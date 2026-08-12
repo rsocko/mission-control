@@ -1,21 +1,84 @@
 name: Publish container
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
+    inputs:
+      commit:
+        description: Full commit SHA from the main branch history to publish
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-container-${{ github.ref }}
+  group: publish-container-${{ github.event.workflow_run.head_sha || inputs.commit }}
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Verify publication source
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.id == github.event.repository.id) ||
+      (github.event_name == 'workflow_dispatch' &&
+       github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Check out main history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: main
+
+      - name: Select and verify source commit
+        id: source
+        env:
+          AUTOMATIC_SHA: ${{ github.event.workflow_run.head_sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          MANUAL_SHA: ${{ inputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            source_sha="${AUTOMATIC_SHA}"
+          else
+            source_sha="${MANUAL_SHA}"
+          fi
+
+          if [[ ! "${source_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Publication requires a full lowercase commit SHA"
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          git cat-file -e "${source_sha}^{commit}"
+          if ! git merge-base --is-ancestor "${source_sha}" refs/remotes/origin/main; then
+            echo "::error::Commit is not in the origin/main history"
+            exit 1
+          fi
+
+          echo "sha=${source_sha}" >> "$GITHUB_OUTPUT"
+
   publish:
     name: Build, publish, and attest
+    needs:
+      - prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -23,14 +86,35 @@ jobs:
       contents: read
       id-token: write
       packages: write
+    env:
+      SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
       image: ${{ steps.image.outputs.name }}
     steps:
-      - name: Check out source
+      - name: Check out verified source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
+          ref: ${{ env.SOURCE_SHA }}
+
+      - name: Reverify exact checkout and main ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${SOURCE_SHA}" ]]; then
+            echo "::error::Checked out ${actual_sha}, expected ${SOURCE_SHA}"
+            exit 1
+          fi
+
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "${SOURCE_SHA}" refs/remotes/origin/main; then
+            echo "::error::Verified commit is no longer in the origin/main history"
+            exit 1
+          fi
 
       - name: Select image name
         id: image
@@ -41,7 +125,7 @@ jobs:
         env:
           GHCR_TOKEN: ${{ github.token }}
         shell: bash
-        run: echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${{ github.actor }}" --password-stdin
+        run: echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
       - name: Create isolated Buildx builder
         shell: bash
@@ -53,14 +137,15 @@ jobs:
           IMAGE: ${{ steps.image.outputs.name }}
         shell: bash
         run: |
+          set -euo pipefail
           metadata_file="${RUNNER_TEMP}/build-metadata.json"
 
           docker buildx build \
             --file Dockerfile \
             --platform linux/amd64 \
-            --build-arg "MC_BUILD_SHA=${GITHUB_SHA}" \
-            --build-arg "MC_DEPLOYMENT_REVISION=sha-${GITHUB_SHA}" \
-            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --build-arg "MC_BUILD_SHA=${SOURCE_SHA}" \
+            --build-arg "MC_DEPLOYMENT_REVISION=sha-${SOURCE_SHA}" \
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --attest type=sbom \
             --provenance=false \
@@ -72,11 +157,62 @@ jobs:
           echo "Published ${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
+      - name: Create source-accurate provenance predicate
+        id: provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          predicate_path="${RUNNER_TEMP}/provenance.json"
+          build_type="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/docs/public/provenance-build-type-v1.md"
+          builder_id="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/publish-container.yml@refs/heads/main"
+          source_uri="git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}@refs/heads/main"
+          invocation_id="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
+
+          jq -n \
+            --arg build_type "${build_type}" \
+            --arg builder_id "${builder_id}" \
+            --arg event_name "${GITHUB_EVENT_NAME}" \
+            --arg source_sha "${SOURCE_SHA}" \
+            --arg source_uri "${source_uri}" \
+            --arg invocation_id "${invocation_id}" \
+            '{
+              buildDefinition: {
+                buildType: $build_type,
+                externalParameters: {
+                  source: {
+                    uri: $source_uri,
+                    digest: {gitCommit: $source_sha}
+                  },
+                  trigger: $event_name
+                },
+                internalParameters: {},
+                resolvedDependencies: [{
+                  uri: $source_uri,
+                  digest: {gitCommit: $source_sha}
+                }]
+              },
+              runDetails: {
+                builder: {
+                  id: $builder_id
+                },
+                metadata: {
+                  invocationId: $invocation_id
+                }
+              }
+            }' > "${predicate_path}"
+
+          jq -e --arg source_sha "${SOURCE_SHA}" \
+            '.buildDefinition.resolvedDependencies[0].digest.gitCommit == $source_sha' \
+            "${predicate_path}" > /dev/null
+          echo "path=${predicate_path}" >> "$GITHUB_OUTPUT"
+
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        uses: actions/attest@daf44fb950173508f38bd2406030372c1d1162b1 # v3.0.0
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.publish.outputs.digest }}
+          predicate-type: https://slsa.dev/provenance/v1
+          predicate-path: ${{ steps.provenance.outputs.path }}
           push-to-registry: true
 
       - name: Log out of GHCR

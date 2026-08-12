@@ -6,10 +6,25 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
-Container publication runs only after a push to `main` or a maintainer-triggered
-manual dispatch. It pushes the image without a mutable tag, records the
-resulting `sha256` digest, attaches a BuildKit-generated SBOM, and publishes
-GitHub build provenance for that digest. Consumers should deploy
+Automatic container publication runs only after the `CI` workflow succeeds for
+a `push` event whose exact source commit and repository are `main` in this
+repository. The privileged workflow checks out the completed run's immutable
+`head_sha`, verifies it is still in `origin/main` history, and never consumes
+pull-request artifacts or contributor-controlled refs.
+
+Manual publication requires a full lowercase commit SHA and is allowed only
+when the workflow itself is dispatched from `main`. A read-only job fetches
+`origin/main` and verifies that SHA is an ancestor before the privileged job
+checks out the exact commit and repeats both the checkout and ancestry checks.
+Branch names and the dispatch context's default SHA are never publication
+sources.
+
+Publication pushes the image without a mutable tag, records the resulting
+`sha256` digest, attaches a BuildKit-generated SBOM, and signs a GitHub
+attestation containing SLSA provenance whose resolved source dependency is the
+verified commit. Its versioned
+[build type](provenance-build-type-v1.md) defines the source, trigger, builder,
+and invocation fields. Consumers should deploy
 `ghcr.io/<owner>/<repository>@sha256:<digest>`, never a mutable tag.
 
 ## Repository configuration

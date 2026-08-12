@@ -13,7 +13,7 @@ assert.ok(workflowFiles.length > 0, 'At least one workflow is required');
 const hostedRunners = new Set(['ubuntu-24.04', 'ubuntu-22.04']);
 const permissionValues = new Set(['read', 'write', 'none']);
 const allowedActions = new Set([
-  'actions/attest-build-provenance',
+  'actions/attest',
   'actions/checkout',
   'actions/setup-node',
 ]);
@@ -61,6 +61,9 @@ for (const file of workflowFiles) {
 
   const handlesPullRequests = 'pull_request' in workflow.on;
   hasPullRequestWorkflow ||= handlesPullRequests;
+  const hasWritePermissions = Object.values(workflow.jobs ?? {}).some((job) =>
+    Object.values(job.permissions ?? {}).includes('write'),
+  );
 
   if (handlesPullRequests) {
     for (const [permission, value] of Object.entries(workflow.permissions)) {
@@ -83,6 +86,63 @@ for (const file of workflowFiles) {
         assert.notEqual(value, 'write', `${location} must not grant ${permission}: write on pull requests`);
       }
     }
+  }
+
+  if (hasWritePermissions) {
+    assert.ok(!('push' in workflow.on), `${file} must not publish directly from a push event`);
+    assert.ok(!('pull_request' in workflow.on), `${file} must not publish from pull requests`);
+    assert.deepEqual(
+      workflow.on.workflow_run,
+      { workflows: ['CI'], types: ['completed'] },
+      `${file} publication must follow completion of the CI workflow`,
+    );
+    assert.deepEqual(
+      workflow.on.workflow_dispatch?.inputs?.commit,
+      {
+        description: 'Full commit SHA from the main branch history to publish',
+        required: true,
+        type: 'string',
+      },
+      `${file} manual publication must require an explicit full commit SHA`,
+    );
+
+    const prepare = workflow.jobs?.prepare;
+    const publish = workflow.jobs?.publish;
+    assert.ok(prepare && publish, `${file} must separate source verification from publication`);
+    assert.deepEqual(prepare.permissions, { contents: 'read' }, `${file} prepare job must be read-only`);
+    assert.deepEqual(publish.needs, ['prepare'], `${file} publish job must depend on source verification`);
+    assert.equal(
+      publish.env?.SOURCE_SHA,
+      '${{ needs.prepare.outputs.source_sha }}',
+      `${file} publish job must consume the verified source SHA`,
+    );
+
+    const prepareCondition = prepare.if ?? '';
+    for (const invariant of [
+      "github.event.workflow_run.conclusion == 'success'",
+      "github.event.workflow_run.event == 'push'",
+      "github.event.workflow_run.head_branch == 'main'",
+      'github.event.workflow_run.head_repository.id == github.event.repository.id',
+      "github.ref == 'refs/heads/main'",
+    ]) {
+      assert.ok(prepareCondition.includes(invariant), `${file} prepare condition must enforce ${invariant}`);
+    }
+
+    for (const invariant of [
+      '^[0-9a-f]{40}$',
+      'git merge-base --is-ancestor "${source_sha}" refs/remotes/origin/main',
+      'actual_sha="$(git rev-parse HEAD)"',
+      'git merge-base --is-ancestor "${SOURCE_SHA}" refs/remotes/origin/main',
+      'provenance-build-type-v1.md',
+      'externalParameters: {',
+      'builder: {',
+      'id: $builder_id',
+      'digest: {gitCommit: $source_sha}',
+      'predicate-type: https://slsa.dev/provenance/v1',
+    ]) {
+      assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
+    }
+    assert.ok(!source.includes('GITHUB_SHA'), `${file} must not build or attest the trigger-context SHA`);
   }
 
   for (const uses of collectUses(workflow)) {

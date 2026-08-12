@@ -841,6 +841,7 @@ describe.sequential('finance insight deterministic ingestion', () => {
       status: 'completed',
       itemCount: 1,
       notificationsProcessed: 0,
+      notificationsAdded: 0,
     });
     expect(firstClient.putSourceFactBatch.mock.calls.map(([batch]) => batch.kind)).toEqual([
       'transaction',

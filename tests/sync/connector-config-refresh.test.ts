@@ -379,17 +379,24 @@ describe('connector settings refresh before sync', () => {
         }),
         fetchNotifications: vi.fn(async () => []),
         getLastSyncToken: vi.fn(async () => null),
+        syncDomainData: vi.fn(async () => ({
+          itemsAdded: 0,
+          itemsUpdated: 0,
+          itemsRemoved: 0,
+          notificationsAdded: 3,
+        })),
       } as IConnector;
       return refreshedConnector;
     });
 
     const scheduler = createScheduler();
-    Reflect.set(scheduler, 'upsertNotifications', vi.fn(async () => 0));
+    Reflect.set(scheduler, 'upsertNotifications', vi.fn(async () => 2));
     Reflect.set(scheduler, 'reconcileStaleNotifications', vi.fn(async () => 0));
 
     const result = await scheduler.runSyncLocally('github-1', { full: true });
 
     expect(result.success).toBe(true);
+    expect(result.notificationsAdded).toBe(5);
     expect(mocks.replaceConnector).toHaveBeenCalledWith(expect.objectContaining({
       settings: { repos: ['octo/existing', 'octo/new'] },
       syncedLists: ['octo/existing', 'octo/new'],

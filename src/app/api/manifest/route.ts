@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getShortcuts, getLaunchMode, MAX_ENABLED_SHORTCUTS } from '@/lib/mode';
+import { APP_DARK_BACKGROUND, APP_DARK_CHROME } from '@/lib/brand';
 
 /**
  * GET /api/manifest — Dynamic Web App Manifest
@@ -33,8 +34,8 @@ export async function GET() {
     start_url: '/',
     scope: '/',
     display: 'standalone',
-    background_color: '#0a0a0a',
-    theme_color: '#2563eb',
+    background_color: APP_DARK_BACKGROUND,
+    theme_color: APP_DARK_CHROME,
     orientation: 'any',
     categories: ['productivity', 'utilities'],
     launch_handler: {

@@ -13,7 +13,13 @@ const controls = vi.hoisted(() => {
     ingestionResult: { status: 'disabled' } as
       | { status: 'disabled' }
       | { status: 'pending'; evaluationState: 'queued' | 'evaluating' }
-      | { status: 'failed'; code: string; retryable: boolean },
+      | { status: 'failed'; code: string; retryable: boolean }
+      | {
+          status: 'completed';
+          itemCount: number;
+          notificationsProcessed: number;
+          notificationsAdded: number;
+        },
     continuationPublicationId: null as string | null,
     ingestionPublicationIds: [] as string[],
     ingestionCalls: 0,
@@ -21,6 +27,7 @@ const controls = vi.hoisted(() => {
     pruneCalls: 0,
     attentionCalls: [] as string[],
     attentionFailure: false,
+    attentionNotificationsCreated: 0,
     wait: () => new Promise<void>((resolve) => {
       release = resolve;
     }),
@@ -104,7 +111,7 @@ vi.mock('@/lib/finance/attention-routing', () => ({
     }
     return {
       evaluated: 0,
-      notificationsCreated: 0,
+      notificationsCreated: controls.attentionNotificationsCreated,
       notificationsUpdated: 0,
       tasksCreated: 0,
       tasksUpdated: 0,
@@ -266,5 +273,28 @@ describe.sequential('finance projection concurrency fence', () => {
     );
     expect(controls.attentionCalls).toEqual(['attention-retry-finance']);
     controls.attentionFailure = false;
+  });
+
+  it('reports only newly created finance notifications in the domain result', async () => {
+    const { FinanceManagerConnector } = await import('@/lib/connectors/monarch-money');
+    const connector = new FinanceManagerConnector();
+    await connector.initialize({ ...config, id: 'notification-count-finance' });
+    controls.publicationReady = true;
+    controls.ingestionResult = {
+      status: 'completed',
+      itemCount: 4,
+      notificationsProcessed: 3,
+      notificationsAdded: 2,
+    };
+    controls.attentionNotificationsCreated = 1;
+
+    await expect(connector.syncDomainData({ full: true })).resolves.toMatchObject({
+      status: 'fresh',
+      notificationsAdded: 3,
+    });
+
+    controls.publicationReady = false;
+    controls.ingestionResult = { status: 'disabled' };
+    controls.attentionNotificationsCreated = 0;
   });
 });

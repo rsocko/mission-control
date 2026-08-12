@@ -9,12 +9,24 @@ rmSync(instanceFile, { force: true });
 export {};
 
 async function main(): Promise<void> {
+  const [{ syncLogger }, { waitForWebReadiness }] = await Promise.all([
+    import('@/lib/logger'),
+    import('@/lib/runtime/web-readiness'),
+  ]);
+  await waitForWebReadiness({
+    onRetry: ({ attempt, maxAttempts, error }) => {
+      syncLogger.warn(
+        { err: error, attempt, maxAttempts },
+        'Sync worker waiting for web database initialization',
+      );
+    },
+  });
+
   const [
     { syncScheduler },
     { assertSupportedWorkerReplicaCount, SyncWorker },
     { startRuntimeTelemetry, stopRuntimeTelemetry },
     { triageSyncScheduler },
-    { syncLogger },
     { publicRuntimeRelease },
     { DurableAiRunStore, DurableAiRunWorker },
   ] = await Promise.all([
@@ -22,7 +34,6 @@ async function main(): Promise<void> {
     import('@/lib/sync/worker'),
     import('@/lib/telemetry/runtime'),
     import('@/lib/triage/scheduler'),
-    import('@/lib/logger'),
     import('@/lib/runtime/release'),
     import('@/lib/ai/durable-runs'),
   ]);
@@ -32,7 +43,10 @@ async function main(): Promise<void> {
     { runtimeRelease: publicRuntimeRelease(), role: 'worker' },
     'Sync worker starting',
   );
-  const telemetry = startRuntimeTelemetry('worker');
+  const { initializeDatabaseWithRetry } = await import('@/db/startup');
+  const telemetry = await initializeDatabaseWithRetry({
+    initialize: () => startRuntimeTelemetry('worker'),
+  });
   writeFileSync(instanceFile, telemetry.instanceId, { encoding: 'utf8', mode: 0o600 });
   const worker = new SyncWorker((connectorId, options) =>
     syncScheduler.runSyncLocally(connectorId, options)

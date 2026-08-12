@@ -1,4 +1,5 @@
 import type { SVGProps } from 'react';
+import { BRAND_GRADIENT_END, BRAND_GRADIENT_START } from '@/lib/brand';
 
 interface HoustonIconProps extends SVGProps<SVGSVGElement> {
   size?: number | string;
@@ -23,8 +24,8 @@ export function HoustonIcon({ size = 24, className, ...props }: HoustonIconProps
     >
       <defs>
         <linearGradient id="houston-grad" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#60a5fa" />
-          <stop offset="100%" stopColor="#a855f7" />
+          <stop offset="0%" stopColor={BRAND_GRADIENT_START} />
+          <stop offset="100%" stopColor={BRAND_GRADIENT_END} />
         </linearGradient>
       </defs>
       {/* Headset with brand gradient */}

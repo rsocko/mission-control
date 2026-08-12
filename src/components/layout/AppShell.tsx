@@ -36,30 +36,10 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { cn } from '@/lib/utils';
 import { getMobileTitle, getRouteMetadata } from '@/lib/navigation/route-metadata';
 import { getHealthIndicatorTone } from '@/lib/telemetry/health-indicator';
-
-type OverallHealth = 'healthy' | 'attention' | 'informational';
-
-interface ConnectorHealthInfo {
-  id: string;
-  type: string;
-  name: string;
-  status: string;
-  message: string;
-  lastSyncAt?: string;
-}
-
-interface HealthData {
-  overall: OverallHealth;
-  message: string;
-  connectors: ConnectorHealthInfo[];
-  disabledFeatures: string[];
-  database?: {
-    status: 'healthy' | 'degraded' | 'critical' | 'error';
-  };
-  runtime?: {
-    degradations?: string[];
-  };
-}
+import {
+  useSystemHealth,
+  type SystemHealthData as HealthData,
+} from '@/lib/hooks/useSystemHealth';
 
 interface FeatureFlags {
   taskCreation: boolean;
@@ -147,7 +127,7 @@ function ToolbarRow({
               </div>
               {health.connectors.filter(c => c.status === 'error' || c.status === 'degraded').length > 0 && (
                 <div className="border-t border-[var(--border)] pt-2 mt-2">
-                  <p className="text-xs font-medium text-[var(--warning)] uppercase mb-1">Connector Issues</p>
+                  <p className="text-xs font-medium text-[var(--warning)] uppercase mb-1">Connector Sync Issues</p>
                   <div className="flex flex-col gap-1">
                     {health.connectors
                       .filter(c => c.status === 'error' || c.status === 'degraded')
@@ -229,11 +209,11 @@ const STANDALONE_ROUTES = ['/icons'];
 export function AppShell({ children }: { children: React.ReactNode }) {
   const syncContextValue = useSyncStreamConnection();
   const pathname = usePathname();
-  const [health, setHealth] = useState<HealthData | null>(null);
   const [features, setFeatures] = useState<FeatureFlags | null>(null);
   const { isAiActive } = useBackgroundAiTasks();
   const [showHealthTooltip, setShowHealthTooltip] = useState(false);
   const isStandalone = STANDALONE_ROUTES.some(r => pathname.startsWith(r));
+  const health = useSystemHealth(!isStandalone);
 
   // Mark first client-side navigation so view-transition animations only
   // play after the initial load (prevents the "flash" on hard reload).
@@ -246,21 +226,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (isStandalone) return;
-    const healthController = new AbortController();
-    const healthTimer = window.setTimeout(() => {
-      fetch('/api/health?detail=summary', { signal: healthController.signal })
-        .then(r => r.json())
-        .then(setHealth)
-        .catch((err) => {
-          if (err instanceof DOMException && err.name === 'AbortError') return;
-          uiLogger.error('Failed to fetch health status', { err });
-        });
-    }, 2000);
     fetch('/api/features').then(r => r.json()).then(setFeatures).catch((err) => { uiLogger.error('Failed to fetch feature flags', { err }); });
-    return () => {
-      window.clearTimeout(healthTimer);
-      healthController.abort();
-    };
   }, [isStandalone]);
 
   // Standalone routes bypass the shell entirely

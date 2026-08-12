@@ -278,7 +278,7 @@ export async function GET(request: NextRequest) {
       overall = 'attention';
       const errorCount = enabledConnectors.filter(c => c.status === 'error' || c.status === 'degraded').length;
       message = errorCount > 0
-        ? `${errorCount} connector${errorCount > 1 ? 's' : ''} need${errorCount === 1 ? 's' : ''} attention`
+        ? `${errorCount} connector sync${errorCount > 1 ? 's' : ''} need${errorCount === 1 ? 's' : ''} attention`
         : degradations[0];
     } else if (enabledConnectors.length === 0 && configs.length === 0) {
       overall = 'informational';
@@ -286,7 +286,7 @@ export async function GET(request: NextRequest) {
     } else {
       overall = 'healthy';
       message = enabledConnectors.length > 0
-        ? `All ${enabledConnectors.length} active connector${enabledConnectors.length > 1 ? 's' : ''} healthy`
+        ? `All ${enabledConnectors.length} active connector sync${enabledConnectors.length > 1 ? 's' : ''} healthy`
         : 'No active connectors';
     }
 

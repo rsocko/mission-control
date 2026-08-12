@@ -3,10 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 
-function renderNavRail() {
+function renderNavRail({ isAiActive = false }: { isAiActive?: boolean } = {}) {
   return render(
     <TooltipProvider>
-      <NavRail features={{ aiEnabled: true, financeEnabled: true }} isAiActive={false} />
+      <NavRail features={{ aiEnabled: true, financeEnabled: true }} isAiActive={isAiActive} />
     </TooltipProvider>
   );
 }
@@ -62,16 +62,33 @@ describe('NavRail', () => {
   it('renders a static brand mark and reveals its name when expanded', () => {
     renderNavRail();
     const brandName = screen.getByText('Mission Control');
-    const brandIcon = brandName.previousElementSibling?.querySelector('svg');
+    const brandIcon = brandName.parentElement?.previousElementSibling?.querySelector('svg');
 
     expect(screen.queryByRole('link', { name: 'Mission Control' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mission Control' })).not.toBeInTheDocument();
-    expect(brandIcon).toHaveClass('lucide-satellite', 'text-violet-400');
-    expect(brandName).toHaveClass('opacity-0', 'max-w-0');
+    expect(brandIcon).toHaveClass('lucide-satellite');
+    expect(brandIcon?.getAttribute('stroke')).toBe('url(#mission-control-brand-gradient)');
+    expect(brandName.parentElement).toHaveClass('-ml-1.5', 'opacity-0', 'max-w-0');
+    expect(brandName).toHaveClass('text-[14px]', 'font-bold', 'tracking-[-0.015em]');
+    expect(screen.getByText('Houston: standing by')).toHaveClass(
+      'font-mono',
+      'text-[9px]'
+    );
+    expect(screen.getByText('Houston: standing by')).toHaveStyle({ color: '#60a5fa' });
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName).toHaveClass('opacity-100', 'max-w-[128px]');
+    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[128px]');
+  });
+
+  it('reflects active Houston work in the brand subtitle', () => {
+    renderNavRail({ isAiActive: true });
+
+    expect(screen.getByText('Houston: working')).toHaveClass(
+      'font-mono',
+      'text-[9px]'
+    );
+    expect(screen.getByText('Houston: working')).toHaveStyle({ color: '#a855f7' });
   });
 
   it('groups navigation by purpose', () => {

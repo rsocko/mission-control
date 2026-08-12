@@ -1033,6 +1033,7 @@ export class SyncScheduler {
       throwIfSyncAborted(options?.signal);
       const remoteNotifications = await remoteNotificationsPromise;
       notificationsAdded = await this.upsertNotifications(connectorId, connector.type, remoteNotifications);
+      notificationsAdded += domainDataResult?.notificationsAdded ?? 0;
       await connector.commitNotificationFetch?.();
 
       // ─── PHASE 6: Reconcile stale notifications ─────────────────────
@@ -1093,6 +1094,7 @@ export class SyncScheduler {
           tasksRemoved,
           tasksPushed: pushResult.pushed,
           localOnlyProtected,
+          notificationsAdded,
           totalLists: discoveredLists.length,
           durationMs: Date.now() - startTime,
           parentTasksAdded: upsertResult.parentTasksAdded,

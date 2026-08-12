@@ -13,11 +13,30 @@ export async function register() {
     configureRuntimeLifecycle,
     markRuntimeReady,
   } = await import('@/lib/runtime/lifecycle');
+  const { terminateFailedStartup } = await import('@/lib/runtime/startup');
   configureRuntimeLifecycle('web');
+  try {
+    const { initializeDatabaseWithRetry } = await import('@/db/startup');
+    await initializeDatabaseWithRetry();
+  } catch (error) {
+    syncLogger.error(
+      { err: error },
+      'Instrumentation: database startup failed; terminating for container recovery',
+    );
+    terminateFailedStartup(error);
+  }
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
-    const { initializePublicDemoData } = await import('@/lib/public-demo-runtime');
-    await initializePublicDemoData();
+    try {
+      const { initializePublicDemoData } = await import('@/lib/public-demo-runtime');
+      await initializePublicDemoData();
+    } catch (error) {
+      syncLogger.error(
+        { err: error },
+        'Instrumentation: public demo initialization failed; terminating for container recovery',
+      );
+      terminateFailedStartup(error);
+    }
     const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
     startRuntimeTelemetry('web');
     markRuntimeReady();

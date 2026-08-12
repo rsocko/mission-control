@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
+import { MissionControlIcon } from '@/components/ui/MissionControlIcon';
+import { BRAND_GRADIENT_END, BRAND_GRADIENT_START } from '@/lib/brand';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -14,7 +16,6 @@ import {
   // Headset — replaced by HoustonIcon
   Inbox,
   Settings,
-  Satellite,
   Target,
   Repeat,
   Activity,
@@ -126,6 +127,7 @@ export function NavRail({ features, isAiActive }: NavRailProps) {
   const clickSuppressUntil = useRef(0);
 
   const expanded = pinned || hovered;
+  const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
 
   const handleMouseEnter = useCallback(() => {
     if (collapseTimer.current) {
@@ -180,15 +182,23 @@ export function NavRail({ features, isAiActive }: NavRailProps) {
       onPointerDownCapture={handlePointerDownCapture}
     >
       {/* Brand */}
-      <div className="flex items-center flex-shrink-0 h-[52px] border-b border-[var(--border)]">
+      <div className="flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
-          <Satellite size={27} aria-hidden="true" className="text-violet-400" />
+          <MissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
         </span>
         <span className={cn(
-          'whitespace-nowrap overflow-hidden text-[13px] font-semibold tracking-tight text-[var(--text-primary)] transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+          '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
           expanded ? 'opacity-100 max-w-[128px]' : 'opacity-0 max-w-0'
         )}>
-          Mission Control
+          <span className="text-[14px] leading-4 font-bold tracking-[-0.015em] text-[var(--text-primary)]">
+            Mission Control
+          </span>
+          <span
+            className="font-mono text-[9px] leading-3 tracking-[0.06em]"
+            style={{ color: isAiActive ? BRAND_GRADIENT_END : BRAND_GRADIENT_START }}
+          >
+            {brandSubtitle}
+          </span>
         </span>
       </div>
 

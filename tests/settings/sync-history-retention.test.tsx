@@ -26,6 +26,46 @@ describe('Sync History retained items', () => {
     vi.restoreAllMocks();
   });
 
+  it('does not call a notification-producing run "No changes"', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [{
+        id: 'log-notifications',
+        connectorId: 'finance-1',
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        tasksPushed: 0,
+        localOnlyProtected: 0,
+        notificationsAdded: 3,
+        errors: [],
+        details: [],
+        syncedAt: '2026-08-12T00:00:00.000Z',
+        durationMs: 120,
+      }],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'finance-1',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, sync: true, notificationOnly: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    expect(await screen.findByText('3 notifications')).toBeInTheDocument();
+    expect(screen.queryByText('No changes')).not.toBeInTheDocument();
+  });
+
   it('explains retained items and shows safe reason-specific actions', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       history: [{

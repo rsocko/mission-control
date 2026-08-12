@@ -144,6 +144,44 @@ try {
     );
   }
 
+  const databaseInitialization = spawnSync(
+    process.execPath,
+    [
+      '--conditions=react-server',
+      '--import',
+      'tsx',
+      '-e',
+      // Read via both the named and default export bindings: under Node 22,
+      // tsx's CommonJS-transpiled output for this module isn't fully
+      // recognized by Node's CJS/ESM named-export interop (cjs-module-lexer),
+      // so the named export can land nested under `default` instead of at
+      // the top level. Node 24 exposes it directly. Support both.
+      "import('./src/db/index.ts').then((m) => {"
+        + " const initializeDatabase = m.initializeDatabase ?? m.default?.initializeDatabase;"
+        + " if (typeof initializeDatabase !== 'function') {"
+        + "   throw new Error('initializeDatabase export not found on ./src/db/index.ts');"
+        + " }"
+        + " return initializeDatabase();"
+        + "})",
+    ],
+    {
+      cwd: root,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        MC_DB_PATH: databasePath,
+        MC_PROCESS_ROLE: 'web',
+      },
+      encoding: 'utf8',
+      timeout: 30_000,
+    },
+  );
+  if (databaseInitialization.status !== 0) {
+    throw new Error(
+      databaseInitialization.stderr || 'Web-role database initialization failed',
+    );
+  }
+
   const output = [];
   const launch = [
     '-e',

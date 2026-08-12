@@ -49,6 +49,7 @@ export interface SyncCompleteEvent {
     tasksRemoved: number;
     tasksPushed: number;
     localOnlyProtected: number;
+    notificationsAdded: number;
     totalLists: number;
     durationMs: number;
     parentTasksAdded?: number;

@@ -63,7 +63,12 @@ type FinanceInsightClient = {
 export type FinanceInsightIngestionResult =
   | { status: 'disabled' }
   | { status: 'pending'; evaluationState: 'queued' | 'evaluating' }
-  | { status: 'completed'; itemCount: number; notificationsProcessed: number }
+  | {
+      status: 'completed';
+      itemCount: number;
+      notificationsProcessed: number;
+      notificationsAdded: number;
+    }
   | { status: 'failed'; code: string; retryable: boolean };
 
 type DeliveryState = {
@@ -202,7 +207,11 @@ async function refreshOccurrences(input: {
   environment?: Readonly<Record<string, string | undefined>>;
   signal?: AbortSignal;
   now: Date;
-}): Promise<{ itemCount: number; notificationsProcessed: number }> {
+}): Promise<{
+  itemCount: number;
+  notificationsProcessed: number;
+  notificationsAdded: number;
+}> {
   const baseQuery = {
     ...defaultOccurrenceListQueryV1(),
     connectorRef: input.connectorId,
@@ -285,15 +294,18 @@ async function refreshOccurrences(input: {
     now: input.now,
   });
   let notificationsProcessed = 0;
+  let notificationsAdded = 0;
   if (input.alertCapable && isFinanceInsightDeliveryEnabled(input.connectorId)) {
-    notificationsProcessed = (await ingestFinanceInsightNotifications({
+    const notificationResults = await ingestFinanceInsightNotifications({
       connectorId: input.connectorId,
       items,
       now: input.now,
       environment: { ...process.env, ...input.environment },
-    })).length;
+    });
+    notificationsProcessed = notificationResults.length;
+    notificationsAdded = notificationResults.filter((result) => result.created).length;
   }
-  return { itemCount: items.length, notificationsProcessed };
+  return { itemCount: items.length, notificationsProcessed, notificationsAdded };
 }
 
 export async function runFinanceInsightIngestion(input: {

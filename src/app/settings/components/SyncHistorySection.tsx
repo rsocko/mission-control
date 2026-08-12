@@ -1133,7 +1133,12 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
                       {pushed > 0 && <span className="text-purple-400">↑{fmt(pushed)} pushed</span>}
                       {protectedCount > 0 && <span className="text-amber-400">🛡{fmt(protectedCount)} retained locally</span>}
                       {entry.notificationsAdded > 0 && <span className="text-amber-400">{fmt(entry.notificationsAdded)} notifications</span>}
-                      {totalChanges === 0 && pushed === 0 && protectedCount === 0 && entry.success && <span>No changes</span>}
+                      {totalChanges === 0
+                        && pushed === 0
+                        && protectedCount === 0
+                        && entry.notificationsAdded === 0
+                        && entry.success
+                        && <span>No changes</span>}
                       {!entry.success && errors.length > 0 && <span className="text-red-400 truncate max-w-[200px]">{errors[0]?.slice(0, 60)}</span>}
                     </div>
                   </div>

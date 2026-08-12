@@ -233,4 +233,103 @@ describe('My Day reconciliation coalescing', () => {
     expect(inArray).toHaveBeenCalledWith('id', ['md-rosey-duplicate']);
     expect(mockDb.insert).not.toHaveBeenCalled();
   });
+
+  it('removes an existing auto-included future recurring task returned by remote My Day', async () => {
+    selectOverrides.set(2, [{
+      id: 'md-future-recurring',
+      taskId: 'task-future-recurring',
+      sourceId: 'bills:future-recurring',
+      isAutoIncluded: true,
+      status: 'todo',
+      completedAt: null,
+    }]);
+    selectOverrides.set(6, [{
+      id: 'task-future-recurring',
+      sourceId: 'bills:future-recurring',
+      metadata: '{"recurrence":"monthly"}',
+      status: 'todo',
+    }]);
+
+    const { POST } = await import('@/app/api/my-day/sync/route');
+    const responsePromise = POST(new Request('http://localhost/api/my-day/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: '2026-08-12' }),
+    }));
+    await vi.waitFor(() => expect(fetchMyDayTasks).toHaveBeenCalledTimes(1));
+    resolveRemoteTasks([{
+      ParentFolderId: 'bills',
+      Id: 'future-recurring',
+      Subject: 'Credit card bill',
+      Status: 'NotStarted',
+      DueDateTime: { DateTime: '2026-09-10T00:00:00Z' },
+      Recurrence: {
+        Pattern: { Type: 'absoluteMonthly', Interval: 1, DayOfMonth: 10 },
+        Range: { Type: 'noEnd', StartDate: '2026-09-10' },
+      },
+    }]);
+
+    const response = await responsePromise;
+    const body = await response.json();
+    const { inArray } = await import('drizzle-orm');
+    expect(response.status).toBe(200);
+    expect(body.skippedFutureRecurring).toBe(1);
+    expect(inArray).toHaveBeenCalledWith('id', ['md-future-recurring']);
+  });
+
+  it('removes an existing auto-included successor created after completing its recurring sibling', async () => {
+    selectOverrides.set(2, [{
+      id: 'md-recurring-successor',
+      taskId: 'task-recurring-successor',
+      sourceId: 'chores:recurring-successor',
+      isAutoIncluded: true,
+      status: 'todo',
+      completedAt: null,
+    }]);
+    selectOverrides.set(6, [{
+      id: 'task-recurring-successor',
+      sourceId: 'chores:recurring-successor',
+      metadata: '{"recurrence":"daily"}',
+      status: 'todo',
+    }]);
+    selectOverrides.set(7, [{
+      sourceListId: 'chores',
+      title: 'Daily reset',
+      completedAt: '2026-08-12T14:00:00Z',
+      metadata: '{"recurrence":"daily"}',
+    }]);
+    selectOverrides.set(9, [{
+      id: 'task-recurring-successor',
+      sourceId: 'chores:recurring-successor',
+      status: 'todo',
+    }]);
+
+    const { POST } = await import('@/app/api/my-day/sync/route');
+    const responsePromise = POST(new Request('http://localhost/api/my-day/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date: '2026-08-12' }),
+    }));
+    await vi.waitFor(() => expect(fetchMyDayTasks).toHaveBeenCalledTimes(1));
+    resolveRemoteTasks([{
+      ParentFolderId: 'chores',
+      Id: 'recurring-successor',
+      Subject: 'Daily reset',
+      Status: 'NotStarted',
+      CreatedDateTime: '2026-08-12T14:00:01Z',
+      DueDateTime: { DateTime: '2026-08-12T00:00:00Z' },
+      Recurrence: {
+        Pattern: { Type: 'daily', Interval: 1 },
+        Range: { Type: 'noEnd', StartDate: '2026-08-12' },
+      },
+    }]);
+
+    const response = await responsePromise;
+    const body = await response.json();
+    const { inArray } = await import('drizzle-orm');
+    expect(response.status).toBe(200);
+    expect(body.skippedFutureRecurring).toBe(1);
+    expect(inArray).toHaveBeenCalledWith('id', ['md-recurring-successor']);
+    expect(mockDb.insert).not.toHaveBeenCalled();
+  });
 });

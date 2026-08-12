@@ -335,13 +335,13 @@ describe('FinanceManagerConnector', () => {
     expect(tasks.length).toBe(0);
   });
 
-  it('should return empty notifications', async () => {
+  it('should not infer Tyrion automation deliveries from finance projections', async () => {
     const { FinanceManagerConnector } = await import('@/lib/connectors/monarch-money');
     const connector = new FinanceManagerConnector();
     await connector.initialize(FINANCE_CONFIG);
 
     const notifications = await connector.fetchNotifications();
-    expect(Array.isArray(notifications)).toBe(true);
+    expect(notifications).toEqual([]);
   });
 
   it('should report connection failure gracefully', async () => {

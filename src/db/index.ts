@@ -20,6 +20,24 @@ let _observedSqlite: Database.Database | null = null;
 let _db: BetterSQLite3Database<typeof schema> | null = null;
 const databaseTelemetry = new DatabaseTelemetryCollector();
 
+function resetPartialDatabaseInitialization(): void {
+  try {
+    _sqlite?.close();
+  } catch {
+    // The original initialization error is more useful than a cleanup error.
+  }
+  _sqlite = null;
+  _observedSqlite = null;
+  _db = null;
+}
+
+export function shouldRunDatabaseInitialization(
+  role = process.env.MC_PROCESS_ROLE,
+  initializerRole = process.env.MC_DATABASE_INITIALIZER_ROLE ?? 'web',
+): boolean {
+  return (role ?? 'web') === initializerRole;
+}
+
 function parseJsonRecord(value: string): Record<string, unknown> | null {
   try {
     let parsed: unknown = JSON.parse(value);
@@ -208,6 +226,7 @@ export function _runMigrationsIndividually(sqlite: Database.Database, migrations
 
 function initDatabase(): { sqlite: Database.Database; db: BetterSQLite3Database<typeof schema> } {
   if (_observedSqlite && _db) return { sqlite: _observedSqlite, db: _db };
+  if (_sqlite || _observedSqlite || _db) resetPartialDatabaseInitialization();
 
   const DB_PATH = process.env.MC_DB_PATH || path.join(process.cwd(), 'data', 'mission-control.db');
 
@@ -218,8 +237,11 @@ function initDatabase(): { sqlite: Database.Database; db: BetterSQLite3Database<
 
   _sqlite = new Database(DB_PATH);
 
-  // Enable WAL mode for better concurrent read performance
-  _sqlite.pragma('journal_mode = WAL');
+  // The web process owns persistent database configuration and schema changes.
+  // Workers open the database only after web readiness.
+  if (shouldRunDatabaseInitialization()) {
+    _sqlite.pragma('journal_mode = WAL');
+  }
   _sqlite.pragma('foreign_keys = ON');
   const configuredBusyTimeoutMs = Number(process.env.MC_DB_BUSY_TIMEOUT_MS);
   const busyTimeoutMs = Number.isSafeInteger(configuredBusyTimeoutMs)
@@ -245,10 +267,11 @@ function initDatabase(): { sqlite: Database.Database; db: BetterSQLite3Database<
   _observedSqlite = createObservedDatabase(_sqlite, databaseTelemetry);
   const localDb = drizzle(_observedSqlite, { schema });
 
-  const migrationsPath = path.join(process.cwd(), 'drizzle');
-  if (fs.existsSync(migrationsPath)) {
-    _runMigrationsIndividually(_sqlite, migrationsPath);
-  }
+  if (shouldRunDatabaseInitialization()) {
+    const migrationsPath = path.join(process.cwd(), 'drizzle');
+    if (fs.existsSync(migrationsPath)) {
+      _runMigrationsIndividually(_sqlite, migrationsPath);
+    }
 
   _sqlite.exec(`
     CREATE TABLE IF NOT EXISTS task_field_states (
@@ -1149,7 +1172,8 @@ function initDatabase(): { sqlite: Database.Database; db: BetterSQLite3Database<
       ON sync_deletion_snapshots (deleted_at);
   `);
 
-  _repairInboundWebhookNotificationActions(_sqlite);
+    _repairInboundWebhookNotificationActions(_sqlite);
+  }
 
   // Assign _db only after all initialization is complete, so concurrent
   // callers (via the Proxy) never see a partially-initialized database.
@@ -1157,6 +1181,10 @@ function initDatabase(): { sqlite: Database.Database; db: BetterSQLite3Database<
   databaseTelemetry.reset();
 
   return { sqlite: _observedSqlite, db: _db };
+}
+
+export function initializeDatabase(): void {
+  initDatabase();
 }
 
 // Use a Proxy so that `import db from '@/db'` still works seamlessly —

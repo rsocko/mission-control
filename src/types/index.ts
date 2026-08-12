@@ -690,6 +690,8 @@ export interface DomainSyncResult {
   itemsAdded: number;
   itemsUpdated: number;
   itemsRemoved: number;
+  /** Notifications newly created while synchronizing connector-owned domain data. */
+  notificationsAdded?: number;
   status?: 'fresh' | 'stale' | 'partial' | 'unavailable';
   datasetErrors?: Partial<Record<
     'transactions' | 'accounts' | 'category-groups' | 'categories' | 'tags' | 'recurring' | 'budgets',

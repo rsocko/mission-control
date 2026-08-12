@@ -11,6 +11,7 @@ import { BackgroundAiToastProvider } from "@/components/BackgroundAiToastProvide
 import { UndoKeyboardProvider } from "@/components/UndoKeyboardProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { APP_DARK_BACKGROUND, APP_DARK_CHROME } from "@/lib/brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -29,7 +30,8 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   viewportFit: "cover",
-  themeColor: "#2563eb",
+  themeColor: APP_DARK_CHROME,
+  colorScheme: "dark",
 };
 
 export const metadata: Metadata = {
@@ -45,7 +47,7 @@ export const metadata: Metadata = {
       { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-maskable-192.png", sizes: "192x192", type: "image/png" },
     ],
   },
   appleWebApp: {
@@ -67,9 +69,9 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
-      style={{ backgroundColor: '#020617' }}
+      style={{ backgroundColor: APP_DARK_BACKGROUND }}
     >
-      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--text-primary)]" style={{ backgroundColor: '#020617' }}>
+      <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--text-primary)]" style={{ backgroundColor: APP_DARK_BACKGROUND }}>
         <SerwistProvider swUrl="/serwist/sw.js">
         <ReactQueryProvider>
         <AppMotionProvider>

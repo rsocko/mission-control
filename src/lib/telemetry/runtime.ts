@@ -900,10 +900,10 @@ export class RuntimeTelemetryMonitor {
 
   start(): void {
     if (this.timer) return;
-    this.histogram.enable();
-    this.gcObserver.observe({ entryTypes: ['gc'] });
     this.registerInstance();
     withoutDatabaseObservation(() => maintainRuntimeTelemetryHistory(sqlite));
+    this.histogram.enable();
+    this.gcObserver.observe({ entryTypes: ['gc'] });
     this.requestStartChannel.subscribe(this.onRequestStart);
     this.expectedSampleAt = performance.now() + this.intervalMs;
     this.timer = setInterval(() => this.sample(), this.intervalMs);
@@ -1291,8 +1291,8 @@ export class RuntimeTelemetryMonitor {
 export function startRuntimeTelemetry(role: RuntimeRole): RuntimeTelemetryMonitor {
   if (globalState.monitor) return globalState.monitor;
   const monitor = new RuntimeTelemetryMonitor(role);
-  globalState.monitor = monitor;
   monitor.start();
+  globalState.monitor = monitor;
   if (role === 'web') {
     const onSigterm = () => stopRuntimeTelemetry('SIGTERM');
     const onSigint = () => stopRuntimeTelemetry('SIGINT');

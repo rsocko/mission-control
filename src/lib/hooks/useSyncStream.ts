@@ -273,6 +273,7 @@ export function useSyncStreamConnection() {
       if (r.tasksRemoved > 0) parts.push(`${r.tasksRemoved} removed`);
       if (r.tasksPushed > 0) parts.push(`${r.tasksPushed} pushed`);
       if (r.localOnlyProtected > 0) parts.push(`${r.localOnlyProtected} local-only preserved`);
+      if (r.notificationsAdded > 0) parts.push(`${r.notificationsAdded} notifications added`);
 
       const summary = parts.length > 0
         ? parts.join(', ')

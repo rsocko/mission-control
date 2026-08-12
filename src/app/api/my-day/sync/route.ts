@@ -156,6 +156,9 @@ async function reconcileMyDay(
 
     // Build lookup of local sourceIds that are already in My Day
     const localSourceIds = new Set(localItems.map(i => i.sourceId).filter(Boolean));
+    const localMyDayItemsBySourceId = new Map(
+      localItems.flatMap(item => item.sourceId ? [[item.sourceId, item] as const] : []),
+    );
 
     // Load user-excluded task IDs for today (tasks the user explicitly removed)
     const exclusionRows = await db.select({ taskId: myDayExclusions.taskId })
@@ -258,6 +261,7 @@ async function reconcileMyDay(
     let removed = 0;
     const myDayRowsToInsert: Array<typeof myDayItems.$inferInsert> = [];
     const myDayIdsToRemove: string[] = [];
+    const suppressedRecurringSourceIds = new Set<string>();
 
     // Add tasks that are in remote My Day but not locally
     let created = 0;
@@ -269,7 +273,6 @@ async function reconcileMyDay(
         skippedArchivedRecurring++;
         continue;
       }
-      if (localSourceIds.has(sourceId)) continue;
 
       // Skip recurring tasks whose due date is strictly after today.
       // When a recurring task is completed, MS Todo creates the next occurrence
@@ -316,12 +319,18 @@ async function reconcileMyDay(
         successorCreatedAfterMyDayCompletion,
       })) {
         skippedFutureRecurring++;
+        suppressedRecurringSourceIds.add(sourceId);
+        const existingMyDayItem = localMyDayItemsBySourceId.get(sourceId);
+        if (existingMyDayItem?.isAutoIncluded) {
+          myDayIdsToRemove.push(existingMyDayItem.id);
+        }
         logger.info(
           { title: remoteTask.Subject, remoteDueDate, date: today, successorCreatedAfterMyDayCompletion },
           'Skipping Microsoft To Do recurring successor in My Day',
         );
         continue;
       }
+      if (localSourceIds.has(sourceId)) continue;
 
       // Find matching task in our DB by sourceId
       let localTask = localTasksBySourceId.get(sourceId);
@@ -490,6 +499,7 @@ async function reconcileMyDay(
     );
 
     for (const dueTodayTask of dueTodayTasks) {
+      if (dueTodayTask.sourceId && suppressedRecurringSourceIds.has(dueTodayTask.sourceId)) continue;
       if (existingMyDayTaskIds.has(dueTodayTask.id)) continue;
       if (excludedTaskIds.has(dueTodayTask.id)) continue; // Skip user-removed
       dueTodayRows.push({

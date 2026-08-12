@@ -1,0 +1,9 @@
+{
+  "label": "Mission Control",
+  "description": "Personal task & alert aggregation hub with AI-powered reasoning across Microsoft Todo, GitHub, RyMessage, and more.",
+  "emoji": "🚀",
+  "order": 40,
+  "sidebarId": "missionControlSidebar",
+  "navbar": true,
+  "homepage": true
+}

@@ -1,0 +1,19 @@
+{
+  "name": "End of Day Review",
+  "description": "Weekly review - surface items that fell through cracks",
+  "triggerType": "schedule",
+  "schedule": {
+    "kind": "single",
+    "naturalLanguage": "Every Friday at 5:00 PM",
+    "days": [5],
+    "time": { "hour": 17, "minute": 0 },
+    "hour": 17,
+    "minute": 0
+  },
+  "steps": [
+    {
+      "label": "Weekly review",
+      "prompt": "Perform a weekly review:\n\n1. Call mc_search_tasks with status=todo and no due date - surface any Scout-pushed items older than 5 days that haven't been touched. These may be stale or need re-evaluation.\n\n2. Scan this week's business M365 sent emails - did I promise anything that isn't tracked in MC? If so, push those commitments.\n\n3. Check next week's calendar - any meetings that need prep work? Push prep tasks with due dates set to day-before-meeting.\n\n4. For any items that seem no longer relevant (old email threads that resolved themselves, cancelled meetings), mark them for potential cleanup but don't auto-delete - flag in description."
+    }
+  ]
+}

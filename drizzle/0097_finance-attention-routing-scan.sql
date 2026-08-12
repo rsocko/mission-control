@@ -1,0 +1,2 @@
+CREATE INDEX `idx_finance_attribution_attention_scan` ON `finance_attribution_exceptions` (`connector_id`,`updated_at`,`id`);--> statement-breakpoint
+CREATE INDEX `idx_finance_mutation_attention_scan` ON `finance_mutation_audit` (`connector_id`,`updated_at`,`id`);

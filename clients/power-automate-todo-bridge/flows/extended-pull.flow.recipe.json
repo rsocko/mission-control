@@ -1,0 +1,84 @@
+{
+  "recipeVersion": "1.0",
+  "name": "MC - Work Todo Extended Graph Pull",
+  "purpose": "Synchronize full-fidelity work To Do data through delegated Microsoft Graph calls.",
+  "connection": {
+    "connector": "HTTP With Microsoft Entra ID",
+    "class": "Premium",
+    "resourceUri": "https://graph.microsoft.com",
+    "baseResourceUrl": "https://graph.microsoft.com",
+    "delegatedScope": "Tasks.ReadWrite"
+  },
+  "trigger": {
+    "type": "When an HTTP request is received",
+    "requestSchema": "../schemas/extended-pull-request.schema.json",
+    "security": "Tenant authentication when available; otherwise protect and rotate the signed trigger URL."
+  },
+  "actions": [
+    {
+      "name": "Validate_request",
+      "type": "Condition",
+      "requirements": [
+        "connectorInstanceId equals the protected environment value",
+        "schemaVersion is supported",
+        "request is within list and payload limits"
+      ]
+    },
+    {
+      "name": "List_delta",
+      "type": "HTTP With Microsoft Entra ID",
+      "operationId": "InvokeHttp",
+      "method": "GET",
+      "url": "Use request.listDeltaLink exactly when present; otherwise /v1.0/me/todo/lists/delta.",
+      "pagination": "Follow every @odata.nextLink and retain the final @odata.deltaLink.",
+      "retry": "Honor Retry-After for 429 and use bounded retry for transient 5xx responses."
+    },
+    {
+      "name": "For_each_selected_list",
+      "type": "Apply to each",
+      "concurrency": 1,
+      "actions": [
+        {
+          "name": "Task_delta",
+          "method": "GET",
+          "url": "Use request.taskDeltaLinks[listId] exactly when present; otherwise /v1.0/me/todo/lists/{listId}/tasks/delta.",
+          "pagination": "Follow every @odata.nextLink and retain the final @odata.deltaLink.",
+          "retry": "Honor Retry-After for 429 and use bounded retry for transient 5xx responses."
+        },
+        {
+          "name": "Checklist_items",
+          "method": "GET",
+          "url": "/v1.0/me/todo/lists/{listId}/tasks/{taskId}/checklistItems",
+          "when": "capabilities.checklistItems and task changed",
+          "pagination": "Follow every @odata.nextLink."
+        },
+        {
+          "name": "Linked_resources",
+          "method": "GET",
+          "url": "/v1.0/me/todo/lists/{listId}/tasks/{taskId}/linkedResources",
+          "when": "capabilities.linkedResources and task changed",
+          "pagination": "Follow every @odata.nextLink."
+        },
+        {
+          "name": "Attachment_metadata",
+          "method": "GET",
+          "url": "/v1.0/me/todo/lists/{listId}/tasks/{taskId}/attachments?$select=id,name,contentType,size,lastModifiedDateTime",
+          "when": "capabilities.attachmentMetadata and task.hasAttachments",
+          "pagination": "Follow every @odata.nextLink.",
+          "constraint": "Never fetch or return contentBytes through Scout."
+        }
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "Response",
+      "responseSchema": "../schemas/extended-pull-response.schema.json",
+      "requirements": [
+        "Return per-collection delta links separately from task data",
+        "Mark response complete only after all next links succeed",
+        "Do not advance stored delta links until MC acknowledges ingest",
+        "On an invalid delta token, return RESET_REQUIRED without a partial payload"
+      ]
+    }
+  ]
+}

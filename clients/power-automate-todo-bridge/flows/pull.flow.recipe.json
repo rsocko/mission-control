@@ -1,0 +1,104 @@
+{
+  "recipeVersion": "1.0",
+  "name": "MC - Work Todo Pull",
+  "purpose": "Return a bounded full snapshot of work Microsoft To Do lists and tasks.",
+  "syncMode": "full-snapshot",
+  "connections": [
+    {
+      "connector": "Microsoft To-Do (Business)",
+      "connectionReference": "mc_work_todo"
+    }
+  ],
+  "trigger": {
+    "type": "When an HTTP request is received",
+    "requestSchema": "../schemas/pull-request.schema.json",
+    "security": "Tenant authentication when available; otherwise protect and rotate the signed trigger URL."
+  },
+  "actions": [
+    {
+      "name": "Validate_connector_instance",
+      "type": "Condition",
+      "expression": "@equals(triggerBody()?['connectorInstanceId'], parameters('MC Work Todo Connector ID'))",
+      "onFalse": "Respond 403 and terminate."
+    },
+    {
+      "name": "List_all_to_do_lists",
+      "type": "Microsoft To-Do (Business)",
+      "operationId": "GetAllTodoListsV2"
+    },
+    {
+      "name": "Initialize_lists",
+      "type": "Initialize variable",
+      "variable": {
+        "name": "lists",
+        "type": "array",
+        "value": []
+      }
+    },
+    {
+      "name": "For_each_list",
+      "type": "Apply to each",
+      "items": "@outputs('List_all_to_do_lists')?['body/value']",
+      "actions": [
+        {
+          "name": "List_tasks",
+          "type": "Microsoft To-Do (Business)",
+          "operationId": "ListToDosByFolderV2",
+          "parameters": {
+            "folderId": "@items('For_each_list')?['id']",
+            "$top": 999
+          },
+          "retry": "Honor connector Retry-After for 429 and use bounded retry for transient 5xx responses."
+        },
+        {
+          "name": "Guard_list_size",
+          "type": "Condition",
+          "expression": "@greaterOrEquals(length(outputs('List_tasks')?['body/value']), 999)",
+          "onTrue": "Respond 500 with errorCode LIST_TOO_LARGE and terminate; never label a potentially truncated response as a full snapshot."
+        },
+        {
+          "name": "Select_task_contract",
+          "type": "Select",
+          "from": "@outputs('List_tasks')?['body/value']",
+          "mapping": {
+            "id": "@item()?['id']",
+            "title": "@item()?['title']",
+            "status": "@item()?['status']",
+            "importance": "@item()?['importance']",
+            "body": "@item()?['body']",
+            "createdDateTime": "@item()?['createdDateTime']",
+            "lastModifiedDateTime": "@item()?['lastModifiedDateTime']",
+            "completedDateTime": "@item()?['completedDateTime']",
+            "dueDateTime": "@item()?['dueDateTime']",
+            "isReminderOn": "@item()?['isReminderOn']",
+            "reminderDateTime": "@item()?['reminderDateTime']"
+          }
+        },
+        {
+          "name": "Append_list",
+          "type": "Append to array variable",
+          "value": {
+            "id": "@items('For_each_list')?['id']",
+            "displayName": "@items('For_each_list')?['displayName']",
+            "wellKnownListName": "@items('For_each_list')?['wellknownListName']",
+            "isOwner": "@items('For_each_list')?['isOwner']",
+            "isShared": "@items('For_each_list')?['isShared']",
+            "tasks": "@body('Select_task_contract')"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "Response",
+      "statusCode": 200,
+      "body": {
+        "schemaVersion": "1.0",
+        "connectorInstanceId": "@triggerBody()?['connectorInstanceId']",
+        "syncTimestamp": "@utcNow()",
+        "isFullSnapshot": true,
+        "lists": "@variables('lists')"
+      }
+    }
+  ]
+}

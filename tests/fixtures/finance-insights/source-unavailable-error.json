@@ -1,0 +1,7 @@
+{
+  "contractVersion": "1.0",
+  "error": {
+    "code": "insight_source_unavailable",
+    "message": "Finance insight source data is unavailable"
+  }
+}

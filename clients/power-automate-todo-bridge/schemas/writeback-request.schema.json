@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-control.example/schemas/work-todo-writeback-request-1.0.json",
+  "title": "Mission Control work To Do write-back request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "connectorInstanceId",
+    "requestedAt",
+    "leaseId",
+    "leaseExpiresAt",
+    "allowDelete",
+    "changes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "enum": ["1.0"]
+    },
+    "connectorInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "leaseId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "leaseExpiresAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "allowDelete": {
+      "type": "boolean"
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "idempotencyKey",
+          "sourceId",
+          "listId",
+          "taskId",
+          "operation"
+        ],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "listId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "taskId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "operation": {
+            "enum": ["update", "complete", "delete"]
+          },
+          "fields": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "status": {
+                "enum": ["notStarted", "inProgress", "completed"]
+              },
+              "importance": {
+                "enum": ["low", "normal", "high"]
+              },
+              "dueDateTime": {
+                "type": ["string", "null"],
+                "maxLength": 64
+              },
+              "bodyContent": {
+                "type": ["string", "null"],
+                "maxLength": 20000
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "operation": {
+                  "enum": ["update"]
+                }
+              },
+              "required": ["operation"]
+            },
+            "then": {
+              "required": ["fields"]
+            }
+          }
+        ]
+      }
+    }
+  }
+}

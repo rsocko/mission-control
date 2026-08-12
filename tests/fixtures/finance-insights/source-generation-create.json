@@ -1,0 +1,81 @@
+{
+  "contractVersion": "1.0",
+  "connectorRef": "demo-connector-v1",
+  "sourceGeneration": "demo-publication-2026-08-10-v1",
+  "sourceSequence": 17,
+  "sourceAsOf": "2026-08-10T15:00:00Z",
+  "coverageStart": "2023-08-01",
+  "coverageEnd": "2026-08-10",
+  "currency": "USD",
+  "bridgeContractVersion": "bridge-v1",
+  "capturedConstituents": [
+    {
+      "kind": "transaction",
+      "generationRef": "demo-transactions-generation-v1",
+      "sourceAsOf": "2026-08-10T15:00:00Z",
+      "itemCount": 1,
+      "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    {
+      "kind": "recurring",
+      "generationRef": "demo-recurring-generation-v1",
+      "sourceAsOf": "2026-08-10T15:01:00Z",
+      "itemCount": 1,
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "kind": "category",
+      "generationRef": "demo-categories-generation-v1",
+      "sourceAsOf": "2026-08-10T15:02:00Z",
+      "itemCount": 1,
+      "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    {
+      "kind": "account",
+      "generationRef": "demo-accounts-generation-v1",
+      "sourceAsOf": "2026-08-10T15:03:00Z",
+      "itemCount": 1,
+      "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    {
+      "kind": "tag",
+      "generationRef": "demo-tags-generation-v1",
+      "sourceAsOf": "2026-08-10T15:04:00Z",
+      "itemCount": 1,
+      "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  ],
+  "manifest": [
+    {
+      "kind": "transaction",
+      "batchCount": 1,
+      "itemCount": 1,
+      "digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    {
+      "kind": "recurring",
+      "batchCount": 1,
+      "itemCount": 1,
+      "digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "kind": "category",
+      "batchCount": 1,
+      "itemCount": 1,
+      "digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+    },
+    {
+      "kind": "account",
+      "batchCount": 1,
+      "itemCount": 1,
+      "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    {
+      "kind": "tag",
+      "batchCount": 1,
+      "itemCount": 1,
+      "digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+    }
+  ],
+  "idempotencyKey": "demo-source-generation-2026-08-10-v1"
+}

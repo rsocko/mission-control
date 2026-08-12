@@ -1,0 +1,17 @@
+node_modules
+.next
+data
+*.db
+*.db-journal
+*.db-wal
+.env
+.env.*
+gh-token*.txt
+.git
+.github
+*.md
+Dockerfile
+docker-compose.yml
+tests
+coverage
+.vscode

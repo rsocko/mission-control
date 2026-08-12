@@ -1,0 +1,13 @@
+Capture any page to Mission Control's Triage Queue with one click or Ctrl+Shift+S.
+
+Mission Control — Save to Triage lets you quickly capture web pages, articles, videos, and social media posts to your personal Mission Control triage queue for later processing.
+
+Features:
+• One-click capture from any page via the toolbar button
+• Keyboard shortcut (Ctrl+Shift+S / Cmd+Shift+S on Mac)
+• Right-click context menu on pages and links
+• Visual badge feedback on capture success/failure
+• Bulk import from Reddit, Instagram, and Facebook saved items
+• Configurable server URL for self-hosted Mission Control instances
+
+This extension requires a running Mission Control instance to save items to. Visit mission-control.example for more information.

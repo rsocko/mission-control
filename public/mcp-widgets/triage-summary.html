@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triage Summary - Mission Control Widget</title>
+<style>
+:root {
+  color-scheme: dark;
+  --surface-0: #0b1120;
+  --surface-1: #111827;
+  --surface-2: #1e293b;
+  --surface-3: #334155;
+  --border: #263449;
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-muted: #94a3b8;
+  --accent: #a78bfa;
+  --accent-strong: #8b5cf6;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --radius: 12px;
+}
+:root.light {
+  color-scheme: light;
+  --surface-0: #f8fafc;
+  --surface-1: #ffffff;
+  --surface-2: #f1f5f9;
+  --surface-3: #e2e8f0;
+  --border: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #334155;
+  --text-muted: #64748b;
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --success: #047857;
+  --warning: #b45309;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 12px;
+  background: transparent;
+  color: var(--text-primary);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+.widget {
+  width: 100%;
+  max-width: 760px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .18);
+}
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.heading { min-width: 0; flex: 1; }
+h1 { margin: 0; font-size: 15px; line-height: 1.3; }
+.subtitle { margin: 3px 0 0; color: var(--text-muted); font-size: 12px; }
+.view-link, .source-link {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.view-link {
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+.view-link:hover, .view-link:focus-visible, .source-link:hover, .source-link:focus-visible {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-0);
+}
+.controls-label {
+  margin-right: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.sort-button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+}
+.sort-button:hover { color: var(--text-primary); }
+.sort-button.active {
+  border-color: var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.items {
+  max-height: 520px;
+  overflow-y: auto;
+}
+.item {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.item:last-child { border-bottom: 0; }
+.thumbnail {
+  width: 96px;
+  height: 72px;
+  flex: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  object-fit: cover;
+}
+.item-content { min-width: 0; flex: 1; }
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+.meta-separator::before { content: "/"; }
+.score {
+  margin-left: auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.item-title {
+  margin: 5px 0 0;
+  font-size: 14px;
+  line-height: 1.35;
+}
+.item-title-text { color: var(--text-primary); }
+.summary {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 5px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.chip {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: var(--surface-0);
+  color: var(--text-muted);
+  font-size: 10px;
+}
+.chip.category { border-color: transparent; background: var(--surface-2); color: var(--text-secondary); }
+.empty {
+  padding: 42px 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+.empty-icon { display: block; margin-bottom: 8px; font-size: 24px; }
+:root.fullscreen .widget { max-width: none; }
+:root.fullscreen .items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  max-height: none;
+}
+:root.fullscreen .item { border-right: 1px solid var(--border); }
+@media (max-width: 540px) {
+  body { padding: 8px; }
+  .header { flex-wrap: wrap; padding: 12px; }
+  .view-link { margin-left: 28px; }
+  .controls { padding: 8px 12px; }
+  .item { padding: 12px; }
+  .thumbnail { width: 76px; height: 64px; }
+  .meta { flex-wrap: wrap; }
+  .score { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+}
+</style>
+</head>
+<body>
+<section class="widget" aria-label="Triage summary">
+  <header class="header">
+    <span aria-hidden="true">T</span>
+    <div class="heading">
+      <h1 id="title">Triage summary</h1>
+      <p class="subtitle" id="subtitle">Loading saved items...</p>
+    </div>
+    <a class="view-link" id="viewQueue" href="#" target="_blank" rel="noopener noreferrer">View queue</a>
+  </header>
+  <div class="controls" aria-label="Sort triage results">
+    <span class="controls-label">Sort</span>
+    <button class="sort-button active" type="button" data-sort="score" aria-pressed="true">Relevance</button>
+    <button class="sort-button" type="button" data-sort="newest" aria-pressed="false">Newest</button>
+    <button class="sort-button" type="button" data-sort="source" aria-pressed="false">Source</button>
+  </div>
+  <div class="items" id="items"></div>
+</section>
+<script>
+const RESOURCE_URI = 'ui://mc/triage-summary';
+const MOCK_DATA = {
+  resourceUri: RESOURCE_URI,
+  title: 'Triage summary',
+  total: 2,
+  hasMore: false,
+  mcBaseUrl: 'http://localhost:3099',
+  items: [
+    {
+      id: 'triage-1',
+      source: 'github',
+      title: 'Mission Control MCP Apps',
+      url: 'https://github.com/',
+      summary: 'A saved repository related to interactive MCP widgets.',
+      score: 92,
+      capturedAt: new Date().toISOString(),
+      status: 'pending',
+      contentType: 'repo',
+      categories: ['software-development'],
+    },
+    {
+      id: 'triage-2',
+      source: 'youtube',
+      title: 'Planning workflows',
+      url: 'https://youtube.com/',
+      summary: 'A video saved for later review.',
+      score: 76,
+      capturedAt: new Date(Date.now() - 86400000).toISOString(),
+      status: 'snoozed',
+      contentType: 'video',
+      categories: ['productivity'],
+    },
+  ],
+};
+
+const EMPTY_DATA = {
+  resourceUri: RESOURCE_URI,
+  title: 'Triage summary',
+  total: 0,
+  hasMore: false,
+  items: [],
+};
+
+let data = EMPTY_DATA;
+let currentSort = 'score';
+let requestId = 0;
+let mcpConnected = false;
+let renderState = 'loading';
+let sizeObserver;
+const pendingRequests = new Map();
+
+async function init() {
+  render();
+
+  const openAIBridge = window.openai;
+  if (openAIBridge && openAIBridge.app) {
+    await initLegacyApp(openAIBridge.app);
+    return;
+  }
+  const hasDirectOpenAIBridge = openAIBridge && (
+    Object.prototype.hasOwnProperty.call(openAIBridge, 'toolOutput')
+    || typeof openAIBridge.openExternal === 'function'
+    || typeof openAIBridge.callTool === 'function'
+  );
+  if (hasDirectOpenAIBridge) {
+    initOpenAIBridge(openAIBridge);
+    return;
+  }
+
+  if (window.parent !== window) {
+    window.addEventListener('message', handleMcpMessage);
+    try {
+      const result = await sendRequest('ui/initialize', {
+        appInfo: { name: 'Mission Control Triage Summary', version: '1.0.0' },
+        appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
+        protocolVersion: '2026-01-26',
+      });
+      applyHostContext(result && result.hostContext);
+      sendNotification('ui/notifications/initialized');
+      mcpConnected = true;
+      startSizeReporting();
+      return;
+    } catch {
+      renderState = 'error';
+      render();
+      return;
+    }
+  }
+
+  function initOpenAIBridge(bridge) {
+    applyOpenAIGlobals(bridge);
+    window.addEventListener('openai:set_globals', event => {
+      applyOpenAIGlobals(event.detail && (event.detail.globals || event.detail));
+      render();
+    });
+    render();
+  }
+
+  function applyOpenAIGlobals(globals) {
+    if (!globals) return;
+    if (globals.toolOutput) {
+      data = normalizeData(globals.toolOutput);
+      renderState = 'ready';
+    }
+    applyTheme(globals.theme);
+    applyDisplayMode(globals.displayMode);
+  }
+
+  const previewMode = new URLSearchParams(window.location.search).get('preview') === '1';
+  if (previewMode) data = normalizeData(MOCK_DATA);
+  renderState = 'ready';
+  if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    document.documentElement.classList.add('light');
+  }
+  render();
+}
+
+async function initLegacyApp(app) {
+  const context = await app.getContext();
+  if (context && context.data) data = normalizeData(context.data);
+  applyTheme(context && context.theme);
+  applyDisplayMode(context && context.displayMode);
+  if (typeof app.ontheme === 'function') app.ontheme(applyTheme);
+  if (typeof app.ondisplaymode === 'function') app.ondisplaymode(applyDisplayMode);
+  renderState = 'ready';
+  render();
+}
+
+function sendRequest(method, params) {
+  const id = ++requestId;
+  const request = { jsonrpc: '2.0', id, method, params };
+  window.parent.postMessage(request, '*');
+  return new Promise((resolve, reject) => pendingRequests.set(id, { resolve, reject }));
+}
+
+function sendNotification(method, params) {
+  const notification = { jsonrpc: '2.0', method };
+  if (params) notification.params = params;
+  window.parent.postMessage(notification, '*');
+}
+
+function handleMcpMessage(event) {
+  if (event.source !== window.parent) return;
+  const message = event.data;
+  if (!message || message.jsonrpc !== '2.0') return;
+
+  if (Object.prototype.hasOwnProperty.call(message, 'id') && !message.method) {
+    const pending = pendingRequests.get(message.id);
+    if (!pending) return;
+    pendingRequests.delete(message.id);
+    if (message.error) pending.reject(new Error(message.error.message || 'MCP host request failed'));
+    else pending.resolve(message.result);
+    return;
+  }
+
+  if (message.method === 'ui/notifications/tool-result') {
+    if (message.params && message.params.isError) {
+      renderState = 'error';
+    } else {
+      data = normalizeData(message.params && message.params.structuredContent);
+      renderState = 'ready';
+    }
+    render();
+  } else if (message.method === 'ui/notifications/tool-cancelled') {
+    renderState = 'cancelled';
+    render();
+  } else if (message.method === 'ui/notifications/host-context-changed') {
+    applyHostContext(message.params);
+  } else if (message.method === 'ui/resource-teardown' && Object.prototype.hasOwnProperty.call(message, 'id')) {
+    window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+    if (sizeObserver) sizeObserver.disconnect();
+    window.removeEventListener('message', handleMcpMessage);
+  }
+}
+
+function applyHostContext(context) {
+  applyTheme(context && context.theme);
+  applyDisplayMode(context && context.displayMode);
+}
+
+function startSizeReporting() {
+  if (typeof ResizeObserver !== 'function') return;
+  let previousWidth = 0;
+  let previousHeight = 0;
+  sizeObserver = new ResizeObserver(() => {
+    const width = Math.ceil(document.documentElement.scrollWidth);
+    const height = Math.ceil(document.documentElement.scrollHeight);
+    if (width === previousWidth && height === previousHeight) return;
+    previousWidth = width;
+    previousHeight = height;
+    sendNotification('ui/notifications/size-changed', { width, height });
+  });
+  sizeObserver.observe(document.documentElement);
+}
+
+function normalizeData(value) {
+  const candidate = value && value.resourceUri === RESOURCE_URI ? value : {};
+  const mcBaseUrl = safeUrl(candidate.mcBaseUrl);
+  return {
+    resourceUri: RESOURCE_URI,
+    title: typeof candidate.title === 'string' ? candidate.title.slice(0, 200) : 'Triage summary',
+    total: Number.isInteger(candidate.total) && candidate.total >= 0 ? candidate.total : 0,
+    hasMore: candidate.hasMore === true,
+    mcBaseUrl,
+    items: Array.isArray(candidate.items)
+      ? candidate.items.slice(0, 50).map(item => normalizeItem(item, mcBaseUrl)).filter(Boolean)
+      : [],
+  };
+}
+
+function normalizeItem(item, mcBaseUrl) {
+  if (!item || typeof item !== 'object' || typeof item.id !== 'string' || typeof item.title !== 'string') return null;
+  const parsedDate = new Date(item.capturedAt);
+  return {
+    id: item.id.slice(0, 200),
+    source: safeText(item.source, 'web', 100),
+    title: safeText(item.title, 'Untitled triage item', 500),
+    url: safeUrl(item.url),
+    summary: safeText(item.summary, '', 2000),
+    score: Number.isFinite(item.score) ? Math.max(0, Math.min(100, item.score)) : 0,
+    capturedAt: Number.isNaN(parsedDate.getTime()) ? new Date(0) : parsedDate,
+    status: ['pending', 'snoozed', 'actioned', 'dismissed'].includes(item.status) ? item.status : 'pending',
+    contentType: safeText(item.contentType, 'link', 100),
+    categories: Array.isArray(item.categories)
+      ? item.categories.filter(value => typeof value === 'string' && value.trim()).slice(0, 20).map(value => value.slice(0, 100))
+      : [],
+    thumbnailUrl: safeThumbnailUrl(item.thumbnailUrl, mcBaseUrl),
+  };
+}
+
+function safeText(value, fallback, limit) {
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : fallback;
+}
+
+function safeUrl(value) {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function safeThumbnailUrl(value, mcBaseUrl) {
+  if (typeof value !== 'string' || !mcBaseUrl) return null;
+  try {
+    const baseUrl = new URL(mcBaseUrl);
+    const url = new URL(value, baseUrl);
+    const approvedPath = url.pathname.startsWith('/api/assets/thumbnails/')
+      || url.pathname.startsWith('/api/triage/capture/image/');
+    return url.origin === baseUrl.origin && approvedPath ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme) {
+  const value = typeof theme === 'string' ? theme : theme && theme.theme;
+  document.documentElement.classList.toggle('light', value === 'light');
+}
+
+function applyDisplayMode(mode) {
+  const value = typeof mode === 'string' ? mode : mode && mode.displayMode;
+  document.documentElement.classList.toggle('fullscreen', value === 'fullscreen');
+}
+
+function sortedItems() {
+  return [...data.items].sort((a, b) => {
+    if (currentSort === 'newest') return b.capturedAt - a.capturedAt;
+    if (currentSort === 'source') return a.source.localeCompare(b.source) || b.score - a.score;
+    return b.score - a.score;
+  });
+}
+
+function render() {
+  document.getElementById('title').textContent = data.title;
+  document.getElementById('subtitle').textContent =
+    `${data.total} matching item${data.total === 1 ? '' : 's'}${data.hasMore ? `; showing ${data.items.length}` : ''}`;
+
+  const queueLink = document.getElementById('viewQueue');
+  const queueUrl = buildMcUrl('triage');
+  queueLink.href = queueUrl || '#';
+  queueLink.hidden = !queueUrl;
+
+  const itemsElement = document.getElementById('items');
+  itemsElement.replaceChildren();
+  const items = sortedItems();
+  if (renderState !== 'ready') {
+    const status = document.createElement('div');
+    status.className = 'empty';
+    status.setAttribute('role', ['error', 'cancelled'].includes(renderState) ? 'alert' : 'status');
+    status.textContent = renderState === 'error'
+      ? 'Triage search failed. Check the text response for details.'
+      : renderState === 'cancelled'
+        ? 'Triage search was cancelled.'
+        : 'Loading triage results...';
+    itemsElement.appendChild(status);
+  } else if (items.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    const icon = document.createElement('span');
+    icon.className = 'empty-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '0';
+    const message = document.createElement('span');
+    message.textContent = 'No triage items match this search.';
+    empty.append(icon, message);
+    itemsElement.appendChild(empty);
+  } else {
+    items.forEach(item => itemsElement.appendChild(renderItem(item)));
+  }
+
+  document.querySelectorAll('.sort-button').forEach(button => {
+    const active = button.dataset.sort === currentSort;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function renderItem(item) {
+  const article = document.createElement('article');
+  article.className = 'item';
+  article.dataset.id = item.id;
+
+  if (item.thumbnailUrl) {
+    const image = document.createElement('img');
+    image.className = 'thumbnail';
+    image.src = item.thumbnailUrl;
+    image.alt = '';
+    image.loading = 'lazy';
+    image.referrerPolicy = 'no-referrer';
+    image.addEventListener('error', () => image.remove(), { once: true });
+    article.appendChild(image);
+  }
+
+  const content = document.createElement('div');
+  content.className = 'item-content';
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  appendMeta(meta, formatLabel(item.source));
+  appendMeta(meta, formatLabel(item.status), true);
+  appendMeta(meta, formatDate(item.capturedAt), true);
+  const score = document.createElement('span');
+  score.className = 'score';
+  score.textContent = `Score ${Math.round(item.score)}`;
+  meta.appendChild(score);
+
+  const heading = document.createElement('h2');
+  heading.className = 'item-title';
+  if (item.url) {
+    const link = document.createElement('a');
+    link.className = 'source-link';
+    link.href = item.url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = item.title;
+    link.setAttribute('aria-label', `Open source: ${item.title}`);
+    heading.appendChild(link);
+  } else {
+    const title = document.createElement('span');
+    title.className = 'item-title-text';
+    title.textContent = item.title;
+    heading.appendChild(title);
+  }
+
+  content.append(meta, heading);
+  if (item.summary) {
+    const summary = document.createElement('p');
+    summary.className = 'summary';
+    summary.textContent = item.summary;
+    content.appendChild(summary);
+  }
+
+  const chips = document.createElement('div');
+  chips.className = 'chips';
+  appendChip(chips, formatLabel(item.contentType), false);
+  item.categories.slice(0, 3).forEach(category => appendChip(chips, category, true));
+  content.appendChild(chips);
+  article.appendChild(content);
+  return article;
+}
+
+function appendMeta(parent, text, separated) {
+  const value = document.createElement('span');
+  if (separated) value.className = 'meta-separator';
+  value.textContent = text;
+  parent.appendChild(value);
+}
+
+function appendChip(parent, text, category) {
+  const chip = document.createElement('span');
+  chip.className = `chip${category ? ' category' : ''}`;
+  chip.textContent = text;
+  parent.appendChild(chip);
+}
+
+function formatLabel(value) {
+  return value.replace(/[_-]/g, ' ').replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function formatDate(value) {
+  return value.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function buildMcUrl(path) {
+  if (!data.mcBaseUrl) return null;
+  try {
+    return new URL(path, `${data.mcBaseUrl.replace(/\/$/, '')}/`).href;
+  } catch {
+    return null;
+  }
+}
+
+function openLinkThroughHost(event) {
+  const link = event.target.closest('a[href]');
+  if (!link) return;
+  const url = safeUrl(link.href);
+  if (!url) return;
+  const bridge = window.openai;
+  if (bridge && typeof bridge.openExternal === 'function') {
+    event.preventDefault();
+    bridge.openExternal({ href: url });
+    return;
+  }
+  if (bridge && bridge.app && typeof bridge.app.openLink === 'function') {
+    event.preventDefault();
+    bridge.app.openLink({ url });
+    return;
+  }
+  if (!mcpConnected) return;
+  event.preventDefault();
+  sendRequest('ui/open-link', { url })
+    .then(result => {
+      if (result && result.isError) markLinkFailure(link);
+    })
+    .catch(() => markLinkFailure(link));
+}
+
+function markLinkFailure(link) {
+  link.setAttribute('aria-disabled', 'true');
+  link.title = 'The host could not open this link';
+}
+
+document.querySelectorAll('.sort-button').forEach(button => {
+  button.addEventListener('click', () => {
+    currentSort = button.dataset.sort;
+    render();
+  });
+});
+document.addEventListener('click', openLinkThroughHost);
+
+// Triage mutations remain intentionally absent until matching MCP tools are registered and authorized.
+init();
+</script>
+</body>
+</html>

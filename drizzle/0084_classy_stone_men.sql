@@ -1,0 +1,1 @@
+CREATE INDEX `idx_sync_log_connector_synced_at` ON `sync_log` (`connector_id`,`synced_at`);

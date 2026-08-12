@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task List — Mission Control Widget</title>
+<style>
+/* ═══ MC Design Tokens ═══ */
+:root {
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+  --gray-950: #020617;
+
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+
+  --priority-critical: #ef4444;
+  --priority-high: #f59e0b;
+  --priority-medium: #eab308;
+  --priority-low: #3b82f6;
+  --priority-none: #334155;
+
+  --surface-1: #111827;
+  --surface-2: #1e293b;
+  --surface-3: #334155;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #6b7a8d;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3);
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+}
+
+:root.light {
+  --surface-1: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.06);
+}
+
+/* ═══ Base ═══ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: transparent;
+  color: var(--text-primary);
+  padding: var(--space-3);
+  line-height: 1.5;
+}
+
+/* ═══ Container ═══ */
+.task-list {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  width: 100%;
+  max-width: 720px;
+  overflow: hidden;
+}
+
+/* ═══ Header ═══ */
+.list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+}
+.list-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.list-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-3);
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.sort-controls {
+  display: flex;
+  gap: var(--space-1);
+}
+.sort-btn {
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.sort-btn:hover { color: var(--text-secondary); }
+.sort-btn.active {
+  background: var(--surface-3);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* ═══ Bulk Action Bar ═══ */
+.bulk-bar {
+  display: none;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  background: color-mix(in srgb, var(--accent-500) 8%, var(--surface-1));
+  border-bottom: 1px solid var(--border);
+}
+.bulk-bar.visible { display: flex; }
+.bulk-bar .count {
+  font-size: 12px;
+  color: var(--accent-400);
+  font-weight: 500;
+}
+.bulk-btn {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-500);
+  background: color-mix(in srgb, var(--accent-500) 15%, transparent);
+  color: var(--accent-400);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.bulk-btn:hover {
+  background: color-mix(in srgb, var(--accent-500) 25%, transparent);
+}
+.bulk-btn:disabled, .sort-btn:disabled, .task-checkbox:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+/* ═══ Task Rows ═══ */
+.task-rows {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition-fast);
+}
+.task-row:last-child { border-bottom: none; }
+.task-row:hover { background: var(--surface-2); }
+.task-row.selected { background: color-mix(in srgb, var(--accent-500) 5%, var(--surface-1)); }
+
+/* Checkbox */
+.task-checkbox {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-strong);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+.task-checkbox:hover { border-color: var(--accent-500); }
+.task-checkbox.checked {
+  background: var(--accent-600);
+  border-color: var(--accent-600);
+}
+.task-checkbox.checked::after {
+  content: '';
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+/* Priority dot */
+.priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Task info */
+.task-info {
+  flex: 1;
+  min-width: 0;
+}
+.task-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+.task-row-title:hover { color: var(--accent-400); }
+
+/* Row meta */
+.task-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.row-due {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.row-due.overdue { color: var(--danger); }
+
+.row-status {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 2px 6px;
+  border-radius: 9999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.row-status.status-in_progress { color: var(--accent-400); }
+.row-status.status-done { color: var(--success); }
+
+/* ═══ Footer ═══ */
+.list-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
+}
+.footer-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent-400);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.footer-link:hover { text-decoration: underline; }
+.footer-link svg { width: 14px; height: 14px; }
+.action-message {
+  display: none;
+  padding: var(--space-2) var(--space-5);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.action-message.visible { display: block; }
+.action-message.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+}
+.action-message.success {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-1));
+}
+:root.fullscreen .task-list { max-width: none; }
+@media (max-width: 560px) {
+  body { padding: var(--space-2); }
+  .list-header { align-items: flex-start; gap: var(--space-2); flex-direction: column; }
+  .task-row { padding: var(--space-3); gap: var(--space-2); }
+  .task-row-meta { gap: var(--space-1); }
+  .row-due { display: none; }
+  .row-status { max-width: 84px; overflow: hidden; text-overflow: ellipsis; }
+}
+</style>
+</head>
+<body>
+
+<div class="task-list" id="taskList">
+  <div class="list-header">
+    <div style="display:flex;align-items:center;gap:var(--space-2)">
+      <span class="list-title" id="listTitle">Found 8 tasks</span>
+      <span class="list-count" id="listCount">8</span>
+    </div>
+    <div class="sort-controls">
+      <button class="sort-btn active" type="button" data-sort="priority" aria-pressed="true">Priority</button>
+      <button class="sort-btn" type="button" data-sort="due" aria-pressed="false">Due</button>
+      <button class="sort-btn" type="button" data-sort="title" aria-pressed="false">Title</button>
+    </div>
+  </div>
+
+  <div class="bulk-bar" id="bulkBar">
+    <span class="count" id="selectedCount">2 selected</span>
+    <button class="bulk-btn" id="bulkDoneBtn" type="button">Mark Done</button>
+  </div>
+  <div class="action-message" id="actionMessage" role="status" aria-live="polite"></div>
+
+  <div class="task-rows" id="taskRows">
+    <!-- Rows rendered by JS -->
+  </div>
+
+  <div class="list-footer">
+    <a class="footer-link" id="viewAllLink" href="#" target="_blank" rel="noopener noreferrer">
+      View all in Mission Control
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M6 3H4a2 2 0 00-2 2v7a2 2 0 002 2h8a2 2 0 002-2V9M9 2h5v5M7 9l7-7"/>
+      </svg>
+    </a>
+  </div>
+</div>
+
+<script>
+// ═══ Mock Data ═══
+const MOCK_TASKS = [
+  { id: 'tsk_1', title: 'Review PR #42 — auth middleware', priority: 'critical', status: 'todo', dueDate: new Date(Date.now() - 86400000).toISOString() },
+  { id: 'tsk_2', title: 'Deploy staging environment for QA', priority: 'high', status: 'in_progress', dueDate: new Date(Date.now() + 86400000).toISOString() },
+  { id: 'tsk_3', title: 'Update API documentation for v2 endpoints', priority: 'high', status: 'todo', dueDate: new Date(Date.now() + 2 * 86400000).toISOString() },
+  { id: 'tsk_4', title: 'Fix memory leak in WebSocket handler', priority: 'medium', status: 'todo', dueDate: new Date(Date.now() + 3 * 86400000).toISOString() },
+  { id: 'tsk_5', title: 'Add rate limiting to public API', priority: 'medium', status: 'todo', dueDate: null },
+  { id: 'tsk_6', title: 'Migrate database schema for multi-tenancy', priority: 'medium', status: 'in_progress', dueDate: new Date(Date.now() + 7 * 86400000).toISOString() },
+  { id: 'tsk_7', title: 'Write integration tests for payment flow', priority: 'low', status: 'todo', dueDate: null },
+  { id: 'tsk_8', title: 'Update project README with new setup steps', priority: 'low', status: 'done', dueDate: null },
+];
+
+let tasks = [];
+let selected = new Set();
+let currentSort = 'priority';
+let mcBaseUrl = 'http://localhost:3099';
+let listTitle = null;
+let pending = false;
+let actionMessage = null;
+let requestId = 0;
+let mcpConnected = false;
+let sizeObserver;
+const pendingRequests = new Map();
+
+const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
+
+// ── Init ──
+async function init() {
+  const bridge = window.openai;
+  if (bridge && bridge.app) {
+    const ctx = await bridge.app.getContext();
+    if (ctx && ctx.data && ctx.data.tasks) {
+      tasks = ctx.data.tasks;
+      mcBaseUrl = ctx.data.mcBaseUrl || mcBaseUrl;
+      listTitle = ctx.data.listTitle || null;
+    }
+    // Apply initial theme from context
+    if (ctx && ctx.theme) {
+      applyTheme(ctx.theme);
+    }
+    if (typeof bridge.app.ontheme === 'function') {
+      bridge.app.ontheme(applyTheme);
+    }
+    applyDisplayMode(ctx && ctx.displayMode);
+    if (typeof bridge.app.ondisplaymode === 'function') {
+      bridge.app.ondisplaymode(applyDisplayMode);
+    }
+  } else if (bridge) {
+    applyOpenAIGlobals(bridge);
+    window.addEventListener('openai:set_globals', event => {
+      applyOpenAIGlobals(event.detail && (event.detail.globals || event.detail));
+      render();
+    });
+  } else if (window.parent !== window) {
+    window.addEventListener('message', handleMcpMessage);
+    try {
+      const result = await sendRequest('ui/initialize', {
+        appInfo: { name: 'Mission Control Task List', version: '1.0.0' },
+        appCapabilities: { availableDisplayModes: ['inline', 'fullscreen'] },
+        protocolVersion: '2026-01-26',
+      });
+      applyHostContext(result && result.hostContext);
+      sendNotification('ui/notifications/initialized');
+      mcpConnected = true;
+      startSizeReporting();
+    } catch (error) {
+      actionMessage = {
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not connect to the MCP host.',
+      };
+    }
+  } else {
+    // Standalone: respect system preference
+    tasks = [...MOCK_TASKS];
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+      document.documentElement.classList.add('light');
+    }
+  }
+  render();
+}
+
+function applyOpenAIGlobals(globals) {
+  if (!globals) return;
+  if (globals.toolOutput && Array.isArray(globals.toolOutput.tasks)) {
+    tasks = globals.toolOutput.tasks;
+    mcBaseUrl = globals.toolOutput.mcBaseUrl || mcBaseUrl;
+    listTitle = globals.toolOutput.listTitle || null;
+  }
+  applyTheme(globals.theme);
+  applyDisplayMode(globals.displayMode);
+}
+
+function applyTheme(theme) {
+  const value = typeof theme === 'string' ? theme : theme && theme.theme;
+  document.documentElement.classList.toggle('light', value === 'light');
+}
+
+function applyDisplayMode(mode) {
+  const value = typeof mode === 'string' ? mode : mode && mode.displayMode;
+  document.documentElement.classList.toggle('fullscreen', value === 'fullscreen');
+}
+
+function sendRequest(method, params) {
+  const id = ++requestId;
+  window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+  return new Promise((resolve, reject) => pendingRequests.set(id, { resolve, reject }));
+}
+
+function sendNotification(method, params) {
+  const notification = { jsonrpc: '2.0', method };
+  if (params) notification.params = params;
+  window.parent.postMessage(notification, '*');
+}
+
+function handleMcpMessage(event) {
+  if (event.source !== window.parent) return;
+  const message = event.data;
+  if (!message || message.jsonrpc !== '2.0') return;
+
+  if (Object.prototype.hasOwnProperty.call(message, 'id') && !message.method) {
+    const request = pendingRequests.get(message.id);
+    if (!request) return;
+    pendingRequests.delete(message.id);
+    if (message.error) request.reject(new Error(message.error.message || 'MCP host request failed'));
+    else request.resolve(message.result);
+    return;
+  }
+
+  if (message.method === 'ui/notifications/tool-result') {
+    if (message.params && message.params.isError) {
+      actionMessage = { type: 'error', text: 'Mission Control could not load these tasks.' };
+    } else {
+      const output = message.params && message.params.structuredContent;
+      if (output && Array.isArray(output.tasks)) {
+        tasks = output.tasks;
+        mcBaseUrl = output.mcBaseUrl || mcBaseUrl;
+        listTitle = output.listTitle || null;
+        selected.clear();
+      }
+    }
+    render();
+  } else if (message.method === 'ui/notifications/host-context-changed') {
+    applyHostContext(message.params);
+  } else if (message.method === 'ui/resource-teardown' && Object.prototype.hasOwnProperty.call(message, 'id')) {
+    window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+    if (sizeObserver) sizeObserver.disconnect();
+    window.removeEventListener('message', handleMcpMessage);
+  }
+}
+
+function applyHostContext(context) {
+  applyTheme(context && context.theme);
+  applyDisplayMode(context && context.displayMode);
+}
+
+function startSizeReporting() {
+  if (typeof ResizeObserver !== 'function') return;
+  let previousWidth = 0;
+  let previousHeight = 0;
+  sizeObserver = new ResizeObserver(() => {
+    const width = Math.ceil(document.documentElement.scrollWidth);
+    const height = Math.ceil(document.documentElement.scrollHeight);
+    if (width === previousWidth && height === previousHeight) return;
+    previousWidth = width;
+    previousHeight = height;
+    sendNotification('ui/notifications/size-changed', { width, height });
+  });
+  sizeObserver.observe(document.documentElement);
+}
+
+// ── Sort ──
+function sortTasks(arr, key) {
+  return [...arr].sort((a, b) => {
+    if (key === 'priority') return (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4);
+    if (key === 'due') {
+      if (!a.dueDate && !b.dueDate) return 0;
+      if (!a.dueDate) return 1;
+      if (!b.dueDate) return -1;
+      return new Date(a.dueDate) - new Date(b.dueDate);
+    }
+    if (key === 'title') return a.title.localeCompare(b.title);
+    return 0;
+  });
+}
+
+// ── Render ──
+function render() {
+  const sorted = sortTasks(tasks, currentSort);
+
+  document.getElementById('listTitle').textContent = listTitle || `Found ${tasks.length} tasks`;
+  document.getElementById('listCount').textContent = tasks.length;
+  document.getElementById('viewAllLink').href = buildMcUrl('tasks');
+
+  const rowsEl = document.getElementById('taskRows');
+  rowsEl.innerHTML = sorted.map(task => {
+    const isSelected = selected.has(task.id);
+    const dueStr = formatDue(task.dueDate);
+    const isOverdue = task.dueDate && new Date(task.dueDate) < new Date();
+    const priority = Object.hasOwn(PRIORITY_ORDER, task.priority) ? task.priority : 'none';
+    const status = ['todo', 'in_progress', 'done', 'cancelled'].includes(task.status) ? task.status : 'todo';
+    const safeId = escapeAttribute(String(task.id));
+    return `
+      <div class="task-row ${isSelected ? 'selected' : ''}" data-id="${safeId}" ${pending && isSelected ? 'aria-busy="true"' : ''}>
+        <button type="button" class="task-checkbox ${isSelected ? 'checked' : ''}" data-id="${safeId}" aria-label="Select ${escapeAttribute(task.title)}" aria-pressed="${isSelected}" ${pending ? 'disabled' : ''}></button>
+        <div class="priority-dot" style="background:var(--priority-${priority})" role="img" aria-label="Priority: ${priority}"></div>
+        <div class="task-info">
+          <a class="task-row-title" href="${buildMcUrl(`tasks/${encodeURIComponent(task.id)}`)}" target="_blank" rel="noopener noreferrer">${escapeHtml(task.title)}</a>
+        </div>
+        <div class="task-row-meta">
+          ${dueStr ? `<span class="row-due ${isOverdue ? 'overdue' : ''}">${dueStr}</span>` : ''}
+          <span class="row-status status-${status}">${formatStatus(status)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Bulk bar
+  const bulkBar = document.getElementById('bulkBar');
+  if (selected.size > 0) {
+    bulkBar.classList.add('visible');
+    document.getElementById('selectedCount').textContent = `${selected.size} selected`;
+  } else {
+    bulkBar.classList.remove('visible');
+  }
+  const bulkDoneBtn = document.getElementById('bulkDoneBtn');
+  bulkDoneBtn.disabled = pending;
+  bulkDoneBtn.textContent = pending ? `Updating ${selected.size}…` : 'Mark Done';
+
+  const messageEl = document.getElementById('actionMessage');
+  messageEl.className = `action-message${actionMessage ? ` visible ${actionMessage.type}` : ''}`;
+  messageEl.textContent = actionMessage ? actionMessage.text : '';
+
+  // Sort buttons
+  document.querySelectorAll('.sort-btn').forEach(btn => {
+    const isActive = btn.dataset.sort === currentSort;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+    btn.disabled = pending;
+  });
+
+  // Event listeners for checkboxes
+  rowsEl.querySelectorAll('.task-checkbox').forEach(cb => {
+    cb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = cb.dataset.id;
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      render();
+    });
+  });
+}
+
+function formatDue(dateStr) {
+  if (!dateStr) return '';
+  const due = new Date(dateStr);
+  const now = new Date();
+  const diff = Math.ceil((due - now) / 86400000);
+  if (diff < -1) return `${Math.abs(diff)}d ago`;
+  if (diff === -1) return 'Yesterday';
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  return `In ${diff}d`;
+}
+
+function formatStatus(s) {
+  if (s === 'in_progress') return 'In Progress';
+  if (s === 'todo') return 'Todo';
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function escapeAttribute(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function buildMcUrl(path) {
+  try {
+    const base = new URL(mcBaseUrl);
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') throw new Error('Unsupported URL');
+    return new URL(path, `${base.href.replace(/\/$/, '')}/`).href;
+  } catch {
+    return '#';
+  }
+}
+
+function toolError(result) {
+  if (!result || !result.isError) return null;
+  const text = Array.isArray(result.content)
+    ? result.content.find(item => item && item.type === 'text' && item.text)?.text
+    : null;
+  return text || 'Mission Control rejected the update.';
+}
+
+function callHostTool(name, args) {
+  const bridge = window.openai;
+  if (bridge && typeof bridge.callTool === 'function') {
+    return bridge.callTool(name, args);
+  }
+  if (bridge && bridge.app && typeof bridge.app.callTool === 'function') {
+    return bridge.app.callTool(name, args);
+  }
+  if (mcpConnected) {
+    return sendRequest('tools/call', { name, arguments: args });
+  }
+  throw new Error('Open this list in a compatible MCP Apps host to update tasks.');
+}
+
+function openExternalLink(event) {
+  const link = event.target.closest('a[href]');
+  if (!link) return;
+  const rawHref = link.getAttribute('href');
+  if (!rawHref || rawHref === '#') return;
+  const href = link.href;
+  if (!href.startsWith('https://') && !href.startsWith('http://')) return;
+  const bridge = window.openai;
+  if (bridge && typeof bridge.openExternal === 'function') {
+    event.preventDefault();
+    bridge.openExternal({ href });
+  } else if (bridge && bridge.app && typeof bridge.app.openLink === 'function') {
+    event.preventDefault();
+    bridge.app.openLink({ url: href });
+  } else if (mcpConnected) {
+    event.preventDefault();
+    sendRequest('ui/open-link', { url: href }).catch(() => {
+      link.setAttribute('aria-disabled', 'true');
+      link.title = 'The host could not open this link';
+    });
+  }
+}
+
+async function callUpdate(id) {
+  const result = await callHostTool('mc_update_task', { id, status: 'done' });
+  const error = toolError(result);
+  if (error) throw new Error(error);
+}
+
+// ── Sort handlers ──
+document.querySelectorAll('.sort-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentSort = btn.dataset.sort;
+    render();
+  });
+});
+document.addEventListener('click', openExternalLink);
+
+// ── Bulk Mark Done ──
+document.getElementById('bulkDoneBtn').addEventListener('click', async () => {
+  if (pending || selected.size === 0) return;
+  const ids = [...selected];
+  const previousStatuses = new Map(
+    tasks.filter(task => selected.has(task.id)).map(task => [task.id, task.status]),
+  );
+  tasks = tasks.map(t => ids.includes(t.id) ? { ...t, status: 'done' } : t);
+  pending = true;
+  actionMessage = null;
+  render();
+
+  const results = await Promise.all(ids.map(async id => {
+    try {
+      await callUpdate(id);
+      return { id, ok: true };
+    } catch (error) {
+      return { id, ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }));
+  const failed = results.filter(result => !result.ok);
+  const failedIds = new Set(failed.map(result => result.id));
+  tasks = tasks.map(task => failedIds.has(task.id)
+    ? { ...task, status: previousStatuses.get(task.id) }
+    : task);
+  selected = failedIds;
+  pending = false;
+  const succeeded = ids.length - failed.length;
+  actionMessage = failed.length
+    ? {
+        type: 'error',
+        text: `Updated ${succeeded} of ${ids.length}. ${failed.length} failed: ${failed[0].error} Retry the selected tasks.`,
+      }
+    : { type: 'success', text: `Marked ${succeeded} task${succeeded === 1 ? '' : 's'} done.` };
+  render();
+});
+
+init();
+</script>
+</body>
+</html>

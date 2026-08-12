@@ -1,0 +1,2278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://missioncontrol.example/contracts/mobile-ios-native-v1.schema.json",
+  "title": "Mission Control iOS Native Contract v1",
+  "contractVersion": 1,
+  "bridgeMaxMessageBytes": 65536,
+  "imageCaptureDependencyIssue": 1656,
+  "$defs": {
+    "NativeBridgeRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "bootstrap"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "webClientVersion": {
+                  "type": "string",
+                  "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "required": [
+                "webClientVersion"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "requestPushPermission"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "context": {
+                  "type": "string",
+                  "enum": [
+                    "onboarding",
+                    "notifications",
+                    "settings"
+                  ]
+                }
+              },
+              "required": [
+                "context"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "hapticFeedback"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "success",
+                    "impact",
+                    "warning",
+                    "selection"
+                  ]
+                },
+                "intensity": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              },
+              "required": [
+                "type"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "openURL"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "pattern": "^https?:\\/\\/(?:(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?|(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9]))(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#].*)?$",
+                  "maxLength": 2048
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "setBadge"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 999
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NativeBridgeEvent": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "authenticationChanged"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "authenticated",
+                    "unauthenticated",
+                    "expired"
+                  ]
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "networkStatus"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "online",
+                    "offline"
+                  ]
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "pushRegistrationChanged"
+            },
+            "payload": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "authorization": {
+                      "type": "string",
+                      "enum": [
+                        "notDetermined",
+                        "denied",
+                        "authorized",
+                        "provisional"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "const": "unregistered"
+                    }
+                  },
+                  "required": [
+                    "authorization",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "authorization": {
+                      "type": "string",
+                      "enum": [
+                        "notDetermined",
+                        "denied",
+                        "authorized",
+                        "provisional"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "const": "registering"
+                    }
+                  },
+                  "required": [
+                    "authorization",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "authorization": {
+                      "type": "string",
+                      "enum": [
+                        "notDetermined",
+                        "denied",
+                        "authorized",
+                        "provisional"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "const": "registered"
+                    },
+                    "registrationId": {
+                      "type": "string",
+                      "allOf": [
+                        {
+                          "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                        },
+                        {
+                          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "authorization",
+                    "state",
+                    "registrationId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "authorization": {
+                      "type": "string",
+                      "enum": [
+                        "notDetermined",
+                        "denied",
+                        "authorized",
+                        "provisional"
+                      ]
+                    },
+                    "state": {
+                      "type": "string",
+                      "const": "failed"
+                    }
+                  },
+                  "required": [
+                    "authorization",
+                    "state"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "const": "shareCaptureCompleted"
+            },
+            "payload": {
+              "type": "object",
+              "properties": {
+                "captureRequestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "created",
+                    "duplicate"
+                  ]
+                },
+                "itemId": {
+                  "type": "string",
+                  "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                  "minLength": 1,
+                  "maxLength": 128
+                }
+              },
+              "required": [
+                "captureRequestId",
+                "status",
+                "itemId"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "payload"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NativeBridgeResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "anyOf": [
+        {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "requestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "const": "bootstrap"
+                },
+                "ok": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "appVersion": {
+                      "type": "string",
+                      "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
+                    "buildNumber": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "authentication": {
+                      "type": "string",
+                      "enum": [
+                        "authenticated",
+                        "unauthenticated",
+                        "expired"
+                      ]
+                    },
+                    "capabilities": {
+                      "maxItems": 5,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "badge",
+                          "externalLinks",
+                          "haptics",
+                          "push",
+                          "shareCaptureStatus"
+                        ]
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "appVersion",
+                    "buildNumber",
+                    "authentication",
+                    "capabilities"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "requestId",
+                "action",
+                "ok",
+                "result"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "requestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "const": "requestPushPermission"
+                },
+                "ok": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "authorization": {
+                      "type": "string",
+                      "enum": [
+                        "notDetermined",
+                        "denied",
+                        "authorized",
+                        "provisional"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "authorization"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "requestId",
+                "action",
+                "ok",
+                "result"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "requestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "const": "hapticFeedback"
+                },
+                "ok": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "delivered": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "delivered"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "requestId",
+                "action",
+                "ok",
+                "result"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "requestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "const": "openURL"
+                },
+                "ok": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "opened": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "opened"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "requestId",
+                "action",
+                "ok",
+                "result"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "version": {
+                  "type": "number",
+                  "const": 1
+                },
+                "requestId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "action": {
+                  "type": "string",
+                  "const": "setBadge"
+                },
+                "ok": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "result": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "version",
+                "requestId",
+                "action",
+                "ok",
+                "result"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "action": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "ok": {
+              "type": "boolean",
+              "const": false
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "INVALID_MESSAGE",
+                    "UNSUPPORTED_VERSION",
+                    "UNSUPPORTED_ACTION",
+                    "UNTRUSTED_ORIGIN",
+                    "INVALID_NAVIGATION",
+                    "NOT_AUTHENTICATED",
+                    "PERMISSION_DENIED",
+                    "TIMEOUT",
+                    "NATIVE_FAILURE"
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+                  "minLength": 1,
+                  "maxLength": 512
+                },
+                "retryable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "retryable"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "action",
+            "ok",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NativeInstallationCredential": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "credentialId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "accessToken": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 4096,
+          "pattern": "^\\S+$"
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "kind": {
+          "type": "string",
+          "const": "installation"
+        },
+        "scopes": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "push:register"
+            },
+            {
+              "type": "string",
+              "const": "push:unregister"
+            },
+            {
+              "type": "string",
+              "const": "credentials:rotate"
+            },
+            {
+              "type": "string",
+              "const": "credentials:revoke"
+            }
+          ],
+          "minItems": 4,
+          "maxItems": 4,
+          "items": false
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 7776000
+        }
+      },
+      "required": [
+        "credentialId",
+        "accessToken",
+        "issuedAt",
+        "kind",
+        "scopes",
+        "expiresInSeconds"
+      ],
+      "additionalProperties": false
+    },
+    "NativeShareExtensionCredential": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "credentialId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "accessToken": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 4096,
+          "pattern": "^\\S+$"
+        },
+        "issuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+        },
+        "kind": {
+          "type": "string",
+          "const": "share_extension"
+        },
+        "scopes": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "triage:capture"
+            }
+          ],
+          "minItems": 1,
+          "maxItems": 1,
+          "items": false
+        },
+        "expiresInSeconds": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 2592000
+        }
+      },
+      "required": [
+        "credentialId",
+        "accessToken",
+        "issuedAt",
+        "kind",
+        "scopes",
+        "expiresInSeconds"
+      ],
+      "additionalProperties": false
+    },
+    "NativeCredential": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "credentialId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "accessToken": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 4096,
+              "pattern": "^\\S+$"
+            },
+            "issuedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "installation"
+            },
+            "scopes": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "const": "push:register"
+                },
+                {
+                  "type": "string",
+                  "const": "push:unregister"
+                },
+                {
+                  "type": "string",
+                  "const": "credentials:rotate"
+                },
+                {
+                  "type": "string",
+                  "const": "credentials:revoke"
+                }
+              ],
+              "minItems": 4,
+              "maxItems": 4,
+              "items": false
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 7776000
+            }
+          },
+          "required": [
+            "credentialId",
+            "accessToken",
+            "issuedAt",
+            "kind",
+            "scopes",
+            "expiresInSeconds"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "credentialId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "accessToken": {
+              "type": "string",
+              "minLength": 32,
+              "maxLength": 4096,
+              "pattern": "^\\S+$"
+            },
+            "issuedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "kind": {
+              "type": "string",
+              "const": "share_extension"
+            },
+            "scopes": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "string",
+                  "const": "triage:capture"
+                }
+              ],
+              "minItems": 1,
+              "maxItems": 1,
+              "items": false
+            },
+            "expiresInSeconds": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 2592000
+            }
+          },
+          "required": [
+            "credentialId",
+            "accessToken",
+            "issuedAt",
+            "kind",
+            "scopes",
+            "expiresInSeconds"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NativeBootstrapRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "authorizationCode": {
+          "type": "string",
+          "minLength": 32,
+          "maxLength": 4096,
+          "pattern": "^\\S+$"
+        },
+        "codeVerifier": {
+          "type": "string",
+          "minLength": 43,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9._~-]+$"
+        },
+        "redirectUri": {
+          "type": "string",
+          "const": "mc://auth/callback"
+        },
+        "appVersion": {
+          "type": "string",
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "buildNumber": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId",
+        "authorizationCode",
+        "codeVerifier",
+        "redirectUri",
+        "appVersion",
+        "buildNumber"
+      ],
+      "additionalProperties": false
+    },
+    "NativeBootstrapResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "trustedOrigin": {
+              "type": "string",
+              "maxLength": 2048,
+              "pattern": "^(?:https:\\/\\/(?:(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?|(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9]))(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?|http:\\/\\/(?:localhost|127\\.0\\.0\\.1|\\[::1\\])(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?)$"
+            },
+            "bridgeVersion": {
+              "type": "number",
+              "const": 1
+            },
+            "installationCredential": {
+              "type": "object",
+              "properties": {
+                "credentialId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "accessToken": {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 4096,
+                  "pattern": "^\\S+$"
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "installation"
+                },
+                "scopes": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "const": "push:register"
+                    },
+                    {
+                      "type": "string",
+                      "const": "push:unregister"
+                    },
+                    {
+                      "type": "string",
+                      "const": "credentials:rotate"
+                    },
+                    {
+                      "type": "string",
+                      "const": "credentials:revoke"
+                    }
+                  ],
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": false
+                },
+                "expiresInSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 7776000
+                }
+              },
+              "required": [
+                "credentialId",
+                "accessToken",
+                "issuedAt",
+                "kind",
+                "scopes",
+                "expiresInSeconds"
+              ],
+              "additionalProperties": false
+            },
+            "shareExtensionCredential": {
+              "type": "object",
+              "properties": {
+                "credentialId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "accessToken": {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 4096,
+                  "pattern": "^\\S+$"
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "share_extension"
+                },
+                "scopes": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "const": "triage:capture"
+                    }
+                  ],
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": false
+                },
+                "expiresInSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2592000
+                }
+              },
+              "required": [
+                "credentialId",
+                "accessToken",
+                "issuedAt",
+                "kind",
+                "scopes",
+                "expiresInSeconds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "trustedOrigin",
+            "bridgeVersion",
+            "installationCredential"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "ok",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "NativeCredentialRotationRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "credentialId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "credentialKind": {
+          "type": "string",
+          "enum": [
+            "installation",
+            "share_extension"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId",
+        "credentialId",
+        "credentialKind"
+      ],
+      "additionalProperties": false
+    },
+    "NativeCredentialRotationResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "ok": {
+              "type": "boolean",
+              "const": true
+            },
+            "credentialKind": {
+              "type": "string",
+              "const": "installation"
+            },
+            "credential": {
+              "type": "object",
+              "properties": {
+                "credentialId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "accessToken": {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 4096,
+                  "pattern": "^\\S+$"
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "installation"
+                },
+                "scopes": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "const": "push:register"
+                    },
+                    {
+                      "type": "string",
+                      "const": "push:unregister"
+                    },
+                    {
+                      "type": "string",
+                      "const": "credentials:rotate"
+                    },
+                    {
+                      "type": "string",
+                      "const": "credentials:revoke"
+                    }
+                  ],
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": false
+                },
+                "expiresInSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 7776000
+                }
+              },
+              "required": [
+                "credentialId",
+                "accessToken",
+                "issuedAt",
+                "kind",
+                "scopes",
+                "expiresInSeconds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "ok",
+            "credentialKind",
+            "credential"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "ok": {
+              "type": "boolean",
+              "const": true
+            },
+            "credentialKind": {
+              "type": "string",
+              "const": "share_extension"
+            },
+            "credential": {
+              "type": "object",
+              "properties": {
+                "credentialId": {
+                  "type": "string",
+                  "allOf": [
+                    {
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                    },
+                    {
+                      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  ]
+                },
+                "accessToken": {
+                  "type": "string",
+                  "minLength": 32,
+                  "maxLength": 4096,
+                  "pattern": "^\\S+$"
+                },
+                "issuedAt": {
+                  "type": "string",
+                  "format": "date-time",
+                  "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+                },
+                "kind": {
+                  "type": "string",
+                  "const": "share_extension"
+                },
+                "scopes": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "string",
+                      "const": "triage:capture"
+                    }
+                  ],
+                  "minItems": 1,
+                  "maxItems": 1,
+                  "items": false
+                },
+                "expiresInSeconds": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 2592000
+                }
+              },
+              "required": [
+                "credentialId",
+                "accessToken",
+                "issuedAt",
+                "kind",
+                "scopes",
+                "expiresInSeconds"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "ok",
+            "credentialKind",
+            "credential"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "NativeCredentialRevocationRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "credentialId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "logout",
+            "rotation",
+            "security",
+            "user_requested"
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId",
+        "credentialId",
+        "reason"
+      ],
+      "additionalProperties": false
+    },
+    "NativeLogoutRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId"
+      ],
+      "additionalProperties": false
+    },
+    "NativeLogoutResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "credentialsRevoked": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2
+            },
+            "registrationsRetired": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20
+            }
+          },
+          "required": [
+            "credentialsRevoked",
+            "registrationsRetired"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "ok",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ApnsRegistrationRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "deviceToken": {
+          "type": "string",
+          "minLength": 64,
+          "maxLength": 200,
+          "pattern": "^(?:[a-fA-F0-9]{2}){32,100}$"
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "development",
+            "production"
+          ]
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 255,
+          "pattern": "^[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+$"
+        },
+        "appVersion": {
+          "type": "string",
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "buildNumber": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "locale": {
+          "type": "string",
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "minLength": 2,
+          "maxLength": 35
+        },
+        "timeZone": {
+          "type": "string",
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId",
+        "deviceToken",
+        "environment",
+        "topic",
+        "appVersion",
+        "buildNumber",
+        "locale",
+        "timeZone"
+      ],
+      "additionalProperties": false
+    },
+    "ApnsRegistrationResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "registrationId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "registered",
+                "rotated"
+              ]
+            },
+            "updatedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            }
+          },
+          "required": [
+            "registrationId",
+            "state",
+            "updatedAt"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "ok",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "ApnsUnregistrationRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "installationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "registrationId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "installationId",
+        "registrationId"
+      ],
+      "additionalProperties": false
+    },
+    "ShareSheetCaptureRequest": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "client": {
+              "type": "string",
+              "const": "ios"
+            },
+            "capturedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "contentType": {
+              "type": "string",
+              "const": "url"
+            },
+            "url": {
+              "type": "string",
+              "pattern": "^https?:\\/\\/(?:(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)*[A-Za-z](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?|(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9]))(?::(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5]))?(?:[/?#].*)?$",
+              "maxLength": 2048
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 500
+            },
+            "sharedText": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 100000
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "client",
+            "contentType",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "version": {
+              "type": "number",
+              "const": 1
+            },
+            "requestId": {
+              "type": "string",
+              "allOf": [
+                {
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+                },
+                {
+                  "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              ]
+            },
+            "client": {
+              "type": "string",
+              "const": "ios"
+            },
+            "capturedAt": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+            },
+            "contentType": {
+              "type": "string",
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 100000
+            },
+            "title": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 500
+            }
+          },
+          "required": [
+            "version",
+            "requestId",
+            "client",
+            "contentType",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ShareSheetCaptureResponse": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "const": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "itemId": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "created",
+                "duplicate"
+              ]
+            }
+          },
+          "required": [
+            "itemId",
+            "status"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "ok",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    "NativeApiErrorEnvelope": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "number",
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            {
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean",
+          "const": false
+        },
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "INVALID_REQUEST",
+                "UNAUTHORIZED",
+                "FORBIDDEN",
+                "TOKEN_EXPIRED",
+                "REPLAY_DETECTED",
+                "RATE_LIMITED",
+                "IMAGE_CAPTURE_UNAVAILABLE",
+                "INTERNAL_ERROR"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$",
+              "minLength": 1,
+              "maxLength": 512
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message",
+            "retryable"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "version",
+        "requestId",
+        "ok",
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

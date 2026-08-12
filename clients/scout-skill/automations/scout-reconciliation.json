@@ -1,0 +1,19 @@
+{
+  "name": "Scout Smart Reconciliation",
+  "description": "Verify open Scout-items against recent M365 signals and suggest/auto-complete resolved items",
+  "triggerType": "schedule",
+  "schedule": {
+    "kind": "single",
+    "naturalLanguage": "Every weekday at 2:00 PM",
+    "days": [1, 2, 3, 4, 5],
+    "time": { "hour": 14, "minute": 0 },
+    "hour": 14,
+    "minute": 0
+  },
+  "steps": [
+    {
+      "label": "Smart reconciliation",
+      "prompt": "Perform Scout smart reconciliation through Mission Control's typed reconciliation contract:\n\n1. Call mc_search_tasks with connectorType=scout, status=todo, limit=200, and offset=0, then repeat with status=in_progress. If either response reports more total tasks than shown, paginate with increasing offsets until all are returned. If the combined open Scout scope exceeds 200 tasks, stop and report that reconciliation must be narrowed rather than silently omitting tasks. Use only the returned Mission Control task IDs.\n\n2. Inspect supported M365 sources for activity from the past 48 hours. Do not send message bodies, transcripts, participant lists, or raw M365 identifiers to Mission Control. For each relevant task, create only sanitized structured signals accepted by mc_scout_reconcile: a unique signalId, taskId, sourceType, evidence kind, occurredAt, a one-line summary (max 240 characters), and a lowercase SHA-256 hash of the canonical source reference. Use source-specific kinds only with their matching source type and do not submit the same source artifact more than once.\n\n3. Call mc_scout_reconcile once with scope=all, lookbackHours=48, sourceIdentity set to this automation run's stable unique identity, an idempotencyKey stable across retries of this run, and the structured signals. Do not call mc_update_task for reconciliation. Confidence is computed deterministically by Mission Control and does not grant mutation authority. Scout-inferred evidence remains confirmation-required even when confidence is high; only a separately verified provider path can satisfy autonomous execution policy.\n\n4. Treat mc_scout_reconcile failures as failures and report them verbatim. Do not claim completion or create success-shaped fallback output. On success, report the returned counts and direct the user to /scout/reconciliation for confirmation-required suggestions."
+    }
+  ]
+}

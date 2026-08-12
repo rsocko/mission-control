@@ -1,0 +1,20 @@
+{
+  "retentionDays": 7,
+  "services": {
+    "mission-control": {
+      "command": [
+        "${node}",
+        "node_modules/next/dist/bin/next",
+        "dev",
+        "--port",
+        "3099"
+      ],
+      "port": 3099,
+      "portArgument": "--port",
+      "memoryMb": 3072,
+      "cpuPercent": 75,
+      "ttlMinutes": 720,
+      "uncappedTtlMinutes": 120
+    }
+  }
+}

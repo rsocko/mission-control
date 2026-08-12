@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.0",
+  "connectorInstanceId": "work-todo",
+  "pullFlowUrlSecretName": "MC_WORK_TODO_PULL_URL",
+  "writebackFlowUrlSecretName": "MC_WORK_TODO_WRITEBACK_URL",
+  "fullSyncIntervalMinutes": 30,
+  "maxTasksPerList": 999,
+  "allowDelete": false
+}

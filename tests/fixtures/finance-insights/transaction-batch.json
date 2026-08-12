@@ -1,0 +1,21 @@
+{
+  "contractVersion": "1.0",
+  "sourceGeneration": "demo-publication-2026-08-10-v1",
+  "kind": "transaction",
+  "batchIndex": 0,
+  "facts": [
+    {
+      "sourceRef": "demo-transaction-trailside-v1",
+      "occurredOn": "2026-08-10",
+      "amountMinor": -184000,
+      "merchantName": "Trailside Cycles Demo",
+      "categoryRef": "demo-category-recreation-v1",
+      "accountRef": "demo-account-household-v1",
+      "isPending": false,
+      "recurringRef": null,
+      "tagRefs": ["demo-tag-reviewed-v1"]
+    }
+  ],
+  "digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "idempotencyKey": "demo-transaction-batch-0000-v1"
+}

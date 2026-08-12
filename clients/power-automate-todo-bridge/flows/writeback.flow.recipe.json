@@ -1,0 +1,81 @@
+{
+  "recipeVersion": "1.0",
+  "name": "MC - Work Todo Writeback",
+  "purpose": "Apply bounded Mission Control changes through the work user's Microsoft To Do connection.",
+  "connections": [
+    {
+      "connector": "Microsoft To-Do (Business)",
+      "connectionReference": "mc_work_todo"
+    }
+  ],
+  "trigger": {
+    "type": "When an HTTP request is received",
+    "requestSchema": "../schemas/writeback-request.schema.json",
+    "security": "Tenant authentication when available; otherwise protect and rotate the signed trigger URL."
+  },
+  "actions": [
+    {
+      "name": "Validate_connector_instance",
+      "type": "Condition",
+      "expression": "@equals(triggerBody()?['connectorInstanceId'], parameters('MC Work Todo Connector ID'))",
+      "onFalse": "Respond 403 and terminate."
+    },
+    {
+      "name": "Initialize_results",
+      "type": "Initialize variable",
+      "variable": {
+        "name": "results",
+        "type": "array",
+        "value": []
+      }
+    },
+    {
+      "name": "For_each_change",
+      "type": "Apply to each",
+      "items": "@triggerBody()?['changes']",
+      "concurrency": 1,
+      "actions": [
+        {
+          "name": "Switch_operation",
+          "type": "Switch",
+          "on": "@items('For_each_change')?['operation']",
+          "cases": {
+            "update": {
+              "operationId": "UpdateToDoV2",
+              "validation": "Require a non-empty fields object.",
+              "note": "Map only fields present under fields; do not replace omitted values with null. dueDateTime is the connector's date-time string input, not the pull response's dateTime/timeZone object."
+            },
+            "complete": {
+              "operationId": "UpdateToDoV2",
+              "fixedParameters": {
+                "status": "completed"
+              }
+            },
+            "delete": {
+              "condition": "@and(equals(triggerBody()?['allowDelete'], true), equals(parameters('MC Work Todo Allow Delete'), true))",
+              "operationId": "DeleteToDoV2",
+              "onFalse": "Append skipped result with errorCode DELETE_DISABLED. MC must not acknowledge this item. The environment parameter defaults to false and is independent of the request envelope."
+            }
+          }
+        },
+        {
+          "name": "Append_result",
+          "type": "Append to array variable",
+          "note": "Configure run-after for success and failure so every input receives one result."
+        }
+      ]
+    },
+    {
+      "name": "Respond",
+      "type": "Response",
+      "statusCode": "200 when all succeeded or skipped; 207 when any failed",
+      "body": {
+        "schemaVersion": "1.0",
+        "connectorInstanceId": "@triggerBody()?['connectorInstanceId']",
+        "leaseId": "@triggerBody()?['leaseId']",
+        "processedAt": "@utcNow()",
+        "results": "@variables('results')"
+      }
+    }
+  ]
+}

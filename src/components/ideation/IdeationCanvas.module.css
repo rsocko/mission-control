@@ -1,0 +1,102 @@
+.canvas {
+  --xy-background-color: var(--surface-0);
+  --xy-background-pattern-dots-color: var(--border);
+  --xy-edge-stroke: var(--border-strong);
+  --xy-controls-button-background-color: var(--surface-1);
+  --xy-controls-button-background-color-hover: var(--surface-2);
+  --xy-controls-button-color: var(--text-secondary);
+  --xy-controls-button-color-hover: var(--text-primary);
+  --xy-controls-button-border-color: var(--border);
+}
+
+.canvas :global(.react-flow__controls) {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.outlineRow > :not(.outlineGuides) {
+  z-index: 1;
+}
+
+.outlineGuides {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--border-strong) 30%, transparent);
+  transition: color 120ms ease;
+}
+
+.outlineGuides[data-active='true'],
+.outlineRow:hover > .outlineGuides {
+  color: color-mix(in srgb, var(--accent-500) 35%, transparent);
+}
+
+.outlineGuide {
+  position: absolute;
+  width: 1px;
+  background: currentColor;
+}
+
+.outlineGuideFull {
+  top: -1px;
+  bottom: -1px;
+}
+
+.outlineElbow {
+  position: absolute;
+  top: -1px;
+  border-bottom: 1px solid currentColor;
+  border-left: 1px solid currentColor;
+  border-bottom-left-radius: 7px;
+}
+
+.outlineNodeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.outlineChevron {
+  position: absolute;
+  display: flex;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.outlineRow:hover .outlineToggle .outlineNodeDot,
+.outlineRow:focus-within .outlineToggle .outlineNodeDot {
+  opacity: 0;
+  transform: scale(0.8);
+}
+
+.outlineRow:hover .outlineChevron,
+.outlineRow:focus-within .outlineChevron {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.outlineLeafGrip {
+  transition: opacity 120ms ease;
+}
+
+.outlineRow:hover .outlineLeafGrip + .outlineNodeDot {
+  opacity: 0;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .outlineToggle .outlineNodeDot {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+
+  .outlineChevron {
+    opacity: 1;
+    transform: scale(1);
+  }
+}

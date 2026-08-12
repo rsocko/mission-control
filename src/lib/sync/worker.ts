@@ -1,0 +1,250 @@
+import { hostname } from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { syncLogger } from '@/lib/logger';
+import type { SyncResult } from '@/types';
+import {
+  claimNextSyncJob,
+  completeSyncJob,
+  failSyncJob,
+  enqueueDueSyncSchedules,
+  getSyncLeaseMs,
+  getSyncQueueMetrics,
+  isSyncJobCancellationRequested,
+  linkSyncLogToJob,
+  persistSyncJobEvent,
+  pruneSyncJobs,
+  renewSyncJobLease,
+  type SyncJob,
+} from './job-queue';
+import { setSyncEventPersistence } from './events';
+import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
+import type { GitHubIdentityRunContext } from '@/lib/external-identities';
+import { StaleGitHubIdentityContextError } from './github-identity-context';
+
+export type SyncJobExecutor = (
+  connectorId: string,
+  options: {
+    full?: boolean;
+    signal?: AbortSignal;
+    jobId?: string;
+    identityContext?: GitHubIdentityRunContext;
+  },
+) => Promise<SyncResult>;
+
+class WorkerShutdownError extends Error {}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function assertSupportedWorkerReplicaCount(
+  value = process.env.MC_SYNC_WORKER_REPLICA_COUNT ?? '1',
+): void {
+  if (value !== '1') {
+    throw new Error(
+      'MC_SYNC_WORKER_REPLICA_COUNT must be 1; horizontal sync-worker scaling is unsupported',
+    );
+  }
+}
+
+export class SyncWorker {
+  readonly ownerId: string;
+  private readonly execute: SyncJobExecutor;
+  private readonly pollIntervalMs: number;
+  private stopping = false;
+  private loopPromise: Promise<void> | null = null;
+  private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  private active:
+    | {
+        job: SyncJob;
+        controller: AbortController;
+        promise: Promise<void>;
+      }
+    | null = null;
+
+  constructor(execute: SyncJobExecutor, options: { ownerId?: string; pollIntervalMs?: number } = {}) {
+    this.execute = execute;
+    this.ownerId = options.ownerId ?? `${hostname()}:${process.pid}:${randomUUID()}`;
+    this.pollIntervalMs = options.pollIntervalMs
+      ?? positiveInteger(process.env.MC_SYNC_WORKER_POLL_MS, 500);
+  }
+
+  start(): void {
+    if (this.loopPromise) return;
+    this.stopping = false;
+    setSyncEventPersistence((event) => {
+      if (this.active) persistSyncJobEvent(this.active.job.id, event);
+    });
+    const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
+    pruneSyncJobs(retentionDays);
+    this.pruneTimer = setInterval(
+      () => pruneSyncJobs(retentionDays),
+      positiveInteger(process.env.MC_SYNC_JOB_PRUNE_INTERVAL_MS, 6 * 60 * 60_000),
+    );
+    this.pruneTimer.unref();
+    this.loopPromise = this.runLoop().finally(() => {
+      this.loopPromise = null;
+      setSyncEventPersistence(null);
+    });
+    syncLogger.info({ ownerId: this.ownerId }, 'Sync worker started');
+  }
+
+  private async runLoop(): Promise<void> {
+    while (!this.stopping) {
+      const recoveredSchedules = enqueueDueSyncSchedules();
+      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+      if (recoveredSchedules.length > 0) {
+        syncLogger.warn(
+          {
+            count: recoveredSchedules.length,
+            connectorIds: recoveredSchedules.map((job) => job.connectorId),
+          },
+          'Recovered overdue sync schedules',
+        );
+      }
+      const job = claimNextSyncJob(this.ownerId);
+      if (!job) {
+        await this.delay(this.pollIntervalMs);
+        continue;
+      }
+      const controller = new AbortController();
+      const promise = this.executeJob(job, controller);
+      this.active = { job, controller, promise };
+      await promise;
+      if (this.active?.job.id === job.id) this.active = null;
+      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+    }
+  }
+
+  private async executeJob(job: SyncJob, controller: AbortController): Promise<void> {
+    const leaseMs = getSyncLeaseMs();
+    const heartbeatMs = Math.max(1, Math.floor(leaseMs / 3));
+    const heartbeat = setInterval(() => {
+      try {
+        if (isSyncJobCancellationRequested(job.id, this.ownerId)) {
+          controller.abort(new Error('Sync cancellation requested'));
+          return;
+        }
+        if (!renewSyncJobLease(job.id, this.ownerId, leaseMs)) {
+          controller.abort(new Error('Sync job lease ownership lost'));
+        }
+      } catch (error) {
+        controller.abort(error instanceof Error ? error : new Error(String(error)));
+      }
+    }, heartbeatMs);
+    heartbeat.unref();
+
+    syncLogger.info(
+      {
+        jobId: job.id,
+        connectorId: job.connectorId,
+        attempt: job.attempt,
+        maxAttempts: job.maxAttempts,
+        full: job.full,
+        source: job.source,
+      },
+      'Sync worker claimed job',
+    );
+
+    try {
+      const result = await this.execute(job.connectorId, {
+        full: job.full,
+        signal: controller.signal,
+        jobId: job.id,
+        identityContext: job.identityMode === null || job.identityModeRevision === null
+          ? undefined
+          : Object.freeze({
+              connectorInstanceId: job.connectorId,
+              effectiveMode: job.identityMode,
+              modeRevision: job.identityModeRevision,
+            }),
+      });
+      linkSyncLogToJob(job, result);
+      if (controller.signal.aborted) {
+        const retry = controller.signal.reason instanceof WorkerShutdownError;
+        failSyncJob(
+          job,
+          this.ownerId,
+          controller.signal.reason instanceof Error
+            ? controller.signal.reason.message
+            : 'Sync cancelled',
+          { retry, cancelled: isSyncJobCancellationRequested(job.id, this.ownerId) },
+        );
+      } else if (!result.success) {
+        const status = failSyncJob(
+          job,
+          this.ownerId,
+          result.errors.join('; ') || 'Connector sync failed',
+        );
+        syncLogger.warn(
+          { jobId: job.id, connectorId: job.connectorId, status, attempt: job.attempt },
+          'Sync worker job failed',
+        );
+      } else {
+        completeSyncJob(job.id, this.ownerId, result);
+        syncLogger.info(
+          { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
+          'Sync worker job completed',
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        const staleIdentityContext = error instanceof StaleGitHubIdentityContextError;
+        const retry = !staleIdentityContext && (
+          !controller.signal.aborted
+          || controller.signal.reason instanceof WorkerShutdownError
+        );
+        failSyncJob(job, this.ownerId, message, {
+          retry,
+          cancelled: !staleIdentityContext
+            && isSyncJobCancellationRequested(job.id, this.ownerId),
+          terminal: staleIdentityContext,
+        });
+      } catch (recordError) {
+        syncLogger.error(
+          { err: recordError, jobId: job.id, connectorId: job.connectorId },
+          'Sync worker could not record job failure',
+        );
+      }
+      syncLogger.error(
+        { err: error, jobId: job.id, connectorId: job.connectorId },
+        'Sync worker execution failed',
+      );
+    } finally {
+      clearInterval(heartbeat);
+    }
+  }
+
+  async stop(graceMs = positiveInteger(process.env.MC_SYNC_WORKER_SHUTDOWN_GRACE_MS, 30_000)): Promise<void> {
+    if (this.stopping) return;
+    this.stopping = true;
+    if (this.pruneTimer) clearInterval(this.pruneTimer);
+    this.pruneTimer = null;
+    const active = this.active;
+    let timedOut = false;
+    if (active) {
+      const completed = await Promise.race([
+        active.promise.then(() => true),
+        this.delay(graceMs).then(() => false),
+      ]);
+      if (!completed) {
+        timedOut = true;
+        active.controller.abort(new WorkerShutdownError('Worker shutdown grace period expired'));
+      }
+    }
+    if (this.loopPromise && !timedOut) await this.loopPromise;
+    if (timedOut) setSyncEventPersistence(null);
+    setQueuedExpensiveOperations(0);
+    syncLogger.info({ ownerId: this.ownerId }, 'Sync worker stopped');
+  }
+
+  getActiveJob(): SyncJob | null {
+    return this.active?.job ?? null;
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+}

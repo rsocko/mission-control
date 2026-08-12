@@ -1,0 +1,132 @@
+{
+  "manifest_version": 3,
+  "name": "Mission Control — Save to Triage",
+  "version": "1.0.0",
+  "description": "Capture any page to Mission Control's Triage Queue with one click or Ctrl+Shift+S.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "alarms",
+    "contextMenus"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "commands": {
+    "save-to-triage": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Save current page to Triage Queue"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content-scripts/capture.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.reddit.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/reddit-import.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.instagram.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/instagram-import.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.facebook.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/facebook-import.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.tiktok.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/tiktok-import.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.pinterest.com/*",
+        "https://pinterest.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/pinterest-import.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://twitter.com/*",
+        "https://x.com/*"
+      ],
+      "js": [
+        "content-scripts/import/common.js",
+        "content-scripts/import/twitter-import.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page-fetch-relay.js"
+      ],
+      "matches": [
+        "https://www.reddit.com/*",
+        "https://www.instagram.com/*",
+        "https://www.facebook.com/*",
+        "https://www.tiktok.com/*",
+        "https://*.pinterest.com/*",
+        "https://www.youtube.com/*",
+        "https://twitter.com/*",
+        "https://x.com/*"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,460 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+   MISSION CONTROL — DESIGN TOKENS
+   Dark-first design with professional neutral grays + blue accent.
+   Palette inspired by Linear/Vercel aesthetic with custom accent colors.
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+
+  /* ─── Neutral Scale (Gray with slight blue undertone) ────────────────────── */
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+  --gray-950: #020617;
+
+  /* ─── Accent (Blue — primary actions, links, active states) ─────────────── */
+  --accent-50: #eff6ff;
+  --accent-100: #dbeafe;
+  --accent-200: #bfdbfe;
+  --accent-300: #93c5fd;
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+  --accent-700: #1d4ed8;
+  --accent-800: #1e40af;
+  --accent-900: #1e3a8a;
+  --accent: var(--accent-500);
+
+  /* ─── Semantic Colors ───────────────────────────────────────────────────── */
+  --success: #10b981;
+  --success-muted: #065f46;
+  --warning: #f59e0b;
+  --warning-muted: #92400e;
+  --danger: #ef4444;
+  --danger-muted: #991b1b;
+  --info: #06b6d4;
+  --info-muted: #155e75;
+
+  /* ─── Surface Colors (Dark Theme) ───────────────────────────────────────── */
+  --background: var(--gray-950);
+  --surface-0: #0b1120;        /* deepest background */
+  --surface-1: #111827;        /* card backgrounds */
+  --surface-2: #1e293b;        /* elevated cards, dropdowns */
+  --surface-3: #334155;        /* hover states, active items */
+
+  /* ─── Border Colors ─────────────────────────────────────────────────────── */
+  --border: #1e293b;
+  --border-subtle: #162032;
+  --border-strong: #334155;
+
+  /* ─── Text Colors ───────────────────────────────────────────────────────── */
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #8b9ab5;     /* bumped from #64748b for WCAG AA (4.5:1 on surface-1) */
+  --text-muted: #8190a6;        /* WCAG AA on surface-0 through surface-2 */
+
+  /* ─── Foreground / Background (shadcn compatibility) ────────────────────── */
+  --foreground: var(--text-primary);
+
+  /* ─── Priority Colors ───────────────────────────────────────────────────── */
+  --priority-critical: #ef4444;
+  --priority-high: #f59e0b;
+  --priority-medium: #3b82f6;
+  --priority-low: #64748b;
+  --priority-none: #334155;
+
+  /* ─── Source Connector Colors ───────────────────────────────────────────── */
+  --source-todo: #3b82f6;
+  --source-github: #a855f7;
+  --source-calendar: #f59e0b;
+  --source-email: #10b981;
+  --source-custom: #64748b;
+
+  /* ─── Radius ────────────────────────────────────────────────────────────── */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* ─── Spacing (base = 4px) ──────────────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ─── Shadows ───────────────────────────────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 20px rgba(59, 130, 246, 0.15);
+  --shadow-focus-glow: 0 0 12px -2px var(--accent), 0 0 4px -1px var(--accent);
+  --border-focus: color-mix(in srgb, var(--accent) 40%, transparent);
+
+  /* ─── Transitions ───────────────────────────────────────────────────────── */
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 300ms ease;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface-0: var(--surface-0);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-accent: var(--accent-500);
+  --color-accent-hover: var(--accent-400);
+  --color-accent-muted: var(--accent-900);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+/* ─── Base Styles ─────────────────────────────────────────────────────────── */
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  color-scheme: dark;
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Tabular numbers for dynamic values */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text wrapping */
+h1, h2, h3, h4, h5, h6 {
+  text-wrap: balance;
+}
+
+p, li {
+  text-wrap: pretty;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface-0);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--gray-700);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--gray-600);
+}
+
+/* Focus ring */
+:focus-visible {
+  outline: 2px solid var(--accent-500);
+  outline-offset: 2px;
+}
+
+/* ─── Input Focus Glow ─────────────────────────────────────────────────── */
+/* Text-entry inputs receive an accent glow on focus.                       */
+/* Uses :where() for low specificity — components can override easily.      */
+:where(
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="number"],
+  input:not([type]),
+  textarea
+):focus {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-glow);
+  outline: none;
+}
+
+/* Wrapper variant: containers with an embedded input glow on focus-within. */
+/* Apply the class .input-glow to any wrapper <div> around a bare input.    */
+.input-glow:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus-glow);
+}
+
+/* Selection */
+::selection {
+  background: var(--accent-600);
+  color: white;
+}
+
+/* ─── Native Date Picker Styling ───────────────────────────────────────── */
+input[type="date"],
+input[type="number"] {
+  color-scheme: dark;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+  opacity: 0.7;
+  transition: opacity var(--transition-fast);
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
+input[type="date"]::-webkit-datetime-edit {
+  color: var(--text-secondary);
+}
+
+input[type="date"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+/* ─── Tooltip animation ────────────────────────────────────────────────── */
+@keyframes tooltipIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ─── Linked-field pulse highlight (effort ↔ duration sync) ────────────── */
+@keyframes pulse-highlight {
+  0%   { transform: scale(1); box-shadow: 0 0 0 0 var(--accent-600, #6366f1); }
+  30%  { transform: scale(1.1); box-shadow: 0 0 8px 2px color-mix(in srgb, var(--accent-600, #6366f1) 40%, transparent); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 transparent; }
+}
+
+@keyframes refresh-progress-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(400%); }
+}
+
+@keyframes mobile-triage-empty-enter {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.refresh-progress-indicator {
+  animation: refresh-progress-slide 1.2s ease-in-out infinite;
+}
+
+.mobile-triage-empty-content {
+  animation: mobile-triage-empty-enter 420ms ease-out;
+}
+
+/* ─── Reduced Motion ───────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto !important;
+  }
+
+  /* Continuous indicators stay visible without spinning, pulsing, or sweeping. */
+  [class*="animate-spin"],
+  [class*="animate-pulse"],
+  [class*="animate-ping"],
+  [class*="animate-bounce"],
+  .refresh-progress-indicator {
+    animation: none !important;
+  }
+
+  .refresh-progress-indicator {
+    width: 100%;
+  }
+
+  /* Preserve color/opacity feedback while making spatial utility changes instant. */
+  [class*="transition-all"],
+  [class*="transition-["][class*="transform"],
+  [class*="transition-["][class*="translate"],
+  [class*="transition-["][class*="scale"],
+  [class*="transition-["][class*="width"],
+  [class*="transition-["][class*="height"] {
+    transition-property: color, background-color, border-color, opacity, box-shadow !important;
+    transition-duration: 100ms !important;
+  }
+
+  [class*="transition-transform"],
+  [class*="transition-[transform"],
+  [class*="transition-[translate"],
+  [class*="transition-[scale"] {
+    transition-duration: 0s !important;
+  }
+
+  [class*="before:transition-transform"]::before,
+  [class*="after:transition-transform"]::after {
+    transition-duration: 0s !important;
+  }
+
+  [class*="active:scale-"],
+  [class*="hover:scale-"],
+  [class*="hover:translate-"],
+  [class*="hover:-translate-"],
+  [class*="group-hover:scale-"],
+  [class*="group-hover:translate-"],
+  [class*="group-hover:-translate-"] {
+    transition-duration: 0s !important;
+  }
+
+  /* Tooltips and meaningful state changes retain short, non-spatial feedback. */
+  .motion-tooltip {
+    animation-name: fade-in !important;
+    animation-duration: 100ms !important;
+  }
+
+  .linked-field-feedback {
+    animation-name: token-escape-fade !important;
+    transform: none !important;
+  }
+
+  .mobile-triage-empty-content {
+    animation-name: fade-in !important;
+    animation-duration: 150ms !important;
+  }
+}
+
+/* ─── View Transitions (app-like page navigation) ─────────────────────── */
+/* Suppress initial-load flash: only animate after the first navigation */
+html:not([data-navigated]) ::view-transition-old(main-content),
+html:not([data-navigated]) ::view-transition-new(main-content) {
+  animation: none !important;
+}
+::view-transition-old(main-content) {
+  animation: fade-out 150ms ease-out;
+}
+::view-transition-new(main-content) {
+  animation: fade-in 200ms ease-in;
+}
+@keyframes fade-out {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ─── Lexical TokenInput ──────────────────────────────────────────────── */
+.token-input-root {
+  outline: none;
+  flex: 1;
+  min-width: 0;
+}
+
+.token-input-paragraph {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Token dismiss affordance — shows ✕ on hover */
+.token-node {
+  position: relative;
+  border-radius: 3px;
+  margin-right: 2px;
+}
+
+.token-node:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.token-node::after {
+  content: '×';
+  position: absolute;
+  right: -12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  line-height: 12px;
+  width: 12px;
+  height: 12px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.1));
+  color: var(--text-muted);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  cursor: pointer;
+}
+
+.token-node:hover::after {
+  opacity: 0.85;
+  pointer-events: auto;
+}
+
+/* Flash animation when a token is escaped */
+.token-escaped-flash {
+  animation: token-escape-fade 0.4s ease-out;
+}
+
+@keyframes token-escape-fade {
+  0% {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+
+/* --- iOS auto-zoom prevention ---------------------------------------- */
+/* iOS Safari zooms in when an input's computed font-size < 16px.
+   Force 16px on mobile to prevent it; desktop keeps the design sizes. */
+@media screen and (max-width: 767px) {
+  input[type="text"],
+  input[type="number"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  input:not([type]),
+  textarea,
+  select,
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
+
+/* --- Mobile safe areas ----------------------------------------------- */
+.safe-area-pt {
+  padding-top: var(--safe-area-inset-top);
+}
+
+.safe-area-pb {
+  padding-bottom: var(--safe-area-inset-bottom);
+}

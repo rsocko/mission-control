@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Task Card — Mission Control Widget</title>
+<style>
+/* ═══ MC Design Tokens ═══ */
+:root {
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+  --gray-950: #020617;
+
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-600: #2563eb;
+
+  --success: #10b981;
+  --success-muted: #065f46;
+  --warning: #f59e0b;
+  --warning-muted: #92400e;
+  --danger: #ef4444;
+  --danger-muted: #991b1b;
+
+  --priority-critical: #ef4444;
+  --priority-high: #f59e0b;
+  --priority-medium: #eab308;
+  --priority-low: #3b82f6;
+  --priority-none: #334155;
+
+  --surface-1: #111827;
+  --surface-2: #1e293b;
+  --surface-3: #334155;
+  --border: #1e293b;
+  --border-strong: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #6b7a8d;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.4), 0 2px 4px -2px rgba(0,0,0,0.3);
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+}
+
+/* ═══ Light theme override (activated by host) ═══ */
+:root.light {
+  --surface-1: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --border: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #64748b;
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.06);
+}
+
+/* ═══ Base ═══ */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: transparent;
+  color: var(--text-primary);
+  padding: var(--space-3);
+  line-height: 1.5;
+}
+
+/* ═══ Card Container ═══ */
+.task-card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-md);
+  max-width: 420px;
+}
+
+/* ═══ Header ═══ */
+.card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.task-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: none;
+  flex: 1;
+  line-height: 1.4;
+}
+.task-title:hover {
+  color: var(--accent-400);
+  text-decoration: underline;
+}
+
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.priority-critical { background: color-mix(in srgb, var(--priority-critical) 15%, transparent); color: var(--priority-critical); }
+.priority-high { background: color-mix(in srgb, var(--priority-high) 15%, transparent); color: var(--priority-high); }
+.priority-medium { background: color-mix(in srgb, var(--priority-medium) 15%, transparent); color: var(--priority-medium); }
+.priority-low { background: color-mix(in srgb, var(--priority-low) 15%, transparent); color: var(--priority-low); }
+.priority-none { background: var(--surface-3); color: var(--text-secondary); }
+
+/* ═══ Meta Row ═══ */
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background: var(--surface-3);
+  color: var(--text-secondary);
+}
+.status-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.status-todo .dot { background: var(--text-muted); }
+.status-in_progress { color: var(--accent-400); }
+.status-in_progress .dot { background: var(--accent-400); }
+.status-done { color: var(--success); }
+.status-done .dot { background: var(--success); }
+
+.due-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.due-date.overdue { color: var(--danger); }
+.due-date svg { width: 14px; height: 14px; }
+
+/* ═══ Description ═══ */
+.description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-4);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ═══ Tags / Project ═══ */
+.chips {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.chip {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.chip.project {
+  border-color: var(--accent-500);
+  color: var(--accent-400);
+  background: color-mix(in srgb, var(--accent-500) 8%, transparent);
+}
+
+/* ═══ Actions ═══ */
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-4);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  text-decoration: none;
+}
+.btn:hover {
+  background: var(--surface-3);
+  border-color: var(--accent-500);
+}
+.btn:disabled, .dropdown-item:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.btn:disabled:hover { border-color: var(--border-strong); }
+.btn-primary {
+  background: var(--accent-600);
+  border-color: var(--accent-600);
+  color: white;
+}
+.btn-primary:hover {
+  background: var(--accent-500);
+  border-color: var(--accent-500);
+}
+.btn svg { width: 14px; height: 14px; }
+
+/* ═══ Priority Dropdown ═══ */
+.dropdown-wrapper { position: relative; }
+.dropdown {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: var(--space-1);
+  display: none;
+  min-width: 120px;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+}
+.dropdown.open { display: block; }
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+}
+.dropdown-item:hover { background: var(--surface-3); }
+.dropdown-item .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.action-message {
+  display: none;
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+.action-message.visible { display: block; }
+.action-message.error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.action-message.success {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+}
+@media (max-width: 420px) {
+  body { padding: var(--space-2); }
+  .task-card { padding: var(--space-4); }
+  .actions { flex-wrap: wrap; }
+}
+</style>
+</head>
+<body>
+
+<div class="task-card" id="taskCard">
+  <div class="card-header">
+    <a class="task-title" id="taskTitle" href="#" target="_blank" rel="noopener noreferrer">Review PR #42 — add auth middleware</a>
+    <span class="priority-badge priority-high" id="priorityBadge">High</span>
+  </div>
+
+  <div class="meta-row">
+    <span class="status-pill status-todo" id="statusPill">
+      <span class="dot"></span>
+      <span id="statusText">Todo</span>
+    </span>
+    <span class="due-date" id="dueDate">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="2" y="3" width="12" height="11" rx="2"/>
+        <path d="M5 1v3M11 1v3M2 7h12"/>
+      </svg>
+      <span id="dueDateText">Due in 3 days</span>
+    </span>
+  </div>
+
+  <p class="description" id="description">Implement JWT token validation in the Express middleware layer. Need to handle token refresh and…</p>
+
+  <div class="chips" id="chips">
+    <span class="chip project">Backend Rewrite</span>
+    <span class="chip">auth</span>
+    <span class="chip">code-review</span>
+  </div>
+
+  <div class="actions">
+    <a class="btn btn-primary" id="openBtn" href="#" target="_blank" rel="noopener noreferrer">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M6 3H4a2 2 0 00-2 2v7a2 2 0 002 2h8a2 2 0 002-2V9M9 2h5v5M7 9l7-7"/>
+      </svg>
+      Open in MC
+    </a>
+    <button class="btn" id="markDoneBtn" type="button">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 8.5l3.5 3.5 7-7"/>
+      </svg>
+      Mark Done
+    </button>
+    <div class="dropdown-wrapper">
+      <button class="btn" id="priorityBtn" type="button" aria-haspopup="menu" aria-expanded="false">
+        Priority ▾
+      </button>
+      <div class="dropdown" id="priorityDropdown" role="menu">
+        <button class="dropdown-item" type="button" role="menuitem" data-priority="critical"><span class="dot" style="background:var(--priority-critical)"></span>Critical</button>
+        <button class="dropdown-item" type="button" role="menuitem" data-priority="high"><span class="dot" style="background:var(--priority-high)"></span>High</button>
+        <button class="dropdown-item" type="button" role="menuitem" data-priority="medium"><span class="dot" style="background:var(--priority-medium)"></span>Medium</button>
+        <button class="dropdown-item" type="button" role="menuitem" data-priority="low"><span class="dot" style="background:var(--priority-low)"></span>Low</button>
+      </div>
+    </div>
+  </div>
+  <div class="action-message" id="actionMessage" role="status" aria-live="polite"></div>
+</div>
+
+<script>
+// ═══ MCP Apps host integration ═══
+// Hosted modes wait for tool output; direct standalone previews use mock data.
+
+const MOCK_TASK = {
+  id: 'tsk_abc123',
+  title: 'Review PR #42 — add auth middleware',
+  description: 'Implement JWT token validation in the Express middleware layer. Need to handle token refresh and expiry edge cases.',
+  priority: 'high',
+  status: 'todo',
+  dueDate: new Date(Date.now() + 3 * 86400000).toISOString(),
+  projects: [{ name: 'Backend Rewrite' }],
+  tags: ['auth', 'code-review'],
+  url: null // Set dynamically from MC_PUBLIC_URL
+};
+
+let task = {
+  id: '',
+  title: 'Loading task…',
+  description: '',
+  priority: 'none',
+  status: 'todo',
+  dueDate: null,
+  projects: [],
+  tags: [],
+};
+let mcBaseUrl = 'http://localhost:3099';
+let pending = false;
+let actionMessage = null;
+let requestId = 0;
+let mcpConnected = false;
+let sizeObserver;
+const pendingRequests = new Map();
+
+// ── Initialization ──
+async function init() {
+  const bridge = window.openai;
+  if (bridge && bridge.app) {
+    const ctx = await bridge.app.getContext();
+    if (ctx && ctx.data && ctx.data.task) {
+      task = ctx.data.task;
+      mcBaseUrl = ctx.data.mcBaseUrl || mcBaseUrl;
+    }
+    // Apply initial theme from context
+    if (ctx && ctx.theme) {
+      applyTheme(ctx.theme);
+    }
+    // Listen for theme changes
+    if (typeof bridge.app.ontheme === 'function') {
+      bridge.app.ontheme(applyTheme);
+    }
+  } else if (bridge) {
+    applyOpenAIGlobals(bridge);
+    window.addEventListener('openai:set_globals', event => {
+      applyOpenAIGlobals(event.detail && (event.detail.globals || event.detail));
+      render();
+    });
+  } else if (window.parent !== window) {
+    window.addEventListener('message', handleMcpMessage);
+    try {
+      const result = await sendRequest('ui/initialize', {
+        appInfo: { name: 'Mission Control Task Card', version: '1.0.0' },
+        appCapabilities: {},
+        protocolVersion: '2026-01-26',
+      });
+      applyHostContext(result && result.hostContext);
+      sendNotification('ui/notifications/initialized');
+      mcpConnected = true;
+      startSizeReporting();
+    } catch (error) {
+      actionMessage = {
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Could not connect to the MCP host.',
+      };
+    }
+  } else {
+    // Standalone: respect system preference
+    task = MOCK_TASK;
+    if (window.matchMedia('(prefers-color-scheme: light)').matches) {
+      document.documentElement.classList.add('light');
+    }
+  }
+  render();
+}
+
+function applyOpenAIGlobals(globals) {
+  if (!globals) return;
+  if (globals.toolOutput && globals.toolOutput.task) {
+    task = globals.toolOutput.task;
+    mcBaseUrl = globals.toolOutput.mcBaseUrl || mcBaseUrl;
+  }
+  applyTheme(globals.theme);
+}
+
+function applyTheme(theme) {
+  const value = typeof theme === 'string' ? theme : theme && theme.theme;
+  document.documentElement.classList.toggle('light', value === 'light');
+}
+
+function sendRequest(method, params) {
+  const id = ++requestId;
+  window.parent.postMessage({ jsonrpc: '2.0', id, method, params }, '*');
+  return new Promise((resolve, reject) => pendingRequests.set(id, { resolve, reject }));
+}
+
+function sendNotification(method, params) {
+  const notification = { jsonrpc: '2.0', method };
+  if (params) notification.params = params;
+  window.parent.postMessage(notification, '*');
+}
+
+function handleMcpMessage(event) {
+  if (event.source !== window.parent) return;
+  const message = event.data;
+  if (!message || message.jsonrpc !== '2.0') return;
+
+  if (Object.prototype.hasOwnProperty.call(message, 'id') && !message.method) {
+    const request = pendingRequests.get(message.id);
+    if (!request) return;
+    pendingRequests.delete(message.id);
+    if (message.error) request.reject(new Error(message.error.message || 'MCP host request failed'));
+    else request.resolve(message.result);
+    return;
+  }
+
+  if (message.method === 'ui/notifications/tool-result') {
+    if (message.params && message.params.isError) {
+      actionMessage = { type: 'error', text: 'Mission Control could not load this task.' };
+    } else {
+      const output = message.params && message.params.structuredContent;
+      if (output && output.task) {
+        task = output.task;
+        mcBaseUrl = output.mcBaseUrl || mcBaseUrl;
+      }
+    }
+    render();
+  } else if (message.method === 'ui/notifications/host-context-changed') {
+    applyHostContext(message.params);
+  } else if (message.method === 'ui/resource-teardown' && Object.prototype.hasOwnProperty.call(message, 'id')) {
+    window.parent.postMessage({ jsonrpc: '2.0', id: message.id, result: {} }, '*');
+    if (sizeObserver) sizeObserver.disconnect();
+    window.removeEventListener('message', handleMcpMessage);
+  }
+}
+
+function applyHostContext(context) {
+  applyTheme(context && context.theme);
+}
+
+function startSizeReporting() {
+  if (typeof ResizeObserver !== 'function') return;
+  let previousWidth = 0;
+  let previousHeight = 0;
+  sizeObserver = new ResizeObserver(() => {
+    const width = Math.ceil(document.documentElement.scrollWidth);
+    const height = Math.ceil(document.documentElement.scrollHeight);
+    if (width === previousWidth && height === previousHeight) return;
+    previousWidth = width;
+    previousHeight = height;
+    sendNotification('ui/notifications/size-changed', { width, height });
+  });
+  sizeObserver.observe(document.documentElement);
+}
+
+// ── Render ──
+function render() {
+  const titleEl = document.getElementById('taskTitle');
+  const taskUrl = task.id ? buildMcUrl(`tasks/${encodeURIComponent(task.id)}`) : '#';
+  titleEl.textContent = task.title;
+  titleEl.href = taskUrl;
+
+  // Priority badge
+  const badge = document.getElementById('priorityBadge');
+  const priority = ['critical', 'high', 'medium', 'low', 'none'].includes(task.priority) ? task.priority : 'none';
+  badge.className = `priority-badge priority-${priority}`;
+  badge.textContent = priority.charAt(0).toUpperCase() + priority.slice(1);
+
+  // Status
+  const status = ['todo', 'in_progress', 'done', 'cancelled'].includes(task.status) ? task.status : 'todo';
+  const pill = document.getElementById('statusPill');
+  pill.className = `status-pill status-${status}`;
+  document.getElementById('statusText').textContent = formatStatus(status);
+
+  // Due date
+  const dateEl = document.getElementById('dueDate');
+  dateEl.hidden = !task.dueDate;
+  dateEl.classList.remove('overdue');
+  if (task.dueDate) {
+    const due = new Date(task.dueDate);
+    const now = new Date();
+    const diffDays = Math.ceil((due - now) / 86400000);
+    const dateText = document.getElementById('dueDateText');
+    if (diffDays < 0) {
+      dateText.textContent = `${Math.abs(diffDays)}d overdue`;
+      dateEl.classList.add('overdue');
+    } else if (diffDays === 0) {
+      dateText.textContent = 'Due today';
+    } else {
+      dateText.textContent = `Due in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
+    }
+  }
+
+  // Description
+  document.getElementById('description').textContent = task.description || '';
+
+  // Chips
+  const chipsEl = document.getElementById('chips');
+  chipsEl.innerHTML = '';
+  (task.projects || []).forEach(p => {
+    const chip = document.createElement('span');
+    chip.className = 'chip project';
+    chip.textContent = p.name;
+    chipsEl.appendChild(chip);
+  });
+  (task.tags || []).forEach(t => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = t;
+    chipsEl.appendChild(chip);
+  });
+
+  // Open button
+  const openBtn = document.getElementById('openBtn');
+  openBtn.href = taskUrl;
+  openBtn.hidden = !task.id;
+
+  const markDoneBtn = document.getElementById('markDoneBtn');
+  markDoneBtn.disabled = pending || !task.id || task.status === 'done';
+  markDoneBtn.lastChild.textContent = pending ? ' Updating…' : task.status === 'done' ? ' Done' : ' Mark Done';
+  document.getElementById('priorityBtn').disabled = pending || !task.id;
+  document.querySelectorAll('.dropdown-item').forEach(item => {
+    item.disabled = pending || !task.id;
+  });
+
+  const messageEl = document.getElementById('actionMessage');
+  messageEl.className = `action-message${actionMessage ? ` visible ${actionMessage.type}` : ''}`;
+  messageEl.textContent = actionMessage ? actionMessage.text : '';
+}
+
+function formatStatus(s) {
+  return s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function buildMcUrl(path) {
+  try {
+    const base = new URL(mcBaseUrl);
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') throw new Error('Unsupported URL');
+    return new URL(path, `${base.href.replace(/\/$/, '')}/`).href;
+  } catch {
+    return '#';
+  }
+}
+
+function toolError(result) {
+  if (!result || !result.isError) return null;
+  const text = Array.isArray(result.content)
+    ? result.content.find(item => item && item.type === 'text' && item.text)?.text
+    : null;
+  return text || 'Mission Control rejected the update.';
+}
+
+function callHostTool(name, args) {
+  const bridge = window.openai;
+  if (bridge && typeof bridge.callTool === 'function') {
+    return bridge.callTool(name, args);
+  }
+  if (bridge && bridge.app && typeof bridge.app.callTool === 'function') {
+    return bridge.app.callTool(name, args);
+  }
+  if (mcpConnected) {
+    return sendRequest('tools/call', { name, arguments: args });
+  }
+  throw new Error('Open this card in a compatible MCP Apps host to update the task.');
+}
+
+function openExternalLink(event) {
+  const link = event.target.closest('a[href]');
+  if (!link) return;
+  const rawHref = link.getAttribute('href');
+  if (!rawHref || rawHref === '#') return;
+  const href = link.href;
+  if (!href.startsWith('https://') && !href.startsWith('http://')) return;
+  const bridge = window.openai;
+  if (bridge && typeof bridge.openExternal === 'function') {
+    event.preventDefault();
+    bridge.openExternal({ href });
+  } else if (bridge && bridge.app && typeof bridge.app.openLink === 'function') {
+    event.preventDefault();
+    bridge.app.openLink({ url: href });
+  } else if (mcpConnected) {
+    event.preventDefault();
+    sendRequest('ui/open-link', { url: href }).catch(() => {
+      link.setAttribute('aria-disabled', 'true');
+      link.title = 'The host could not open this link';
+    });
+  }
+}
+
+async function updateTask(patch, successText) {
+  if (pending) return;
+  const previousTask = task;
+  task = { ...task, ...patch };
+  pending = true;
+  actionMessage = null;
+  render();
+
+  try {
+    const result = await callHostTool('mc_update_task', { id: task.id, ...patch });
+    const error = toolError(result);
+    if (error) throw new Error(error);
+    actionMessage = { type: 'success', text: successText };
+  } catch (error) {
+    task = previousTask;
+    actionMessage = {
+      type: 'error',
+      text: `${error instanceof Error ? error.message : String(error)} Try again.`,
+    };
+  } finally {
+    pending = false;
+    render();
+  }
+}
+
+// ── Actions ──
+document.getElementById('markDoneBtn').addEventListener('click', async () => {
+  await updateTask({ status: 'done' }, 'Task marked done.');
+});
+
+document.getElementById('priorityBtn').addEventListener('click', () => {
+  const dd = document.getElementById('priorityDropdown');
+  dd.classList.toggle('open');
+  document.getElementById('priorityBtn').setAttribute('aria-expanded', String(dd.classList.contains('open')));
+});
+document.addEventListener('click', openExternalLink);
+
+document.querySelectorAll('.dropdown-item').forEach(item => {
+  item.addEventListener('click', async () => {
+    const newPriority = item.dataset.priority;
+    document.getElementById('priorityDropdown').classList.remove('open');
+    document.getElementById('priorityBtn').setAttribute('aria-expanded', 'false');
+    await updateTask({ priority: newPriority }, `Priority changed to ${newPriority}.`);
+  });
+});
+
+// Close dropdown on outside click
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.dropdown-wrapper')) {
+    document.getElementById('priorityDropdown').classList.remove('open');
+    document.getElementById('priorityBtn').setAttribute('aria-expanded', 'false');
+  }
+});
+
+init();
+</script>
+</body>
+</html>

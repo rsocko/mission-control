@@ -1,0 +1,313 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-control.example/schemas/work-todo-extended-pull-response-1.1.json",
+  "title": "Mission Control extended work To Do delta response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "connectorInstanceId",
+    "syncTimestamp",
+    "syncMode",
+    "reset",
+    "complete",
+    "listDeltaLink",
+    "lists"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "enum": ["1.1"]
+    },
+    "connectorInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "syncTimestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "syncMode": {
+      "enum": ["delta"]
+    },
+    "reset": {
+      "type": "boolean"
+    },
+    "complete": {
+      "enum": [true]
+    },
+    "listDeltaLink": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "lists": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/listChange"
+      }
+    }
+  },
+  "$defs": {
+    "dateTimeValue": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["dateTime", "timeZone"],
+      "properties": {
+        "dateTime": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        }
+      }
+    },
+    "listChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "removed", "taskDeltaLink", "tasks"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "wellKnownListName": {
+          "type": ["string", "null"],
+          "maxLength": 100
+        },
+        "isOwner": {
+          "type": ["boolean", "null"]
+        },
+        "isShared": {
+          "type": ["boolean", "null"]
+        },
+        "taskDeltaLink": {
+          "type": ["string", "null"],
+          "maxLength": 8000
+        },
+        "tasks": {
+          "type": "array",
+          "maxItems": 5000,
+          "items": {
+            "$ref": "#/$defs/taskChange"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "removed": {
+                "enum": [false]
+              }
+            }
+          },
+          "then": {
+            "required": ["displayName"]
+          }
+        }
+      ]
+    },
+    "taskChange": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "removed"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "removed": {
+          "type": "boolean"
+        },
+        "etag": {
+          "type": ["string", "null"],
+          "maxLength": 500
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "status": {
+          "enum": ["notStarted", "inProgress", "completed", "waitingOnOthers", "deferred"]
+        },
+        "importance": {
+          "enum": ["low", "normal", "high"]
+        },
+        "body": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["content", "contentType"],
+          "properties": {
+            "content": {
+              "type": "string",
+              "maxLength": 20000
+            },
+            "contentType": {
+              "enum": ["text", "html"]
+            }
+          }
+        },
+        "bodyLastModifiedDateTime": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "createdDateTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastModifiedDateTime": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedDateTime": {
+          "$ref": "#/$defs/dateTimeValue"
+        },
+        "dueDateTime": {
+          "$ref": "#/$defs/dateTimeValue"
+        },
+        "reminderDateTime": {
+          "$ref": "#/$defs/dateTimeValue"
+        },
+        "isReminderOn": {
+          "type": ["boolean", "null"]
+        },
+        "categories": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          }
+        },
+        "recurrence": {
+          "type": ["object", "null"],
+          "maxProperties": 10
+        },
+        "checklistItems": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "displayName", "isChecked"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "displayName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "isChecked": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "linkedResources": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "applicationName", "displayName", "webUrl"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "applicationName": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "displayName": {
+                "type": "string",
+                "maxLength": 1000
+              },
+              "webUrl": {
+                "type": "string",
+                "maxLength": 4000
+              }
+            }
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "name", "contentType", "size"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "contentType": {
+                "type": "string",
+                "maxLength": 255
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "lastModifiedDateTime": {
+                "type": ["string", "null"],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "removed": {
+                "enum": [false]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "title",
+              "status",
+              "importance",
+              "createdDateTime",
+              "lastModifiedDateTime"
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

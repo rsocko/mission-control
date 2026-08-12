@@ -1,0 +1,19 @@
+{
+  "name": "Morning Business M365 Triage",
+  "description": "Scan overnight business M365 activity and push actionable items to MC",
+  "triggerType": "schedule",
+  "schedule": {
+    "kind": "single",
+    "naturalLanguage": "Every weekday at 7:00 AM",
+    "days": [1, 2, 3, 4, 5],
+    "time": { "hour": 7, "minute": 0 },
+    "hour": 7,
+    "minute": 0
+  },
+  "steps": [
+    {
+      "label": "Triage business M365",
+      "prompt": "Review my business M365 activity since yesterday 5pm. Do not inspect or push personal Outlook, personal Calendar, or personal Microsoft Todo content; those are handled by Mission Control's direct connectors.\n\n1. **Email**: Scan inbox for messages that require my action (replies needed, requests, deadlines mentioned). Ignore newsletters, automated notifications, FYI-only messages, read receipts, and distribution list announcements. Only push emails where I am directly addressed or the sole/named recipient of a request.\n\n2. **Teams**: Check channels and DMs for messages that need my response or contain action items directed at me by name. Ignore reactions, GIFs, casual \"thanks\" replies, and high-traffic channel @mentions where I'm not specifically named.\n\n3. **Meetings**: Review today's meeting agendas. Surface any prep work needed. Also check yesterday's meeting notes for action items assigned to me. Do NOT push auto-generated meeting recaps unless they contain a NEW action item explicitly assigned to me that isn't already tracked.\n\n4. **Planner/Todo**: Check for items created by others or with approaching deadlines I haven't acknowledged. Skip items that already exist in MC (call mc_search_tasks first).\n\nFor each actionable item found:\n- Apply the actionability filter from the SKILL.md (>=3 of 4 checks must pass)\n- Use confidence thresholds: >=0.8 push directly, 0.5-0.79 push as low priority with needs-review tag, <0.5 skip and mention in summary only\n- First call mc_search_tasks to check if it already exists in MC\n- If new, push via mc_scout_push_tasks with appropriate priority and context\n- If exists but context changed, update via mc_scout_push_tasks (same sourceId)\n- Group related items (same email thread = one task, email + Teams about same topic = one cross-source task)\n- Default to priority \"medium\" unless clear urgency signals exist\n- Check the Anti-Patterns table in SKILL.md before pushing borderline items\n\nAfter pushing, provide a summary using the format specified in SKILL.md."
+    }
+  ]
+}

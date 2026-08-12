@@ -1,0 +1,243 @@
+{
+  "WFWorkflowName": "Save to Triage",
+  "WFWorkflowMinimumClientVersion": 900,
+  "WFWorkflowMinimumClientVersionString": "900",
+  "WFWorkflowIcon": {
+    "WFWorkflowIconStartColor": 4282601983,
+    "WFWorkflowIconGlyphNumber": 59783
+  },
+  "WFWorkflowInputContentItemClasses": [
+    "WFURLContentItem",
+    "WFArticleContentItem",
+    "WFSafariWebPageContentItem",
+    "WFStringContentItem"
+  ],
+  "WFWorkflowTypes": ["ActionExtension"],
+  "WFWorkflowActions": [
+    {
+      "_comment": "── VERSION CHECK ── Current shortcut version",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
+      "WFWorkflowActionParameters": {
+        "WFTextActionText": "1.0.0"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "shortcutVersion",
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "_comment": "Check server for latest version (fail silently on network error)",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
+      "WFWorkflowActionParameters": {
+        "WFURL": "REPLACE_WITH_YOUR_MC_URL/api/shortcut/version",
+        "WFHTTPMethod": "GET"
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "versionResponse",
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "WFDictionaryKey": "version",
+        "WFInput": { "Value": { "Type": "Variable", "VariableName": "versionResponse" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "latestVersion",
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "_comment": "Compare versions — if different, prompt to update",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFInput": { "Type": "Variable", "VariableName": "latestVersion" },
+        "WFCondition": 1,
+        "WFConditionalActionString": { "Value": { "Type": "Variable", "VariableName": "shortcutVersion" } },
+        "WFConditionalComparison": "Does not equal"
+      },
+      "GroupingIdentifier": "version-check-1",
+      "WFControlFlowMode": 0
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "WFDictionaryKey": "changelog",
+        "WFInput": { "Value": { "Type": "Variable", "VariableName": "versionResponse" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "changelog",
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.choosefrommenu",
+      "WFWorkflowActionParameters": {
+        "WFMenuPrompt": { "Value": { "string": "Update Available (v{{latestVersion}})\n{{changelog}}" } },
+        "WFMenuItems": ["Update Now", "Skip"]
+      },
+      "GroupingIdentifier": "version-menu-1",
+      "WFControlFlowMode": 0
+    },
+    {
+      "_comment": "User chose 'Update Now' — open install link",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.choosefrommenu",
+      "WFWorkflowActionParameters": { "WFMenuItem": "Update Now" },
+      "GroupingIdentifier": "version-menu-1",
+      "WFControlFlowMode": 1
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+      "WFWorkflowActionParameters": {
+        "WFDictionaryKey": "installUrl",
+        "WFInput": { "Value": { "Type": "Variable", "VariableName": "versionResponse" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.openurl",
+      "WFWorkflowActionParameters": {
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.exit",
+      "WFWorkflowActionParameters": {}
+    },
+    {
+      "_comment": "User chose 'Skip' — continue with capture",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.choosefrommenu",
+      "WFWorkflowActionParameters": { "WFMenuItem": "Skip" },
+      "GroupingIdentifier": "version-menu-1",
+      "WFControlFlowMode": 1
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.choosefrommenu",
+      "GroupingIdentifier": "version-menu-1",
+      "WFControlFlowMode": 2
+    },
+    {
+      "_comment": "── END VERSION CHECK (no update needed or skipped) ──",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "GroupingIdentifier": "version-check-1",
+      "WFControlFlowMode": 2
+    },
+    {
+      "_comment": "── CAPTURE FLOW ──",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "sharedInput",
+        "WFInput": { "Value": { "Type": "ExtensionInput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.detect.link",
+      "WFWorkflowActionParameters": {
+        "WFInput": { "Value": { "Type": "Variable", "VariableName": "sharedInput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.setvariable",
+      "WFWorkflowActionParameters": {
+        "WFVariableName": "capturedUrl",
+        "WFInput": { "Value": { "Type": "ActionOutput" } }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "WFWorkflowActionParameters": {
+        "WFConditionalActionString": "",
+        "WFInput": { "Type": "Variable", "VariableName": "capturedUrl" },
+        "WFCondition": 100
+      },
+      "GroupingIdentifier": "conditional-1",
+      "WFControlFlowMode": 0
+    },
+    {
+      "_comment": "── TRUE BRANCH: URL found → POST to Mission Control ──",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
+      "WFWorkflowActionParameters": {
+        "WFURL": "REPLACE_WITH_YOUR_MC_URL/api/triage/capture",
+        "WFHTTPMethod": "POST",
+        "WFHTTPHeaders": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFKey": { "Value": { "string": "Content-Type" } },
+                "WFValue": { "Value": { "string": "application/json" } }
+              },
+              {
+                "WFKey": { "Value": { "string": "Authorization" } },
+                "WFValue": { "Value": { "string": "Bearer REPLACE_WITH_YOUR_KEY" } }
+              }
+            ]
+          }
+        },
+        "WFHTTPBodyType": "Json",
+        "WFJSONValues": {
+          "Value": {
+            "WFDictionaryFieldValueItems": [
+              {
+                "WFKey": { "Value": { "string": "url" } },
+                "WFValue": { "Value": { "Type": "Variable", "VariableName": "capturedUrl" } }
+              },
+              {
+                "WFKey": { "Value": { "string": "title" } },
+                "WFValue": { "Value": { "Type": "Variable", "VariableName": "sharedInput", "Aggrandizements": [{ "Type": "WFPropertyVariableAggrandizement", "PropertyName": "Name" }] } }
+              },
+              {
+                "WFKey": { "Value": { "string": "sharedText" } },
+                "WFValue": { "Value": { "Type": "Variable", "VariableName": "sharedInput" } }
+              },
+              {
+                "WFKey": { "Value": { "string": "client" } },
+                "WFValue": { "Value": { "string": "ios" } }
+              },
+              {
+                "WFKey": { "Value": { "string": "sourcePlatform" } },
+                "WFValue": { "Value": { "string": "ios_share" } }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.notification",
+      "WFWorkflowActionParameters": {
+        "WFNotificationActionTitle": "Saved to Triage ✓",
+        "WFNotificationActionBody": { "Value": { "Type": "Variable", "VariableName": "capturedUrl" } }
+      }
+    },
+    {
+      "_comment": "── FALSE BRANCH: No URL found ──",
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "GroupingIdentifier": "conditional-1",
+      "WFControlFlowMode": 1
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.alert",
+      "WFWorkflowActionParameters": {
+        "WFAlertActionTitle": "No URL Found",
+        "WFAlertActionMessage": "The shared content did not contain a URL. Try sharing from a browser."
+      }
+    },
+    {
+      "WFWorkflowActionIdentifier": "is.workflow.actions.conditional",
+      "GroupingIdentifier": "conditional-1",
+      "WFControlFlowMode": 2
+    }
+  ]
+}

@@ -1,0 +1,306 @@
+import type { ScoreBreakdown } from '@/lib/smart-score';
+import type { TaskFilterContext } from '@/lib/task-filter-context';
+import type { LocalDisposition, TaskSourceModel } from '@/types';
+import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import type { TaskEditPolicy } from '@/types';
+
+export interface TaskTag {
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  source?: string | null;
+  sources?: string[];
+  color: string | null;
+  count?: number;
+}
+
+export interface Task {
+  id: string;
+  title: string;
+  status: string;
+  localDisposition: LocalDisposition;
+  taskSourceModel: TaskSourceModel;
+  microStatus: string | null;
+  priority: string;
+  dueDate: string | null;
+  connectorType: string;
+  connectorInstanceId: string;
+  sourceListId?: string | null;
+  sourceListName: string | null;
+  assignee: string | null;
+  tags: TaskTag[];
+  metadata: string | null;
+  sourceId: string | null;
+  effort?: number | null;
+  estimatedDuration?: number | null;
+  subtaskTotal?: number;
+  subtaskDone?: number;
+  smartScore?: number | null;
+  scoreBreakdown?: ScoreBreakdown | null;
+  snoozedUntil?: string | null;
+  reminderAt?: string | null;
+  hubProjectIds?: string[];
+  projectPhaseMemberships?: Array<{
+    projectId: string;
+    projectName: string;
+    phaseId: string | null;
+    phaseName: string | null;
+  }>;
+  linkedSourceCount?: number;
+  hasDescription: boolean;
+  editPolicy: TaskEditPolicy;
+}
+
+export interface TaskStats {
+  totalOpen: number;
+  overdue: number;
+  dueThisWeek: number;
+  highPriority: number;
+  assignedToMe: number;
+  myDay: number;
+  recentlyCreated: number;
+  waiting: number;
+  inbox: number;
+}
+
+export interface TaskResponse {
+  tasks: Task[];
+  total: number;
+  stats: TaskStats;
+  hasMore: boolean;
+  sourceCounts: Record<string, number>;
+  availableTags: TaskTag[];
+}
+
+export interface HubProject {
+  id: string;
+  name: string;
+  color: string;
+  icon: string | null;
+  hidden?: boolean;
+  category?: string | null;
+  metadata?: Record<string, unknown>;
+  phases?: { id: string; name: string }[];
+}
+
+export interface ListGroup {
+  id: string;
+  name: string;
+  icon: string | null;
+  iconColor: string | null;
+  sortOrder: number;
+  createdAt: string;
+}
+
+export interface SourceList {
+  id: string;
+  sourceId: string;
+  connectorInstanceId: string;
+  name: string;
+  taskCount: number;
+  groupId: string | null;
+  hidden?: boolean;
+  sortOrder?: number;
+  icon?: string | null;
+  iconColor?: string | null;
+}
+
+export interface EnabledSource {
+  type: string;
+  name: string;
+  icon: string;
+  notificationOnly?: boolean;
+  tagScope?: 'global' | 'per-list';
+  tagCreationMode?: 'freeform' | 'predefined';
+}
+
+export interface SyncStatusEntry {
+  id: string;
+  type: string;
+  name: string;
+  lastSyncedAt: string | null;
+  enabled: boolean;
+}
+
+export interface SavedView {
+  id: string;
+  name: string;
+  icon: string;
+  filters: Record<string, string>;
+  filterContext?: TaskFilterContext;
+}
+
+export interface ConnectorCaps {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+}
+
+export const PAGE_SIZE = 50;
+
+export const EMPTY_TASK_RESPONSE: TaskResponse = {
+  tasks: [],
+  total: 0,
+  stats: {
+    totalOpen: 0,
+    overdue: 0,
+    dueThisWeek: 0,
+    highPriority: 0,
+    assignedToMe: 0,
+    myDay: 0,
+    recentlyCreated: 0,
+    waiting: 0,
+    inbox: 0,
+  },
+  hasMore: false,
+  sourceCounts: {},
+  availableTags: [],
+};
+
+export const CONNECTOR_ICONS: Record<string, string> = {
+  'local': LOCAL_CONNECTOR_ICON_PATH,
+  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
+  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
+  'github-issues': '/icons/connectors/github.svg',
+  'outlook-email': '/icons/connectors/outlook.svg',
+  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
+  'rymessage': '/icons/connectors/rymessage.svg',
+  'document-intelligence': '/icons/agents/owl.svg',
+  finance: '/icons/connectors/tyrion.svg',
+  'finance-manager': '/icons/connectors/tyrion.svg',
+  'monarch-money': '/icons/connectors/tyrion.svg',
+  'custom-rest': '/icons/connectors/custom-rest.svg',
+  'scout': 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
+};
+
+export const PRIORITY_COLORS: Record<string, string> = {
+  critical: 'text-rose-400 bg-rose-900/40 border-rose-700/50',
+  high: 'text-orange-400 bg-orange-900/30 border-orange-800/40',
+  medium: 'text-amber-300 bg-amber-900/25 border-amber-700/35',
+  low: 'text-sky-400 bg-sky-900/25 border-sky-700/35',
+  none: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
+};
+
+export const PRIORITY_LABELS: Record<string, string> = {
+  critical: 'P0',
+  high: 'P1',
+  medium: 'P2',
+  low: 'P3',
+  none: '—',
+};
+
+export const STATUS_COLORS: Record<string, string> = {
+  todo: 'text-slate-400 bg-slate-900/30 border-slate-700/40',
+  in_progress: 'text-blue-400 bg-blue-900/30 border-blue-800/40',
+  done: 'text-green-400 bg-green-900/30 border-green-800/40',
+  cancelled: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
+};
+
+export const STATUS_LABELS: Record<string, string> = {
+  todo: 'To Do',
+  in_progress: 'In Progress',
+  done: 'Done',
+  cancelled: 'Cancelled',
+};
+
+// ─── NOTIFICATION LEVEL DESIGN TOKENS ───────────────────────────────────────
+
+export interface NotificationLevelConfig {
+  label: string;
+  icon: string;
+  color: string;
+  bgColor: string;
+  borderColor: string;
+  pillClass: string;
+  buttonClass: string;
+}
+
+export const NOTIFICATION_LEVELS: Record<string, NotificationLevelConfig> = {
+  urgent: {
+    label: 'Urgent',
+    icon: 'alert-circle',
+    color: 'text-red-400',
+    bgColor: 'bg-transparent',
+    borderColor: 'border-red-500/70',
+    pillClass: 'bg-red-900/40 text-red-300 border border-red-800/40',
+    buttonClass: 'bg-red-600 hover:bg-red-500 text-white shadow-sm shadow-red-900/40',
+  },
+  action_needed: {
+    label: 'Action Needed',
+    icon: 'alert-triangle',
+    color: 'text-amber-400',
+    bgColor: 'bg-transparent',
+    borderColor: 'border-amber-500/60',
+    pillClass: 'bg-amber-900/30 text-amber-300 border border-amber-800/40',
+    buttonClass: 'bg-amber-600 hover:bg-amber-500 text-white shadow-sm shadow-amber-900/40',
+  },
+  heads_up: {
+    label: 'Heads Up',
+    icon: 'info',
+    color: 'text-blue-400',
+    bgColor: 'bg-transparent',
+    borderColor: 'border-blue-500/40',
+    pillClass: 'bg-blue-900/30 text-blue-300 border border-blue-800/40',
+    buttonClass: 'bg-blue-600 hover:bg-blue-500 text-white shadow-sm shadow-blue-900/40',
+  },
+  fyi: {
+    label: 'FYI',
+    icon: 'message-circle',
+    color: 'text-slate-400',
+    bgColor: 'bg-transparent',
+    borderColor: 'border-slate-600/40',
+    pillClass: 'bg-slate-800/30 text-slate-300 border border-slate-700/40',
+    buttonClass: 'bg-slate-600 hover:bg-slate-500 text-white shadow-sm shadow-slate-900/40',
+  },
+  digest: {
+    label: 'Digest',
+    icon: 'newspaper',
+    color: 'text-purple-400',
+    bgColor: 'bg-transparent',
+    borderColor: 'border-purple-500/40',
+    pillClass: 'bg-purple-900/25 text-purple-300 border border-purple-800/40',
+    buttonClass: 'bg-purple-600 hover:bg-purple-500 text-white shadow-sm shadow-purple-900/40',
+  },
+};
+
+export const NOTIFICATION_CATEGORY_ICONS: Record<string, string> = {
+  system: 'server',
+  tasks: 'check-square',
+  finance: 'dollar-sign',
+  home: 'home',
+  social: 'at-sign',
+  ai_insights: 'sparkles',
+  packages: 'package',
+};
+
+export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
+  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
+  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
+  'github-issues': '/icons/connectors/github.svg',
+  'outlook-email': '/icons/connectors/outlook.svg',
+  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
+  'rymessage': '/icons/connectors/rymessage.svg',
+  'document-intelligence': '/icons/agents/owl.svg',
+  finance: '/icons/agents/tyrion.svg',
+  'finance-manager': '/icons/agents/tyrion.svg',
+  'custom-rest': '/icons/connectors/custom-rest.svg',
+  'home-assistant': '/icons/connectors/custom-rest.svg',
+  'monarch-money': '/icons/agents/tyrion.svg',
+};
+
+export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
+  'microsoft-todo': 'Microsoft To Do',
+  'microsoft-todo-work': 'Microsoft To Do - Work',
+  'github-issues': 'GitHub',
+  'outlook-email': 'Outlook Mail',
+  'outlook-calendar': 'Outlook Calendar',
+  rymessage: 'RyMessage',
+  'document-intelligence': 'OWL',
+  finance: 'Tyrion',
+  'finance-manager': 'Tyrion',
+  'custom-rest': 'Custom REST',
+  scout: 'Scout',
+  'home-assistant': 'Home Assistant',
+  'monarch-money': 'Tyrion',
+};

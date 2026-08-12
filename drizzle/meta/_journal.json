@@ -1,0 +1,692 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783295713447,
+      "tag": "0000_sweet_chameleon",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783670460000,
+      "tag": "0001_remove_epics",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1752033363000,
+      "tag": "0002_add_project_phases",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1752120000000,
+      "tag": "0003_add_subtask_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1752206400000,
+      "tag": "0004_add_inbound_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1752292800000,
+      "tag": "0004_add_micro_status_and_template_enhancements",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1752379200000,
+      "tag": "0005_add_phase_dependencies_and_plans",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1752465600000,
+      "tag": "0005_add_triage_collections",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1752552000000,
+      "tag": "0006_add_focus_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1752638400000,
+      "tag": "0007_add_weekly_one_thing",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1752724800000,
+      "tag": "0008_add_routines",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1752811200000,
+      "tag": "0009_add_energy_checkins",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1752897600000,
+      "tag": "0009_add_task_snoozed_until",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1752984000000,
+      "tag": "0010_add_resets",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1753070400000,
+      "tag": "0011_add_my_day_exclusions",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "6",
+      "when": 1753156800000,
+      "tag": "0012_add_collection_staleness",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1753243200000,
+      "tag": "0013_add_triage_source_order",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1753329600000,
+      "tag": "0014_remove_triage_collections",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1753416000000,
+      "tag": "0015_add_project_hidden",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1753502400000,
+      "tag": "0016_add_query_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1753588800000,
+      "tag": "0017_add_alert_dismissed",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1753675200000,
+      "tag": "0018_add_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1753761600000,
+      "tag": "0019_add_icon_color",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1753848000000,
+      "tag": "0020_add_task_effort",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1753934400000,
+      "tag": "0014_add_content_type_registry",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1754020800000,
+      "tag": "0021_add_notification_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1754107200000,
+      "tag": "0022_add_task_reminder",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1754193600000,
+      "tag": "0023_add_task_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1754280000000,
+      "tag": "0024_add_push_subscriptions",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1754366400000,
+      "tag": "0025_add_task_linked_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1754452800000,
+      "tag": "0026_add_push_dnd",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1754539200000,
+      "tag": "0027_add_bulk_import_flag",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1754625600000,
+      "tag": "0028_purge_markdown_checklists",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1754712000000,
+      "tag": "0029_add_task_dependencies",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1754798400000,
+      "tag": "0030_add_task_dependency_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1785473000000,
+      "tag": "0031_add_task_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1785512700000,
+      "tag": "0032_project_hierarchy_commands",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1785545100000,
+      "tag": "0033_add_notification_action_execution",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1785554000000,
+      "tag": "0033_add_native_share_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1785600000000,
+      "tag": "0034_repair_inbound_webhook_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1785708000000,
+      "tag": "0035_add_notification_push_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1785782400000,
+      "tag": "0036_add_notification_delivery_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1785790800000,
+      "tag": "0037_add_native_apns_delivery",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1785792000000,
+      "tag": "0038_enforce_task_source_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1785767558831,
+      "tag": "0044_sync_deletion_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1785775363495,
+      "tag": "0045_checkpoint_dependency_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1785859200000,
+      "tag": "0046_add_triage_action_claims",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1785859200001,
+      "tag": "0047_isolate_sync_worker",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1785859200002,
+      "tag": "0048_redundant_masque",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "6",
+      "when": 1785874614392,
+      "tag": "0049_sync_operational_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1785932066942,
+      "tag": "0050_square_stepford_cuckoos",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1785933000000,
+      "tag": "0051_add_task_field_states",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1785945600000,
+      "tag": "0052_add_task_ingest_suppressions",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "6",
+      "when": 1785949200000,
+      "tag": "0053_add_task_local_disposition",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "6",
+      "when": 1786030170324,
+      "tag": "0054_futuristic_microchip",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1786049961311,
+      "tag": "0055_far_daredevil",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1786065623402,
+      "tag": "0056_strange_gunslinger",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1786071200000,
+      "tag": "0057_runtime_telemetry_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1786074650000,
+      "tag": "0058_runtime_telemetry_history_v2",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1786128930310,
+      "tag": "0059_work_todo_bridge_runtime",
+      "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1786136762000,
+      "tag": "0060_optimize_list_queries",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1786205025567,
+      "tag": "0061_glamorous_colossus",
+      "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "6",
+      "when": 1786212522751,
+      "tag": "0062_melodic_squirrel_girl",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1786234602795,
+      "tag": "0063_brown_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "6",
+      "when": 1786240513303,
+      "tag": "0064_reflective_rawhide_kid",
+      "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "6",
+      "when": 1786246255011,
+      "tag": "0065_github_shadow_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "6",
+      "when": 1786247551616,
+      "tag": "0066_github_repository_repoint",
+      "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "6",
+      "when": 1786285106495,
+      "tag": "0067_github_identity_comparison_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1786289996317,
+      "tag": "0068_github_identity_observe_mode",
+      "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1786296064811,
+      "tag": "0069_dependency_resume_observability",
+      "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1786317660034,
+      "tag": "0070_curved_joshua_kane",
+      "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1786329464059,
+      "tag": "0071_dependency_stream_generations",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1786332443785,
+      "tag": "0072_dependency_poll_telemetry",
+      "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "6",
+      "when": 1786336917003,
+      "tag": "0073_github-linked-source-identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1786339000000,
+      "tag": "0074_github_write_recovery_fences",
+      "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "6",
+      "when": 1786340021270,
+      "tag": "0075_yielding_professor_monster",
+      "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "6",
+      "when": 1786371533078,
+      "tag": "0076_panoramic_layla_miller",
+      "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "6",
+      "when": 1786371971477,
+      "tag": "0077_superb_overlord",
+      "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1786377574717,
+      "tag": "0078_github_stable_write_route",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "6",
+      "when": 1786384500000,
+      "tag": "0079_clear_legacy_tyrion_origin",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "6",
+      "when": 1786384500001,
+      "tag": "0080_split_notification_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "6",
+      "when": 1786389511426,
+      "tag": "0081_cloudy_reaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1786392000000,
+      "tag": "0082_github_notification_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1786395631849,
+      "tag": "0083_github_identity_evidence_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1786403594668,
+      "tag": "0084_classy_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "6",
+      "when": 1786405000000,
+      "tag": "0085_github_write_outcome_resolution",
+      "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "6",
+      "when": 1786406622635,
+      "tag": "0086_red_greymalkin",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1786407000000,
+      "tag": "0087_connector_sync_performance",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "6",
+      "when": 1786409974442,
+      "tag": "0088_project-auto-include-exclusions",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "6",
+      "when": 1786414959147,
+      "tag": "0089_finance-insight-publication",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "6",
+      "when": 1786416254779,
+      "tag": "0090_finance-insight-stable-tags",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "6",
+      "when": 1786417524293,
+      "tag": "0091_finance-insight-cache-sequence",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "6",
+      "when": 1786423060581,
+      "tag": "0092_finance-insight-generation-proof",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "6",
+      "when": 1786428892455,
+      "tag": "0093_finance-insight-history",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "6",
+      "when": 1786430104418,
+      "tag": "0094_cultured_luke_cage",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "6",
+      "when": 1786430126373,
+      "tag": "0095_chief_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "6",
+      "when": 1786472766864,
+      "tag": "0096_yellow_dark_phoenix",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "6",
+      "when": 1786490455318,
+      "tag": "0097_finance-attention-routing-scan",
+      "breakpoints": true
+    }
+  ]
+}

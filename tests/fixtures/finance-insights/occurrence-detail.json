@@ -1,0 +1,202 @@
+{
+  "contractVersion": "1.0",
+  "insightId": "insight-v1_VFpCYH8m1N-WEMONPGO5FS_SIFq2RTVor6DXwphV-1Q",
+  "occurrenceId": "occurrence-v1_LWrUx-lNUiYwXByUG0Nv_QNvSvbHsKmQA0PyLB3K-rU",
+  "deliveryRevision": 1,
+  "kind": "recurringAmountChange",
+  "entity": {
+    "kind": "recurring",
+    "sourceRef": "demo-recurring-electric-v1",
+    "displayName": "Demo Electric Service",
+    "identityQuality": "stableSource"
+  },
+  "analysisState": "qualified",
+  "sourceLifecycle": "open",
+  "resolutionReason": null,
+  "supersededByOccurrenceId": null,
+  "severity": "high",
+  "confidence": "high",
+  "baselineSufficiency": "sufficient",
+  "reasonCodes": [
+    "recurring_absolute_gate_exceeded",
+    "recurring_relative_gate_exceeded",
+    "period_normalized"
+  ],
+  "headline": "Demo electric bill increased above its seasonal range",
+  "explanation": "The invented current bill exceeded both configured increase gates after equivalent-period normalization.",
+  "observationPeriod": {
+    "start": "2026-07-01",
+    "end": "2026-07-31"
+  },
+  "baselinePeriod": {
+    "start": "2023-06-01",
+    "end": "2025-08-31"
+  },
+  "observedValue": {
+    "currency": "USD",
+    "amountMinor": 28640
+  },
+  "expectedRange": {
+    "currency": "USD",
+    "lowerMinor": 17000,
+    "upperMinor": 21500
+  },
+  "absoluteDelta": {
+    "currency": "USD",
+    "amountMinor": 7140
+  },
+  "percentageDeltaBasisPoints": 3321,
+  "currency": "USD",
+  "freshness": {
+    "state": "fresh",
+    "sourceAsOf": "2026-08-10T15:00:00Z",
+    "maxAgeHours": 48,
+    "warningReason": null
+  },
+  "provenance": {
+    "connectorRef": "demo-connector-v1",
+    "sourceGeneration": "demo-publication-2026-08-10-v1",
+    "bridgeContractVersion": "bridge-v1",
+    "providerClass": "monarchBridgeNormalized",
+    "sourceAsOf": "2026-08-10T15:00:00Z",
+    "coverageStart": "2023-08-01",
+    "coverageEnd": "2026-08-10",
+    "completeness": "complete",
+    "detectorSetVersion": "detectors-v1",
+    "detectorVersion": "recurring-v1",
+    "methodVersion": "seasonal-mad-v1",
+    "explanationTemplateVersion": "recurring-explanation-v1",
+    "policyVersion": 1,
+    "evaluationStartedAt": "2026-08-10T15:05:00Z",
+    "evaluationCompletedAt": "2026-08-10T15:05:01Z"
+  },
+  "targets": [
+    {
+      "system": "monarch",
+      "targetKind": "recurring",
+      "sourceRef": "demo-recurring-electric-v1"
+    }
+  ],
+  "createdAt": "2026-08-10T15:05:01Z",
+  "updatedAt": "2026-08-10T15:05:01Z",
+  "resolvedAt": null,
+  "ruleResults": [
+    {
+      "ruleCode": "recurring_absolute_gate",
+      "outcome": "triggered",
+      "observedMinor": 7140,
+      "thresholdMinor": 7000,
+      "observedBasisPoints": null,
+      "thresholdBasisPoints": null,
+      "reasonCodes": ["recurring_absolute_gate_exceeded"]
+    },
+    {
+      "ruleCode": "recurring_relative_gate",
+      "outcome": "triggered",
+      "observedMinor": null,
+      "thresholdMinor": null,
+      "observedBasisPoints": 3321,
+      "thresholdBasisPoints": 2500,
+      "reasonCodes": ["recurring_relative_gate_exceeded"]
+    }
+  ],
+  "baseline": {
+    "method": "seasonalMedianMad",
+    "windowStart": "2023-06-01",
+    "windowEnd": "2025-08-31",
+    "sampleCount": 8,
+    "activePeriodCount": 3,
+    "robustCenterMinor": 19530,
+    "dispersionMinor": 920,
+    "expectedRange": {
+      "currency": "USD",
+      "lowerMinor": 17000,
+      "upperMinor": 21500
+    },
+    "exclusionCounts": {
+      "pending": 0,
+      "transfer": 0,
+      "income": 0,
+      "refund": 0,
+      "unclassifiedCredit": 0,
+      "knownRecurring": 0,
+      "policyExcluded": 0
+    }
+  },
+  "comparisons": [
+    {
+      "period": {
+        "start": "2025-07-01",
+        "end": "2025-07-31"
+      },
+      "value": {
+        "currency": "USD",
+        "amountMinor": 20100
+      },
+      "eligible": true,
+      "contribution": "reinforced",
+      "sampleCount": 8,
+      "medianMinor": 19530,
+      "dispersionMinor": 920,
+      "empiricalPercentileBasisPoints": 10000,
+      "ratioBasisPoints": 14249
+    }
+  ],
+  "contributors": [
+    {
+      "rank": 1,
+      "sourceRef": "demo-transaction-electric-v1",
+      "occurredOn": "2026-08-08",
+      "displayName": "Demo Electric Service",
+      "amount": {
+        "currency": "USD",
+        "amountMinor": 28640
+      },
+      "contributionMinor": 7140
+    }
+  ],
+  "exclusions": [],
+  "evidence": [
+    {
+      "source": "owl",
+      "evidenceType": "billingPeriod",
+      "observedAt": "2026-08-09T12:00:00Z",
+      "documentRef": "demo-document-electric-v1",
+      "normalizedValueMinor": 31,
+      "normalizedUnit": "days"
+    }
+  ],
+  "lifecycleHistory": [
+    {
+      "sequence": 1,
+      "state": "analyzing",
+      "reasonCode": null,
+      "occurredAt": "2026-08-10T15:05:00Z",
+      "replacementOccurrenceId": null
+    },
+    {
+      "sequence": 2,
+      "state": "open",
+      "reasonCode": null,
+      "occurredAt": "2026-08-10T15:05:01Z",
+      "replacementOccurrenceId": null
+    }
+  ],
+  "suppression": {
+    "state": "none",
+    "suppressionId": null,
+    "scope": null,
+    "durationDays": null,
+    "operator": null,
+    "createdAt": null,
+    "expiresAt": null,
+    "undoneAt": null
+  },
+  "availableActions": [
+    "expected",
+    "notUseful",
+    "suppress30Days",
+    "suppress90Days",
+    "suppress180Days"
+  ]
+}

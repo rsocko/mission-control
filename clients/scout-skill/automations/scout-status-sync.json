@@ -1,0 +1,20 @@
+{
+  "name": "Scout Status Writeback",
+  "description": "Sync MC status signals back to business M365 sources",
+  "triggerType": "schedule",
+  "schedule": {
+    "kind": "interval",
+    "naturalLanguage": "Every 2 hours",
+    "days": [0, 1, 2, 3, 4, 5, 6],
+    "intervalMinutes": 120,
+    "anchor": { "hour": 8, "minute": 0 },
+    "hour": 8,
+    "minute": 0
+  },
+  "steps": [
+    {
+      "label": "Sync status changes",
+      "prompt": "Call mc_scout_status_sync to get Scout-originated tasks that changed status since last sync.\n\nFor each completed/cancelled task:\n- If source was work email: Record that this thread should not be re-pushed unless new actionable context appears. Do not send a reply or mutate the message unless explicitly requested by the user.\n- If source was a Planner task: Mark the Planner task complete only if the task was originally pushed from Planner and MC has an explicit completion.\n- If source was a meeting action item: No write-back needed (informational).\n\nFor tasks that were snoozed in MC: Remember not to re-push these items in future triage runs until the snooze expires.\n\nReport a brief summary of write-backs performed."
+    }
+  ]
+}

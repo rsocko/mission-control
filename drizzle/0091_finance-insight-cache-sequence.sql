@@ -1,0 +1,1 @@
+ALTER TABLE `finance_insight_occurrence_cache_state` ADD `source_sequence` integer DEFAULT 0 NOT NULL;

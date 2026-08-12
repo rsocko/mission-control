@@ -1,0 +1,2 @@
+ALTER TABLE `dependency_reconciliation_snapshots` ADD `collection_page_count` integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE `dependency_reconciliation_snapshots` ADD `overflow_fetch_count` integer DEFAULT 0 NOT NULL;

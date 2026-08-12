@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-control.example/schemas/work-todo-extended-pull-request-1.1.json",
+  "title": "Mission Control extended work To Do pull request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "connectorInstanceId",
+    "requestedAt",
+    "listDeltaLink",
+    "taskDeltaLinks"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "enum": ["1.1"]
+    },
+    "connectorInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "selectedListIds": {
+      "type": "array",
+      "maxItems": 500,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    },
+    "listDeltaLink": {
+      "type": ["string", "null"],
+      "maxLength": 8000
+    },
+    "taskDeltaLinks": {
+      "type": "object",
+      "maxProperties": 500,
+      "additionalProperties": {
+        "type": ["string", "null"],
+        "maxLength": 8000
+      }
+    }
+  }
+}

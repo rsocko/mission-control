@@ -1,0 +1,2 @@
+DROP INDEX `idx_sync_jobs_active_connector`;--> statement-breakpoint
+CREATE UNIQUE INDEX `idx_sync_jobs_active_connector` ON `sync_jobs` (`connector_id`,`status`) WHERE "sync_jobs"."status" IN ('queued', 'running');

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-control.example/schemas/work-todo-pull-request-1.0.json",
+  "title": "Mission Control work To Do pull request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "connectorInstanceId", "requestedAt"],
+  "properties": {
+    "schemaVersion": {
+      "enum": ["1.0"]
+    },
+    "connectorInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

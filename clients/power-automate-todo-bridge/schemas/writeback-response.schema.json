@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mission-control.example/schemas/work-todo-writeback-response-1.0.json",
+  "title": "Mission Control work To Do write-back response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "connectorInstanceId", "leaseId", "processedAt", "results"],
+  "properties": {
+    "schemaVersion": {
+      "enum": ["1.0"]
+    },
+    "connectorInstanceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 100
+    },
+    "leaseId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+    },
+    "processedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "results": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["idempotencyKey", "sourceId", "status"],
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 200
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "enum": ["succeeded", "failed", "skipped"]
+          },
+          "errorCode": {
+            "type": ["string", "null"],
+            "maxLength": 100
+          },
+          "errorMessage": {
+            "type": ["string", "null"],
+            "maxLength": 500
+          }
+        }
+      }
+    }
+  }
+}

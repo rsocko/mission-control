@@ -1,0 +1,85 @@
+.graph {
+  --xy-background-color: var(--surface-0);
+  --xy-background-pattern-dots-color: var(--border-strong);
+  --xy-edge-stroke: var(--border-strong);
+  --xy-connectionline-stroke: var(--accent-400);
+  --xy-minimap-background-color: var(--surface-1);
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--surface-0) 70%, transparent);
+  --xy-minimap-node-background-color: var(--surface-3);
+  --xy-controls-button-background-color: var(--surface-1);
+  --xy-controls-button-background-color-hover: var(--surface-2);
+  --xy-controls-button-color: var(--text-secondary);
+  --xy-controls-button-color-hover: var(--text-primary);
+  --xy-controls-button-border-color: var(--border);
+}
+
+.graph :global(.react-flow__attribution) {
+  background: color-mix(in srgb, var(--surface-1) 85%, transparent);
+  color: var(--text-muted);
+}
+
+.graph :global(.react-flow__controls) {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.graph :global(.react-flow__minimap) {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.loadingProgress {
+  animation: loading-progress 1.35s ease-in-out infinite;
+}
+
+@keyframes loading-progress {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(350%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingProgress {
+    animation: none;
+    transform: translateX(75%);
+  }
+}
+
+.node {
+  border-color: color-mix(in srgb, var(--node-status-color) 78%, transparent);
+  background:
+    linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--node-status-color) 18%, var(--surface-1)) 0%,
+      color-mix(in srgb, var(--node-status-color) 8%, var(--surface-1)) 70%
+    );
+  box-shadow:
+    inset 4px 0 0 var(--node-status-color),
+    var(--shadow-md);
+}
+
+.nodeButton {
+  transition: background-color 150ms ease;
+}
+
+.nodeButton:hover {
+  background: color-mix(in srgb, var(--node-status-color) 10%, transparent);
+}
+
+.statusIcon {
+  color: var(--node-status-color);
+  border: 1px solid color-mix(in srgb, var(--node-status-color) 35%, transparent);
+  background: color-mix(in srgb, var(--node-status-color) 18%, var(--surface-2));
+}
+
+.statusDot {
+  background: var(--node-status-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--node-status-color) 18%, transparent);
+}

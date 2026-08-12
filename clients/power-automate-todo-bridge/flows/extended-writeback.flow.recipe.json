@@ -1,0 +1,64 @@
+{
+  "recipeVersion": "1.0",
+  "name": "MC - Work Todo Extended Graph Writeback",
+  "purpose": "Apply capability-gated work To Do mutations through delegated Microsoft Graph calls.",
+  "connection": {
+    "connector": "HTTP With Microsoft Entra ID",
+    "class": "Premium",
+    "resourceUri": "https://graph.microsoft.com",
+    "baseResourceUrl": "https://graph.microsoft.com",
+    "delegatedScope": "Tasks.ReadWrite"
+  },
+  "trigger": {
+    "type": "When an HTTP request is received",
+    "security": "Tenant authentication when available; otherwise protect and rotate the signed trigger URL."
+  },
+  "actions": [
+    {
+      "name": "Validate_request_and_capabilities",
+      "type": "Condition",
+      "requirements": [
+        "connectorInstanceId equals the protected environment value",
+        "operation is advertised by the installed capability profile",
+        "destructive operation is enabled by both the MC envelope and tenant environment",
+        "batch contains between 1 and 100 changes"
+      ]
+    },
+    {
+      "name": "For_each_change",
+      "type": "Apply to each",
+      "concurrency": 1,
+      "idempotency": "Check durable tenant store before destructive or non-idempotent operations.",
+      "operations": {
+        "task.update": "PATCH /v1.0/me/todo/lists/{listId}/tasks/{taskId}",
+        "task.delete": "DELETE /v1.0/me/todo/lists/{listId}/tasks/{taskId}",
+        "list.create": "POST /v1.0/me/todo/lists",
+        "list.update": "PATCH /v1.0/me/todo/lists/{listId}",
+        "list.delete": "DELETE /v1.0/me/todo/lists/{listId}",
+        "checklist.create": "POST /v1.0/me/todo/lists/{listId}/tasks/{taskId}/checklistItems",
+        "checklist.update": "PATCH /v1.0/me/todo/lists/{listId}/tasks/{taskId}/checklistItems/{checklistItemId}",
+        "checklist.delete": "DELETE /v1.0/me/todo/lists/{listId}/tasks/{taskId}/checklistItems/{checklistItemId}",
+        "linkedResource.create": "POST /v1.0/me/todo/lists/{listId}/tasks/{taskId}/linkedResources",
+        "linkedResource.delete": "DELETE /v1.0/me/todo/lists/{listId}/tasks/{taskId}/linkedResources/{linkedResourceId}",
+        "attachment.delete": "DELETE /v1.0/me/todo/lists/{listId}/tasks/{taskId}/attachments/{attachmentId}"
+      },
+      "fieldPolicies": {
+        "categories": "Read current categories and @odata.etag, merge only the requested additions/removals, and PATCH with If-Match. On 412, re-read and retry the merge once before failing.",
+        "recurrence": "Accept only a complete Graph patternedRecurrence object or null.",
+        "body": "Reject stale writes when bodyLastModifiedDateTime no longer matches.",
+        "move": "Create in destination, reconcile the new task ID, then delete source only after acknowledgement.",
+        "attachmentUpload": "Disabled until a separate binary-safe tenant path is approved."
+      }
+    },
+    {
+      "name": "Respond",
+      "type": "Response",
+      "requirements": [
+        "Return one result for every input idempotency key",
+        "Echo connectorInstanceId and leaseId from the validated request",
+        "Use 200 for all success and 207 for mixed results",
+        "Never acknowledge failed or policy-skipped operations"
+      ]
+    }
+  ]
+}

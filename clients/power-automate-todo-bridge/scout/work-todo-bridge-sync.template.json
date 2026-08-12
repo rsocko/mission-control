@@ -1,0 +1,28 @@
+{
+  "name": "Work Microsoft To Do Bridge Sync",
+  "description": "Courier structured work To Do snapshots and write-back changes between Power Automate and Mission Control",
+  "enabled": false,
+  "triggerType": "schedule",
+  "schedule": {
+    "kind": "interval",
+    "naturalLanguage": "Every 30 minutes",
+    "days": [0, 1, 2, 3, 4, 5, 6],
+    "intervalMinutes": 30,
+    "anchor": {
+      "hour": 8,
+      "minute": 0
+    },
+    "hour": 8,
+    "minute": 0
+  },
+  "steps": [
+    {
+      "label": "Pull work To Do snapshot",
+      "prompt": "This is a deterministic courier operation. Call mc_todo_sync_pull_request for the configured connectorInstanceId. Never print, summarize, parse, edit, or persist opaque delta links returned by that tool. Read the protected Work Todo pull-flow URL from the configured secret; never print, summarize, or persist that URL. POST the exact pull-request envelope to the flow. Validate that the response has the same connectorInstanceId and matching schema version. Pass the entire response unchanged as the payload argument to mc_todo_sync_ingest. Do not summarize, filter, rename, prioritize, deduplicate, or otherwise reason over any list or task field. If the flow or MCP tool fails, retry once after 30 seconds, then report failure without advancing any checkpoint."
+    },
+    {
+      "label": "Write back Mission Control changes",
+      "prompt": "Call mc_todo_sync_changes for the configured connectorInstanceId without acknowledging changes. If there are no changes, stop. POST the exact returned write-back envelope to the protected Work Todo write-back flow URL; never print or persist the URL. Do not add, remove, reinterpret, or rewrite any task field. The Power Automate flow independently requires both the envelope and its protected environment parameter to allow deletion; do not attempt to bypass that policy. Pass the exact connectorInstanceId, leaseId, processedAt, and per-item results returned by the flow to mc_todo_sync_ack. Acknowledge only source IDs whose result status is \"succeeded\" and only under the exact active lease. Do not acknowledge results under a different or expired lease. Leave failed and skipped items pending, including DELETE_DISABLED, and report their sanitized error codes."
+    }
+  ]
+}

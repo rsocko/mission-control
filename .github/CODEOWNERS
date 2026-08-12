@@ -1,0 +1,38 @@
+# Default ownership keeps every path reviewable while the maintainer team is small.
+* @rsocko
+
+# Repository security, automation, and governance
+/.github/ @rsocko
+/SECURITY.md @rsocko
+/CODE_OF_CONDUCT.md @rsocko
+/CONTRIBUTING.md @rsocko
+/SUPPORT.md @rsocko
+/docs/governance/ @rsocko
+
+# Releases and packages
+/package.json @rsocko
+/package-lock.json @rsocko
+/runtime/ @rsocko
+/scripts/ @rsocko
+
+# Authentication and authorization
+/src/app/api/auth/ @rsocko
+/src/lib/ai/durable-runs/provider-session-crypto.ts @rsocko
+/src/lib/native/installation-auth.ts @rsocko
+/src/lib/native/share-capture-auth.ts @rsocko
+/src/lib/triage/capture-auth.ts @rsocko
+/src/lib/triage/credentials.ts @rsocko
+/src/mcp/auth.ts @rsocko
+
+# Connectors and external integrations
+/src/app/api/connectors/ @rsocko
+/src/lib/connectors/ @rsocko
+/src/mcp/ @rsocko
+/docs/architecture/connectors.md @rsocko
+/docs/governance/connector-privacy.md @rsocko
+
+# Deployment templates and container boundaries
+/Dockerfile* @rsocko
+/docker-compose*.yml @rsocko
+/docker-compose*.yaml @rsocko
+/deploy/ @rsocko

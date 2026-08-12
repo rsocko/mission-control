@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/rsocko/mission-control/security/policy
+    about: Send vulnerabilities through GitHub's private reporting channel.
+  - name: Support policy
+    url: https://github.com/rsocko/mission-control/blob/main/SUPPORT.md
+    about: Review supported versions and safe diagnostic guidance.

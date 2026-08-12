@@ -28,6 +28,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/lib/seed.ts",
+    "github:bulk-transfer": "node --conditions=react-server --import tsx scripts/github-bulk-issue-transfer.ts",
     "brand:icons": "node scripts/generate-brand-icons.mjs",
     "test:dev-services": "node --test scripts/dev-service.test.mjs",
     "public:export": "node scripts/public-export.mjs",

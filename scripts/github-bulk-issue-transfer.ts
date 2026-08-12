@@ -1,0 +1,141 @@
+#!/usr/bin/env tsx
+
+import process from 'node:process';
+import { parseArgs } from 'node:util';
+import { pathToFileURL } from 'node:url';
+import {
+  abortGitHubBulkTransfer,
+  executeGitHubBulkTransfer,
+  getGitHubBulkTransferStatus,
+  previewGitHubBulkTransfer,
+  reconcileGitHubBulkTransferItem,
+} from '../src/lib/connectors/github-issues/bulk-transfer-service';
+import { inspectGitHubRepointBackup } from '../src/lib/connectors/github-issues/repoint-service';
+
+export type GitHubBulkTransferCommand =
+  | 'preview' | 'execute' | 'status' | 'resume' | 'abort' | 'reconcile';
+
+async function main(): Promise<void> {
+  const command = parseGitHubBulkTransferCommand(process.argv[2]);
+  const optionStart = process.argv[2]?.startsWith('--') ? 2 : 3;
+  const { values } = parseArgs({
+    args: process.argv.slice(optionStart),
+    options: {
+      connector: { type: 'string' },
+      source: { type: 'string' },
+      target: { type: 'string' },
+      backup: { type: 'string' },
+      actor: { type: 'string' },
+      run: { type: 'string' },
+      'plan-hash': { type: 'string' },
+      'idempotency-key': { type: 'string' },
+      concurrency: { type: 'string' },
+      task: { type: 'string' },
+      'target-number': { type: 'string' },
+      confirm: { type: 'string' },
+    },
+    strict: true,
+  });
+
+  if (command === 'status') {
+    print(getGitHubBulkTransferStatus(required(values.run, '--run')));
+    return;
+  }
+  if (command === 'abort') {
+    if (values.confirm !== 'abort') throw new Error('Abort requires --confirm abort');
+    print(abortGitHubBulkTransfer(
+      required(values.run, '--run'),
+      required(values.actor, '--actor'),
+    ));
+    return;
+  }
+  if (command === 'reconcile') {
+    if (values.confirm !== 'reconcile') {
+      throw new Error('Reconciliation requires --confirm reconcile');
+    }
+    print(await reconcileGitHubBulkTransferItem({
+      runId: required(values.run, '--run'),
+      taskId: required(values.task, '--task'),
+      targetNumber: positiveInteger(values['target-number'], '--target-number'),
+      actor: required(values.actor, '--actor'),
+    }));
+    return;
+  }
+
+  const sourceRepository = required(values.source, '--source');
+  const targetRepository = required(values.target, '--target');
+  const common = {
+    connectorInstanceId: required(values.connector, '--connector'),
+    sourceRepository,
+    targetRepository,
+    actor: required(values.actor, '--actor'),
+    backupProof: await inspectGitHubRepointBackup(required(values.backup, '--backup')),
+  };
+  if (command === 'preview') {
+    const result = await previewGitHubBulkTransfer(common);
+    print(result);
+    if (!result.go) process.exitCode = 2;
+    return;
+  }
+  requireExecutionConfirmation(values.confirm, sourceRepository, targetRepository);
+  print(await executeGitHubBulkTransfer({
+    ...common,
+    idempotencyKey: required(values['idempotency-key'], '--idempotency-key'),
+    planHash: required(values['plan-hash'], '--plan-hash'),
+    confirmation: values.confirm!,
+    concurrency: optionalConcurrency(values.concurrency),
+  }));
+}
+
+export function parseGitHubBulkTransferCommand(
+  value: string | undefined,
+): GitHubBulkTransferCommand {
+  if (!value || value.startsWith('--')) return 'preview';
+  if (['preview', 'execute', 'status', 'resume', 'abort', 'reconcile'].includes(value)) {
+    return value as GitHubBulkTransferCommand;
+  }
+  throw new Error(`Unknown command: ${value}`);
+}
+
+export function requireExecutionConfirmation(
+  actual: string | undefined,
+  source: string,
+  target: string,
+): void {
+  const expected = `${source}=>${target}`;
+  if (actual !== expected) throw new Error(`Execution requires --confirm ${expected}`);
+}
+
+export function required(value: string | undefined, option: string): string {
+  const normalized = value?.trim();
+  if (!normalized) throw new Error(`${option} is required`);
+  return normalized;
+}
+
+function optionalConcurrency(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new Error('--concurrency must be an integer');
+  return parsed;
+}
+
+function positiveInteger(value: string | undefined, option: string): number {
+  const parsed = Number(required(value, option));
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${option} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function print(value: unknown): void {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    process.exitCode = 1;
+  });
+}

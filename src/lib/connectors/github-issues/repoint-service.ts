@@ -175,12 +175,14 @@ export interface GitHubRepositoryRepointRemote {
     repository: string,
     issueNumber: number,
   ): Promise<GitHubHistoricalIssueResolution | null>;
+  listIssues?(repository: string): Promise<GitHubRestIssue[]>;
 }
 
-interface RepointDependencies {
+export interface RepointDependencies {
   remote?: GitHubRepositoryRepointRemote;
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
+  onTransferDispatch?: () => void;
 }
 
 interface RepositoryBindingRow {
@@ -677,7 +679,7 @@ export async function transferGitHubIssueByStableIdentity(
   return transferred.number!;
 }
 
-async function transferGitHubIssueWithLease(
+export async function transferGitHubIssueWithLease(
   input: {
     connectorInstanceId: string;
     sourceId: string;
@@ -730,6 +732,7 @@ async function transferGitHubIssueWithLease(
     throw new Error('Native GitHub transfer source issue identity verification failed');
   }
 
+  dependencies.onTransferDispatch?.();
   const transferredNumber = await remote.transferIssue(
     issue.issueStableId,
     targetBinding.repositoryStableId,
@@ -806,7 +809,7 @@ async function resolveTransferredIssue(
   expectedIssueStableId: string,
   sleep: (milliseconds: number) => Promise<void> = defaultSleep,
 ): Promise<ExternalIdentityEvidence | null> {
-  const retryDelaysMs = [250, 500, 1_000, 2_000];
+  const retryDelaysMs = [250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
   let observation = await remote.resolveIssue(
     targetRepository,
     transferredNumber,
@@ -1559,7 +1562,36 @@ function createRemote(
         stateReason: issue.state_reason ?? null,
       };
     },
+    async listIssues(repository) {
+      const issues: GitHubRestIssue[] = [];
+      let next: string | null = `/repos/${encodeRepository(repository)}/issues?state=all&per_page=100`;
+      while (next) {
+        const response = await client.restFetch(next);
+        if (!response.ok) {
+          throw new Error(`GitHub issue enumeration failed (${response.status})`);
+        }
+        const page = await response.json() as GitHubRestIssue[];
+        issues.push(...page.filter((issue) => !issue.pull_request));
+        next = nextLink(response.headers.get('link'));
+      }
+      return issues;
+    },
   };
+}
+
+export function createGitHubRepositoryRemote(
+  connectorInstanceId: string,
+): GitHubRepositoryRepointRemote {
+  return createRemote(requireGitHubConnector(connectorInstanceId));
+}
+
+function nextLink(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  for (const part of linkHeader.split(',')) {
+    const match = part.match(/^\s*<([^>]+)>;\s*rel="([^"]+)"\s*$/);
+    if (match?.[2] === 'next') return match[1];
+  }
+  return null;
 }
 
 function repositoryFromApiUrl(

@@ -29,7 +29,12 @@ npm run test
 npm run lint
 npm run build
 npm run test:e2e
+npm run ci:workflows
 ```
+
+See [continuous integration and container publication](continuous-integration.md)
+for CI trust boundaries, GHCR digest publication, and required repository
+settings.
 
 Do not commit `.env.local`, databases, logs, screenshots containing real data,
 or generated connector exports. Use `example.test`, reserved documentation IP

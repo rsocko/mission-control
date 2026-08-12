@@ -33,6 +33,7 @@
     "public:export": "node scripts/public-export.mjs",
     "public:scan": "node scripts/scan-public-export.mjs",
     "test:public-export": "node --test scripts/public-export.test.mjs",
+    "ci:workflows": "node scripts/validate-workflows.mjs",
     "mcp": "tsx src/mcp/server.ts",
     "worker": "tsx src/sync-worker.ts"
   },
@@ -163,6 +164,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
     "typescript": "^5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "yaml": "^2.9.0"
   }
 }

@@ -151,6 +151,9 @@ export {
   githubIdentityCollisions,
   githubRepositoryRepoints,
   githubRepositoryRepointEvents,
+  githubBulkTransferRuns,
+  githubBulkTransferItems,
+  githubBulkTransferEvents,
   connectorMaintenanceLocks,
   EXTERNAL_ENTITY_TYPES,
   EXTERNAL_BINDING_TYPES,
@@ -161,6 +164,8 @@ export {
   GITHUB_COLLISION_CATEGORIES,
   GITHUB_COLLISION_STATES,
   GITHUB_REPOSITORY_REPOINT_PHASES,
+  GITHUB_BULK_TRANSFER_PHASES,
+  GITHUB_BULK_TRANSFER_ITEM_STATES,
 } from './external-identities';
 export type {
   GitHubIdentityEffectiveMode,
@@ -189,6 +194,8 @@ export type {
   GitHubIdentityCounters,
   GitHubCollisionResolution,
   GitHubRepositoryRepointPhase,
+  GitHubBulkTransferPhase,
+  GitHubBulkTransferItemState,
 } from './external-identities';
 
 // Stable identity associations for cross-connector provenance rows

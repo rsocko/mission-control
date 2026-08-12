@@ -27,9 +27,8 @@ import { FinanceInsightHistorySynchronizer } from './finance-insight-history-syn
 import { applyManualAttributionDecision } from './attribution-service';
 import { captureFinanceInsightPublication } from '@/lib/finance-insights/publication';
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
-import { reconcileFinanceAttention } from '@/lib/finance/attention-routing';
 import logger from '@/lib/logger';
-import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy';
+import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
 
 export {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -192,6 +191,7 @@ export class FinanceManagerConnector implements IConnector {
         );
       }
       pruneFinanceInsightOccurrenceCache();
+      const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
       logger.info(
         {

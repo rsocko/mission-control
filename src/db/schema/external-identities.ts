@@ -186,6 +186,23 @@ export const GITHUB_REPOSITORY_REPOINT_PHASES = [
 ] as const;
 export type GitHubRepositoryRepointPhase = (typeof GITHUB_REPOSITORY_REPOINT_PHASES)[number];
 
+export const GITHUB_BULK_TRANSFER_PHASES = [
+  'running',
+  'completed',
+  'failed',
+  'aborted',
+] as const;
+export type GitHubBulkTransferPhase = (typeof GITHUB_BULK_TRANSFER_PHASES)[number];
+
+export const GITHUB_BULK_TRANSFER_ITEM_STATES = [
+  'pending',
+  'transferring',
+  'transferred',
+  'failed',
+] as const;
+export type GitHubBulkTransferItemState =
+  (typeof GITHUB_BULK_TRANSFER_ITEM_STATES)[number];
+
 export interface GitHubIdentityCounters {
   eligible: number;
   bound: number;
@@ -1014,4 +1031,78 @@ export const connectorMaintenanceLocks = sqliteTable('connector_maintenance_lock
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_connector_maintenance_locks_operation').on(table.operationId),
+]);
+
+export const githubBulkTransferRuns = sqliteTable('github_bulk_transfer_runs', {
+  id: text('id').primaryKey(),
+  connectorInstanceId: text('connector_instance_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  idempotencyKey: text('idempotency_key').notNull(),
+  phase: text('phase').$type<GitHubBulkTransferPhase>().notNull(),
+  actor: text('actor').notNull(),
+  sourceRepository: text('source_repository').notNull(),
+  targetRepository: text('target_repository').notNull(),
+  planHash: text('plan_hash').notNull(),
+  plan: text('plan', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  connectorWasEnabled: integer('connector_was_enabled', { mode: 'boolean' }).notNull(),
+  transferredCount: integer('transferred_count').notNull().default(0),
+  skippedCount: integer('skipped_count').notNull().default(0),
+  failedCount: integer('failed_count').notNull().default(0),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  completedAt: text('completed_at'),
+}, (table) => [
+  uniqueIndex('idx_github_bulk_transfer_runs_idempotency')
+    .on(table.connectorInstanceId, table.idempotencyKey),
+  uniqueIndex('idx_github_bulk_transfer_runs_active_connector')
+    .on(table.connectorInstanceId)
+    .where(sql`${table.phase} = 'running'`),
+  index('idx_github_bulk_transfer_runs_phase').on(table.phase, table.updatedAt),
+  check(
+    'github_bulk_transfer_runs_phase_check',
+    sql`${table.phase} IN ('running', 'completed', 'failed', 'aborted')`,
+  ),
+]);
+
+export const githubBulkTransferItems = sqliteTable('github_bulk_transfer_items', {
+  runId: text('run_id')
+    .notNull()
+    .references(() => githubBulkTransferRuns.id, { onDelete: 'cascade' }),
+  taskId: text('task_id').notNull(),
+  issueEntityId: text('issue_entity_id')
+    .notNull()
+    .references(() => externalEntities.id, { onDelete: 'restrict' }),
+  issueStableId: text('issue_stable_id').notNull(),
+  sourceNumber: integer('source_number').notNull(),
+  targetNumber: integer('target_number'),
+  state: text('state').$type<GitHubBulkTransferItemState>().notNull().default('pending'),
+  beforeDigest: text('before_digest').notNull(),
+  newSourceId: text('new_source_id'),
+  lastError: text('last_error'),
+  startedAt: text('started_at'),
+  completedAt: text('completed_at'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.runId, table.taskId] }),
+  uniqueIndex('idx_github_bulk_transfer_items_issue').on(table.runId, table.issueStableId),
+  index('idx_github_bulk_transfer_items_state').on(table.runId, table.state, table.sourceNumber),
+  check(
+    'github_bulk_transfer_items_state_check',
+    sql`${table.state} IN ('pending', 'transferring', 'transferred', 'failed')`,
+  ),
+]);
+
+export const githubBulkTransferEvents = sqliteTable('github_bulk_transfer_events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: text('run_id')
+    .notNull()
+    .references(() => githubBulkTransferRuns.id, { onDelete: 'cascade' }),
+  taskId: text('task_id'),
+  eventType: text('event_type').notNull(),
+  payload: text('payload', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_github_bulk_transfer_events_run').on(table.runId, table.id),
 ]);

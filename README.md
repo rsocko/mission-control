@@ -67,6 +67,22 @@ npm run mcp
 
 See [docs/MCP-SERVER.md](docs/MCP-SERVER.md) for setup, available tools, and Copilot CLI configuration.
 
+## Community and Governance
+
+- [Security policy](SECURITY.md)
+- [Contributing guide](CONTRIBUTING.md)
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Support policy](SUPPORT.md)
+- [Compatibility policy](docs/governance/compatibility.md)
+- [Release and versioning policy](docs/governance/releases.md)
+- [Connector data and privacy](docs/governance/connector-privacy.md)
+- [Licensing status](docs/governance/licensing.md)
+- [Public architecture and development guides](docs/public/architecture.md)
+
+Mission Control does not yet have an approved public license. Publication and
+external contribution acceptance remain blocked until the legal/IP review
+records an explicit decision and the approved `LICENSE` file is added.
+
 ## Triage Queue Phase 2 (GitHub + Reddit ingestion)
 
 - Manual import endpoints:

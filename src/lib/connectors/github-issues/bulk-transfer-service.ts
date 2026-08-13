@@ -24,6 +24,7 @@ import { GitHubHttpError } from './github-client';
 import { parseSourceId } from './issue-transformer';
 import {
   createGitHubRepositoryRemote,
+  type GitHubChangedIssueIdentityTransfer,
   type GitHubRepointBackupProof,
   type GitHubRepositoryRepointRemote,
   transferGitHubIssueWithLease,
@@ -154,14 +155,20 @@ export async function previewGitHubBulkTransfer(
     reasons.push('target_repository_identity_mismatch');
   }
 
+  const authoritativeDeletedTaskIds = getDurablyAuthoritativeDeletedTaskIds(
+    input.connectorInstanceId,
+  );
   const localRows = db.select({
     id: tasks.id,
     sourceId: tasks.sourceId,
+    status: tasks.status,
   }).from(tasks).where(and(
     eq(tasks.connectorInstanceId, input.connectorInstanceId),
     eq(tasks.connectorType, 'github-issues'),
-  )).all().filter((row) => parseSourceId(row.sourceId).repo.toLowerCase()
-    === input.sourceRepository.toLowerCase());
+  )).all().filter((row) => (
+    parseSourceId(row.sourceId).repo.toLowerCase() === input.sourceRepository.toLowerCase()
+    && (row.status !== 'cancelled' || !authoritativeDeletedTaskIds.has(row.id))
+  ));
   const remoteByNumber = new Map(remoteIssues.map((issue) => [issue.number, issue]));
   const items: GitHubBulkTransferPlanItem[] = [];
   for (const row of localRows) {
@@ -329,6 +336,15 @@ export async function executeGitHubBulkTransfer(
                 targetNumber,
                 issueStableIdDigest: digest(item.issueStableId),
               }, nowIso(dependencies));
+            },
+            onChangedIssueIdentity: (transfer) => {
+              reconcileAutomaticallyChangedIssueIdentity({
+                run: requireRun(runId),
+                item,
+                transfer,
+                actor: input.actor,
+                now: nowIso(dependencies),
+              });
             },
           }), dependencies.sleep, ({ attempt, delayMs, status }) => {
             const rateLimitedAt = nowIso(dependencies);
@@ -576,6 +592,77 @@ function reconcileChangedIssueIdentity(input: {
   if (authorization.expectedSuccessorStableIdDigest !== successorStableIdDigest) {
     throw new Error('Bulk transfer successor authorization target identity mismatch');
   }
+  recordChangedIssueIdentity({
+    ...input,
+    audit: {
+      reason: authorization.reason.trim(),
+      idempotencyKey: authorization.idempotencyKey.trim(),
+      requireAcceptedDispatch: false,
+    },
+  });
+}
+
+function reconcileAutomaticallyChangedIssueIdentity(input: {
+  run: typeof githubBulkTransferRuns.$inferSelect;
+  item: typeof githubBulkTransferItems.$inferSelect;
+  transfer: GitHubChangedIssueIdentityTransfer;
+  actor: string;
+  now: string;
+}): void {
+  const { run, item, transfer } = input;
+  if (
+    transfer.sourceTaskId !== item.taskId
+    || transfer.sourceExternalEntityId !== item.issueEntityId
+    || transfer.sourceStableId !== item.issueStableId
+    || transfer.sourceId.toLowerCase()
+      !== `${run.sourceRepository}:${item.sourceNumber}`.toLowerCase()
+    || transfer.targetRepository.toLowerCase() !== run.targetRepository.toLowerCase()
+    || transfer.targetNumber <= 0
+  ) {
+    throw new Error('Bulk transfer automatic successor dispatch proof mismatch');
+  }
+  const targetBinding = repositoryBinding(run.connectorInstanceId, run.targetRepository);
+  if (
+    !targetBinding
+    || transfer.targetRepositoryEntityId !== targetBinding.entityId
+    || transfer.targetRepositoryStableId !== targetBinding.stableId
+    || !transfer.evidence.repository
+    || transfer.evidence.repository.identity.stableId !== targetBinding.stableId
+  ) {
+    throw new Error('Bulk transfer automatic successor target repository mismatch');
+  }
+  recordChangedIssueIdentity({
+    run,
+    item,
+    evidence: transfer.evidence,
+    targetBinding,
+    targetNumber: transfer.targetNumber,
+    actor: input.actor,
+    now: input.now,
+    audit: {
+      reason: 'GitHub-confirmed native transfer created a successor identity',
+      idempotencyKey: `automatic-${digest({ runId: run.id, taskId: item.taskId })}`,
+      requireAcceptedDispatch: true,
+    },
+  });
+}
+
+function recordChangedIssueIdentity(input: {
+  run: typeof githubBulkTransferRuns.$inferSelect;
+  item: typeof githubBulkTransferItems.$inferSelect;
+  evidence: ExternalIdentityEvidence;
+  targetBinding: { entityId: string; stableId: string };
+  targetNumber: number;
+  actor: string;
+  now: string;
+  audit: {
+    reason: string;
+    idempotencyKey: string;
+    requireAcceptedDispatch: boolean;
+  };
+}): void {
+  const sourceStableIdDigest = identityDigest(input.item.issueStableId);
+  const successorStableIdDigest = identityDigest(input.evidence.entity.identity.stableId);
   const mode = getGitHubIdentityModeSnapshot(input.run.connectorInstanceId);
   if (mode.effectiveMode !== 'stable') {
     throw new Error('Bulk transfer successor reconciliation requires stable-primary mode');
@@ -602,6 +689,9 @@ function reconcileChangedIssueIdentity(input: {
     .filter((value): value is number => Number.isSafeInteger(value));
   if (acceptedTargets.length > 0 && !acceptedTargets.includes(input.targetNumber)) {
     throw new Error('Bulk transfer successor target number disagrees with dispatch evidence');
+  }
+  if (input.audit.requireAcceptedDispatch && !acceptedTargets.includes(input.targetNumber)) {
+    throw new Error('Bulk transfer automatic successor requires matching dispatch acceptance');
   }
 
   const successorSourceId = `${input.run.targetRepository}:${input.targetNumber}`;
@@ -714,8 +804,8 @@ function reconcileChangedIssueIdentity(input: {
       proof,
       proofDigest: digest(proof),
       actor: input.actor,
-      reason: authorization.reason.trim(),
-      idempotencyKey: authorization.idempotencyKey.trim(),
+      reason: input.audit.reason,
+      idempotencyKey: input.audit.idempotencyKey,
       observedAt: input.evidence.entity.observedAt,
       createdAt: input.now,
     }).run();
@@ -1215,6 +1305,50 @@ function blockingStateCount(connectorInstanceId: string): number {
       AS value
   `, connectorInstanceId, connectorInstanceId, connectorInstanceId, connectorInstanceId,
   connectorInstanceId);
+}
+
+function getDurablyAuthoritativeDeletedTaskIds(
+  connectorInstanceId: string,
+): ReadonlySet<string> {
+  const rows = sqlite.prepare(`
+    SELECT DISTINCT exception.local_id AS taskId
+    FROM github_identity_exception_events AS exception
+    INNER JOIN github_identity_comparison_runs AS proof_run
+      ON proof_run.id = exception.comparison_run_id
+    INNER JOIN github_identity_comparison_records AS proof_record
+      ON proof_record.run_id = proof_run.id
+      AND proof_record.surface = 'deletion'
+      AND proof_record.local_task_id = exception.local_id
+      AND proof_record.outcome = 'inaccessible'
+      AND proof_record.reason = 'access_denied'
+    WHERE exception.connector_instance_id = ?
+      AND exception.binding_type = 'task'
+      AND exception.category = 'terminal_inaccessible'
+      AND exception.action = 'accept'
+      AND exception.proof_type = 'post_backfill_authoritative_deletion'
+      AND exception.id = (
+        SELECT MAX(latest.id)
+        FROM github_identity_exception_events AS latest
+        WHERE latest.connector_instance_id = exception.connector_instance_id
+          AND latest.binding_type = exception.binding_type
+          AND latest.local_id = exception.local_id
+          AND latest.category = exception.category
+      )
+      AND proof_run.connector_instance_id = exception.connector_instance_id
+      AND proof_run.sync_kind = 'full'
+      AND proof_run.state = 'succeeded'
+      AND EXISTS (
+        SELECT 1
+        FROM github_identity_comparison_runs AS soak_run
+        WHERE soak_run.connector_instance_id = exception.connector_instance_id
+          AND soak_run.id != proof_run.id
+          AND soak_run.sync_kind = 'full'
+          AND soak_run.state = 'succeeded'
+          AND soak_run.evidence_eligible = 1
+          AND soak_run.started_at >= exception.created_at
+      )
+  `).all(connectorInstanceId) as Array<{ taskId: string }>;
+  return new Set(rows.map((row) => row.taskId));
 }
 
 function status(runId: string): GitHubBulkTransferStatus {

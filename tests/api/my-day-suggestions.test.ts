@@ -9,6 +9,13 @@ describe('GET /api/my-day suggestions', () => {
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
+    vi.doMock('@/lib/mode', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/mode')>();
+      return {
+        ...actual,
+        getTimezone: () => 'America/New_York',
+      };
+    });
     vi.doUnmock('@/db');
     vi.doUnmock('@/db/schema');
     vi.doUnmock('drizzle-orm');
@@ -165,6 +172,7 @@ describe('GET /api/my-day suggestions', () => {
 
   afterAll(() => {
     sqlite.close();
+    vi.doUnmock('@/lib/mode');
     delete process.env.MC_DB_PATH;
   });
 

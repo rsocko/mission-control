@@ -51,15 +51,16 @@ describe('shared notification filter controls', () => {
     for (const label of ['Category filter', 'Source filter', 'Merchant filter']) {
       const desktopControl = desktop.getByRole('combobox', { name: label });
       const mobileControl = mobile.getByRole('combobox', { name: label });
-      expect(
-        within(desktopControl).getAllByRole('option').map(option => option.textContent),
-      ).toEqual(
-        within(mobileControl).getAllByRole('option').map(option => option.textContent),
-      );
+      fireEvent.click(desktopControl);
+      const desktopOptions = screen.getAllByRole('option').map(option => option.textContent);
+      fireEvent.keyDown(desktopControl, { key: 'Escape' });
+      fireEvent.click(mobileControl);
+      expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(desktopOptions);
+      fireEvent.keyDown(mobileControl, { key: 'Escape' });
     }
-    expect(desktop.getByRole('combobox', { name: 'Category filter' })).toHaveValue('finance');
-    expect(mobile.getByRole('combobox', { name: 'Source filter' })).toHaveValue('finance-manager');
-    expect(mobile.getByRole('combobox', { name: 'Merchant filter' })).toHaveValue(merchant);
+    expect(desktop.getByRole('combobox', { name: 'Category filter' })).toHaveTextContent('Finance (3)');
+    expect(mobile.getByRole('combobox', { name: 'Source filter' })).toHaveTextContent('Finance Manager (3)');
+    expect(mobile.getByRole('combobox', { name: 'Merchant filter' })).toHaveTextContent('Invented Market (2)');
     expect(desktop.getByText('3 filters applied')).toBeInTheDocument();
     expect(mobile.getByText('3 filters applied')).toBeInTheDocument();
     expect(activeNotificationFilters(query, facets).map(filter => filter.label)).toEqual([

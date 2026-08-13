@@ -27,29 +27,36 @@ vi.mock('@/db', () => {
     mockUpdateSets.push(data);
     return { where: updateWhereFn };
   });
+  const database = {
+    select: vi.fn(() => {
+      const callNum = ++selectCallCount;
+      return {
+        from: vi.fn(() => {
+          if (callNum === 1) {
+            // First select: existing tasks (has .where)
+            return { where: vi.fn(() => [...mockExistingTasks]) };
+          }
+          // Second select: tags (NO .where — returns array directly as thenable)
+          const tagsResult = [] as unknown as AwaitableTagRows;
+          // Make it thenable (awaitable) since it's used with await without .where()
+          tagsResult.where = vi.fn(() => []);
+          tagsResult.then = (onFulfilled, onRejected) => Promise.resolve([] as unknown[]).then(onFulfilled, onRejected);
+          return tagsResult;
+        }),
+      };
+    }),
+    update: vi.fn(() => ({ set: updateSetFn })),
+    insert: vi.fn(() => ({ values: vi.fn() })),
+    delete: vi.fn(() => ({ where: vi.fn() })),
+  };
   return {
-    default: {
-      select: vi.fn(() => {
-        const callNum = ++selectCallCount;
-        return {
-          from: vi.fn(() => {
-            if (callNum === 1) {
-              // First select: existing tasks (has .where)
-              return { where: vi.fn(() => [...mockExistingTasks]) };
-            }
-            // Second select: tags (NO .where — returns array directly as thenable)
-            const tagsResult = [] as unknown as AwaitableTagRows;
-            // Make it thenable (awaitable) since it's used with await without .where()
-            tagsResult.where = vi.fn(() => []);
-            tagsResult.then = (onFulfilled, onRejected) => Promise.resolve([] as unknown[]).then(onFulfilled, onRejected);
-            return tagsResult;
-          }),
-        };
-      }),
-      update: vi.fn(() => ({ set: updateSetFn })),
-      insert: vi.fn(() => ({ values: vi.fn() })),
-      delete: vi.fn(() => ({ where: vi.fn() })),
+    default: database,
+    sqlite: {
+      prepare: vi.fn(() => ({
+        all: vi.fn(() => []),
+      })),
     },
+    runTransaction: vi.fn((callback: (tx: typeof database) => unknown) => callback(database)),
   };
 });
 
@@ -71,6 +78,35 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/sync/events', () => ({
   syncEventBus: { emitSyncEvent: vi.fn() },
+}));
+
+vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
+  readGitHubHierarchyObservation: (task: TaskItem) => {
+    if (task.connectorType !== 'github-issues') return { kind: 'not-issue' };
+    if (!Object.prototype.hasOwnProperty.call(task.metadata, 'githubParent')) {
+      return {
+        kind: 'incomplete',
+        reasonCode: 'sub_issue_graphql_evidence_unavailable',
+      };
+    }
+    return {
+      kind: 'complete',
+      observation: {
+        childSourceId: task.sourceId,
+        childIdentityEvidence: task.externalIdentity,
+        parent: task.metadata.githubParent,
+        parentIdentityEvidence: task.githubParentIdentity,
+      },
+    };
+  },
+  mergeGitHubHierarchyObservation: (
+    observations: Map<string, unknown>,
+    observation: { childSourceId: string },
+  ) => {
+    observations.set(observation.childSourceId, observation);
+    return true;
+  },
+  reconcileGitHubTaskHierarchy: vi.fn(async () => ({ applied: false, updated: 0 })),
 }));
 
 vi.mock('@/lib/sync/search-indexer', () => ({

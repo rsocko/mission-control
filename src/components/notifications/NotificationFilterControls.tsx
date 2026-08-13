@@ -2,12 +2,21 @@
 
 import { X } from 'lucide-react';
 import { useRef } from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { NotificationFacets } from '@/lib/hooks/useNotifications';
 import {
   DEFAULT_NOTIFICATION_QUERY,
   type NotificationQuery,
 } from '@/lib/notifications/query';
 import { cn } from '@/lib/utils';
+
+const ALL_OPTIONS_VALUE = '__all__';
 
 const CATEGORY_LABELS: Record<string, string> = {
   ai_insights: 'AI Insights',
@@ -105,9 +114,9 @@ export function NotificationFilterControls({
   onChange,
   touchTargets = false,
 }: NotificationFilterControlsProps) {
-  const categoryControlRef = useRef<HTMLSelectElement>(null);
-  const sourceControlRef = useRef<HTMLSelectElement>(null);
-  const merchantControlRef = useRef<HTMLSelectElement>(null);
+  const categoryControlRef = useRef<HTMLButtonElement>(null);
+  const sourceControlRef = useRef<HTMLButtonElement>(null);
+  const merchantControlRef = useRef<HTMLButtonElement>(null);
   const activeFilters = activeNotificationFilters(query, facets);
   const categories = optionValues(facets.category, query.category, ['finance']);
   const sources = optionValues(facets.source, query.source);
@@ -136,57 +145,81 @@ export function NotificationFilterControls({
   return (
     <section aria-label="Notification filter controls" className="mt-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <label className="min-w-0">
-          <span className="sr-only">Category filter</span>
-          <select
-            ref={categoryControlRef}
-            aria-label="Category filter"
-            value={query.category ?? ''}
-            onChange={event => onChange({ ...query, category: event.target.value || null })}
-            className={cn(controlClassName, 'w-full')}
+        <div className="min-w-0">
+          <Select
+            value={query.category ?? ALL_OPTIONS_VALUE}
+            onValueChange={value => onChange({
+              ...query,
+              category: value === ALL_OPTIONS_VALUE ? null : value,
+            })}
           >
-            <option value="">All categories</option>
-            {categories.map(value => (
-              <option key={value} value={value}>
-                {categoryLabel(value)} ({facets.category[value] ?? 0})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Source filter</span>
-          <select
-            ref={sourceControlRef}
-            aria-label="Source filter"
-            value={query.source ?? ''}
-            onChange={event => onChange({ ...query, source: event.target.value || null })}
-            className={cn(controlClassName, 'w-full')}
+            <SelectTrigger
+              ref={categoryControlRef}
+              aria-label="Category filter"
+              className={cn(controlClassName, 'w-full')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_OPTIONS_VALUE}>All categories</SelectItem>
+              {categories.map(value => (
+                <SelectItem key={value} value={value}>
+                  {categoryLabel(value)} ({facets.category[value] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-w-0">
+          <Select
+            value={query.source ?? ALL_OPTIONS_VALUE}
+            onValueChange={value => onChange({
+              ...query,
+              source: value === ALL_OPTIONS_VALUE ? null : value,
+            })}
           >
-            <option value="">All sources</option>
-            {sources.map(value => (
-              <option key={value} value={value}>
-                {formatLabel(value)} ({facets.source[value] ?? 0})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="min-w-0">
-          <span className="sr-only">Merchant filter</span>
-          <select
-            ref={merchantControlRef}
-            aria-label="Merchant filter"
-            value={query.merchant ?? ''}
-            onChange={event => onChange({ ...query, merchant: event.target.value || null })}
-            className={cn(controlClassName, 'w-full')}
+            <SelectTrigger
+              ref={sourceControlRef}
+              aria-label="Source filter"
+              className={cn(controlClassName, 'w-full')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_OPTIONS_VALUE}>All sources</SelectItem>
+              {sources.map(value => (
+                <SelectItem key={value} value={value}>
+                  {formatLabel(value)} ({facets.source[value] ?? 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-w-0">
+          <Select
+            value={query.merchant ?? ALL_OPTIONS_VALUE}
+            onValueChange={value => onChange({
+              ...query,
+              merchant: value === ALL_OPTIONS_VALUE ? null : value,
+            })}
           >
-            <option value="">All merchants</option>
-            {merchants.map(facet => (
-              <option key={facet.key} value={facet.key}>
-                {facet.label} ({facet.count})
-              </option>
-            ))}
-          </select>
-        </label>
+            <SelectTrigger
+              ref={merchantControlRef}
+              aria-label="Merchant filter"
+              className={cn(controlClassName, 'w-full')}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_OPTIONS_VALUE}>All merchants</SelectItem>
+              {merchants.map(facet => (
+                <SelectItem key={facet.key} value={facet.key}>
+                  {facet.label} ({facet.count})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {activeFilters.length > 0 && (

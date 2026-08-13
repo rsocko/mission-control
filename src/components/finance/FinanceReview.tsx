@@ -15,6 +15,13 @@ import {
   UserRoundCheck,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import type {
   AttributionException,
@@ -27,6 +34,8 @@ interface ExceptionPage {
   nextCursor: string | null;
   subjects: AttributionSubject[];
 }
+
+const NO_MANUAL_SUBJECT_VALUE = '__no_manual_subject__';
 
 type ExceptionAction = 'approve' | 'manual-resolve' | 'dismiss' | 'retry';
 
@@ -397,19 +406,24 @@ export function FinanceReview() {
                       <label htmlFor="manual-subject" className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
                         Manual correction
                       </label>
-                      <select
-                        id="manual-subject"
-                        value={manualKidId}
-                        onChange={(event) => setManualKidId(event.target.value)}
+                      <Select
+                        value={manualKidId || NO_MANUAL_SUBJECT_VALUE}
+                        onValueChange={(value) => setManualKidId(
+                          value === NO_MANUAL_SUBJECT_VALUE ? '' : value,
+                        )}
                         disabled={actionPending}
-                        className="min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-sm text-[var(--text-primary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
                       >
-                        <option value="">Choose a current subject</option>
-                        <option value="__parent__">Parent expense</option>
-                        {subjects.map((subject) => (
-                          <option key={subject.kidId} value={subject.kidId}>{subject.name}</option>
-                        ))}
-                      </select>
+                        <SelectTrigger id="manual-subject" className="min-h-10 w-full bg-[var(--surface-2)]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value={NO_MANUAL_SUBJECT_VALUE}>Choose a current subject</SelectItem>
+                          <SelectItem value="__parent__">Parent expense</SelectItem>
+                          {subjects.map((subject) => (
+                            <SelectItem key={subject.kidId} value={subject.kidId}>{subject.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <button
                       type="button"

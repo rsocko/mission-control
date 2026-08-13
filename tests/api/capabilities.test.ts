@@ -58,7 +58,7 @@ vi.mock('@/db', () => ({
       mockSelectCall += 1;
       return chainable(mockSelectCall === 1
         ? (mockTask ? [mockTask] : [])
-        : mockFieldStates);
+        : []);
     }),
     insert: vi.fn(() => chainable([])),
     update: vi.fn(() => ({

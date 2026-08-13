@@ -79,7 +79,7 @@ describe('SuggestionGroup task interactions', () => {
 
   it('exposes the standard task context menu', async () => {
     const { onComplete } = renderGroup();
-    const row = screen.getByRole('button', { name: /Suggested task.*Yesterday/ });
+    const row = screen.getByRole('button', { name: /Suggested task due Aug 4/ });
 
     expect(row).not.toBeNull();
     fireEvent.contextMenu(row!);

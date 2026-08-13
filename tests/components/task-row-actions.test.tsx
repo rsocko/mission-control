@@ -234,14 +234,14 @@ describe('TaskRowActions', () => {
 
   it('caps Later today at 11:59 PM when selected after 8 PM', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-08-01T20:30:00-04:00'));
+    vi.setSystemTime(new Date(2026, 7, 1, 20, 30));
     const onSnoozeUntil = vi.fn();
     renderActions({ onSnoozeUntil });
 
     fireEvent.click(screen.getByRole('button', { name: 'Snooze task' }));
     fireEvent.click(screen.getByRole('button', { name: 'Later today' }));
 
-    expect(onSnoozeUntil).toHaveBeenCalledWith(new Date('2026-08-01T23:59:00-04:00').toISOString());
+    expect(onSnoozeUntil).toHaveBeenCalledWith(new Date(2026, 7, 1, 23, 59).toISOString());
   });
 
   it('keeps applicable My Day state visible while disabling connector mutations', () => {

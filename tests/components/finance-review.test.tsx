@@ -132,7 +132,8 @@ describe('FinanceReview', () => {
 
     render(<FinanceReview />);
     await screen.findByRole('heading', { name: 'Invented Market' });
-    fireEvent.change(screen.getByLabelText('Manual correction'), { target: { value: 'kid-two' } });
+    fireEvent.click(screen.getByLabelText('Manual correction'));
+    fireEvent.click(screen.getByRole('option', { name: 'Jordan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
     expect(screen.getByRole('alertdialog')).toHaveTextContent('Jordan');
     fireEvent.click(screen.getByRole('button', { name: 'Save decision' }));

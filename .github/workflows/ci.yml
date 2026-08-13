@@ -50,4 +50,11 @@ jobs:
         run: npm ci --no-audit --no-fund
 
       - name: Run ${{ matrix.name }}
+        if: matrix.name != 'Production build'
+        run: ${{ matrix.command }}
+
+      - name: Run Production build
+        if: matrix.name == 'Production build'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: ${{ matrix.command }}

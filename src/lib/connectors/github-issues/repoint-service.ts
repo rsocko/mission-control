@@ -183,6 +183,7 @@ export interface RepointDependencies {
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
   onTransferDispatch?: () => void;
+  onTransferAccepted?: (targetNumber: number) => void;
 }
 
 interface RepositoryBindingRow {
@@ -443,7 +444,7 @@ export async function rollbackGitHubRepositoryRepoint(
 ): Promise<GitHubRepositoryRepointStatus> {
   validateActor(actor);
   const operation = requireOperation(operationId);
-  if (!['applied', 'verifying', 'verification_failed', 'failed'].includes(operation.phase)) {
+  if (!['applied', 'verifying', 'verification_failed', 'failed', 'rolled_back'].includes(operation.phase)) {
     throw new Error(`Repoint operation cannot be rolled back from phase ${operation.phase}`);
   }
   const connector = requireGitHubConnector(operation.connectorInstanceId);
@@ -463,18 +464,55 @@ export async function rollbackGitHubRepositoryRepoint(
   const issueRows = targetRows.length > 0
     ? targetRows
     : selectIssuePlanRows(operation.connectorInstanceId, from);
-  for (const row of issueRows) {
-    if (!row.issueStableId || !row.issueNumber) {
-      throw new Error(`Task ${row.taskId} is missing a stable issue binding for rollback`);
-    }
-    const evidence = await remote.resolveIssue(from, row.issueNumber, repositoryEvidence);
-    if (!evidence || evidence.entity.identity.stableId !== row.issueStableId) {
-      throw new Error(`Rollback issue identity verification failed for task ${row.taskId}`);
+  if (operation.phase !== 'rolled_back') {
+    for (const row of issueRows) {
+      if (!row.issueStableId || !row.issueNumber) {
+        throw new Error(`Task ${row.taskId} is missing a stable issue binding for rollback`);
+      }
+      const evidence = await remote.resolveIssue(from, row.issueNumber, repositoryEvidence);
+      if (!evidence || evidence.entity.identity.stableId !== row.issueStableId) {
+        throw new Error(`Rollback issue identity verification failed for task ${row.taskId}`);
+      }
     }
   }
 
   runTransaction((tx) => {
     const current = requireOperationInTransaction(tx, operation.id);
+    if (current.phase === 'rolled_back') {
+      const currentConnector = tx.select().from(connectorConfigs)
+        .where(eq(connectorConfigs.id, current.connectorInstanceId)).limit(1).get();
+      if (!currentConnector || currentConnector.enabled) {
+        throw new Error('Rolled-back repoint repair requires a disabled connector');
+      }
+      const unexpectedLock = tx.select().from(connectorMaintenanceLocks)
+        .where(eq(connectorMaintenanceLocks.connectorInstanceId, current.connectorInstanceId))
+        .limit(1).get();
+      if (unexpectedLock) {
+        throw new Error('Rolled-back repoint repair found an unexpected maintenance lock');
+      }
+      assertNoConnectorActivityInTransaction(tx, current.connectorInstanceId);
+      const settings = asRecord(currentConnector.settings);
+      if (
+        !asStringArray(settings.repos).some((repository) => samePath(repository, from))
+        || asStringArray(settings.repos).some((repository) => samePath(repository, to))
+        || !asStringArray(currentConnector.syncedLists).some((repository) => samePath(repository, from))
+        || asStringArray(currentConnector.syncedLists).some((repository) => samePath(repository, to))
+      ) {
+        throw new Error('Rolled-back repoint repair found unexpected connector routing');
+      }
+      const repair = restoreSourceListSnapshot(tx, current, from, to);
+      if (repair.repaired) {
+        tx.update(githubRepositoryRepoints).set({
+          updatedAt: nowIso,
+        }).where(eq(githubRepositoryRepoints.id, current.id)).run();
+        appendEvent(tx, current.id, 'rolled_back', actor, {
+          idempotentRepair: true,
+          restoredSourceList: true,
+          sourceListSnapshotMode: repair.snapshotMode,
+        }, nowIso);
+      }
+      return;
+    }
     requireOwnedMaintenanceLock(tx, current);
     assertNoConnectorActivityInTransaction(tx, current.connectorInstanceId);
     tx.update(githubRepositoryRepoints).set({
@@ -510,6 +548,7 @@ export async function rollbackGitHubRepositoryRepoint(
       }).where(eq(tasks.id, issue.taskId)).run();
     }
     replaceActiveReferences(tx, current.connectorInstanceId, to, from, nowIso);
+    restoreSourceListSnapshot(tx, current, from, to);
     const snapshot = current.rollbackSnapshot;
     tx.update(connectorConfigs).set({
       settings: snapshot.settings ?? {},
@@ -737,6 +776,7 @@ export async function transferGitHubIssueWithLease(
     issue.issueStableId,
     targetBinding.repositoryStableId,
   );
+  dependencies.onTransferAccepted?.(transferredNumber);
   const after = await resolveTransferredIssue(
     remote,
     input.targetRepository,
@@ -1020,6 +1060,11 @@ function acquireRepointOperation(
       .where(eq(connectorMaintenanceLocks.connectorInstanceId, input.connectorInstanceId))
       .limit(1).get();
     if (existingLock) throw new Error('Connector already has a maintenance lock');
+    const sourceListSnapshot = tx.select().from(sourceLists).where(and(
+      eq(sourceLists.connectorInstanceId, input.connectorInstanceId),
+      eq(sourceLists.id, plan.repositoryBinding!.localId),
+    )).limit(1).get();
+    if (!sourceListSnapshot) throw new Error('Repository source list disappeared before repoint lock');
     tx.insert(githubRepositoryRepoints).values({
       id: operationId,
       connectorInstanceId: input.connectorInstanceId,
@@ -1043,6 +1088,12 @@ function acquireRepointOperation(
         taskIdDigest: digest(
           plan.issues.map((issue) => issue.row.taskId).sort().join('\0'),
         ),
+        sourceList: {
+          id: sourceListSnapshot.id,
+          sourceId: sourceListSnapshot.sourceId,
+          name: sourceListSnapshot.name,
+          lastKnownRemoteName: sourceListSnapshot.lastKnownRemoteName,
+        },
       },
       verification: null,
       lastError: null,
@@ -1214,6 +1265,62 @@ function replaceActiveReferences(
       createdAt: row.createdAt || now,
     }).run();
   }
+}
+
+function restoreSourceListSnapshot(
+  tx: ExternalIdentityTransaction,
+  operation: RepointOperationRow,
+  from: string,
+  to: string,
+): { repaired: boolean; snapshotMode: 'captured' | 'legacy_derived' } {
+  const snapshot = asRecord(asRecord(operation.rollbackSnapshot).sourceList);
+  const snapshotId = stringValue(snapshot.id);
+  const snapshotMode = snapshotId ? 'captured' : 'legacy_derived';
+  const rows = tx.select().from(sourceLists)
+    .where(eq(sourceLists.connectorInstanceId, operation.connectorInstanceId))
+    .all();
+  const row = snapshotId
+    ? rows.find((candidate) => candidate.id === snapshotId)
+    : rows.find((candidate) => samePath(candidate.sourceId, from) || samePath(candidate.sourceId, to));
+  if (
+    !row
+    || (!samePath(row.sourceId, from) && !samePath(row.sourceId, to))
+  ) {
+    throw new Error('Rollback source list identity verification failed');
+  }
+  if (!snapshotId) {
+    const candidates = rows.filter(
+      (candidate) => samePath(candidate.sourceId, from) || samePath(candidate.sourceId, to),
+    );
+    if (candidates.length !== 1) {
+      throw new Error('Legacy rollback source list repair is ambiguous');
+    }
+  }
+  const desiredSourceId = snapshotId ? stringValue(snapshot.sourceId) : from;
+  const desiredName = snapshotId ? stringValue(snapshot.name) : from;
+  const desiredLastKnownRemoteName = snapshotId
+    ? (snapshot.lastKnownRemoteName === null ? null : stringValue(snapshot.lastKnownRemoteName))
+    : from;
+  if (
+    !samePath(desiredSourceId, from)
+    || !desiredName
+    || (snapshotId && snapshot.lastKnownRemoteName !== null && !desiredLastKnownRemoteName)
+  ) {
+    throw new Error('Rollback source list snapshot is invalid');
+  }
+  if (
+    row.sourceId === desiredSourceId
+    && row.name === desiredName
+    && row.lastKnownRemoteName === desiredLastKnownRemoteName
+  ) {
+    return { repaired: false, snapshotMode };
+  }
+  tx.update(sourceLists).set({
+    sourceId: desiredSourceId,
+    name: desiredName,
+    lastKnownRemoteName: desiredLastKnownRemoteName,
+  }).where(eq(sourceLists.id, row.id)).run();
+  return { repaired: true, snapshotMode };
 }
 
 function restoreHistoricalLocator(
@@ -1400,7 +1507,8 @@ function collectCounts(
     `, connectorInstanceId),
     failedPushes: scalar(`
       SELECT COUNT(*) AS value FROM tasks
-      WHERE connector_instance_id = ? AND sync_status IN ('push_error', 'error')
+      WHERE connector_instance_id = ?
+        AND sync_status IN ('push_error', 'push_failed', 'error')
     `, connectorInstanceId),
     dependencySnapshots: scalar(`
       SELECT COUNT(*) AS value FROM dependency_reconciliation_snapshots

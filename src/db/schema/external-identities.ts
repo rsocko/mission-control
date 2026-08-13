@@ -1094,6 +1094,65 @@ export const githubBulkTransferItems = sqliteTable('github_bulk_transfer_items',
   ),
 ]);
 
+export const githubBulkTransferSuccessions = sqliteTable(
+  'github_bulk_transfer_successions',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => githubBulkTransferRuns.id, { onDelete: 'cascade' }),
+    taskId: text('task_id').notNull(),
+    sourceExternalEntityId: text('source_external_entity_id')
+      .notNull()
+      .references(() => externalEntities.id, { onDelete: 'restrict' }),
+    successorExternalEntityId: text('successor_external_entity_id')
+      .notNull()
+      .references(() => externalEntities.id, { onDelete: 'restrict' }),
+    sourceStableIdDigest: text('source_stable_id_digest').notNull(),
+    successorStableIdDigest: text('successor_stable_id_digest').notNull(),
+    sourceId: text('source_id').notNull(),
+    successorSourceId: text('successor_source_id').notNull(),
+    targetRepositoryEntityId: text('target_repository_entity_id')
+      .notNull()
+      .references(() => externalEntities.id, { onDelete: 'restrict' }),
+    targetNumber: integer('target_number').notNull(),
+    proof: text('proof', { mode: 'json' }).$type<Record<string, unknown>>().notNull(),
+    proofDigest: text('proof_digest').notNull(),
+    actor: text('actor').notNull(),
+    reason: text('reason').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    observedAt: text('observed_at').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_github_bulk_transfer_successions_item')
+      .on(table.runId, table.taskId),
+    uniqueIndex('idx_github_bulk_transfer_successions_idempotency')
+      .on(table.runId, table.idempotencyKey),
+    index('idx_github_bulk_transfer_successions_source')
+      .on(table.sourceExternalEntityId),
+    index('idx_github_bulk_transfer_successions_successor')
+      .on(table.successorExternalEntityId),
+    check(
+      'github_bulk_transfer_successions_distinct_entities_check',
+      sql`${table.sourceExternalEntityId} <> ${table.successorExternalEntityId}`,
+    ),
+    check(
+      'github_bulk_transfer_successions_digest_check',
+      sql`length(${table.sourceStableIdDigest}) = 64
+        AND length(${table.successorStableIdDigest}) = 64
+        AND length(${table.proofDigest}) = 64`,
+    ),
+    check(
+      'github_bulk_transfer_successions_audit_check',
+      sql`${table.targetNumber} > 0
+        AND length(${table.actor}) BETWEEN 1 AND 80
+        AND length(${table.reason}) BETWEEN 3 AND 500
+        AND length(${table.idempotencyKey}) BETWEEN 8 AND 192`,
+    ),
+  ],
+);
+
 export const githubBulkTransferEvents = sqliteTable('github_bulk_transfer_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   runId: text('run_id')

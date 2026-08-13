@@ -2,8 +2,8 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# Install build dependencies for native modules (better-sqlite3)
-RUN apk add --no-cache python3 make g++
+# Install build dependencies and Linux headers for native modules
+RUN apk add --no-cache python3 make g++ linux-headers
 
 COPY package*.json ./
 RUN npm ci --prefer-offline --no-audit --no-fund
@@ -29,8 +29,12 @@ LABEL org.opencontainers.image.revision=$MC_BUILD_SHA \
 RUN apk add --no-cache libc6-compat \
     && addgroup -S mc && adduser -S mc -G mc
 
-# Copy standalone server output
-COPY --from=builder /app/.next/standalone ./
+# Copy only the runtime pieces from the standalone trace. The trace may include
+# broad repository files when dynamic filesystem access cannot be narrowed.
+COPY --from=builder /app/.next/standalone/server.js ./server.js
+COPY --from=builder /app/.next/standalone/package.json ./package.json
+COPY --from=builder /app/.next/standalone/node_modules ./node_modules
+COPY --from=builder /app/.next/standalone/.next ./.next
 COPY --from=builder /app/.next/static ./.next/static
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/dist ./dist

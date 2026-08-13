@@ -13,8 +13,31 @@ const GITHUB_REST_URL = 'https://api.github.com';
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const ERROR_BODY_READ_TIMEOUT_MS = 1_000;
+const MAX_RETRY_AFTER_MS = 300_000;
+const MAX_ERROR_BODY_BYTES = 8_192;
 
 export { GITHUB_GRAPHQL_URL, GITHUB_REST_URL };
+
+export class GitHubHttpError extends Error {
+  readonly headers: Readonly<Record<string, string>>;
+  readonly responseBody: string | null;
+
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterMs: number | null,
+    details: {
+      headers?: Record<string, string>;
+      responseBody?: string | null;
+    } = {},
+  ) {
+    super(message);
+    this.name = 'GitHubHttpError';
+    this.headers = Object.freeze({ ...(details.headers ?? {}) });
+    this.responseBody = details.responseBody ?? null;
+  }
+}
 
 /** Returns true for transient network errors worth retrying (socket resets, DNS failures, etc.) */
 function isTransientError(err: unknown): boolean {
@@ -73,6 +96,50 @@ async function fetchWithTimeout(
   } finally {
     clearTimeout(timeout);
     upstreamSignal?.removeEventListener('abort', abortFromUpstream);
+  }
+}
+
+async function readBoundedErrorBody(response: Response): Promise<string | null> {
+  if (!response.body) return '';
+
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    return null;
+  }
+  const body = new Uint8Array(MAX_ERROR_BODY_BYTES);
+  let length = 0;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutError = new Error('GitHub error response body read timed out');
+  const timedOut = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(timeoutError);
+      void reader.cancel(timeoutError).catch(() => undefined);
+    }, ERROR_BODY_READ_TIMEOUT_MS);
+  });
+
+  try {
+    while (length < MAX_ERROR_BODY_BYTES) {
+      const { done, value } = await Promise.race([reader.read(), timedOut]);
+      if (done) break;
+      if (!value?.byteLength) continue;
+
+      const consumed = Math.min(value.byteLength, MAX_ERROR_BODY_BYTES - length);
+      body.set(value.subarray(0, consumed), length);
+      length += consumed;
+
+      if (length === MAX_ERROR_BODY_BYTES) {
+        void reader.cancel().catch(() => undefined);
+      }
+    }
+
+    return new TextDecoder().decode(body.subarray(0, length));
+  } catch {
+    void reader.cancel().catch(() => undefined);
+    return null;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -322,7 +389,19 @@ export function createGitHubClient(
       'GraphQL',
       options?.signal,
     );
-    if (!res.ok) throw new Error(`GraphQL request failed: ${res.status}`);
+    if (!res.ok) {
+      const headers = Object.fromEntries(res.headers.entries());
+      const responseBody = await readBoundedErrorBody(res);
+      throw new GitHubHttpError(
+        `GraphQL request failed: ${res.status}`,
+        res.status,
+        retryAfterMilliseconds(res.headers.get('retry-after')),
+        {
+          headers,
+          responseBody,
+        },
+      );
+    }
     return res.json();
   }
 
@@ -336,6 +415,23 @@ export function createGitHubClient(
       options?: { signal?: AbortSignal },
     ) => Promise<GraphQLAnyResponse>,
   };
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  if (/^\d+$/.test(normalized)) {
+    const seconds = Number(normalized);
+    if (!Number.isSafeInteger(seconds)) return null;
+    return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
+  }
+  if (!/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(normalized)) {
+    return null;
+  }
+  const retryAt = Date.parse(normalized);
+  if (!Number.isFinite(retryAt)) return null;
+  if (new Date(retryAt).toUTCString() !== normalized) return null;
+  return Math.min(Math.max(0, retryAt - Date.now()), MAX_RETRY_AFTER_MS);
 }
 
 function resolveRestUrl(path: string, origin: TrustedGitHubOrigin): string {

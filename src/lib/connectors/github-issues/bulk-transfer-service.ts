@@ -1,19 +1,26 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import db, { runTransaction, sqlite } from '@/db';
 import {
   connectorConfigs,
+  externalEntityBindings,
+  externalEntityLocators,
   githubBulkTransferEvents,
   githubBulkTransferItems,
   githubBulkTransferRuns,
+  githubBulkTransferSuccessions,
   tasks,
 } from '@/db/schema';
 import {
   getGitHubIdentityModeSnapshot,
+  getGitHubIdentityModeSnapshotInTransaction,
   observeOperatorExternalEntityLocatorInTransaction,
   readGitHubTaskTransferBinding,
+  type ExternalIdentityEvidence,
+  upsertExternalEntityInTransaction,
 } from '@/lib/external-identities';
 import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
+import { GitHubHttpError } from './github-client';
 import { parseSourceId } from './issue-transformer';
 import {
   createGitHubRepositoryRemote,
@@ -24,6 +31,7 @@ import {
 
 const REPOSITORY_PATH = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
 const MAX_CONCURRENCY = 8;
+const MAX_RATE_LIMIT_BACKOFF_MS = 300_000;
 
 export interface GitHubBulkTransferInput {
   connectorInstanceId: string;
@@ -94,6 +102,13 @@ export interface GitHubBulkTransferDependencies {
   now?: () => Date;
   sleep?: (milliseconds: number) => Promise<void>;
   operationLeaseOwned?: boolean;
+}
+
+export interface GitHubBulkTransferSuccessorAuthorization {
+  expectedSourceStableIdDigest: string;
+  expectedSuccessorStableIdDigest: string;
+  reason: string;
+  idempotencyKey: string;
 }
 
 export async function previewGitHubBulkTransfer(
@@ -284,6 +299,7 @@ export async function executeGitHubBulkTransfer(
         }, attemptStartedAt);
 
         let result;
+        let transferAccepted = false;
         try {
           result = await withRateLimitBackoff(() => transferGitHubIssueWithLease({
             connectorInstanceId: input.connectorInstanceId,
@@ -307,14 +323,46 @@ export async function executeGitHubBulkTransfer(
                 issueStableIdDigest: digest(item.issueStableId),
               }, dispatchedAt);
             },
-          }), dependencies.sleep);
+            onTransferAccepted: (targetNumber) => {
+              transferAccepted = true;
+              appendEvent(runId, item.taskId, 'dispatch_accepted', {
+                targetNumber,
+                issueStableIdDigest: digest(item.issueStableId),
+              }, nowIso(dependencies));
+            },
+          }), dependencies.sleep, ({ attempt, delayMs, status }) => {
+            const rateLimitedAt = nowIso(dependencies);
+            if (!transferAccepted) {
+              db.update(githubBulkTransferItems).set({
+                state: 'pending',
+                updatedAt: rateLimitedAt,
+                lastError: null,
+              }).where(and(
+                eq(githubBulkTransferItems.runId, runId),
+                eq(githubBulkTransferItems.taskId, item.taskId),
+              )).run();
+            }
+            appendEvent(runId, item.taskId, transferAccepted
+              ? 'verification_rate_limited'
+              : 'rate_limited', {
+              attempt,
+              delayMs,
+              status,
+            }, rateLimitedAt);
+            return !transferAccepted;
+          });
         } catch (error) {
           const current = db.select({ state: githubBulkTransferItems.state })
             .from(githubBulkTransferItems).where(and(
               eq(githubBulkTransferItems.runId, runId),
               eq(githubBulkTransferItems.taskId, item.taskId),
             )).get();
-          if (current?.state === 'pending') {
+          const definitelyRejectedBeforeAcceptance = (
+            !transferAccepted
+            && error instanceof GitHubHttpError
+            && error.status === 403
+          );
+          if (current?.state === 'pending' || definitelyRejectedBeforeAcceptance) {
             const failedAt = nowIso(dependencies);
             const message = error instanceof Error ? error.message : String(error);
             db.update(githubBulkTransferItems).set({
@@ -383,6 +431,7 @@ export async function reconcileGitHubBulkTransferItem(
     taskId: string;
     targetNumber: number;
     actor: string;
+    successorAuthorization?: GitHubBulkTransferSuccessorAuthorization;
   },
   dependencies: GitHubBulkTransferDependencies = {},
 ): Promise<GitHubBulkTransferStatus> {
@@ -391,13 +440,24 @@ export async function reconcileGitHubBulkTransferItem(
     throw new Error('Bulk transfer reconciliation requires a positive target issue number');
   }
   const run = requireRun(input.runId);
-  if (run.phase !== 'failed') {
-    throw new Error(`Bulk transfer item cannot be reconciled from run phase ${run.phase}`);
-  }
   const item = db.select().from(githubBulkTransferItems).where(and(
     eq(githubBulkTransferItems.runId, input.runId),
     eq(githubBulkTransferItems.taskId, input.taskId),
   )).limit(1).get();
+  const replay = db.select().from(githubBulkTransferSuccessions).where(and(
+    eq(githubBulkTransferSuccessions.runId, input.runId),
+    eq(githubBulkTransferSuccessions.taskId, input.taskId),
+  )).limit(1).get();
+  if (replay) {
+    if (!item || !successionProofMatches(replay, run, item)) {
+      throw new Error('Bulk transfer successor replay proof is invalid');
+    }
+    assertSuccessorReplay(replay, input);
+    return status(input.runId);
+  }
+  if (run.phase !== 'failed') {
+    throw new Error(`Bulk transfer item cannot be reconciled from run phase ${run.phase}`);
+  }
   if (!item || item.state !== 'transferring') {
     throw new Error('Bulk transfer reconciliation requires an ambiguous item');
   }
@@ -421,10 +481,23 @@ export async function reconcileGitHubBulkTransferItem(
       input.targetNumber,
       targetRepository,
     );
-    if (!evidence || evidence.entity.identity.stableId !== item.issueStableId) {
-      throw new Error('Bulk transfer reconciliation target issue identity mismatch');
+    if (!evidence) {
+      throw new Error('Bulk transfer reconciliation target issue was not found');
     }
     const now = nowIso(dependencies);
+    if (evidence.entity.identity.stableId !== item.issueStableId) {
+      reconcileChangedIssueIdentity({
+        run,
+        item,
+        evidence,
+        targetBinding,
+        targetNumber: input.targetNumber,
+        actor: input.actor,
+        authorization: input.successorAuthorization,
+        now,
+      });
+      return;
+    }
     runTransaction((tx) => {
       const observed = observeOperatorExternalEntityLocatorInTransaction(tx, {
         entityId: item.issueEntityId,
@@ -476,6 +549,253 @@ export async function reconcileGitHubBulkTransferItem(
     });
   });
   return status(input.runId);
+}
+
+function reconcileChangedIssueIdentity(input: {
+  run: typeof githubBulkTransferRuns.$inferSelect;
+  item: typeof githubBulkTransferItems.$inferSelect;
+  evidence: ExternalIdentityEvidence;
+  targetBinding: { entityId: string; stableId: string };
+  targetNumber: number;
+  actor: string;
+  authorization: GitHubBulkTransferSuccessorAuthorization | undefined;
+  now: string;
+}): void {
+  const authorization = input.authorization;
+  if (!authorization) {
+    throw new Error(
+      'Bulk transfer target has a successor identity; explicit successor authorization is required',
+    );
+  }
+  validateSuccessorAuthorization(authorization);
+  const sourceStableIdDigest = identityDigest(input.item.issueStableId);
+  const successorStableIdDigest = identityDigest(input.evidence.entity.identity.stableId);
+  if (authorization.expectedSourceStableIdDigest !== sourceStableIdDigest) {
+    throw new Error('Bulk transfer successor authorization source identity mismatch');
+  }
+  if (authorization.expectedSuccessorStableIdDigest !== successorStableIdDigest) {
+    throw new Error('Bulk transfer successor authorization target identity mismatch');
+  }
+  const mode = getGitHubIdentityModeSnapshot(input.run.connectorInstanceId);
+  if (mode.effectiveMode !== 'stable') {
+    throw new Error('Bulk transfer successor reconciliation requires stable-primary mode');
+  }
+  const sourceBinding = readGitHubTaskTransferBinding(
+    db,
+    input.run.connectorInstanceId,
+    input.item.taskId,
+  );
+  const sourceId = `${input.run.sourceRepository}:${input.item.sourceNumber}`;
+  if (
+    sourceBinding.externalEntityId !== input.item.issueEntityId
+    || sourceBinding.stableId !== input.item.issueStableId
+    || sourceBinding.sourceId.toLowerCase() !== sourceId.toLowerCase()
+  ) {
+    throw new Error('Bulk transfer successor reconciliation source binding changed');
+  }
+  const acceptedTargets = db.select({ payload: githubBulkTransferEvents.payload })
+    .from(githubBulkTransferEvents).where(and(
+      eq(githubBulkTransferEvents.runId, input.run.id),
+      eq(githubBulkTransferEvents.taskId, input.item.taskId),
+      eq(githubBulkTransferEvents.eventType, 'dispatch_accepted'),
+    )).all().map((event) => event.payload.targetNumber)
+    .filter((value): value is number => Number.isSafeInteger(value));
+  if (acceptedTargets.length > 0 && !acceptedTargets.includes(input.targetNumber)) {
+    throw new Error('Bulk transfer successor target number disagrees with dispatch evidence');
+  }
+
+  const successorSourceId = `${input.run.targetRepository}:${input.targetNumber}`;
+  const proof = {
+    kind: 'native_issue_identity_successor',
+    runId: input.run.id,
+    planHash: input.run.planHash,
+    taskId: input.item.taskId,
+    sourceExternalEntityId: input.item.issueEntityId,
+    sourceStableIdDigest,
+    sourceId,
+    successorStableIdDigest,
+    successorSourceId,
+    targetRepositoryEntityId: input.targetBinding.entityId,
+    targetRepositoryStableIdDigest: identityDigest(input.targetBinding.stableId),
+    targetNumber: input.targetNumber,
+    beforeDigest: input.item.beforeDigest,
+    expectedModeRevision: mode.modeRevision,
+    dispatchTargetVerified: acceptedTargets.length > 0,
+  };
+
+  runTransaction((tx) => {
+    const currentItem = tx.select().from(githubBulkTransferItems).where(and(
+      eq(githubBulkTransferItems.runId, input.run.id),
+      eq(githubBulkTransferItems.taskId, input.item.taskId),
+    )).limit(1).get();
+    if (!currentItem || currentItem.state !== 'transferring') {
+      throw new Error('Bulk transfer successor reconciliation item state changed');
+    }
+    const currentMode = getGitHubIdentityModeSnapshotInTransaction(
+      tx,
+      input.run.connectorInstanceId,
+    );
+    if (
+      currentMode.effectiveMode !== 'stable'
+      || currentMode.modeRevision !== mode.modeRevision
+    ) {
+      throw new Error('Bulk transfer successor reconciliation identity mode changed');
+    }
+    const currentTask = tx.select({ sourceId: tasks.sourceId }).from(tasks).where(and(
+      eq(tasks.id, input.item.taskId),
+      eq(tasks.connectorInstanceId, input.run.connectorInstanceId),
+    )).limit(1).get();
+    if (currentTask?.sourceId.toLowerCase() !== sourceId.toLowerCase()) {
+      throw new Error('Bulk transfer successor reconciliation task route changed');
+    }
+    const binding = tx.select().from(externalEntityBindings).where(and(
+      eq(externalEntityBindings.connectorInstanceId, input.run.connectorInstanceId),
+      eq(externalEntityBindings.bindingType, 'task'),
+      eq(externalEntityBindings.localId, input.item.taskId),
+      inArray(externalEntityBindings.state, ['shadow', 'active']),
+    )).limit(1).get();
+    if (!binding || binding.externalEntityId !== input.item.issueEntityId) {
+      throw new Error('Bulk transfer successor reconciliation binding changed');
+    }
+    const successor = upsertExternalEntityInTransaction(tx, {
+      identity: input.evidence.entity.identity,
+      observedAt: input.now,
+    });
+    if (successor.id === input.item.issueEntityId) {
+      throw new Error('Bulk transfer successor reconciliation requires distinct identities');
+    }
+    const occupied = tx.select().from(externalEntityBindings).where(and(
+      eq(externalEntityBindings.connectorInstanceId, input.run.connectorInstanceId),
+      eq(externalEntityBindings.externalEntityId, successor.id),
+    )).limit(1).get();
+    if (occupied) {
+      throw new Error('Bulk transfer successor identity is already bound');
+    }
+    tx.update(externalEntityLocators).set({
+      validTo: input.now,
+    }).where(and(
+      eq(externalEntityLocators.externalEntityId, input.item.issueEntityId),
+      isNull(externalEntityLocators.validTo),
+    )).run();
+    const observed = observeOperatorExternalEntityLocatorInTransaction(tx, {
+      entityId: successor.id,
+      identity: input.evidence.entity.identity,
+      locator: input.evidence.entity.locator,
+      repositoryEntityId: input.targetBinding.entityId,
+      observedAt: input.now,
+    });
+    if (observed.state === 'collision') {
+      throw new Error('Bulk transfer successor target locator collision');
+    }
+    tx.update(externalEntityBindings).set({
+      externalEntityId: successor.id,
+      verifiedAt: input.now,
+      updatedAt: input.now,
+    }).where(eq(externalEntityBindings.id, binding.id)).run();
+    tx.update(tasks).set({
+      sourceId: successorSourceId,
+      sourceListId: input.run.targetRepository,
+      sourceListName: input.run.targetRepository,
+      syncStatus: 'synced',
+      updatedAt: input.now,
+    }).where(eq(tasks.id, input.item.taskId)).run();
+    tx.insert(githubBulkTransferSuccessions).values({
+      id: randomUUID(),
+      runId: input.run.id,
+      taskId: input.item.taskId,
+      sourceExternalEntityId: input.item.issueEntityId,
+      successorExternalEntityId: successor.id,
+      sourceStableIdDigest,
+      successorStableIdDigest,
+      sourceId,
+      successorSourceId,
+      targetRepositoryEntityId: input.targetBinding.entityId,
+      targetNumber: input.targetNumber,
+      proof,
+      proofDigest: digest(proof),
+      actor: input.actor,
+      reason: authorization.reason.trim(),
+      idempotencyKey: authorization.idempotencyKey.trim(),
+      observedAt: input.evidence.entity.observedAt,
+      createdAt: input.now,
+    }).run();
+    tx.update(githubBulkTransferItems).set({
+      state: 'transferred',
+      targetNumber: input.targetNumber,
+      newSourceId: successorSourceId,
+      lastError: null,
+      completedAt: input.now,
+      updatedAt: input.now,
+    }).where(and(
+      eq(githubBulkTransferItems.runId, input.run.id),
+      eq(githubBulkTransferItems.taskId, input.item.taskId),
+    )).run();
+    tx.update(githubBulkTransferRuns).set({
+      actor: input.actor,
+      transferredCount: sqlCountTransferred(input.run.id),
+      failedCount: 0,
+      lastError: null,
+      updatedAt: input.now,
+    }).where(eq(githubBulkTransferRuns.id, input.run.id)).run();
+    tx.insert(githubBulkTransferEvents).values({
+      runId: input.run.id,
+      taskId: input.item.taskId,
+      eventType: 'identity_successor_reconciled',
+      payload: {
+        targetNumber: input.targetNumber,
+        sourceStableIdDigest,
+        successorStableIdDigest,
+        proofDigest: digest(proof),
+        actor: input.actor,
+      },
+      createdAt: input.now,
+    }).run();
+  });
+}
+
+function validateSuccessorAuthorization(
+  authorization: GitHubBulkTransferSuccessorAuthorization,
+): void {
+  const digestPattern = /^[a-f0-9]{64}$/;
+  if (
+    !digestPattern.test(authorization.expectedSourceStableIdDigest)
+    || !digestPattern.test(authorization.expectedSuccessorStableIdDigest)
+  ) {
+    throw new Error('Bulk transfer successor authorization requires lowercase SHA-256 digests');
+  }
+  const reason = authorization.reason.trim();
+  if (reason.length < 3 || reason.length > 500) {
+    throw new Error('Bulk transfer successor authorization reason must be 3-500 characters');
+  }
+  const idempotencyKey = authorization.idempotencyKey.trim();
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 192) {
+    throw new Error('Bulk transfer successor idempotency key must be 8-192 characters');
+  }
+}
+
+function assertSuccessorReplay(
+  replay: typeof githubBulkTransferSuccessions.$inferSelect,
+  input: {
+    targetNumber: number;
+    actor: string;
+    successorAuthorization?: GitHubBulkTransferSuccessorAuthorization;
+  },
+): void {
+  const authorization = input.successorAuthorization;
+  if (!authorization) {
+    throw new Error('Bulk transfer successor replay requires its original authorization');
+  }
+  validateSuccessorAuthorization(authorization);
+  if (
+    replay.targetNumber !== input.targetNumber
+    || replay.actor !== input.actor
+    || replay.reason !== authorization.reason.trim()
+    || replay.idempotencyKey !== authorization.idempotencyKey.trim()
+    || replay.sourceStableIdDigest !== authorization.expectedSourceStableIdDigest
+    || replay.successorStableIdDigest !== authorization.expectedSuccessorStableIdDigest
+  ) {
+    throw new Error('Bulk transfer successor idempotency key belongs to another request');
+  }
 }
 
 export function abortGitHubBulkTransfer(
@@ -583,13 +903,33 @@ async function completeRun(
   const destinationStableIds = new Set(
     destinationIssues.map((issue) => issue.node_id).filter((value): value is string => Boolean(value)),
   );
+  const destinationStableIdDigests = new Set(
+    [...destinationStableIds].map((stableId) => identityDigest(stableId)),
+  );
+  const successions = db.select().from(githubBulkTransferSuccessions)
+    .where(eq(githubBulkTransferSuccessions.runId, runId)).all();
+  const itemByTask = new Map(items.map((item) => [item.taskId, item]));
+  if (successions.some((succession) => {
+    const item = itemByTask.get(succession.taskId);
+    return !item || !successionProofMatches(succession, run, item);
+  })) {
+    throw new Error('Bulk transfer successor proof did not reconcile');
+  }
+  const successorByTask = new Map(
+    successions.map((succession) => [succession.taskId, succession.successorStableIdDigest]),
+  );
   const targetBefore = Array.isArray(run.plan.targetIssueStableIds)
     ? run.plan.targetIssueStableIds.filter((value): value is string => typeof value === 'string')
     : null;
   if (
     !targetBefore
     || destinationIssues.length !== targetBefore.length + items.length
-    || items.some((item) => !destinationStableIds.has(item.issueStableId))
+    || items.some((item) => {
+      const expectedDigest = successorByTask.get(item.taskId);
+      return expectedDigest
+        ? !destinationStableIdDigests.has(expectedDigest)
+        : !destinationStableIds.has(item.issueStableId);
+    })
   ) {
     throw new Error('Bulk transfer destination counts or stable identities did not reconcile');
   }
@@ -672,6 +1012,11 @@ async function runBounded<T>(
 async function withRateLimitBackoff<T>(
   operation: () => Promise<T>,
   sleep: (milliseconds: number) => Promise<void> = defaultSleep,
+  onRateLimited?: (retry: {
+    attempt: number;
+    delayMs: number | null;
+    status: number | null;
+  }) => boolean,
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -679,12 +1024,63 @@ async function withRateLimitBackoff<T>(
       return await operation();
     } catch (error) {
       lastError = error;
-      const message = error instanceof Error ? error.message.toLowerCase() : '';
-      if (!message.includes('rate limit') && !message.includes('(429)')) throw error;
-      if (attempt < 3) await sleep(1_000 * 2 ** attempt);
+      const retry = rateLimitRetry(error, attempt);
+      if (!retry) throw error;
+      const delayMs = attempt < 3 ? retry.delayMs : null;
+      const retryAllowed = onRateLimited?.({
+        attempt: attempt + 1,
+        delayMs,
+        status: retry.status,
+      }) ?? true;
+      if (!retryAllowed) throw error;
+      if (delayMs !== null) await sleep(delayMs);
     }
   }
   throw lastError;
+}
+
+function rateLimitRetry(
+  error: unknown,
+  attempt: number,
+): { delayMs: number; status: number | null } | null {
+  const fallbackDelayMs = 1_000 * 2 ** attempt;
+  if (
+    error instanceof GitHubHttpError
+    && (error.status === 429 || isProvenRateLimitedForbidden(error))
+  ) {
+    const resetDelayMs = rateLimitResetDelayMilliseconds(error);
+    return {
+      delayMs: Math.min(
+        error.retryAfterMs ?? resetDelayMs ?? fallbackDelayMs,
+        MAX_RATE_LIMIT_BACKOFF_MS,
+      ),
+      status: error.status,
+    };
+  }
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  if (!message.includes('rate limit') && !message.includes('(429)')) return null;
+  return { delayMs: fallbackDelayMs, status: null };
+}
+
+function isProvenRateLimitedForbidden(error: GitHubHttpError): boolean {
+  if (error.status !== 403) return false;
+  if (error.retryAfterMs !== null) return true;
+  if (rateLimitResetDelayMilliseconds(error) !== null) return true;
+  const body = error.responseBody?.toLowerCase() ?? '';
+  return (
+    body.includes('secondary rate limit')
+    || body.includes('api rate limit exceeded')
+    || body.includes('abuse detection mechanism')
+  );
+}
+
+function rateLimitResetDelayMilliseconds(error: GitHubHttpError): number | null {
+  if (error.headers['x-ratelimit-remaining']?.trim() !== '0') return null;
+  const reset = error.headers['x-ratelimit-reset']?.trim();
+  if (!reset || !/^\d+$/.test(reset)) return null;
+  const resetAtMs = Number(reset) * 1_000;
+  if (!Number.isSafeInteger(resetAtMs) || resetAtMs <= 0) return null;
+  return Math.max(0, resetAtMs - Date.now());
 }
 
 function taskMetadataDigest(taskId: string): string {
@@ -787,15 +1183,38 @@ function blockingStateCount(connectorInstanceId: string): number {
   return scalar(`
     SELECT
       (SELECT COUNT(*) FROM tasks
-       WHERE connector_instance_id = ? AND sync_status IN ('pending_push', 'push_error'))
+       WHERE connector_instance_id = ?
+         AND sync_status IN ('pending_push', 'push_error', 'push_failed'))
       + (SELECT COUNT(*) FROM sync_deletion_candidates WHERE connector_id = ?)
       + (SELECT COUNT(*) FROM github_identity_collisions
          WHERE connector_instance_id = ? AND state = 'open')
       + (SELECT COUNT(*) FROM github_identity_write_cycles
-         WHERE connector_instance_id = ? AND reconciliation_state IN
-           ('unresolved', 'pre_dispatch_retryable', 'post_dispatch_retryable', 'quarantined'))
+         WHERE connector_instance_id = ?
+           AND (
+             reconciliation_state = 'quarantined'
+             OR state = 'running'
+             OR (
+               state = 'interrupted'
+               AND reconciliation_state NOT IN
+                 ('pre_dispatch_retryable', 'resolved', 'superseded')
+             )
+             OR (
+               state = 'completed'
+               AND reconciliation_state NOT IN
+                 ('pre_dispatch_retryable', 'resolved', 'superseded')
+               AND (
+                 pending_candidate_count > observed_route_count
+                 OR blocked_count > 0
+                 OR failed_count > 0
+                 OR unknown_count > 0
+               )
+             )
+           ))
+      + (SELECT COUNT(*) FROM dependency_reconciliation_snapshots
+         WHERE connector_instance_id = ? AND status != 'completed')
       AS value
-  `, connectorInstanceId, connectorInstanceId, connectorInstanceId, connectorInstanceId);
+  `, connectorInstanceId, connectorInstanceId, connectorInstanceId, connectorInstanceId,
+  connectorInstanceId);
 }
 
 function status(runId: string): GitHubBulkTransferStatus {
@@ -955,6 +1374,31 @@ function backupReady(proof: GitHubRepointBackupProof, now: Date): boolean {
 
 function digest(value: unknown): string {
   return createHash('sha256').update(canonical(value)).digest('hex');
+}
+
+function identityDigest(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function successionProofMatches(
+  succession: typeof githubBulkTransferSuccessions.$inferSelect,
+  run: typeof githubBulkTransferRuns.$inferSelect,
+  item: typeof githubBulkTransferItems.$inferSelect,
+): boolean {
+  const proof = succession.proof;
+  return digest(proof) === succession.proofDigest
+    && proof.kind === 'native_issue_identity_successor'
+    && proof.runId === run.id
+    && proof.planHash === run.planHash
+    && proof.taskId === item.taskId
+    && proof.sourceExternalEntityId === succession.sourceExternalEntityId
+    && proof.sourceStableIdDigest === succession.sourceStableIdDigest
+    && proof.sourceId === succession.sourceId
+    && proof.successorStableIdDigest === succession.successorStableIdDigest
+    && proof.successorSourceId === succession.successorSourceId
+    && proof.targetRepositoryEntityId === succession.targetRepositoryEntityId
+    && proof.targetNumber === succession.targetNumber
+    && proof.beforeDigest === item.beforeDigest;
 }
 
 function canonical(value: unknown): string {

@@ -110,12 +110,34 @@ for (const file of workflowFiles) {
     const publish = workflow.jobs?.publish;
     assert.ok(prepare && publish, `${file} must separate source verification from publication`);
     assert.deepEqual(prepare.permissions, { contents: 'read' }, `${file} prepare job must be read-only`);
+    assert.deepEqual(
+      publish.permissions,
+      {
+        attestations: 'write',
+        contents: 'read',
+        'id-token': 'write',
+        packages: 'write',
+      },
+      `${file} publish job must use only its required permissions`,
+    );
     assert.deepEqual(publish.needs, ['prepare'], `${file} publish job must depend on source verification`);
     assert.equal(
       publish.env?.SOURCE_SHA,
       '${{ needs.prepare.outputs.source_sha }}',
       `${file} publish job must consume the verified source SHA`,
     );
+    for (const [jobName, job] of Object.entries({ prepare, publish })) {
+      const checkouts = job.steps?.filter((step) => step.uses?.startsWith('actions/checkout@')) ?? [];
+      assert.equal(checkouts.length, 1, `${file} ${jobName} job must have exactly one checkout`);
+      const [checkout] = checkouts;
+      assert.equal(checkout.with?.ref, 'main', `${file} ${jobName} checkout must select main`);
+      assert.equal(checkout.with?.['fetch-depth'], 0, `${file} ${jobName} checkout must include main history`);
+      assert.equal(
+        checkout.with?.['persist-credentials'],
+        false,
+        `${file} ${jobName} checkout must not persist credentials`,
+      );
+    }
 
     const prepareCondition = prepare.if ?? '';
     for (const invariant of [
@@ -130,9 +152,11 @@ for (const file of workflowFiles) {
 
     for (const invariant of [
       '^[0-9a-f]{40}$',
-      'git merge-base --is-ancestor "${source_sha}" refs/remotes/origin/main',
+      'trusted_main_sha="$(git rev-parse HEAD)"',
+      'git merge-base --is-ancestor "${source_sha}" "${trusted_main_sha}"',
+      'git merge-base --is-ancestor "${SOURCE_SHA}" "${trusted_main_sha}"',
+      'git checkout --detach "${SOURCE_SHA}"',
       'actual_sha="$(git rev-parse HEAD)"',
-      'git merge-base --is-ancestor "${SOURCE_SHA}" refs/remotes/origin/main',
       'provenance-build-type-v1.md',
       'externalParameters: {',
       'builder: {',
@@ -142,6 +166,11 @@ for (const file of workflowFiles) {
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
     }
+    assert.doesNotMatch(
+      source,
+      /\bgit\s+fetch\b/u,
+      `${file} must not fetch after checkout removes private-repository credentials`,
+    );
     assert.ok(!source.includes('GITHUB_SHA'), `${file} must not build or attest the trigger-context SHA`);
   }
 

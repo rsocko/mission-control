@@ -66,10 +66,10 @@ jobs:
             exit 1
           fi
 
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          trusted_main_sha="$(git rev-parse HEAD)"
           git cat-file -e "${source_sha}^{commit}"
-          if ! git merge-base --is-ancestor "${source_sha}" refs/remotes/origin/main; then
-            echo "::error::Commit is not in the origin/main history"
+          if ! git merge-base --is-ancestor "${source_sha}" "${trusted_main_sha}"; then
+            echo "::error::Commit is not in the checked-out main history"
             exit 1
           fi
 
@@ -92,27 +92,29 @@ jobs:
       digest: ${{ steps.publish.outputs.digest }}
       image: ${{ steps.image.outputs.name }}
     steps:
-      - name: Check out verified source
+      - name: Check out current main history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ env.SOURCE_SHA }}
+          ref: main
 
-      - name: Reverify exact checkout and main ancestry
+      - name: Reverify main ancestry and select exact source
         shell: bash
         run: |
           set -euo pipefail
 
-          actual_sha="$(git rev-parse HEAD)"
-          if [[ "${actual_sha}" != "${SOURCE_SHA}" ]]; then
-            echo "::error::Checked out ${actual_sha}, expected ${SOURCE_SHA}"
+          trusted_main_sha="$(git rev-parse HEAD)"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          if ! git merge-base --is-ancestor "${SOURCE_SHA}" "${trusted_main_sha}"; then
+            echo "::error::Verified commit is no longer in the checked-out main history"
             exit 1
           fi
 
-          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${SOURCE_SHA}" refs/remotes/origin/main; then
-            echo "::error::Verified commit is no longer in the origin/main history"
+          git checkout --detach "${SOURCE_SHA}"
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${SOURCE_SHA}" ]]; then
+            echo "::error::Checked out ${actual_sha}, expected ${SOURCE_SHA}"
             exit 1
           fi
 

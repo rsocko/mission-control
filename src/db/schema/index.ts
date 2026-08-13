@@ -153,6 +153,7 @@ export {
   githubRepositoryRepointEvents,
   githubBulkTransferRuns,
   githubBulkTransferItems,
+  githubBulkTransferSuccessions,
   githubBulkTransferEvents,
   connectorMaintenanceLocks,
   EXTERNAL_ENTITY_TYPES,

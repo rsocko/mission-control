@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type {
   ExternalIdentityEvidence,
@@ -9,6 +11,7 @@ import type {
 import type {
   GitHubRepositoryRepointRemote,
 } from '@/lib/connectors/github-issues/repoint-service';
+import { GitHubHttpError } from '@/lib/connectors/github-issues/github-client';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -61,6 +64,68 @@ describe('GitHub bulk issue transfer', () => {
       'owner/source:1',
       'owner/source:2',
     ]);
+  });
+
+  it('allows a fully observed completed comparison write cycle', async () => {
+    const seeded = seedConnector('bulk-completed-write-cycle');
+    database.default.insert(schema.githubIdentityWriteCycles).values({
+      id: 'bulk-completed-write-cycle-evidence',
+      connectorInstanceId: seeded.connectorId,
+      effectiveMode: 'comparison',
+      modeRevision: 4,
+      pendingCandidateCount: 1,
+      observedRouteCount: 1,
+      legacyAppliedCount: 1,
+      state: 'completed',
+      startedAt: now.toISOString(),
+      completedAt: now.toISOString(),
+    }).run();
+
+    const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+
+    expect(preview.go).toBe(true);
+  });
+
+  it('fails closed while an unknown GitHub write outcome is unresolved', async () => {
+    const seeded = seedConnector('bulk-push-failed');
+    database.default.update(schema.tasks).set({
+      syncStatus: 'push_failed',
+      pushRetryCount: 5,
+    }).where(eq(schema.tasks.id, seeded.taskIds[0])).run();
+
+    const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+
+    expect(preview.go).toBe(false);
+    expect(preview.reasons).toContain('pending_writes_deletions_or_identity_collisions');
+  });
+
+  it('fails closed while dependency reconciliation is incomplete', async () => {
+    const seeded = seedConnector('bulk-dependency-running');
+    database.default.insert(schema.dependencyReconciliationSnapshots).values({
+      id: 'bulk-dependency-running-snapshot',
+      connectorInstanceId: seeded.connectorId,
+      status: 'running',
+      phase: 'reconciling',
+      cursor: 0,
+      total: 1,
+      batchSize: 100,
+      startedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    }).run();
+
+    const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+
+    expect(preview.go).toBe(false);
+    expect(preview.reasons).toContain('pending_writes_deletions_or_identity_collisions');
   });
 
   it('checkpoints verified transfers and reconciles unchanged local metadata', async () => {
@@ -210,6 +275,392 @@ describe('GitHub bulk issue transfer', () => {
       transferredCount: 2,
     });
   });
+
+  it('returns rate-limited dispatches to pending before bounded retry', async () => {
+    const seeded = seedConnector('bulk-rate-limit');
+    const remote = createRemote(seeded, { rateLimitFirstDispatch: true });
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    const observedStates: string[] = [];
+    const sleep = vi.fn(async () => {
+      const item = database.default.select().from(schema.githubBulkTransferItems)
+        .where(eq(
+          schema.githubBulkTransferItems.runId,
+          database.default.select().from(schema.githubBulkTransferRuns)
+            .where(eq(
+              schema.githubBulkTransferRuns.connectorInstanceId,
+              seeded.connectorId,
+            )).get()!.id,
+        )).get();
+      observedStates.push(item!.state);
+    });
+
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      idempotencyKey: 'bulk-rate-limit-key',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote,
+      now: () => now,
+      sleep,
+    })).resolves.toMatchObject({
+      phase: 'completed',
+      transferredCount: 2,
+      ambiguousCount: 0,
+    });
+
+    expect(sleep).toHaveBeenCalledWith(2_000);
+    expect(observedStates).toEqual(['pending']);
+    expect(database.default.select().from(schema.githubBulkTransferEvents).all()
+      .filter((event) => event.runId === database.default.select()
+        .from(schema.githubBulkTransferRuns)
+        .where(eq(
+          schema.githubBulkTransferRuns.connectorInstanceId,
+          seeded.connectorId,
+        )).get()!.id)
+      .map((event) => event.eventType)).toContain('rate_limited');
+  });
+
+  it('keeps a post-transfer verification rate limit ambiguous without redispatch', async () => {
+    const seeded = seedConnector('bulk-verification-rate-limit');
+    const remote = createRemote(seeded, { rateLimitTargetResolutionOnce: true });
+    const transferIssue = vi.fn(remote.transferIssue!);
+    remote.transferIssue = transferIssue;
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    const sleep = vi.fn(async () => undefined);
+    const execute = {
+      ...common,
+      idempotencyKey: 'bulk-verification-rate-limit-key',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    };
+
+    await expect(service.executeGitHubBulkTransfer(execute, {
+      remote,
+      now: () => now,
+      sleep,
+    })).rejects.toThrow('GraphQL request failed: 429');
+
+    const run = database.default.select().from(schema.githubBulkTransferRuns)
+      .where(eq(
+        schema.githubBulkTransferRuns.connectorInstanceId,
+        seeded.connectorId,
+      )).get()!;
+    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+      phase: 'failed',
+      ambiguousCount: 1,
+      connectorEnabled: false,
+    });
+    expect(transferIssue).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+    }, { remote, now: () => now })).resolves.toMatchObject({
+      ambiguousCount: 0,
+      transferredCount: 1,
+    });
+    await expect(service.executeGitHubBulkTransfer(execute, {
+      remote,
+      now: () => now,
+      sleep,
+    })).resolves.toMatchObject({
+      phase: 'completed',
+      transferredCount: 2,
+    });
+    expect(transferIssue).toHaveBeenCalledTimes(2);
+  });
+
+  it('adopts explicitly authorized successor identities and preserves task identity', async () => {
+    const seeded = seedConnector('bulk-identity-successor');
+    const remote = createRemote(seeded, { changeIdentityOnTransfer: true });
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    const execute = {
+      ...common,
+      idempotencyKey: 'bulk-identity-successor-run',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    };
+
+    await expect(service.executeGitHubBulkTransfer(execute, {
+      remote,
+      now: () => now,
+      sleep: async () => undefined,
+    })).rejects.toThrow('changed issue identity');
+    const run = database.default.select().from(schema.githubBulkTransferRuns)
+      .where(eq(
+        schema.githubBulkTransferRuns.connectorInstanceId,
+        seeded.connectorId,
+      )).get()!;
+    const sourceStableId = `I_${seeded.connectorId}_1`;
+    const successorStableId = `S_${sourceStableId}`;
+    const authorization = {
+      expectedSourceStableIdDigest: sha256(sourceStableId),
+      expectedSuccessorStableIdDigest: sha256(successorStableId),
+      reason: 'GitHub native transfer created the reviewed successor identity',
+      idempotencyKey: 'successor-reconcile-1',
+    };
+
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+    }, { remote, now: () => now })).rejects.toThrow('explicit successor authorization');
+    database.default.update(schema.githubIdentityControls).set({
+      stablePrimaryEnabled: false,
+    }).where(eq(
+      schema.githubIdentityControls.connectorInstanceId,
+      seeded.connectorId,
+    )).run();
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: authorization,
+    }, { remote, now: () => now })).rejects.toThrow('requires stable-primary mode');
+    database.default.update(schema.githubIdentityControls).set({
+      stablePrimaryEnabled: true,
+    }).where(eq(
+      schema.githubIdentityControls.connectorInstanceId,
+      seeded.connectorId,
+    )).run();
+    const dispatchAccepted = database.default.select()
+      .from(schema.githubBulkTransferEvents).where(eq(
+        schema.githubBulkTransferEvents.eventType,
+        'dispatch_accepted',
+      )).all().find((event) => (
+        event.runId === run.id && event.taskId === seeded.taskIds[0]
+      ))!;
+    database.default.update(schema.githubBulkTransferEvents).set({
+      payload: { ...dispatchAccepted.payload, targetNumber: 999 },
+    }).where(eq(schema.githubBulkTransferEvents.id, dispatchAccepted.id)).run();
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: authorization,
+    }, { remote, now: () => now })).rejects.toThrow('disagrees with dispatch evidence');
+    database.default.update(schema.githubBulkTransferEvents).set({
+      payload: dispatchAccepted.payload,
+    }).where(eq(schema.githubBulkTransferEvents.id, dispatchAccepted.id)).run();
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: {
+        ...authorization,
+        expectedSuccessorStableIdDigest: 'f'.repeat(64),
+      },
+    }, { remote, now: () => now })).rejects.toThrow('target identity mismatch');
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: authorization,
+    }, { remote, now: () => now })).resolves.toMatchObject({
+      phase: 'failed',
+      ambiguousCount: 0,
+      transferredCount: 1,
+      connectorEnabled: false,
+    });
+
+    const task = database.default.select().from(schema.tasks)
+      .where(eq(schema.tasks.id, seeded.taskIds[0])).get()!;
+    expect(task).toMatchObject({
+      id: seeded.taskIds[0],
+      sourceId: 'owner/target:101',
+      sourceListId: 'owner/target',
+      metadata: { issueNumber: 1, retained: true },
+    });
+    expect(identities.readGitHubTaskTransferBinding(
+      database.default,
+      seeded.connectorId,
+      seeded.taskIds[0],
+    )).toMatchObject({
+      taskId: seeded.taskIds[0],
+      stableId: successorStableId,
+      sourceId: 'owner/target:101',
+    });
+    const succession = database.default.select().from(schema.githubBulkTransferSuccessions)
+      .where(eq(schema.githubBulkTransferSuccessions.runId, run.id)).get()!;
+    expect(succession).toMatchObject({
+      taskId: seeded.taskIds[0],
+      sourceStableIdDigest: sha256(sourceStableId),
+      successorStableIdDigest: sha256(successorStableId),
+      sourceId: 'owner/source:1',
+      successorSourceId: 'owner/target:101',
+      targetNumber: 101,
+      actor: 'incident-operator',
+      idempotencyKey: 'successor-reconcile-1',
+    });
+    expect(succession.proofDigest).toMatch(/^[a-f0-9]{64}$/);
+    const sourceLocator = database.default.select().from(schema.externalEntityLocators)
+      .where(eq(schema.externalEntityLocators.externalEntityId, succession.sourceExternalEntityId))
+      .get()!;
+    expect(sourceLocator.validTo).toBe(now.toISOString());
+
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: authorization,
+    }, { remote, now: () => now })).resolves.toMatchObject({
+      transferredCount: 1,
+    });
+    database.default.update(schema.githubBulkTransferSuccessions).set({
+      proof: { ...succession.proof, targetNumber: 999 },
+    }).where(eq(schema.githubBulkTransferSuccessions.id, succession.id)).run();
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: authorization,
+    }, { remote, now: () => now })).rejects.toThrow('replay proof is invalid');
+    database.default.update(schema.githubBulkTransferSuccessions).set({
+      proof: succession.proof,
+    }).where(eq(schema.githubBulkTransferSuccessions.id, succession.id)).run();
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: {
+        ...authorization,
+        reason: 'different authorization',
+      },
+    }, { remote, now: () => now })).rejects.toThrow('belongs to another request');
+
+    await expect(service.executeGitHubBulkTransfer(execute, {
+      remote,
+      now: () => now,
+      sleep: async () => undefined,
+    })).rejects.toThrow('changed issue identity');
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[1],
+      targetNumber: 102,
+      actor: 'incident-operator',
+      successorAuthorization: {
+        expectedSourceStableIdDigest: sha256(`I_${seeded.connectorId}_2`),
+        expectedSuccessorStableIdDigest: sha256(`S_I_${seeded.connectorId}_2`),
+        reason: 'GitHub native transfer created the second reviewed successor identity',
+        idempotencyKey: 'successor-reconcile-2',
+      },
+    }, { remote, now: () => now })).resolves.toMatchObject({
+      transferredCount: 2,
+      ambiguousCount: 0,
+    });
+    await expect(service.executeGitHubBulkTransfer(execute, {
+      remote,
+      now: () => now,
+      sleep: async () => undefined,
+    })).resolves.toMatchObject({
+      phase: 'completed',
+      transferredCount: 2,
+      connectorEnabled: true,
+    });
+  });
+
+  it('refuses to adopt a successor identity already bound to another task', async () => {
+    const seeded = seedConnector('bulk-successor-occupied');
+    const remote = createRemote(seeded, { changeIdentityOnTransfer: true });
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      idempotencyKey: 'bulk-successor-occupied-run',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote,
+      now: () => now,
+      sleep: async () => undefined,
+    })).rejects.toThrow('changed issue identity');
+    const run = database.default.select().from(schema.githubBulkTransferRuns)
+      .where(eq(
+        schema.githubBulkTransferRuns.connectorInstanceId,
+        seeded.connectorId,
+      )).get()!;
+    const occupiedTaskId = `${seeded.connectorId}-occupied`;
+    database.default.insert(schema.tasks).values({
+      id: occupiedTaskId,
+      sourceId: 'owner/target:101',
+      sourceListId: 'owner/target',
+      sourceListName: 'owner/target',
+      connectorType: 'github-issues',
+      connectorInstanceId: seeded.connectorId,
+      title: 'Conflicting successor task',
+      description: '',
+      status: 'todo',
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      lastSyncedAt: now.toISOString(),
+    }).run();
+    identities.persistExternalIdentityBatch([{
+      target: {
+        connectorInstanceId: seeded.connectorId,
+        bindingType: 'task',
+        localId: occupiedTaskId,
+        legacyIdentity: 'owner/target:101',
+      },
+      evidence: issueEvidence(
+        seeded.connectorId,
+        'target',
+        101,
+        `S_I_${seeded.connectorId}_1`,
+      ),
+    }], 'stable_primary');
+
+    await expect(service.reconcileGitHubBulkTransferItem({
+      runId: run.id,
+      taskId: seeded.taskIds[0],
+      targetNumber: 101,
+      actor: 'incident-operator',
+      successorAuthorization: {
+        expectedSourceStableIdDigest: sha256(`I_${seeded.connectorId}_1`),
+        expectedSuccessorStableIdDigest: sha256(`S_I_${seeded.connectorId}_1`),
+        reason: 'Attempt to adopt a successor that is already occupied',
+        idempotencyKey: 'successor-occupied-reconcile',
+      },
+    }, { remote, now: () => now })).rejects.toThrow('already bound');
+    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+      ambiguousCount: 1,
+      connectorEnabled: false,
+    });
+    expect(identities.readGitHubTaskTransferBinding(
+      database.default,
+      seeded.connectorId,
+      seeded.taskIds[0],
+    )).toMatchObject({
+      stableId: `I_${seeded.connectorId}_1`,
+      sourceId: 'owner/source:1',
+    });
+  });
 });
 
 function input(connectorInstanceId: string) {
@@ -323,6 +774,9 @@ function createRemote(
   options: {
     failAfterDispatch?: boolean;
     failSourceResolutionOnce?: boolean;
+    rateLimitFirstDispatch?: boolean;
+    rateLimitTargetResolutionOnce?: boolean;
+    changeIdentityOnTransfer?: boolean;
   } = {},
 ): GitHubRepositoryRepointRemote {
   const locations = new Map([
@@ -331,6 +785,7 @@ function createRemote(
   ]);
   let transferCalls = 0;
   let sourceResolutionFailed = false;
+  let targetResolutionRateLimited = false;
   return {
     async resolveRepository(repository) {
       if (repository === 'owner/source') {
@@ -364,6 +819,14 @@ function createRemote(
         sourceResolutionFailed = true;
         return null;
       }
+      if (
+        options.rateLimitTargetResolutionOnce
+        && repository === 'owner/target'
+        && !targetResolutionRateLimited
+      ) {
+        targetResolutionRateLimited = true;
+        throw new GitHubHttpError('GraphQL request failed: 429', 429, 2_000);
+      }
       const match = [...locations.entries()].find(([, location]) => (
         location.repository === repository && location.number === issueNumber
       ));
@@ -378,8 +841,15 @@ function createRemote(
     },
     async transferIssue(issueStableId) {
       transferCalls++;
+      if (options.rateLimitFirstDispatch && transferCalls === 1) {
+        throw new GitHubHttpError('GraphQL request failed: 429', 429, 2_000);
+      }
       const targetNumber = 100 + transferCalls;
-      locations.set(issueStableId, { repository: 'owner/target', number: targetNumber });
+      const transferredStableId = options.changeIdentityOnTransfer
+        ? `S_${issueStableId}`
+        : issueStableId;
+      if (options.changeIdentityOnTransfer) locations.delete(issueStableId);
+      locations.set(transferredStableId, { repository: 'owner/target', number: targetNumber });
       if (options.failAfterDispatch && transferCalls === 1) {
         throw new Error('simulated post-dispatch interruption');
       }
@@ -445,4 +915,8 @@ function restIssue(number: number, nodeId: string, state: string) {
     html_url: `https://github.test/owner/source/issues/${number}`,
     labels: [],
   };
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }

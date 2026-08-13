@@ -13,8 +13,20 @@ const GITHUB_REST_URL = 'https://api.github.com';
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 500;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const MAX_RETRY_AFTER_MS = 300_000;
 
 export { GITHUB_GRAPHQL_URL, GITHUB_REST_URL };
+
+export class GitHubHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly retryAfterMs: number | null,
+  ) {
+    super(message);
+    this.name = 'GitHubHttpError';
+  }
+}
 
 /** Returns true for transient network errors worth retrying (socket resets, DNS failures, etc.) */
 function isTransientError(err: unknown): boolean {
@@ -322,7 +334,13 @@ export function createGitHubClient(
       'GraphQL',
       options?.signal,
     );
-    if (!res.ok) throw new Error(`GraphQL request failed: ${res.status}`);
+    if (!res.ok) {
+      throw new GitHubHttpError(
+        `GraphQL request failed: ${res.status}`,
+        res.status,
+        retryAfterMilliseconds(res.headers.get('retry-after')),
+      );
+    }
     return res.json();
   }
 
@@ -336,6 +354,17 @@ export function createGitHubClient(
       options?: { signal?: AbortSignal },
     ) => Promise<GraphQLAnyResponse>,
   };
+}
+
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(seconds * 1_000, MAX_RETRY_AFTER_MS);
+  }
+  const retryAt = Date.parse(value);
+  if (!Number.isFinite(retryAt)) return null;
+  return Math.min(Math.max(0, retryAt - Date.now()), MAX_RETRY_AFTER_MS);
 }
 
 function resolveRestUrl(path: string, origin: TrustedGitHubOrigin): string {

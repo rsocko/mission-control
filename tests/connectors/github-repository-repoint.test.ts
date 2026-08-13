@@ -225,7 +225,7 @@ describe('GitHub repository repoint service', () => {
     const seeded = seedRepository('blocked', 'blocked-old/repo', 'R_blocked', 'I_blocked');
     database.default.update(schema.tasks).set({ syncStatus: 'pending_push' })
       .where(eq(schema.tasks.id, seeded.taskId)).run();
-    database.default.update(schema.tasks).set({ syncStatus: 'push_error' })
+    database.default.update(schema.tasks).set({ syncStatus: 'push_failed' })
       .where(eq(schema.tasks.id, seeded.relatedTaskId)).run();
     database.default.insert(schema.syncDeletionCandidates).values({
       id: 'delete-blocked',
@@ -459,6 +459,51 @@ describe('GitHub repository repoint service', () => {
       .where(eq(schema.connectorConfigs.id, 'rollback')).get()).toMatchObject({
       enabled: false,
       settings: { repos: ['rollback-old/repo'] },
+    });
+    expect(database.default.select().from(schema.sourceLists)
+      .where(eq(schema.sourceLists.id, seeded.sourceListId)).get()).toMatchObject({
+      sourceId: 'rollback-old/repo',
+      name: 'rollback-old/repo',
+      lastKnownRemoteName: null,
+    });
+
+    const operation = database.default.select().from(schema.githubRepositoryRepoints)
+      .where(eq(schema.githubRepositoryRepoints.id, failed.id)).get()!;
+    database.default.update(schema.sourceLists).set({
+      sourceId: 'rollback-new/repo',
+      name: 'rollback-new/repo',
+      lastKnownRemoteName: 'rollback-new/repo',
+    }).where(eq(schema.sourceLists.id, seeded.sourceListId)).run();
+    database.default.update(schema.githubRepositoryRepoints).set({
+      rollbackSnapshot: {
+        ...operation.rollbackSnapshot,
+        sourceList: undefined,
+      },
+    }).where(eq(schema.githubRepositoryRepoints.id, failed.id)).run();
+
+    const repaired = await service.rollbackGitHubRepositoryRepoint(
+      failed.id,
+      'repair-operator',
+      dependencies(base),
+    );
+    expect(repaired).toMatchObject({ phase: 'rolled_back', connectorLocked: false });
+    expect(repaired.actor).toBe('incident-operator');
+    expect(database.default.select().from(schema.sourceLists)
+      .where(eq(schema.sourceLists.id, seeded.sourceListId)).get()).toMatchObject({
+      sourceId: 'rollback-old/repo',
+      name: 'rollback-old/repo',
+      lastKnownRemoteName: 'rollback-old/repo',
+    });
+    const events = database.default.select().from(schema.githubRepositoryRepointEvents)
+      .where(eq(schema.githubRepositoryRepointEvents.operationId, failed.id)).all();
+    expect(events.at(-1)).toMatchObject({
+      phase: 'rolled_back',
+      actor: 'repair-operator',
+      payload: {
+        idempotentRepair: true,
+        restoredSourceList: true,
+        sourceListSnapshotMode: 'legacy_derived',
+      },
     });
   });
 

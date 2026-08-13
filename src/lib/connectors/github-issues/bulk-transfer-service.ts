@@ -357,7 +357,12 @@ export async function executeGitHubBulkTransfer(
               eq(githubBulkTransferItems.runId, runId),
               eq(githubBulkTransferItems.taskId, item.taskId),
             )).get();
-          if (current?.state === 'pending') {
+          const definitelyRejectedBeforeAcceptance = (
+            !transferAccepted
+            && error instanceof GitHubHttpError
+            && error.status === 403
+          );
+          if (current?.state === 'pending' || definitelyRejectedBeforeAcceptance) {
             const failedAt = nowIso(dependencies);
             const message = error instanceof Error ? error.message : String(error);
             db.update(githubBulkTransferItems).set({
@@ -1039,15 +1044,43 @@ function rateLimitRetry(
   attempt: number,
 ): { delayMs: number; status: number | null } | null {
   const fallbackDelayMs = 1_000 * 2 ** attempt;
-  if (error instanceof GitHubHttpError && error.status === 429) {
+  if (
+    error instanceof GitHubHttpError
+    && (error.status === 429 || isProvenRateLimitedForbidden(error))
+  ) {
+    const resetDelayMs = rateLimitResetDelayMilliseconds(error);
     return {
-      delayMs: Math.min(error.retryAfterMs ?? fallbackDelayMs, MAX_RATE_LIMIT_BACKOFF_MS),
+      delayMs: Math.min(
+        error.retryAfterMs ?? resetDelayMs ?? fallbackDelayMs,
+        MAX_RATE_LIMIT_BACKOFF_MS,
+      ),
       status: error.status,
     };
   }
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   if (!message.includes('rate limit') && !message.includes('(429)')) return null;
   return { delayMs: fallbackDelayMs, status: null };
+}
+
+function isProvenRateLimitedForbidden(error: GitHubHttpError): boolean {
+  if (error.status !== 403) return false;
+  if (error.retryAfterMs !== null) return true;
+  if (rateLimitResetDelayMilliseconds(error) !== null) return true;
+  const body = error.responseBody?.toLowerCase() ?? '';
+  return (
+    body.includes('secondary rate limit')
+    || body.includes('api rate limit exceeded')
+    || body.includes('abuse detection mechanism')
+  );
+}
+
+function rateLimitResetDelayMilliseconds(error: GitHubHttpError): number | null {
+  if (error.headers['x-ratelimit-remaining']?.trim() !== '0') return null;
+  const reset = error.headers['x-ratelimit-reset']?.trim();
+  if (!reset || !/^\d+$/.test(reset)) return null;
+  const resetAtMs = Number(reset) * 1_000;
+  if (!Number.isSafeInteger(resetAtMs) || resetAtMs <= 0) return null;
+  return Math.max(0, resetAtMs - Date.now());
 }
 
 function taskMetadataDigest(taskId: string): string {

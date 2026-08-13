@@ -325,9 +325,134 @@ describe('GitHub bulk issue transfer', () => {
       .map((event) => event.eventType)).toContain('rate_limited');
   });
 
-  it('keeps a post-transfer verification rate limit ambiguous without redispatch', async () => {
+  it.each([
+    {
+      name: 'Retry-After',
+      error: new GitHubHttpError('GraphQL request failed: 403', 403, 2_000, {
+        headers: { 'retry-after': '2' },
+      }),
+      expectedDelayMs: 2_000,
+    },
+    {
+      name: 'exhausted primary limit and reset',
+      error: new GitHubHttpError('GraphQL request failed: 403', 403, null, {
+        headers: {
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': String(Math.ceil(Date.now() / 1_000) + 60),
+        },
+      }),
+      expectedDelayMs: null,
+    },
+    {
+      name: 'secondary limit response',
+      error: new GitHubHttpError('GraphQL request failed: 403', 403, null, {
+        responseBody: '{"message":"You have exceeded a secondary rate limit."}',
+      }),
+      expectedDelayMs: 1_000,
+    },
+  ])('retries a 403 dispatch with proven $name evidence', async ({
+    name,
+    error,
+    expectedDelayMs,
+  }) => {
+    const seeded = seedConnector(`bulk-403-${name.replaceAll(' ', '-')}`);
+    const remote = createRemote(seeded, { firstDispatchError: error });
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      idempotencyKey: `bulk-403-${name}-key`,
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote,
+      now: () => now,
+      sleep,
+    })).resolves.toMatchObject({
+      phase: 'completed',
+      transferredCount: 2,
+      ambiguousCount: 0,
+    });
+
+    if (expectedDelayMs === null) {
+      const delay = sleep.mock.calls[0]?.[0];
+      expect(delay).toBeGreaterThan(0);
+      expect(delay).toBeLessThanOrEqual(61_000);
+    } else {
+      expect(sleep).toHaveBeenCalledWith(expectedDelayMs);
+    }
+  });
+
+  it.each([
+    {
+      name: 'ordinary forbidden',
+      error: new GitHubHttpError('GraphQL request failed: 403', 403, null, {
+        responseBody: '{"message":"Resource not accessible by personal access token"}',
+      }),
+    },
+    {
+      name: 'malformed rate-limit headers',
+      error: new GitHubHttpError('GraphQL request failed: 403', 403, null, {
+        headers: {
+          'retry-after': 'later',
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': 'not-a-timestamp',
+        },
+      }),
+    },
+  ])('rejects a 403 dispatch with $name evidence', async ({ name, error }) => {
+    const seeded = seedConnector(`bulk-403-reject-${name.replaceAll(' ', '-')}`);
+    const remote = createRemote(seeded, { firstDispatchError: error });
+    const transferIssue = vi.fn(remote.transferIssue!);
+    remote.transferIssue = transferIssue;
+    const common = input(seeded.connectorId);
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote,
+      now: () => now,
+    });
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      idempotencyKey: `bulk-403-reject-${name}-key`,
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote,
+      now: () => now,
+      sleep,
+    })).rejects.toThrow('GraphQL request failed: 403');
+
+    const run = database.default.select().from(schema.githubBulkTransferRuns)
+      .where(eq(
+        schema.githubBulkTransferRuns.connectorInstanceId,
+        seeded.connectorId,
+      )).get()!;
+    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+      phase: 'failed',
+      failedCount: 1,
+      ambiguousCount: 0,
+      connectorEnabled: false,
+    });
+    expect(transferIssue).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('keeps a post-transfer 403 rate limit ambiguous without redispatch', async () => {
     const seeded = seedConnector('bulk-verification-rate-limit');
-    const remote = createRemote(seeded, { rateLimitTargetResolutionOnce: true });
+    const remote = createRemote(seeded, {
+      targetResolutionError: new GitHubHttpError(
+        'GraphQL request failed: 403',
+        403,
+        2_000,
+        { headers: { 'retry-after': '2' } },
+      ),
+    });
     const transferIssue = vi.fn(remote.transferIssue!);
     remote.transferIssue = transferIssue;
     const common = input(seeded.connectorId);
@@ -347,7 +472,7 @@ describe('GitHub bulk issue transfer', () => {
       remote,
       now: () => now,
       sleep,
-    })).rejects.toThrow('GraphQL request failed: 429');
+    })).rejects.toThrow('GraphQL request failed: 403');
 
     const run = database.default.select().from(schema.githubBulkTransferRuns)
       .where(eq(
@@ -775,7 +900,8 @@ function createRemote(
     failAfterDispatch?: boolean;
     failSourceResolutionOnce?: boolean;
     rateLimitFirstDispatch?: boolean;
-    rateLimitTargetResolutionOnce?: boolean;
+    firstDispatchError?: GitHubHttpError;
+    targetResolutionError?: GitHubHttpError;
     changeIdentityOnTransfer?: boolean;
   } = {},
 ): GitHubRepositoryRepointRemote {
@@ -820,12 +946,12 @@ function createRemote(
         return null;
       }
       if (
-        options.rateLimitTargetResolutionOnce
+        options.targetResolutionError
         && repository === 'owner/target'
         && !targetResolutionRateLimited
       ) {
         targetResolutionRateLimited = true;
-        throw new GitHubHttpError('GraphQL request failed: 429', 429, 2_000);
+        throw options.targetResolutionError;
       }
       const match = [...locations.entries()].find(([, location]) => (
         location.repository === repository && location.number === issueNumber
@@ -843,6 +969,9 @@ function createRemote(
       transferCalls++;
       if (options.rateLimitFirstDispatch && transferCalls === 1) {
         throw new GitHubHttpError('GraphQL request failed: 429', 429, 2_000);
+      }
+      if (options.firstDispatchError && transferCalls === 1) {
+        throw options.firstDispatchError;
       }
       const targetNumber = 100 + transferCalls;
       const transferredStableId = options.changeIdentityOnTransfer

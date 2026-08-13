@@ -82,6 +82,7 @@ vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', parentId: 'parent_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceListId: 'source_list_id' },
   taskTags: { taskId: 'task_id', tagId: 'tag_id' },
   taskProjects: { taskId: 'task_id', projectId: 'project_id' },
+  projectAutoIncludeExclusions: { taskId: 'task_id' },
   taskAttachments: {
     id: 'attachment_id',
     taskId: 'task_id',
@@ -192,12 +193,14 @@ const mockMoveLogWarn = vi.fn();
 const mockMoveLogError = vi.fn();
 
 vi.mock('@/lib/logger', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   dbLogger: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
   connectorLogger: {
     info: mockMoveLogInfo,
     warn: mockMoveLogWarn,
     error: mockMoveLogError,
   },
+  requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
 vi.mock('@/lib/api-error', () => ({

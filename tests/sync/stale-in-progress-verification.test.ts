@@ -24,33 +24,63 @@ vi.mock('@/db', () => {
     mockUpdateSets.push({ data, id: '' });
     return { where: updateWhereFn };
   });
-  return {
-    default: {
-      select: vi.fn((fields?: unknown) => ({
-        from: vi.fn((table: unknown) => {
-          // Return different data based on what's being queried
-          return {
-            where: vi.fn((condition: unknown) => {
-              // For sync_log hydration
-              if (!fields) return [];
-              // Check if this is the in_progress task query
-              if (Array.isArray(condition) && JSON.stringify(condition).includes('in_progress')) {
-                return [...mockInProgressTasks];
-              }
-              return [];
-            }),
-            orderBy: vi.fn(() => ({
-              all: vi.fn(() => [...mockSyncLogRows]),
-            })),
+  const database = {
+    select: vi.fn((fields?: unknown) => ({
+      from: vi.fn(() => {
+        // Return different data based on what's being queried
+        return {
+          where: vi.fn((condition: unknown) => {
+            // For sync_log hydration
+            if (!fields) {
+              const rows = [] as unknown[] & {
+                limit: ReturnType<typeof vi.fn>;
+              };
+              rows.limit = vi.fn(async () => mockConnectorInstance
+                ? [{
+                    id: mockConnectorInstance.id,
+                    type: mockConnectorInstance.type,
+                    name: mockConnectorInstance.displayName,
+                    enabled: true,
+                    syncMode: 'manual',
+                    pollIntervalMinutes: null,
+                    capabilities: JSON.stringify(mockConnectorInstance.capabilities ?? {}),
+                    credentials: '{}',
+                    settings: '{}',
+                    syncedLists: '[]',
+                  }]
+                : []);
+              return rows;
+            }
+            // Check if this is the in_progress task query
+            if (Array.isArray(condition) && JSON.stringify(condition).includes('in_progress')) {
+              return [...mockInProgressTasks];
+            }
+            return [];
+          }),
+          orderBy: vi.fn(() => ({
             all: vi.fn(() => [...mockSyncLogRows]),
-          };
-        }),
+          })),
+          all: vi.fn(() => [...mockSyncLogRows]),
+        };
+      }),
+    })),
+    update: vi.fn(() => ({ set: updateSetFn })),
+    insert: vi.fn(() => ({
+      values: vi.fn(() => ({
+        run: vi.fn(),
       })),
-      update: vi.fn(() => ({ set: updateSetFn })),
-      insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve()) })),
-      delete: vi.fn(() => ({ where: vi.fn() })),
-      transaction: vi.fn((callback: (transaction: object) => unknown) => callback({})),
+    })),
+    delete: vi.fn(() => ({ where: vi.fn() })),
+    transaction: vi.fn((callback: (transaction: object) => unknown) => callback({})),
+  };
+  return {
+    default: database,
+    sqlite: {
+      prepare: vi.fn(() => ({
+        all: vi.fn(() => []),
+      })),
     },
+    runTransaction: vi.fn((callback: (tx: typeof database) => unknown) => callback(database)),
   };
 });
 
@@ -63,6 +93,23 @@ vi.mock('@/db/schema', () => ({
   hubProjects: {},
   taskProjects: {},
   tasks: { id: 'id', sourceId: 'source_id', connectorInstanceId: 'connector_instance_id', status: 'status', completedAt: 'completed_at', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', sourceListId: 'source_list_id' },
+}));
+
+vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
+  readGitHubHierarchyObservation: () => ({ kind: 'not-issue' }),
+  mergeGitHubHierarchyObservation: () => true,
+  reconcileGitHubTaskHierarchy: vi.fn(async () => ({ applied: false, updated: 0 })),
+}));
+
+vi.mock('@/lib/sync/maintenance-lock', () => ({
+  assertConnectorMaintenanceUnlocked: vi.fn(),
+}));
+
+vi.mock('@/lib/sync/connector-lock', () => ({
+  ConnectorOperationBusyError: class ConnectorOperationBusyError extends Error {},
+  runWithConnectorOperationLease: vi.fn(
+    async (_id: string, _operation: string, callback: () => Promise<unknown>) => callback(),
+  ),
 }));
 
 vi.mock('drizzle-orm', () => ({
@@ -83,7 +130,20 @@ vi.mock('@/lib/connectors', () => ({
   connectorRegistry: {
     getConnector: vi.fn(() => mockConnectorInstance),
     getAllConnectors: vi.fn(() => []),
+    replaceConnector: vi.fn(() => mockConnectorInstance),
   },
+}));
+
+vi.mock('@/lib/external-identities', () => ({
+  GitHubIdentityComparisonRuntime: class {},
+  getGitHubIdentityModeSnapshot: vi.fn((connectorInstanceId: string) => ({
+    connectorInstanceId,
+    phase: 'rollback_legacy',
+    effectiveMode: 'legacy',
+    stablePrimaryEnabled: false,
+    modeRevision: 1,
+    capturedAt: '2026-07-27T00:00:00.000Z',
+  })),
 }));
 
 vi.mock('@/lib/events', () => ({

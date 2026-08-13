@@ -208,7 +208,7 @@ describe('project phase navigation', () => {
       </TooltipProvider>,
     );
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Plan (0)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Plan (1)' }));
 
     const getPlanToolbar = () => screen.getByRole('heading', { name: 'Plan' }).parentElement?.parentElement;
     expect(getPlanToolbar()).toHaveClass('sticky');

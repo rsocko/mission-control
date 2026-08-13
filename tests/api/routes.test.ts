@@ -32,11 +32,23 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id', status: 'status', priority: 'priority', dueDate: 'dueDate', connectorType: 'connectorType', sourceId: 'sourceId', parentId: 'parentId', assignee: 'assignee', kanbanColumn: 'kanbanColumn' },
+  tasks: { id: 'id', title: 'title', status: 'status', priority: 'priority', dueDate: 'dueDate', updatedAt: 'updatedAt', connectorType: 'connectorType', sourceId: 'sourceId', parentId: 'parentId', assignee: 'assignee', kanbanColumn: 'kanbanColumn' },
   taskTags: { taskId: 'taskId', tagId: 'tagId' },
   taskProjects: { taskId: 'taskId', projectId: 'projectId' },
   taskSchedules: { taskId: 'taskId' },
   myDayItems: { taskId: 'taskId' },
+  notifications: {
+    id: 'id',
+    title: 'title',
+    level: 'level',
+    levelRank: 'levelRank',
+    connectorType: 'connectorType',
+    disposition: 'disposition',
+    sourceState: 'sourceState',
+    snoozedUntil: 'snoozedUntil',
+    readState: 'readState',
+    receivedAt: 'receivedAt',
+  },
   tags: {},
   sourceLists: {},
   connectorConfigs: { id: 'id', type: 'type', enabled: 'enabled', settings: 'settings', deletedAt: 'deletedAt' },
@@ -84,6 +96,13 @@ vi.mock('@/lib/sync/job-queue', () => ({
   requestSyncJobCancellation: vi.fn(),
 }));
 
+vi.mock('@/lib/sync/connector-lock', () => ({
+  ConnectorOperationBusyError: class ConnectorOperationBusyError extends Error {},
+  runWithConnectorOperationLease: vi.fn(
+    async (_id: string, _operation: string, callback: () => Promise<unknown>) => callback(),
+  ),
+}));
+
 vi.mock('@/lib/telemetry/runtime', () => ({
   getRuntimeTelemetry: vi.fn(() => []),
   getRuntimeTelemetryAlertHistory: vi.fn(() => []),
@@ -100,8 +119,10 @@ vi.mock('@/lib/utils/date', () => ({
 }));
 
 vi.mock('@/lib/logger', () => ({
+  default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
   syncLogger: { info: vi.fn(), error: vi.fn() },
   aiLogger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
 vi.mock('@/lib/triage', () => ({
@@ -115,6 +136,7 @@ vi.mock('@/lib/triage', () => ({
 }));
 
 vi.mock('@/lib/ai', () => ({
+  getAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
   getResolvedAIConfig: vi.fn(() => ({ configured: true })),
   streamChat: vi.fn(() => Promise.resolve({
     result: {

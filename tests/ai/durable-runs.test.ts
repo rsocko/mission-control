@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HoustonRunEventMapper } from '@/lib/ai/copilot-run-events';
 import type { CopilotRunRecord } from '@/lib/ai/copilot-session-lifecycle';
 import type { DurableAiRunExecutor } from '@/lib/ai/durable-runs/worker';
@@ -29,6 +29,10 @@ beforeEach(() => {
   database.sqlite.prepare('DELETE FROM ai_run_events').run();
   database.sqlite.prepare('DELETE FROM ai_provider_sessions').run();
   database.sqlite.prepare('DELETE FROM ai_runs').run();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 afterAll(() => {
@@ -306,8 +310,8 @@ describe('DurableAiRunStore', () => {
 
   it('fences stale executors from events and provider session mutations', () => {
     const store = new durable.DurableAiRunStore();
-    const startedAt = new Date();
     const { run } = enqueue(store, 'stale-executor', { maxAttempts: 2 });
+    const startedAt = new Date();
     const first = store.claimNextRun(
       'worker-a',
       ['test-route'],
@@ -623,6 +627,8 @@ describe('DurableAiRunWorker', () => {
 
 describe('Copilot durable persistence adapter', () => {
   it('persists lifecycle state and content-free events without exposing the SDK session', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-06T17:00:00.000Z'));
     const store = new durable.DurableAiRunStore();
     const persistence = copilotPersistence.createDurableCopilotPersistence(
       'copilot-worker',

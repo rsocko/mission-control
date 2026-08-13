@@ -100,6 +100,27 @@ function testDatabase() {
   for (const statement of migration.split('--> statement-breakpoint')) {
     if (statement.trim()) sqlite.exec(statement);
   }
+  const notificationWritebackMigration = readFileSync(
+    resolve(process.cwd(), 'drizzle/0061_glamorous_colossus.sql'),
+    'utf8',
+  );
+  for (const statement of notificationWritebackMigration.split('--> statement-breakpoint')) {
+    if (statement.trim()) sqlite.exec(statement);
+  }
+  const notificationLifecycleMigration = readFileSync(
+    resolve(process.cwd(), 'drizzle/0080_split_notification_lifecycle.sql'),
+    'utf8',
+  );
+  for (const statement of notificationLifecycleMigration.split('--> statement-breakpoint')) {
+    if (statement.trim()) sqlite.exec(statement);
+  }
+  const githubNotificationLifecycleMigration = readFileSync(
+    resolve(process.cwd(), 'drizzle/0082_github_notification_lifecycle.sql'),
+    'utf8',
+  );
+  for (const statement of githubNotificationLifecycleMigration.split('--> statement-breakpoint')) {
+    if (statement.trim()) sqlite.exec(statement);
+  }
   openDatabases.push(sqlite);
   return drizzle(sqlite, { schema });
 }

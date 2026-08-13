@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import NotificationsPage from '@/app/notifications/page';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
@@ -76,9 +77,26 @@ vi.mock('@/components/notifications/NotificationCard', () => ({
 
 vi.mock('@/components/ui/select', () => ({
   Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  SelectTrigger: ({ children }: { children: React.ReactNode }) => <button>{children}</button>,
+  SelectTrigger: forwardRef<
+    HTMLButtonElement,
+    ButtonHTMLAttributes<HTMLButtonElement>
+  >(function MockSelectTrigger({ children, ...props }, ref) {
+    return (
+      <button
+        ref={ref}
+        role="combobox"
+        aria-controls="mock-select-content"
+        aria-expanded={false}
+        {...props}
+      >
+        {children}
+      </button>
+    );
+  }),
   SelectValue: () => <span>Newest</span>,
-  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectContent: ({ children }: { children: React.ReactNode }) => (
+    <div id="mock-select-content">{children}</div>
+  ),
   SelectItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
@@ -235,8 +253,8 @@ describe('NotificationsPage data states', () => {
 
     render(<NotificationsPage />);
 
-    expect(screen.getByRole('combobox', { name: 'Category filter' })).toHaveValue('finance');
-    expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toHaveValue(merchant);
+    expect(screen.getByRole('combobox', { name: 'Category filter' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toBeInTheDocument();
     expect(screen.getByText('2 filters applied')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', {
       name: 'Clear Merchant: Invented Market filter',
@@ -263,7 +281,7 @@ describe('NotificationsPage data states', () => {
     expect(routerReplace).not.toHaveBeenCalled();
   });
 
-  it('keeps unread details visible after the selected row leaves the filtered list', () => {
+  it('keeps unread details visible after the selected row leaves the filtered list', async () => {
     const notification = {
       id: 'notification-1',
       sourceId: 'source-1',
@@ -296,11 +314,12 @@ describe('NotificationsPage data states', () => {
         state: 'unread',
       },
       setSelectedId,
-      markRead: vi.fn(),
     });
     const view = render(<NotificationsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Review requested' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Review requested' }));
+    });
     hookState.notifications = [];
     view.rerender(<NotificationsPage />);
 

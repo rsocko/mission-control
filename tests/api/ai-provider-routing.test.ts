@@ -26,6 +26,7 @@ vi.mock('@/db/schema', () => ({
 
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn(() => 'condition'),
+  sql: vi.fn(() => 'sql'),
 }));
 
 vi.mock('@/db', () => {
@@ -51,7 +52,9 @@ vi.mock('@/db', () => {
 });
 
 vi.mock('@/lib/ai', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/ai')>('@/lib/ai');
+  const actual = await vi.importActual<
+    typeof import('@/lib/ai/sensitivity-policy')
+  >('@/lib/ai/sensitivity-policy');
   return {
   AIProviderEndpointValidationError: actual.AIProviderEndpointValidationError,
   AIRoutingPolicyValidationError: actual.AIRoutingPolicyValidationError,

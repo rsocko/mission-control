@@ -188,7 +188,9 @@ describe('BurnReportCard', () => {
 
     await screen.findByTestId('responsive-chart');
     const requestUrl = new URL(String(vi.mocked(fetch).mock.calls[0]?.[0]), 'http://localhost');
-    expect(requestUrl.searchParams.get('start')).toBe('2021-08-05');
+    const expectedStart = new Date();
+    expectedStart.setUTCDate(expectedStart.getUTCDate() - 1_829);
+    expect(requestUrl.searchParams.get('start')).toBe(expectedStart.toISOString().slice(0, 10));
   });
 
   it('includes years in chart labels for multi-year project history', async () => {

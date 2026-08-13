@@ -33,7 +33,10 @@ vi.mock('@/db', () => {
             if (callNum === 1) {
               return { where: vi.fn(() => [...mockExistingTasks]) };
             }
-            if (callNum === 3) {
+            if (callNum === 2) {
+              return { where: vi.fn(() => []) };
+            }
+            if (callNum === 4) {
               return { where: vi.fn(() => [...mockConcurrentTasks]) };
             }
             const tagsResult = [] as unknown as AwaitableTagRows;
@@ -90,6 +93,11 @@ vi.mock('@/db/schema', () => ({
   taskHistoryEvents: { taskId: 'taskId' },
   taskDependencies: { taskId: 'taskId', dependsOnTaskId: 'dependsOnTaskId' },
   notifications: { relatedTaskId: 'relatedTaskId' },
+  syncDeletionSnapshots: {
+    sourceId: 'sourceId',
+    connectorId: 'connectorId',
+    reason: 'reason',
+  },
   tags: { id: 'id', slug: 'slug', type: 'type' },
 }));
 
@@ -117,6 +125,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
   inArray: vi.fn((...args: unknown[]) => args),
+  like: vi.fn((...args: unknown[]) => args),
   or: vi.fn((...args: unknown[]) => args),
 }));
 

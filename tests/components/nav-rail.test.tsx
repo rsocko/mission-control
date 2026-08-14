@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
+import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
 
 function renderNavRail({
   isAiActive = false,
@@ -29,6 +30,7 @@ describe('NavRail', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it('auto-expands after a deliberate hover', () => {
@@ -102,6 +104,7 @@ describe('NavRail', () => {
   });
 
   it('replaces the static brand mark with the alternating signal while syncing', () => {
+    localStorage.setItem(SYNC_ICON_PREFERENCE_KEY, 'alternating');
     renderNavRail({ isSyncing: true });
 
     const syncIcon = screen.getByTestId('mission-control-sync-icon');
@@ -117,6 +120,47 @@ describe('NavRail', () => {
       'transform',
       'matrix(-1 0 0 -1 14.8 34.6)'
     );
+  });
+
+  it('renders three independent particle streams when that treatment is selected', () => {
+    localStorage.setItem(SYNC_ICON_PREFERENCE_KEY, 'particles');
+    renderNavRail({ isSyncing: true });
+
+    const syncIcon = screen.getByTestId('mission-control-sync-icon');
+    const streams = syncIcon.querySelector('[data-particle-streams="true"]');
+
+    expect(syncIcon).toHaveAttribute('data-sync-variant', 'particles');
+    expect(streams?.querySelectorAll('line')).toHaveLength(3);
+    expect(streams?.querySelectorAll('circle, rect')).toHaveLength(3);
+  });
+
+  it('chooses a new treatment at the start of each sync when both are enabled', () => {
+    localStorage.setItem(SYNC_ICON_PREFERENCE_KEY, 'both');
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    const rendered = renderNavRail({ isSyncing: true });
+
+    expect(screen.getByTestId('mission-control-sync-icon')).toHaveAttribute(
+      'data-sync-variant',
+      'particles'
+    );
+
+    rendered.rerender(
+      <TooltipProvider>
+        <NavRail features={{ aiEnabled: true, financeEnabled: true }} isAiActive={false} isSyncing={false} />
+      </TooltipProvider>
+    );
+    random.mockReturnValue(0.1);
+    rendered.rerender(
+      <TooltipProvider>
+        <NavRail features={{ aiEnabled: true, financeEnabled: true }} isAiActive={false} isSyncing />
+      </TooltipProvider>
+    );
+
+    expect(screen.getByTestId('mission-control-sync-icon')).toHaveAttribute(
+      'data-sync-variant',
+      'alternating'
+    );
+    random.mockRestore();
   });
 
   it('groups navigation by purpose', () => {

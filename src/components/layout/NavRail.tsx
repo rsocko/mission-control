@@ -30,6 +30,10 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavRailPrefs } from '@/lib/hooks/useNavRailPrefs';
+import {
+  getSyncIconPreference,
+  resolveSyncIconVariant,
+} from '@/lib/hooks/useSyncIconPreference';
 
 import type { ComponentType } from 'react';
 
@@ -120,6 +124,11 @@ interface NavRailProps {
   isSyncing?: boolean;
 }
 
+function ActiveSyncIcon({ className }: { className?: string }) {
+  const [variant] = useState(() => resolveSyncIconVariant(getSyncIconPreference()));
+  return <SyncingMissionControlIcon variant={variant} className={className} />;
+}
+
 export function NavRail({ features, isAiActive, isSyncing = false }: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
@@ -187,7 +196,7 @@ export function NavRail({ features, isAiActive, isSyncing = false }: NavRailProp
       <div className="flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
           {isSyncing ? (
-            <SyncingMissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
+            <ActiveSyncIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
           ) : (
             <MissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
           )}

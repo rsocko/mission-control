@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Notifications Redesign</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            body: '#0f1117',
+            'surface-0': '#1a1d27',
+            'surface-1': '#22252f',
+            'surface-2': '#2a2e3a',
+            border: '#2d3748',
+            primary: '#e8eaed',
+            secondary: '#9ca3af',
+            muted: '#6b7280',
+            accent: '#3b82f6'
+          },
+          boxShadow: {
+            premium: '0 14px 40px rgba(0,0,0,0.35)',
+            card: '0 6px 20px rgba(0,0,0,0.22)'
+          },
+          borderRadius: {
+            xl2: '8px'
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f1117;
+      color: #e8eaed;
+    }
+
+    .surface-card {
+      background: linear-gradient(180deg, rgba(42,46,58,0.9), rgba(26,29,39,0.96));
+      border: 1px solid #2d3748;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+    }
+
+    .hover-lift {
+      transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+
+    .hover-lift:hover {
+      transform: translateY(-1px);
+      border-color: rgba(59,130,246,0.5);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.32);
+    }
+
+    .pill {
+      border: 1px solid #2d3748;
+      background: #1a1d27;
+      color: #9ca3af;
+      transition: all 0.18s ease;
+    }
+
+    .pill:hover,
+    .pill.active {
+      background: rgba(59,130,246,0.12);
+      color: #e8eaed;
+      border-color: rgba(59,130,246,0.45);
+    }
+
+    .kbd {
+      border: 1px solid #2d3748;
+      background: #1a1d27;
+      color: #9ca3af;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .line-clamp-2 {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .noise {
+      background-image:
+        radial-gradient(circle at top right, rgba(59,130,246,0.1), transparent 24%),
+        radial-gradient(circle at bottom left, rgba(16,185,129,0.06), transparent 22%);
+    }
+
+    .scrollbar-dark::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+
+    .scrollbar-dark::-webkit-scrollbar-thumb {
+      background: #2a2e3a;
+      border-radius: 999px;
+      border: 2px solid #1a1d27;
+    }
+
+    .scrollbar-dark::-webkit-scrollbar-track {
+      background: #1a1d27;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <div style="position:sticky;top:0;z-index:1000;padding:12px 20px;background:#172033;border-bottom:1px solid #3b82f6;color:#e8eaed;text-align:center;font:600 13px Inter,sans-serif">
+    This concept has been superseded by the
+    <a href="./mockup-notifications-v2.html" style="color:#93c5fd;text-decoration:underline">revised Notifications V2 interaction mockup</a>.
+  </div>
+  <div class="mx-auto max-w-7xl px-6 py-10">
+    <div class="mb-8 flex items-start justify-between gap-6">
+      <div>
+        <p class="mb-2 text-xs font-semibold uppercase tracking-[0.3em] text-accent">Mission Control Mockup</p>
+        <h1 class="text-3xl font-semibold text-primary">Notifications system redesign</h1>
+        <p class="mt-2 max-w-3xl text-sm text-secondary">A premium dark-first replacement for Alerts with stronger severity cues, direct actions, AI suggestions, and a dedicated notifications workspace.</p>
+      </div>
+      <button class="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full border border-border bg-surface-1 text-secondary shadow-premium transition hover:-translate-y-0.5 hover:text-primary">
+        <i class="fas fa-gear text-lg"></i>
+      </button>
+    </div>
+
+    <section class="noise surface-card mb-10 overflow-hidden">
+      <div class="border-b border-border px-6 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">View 1</p>
+            <h2 class="mt-1 text-xl font-semibold">Right sidebar notification panel</h2>
+          </div>
+          <div class="flex items-center gap-3 text-xs text-secondary">
+            <span class="flex items-center gap-1"><span class="kbd">r</span> mark read</span>
+            <span class="flex items-center gap-1"><span class="kbd">d</span> dismiss</span>
+            <span class="flex items-center gap-1"><span class="kbd">Enter</span> primary action</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-center bg-[#0b0d12] px-8 py-8">
+        <div class="w-full max-w-[1100px] rounded-[14px] border border-[#1d2330] bg-[#131722] p-6 shadow-premium">
+          <div class="flex min-h-[860px] justify-end rounded-[12px] border border-border bg-body p-5">
+            <aside class="scrollbar-dark flex h-[810px] w-[320px] flex-col overflow-y-auto rounded-[10px] border border-border bg-surface-0 shadow-card">
+              <div class="sticky top-0 z-10 border-b border-border bg-surface-0/95 px-4 py-4 backdrop-blur">
+                <div class="flex items-start justify-between gap-3">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <h3 class="text-lg font-semibold text-primary">Notifications</h3>
+                      <span class="rounded-full bg-accent/15 px-2 py-0.5 text-xs font-semibold text-accent">12 unread</span>
+                    </div>
+                    <div class="mt-1 flex items-center gap-3 text-xs text-secondary">
+                      <a href="#" class="transition hover:text-primary">Mark all read</a>
+                      <span>Updated 2m ago</span>
+                    </div>
+                  </div>
+                  <button class="rounded-lg border border-border bg-surface-1 px-2.5 py-2 text-secondary transition hover:bg-surface-2 hover:text-primary">
+                    <i class="fas fa-angles-right"></i>
+                  </button>
+                </div>
+
+                <div class="mt-4 flex flex-wrap gap-2 text-xs font-medium">
+                  <button class="pill active rounded-full px-3 py-1.5">All</button>
+                  <button class="pill rounded-full px-3 py-1.5">Urgent</button>
+                  <button class="pill rounded-full px-3 py-1.5">Action Needed</button>
+                  <button class="pill rounded-full px-3 py-1.5">FYI</button>
+                </div>
+              </div>
+
+              <div class="space-y-6 px-4 py-4">
+                <section>
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Today</h4>
+                    <span class="text-xs text-muted">5 items</span>
+                  </div>
+                  <div class="space-y-3">
+                    <article class="surface-card hover-lift relative p-3">
+                      <span class="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-accent"></span>
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-400">
+                          <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-chart-line text-xs text-red-400"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Budget exceeded: Dining</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-300"><span class="h-2 w-2 rounded-full bg-red-400"></span>Urgent</span>
+                            <span class="rounded-full bg-accent/15 px-2 py-0.5 font-semibold text-accent"><i class="fas fa-sparkles mr-1 text-[10px]"></i>AI Suggestion</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">$520 spent of $500 monthly budget (104%). AI recommends freezing restaurant spend for 4 days.</p>
+                          <div class="mt-2 text-xs text-muted">2h ago</div>
+                        </div>
+                      </div>
+                      <div class="mb-3">
+                        <button class="w-full rounded-lg bg-red-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-400">
+                          <i class="fas fa-arrow-up-right-from-square mr-2"></i>View Budget
+                        </button>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary" title="Mark read"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary" title="Snooze"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary" title="Dismiss"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary" title="Pin"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="flex items-center gap-1 text-[11px] text-muted">
+                          <span class="kbd">r</span><span class="kbd">d</span><span class="kbd">Enter</span>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift relative p-3">
+                      <span class="absolute right-3 top-3 h-2.5 w-2.5 rounded-full bg-accent"></span>
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-200">
+                          <i class="fab fa-github"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-code-pull-request text-xs text-amber-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">PR Review Requested: Fix auth middleware</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-semibold text-amber-300"><span class="h-2 w-2 rounded-full bg-amber-400"></span>Action Needed</span>
+                            <span class="rounded-full bg-accent/15 px-2 py-0.5 font-semibold text-accent"><i class="fas fa-sparkles mr-1 text-[10px]"></i>AI Suggestion</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">rsocko/api-gateway #142 — 3 files changed. Suggested review path: auth.ts, edge policy, regression tests.</p>
+                          <div class="mt-2 text-xs text-muted">48m ago</div>
+                        </div>
+                      </div>
+                      <div class="mb-3">
+                        <button class="w-full rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-400">
+                          <i class="fas fa-arrow-up-right-from-square mr-2"></i>Review PR
+                        </button>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">From GitHub</div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
+                          <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-wallet text-xs text-amber-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Jake exceeded daily limit</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 font-semibold text-amber-300"><span class="h-2 w-2 rounded-full bg-amber-400"></span>Action Needed</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">$55.00 spent today (limit: $50.00, 110%). Two card transactions posted after 4pm.</p>
+                          <div class="mt-2 text-xs text-muted">22m ago</div>
+                        </div>
+                      </div>
+                      <button class="mb-3 w-full rounded-lg bg-emerald-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-400">
+                        <i class="fas fa-arrow-up-right-from-square mr-2"></i>View Transactions
+                      </button>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">Suggested: check subscriptions</div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300">
+                          <i class="fas fa-credit-card"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-bell text-xs text-blue-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Upcoming bill: Netflix</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 font-semibold text-blue-300"><span class="h-2 w-2 rounded-full bg-blue-400"></span>Heads Up</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">$15.99 due in 3 days. Auto-pay is enabled from checking account ending in 2842.</p>
+                          <div class="mt-2 text-xs text-muted">5h ago</div>
+                        </div>
+                      </div>
+                      <button class="mb-3 w-full rounded-lg border border-border bg-surface-1 px-3 py-2 text-sm font-semibold text-primary transition hover:bg-surface-2">
+                        <i class="fas fa-circle-info mr-2 text-secondary"></i>View Bill
+                      </button>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">Auto-pay</div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 text-sky-300">
+                          <i class="fas fa-truck"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-box text-xs text-blue-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Package arriving today</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 font-semibold text-blue-300"><span class="h-2 w-2 rounded-full bg-blue-400"></span>Heads Up</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">Amazon order #123-456 — Out for delivery. Estimated arrival between 4:10pm and 7:35pm.</p>
+                          <div class="mt-2 text-xs text-muted">9h ago</div>
+                        </div>
+                      </div>
+                      <button class="mb-3 w-full rounded-lg bg-blue-600/85 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-500">
+                        <i class="fas fa-location-arrow mr-2"></i>Track Package
+                      </button>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">Front porch</div>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Yesterday</h4>
+                    <span class="text-xs text-muted">2 items</span>
+                  </div>
+                  <div class="space-y-3">
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-300">
+                          <i class="fas fa-robot"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-chart-simple text-xs text-slate-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Weekly Finance Summary</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 font-semibold text-slate-300"><span class="h-2 w-2 rounded-full bg-slate-400"></span>FYI</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">You spent 12% less this week. 3 budgets on track. Groceries trending 8% under forecast.</p>
+                          <div class="mt-2 text-xs text-muted">Yesterday 3:12pm</div>
+                        </div>
+                      </div>
+                      <button class="mb-3 w-full rounded-lg border border-border bg-surface-1 px-3 py-2 text-sm font-semibold text-primary transition hover:bg-surface-2">
+                        <i class="fas fa-arrow-right mr-2 text-secondary"></i>View Summary
+                      </button>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">AI Insights</div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-300">
+                          <i class="fas fa-gear"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-rotate text-xs text-slate-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Sync completed</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-slate-500/10 px-2 py-0.5 font-semibold text-slate-300"><span class="h-2 w-2 rounded-full bg-slate-400"></span>FYI</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">Microsoft Todo: 47 tasks synced. No conflicts detected across connected project lists.</p>
+                          <div class="mt-2 text-xs text-muted">Yesterday 9:41am</div>
+                        </div>
+                      </div>
+                      <button class="mb-3 w-full rounded-lg border border-border bg-surface-1 px-3 py-2 text-sm font-semibold text-primary transition hover:bg-surface-2">
+                        <i class="fas fa-file-lines mr-2 text-secondary"></i>View Log
+                      </button>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">System</div>
+                      </div>
+                    </article>
+                  </div>
+                </section>
+
+                <section>
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">This Week</h4>
+                    <span class="text-xs text-muted">3 items</span>
+                  </div>
+                  <div class="space-y-3">
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-300">
+                          <i class="fas fa-home"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-shield-halved text-xs text-red-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Garage door left open</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 font-semibold text-red-300"><span class="h-2 w-2 rounded-full bg-red-400"></span>Urgent</span>
+                            <span class="rounded-full bg-accent/15 px-2 py-0.5 font-semibold text-accent"><i class="fas fa-sparkles mr-1 text-[10px]"></i>AI Suggestion</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">Garage door has been open for 30 minutes. No motion detected nearby; close remotely now?</p>
+                          <div class="mt-2 text-xs text-muted">Mon 8:26pm</div>
+                        </div>
+                      </div>
+                      <div class="mb-3 grid grid-cols-[1fr_auto] overflow-hidden rounded-lg border border-border">
+                        <button class="bg-red-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-red-400">Close Door</button>
+                        <button class="border-l border-border bg-surface-1 px-3 py-2 text-secondary transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-chevron-down"></i></button>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">Home Assistant</div>
+                      </div>
+                    </article>
+
+                    <article class="surface-card hover-lift p-3">
+                      <div class="mb-2 flex items-start gap-3">
+                        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/10 text-emerald-300">
+                          <i class="fas fa-user-shield"></i>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                          <div class="mb-1 flex items-center gap-2">
+                            <i class="fas fa-shield text-xs text-emerald-300"></i>
+                            <h5 class="truncate text-sm font-semibold text-primary">Policy exception request</h5>
+                          </div>
+                          <div class="mb-2 flex items-center gap-2 text-[11px]">
+                            <span class="inline-flex items-center gap-1 rounded-full bg-blue-500/10 px-2 py-0.5 font-semibold text-blue-300"><span class="h-2 w-2 rounded-full bg-blue-400"></span>Heads Up</span>
+                          </div>
+                          <p class="line-clamp-2 text-sm text-secondary">Deployment allowlist update proposed for staging. Decide whether to approve or dismiss before Friday.</p>
+                          <div class="mt-2 text-xs text-muted">Sun 11:04am</div>
+                        </div>
+                      </div>
+                      <div class="mb-3 grid grid-cols-2 gap-2">
+                        <button class="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-400">Approve</button>
+                        <button class="rounded-lg border border-border bg-surface-1 px-3 py-2 text-sm font-semibold text-secondary transition hover:bg-surface-2 hover:text-primary">Dismiss</button>
+                      </div>
+                      <div class="flex items-center justify-between">
+                        <div class="flex gap-1 text-secondary">
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-envelope-open"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-clock"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-xmark"></i></button>
+                          <button class="rounded-md p-2 transition hover:bg-surface-2 hover:text-primary"><i class="fas fa-thumbtack"></i></button>
+                        </div>
+                        <div class="text-[11px] text-muted">Review queue</div>
+                      </div>
+                    </article>
+
+                    <div class="rounded-xl border border-dashed border-border bg-surface-1/60 px-4 py-5 text-center">
+                      <div class="mb-1 text-sm font-semibold text-primary">All caught up! 🎉</div>
+                      <p class="text-sm text-secondary">Muted and archived notifications land here when a filter returns nothing.</p>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <div class="mt-auto border-t border-border px-4 py-4">
+                <a href="#full-page" class="group inline-flex items-center gap-2 text-sm font-semibold text-accent transition hover:text-blue-300">
+                  View All
+                  <i class="fas fa-arrow-right text-xs transition group-hover:translate-x-0.5"></i>
+                </a>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="my-10 flex items-center gap-4">
+      <div class="h-px flex-1 bg-border"></div>
+      <span class="text-xs font-semibold uppercase tracking-[0.28em] text-muted">/notifications</span>
+      <div class="h-px flex-1 bg-border"></div>
+    </div>
+
+    <section id="full-page" class="noise surface-card overflow-hidden">
+      <div class="border-b border-border px-6 py-5">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <p class="text-xs font-semibold uppercase tracking-[0.25em] text-muted">View 2</p>
+            <h2 class="mt-1 text-2xl font-semibold text-primary">Full notifications page</h2>
+            <div class="mt-3 flex flex-wrap gap-2 text-sm">
+              <span class="rounded-full bg-accent/15 px-3 py-1 font-semibold text-accent">12 unread</span>
+              <span class="rounded-full bg-red-500/10 px-3 py-1 font-semibold text-red-300">3 urgent</span>
+              <span class="rounded-full bg-surface-1 px-3 py-1 font-semibold text-secondary">4 connectors active</span>
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs text-secondary">
+            <span class="flex items-center gap-1"><span class="kbd">/</span> search</span>
+            <span class="flex items-center gap-1"><span class="kbd">j</span><span class="kbd">k</span> navigate</span>
+            <span class="flex items-center gap-1"><span class="kbd">Enter</span> open</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="border-b border-border px-6 py-4">
+        <div class="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <div class="flex flex-1 flex-wrap gap-3">
+            <div class="relative min-w-[260px] flex-1 xl:max-w-sm">
+              <input type="text" value="budget" class="w-full rounded-lg border border-border bg-surface-1 py-2.5 pl-10 pr-4 text-sm text-primary outline-none transition focus:border-accent" />
+              <i class="fas fa-search pointer-events-none absolute left-3 top-3 text-secondary"></i>
+            </div>
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Source <i class="fas fa-chevron-down ml-2 text-xs"></i></button>
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Severity <i class="fas fa-chevron-down ml-2 text-xs"></i></button>
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Category <i class="fas fa-chevron-down ml-2 text-xs"></i></button>
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Date range <i class="fas fa-chevron-down ml-2 text-xs"></i></button>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Sort: Smart priority <i class="fas fa-arrow-down-wide-short ml-2"></i></button>
+            <button class="rounded-lg border border-border bg-surface-1 px-3 py-2.5 text-sm text-secondary transition hover:bg-surface-2 hover:text-primary">Bulk actions <i class="fas fa-bolt ml-2"></i></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid min-h-[920px] grid-cols-1 xl:grid-cols-[420px_minmax(0,1fr)]">
+        <div class="border-r border-border bg-surface-0">
+          <div class="border-b border-border px-5 py-3">
+            <div class="flex items-center justify-between text-sm">
+              <div class="flex gap-2">
+                <button class="pill active rounded-full px-3 py-1.5">All</button>
+                <button class="pill rounded-full px-3 py-1.5">Unread</button>
+                <button class="pill rounded-full px-3 py-1.5">Pinned</button>
+              </div>
+              <span class="text-secondary">18 results</span>
+            </div>
+          </div>
+
+          <div class="scrollbar-dark h-[840px] space-y-5 overflow-y-auto px-4 py-5">
+            <section>
+              <div class="mb-3 flex items-center justify-between">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Today</h3>
+                <span class="text-xs text-muted">5</span>
+              </div>
+              <div class="space-y-2">
+                <article class="hover-lift rounded-xl border border-accent/50 bg-accent/10 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-300"><i class="fas fa-dollar-sign"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-red-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Budget exceeded: Dining</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">Monarch Money</p>
+                        <span class="text-xs text-muted">2h ago</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-300">Urgent</span>
+                        <span class="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">View Budget</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-200"><i class="fab fa-github"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">PR Review Requested: Fix auth middleware</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">GitHub</p>
+                        <span class="text-xs text-muted">48m ago</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300">Action Needed</span>
+                        <span class="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Review PR</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300"><i class="fas fa-dollar-sign"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Jake exceeded daily limit</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">Finance</p>
+                        <span class="text-xs text-muted">22m ago</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-semibold text-amber-300">Action Needed</span>
+                        <span class="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">View Transactions</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-300"><i class="fas fa-credit-card"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-blue-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Upcoming bill: Netflix</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">Finance</p>
+                        <span class="text-xs text-muted">5h ago</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-300">Heads Up</span>
+                        <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-secondary">View Bill</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-500/10 text-sky-300"><i class="fas fa-truck"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-blue-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Package arriving today</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">Shipments</p>
+                        <span class="text-xs text-muted">9h ago</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-300">Heads Up</span>
+                        <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-secondary">Track Package</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section>
+              <div class="mb-3 flex items-center justify-between">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">Yesterday</h3>
+                <span class="text-xs text-muted">2</span>
+              </div>
+              <div class="space-y-2">
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-300"><i class="fas fa-robot"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Weekly Finance Summary</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">AI Insights</p>
+                        <span class="text-xs text-muted">Yesterday 3pm</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-slate-500/10 px-2 py-0.5 text-[11px] font-semibold text-slate-300">FYI</span>
+                        <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-secondary">View Summary</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-white/5 text-slate-300"><i class="fas fa-gear"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-slate-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Sync completed</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">System</p>
+                        <span class="text-xs text-muted">Yesterday 9am</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-slate-500/10 px-2 py-0.5 text-[11px] font-semibold text-slate-300">FYI</span>
+                        <span class="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-secondary">View Log</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section>
+              <div class="mb-3 flex items-center justify-between">
+                <h3 class="text-xs font-semibold uppercase tracking-[0.24em] text-muted">This Week</h3>
+                <span class="text-xs text-muted">2</span>
+              </div>
+              <div class="space-y-2">
+                <article class="hover-lift rounded-xl border border-border bg-surface-1 p-3">
+                  <div class="flex items-start gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-300"><i class="fas fa-home"></i></div>
+                    <div class="min-w-0 flex-1">
+                      <div class="flex items-center gap-2">
+                        <span class="h-2.5 w-2.5 rounded-full bg-red-400"></span>
+                        <h4 class="truncate text-sm font-semibold text-primary">Garage door left open</h4>
+                      </div>
+                      <div class="mt-1 flex items-center justify-between gap-3">
+                        <p class="truncate text-xs text-secondary">Home Assistant</p>
+                        <span class="text-xs text-muted">Mon 8:26pm</span>
+                      </div>
+                      <div class="mt-2 flex items-center gap-2">
+                        <span class="rounded-full bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-300">Urgent</span>
+                        <span class="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Close Door</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="bg-surface-1">
+          <div class="scrollbar-dark h-[920px] overflow-y-auto px-6 py-6">
+            <div class="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                  <span class="rounded-full bg-red-500/10 px-2.5 py-1 text-xs font-semibold text-red-300">Urgent</span>
+                  <span class="rounded-full bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent"><i class="fas fa-sparkles mr-1"></i>AI Suggestion</span>
+                  <span class="rounded-full bg-surface-2 px-2.5 py-1 text-xs font-semibold text-secondary">Budget</span>
+                </div>
+                <h3 class="text-2xl font-semibold text-primary">Budget exceeded: Dining</h3>
+                <p class="mt-3 max-w-3xl text-sm leading-7 text-secondary">$520 spent of $500 monthly budget (104%). Dining spend accelerated after three restaurant transactions over the weekend. Based on current burn, you'll end the month 18% over plan unless the category is paused or reallocated.</p>
+              </div>
+              <div class="rounded-xl border border-border bg-surface-0 px-3 py-2 text-right text-xs text-secondary">
+                <div>Received</div>
+                <div class="mt-1 font-semibold text-primary">Today • 2:14 PM</div>
+              </div>
+            </div>
+
+            <div class="mb-6 grid gap-3 md:grid-cols-3">
+              <div class="rounded-xl border border-border bg-surface-0 p-4">
+                <div class="mb-2 flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/10 text-red-300"><i class="fas fa-dollar-sign"></i></div>
+                  <div>
+                    <div class="text-xs uppercase tracking-[0.24em] text-muted">Source</div>
+                    <div class="text-sm font-semibold text-primary">Monarch Money</div>
+                  </div>
+                </div>
+                <p class="text-sm text-secondary">Connector synced 2 minutes ago from personal finance workspace.</p>
+              </div>
+              <div class="rounded-xl border border-border bg-surface-0 p-4">
+                <div class="text-xs uppercase tracking-[0.24em] text-muted">Related context</div>
+                <div class="mt-2 space-y-2 text-sm">
+                  <a href="#" class="block rounded-lg border border-border bg-surface-1 px-3 py-2 text-primary transition hover:bg-surface-2">Budget: Dining • July 2026</a>
+                  <a href="#" class="block rounded-lg border border-border bg-surface-1 px-3 py-2 text-primary transition hover:bg-surface-2">Task: Review discretionary spending</a>
+                </div>
+              </div>
+              <div class="rounded-xl border border-border bg-surface-0 p-4">
+                <div class="text-xs uppercase tracking-[0.24em] text-muted">Recommended next step</div>
+                <p class="mt-2 text-sm text-secondary">Create a spend-freeze task and notify shared household budgeting dashboard.</p>
+              </div>
+            </div>
+
+            <div class="mb-6 flex flex-wrap gap-3">
+              <button class="rounded-lg bg-red-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-red-400">
+                <i class="fas fa-arrow-up-right-from-square mr-2"></i>View Budget
+              </button>
+              <button class="rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-400">
+                <i class="fas fa-plus mr-2"></i>Create Task
+              </button>
+              <button class="rounded-lg border border-border bg-surface-0 px-4 py-3 text-sm font-semibold text-secondary transition hover:bg-surface-2 hover:text-primary">
+                <i class="fas fa-clock mr-2"></i>Snooze 24h
+              </button>
+              <button class="rounded-lg border border-border bg-surface-0 px-4 py-3 text-sm font-semibold text-secondary transition hover:bg-surface-2 hover:text-primary">
+                <i class="fas fa-xmark mr-2"></i>Dismiss
+              </button>
+            </div>
+
+            <div class="mb-6 grid gap-6 2xl:grid-cols-[minmax(0,1.2fr)_360px]">
+              <div class="rounded-xl border border-border bg-surface-0 p-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-primary">Metadata</h4>
+                  <span class="text-xs text-muted">Payload snapshot</span>
+                </div>
+                <div class="grid gap-x-6 gap-y-3 md:grid-cols-2">
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Severity</div>
+                    <div class="mt-1 text-sm text-primary">Urgent</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Category</div>
+                    <div class="mt-1 text-sm text-primary">Budget anomaly</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Connector</div>
+                    <div class="mt-1 text-sm text-primary">monarch-money.personal</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Owner</div>
+                    <div class="mt-1 text-sm text-primary">Household finances</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Budget cap</div>
+                    <div class="mt-1 text-sm text-primary">$500.00</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Current spend</div>
+                    <div class="mt-1 text-sm text-primary">$520.00</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Threshold</div>
+                    <div class="mt-1 text-sm text-primary">100%</div>
+                  </div>
+                  <div class="border-b border-border/60 pb-3">
+                    <div class="text-xs uppercase tracking-[0.2em] text-muted">Routing rule</div>
+                    <div class="mt-1 text-sm text-primary">Finance / urgent / auto-pin</div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-border bg-surface-0 p-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-primary">Related notifications</h4>
+                  <a href="#" class="text-xs text-accent">View all</a>
+                </div>
+                <div class="space-y-3">
+                  <div class="rounded-lg border border-border bg-surface-1 p-3">
+                    <div class="text-sm font-medium text-primary">Jake exceeded daily limit</div>
+                    <div class="mt-1 text-xs text-secondary">$55.00 spent today • Finance</div>
+                  </div>
+                  <div class="rounded-lg border border-border bg-surface-1 p-3">
+                    <div class="text-sm font-medium text-primary">Weekly Finance Summary</div>
+                    <div class="mt-1 text-xs text-secondary">3 budgets on track • AI Insights</div>
+                  </div>
+                  <div class="rounded-lg border border-dashed border-border bg-surface-1/60 p-3 text-center">
+                    <div class="text-sm font-medium text-primary">All caught up! 🎉</div>
+                    <div class="mt-1 text-xs text-secondary">No more urgent finance alerts after this one.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+              <div class="rounded-xl border border-border bg-surface-0 p-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-primary">History</h4>
+                  <span class="text-xs text-muted">Audit trail</span>
+                </div>
+                <div class="space-y-4">
+                  <div class="flex gap-4">
+                    <div class="mt-1 h-3 w-3 rounded-full bg-accent"></div>
+                    <div>
+                      <div class="text-sm font-medium text-primary">Notification created from connector event</div>
+                      <div class="text-xs text-secondary">Monarch Money posted category overrun after latest restaurant charge.</div>
+                      <div class="mt-1 text-xs text-muted">2:14 PM</div>
+                    </div>
+                  </div>
+                  <div class="flex gap-4">
+                    <div class="mt-1 h-3 w-3 rounded-full bg-emerald-400"></div>
+                    <div>
+                      <div class="text-sm font-medium text-primary">AI triage generated recommendation</div>
+                      <div class="text-xs text-secondary">Suggested action: freeze dining spend for 4 days and create follow-up task.</div>
+                      <div class="mt-1 text-xs text-muted">2:14 PM</div>
+                    </div>
+                  </div>
+                  <div class="flex gap-4">
+                    <div class="mt-1 h-3 w-3 rounded-full bg-slate-400"></div>
+                    <div>
+                      <div class="text-sm font-medium text-primary">Pinned to dashboard sidebar</div>
+                      <div class="text-xs text-secondary">Shown above standard FYI notifications until acknowledged.</div>
+                      <div class="mt-1 text-xs text-muted">2:15 PM</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="rounded-xl border border-border bg-surface-0 p-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-primary">Keyboard shortcuts</h4>
+                  <span class="text-xs text-muted">Power user mode</span>
+                </div>
+                <div class="space-y-3 text-sm text-secondary">
+                  <div class="flex items-center justify-between"><span>Mark read</span><span class="kbd">r</span></div>
+                  <div class="flex items-center justify-between"><span>Dismiss</span><span class="kbd">d</span></div>
+                  <div class="flex items-center justify-between"><span>Primary action</span><span class="kbd">Enter</span></div>
+                  <div class="flex items-center justify-between"><span>Pin</span><span class="kbd">p</span></div>
+                  <div class="flex items-center justify-between"><span>Snooze</span><span class="kbd">s</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

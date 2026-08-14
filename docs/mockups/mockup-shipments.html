@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Packages</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .sidebar-item:hover { background: #f1f5f9; }
+    .card-hover:hover { background: #f8fafc; border-color: #94a3b8; }
+    .card-active { background: #eff6ff; border-color: #3b82f6 !important; }
+    .status-in-transit { background: #dbeafe; color: #1e40af; }
+    .status-out-for-delivery { background: #fef3c7; color: #92400e; }
+    .status-delivered { background: #dcfce7; color: #166534; }
+    .status-pending { background: #f1f5f9; color: #475569; }
+    .status-exception { background: #fee2e2; color: #991b1b; }
+    .carrier-usps { background: #1a4b8c; }
+    .carrier-fedex { background: #4d148c; }
+    .carrier-ups { background: #351c15; }
+    .carrier-dhl { background: #d40511; }
+    .carrier-amazon { background: #232f3e; }
+    .carrier-other { background: #475569; }
+    .confidence-high { color: #16a34a; }
+    .confidence-medium { color: #d97706; }
+    .confidence-inferred { color: #2563eb; }
+    .confidence-low { color: #9ca3af; }
+    .progress-track { background: #e2e8f0; border-radius: 9999px; height: 4px; }
+    .progress-fill { border-radius: 9999px; height: 4px; transition: width 0.3s; }
+    .detail-panel { animation: slideIn 0.2s ease-out; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+    .timeline-dot { width: 10px; height: 10px; border-radius: 9999px; flex-shrink: 0; margin-top: 4px; }
+    .timeline-line { width: 2px; background: #e2e8f0; flex-shrink: 0; }
+    .tab-active { color: #2563eb; border-bottom: 2px solid #2563eb; }
+    .tab-inactive { color: #6b7280; border-bottom: 2px solid transparent; }
+    .tab-inactive:hover { color: #374151; }
+    .source-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+    .source-email { background: #dcfce7; color: #166534; }
+    .source-message { background: #dbeafe; color: #1e40af; }
+    .source-manual { background: #f3e8ff; color: #6b21a8; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">My Day</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-md">
+          <i class="fas fa-box mr-1.5 text-xs"></i>Packages
+          <span class="ml-1.5 bg-amber-500 text-white text-[9px] rounded-full px-1.5 py-0.5 font-bold">2</span>
+        </a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Timeline</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <input type="text" placeholder="Search packages..." class="w-56 px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <i class="fas fa-search absolute right-3 top-2 text-gray-400 text-sm"></i>
+      </div>
+      <button onclick="document.getElementById('quickAddModal').classList.toggle('hidden')"
+        class="flex items-center gap-2 px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+        <i class="fas fa-plus text-xs"></i>
+        Track Package
+      </button>
+      <button class="relative p-2 text-gray-500 hover:text-gray-700">
+        <i class="fas fa-bell"></i>
+        <span class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">3</span>
+      </button>
+      <button class="p-2 text-gray-500 hover:text-gray-700"><i class="fas fa-cog"></i></button>
+    </div>
+  </header>
+
+  <div class="flex h-[calc(100vh-57px)]">
+
+    <!-- Left Sidebar -->
+    <aside class="w-56 bg-white border-r border-gray-200 p-4 overflow-y-auto flex-shrink-0">
+      <!-- Stats Summary -->
+      <div class="mb-5 p-3 bg-blue-50 rounded-lg border border-blue-100">
+        <p class="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-2">Active</p>
+        <div class="space-y-1.5">
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-600">In Transit</span>
+            <span class="font-semibold text-blue-700">4</span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-600 flex items-center gap-1">
+              <span class="w-1.5 h-1.5 bg-amber-500 rounded-full"></span>
+              Arriving Today
+            </span>
+            <span class="font-semibold text-amber-600">1</span>
+          </div>
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-600 flex items-center gap-1">
+              <span class="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
+              Tomorrow
+            </span>
+            <span class="font-semibold text-green-600">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div class="mb-5">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Filter by Status</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer bg-blue-50">
+            <i class="fas fa-globe text-blue-600 text-sm w-4"></i>
+            <span class="text-sm font-medium text-blue-700">All Packages</span>
+            <span class="ml-auto text-xs text-blue-600 font-medium">7</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-truck text-blue-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">In Transit</span>
+            <span class="ml-auto text-xs text-gray-400">4</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-shipping-fast text-amber-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Out for Delivery</span>
+            <span class="ml-auto text-xs text-amber-500 font-medium">1</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-check-circle text-green-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Delivered</span>
+            <span class="ml-auto text-xs text-gray-400">12</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-exclamation-circle text-red-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Exception</span>
+            <span class="ml-auto text-xs text-red-500 font-medium">1</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-question-circle text-gray-400 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Needs Review</span>
+            <span class="ml-auto text-xs text-orange-500 font-medium">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Carrier filter -->
+      <div class="mb-5">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Carrier</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="w-2 h-2 rounded-sm carrier-usps inline-block"></span>
+            <span class="text-sm text-gray-700">USPS</span>
+            <span class="ml-auto text-xs text-gray-400">3</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="w-2 h-2 rounded-sm carrier-fedex inline-block"></span>
+            <span class="text-sm text-gray-700">FedEx</span>
+            <span class="ml-auto text-xs text-gray-400">2</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="w-2 h-2 rounded-sm carrier-ups inline-block"></span>
+            <span class="text-sm text-gray-700">UPS</span>
+            <span class="ml-auto text-xs text-gray-400">1</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="w-2 h-2 rounded-sm carrier-amazon inline-block"></span>
+            <span class="text-sm text-gray-700">Amazon</span>
+            <span class="ml-auto text-xs text-gray-400">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Source -->
+      <div class="mb-5">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Detected From</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-envelope text-green-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Email</span>
+            <span class="ml-auto text-xs text-gray-400">5</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-comment text-blue-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Messages</span>
+            <span class="ml-auto text-xs text-gray-400">1</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-keyboard text-purple-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Manual</span>
+            <span class="ml-auto text-xs text-gray-400">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sync status -->
+      <div class="mt-auto pt-4 border-t border-gray-200">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Tracking</h3>
+        <div class="space-y-2 text-xs text-gray-500">
+          <div class="flex items-center justify-between">
+            <span>AfterShip</span>
+            <span class="text-green-600"><i class="fas fa-check-circle"></i> 12m ago</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>USPS</span>
+            <span class="text-green-600"><i class="fas fa-check-circle"></i> 8m ago</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span>Used this month</span>
+            <span class="text-gray-600 font-medium">7 / 100</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main List -->
+    <main class="flex-1 overflow-y-auto p-5 min-w-0" id="mainContent">
+
+      <!-- Tabs + Stats bar -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-6 border-b border-gray-200 w-full pb-0">
+          <button class="tab-active pb-2.5 text-sm font-medium">All Packages <span class="ml-1 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5">7</span></button>
+          <button class="tab-inactive pb-2.5 text-sm font-medium">Arriving Soon <span class="ml-1 text-xs bg-amber-100 text-amber-700 rounded-full px-1.5">2</span></button>
+          <button class="tab-inactive pb-2.5 text-sm font-medium">Needs Review <span class="ml-1 text-xs bg-orange-100 text-orange-700 rounded-full px-1.5">1</span></button>
+          <button class="tab-inactive pb-2.5 text-sm font-medium">Delivered</button>
+          <div class="ml-auto flex items-center gap-2 pb-2">
+            <button class="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1">
+              <i class="fas fa-sort-amount-down text-xs"></i> Sort: Expected Date
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arriving Today Banner -->
+      <div class="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
+        <div class="w-8 h-8 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-shipping-fast text-amber-600 text-sm"></i>
+        </div>
+        <div>
+          <p class="text-sm font-medium text-amber-800">1 package arriving today</p>
+          <p class="text-xs text-amber-600">MacBook Pro USB-C adapter — FedEx out for delivery</p>
+        </div>
+        <button class="ml-auto text-xs text-amber-600 hover:text-amber-800 font-medium">View ↓</button>
+      </div>
+
+      <!-- Package Cards -->
+      <div class="space-y-2.5" id="packageList">
+
+        <!-- Card 1: Out for Delivery -->
+        <div class="bg-white rounded-lg border-2 border-amber-300 p-4 cursor-pointer card-hover"
+             onclick="showDetail('pkg1')">
+          <div class="flex items-start gap-3">
+            <!-- Carrier Badge -->
+            <div class="carrier-fedex rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">FEDEX</span>
+            </div>
+            <!-- Info -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">MacBook Pro USB-C Adapter</p>
+                  <p class="text-xs text-gray-500 mt-0.5">From: Apple Store · #7748491029394857</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="status-out-for-delivery text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-shipping-fast mr-1 text-[10px]"></i>Out for Delivery
+                  </span>
+                  <p class="text-xs text-amber-600 font-medium mt-1">Today</p>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+                  <span>Shipped Dec 18</span>
+                  <span class="text-amber-600 font-medium flex items-center gap-1">
+                    <i class="fas fa-check-circle text-green-500"></i> API confirmed
+                  </span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill bg-amber-400" style="width: 85%"></div>
+                </div>
+                <div class="flex justify-between text-[10px] text-gray-400 mt-1">
+                  <span>Picked up</span>
+                  <span>In transit</span>
+                  <span>Out for delivery</span>
+                  <span class="text-gray-300">Delivered</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-email">📧 email</span>
+                <span class="text-xs text-gray-400">Detected from order confirmation · Dec 18</span>
+                <a href="#" class="ml-auto text-xs text-blue-500 hover:text-blue-700">Track ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: In Transit, arriving tomorrow -->
+        <div class="bg-white rounded-lg border border-gray-200 p-4 cursor-pointer card-hover"
+             onclick="showDetail('pkg2')">
+          <div class="flex items-start gap-3">
+            <div class="carrier-usps rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">USPS</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">Package from Mom</p>
+                  <p class="text-xs text-gray-500 mt-0.5">From: Susan R. · #9274899938502938475</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="status-in-transit text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-truck mr-1 text-[10px]"></i>In Transit
+                  </span>
+                  <p class="text-xs text-green-600 font-medium mt-1">Tomorrow, Dec 21</p>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+                  <span>Shipped Dec 17 · Denver, CO → Salt Lake City, UT</span>
+                  <span class="confidence-high text-xs flex items-center gap-1">
+                    <i class="fas fa-check-circle"></i> API confirmed
+                  </span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill bg-blue-500" style="width: 65%"></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-message">💬 message</span>
+                <span class="text-xs text-gray-400">Detected from iMessage · "I mailed it today" · Dec 17</span>
+                <a href="#" class="ml-auto text-xs text-blue-500 hover:text-blue-700">Track ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: In Transit, expected in 3 days -->
+        <div class="bg-white rounded-lg border border-gray-200 p-4 cursor-pointer card-hover"
+             onclick="showDetail('pkg3')">
+          <div class="flex items-start gap-3">
+            <div class="carrier-amazon rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">AMZN</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">Phone case + screen protector</p>
+                  <p class="text-xs text-gray-500 mt-0.5">From: Amazon · #TBA308293748594</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="status-in-transit text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-truck mr-1 text-[10px]"></i>In Transit
+                  </span>
+                  <p class="text-xs text-blue-600 font-medium mt-1">Dec 22</p>
+                </div>
+              </div>
+              <div class="mt-2.5">
+                <div class="flex items-center justify-between text-xs text-gray-400 mb-1">
+                  <span>Shipped Dec 19</span>
+                  <span class="confidence-high text-xs flex items-center gap-1">
+                    <i class="fas fa-check-circle text-green-500"></i> API confirmed
+                  </span>
+                </div>
+                <div class="progress-track">
+                  <div class="progress-fill bg-blue-500" style="width: 40%"></div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-email">📧 email</span>
+                <span class="text-xs text-gray-400">2 sources: order confirmation + shipping notification</span>
+                <a href="#" class="ml-auto text-xs text-blue-500 hover:text-blue-700">Track ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Exception / Delayed -->
+        <div class="bg-white rounded-lg border border-red-200 p-4 cursor-pointer card-hover"
+             onclick="showDetail('pkg4')">
+          <div class="flex items-start gap-3">
+            <div class="carrier-ups rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">UPS</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">Standing Desk Monitor Arm</p>
+                  <p class="text-xs text-gray-500 mt-0.5">From: Ergotron via Amazon · #1Z83929A0393849382</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="status-exception text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-exclamation-circle mr-1 text-[10px]"></i>Delayed
+                  </span>
+                  <p class="text-xs text-red-500 font-medium mt-1">
+                    <s class="text-gray-400">Dec 19</s> → Dec 23
+                  </p>
+                </div>
+              </div>
+              <div class="mt-2 p-2 bg-red-50 rounded text-xs text-red-700">
+                <i class="fas fa-info-circle mr-1"></i>Weather delay — Memphis, TN sort facility
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-email">📧 email</span>
+                <span class="text-xs text-gray-400">Originally expected Dec 19</span>
+                <a href="#" class="ml-auto text-xs text-blue-500 hover:text-blue-700">Track ↗</a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: Needs Review (low confidence extraction) -->
+        <div class="bg-orange-50 rounded-lg border border-orange-200 p-4 cursor-pointer card-hover"
+             onclick="showDetail('pkg5')">
+          <div class="flex items-start gap-3">
+            <div class="bg-orange-400 rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">???</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">Possible package from John</p>
+                  <p class="text-xs text-gray-500 mt-0.5">No tracking number · Carrier unknown</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="bg-orange-100 text-orange-700 text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-question mr-1 text-[10px]"></i>Needs Review
+                  </span>
+                  <p class="text-xs text-gray-400 mt-1">~Dec 24 (inferred)</p>
+                </div>
+              </div>
+              <div class="mt-2 p-2 bg-orange-100/70 rounded text-xs text-orange-800">
+                <i class="fas fa-robot mr-1"></i>AI extracted from message: "I shipped your Christmas gift yesterday, should be there by Christmas" — confidence 62%
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-message">💬 message</span>
+                <span class="text-xs text-gray-400">iMessage from John · Dec 18</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <button class="text-xs text-green-600 hover:text-green-800 font-medium">Confirm</button>
+                  <button class="text-xs text-red-400 hover:text-red-600">Dismiss</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6: Delivered recently -->
+        <div class="bg-white rounded-lg border border-gray-200 p-4 cursor-pointer card-hover opacity-60"
+             onclick="showDetail('pkg6')">
+          <div class="flex items-start gap-3">
+            <div class="carrier-fedex rounded-md px-2 py-0.5 flex-shrink-0 mt-0.5">
+              <span class="text-white text-[10px] font-bold tracking-wider">FEDEX</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="font-medium text-gray-900 text-sm">Keyboard — Keychron K2</p>
+                  <p class="text-xs text-gray-500 mt-0.5">From: B&H Photo · #7748299192830182</p>
+                </div>
+                <div class="text-right flex-shrink-0">
+                  <span class="status-delivered text-xs font-medium px-2 py-0.5 rounded-full inline-block">
+                    <i class="fas fa-check-circle mr-1 text-[10px]"></i>Delivered
+                  </span>
+                  <p class="text-xs text-gray-400 mt-1">Dec 17 at 2:14 PM</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 mt-2.5">
+                <span class="source-badge source-email">📧 email</span>
+                <span class="text-xs text-gray-400">Delivered 2 days ago · Front door</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div><!-- end package list -->
+
+    </main><!-- end main -->
+
+    <!-- Detail Panel (slide-in from right) -->
+    <aside id="detailPanel" class="hidden w-96 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 detail-panel">
+      <div class="p-4 border-b border-gray-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-900">Package Details</h2>
+        <button onclick="closeDetail()" class="p-1 text-gray-400 hover:text-gray-600">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <!-- Detail content -->
+      <div class="p-4 space-y-5" id="detailContent">
+
+        <!-- Package header -->
+        <div>
+          <div class="flex items-start gap-3 mb-3">
+            <div class="carrier-fedex rounded-md px-2 py-1 flex-shrink-0">
+              <span class="text-white text-xs font-bold tracking-wider">FEDEX</span>
+            </div>
+            <div>
+              <p class="font-semibold text-gray-900">MacBook Pro USB-C Adapter</p>
+              <p class="text-xs text-gray-500 mt-0.5">Apple Store</p>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="status-out-for-delivery text-xs font-medium px-2 py-0.5 rounded-full">
+              <i class="fas fa-shipping-fast mr-1 text-[10px]"></i>Out for Delivery
+            </span>
+            <span class="text-xs text-amber-600 font-medium">Expected Today</span>
+          </div>
+        </div>
+
+        <!-- Tracking number -->
+        <div class="p-3 bg-gray-50 rounded-lg">
+          <p class="text-xs text-gray-500 mb-1">Tracking Number</p>
+          <div class="flex items-center gap-2">
+            <code class="text-sm font-mono text-gray-900">7748491029394857</code>
+            <button class="text-gray-400 hover:text-gray-600 text-xs"><i class="fas fa-copy"></i></button>
+          </div>
+          <p class="text-xs text-gray-400 mt-1">FedEx Ground · Auto-detected with 95% confidence</p>
+        </div>
+
+        <!-- Key dates -->
+        <div class="grid grid-cols-3 gap-3">
+          <div class="text-center p-2 bg-gray-50 rounded">
+            <p class="text-[10px] text-gray-500 uppercase tracking-wide">Shipped</p>
+            <p class="text-sm font-medium text-gray-900 mt-0.5">Dec 18</p>
+          </div>
+          <div class="text-center p-2 bg-amber-50 rounded border border-amber-200">
+            <p class="text-[10px] text-amber-600 uppercase tracking-wide">Expected</p>
+            <p class="text-sm font-semibold text-amber-700 mt-0.5">Today</p>
+          </div>
+          <div class="text-center p-2 bg-gray-50 rounded">
+            <p class="text-[10px] text-gray-500 uppercase tracking-wide">Delivered</p>
+            <p class="text-sm font-medium text-gray-400 mt-0.5">—</p>
+          </div>
+        </div>
+
+        <!-- Arrival confidence -->
+        <div class="flex items-center gap-2 p-2.5 bg-green-50 rounded border border-green-200">
+          <i class="fas fa-check-circle text-green-500 text-sm"></i>
+          <div>
+            <p class="text-xs font-medium text-green-800">Arrival date confirmed by carrier API</p>
+            <p class="text-[10px] text-green-600">Updated 12 minutes ago via AfterShip</p>
+          </div>
+        </div>
+
+        <!-- Tracking timeline -->
+        <div>
+          <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-3">Tracking History</h3>
+          <div class="space-y-0">
+
+            <div class="flex gap-3">
+              <div class="flex flex-col items-center">
+                <div class="timeline-dot bg-amber-400"></div>
+                <div class="timeline-line h-12"></div>
+              </div>
+              <div class="pb-4">
+                <p class="text-sm font-medium text-gray-900">Out for delivery</p>
+                <p class="text-xs text-gray-500">Salt Lake City, UT</p>
+                <p class="text-xs text-gray-400 mt-0.5">Today · 7:23 AM</p>
+              </div>
+            </div>
+
+            <div class="flex gap-3">
+              <div class="flex flex-col items-center">
+                <div class="timeline-dot bg-blue-400"></div>
+                <div class="timeline-line h-12"></div>
+              </div>
+              <div class="pb-4">
+                <p class="text-sm font-medium text-gray-900">At local facility</p>
+                <p class="text-xs text-gray-500">Salt Lake City, UT sort facility</p>
+                <p class="text-xs text-gray-400 mt-0.5">Yesterday · 11:47 PM</p>
+              </div>
+            </div>
+
+            <div class="flex gap-3">
+              <div class="flex flex-col items-center">
+                <div class="timeline-dot bg-blue-300"></div>
+                <div class="timeline-line h-12"></div>
+              </div>
+              <div class="pb-4">
+                <p class="text-sm text-gray-700">In transit</p>
+                <p class="text-xs text-gray-500">Phoenix, AZ → Salt Lake City, UT</p>
+                <p class="text-xs text-gray-400 mt-0.5">Dec 19 · 3:15 PM</p>
+              </div>
+            </div>
+
+            <div class="flex gap-3">
+              <div class="flex flex-col items-center">
+                <div class="timeline-dot bg-gray-300"></div>
+              </div>
+              <div class="pb-2">
+                <p class="text-sm text-gray-500">Picked up</p>
+                <p class="text-xs text-gray-400">Cupertino, CA</p>
+                <p class="text-xs text-gray-400 mt-0.5">Dec 18 · 9:00 AM</p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- Source messages -->
+        <div>
+          <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wide mb-2">Detected From</h3>
+          <div class="space-y-2">
+            <div class="p-3 bg-gray-50 rounded-lg border border-gray-200">
+              <div class="flex items-center gap-2 mb-1.5">
+                <span class="source-badge source-email">📧 email</span>
+                <span class="text-xs text-gray-500">Dec 18, 9:15 AM</span>
+              </div>
+              <p class="text-xs text-gray-700">
+                "Your order has shipped! MacBook Pro USB-C Adapter. Tracking: 7748491029394857.
+                Estimated delivery: <strong>Dec 20</strong>."
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-2 pt-2 border-t border-gray-200">
+          <button class="flex-1 py-2 text-sm text-green-700 bg-green-50 hover:bg-green-100 rounded-md font-medium">
+            <i class="fas fa-check mr-1.5"></i>Mark Delivered
+          </button>
+          <button class="flex-1 py-2 text-sm text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-md font-medium">
+            <i class="fas fa-edit mr-1.5"></i>Edit
+          </button>
+          <button class="py-2 px-3 text-sm text-red-400 bg-gray-50 hover:bg-red-50 rounded-md">
+            <i class="fas fa-trash"></i>
+          </button>
+        </div>
+
+        <!-- Home Assistant -->
+        <div class="p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <div class="flex items-center gap-2 mb-1.5">
+            <img src="https://www.home-assistant.io/images/favicon-192x192.png"
+                 onerror="this.style.display='none'"
+                 class="w-4 h-4">
+            <span class="text-xs font-medium text-blue-800">Home Assistant</span>
+            <span class="ml-auto text-xs text-green-600"><i class="fas fa-circle text-[8px]"></i> Active</span>
+          </div>
+          <p class="text-xs text-blue-700">Sensor: <code>sensor.fedex_7748491</code></p>
+          <p class="text-xs text-blue-600 mt-0.5">Porch light automation will trigger when status = out_for_delivery ✓</p>
+        </div>
+
+      </div>
+    </aside>
+
+  </div><!-- end flex -->
+
+  <!-- Quick Add Modal -->
+  <div id="quickAddModal" class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold text-gray-900">Track a Package</h2>
+        <button onclick="document.getElementById('quickAddModal').classList.add('hidden')"
+                class="text-gray-400 hover:text-gray-600">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1.5">Tracking Number</label>
+          <input type="text" placeholder="Paste tracking number here..."
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <p class="text-xs text-gray-400 mt-1">We'll auto-detect the carrier (USPS, FedEx, UPS, DHL, Amazon)</p>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1.5">Description (optional)</label>
+          <input type="text" placeholder="e.g. Birthday gift from Sarah"
+                 class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="flex items-center gap-3 pt-2">
+          <button class="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
+            <i class="fas fa-search mr-1.5 text-xs"></i>Start Tracking
+          </button>
+          <button onclick="document.getElementById('quickAddModal').classList.add('hidden')"
+                  class="flex-1 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showDetail(id) {
+      const panel = document.getElementById('detailPanel');
+      panel.classList.remove('hidden');
+    }
+    function closeDetail() {
+      const panel = document.getElementById('detailPanel');
+      panel.classList.add('hidden');
+    }
+  </script>
+
+</body>
+</html>

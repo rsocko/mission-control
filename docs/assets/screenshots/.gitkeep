@@ -1,0 +1,2 @@
+# Screenshot manifest is tracked; PNGs are tracked when captured.
+# Playwright test results are not tracked.

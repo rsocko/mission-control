@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Routines &amp; Habits (Multi-Cadence) + Weekly Reset + Insights</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    h1, h2, h3, h4 {
+      text-wrap: balance;
+    }
+
+    p, button, label, textarea, select, span {
+      text-wrap: pretty;
+    }
+
+    .tabular {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .bg-gray-25 {
+      background: #fcfcfd;
+    }
+
+    .nav-tab,
+    .view-tab,
+    .action-button,
+    .choice-button,
+    .mini-input {
+      transition-property: background-color, border-color, color, box-shadow, transform, opacity;
+      transition-duration: 160ms;
+      transition-timing-function: ease;
+    }
+
+    .nav-tab.active,
+    .view-tab.active {
+      background: #eff6ff;
+      color: #2563eb;
+      border-color: #bfdbfe;
+    }
+
+    .action-button:active,
+    .choice-button:active,
+    .view-tab:active,
+    .nav-tab:active {
+      transform: scale(0.96);
+    }
+
+    .day-cell,
+    .empty-cell,
+    .future-cell,
+    .disabled-cell {
+      width: 1.75rem;
+      height: 1.75rem;
+      border-radius: 0.5rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      line-height: 1;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    }
+
+    .day-cell {
+      background: #dcfce7;
+      border: 1px solid #86efac;
+      color: #16a34a;
+    }
+
+    .empty-cell {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      color: #9ca3af;
+    }
+
+    .future-cell {
+      background: #f9fafb;
+      border: 1px dashed #cbd5e1;
+      color: #9ca3af;
+    }
+
+    .disabled-cell {
+      background: #fcfcfd;
+      color: #d1d5db;
+    }
+
+    .heat-cell {
+      width: 0.95rem;
+      height: 0.95rem;
+      border-radius: 0.32rem;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <header class="border-b border-gray-200 bg-white">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <div class="flex items-center gap-8">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+            <i class="fas fa-satellite-dish"></i>
+          </div>
+          <div>
+            <h1 class="text-lg font-semibold">Mission Control</h1>
+          </div>
+        </div>
+        <nav class="flex items-center gap-2">
+          <a href="#" class="nav-tab active rounded-md border border-blue-100 px-3 py-2 text-sm font-medium text-blue-600">Dashboard</a>
+          <a href="#" class="nav-tab rounded-md border border-transparent px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">My Day</a>
+          <a href="#" class="nav-tab rounded-md border border-transparent px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">Kanban</a>
+          <a href="#" class="nav-tab rounded-md border border-transparent px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100">More <i class="fas fa-chevron-down ml-1 text-xs"></i></a>
+        </nav>
+      </div>
+      <div class="hidden items-center gap-2 md:flex">
+        <button class="action-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700" aria-label="Search">
+          <i class="fas fa-magnifying-glass"></i>
+        </button>
+        <button class="action-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700" aria-label="Settings">
+          <i class="fas fa-gear"></i>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-7xl px-6 py-6">
+    <div class="mb-6 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-gray-200 bg-white p-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Views</p>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <button class="view-tab active rounded-md border px-4 py-2 text-sm font-medium" data-tab="routines">
+            <i class="fas fa-repeat mr-2 text-blue-600"></i>Routines &amp; Habits
+          </button>
+          <button class="view-tab rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100" data-tab="reset">
+            <i class="fas fa-calendar-check mr-2 text-gray-500"></i>Weekly Reset
+          </button>
+          <button class="view-tab rounded-md border border-transparent px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100" data-tab="insights">
+            <i class="fas fa-chart-line mr-2 text-gray-500"></i>Cadence Insights
+          </button>
+        </div>
+      </div>
+      <div class="text-right">
+        <p class="text-sm font-medium text-gray-700">Week of Jul 7 – Jul 13, 2026</p>
+        <p class="text-xs text-gray-500">Three connected views: track, reflect, and adjust.</p>
+      </div>
+    </div>
+
+    <section data-view="routines" class="space-y-6">
+      <div class="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 class="flex items-center gap-2 text-xl font-semibold">
+            <i class="fas fa-repeat text-blue-600"></i>
+            Routines &amp; Habits
+          </h2>
+          <p class="mt-1 max-w-3xl text-sm text-gray-500">Track patterns at your own pace. Missing a day is normal — data helps you adjust, not judge.</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-700">
+          <div class="tabular min-w-[14rem] text-center">← Jul 7 – Jul 13, 2026 →</div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white">
+        <div class="border-b border-gray-200 px-5 py-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Daily Routines</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full">
+            <thead>
+              <tr class="border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <th class="px-5 py-3 text-left">Routine</th>
+                <th class="px-2 py-3 text-center">M</th>
+                <th class="px-2 py-3 text-center">T</th>
+                <th class="px-2 py-3 text-center">W</th>
+                <th class="px-2 py-3 text-center">T</th>
+                <th class="px-2 py-3 text-center">F</th>
+                <th class="px-2 py-3 text-center">S</th>
+                <th class="px-2 py-3 text-center">S</th>
+                <th class="px-5 py-3 text-right">Streak</th>
+              </tr>
+            </thead>
+            <tbody class="text-sm">
+              <tr class="border-b border-gray-100">
+                <td class="px-5 py-4 font-medium text-gray-800">Take vitamins</td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">18 <span class="text-orange-500">🔥</span></td>
+              </tr>
+              <tr class="border-b border-gray-100">
+                <td class="px-5 py-4 font-medium text-gray-800">Morning workout</td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="empty-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">4</td>
+              </tr>
+              <tr class="border-b border-gray-100">
+                <td class="px-5 py-4 font-medium text-gray-800">Read 20 min</td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="empty-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">2</td>
+              </tr>
+              <tr>
+                <td class="px-5 py-4 font-medium text-gray-800">Wind-down by 11pm</td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="empty-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="empty-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">1</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white">
+        <div class="border-b border-gray-200 px-5 py-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Specific Days</p>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full">
+            <thead>
+              <tr class="border-b border-gray-200 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                <th class="px-5 py-3 text-left">Routine</th>
+                <th class="px-2 py-3 text-center">M</th>
+                <th class="px-2 py-3 text-center">T</th>
+                <th class="px-2 py-3 text-center">W</th>
+                <th class="px-2 py-3 text-center">T</th>
+                <th class="px-2 py-3 text-center">F</th>
+                <th class="px-2 py-3 text-center">S</th>
+                <th class="px-2 py-3 text-center">S</th>
+                <th class="px-5 py-3 text-right">Streak</th>
+              </tr>
+            </thead>
+            <tbody class="text-sm">
+              <tr class="border-b border-gray-100">
+                <td class="px-5 py-4 font-medium text-gray-800">Gym (M/W/F)</td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="day-cell"><i class="fas fa-check text-[10px]"></i></span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="empty-cell">·</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">8 <span class="text-orange-500">🔥</span></td>
+              </tr>
+              <tr>
+                <td class="px-5 py-4 font-medium text-gray-800">Meal prep (Sun)</td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="disabled-cell">—</span></td>
+                <td class="px-2 py-4 text-center"><span class="future-cell">·</span></td>
+                <td class="px-5 py-4 text-right font-medium tabular">3</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white">
+        <div class="border-b border-gray-200 px-5 py-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Flexible / Target-Based</p>
+        </div>
+        <div class="space-y-4 p-5">
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-sm font-medium text-gray-900">Exercise</h3>
+                  <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">3x/week</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Mon, Wed, Fri, Sat completed</p>
+              </div>
+              <div class="flex flex-wrap items-center gap-3 text-sm">
+                <span class="text-gray-500">Target: <span class="tabular font-medium text-gray-700">3/week</span></span>
+                <span class="font-medium text-gray-900">Done: <span class="tabular">4/3</span></span>
+                <span class="rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-600">+1 bonus</span>
+                <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600 hover:bg-blue-100">+1</button>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center gap-3">
+              <div class="text-sm font-medium text-gray-700">●●● <span class="ml-1 text-green-600">+●</span></div>
+              <div class="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+                <div class="h-full rounded-full bg-green-400" style="width: 100%;"></div>
+              </div>
+            </div>
+            <p class="mt-3 text-xs text-green-600">Nice — exceeded target this week.</p>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-sm font-medium text-gray-900">Call Mom</h3>
+                  <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">every 3-4 days</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Last: 2 days ago</p>
+              </div>
+              <span class="text-sm font-medium text-green-600">✓ On track</span>
+            </div>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div class="h-full rounded-full bg-green-400" style="width: 52%;"></div>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">Comfortably inside the preferred window.</p>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-sm font-medium text-gray-900">Clean bathroom</h3>
+                  <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">~weekly</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Last: 5 days ago</p>
+              </div>
+              <span class="text-sm font-medium text-amber-600">⚡ Due soon</span>
+            </div>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div class="h-full rounded-full bg-amber-400" style="width: 72%;"></div>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">Approaching the edge of the 7-day window.</p>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-sm font-medium text-gray-900">Budget review</h3>
+                  <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">monthly</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Last: 12 days ago</p>
+              </div>
+              <span class="text-sm font-medium text-green-600">✓ On track</span>
+            </div>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div class="h-full rounded-full bg-green-400" style="width: 30%;"></div>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">Plenty of room before the next review window.</p>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 p-4">
+            <div class="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div class="flex flex-wrap items-center gap-2">
+                  <h3 class="text-sm font-medium text-gray-900">Quarterly goals check</h3>
+                  <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600">quarterly</span>
+                </div>
+                <p class="mt-1 text-xs text-gray-500">Last: 6 weeks ago</p>
+              </div>
+              <span class="text-sm font-medium text-green-600">✓ On track</span>
+            </div>
+            <div class="mt-3 h-2 overflow-hidden rounded-full bg-gray-100">
+              <div class="h-full rounded-full bg-green-400" style="width: 42%;"></div>
+            </div>
+            <p class="mt-2 text-xs text-gray-500">Still well within the quarterly window.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white">
+        <div class="border-b border-gray-200 px-5 py-4">
+          <p class="text-xs font-semibold uppercase tracking-[0.16em] text-gray-400">Add Routine</p>
+        </div>
+        <form class="space-y-4 p-5">
+          <div class="grid gap-4 md:grid-cols-2">
+            <label class="block text-sm">
+              <span class="mb-2 block font-medium text-gray-700">Name</span>
+              <input type="text" value="Hydrate before coffee" class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+            </label>
+            <label class="block text-sm">
+              <span class="mb-2 block font-medium text-gray-700">Cadence type</span>
+              <select id="cadence-type" class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                <option>Daily</option>
+                <option>Specific days</option>
+                <option>X per week</option>
+                <option>Every N days</option>
+                <option>Weekly</option>
+                <option>Monthly</option>
+                <option>Quarterly</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="dynamic-fields" class="space-y-4">
+            <div data-cadence-panel="Daily" class="rounded-lg bg-gray-50 p-4 text-sm text-gray-500">
+              Daily routines track every day by default.
+            </div>
+
+            <div data-cadence-panel="Specific days" class="hidden rounded-lg border border-gray-200 p-4">
+              <p class="mb-3 text-sm font-medium text-gray-700">Expected days</p>
+              <div class="flex flex-wrap gap-2">
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-sm font-medium text-blue-600"><input type="checkbox" checked class="sr-only">M</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-600"><input type="checkbox" class="sr-only">T</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-sm font-medium text-blue-600"><input type="checkbox" checked class="sr-only">W</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-600"><input type="checkbox" class="sr-only">T</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-sm font-medium text-blue-600"><input type="checkbox" checked class="sr-only">F</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-600"><input type="checkbox" class="sr-only">S</label>
+                <label class="choice-button flex h-10 w-10 items-center justify-center rounded-md border border-gray-200 bg-white text-sm font-medium text-gray-600"><input type="checkbox" class="sr-only">S</label>
+              </div>
+            </div>
+
+            <div data-cadence-panel="X per week" class="hidden grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Target per week</span>
+                <input type="number" min="1" value="3" class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              </label>
+            </div>
+
+            <div data-cadence-panel="Every N days" class="hidden grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Minimum interval</span>
+                <input type="number" min="1" value="3" class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              </label>
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Maximum interval</span>
+                <input type="number" min="1" value="4" class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+              </label>
+            </div>
+
+            <div data-cadence-panel="Weekly" class="hidden grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Preferred day (optional)</span>
+                <select class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option>Any day</option>
+                  <option>Monday</option>
+                  <option>Wednesday</option>
+                  <option>Friday</option>
+                  <option>Sunday</option>
+                </select>
+              </label>
+            </div>
+
+            <div data-cadence-panel="Monthly" class="hidden grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Preferred day (optional)</span>
+                <select class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option>Any day</option>
+                  <option>1st of month</option>
+                  <option>15th of month</option>
+                  <option>Last weekend</option>
+                </select>
+              </label>
+            </div>
+
+            <div data-cadence-panel="Quarterly" class="hidden grid gap-4 md:grid-cols-2">
+              <label class="block text-sm">
+                <span class="mb-2 block font-medium text-gray-700">Preferred day (optional)</span>
+                <select class="mini-input w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                  <option>Any day</option>
+                  <option>First week</option>
+                  <option>Mid-quarter</option>
+                  <option>Last week</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div class="flex justify-end">
+            <button type="button" class="action-button rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Add routine</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section data-view="reset" class="hidden space-y-6">
+      <div>
+        <h2 class="flex items-center gap-2 text-xl font-semibold">
+          <i class="fas fa-calendar-check text-blue-600"></i>
+          Weekly Reset
+        </h2>
+        <p class="mt-1 text-sm text-gray-500">Look back with clarity. Decide what to carry forward.</p>
+        <p class="mt-3 text-sm font-medium text-gray-700">Week of Jul 7 – Jul 13, 2026</p>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white p-5">
+        <div class="grid gap-4 md:grid-cols-4">
+          <div class="rounded-lg bg-gray-50 p-4">
+            <p class="text-xs uppercase tracking-wide text-gray-500">Tasks completed</p>
+            <p class="mt-2 text-2xl font-semibold tabular">12</p>
+          </div>
+          <div class="rounded-lg bg-gray-50 p-4">
+            <p class="text-xs uppercase tracking-wide text-gray-500">Routines kept</p>
+            <p class="mt-2 text-2xl font-semibold tabular">71%</p>
+          </div>
+          <div class="rounded-lg bg-gray-50 p-4">
+            <p class="text-xs uppercase tracking-wide text-gray-500">Focus 3 hit rate</p>
+            <p class="mt-2 text-2xl font-semibold tabular">4/5 days</p>
+          </div>
+          <div class="rounded-lg bg-gray-50 p-4">
+            <p class="text-xs uppercase tracking-wide text-gray-500">Over-completions</p>
+            <p class="mt-2 text-2xl font-semibold tabular">3</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <div class="rounded-lg border border-gray-200 bg-white p-5">
+          <h3 class="text-sm font-semibold text-gray-800">What went well?</h3>
+          <div class="mt-4 rounded-lg border-l-4 border-green-300 bg-green-50 p-4">
+            <textarea class="h-36 w-full bg-transparent text-sm text-gray-700 outline-none">Morning momentum felt stable. Vitamins stayed easy, exercise exceeded target, and the midweek planning block prevented task drift.</textarea>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 bg-white p-5">
+          <h3 class="text-sm font-semibold text-gray-800">What needs adjustment?</h3>
+          <div class="mt-4 rounded-lg border-l-4 border-amber-300 bg-amber-50 p-4">
+            <textarea class="h-36 w-full bg-transparent text-sm text-gray-700 outline-none">Wind-down slipped on two high-stimulation nights. Bathroom cleaning is trending later than weekly, and one stale project task needs a smaller next action.</textarea>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid gap-6 lg:grid-cols-2">
+        <div class="rounded-lg border border-gray-200 bg-white p-5">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-gray-800">Carry Forward</h3>
+            <span class="text-xs text-gray-500">3 items</span>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-gray-800">Keep Thursday planning block</p>
+                  <p class="text-xs text-gray-500">Protected the rest of the week from context switching.</p>
+                </div>
+                <div class="flex gap-2">
+                  <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">Keep →</button>
+                  <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Let go</button>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-gray-800">Saturday walk reset</p>
+                  <p class="text-xs text-gray-500">Useful for avoiding weekend drift.</p>
+                </div>
+                <div class="flex gap-2">
+                  <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">Keep →</button>
+                  <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Let go</button>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="text-sm font-medium text-gray-800">Short inbox closeout before dinner</p>
+                  <p class="text-xs text-gray-500">Worked, but only on lighter days.</p>
+                </div>
+                <div class="flex gap-2">
+                  <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">Keep →</button>
+                  <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Let go</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 bg-white p-5">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-gray-800">Stale Tasks</h3>
+            <span class="text-xs text-gray-500">14+ days old</span>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div class="rounded-lg border border-gray-200 p-4">
+              <p class="text-sm font-medium text-gray-800">Finalize backup workflow for receipts archive</p>
+              <p class="mt-1 text-xs text-gray-500">Last touched 17 days ago</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Keep</button>
+                <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Archive</button>
+                <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">Break down →</button>
+              </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-4">
+              <p class="text-sm font-medium text-gray-800">Research quieter desk lighting setup</p>
+              <p class="mt-1 text-xs text-gray-500">Last touched 21 days ago</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Keep</button>
+                <button class="action-button rounded-md border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Archive</button>
+                <button class="action-button rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">Break down →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end">
+        <button class="action-button rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Complete Reset</button>
+      </div>
+    </section>
+
+    <section data-view="insights" class="hidden space-y-6">
+      <div>
+        <h2 class="flex items-center gap-2 text-xl font-semibold">
+          <i class="fas fa-chart-line text-blue-600"></i>
+          Cadence Insights
+        </h2>
+        <p class="mt-1 text-sm text-gray-500">Your patterns suggest some adjustments. These are suggestions, not rules.</p>
+      </div>
+
+      <div class="space-y-4">
+        <div class="rounded-lg border border-gray-200 border-l-4 border-l-blue-400 bg-blue-50 p-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">📈 Increase frequency suggestion</p>
+          <h3 class="mt-2 text-sm font-semibold text-gray-900">“Exercise” — currently set to 3x/week</h3>
+          <p class="mt-1 text-sm text-gray-700">You've consistently done 4-5x/week for the past 3 weeks.</p>
+          <p class="mt-1 text-sm text-gray-700">Consider: Adjust to 4x/week?</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button class="action-button rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Accept</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Dismiss</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Keep watching</button>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 border-l-4 border-l-amber-400 bg-amber-50 p-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-amber-700">📉 Decrease frequency suggestion</p>
+          <h3 class="mt-2 text-sm font-semibold text-gray-900">“Clean bathroom” — currently set to weekly (~7 days)</h3>
+          <p class="mt-1 text-sm text-gray-700">Your actual pattern: every 9-10 days on average.</p>
+          <p class="mt-1 text-sm text-gray-700">Consider: Adjust to every 10 days? No shame — match reality.</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button class="action-button rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Accept</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Dismiss</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Keep watching</button>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 border-l-4 border-l-green-400 bg-green-50 p-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-green-700">✓ Confirmed pattern</p>
+          <h3 class="mt-2 text-sm font-semibold text-gray-900">“Call Mom” — set to every 3-4 days</h3>
+          <p class="mt-1 text-sm text-gray-700">You've stayed within window 90% of the time over 6 weeks.</p>
+          <p class="mt-1 text-sm text-gray-700">This cadence fits you well. No change needed.</p>
+        </div>
+
+        <div class="rounded-lg border border-gray-200 border-l-4 border-l-purple-400 bg-purple-50 p-5">
+          <p class="text-xs font-semibold uppercase tracking-[0.14em] text-purple-700">🆕 Pattern detected</p>
+          <h3 class="mt-2 text-sm font-semibold text-gray-900">“Read 20 min” — currently daily</h3>
+          <p class="mt-1 text-sm text-gray-700">You tend to skip weekends (89% weekday, 20% weekend).</p>
+          <p class="mt-1 text-sm text-gray-700">Consider: Switch to “weekdays only”? Weekends become bonus.</p>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button class="action-button rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">Accept</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Dismiss</button>
+            <button class="action-button rounded-md border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50">Keep watching</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white p-5">
+        <div class="flex items-center justify-between">
+          <h3 class="text-sm font-semibold text-gray-900">Behavior Heatmap</h3>
+          <p class="text-xs text-gray-500">4 weeks of cadence behavior</p>
+        </div>
+        <div class="mt-5 space-y-5">
+          <div class="grid gap-3 md:grid-cols-[220px,1fr] md:items-center">
+            <div>
+              <p class="text-sm font-medium text-gray-800">Take vitamins <span class="text-gray-500">(last 4 weeks: 93%)</span></p>
+            </div>
+            <div class="grid grid-cols-7 gap-1">
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+            </div>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[220px,1fr] md:items-center">
+            <div>
+              <p class="text-sm font-medium text-gray-800">Exercise <span class="text-gray-500">(last 4 weeks: 78%)</span></p>
+            </div>
+            <div class="grid grid-cols-7 gap-1">
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span>
+            </div>
+          </div>
+
+          <div class="grid gap-3 md:grid-cols-[220px,1fr] md:items-center">
+            <div>
+              <p class="text-sm font-medium text-gray-800">Call Mom <span class="text-gray-500">(last 4 weeks: within window 85%)</span></p>
+            </div>
+            <div class="grid grid-cols-7 gap-1">
+              <span class="heat-cell bg-amber-300"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-amber-300"></span><span class="heat-cell bg-green-400"></span>
+              <span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span>
+              <span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span><span class="heat-cell bg-amber-300"></span><span class="heat-cell bg-green-400"></span><span class="heat-cell bg-gray-200"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border border-gray-200 bg-white p-5">
+        <h3 class="text-sm font-semibold text-gray-900">Over-completion Log</h3>
+        <div class="mt-4 space-y-3">
+          <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">Exercise: <span class="font-medium">5x this week (target: 3)</span> — Jul 7 week</div>
+          <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">Exercise: <span class="font-medium">4x this week (target: 3)</span> — Jun 30 week</div>
+          <div class="rounded-lg bg-gray-50 p-4 text-sm text-gray-700">Read 20 min: <span class="font-medium">completed on Sat + Sun (not required)</span> — Jul 5 week</div>
+        </div>
+        <p class="mt-4 text-xs text-gray-500">Over-completions inform cadence suggestions above. You're naturally doing more — let the system match your pace.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const viewTabs = document.querySelectorAll('[data-tab]');
+    const views = document.querySelectorAll('[data-view]');
+
+    function setActiveTab(tabName) {
+      viewTabs.forEach((tab) => {
+        const isActive = tab.dataset.tab === tabName;
+        tab.classList.toggle('active', isActive);
+        tab.classList.toggle('border-blue-100', isActive);
+        tab.classList.toggle('text-blue-600', isActive);
+        tab.classList.toggle('text-gray-600', !isActive);
+      });
+
+      views.forEach((view) => {
+        view.classList.toggle('hidden', view.dataset.view !== tabName);
+      });
+    }
+
+    viewTabs.forEach((tab) => {
+      tab.addEventListener('click', () => setActiveTab(tab.dataset.tab));
+    });
+
+    const cadenceSelect = document.getElementById('cadence-type');
+    const cadencePanels = document.querySelectorAll('[data-cadence-panel]');
+
+    function setCadencePanel(value) {
+      cadencePanels.forEach((panel) => {
+        panel.classList.toggle('hidden', panel.dataset.cadencePanel !== value);
+      });
+    }
+
+    cadenceSelect.addEventListener('change', (event) => {
+      setCadencePanel(event.target.value);
+    });
+
+    setActiveTab('routines');
+    setCadencePanel(cadenceSelect.value);
+  </script>
+</body>
+</html>

@@ -1,0 +1,1702 @@
+<!doctype html>
+<html lang="en" data-color-mode="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Task detail redesign</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: var(--background-color-default, #070b14);
+      --panel: #0f1726;
+      --panel-raised: #131e30;
+      --field: #172338;
+      --field-hover: #1b2a43;
+      --line: #25344b;
+      --line-soft: #1b283b;
+      --text: var(--text-color-default, #f4f7fb);
+      --muted: var(--text-color-muted, #8796ab);
+      --subtle: #8a99b3;
+      --blue: var(--true-color-blue, #5b9cff);
+      --blue-soft: rgba(91, 156, 255, .14);
+      --green: #32d69b;
+      --green-soft: rgba(50, 214, 155, .12);
+      --amber: #f4bf52;
+      --amber-soft: rgba(244, 191, 82, .12);
+      --violet: #ad8cff;
+      --violet-soft: rgba(173, 140, 255, .13);
+      --radius: 12px;
+      --shadow: 0 28px 80px rgba(0, 0, 0, .48);
+      font-family: var(--font-sans, Inter, "Segoe UI", sans-serif);
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 72% -10%, rgba(55, 111, 206, .16), transparent 35%),
+        var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--color-focus-outline, var(--blue));
+      outline-offset: 2px;
+    }
+    svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+    .prototype-bar {
+      position: sticky;
+      z-index: 20;
+      top: 0;
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(7, 11, 20, .9);
+      backdrop-filter: blur(18px);
+    }
+    .prototype-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .prototype-mark {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid rgba(91, 156, 255, .35);
+      border-radius: 10px;
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    .prototype-title strong { display: block; font-size: 14px; }
+    .prototype-title span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .view-switcher {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0b1220;
+    }
+    .view-button {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .view-button:hover { color: var(--text); background: var(--field); }
+    .view-button.active { color: white; background: #24334b; box-shadow: inset 0 0 0 1px #324762; }
+
+    .stage {
+      min-height: calc(100vh - 64px);
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      overflow: hidden;
+    }
+    .app-ghost {
+      position: fixed;
+      inset: 64px 0 0;
+      z-index: -1;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      opacity: .42;
+      pointer-events: none;
+    }
+    .ghost-nav { border-right: 1px solid var(--line-soft); background: #0a101c; padding: 24px 18px; }
+    .ghost-logo { width: 120px; height: 12px; border-radius: 6px; background: #263349; margin-bottom: 30px; }
+    .ghost-line { height: 10px; margin: 16px 0; border-radius: 6px; background: #1c293c; }
+    .ghost-line:nth-child(2n) { width: 70%; }
+    .ghost-content { padding: 34px; }
+    .ghost-header { width: 260px; height: 20px; border-radius: 8px; background: #1c293c; margin-bottom: 24px; }
+    .ghost-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+    .ghost-card { height: 160px; border: 1px solid #1a2738; border-radius: 14px; background: #0d1522; }
+
+    .task-shell {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      max-height: calc(100vh - 116px);
+      border: 1px solid var(--line);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      transition: width .25s ease, max-width .25s ease, height .25s ease, border-radius .25s ease;
+      overflow: hidden;
+    }
+    .task-shell[data-view="panel"] { width: 430px; height: calc(100vh - 116px); margin-left: auto; border-radius: 16px 0 0 16px; }
+    .task-shell[data-view="popout"] { width: min(920px, 94vw); height: min(780px, calc(100vh - 116px)); border-radius: 18px; }
+    .task-shell[data-view="workspace"] { width: min(1320px, 97vw); height: calc(100vh - 94px); max-height: calc(100vh - 94px); border-radius: 14px; }
+    .task-shell[data-view="mobile"] { width: 430px; height: min(820px, calc(100vh - 94px)); max-height: calc(100vh - 94px); border-radius: 20px 20px 12px 12px; }
+
+    .task-header {
+      flex: 0 0 auto;
+      padding: 18px 20px 16px;
+      border-bottom: 1px solid var(--line-soft);
+      background: linear-gradient(180deg, rgba(27, 43, 68, .48), rgba(15, 23, 38, .1));
+    }
+    .topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .source {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    .source-logo {
+      display: grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      border: 1px solid #34435a;
+      border-radius: 7px;
+      background: #101a2a;
+      color: #dce5f1;
+      font-size: 11px;
+      letter-spacing: 0;
+    }
+    .header-actions { display: flex; align-items: center; gap: 4px; }
+    .icon-button {
+      display: grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .icon-button:hover { color: var(--text); background: var(--field); }
+    .task-title {
+      margin: 15px 0 7px;
+      max-width: 900px;
+      font-size: clamp(18px, 2vw, 23px);
+      font-weight: 680;
+      line-height: 1.25;
+      letter-spacing: -.02em;
+      overflow-wrap: anywhere;
+      text-wrap: balance;
+    }
+    .task-id { margin-left: 7px; color: var(--subtle); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+    .context-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 12px; }
+    .context-main { display: flex; align-items: center; min-width: 0; gap: 8px; }
+    .context-separator { color: #485972; }
+    .context-updated { flex: 0 0 auto; color: #9aa9bc; font-variant-numeric: tabular-nums; }
+    .context-chip { display: inline-flex; align-items: center; gap: 5px; }
+    .context-chip svg { width: 13px; height: 13px; }
+
+    .content {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: auto;
+      padding: 18px 20px 24px;
+      scrollbar-color: #35455d transparent;
+      scrollbar-width: thin;
+    }
+    .layout { display: grid; gap: 18px; }
+    .task-shell[data-view="panel"] .layout { grid-template-columns: 1fr; }
+    .task-shell[data-view="popout"] .layout { grid-template-columns: minmax(0, 1.15fr) minmax(300px, .85fr); align-items: start; }
+    .task-shell[data-view="workspace"] .content { display: flex; flex-direction: column; overflow: auto; }
+    .task-shell[data-view="workspace"] .layout {
+      flex: 0 0 auto;
+      width: 100%;
+      height: auto;
+      min-height: calc(100vh - 270px);
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(440px, 1.55fr);
+      align-items: stretch;
+    }
+    .task-shell[data-view="workspace"] .column { min-height: 0; overflow: visible; }
+    .task-shell[data-view="workspace"] .notes-column {
+      height: 100%;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      gap: 14px;
+      overflow: visible;
+    }
+    .task-shell[data-view="workspace"] .notes-column > .section:first-child { display: flex; flex-direction: column; }
+    .task-shell[data-view="workspace"] .notes-column > .section:first-child .section-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .task-shell[data-view="workspace"] .notes-preview { flex: 1; max-height: none; }
+
+    .column { min-width: 0; display: grid; gap: 14px; align-content: start; }
+    .task-shell[data-view="panel"] .secondary-column,
+    .task-shell[data-view="panel"] .notes-column { display: contents; }
+    .task-shell[data-view="popout"] .notes-column { grid-column: 1 / -1; }
+    .task-shell[data-view="mobile"] .layout { grid-template-columns: 1fr; gap: 12px; }
+    .task-shell[data-view="mobile"] .column { display: contents; }
+    .task-shell[data-view="mobile"] .task-header { position: relative; padding: 25px 16px 14px; }
+    .task-shell[data-view="mobile"] .task-header::before {
+      content: "";
+      position: absolute;
+      top: 8px;
+      left: 50%;
+      width: 42px;
+      height: 4px;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: #43516a;
+    }
+    .task-shell[data-view="mobile"] .task-title { margin-top: 13px; font-size: 20px; }
+    .task-shell[data-view="mobile"] .content { padding: 12px 12px 86px; overscroll-behavior: contain; }
+    .task-shell[data-view="mobile"] .complete-button { display: none; }
+    .task-shell[data-view="mobile"] .field { min-height: 96px; }
+    .task-shell[data-view="mobile"] .section-action,
+    .task-shell[data-view="mobile"] .content-tab { min-height: 44px; padding-inline: 10px; }
+    .task-shell[data-view="mobile"] .icon-button,
+    .task-shell[data-view="mobile"] .status-reason-control,
+    .task-shell[data-view="mobile"] .reason-ai-button,
+    .task-shell[data-view="mobile"] .field-secondary-control,
+    .task-shell[data-view="mobile"] .comment-input,
+    .task-shell[data-view="mobile"] .comment-submit { min-height: 44px; }
+    .task-shell[data-view="mobile"] .icon-button,
+    .task-shell[data-view="mobile"] .reason-ai-button { width: 44px; }
+    .task-shell[data-view="mobile"] .status-reason-row { gap: 8px; }
+    .task-shell[data-view="mobile"] .detail-row,
+    .task-shell[data-view="mobile"] .relationship-row { min-height: 44px; }
+    .task-shell[data-view="mobile"] .relationship-kind { width: auto; gap: 5px; padding: 0 8px; }
+    .task-shell[data-view="mobile"] .relationship-kind::after { content: attr(aria-label); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+    .task-shell[data-view="mobile"] .source-button,
+    .task-shell[data-view="mobile"] .source-action-chip { min-height: 44px; }
+    .task-shell[data-view="mobile"] .subtask { min-height: 48px; }
+    .task-shell[data-view="mobile"] .subtask-actions,
+    .task-shell[data-view="mobile"] .attachment-actions,
+    .task-shell[data-view="mobile"] .tag-remove { opacity: 1; }
+    .task-shell[data-view="mobile"] .subtask-action,
+    .task-shell[data-view="mobile"] .attachment-action { width: 34px; height: 34px; }
+    .task-shell[data-view="mobile"] .design-note { display: none; }
+    .task-shell[data-view="mobile"] .notes-preview,
+    .task-shell[data-view="mobile"] .comments-thread { max-height: 250px; }
+    .task-shell[data-view="mobile"] .task-footer { align-items: flex-start; flex-direction: column; gap: 7px; }
+    .task-shell[data-view="mobile"] .footer-updated { width: 100%; justify-content: space-between; }
+    .task-shell[data-view="panel"] .primary-column,
+    .task-shell[data-view="mobile"] .primary-column { display: contents; }
+    .task-shell[data-view="panel"] .core-section,
+    .task-shell[data-view="mobile"] .core-section { order: 0; }
+    .task-shell[data-view="panel"] .notes-content-section,
+    .task-shell[data-view="mobile"] .notes-content-section { order: 1; }
+    .task-shell[data-view="panel"] .tags-section,
+    .task-shell[data-view="mobile"] .tags-section { order: 2; }
+    .task-shell[data-view="panel"] .projects-section,
+    .task-shell[data-view="mobile"] .projects-section { order: 3; }
+    .task-shell[data-view="panel"] .planning-section,
+    .task-shell[data-view="mobile"] .planning-section { order: 4; }
+    .task-shell[data-view="panel"] .subtasks-section,
+    .task-shell[data-view="mobile"] .subtasks-section { order: 5; }
+    .task-shell[data-view="panel"] .relationships-section,
+    .task-shell[data-view="mobile"] .relationships-section { order: 6; }
+    .task-shell[data-view="panel"] .source-section,
+    .task-shell[data-view="mobile"] .source-section { order: 7; }
+    .task-shell[data-view="panel"] .attachments-section,
+    .task-shell[data-view="mobile"] .attachments-section { order: 8; }
+    .task-shell[data-view="panel"] .design-note,
+    .task-shell[data-view="mobile"] .design-note { order: 9; }
+    .mobile-action-bar {
+      display: none;
+      position: absolute;
+      z-index: 12;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      grid-template-columns: 1fr 1fr 44px;
+      gap: 8px;
+      padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+      border-top: 1px solid var(--line);
+      background: rgba(15, 23, 38, .96);
+      backdrop-filter: blur(12px);
+    }
+    .task-shell[data-view="mobile"] .mobile-action-bar { display: grid; }
+    .mobile-primary-action,
+    .mobile-secondary-action,
+    .mobile-more-action {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--field);
+      color: #d9e2ee;
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .mobile-primary-action { border-color: rgba(50, 214, 155, .4); background: rgba(50, 214, 155, .13); color: #45dea8; }
+    .mobile-secondary-action { border-color: rgba(91, 156, 255, .3); background: var(--blue-soft); color: #8bb7ff; }
+    .mobile-primary-action svg, .mobile-secondary-action svg, .mobile-more-action svg { width: 14px; height: 14px; }
+
+    .section {
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      background: rgba(16, 26, 43, .66);
+      overflow: hidden;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 42px;
+      padding: 0 13px;
+      border-bottom: 1px solid var(--line-soft);
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #bec9d9;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .075em;
+      text-transform: uppercase;
+    }
+    .section-title svg { width: 14px; height: 14px; color: var(--muted); }
+    .section-action {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      border: 0;
+      background: transparent;
+      color: var(--blue);
+      font-size: 11px;
+      cursor: pointer;
+    }
+    .section-action svg { width: 13px; height: 13px; }
+    .section-body { padding: 12px; }
+
+    .complete-button {
+      width: 100%;
+      min-height: 42px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid rgba(50, 214, 155, .42);
+      border-radius: 10px;
+      background: var(--green-soft);
+      color: var(--green);
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .complete-button:hover { background: rgba(50, 214, 155, .18); }
+    .complete-button.done { background: rgba(50, 214, 155, .2); color: #7cf1c7; }
+
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; margin-top: 10px; }
+    .task-shell[data-view="panel"] .field-grid { grid-template-columns: 1fr 1fr; }
+    .field {
+      display: block;
+      align-self: stretch;
+      min-width: 0;
+      min-height: 68px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--field);
+      text-align: left;
+      cursor: pointer;
+      transition: background .12s ease, border-color .12s ease, transform .12s ease;
+    }
+    .field:hover { border-color: #3c526f; background: var(--field-hover); transform: translateY(-1px); }
+    .field-label { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .field-label svg { width: 13px; height: 13px; }
+    .field-value { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #e8edf5; font-size: 13px; font-weight: 600; }
+    .field-value svg { width: 13px; height: 13px; color: var(--subtle); }
+    .status-card { display: flex; flex-direction: column; justify-content: flex-start; }
+    .status-card-main,
+    .field-card-main {
+      width: 100%;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .field-grid > button.field {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+    }
+    .status-reason-row { display: flex; align-items: center; gap: 4px; margin-top: 7px; }
+    .status-reason-control {
+      display: inline-flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      min-width: 84px;
+      padding: 3px 6px 3px 5px;
+      border: 0;
+      border-radius: 5px;
+      background: var(--violet-soft);
+      color: var(--violet);
+      font-size: 10px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .status-reason-control:hover { background: rgba(173, 140, 255, .22); }
+    .status-reason-control svg { width: 11px; height: 11px; }
+    .status-reason-control.has-reason { color: #c7b4ff; }
+    .reason-ai-button {
+      display: grid;
+      width: 22px;
+      height: 22px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--violet);
+      cursor: pointer;
+    }
+    .reason-ai-button:hover { background: rgba(173, 140, 255, .18); }
+    .reason-ai-button svg { width: 12px; height: 12px; }
+    .related-field-card { display: flex; flex-direction: column; justify-content: flex-start; }
+    .related-field-card.has-corner-control { position: relative; }
+    .related-field-card.has-corner-control .field-card-main { padding-right: 26px; }
+    .field-corner-control {
+      position: absolute;
+      top: 7px;
+      right: 7px;
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      background: rgba(91, 156, 255, .1);
+      color: #8eb7f7;
+      cursor: pointer;
+    }
+    .field-corner-control:hover { background: rgba(91, 156, 255, .2); color: #b9d4ff; }
+    .field-corner-control svg { width: 13px; height: 13px; }
+    .field-secondary-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      width: fit-content;
+      margin-top: 7px;
+      padding: 3px 6px 3px 5px;
+      border: 0;
+      border-radius: 5px;
+      background: rgba(91, 156, 255, .1);
+      color: #8eb7f7;
+      font-size: 10px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .field-secondary-control:hover { background: rgba(91, 156, 255, .19); }
+    .field-secondary-control svg { width: 11px; height: 11px; }
+    .field-secondary-control.active { background: var(--green-soft); color: var(--green); }
+    .status-value { color: var(--blue); }
+    .priority-value { color: var(--amber); }
+    .due-value { color: #e9d9b4; }
+    .due-value.overdue { color: #ff9aa5; }
+    .overdue-label {
+      margin-left: auto;
+      padding: 2px 5px;
+      border-radius: 999px;
+      background: rgba(239, 68, 68, .12);
+      color: #ff9aa5;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .reason-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 9px;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px dashed #33445d;
+      border-radius: 9px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .reason-row:hover { border-color: var(--violet); color: #cfc4ee; background: var(--violet-soft); }
+    .reason-left { display: flex; align-items: center; gap: 7px; }
+    .reason-left svg { width: 14px; height: 14px; color: var(--violet); }
+    .ai-badge { color: var(--violet); font-size: 10px; font-weight: 700; }
+
+    .tag-wrap { display: flex; flex-wrap: wrap; gap: 7px; }
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      min-height: 29px;
+      padding: 0 8px 0 10px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .tag.blue { border-color: rgba(91, 156, 255, .27); background: var(--blue-soft); color: #8db7ff; }
+    .tag.green { border-color: rgba(50, 214, 155, .24); background: var(--green-soft); color: #72e4bd; }
+    .tag.violet { border-color: rgba(173, 140, 255, .28); background: var(--violet-soft); color: #c1a9ff; }
+    .tag-remove {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: currentColor;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .tag:hover .tag-remove, .tag:focus-within .tag-remove { opacity: .75; }
+    .tag-remove:hover { opacity: 1; background: rgba(255, 255, 255, .1); }
+    .tag-remove svg { width: 10px; height: 10px; }
+    .section-actions { display: flex; align-items: center; gap: 10px; }
+    .suggested-tags {
+      display: none;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line-soft);
+    }
+    .suggested-tags.open { display: flex; }
+    .suggested-label { color: var(--violet); font-size: 10px; font-weight: 700; }
+    .suggested-tag {
+      padding: 4px 8px;
+      border: 1px dashed rgba(173, 140, 255, .45);
+      border-radius: 7px;
+      background: var(--violet-soft);
+      color: #c7b4ff;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .add-tag {
+      min-height: 29px;
+      padding: 0 10px;
+      border: 1px dashed #40516a;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .add-tag:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-soft); }
+
+    .subtask { display: flex; align-items: center; gap: 9px; min-height: 36px; color: #cbd4e0; font-size: 12px; }
+    .subtask + .subtask { border-top: 1px solid var(--line-soft); }
+    .subtask-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .subtask-actions { display: flex; align-items: center; gap: 1px; opacity: 0; }
+    .subtask:hover .subtask-actions, .subtask:focus-within .subtask-actions { opacity: 1; }
+    .subtask-action { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+    .subtask-action:hover { color: white; background: var(--field); }
+    .subtask-action.danger:hover { color: #ff8f9a; background: rgba(239, 68, 68, .11); }
+    .subtask-action svg { width: 12px; height: 12px; }
+    .check {
+      width: 16px;
+      height: 16px;
+      flex: 0 0 auto;
+      border: 1.5px solid #53637a;
+      border-radius: 50%;
+    }
+    .add-subtask { color: var(--blue); }
+
+    .detail-list { display: grid; gap: 6px; }
+    .detail-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 38px;
+      padding: 0 10px;
+      border-radius: 8px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .detail-row:hover { background: var(--field); color: var(--text); }
+    .detail-label { display: flex; align-items: center; gap: 8px; }
+    .detail-label svg { width: 14px; height: 14px; }
+    .detail-value { display: flex; align-items: center; gap: 6px; color: #c9d2df; font-size: 12px; font-weight: 550; }
+    .detail-value svg { width: 12px; height: 12px; color: var(--subtle); }
+    .recurrence-detail {
+      padding: 4px 8px 8px;
+      border: 1px solid rgba(91, 156, 255, .24);
+      border-radius: 9px;
+      background: rgba(91, 156, 255, .06);
+      transition: border-color .2s ease, background .2s ease, box-shadow .2s ease;
+    }
+    .recurrence-detail.focused {
+      border-color: rgba(91, 156, 255, .72);
+      background: rgba(91, 156, 255, .13);
+      box-shadow: 0 0 0 3px rgba(91, 156, 255, .11);
+    }
+    .recurrence-detail .detail-row { min-height: 34px; padding: 0 2px; }
+    .recurrence-detail .detail-row:hover { background: transparent; }
+    .recurrence-detail .detail-label svg,
+    .recurrence-detail .detail-value { color: #8eb7f7; }
+    .skip-current-button {
+      width: 100%;
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 0 8px;
+      border: 1px solid rgba(91, 156, 255, .3);
+      border-radius: 7px;
+      background: rgba(91, 156, 255, .1);
+      color: #a8c9ff;
+      font-size: 11px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .skip-current-button:hover { border-color: rgba(91, 156, 255, .5); background: rgba(91, 156, 255, .18); }
+    .skip-current-button svg { width: 13px; height: 13px; }
+    .skip-current-date { margin-left: auto; color: var(--muted); font-size: 10px; font-weight: 550; }
+    .quick-times { display: flex; gap: 5px; margin: 7px 0 10px 31px; }
+    .time-chip { padding: 4px 7px; border: 1px solid var(--line); border-radius: 6px; background: #111c2d; color: var(--muted); font-size: 10px; cursor: pointer; }
+    .time-chip:hover { color: var(--text); border-color: #405573; }
+    .project-list { display: grid; gap: 8px; }
+    .project-membership {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 54px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--field);
+    }
+    .project-dot { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 50%; background: var(--blue); box-shadow: 0 0 0 4px var(--blue-soft); }
+    .project-dot.violet { background: var(--violet); box-shadow: 0 0 0 4px var(--violet-soft); }
+    .project-copy { min-width: 0; flex: 1; }
+    .project-name { color: #e2e8f1; font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
+    .phase-name { margin-top: 3px; color: var(--muted); font-size: 10px; }
+    .phase-name strong { color: #b7c4d6; font-weight: 600; }
+    .project-menu { color: var(--subtle); }
+    .project-menu svg { width: 13px; height: 13px; }
+    .attachment-list { display: grid; gap: 7px; }
+    .attachment-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 48px;
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--field);
+    }
+    .attachment-icon {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      flex: 0 0 auto;
+      place-items: center;
+      border-radius: 7px;
+      background: rgba(91, 156, 255, .11);
+      color: #86b2f5;
+    }
+    .attachment-icon.image { background: var(--violet-soft); color: #c2adff; }
+    .attachment-icon svg { width: 15px; height: 15px; }
+    .attachment-copy { min-width: 0; flex: 1; }
+    .attachment-name { overflow: hidden; color: #dfe6ef; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+    .attachment-meta { margin-top: 2px; color: var(--subtle); font-size: 9px; }
+    .attachment-actions { display: flex; gap: 2px; opacity: 0; }
+    .attachment-item:hover .attachment-actions, .attachment-item:focus-within .attachment-actions { opacity: 1; }
+    .attachment-action { display: grid; width: 24px; height: 24px; place-items: center; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted); cursor: pointer; }
+    .attachment-action:hover { color: white; background: #26364e; }
+    .attachment-action svg { width: 12px; height: 12px; }
+    .relationship-list { display: grid; gap: 6px; }
+    .relationship-row { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 8px; border-radius: 7px; color: var(--muted); font-size: 11px; }
+    .relationship-row:hover { background: var(--field); }
+    .relationship-kind {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 auto;
+      place-items: center;
+      border-radius: 6px;
+      background: #17243a;
+      color: #9dafc6;
+    }
+    .relationship-kind:hover { color: white; background: #233550; }
+    .relationship-kind svg { width: 13px; height: 13px; }
+    .relationship-task { min-width: 0; flex: 1; overflow: hidden; color: #d4dce8; text-overflow: ellipsis; white-space: nowrap; }
+    .relationship-id { flex: 0 0 auto; color: #82adf2; font-family: var(--font-mono, monospace); font-size: 10px; }
+
+    .content-tabs { display: flex; align-items: center; gap: 4px; }
+    .content-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 27px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .content-tab:hover { color: white; background: var(--field); }
+    .content-tab.active { background: #1b2a40; color: #dbe6f5; }
+    .content-tab svg { width: 12px; height: 12px; }
+    .content-tab-count { color: #82adf2; font-size: 9px; }
+    .load-comments {
+      width: 100%;
+      min-height: 34px;
+      border: 0;
+      border-bottom: 1px solid var(--line-soft);
+      background: rgba(91, 156, 255, .05);
+      color: #82adf2;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .load-comments:hover { background: var(--blue-soft); }
+    [data-content-panel][hidden], [data-content-action][hidden] { display: none !important; }
+    .notes-preview {
+      position: relative;
+      min-height: 126px;
+      max-height: 220px;
+      overflow: auto;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0c1422;
+      color: #c7d0dd;
+      line-height: 1.6;
+      cursor: auto;
+    }
+    .notes-preview p { margin: 0 0 9px; }
+    .notes-preview strong { color: #edf2f8; }
+    .notes-preview code { padding: 2px 4px; border-radius: 4px; background: #1b293d; color: #a9caff; font-family: var(--font-mono, monospace); font-size: 11px; }
+    .notes-hint { display: flex; align-items: center; gap: 7px; margin-top: 9px; color: var(--subtle); font-size: 10px; }
+    .comments-thread {
+      min-height: 126px;
+      max-height: 220px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0c1422;
+    }
+    .comments-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      scrollbar-color: #35455d transparent;
+      scrollbar-width: thin;
+    }
+    .comments-context {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 9px 11px;
+      border-bottom: 1px solid var(--line-soft);
+      color: var(--subtle);
+      font-size: 9px;
+    }
+    .comments-context svg { width: 11px; height: 11px; }
+    .comment { display: grid; grid-template-columns: 25px minmax(0, 1fr); gap: 8px; padding: 11px; }
+    .comment + .comment { border-top: 1px solid var(--line-soft); }
+    .comment-avatar { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 50%; background: #263a58; color: #c8dbf7; font-size: 9px; font-weight: 750; }
+    .comment-meta { color: var(--subtle); font-size: 9px; }
+    .comment-meta strong { color: #dce5f1; font-size: 10px; }
+    .comment-body { margin-top: 5px; color: #c7d0dd; font-size: 11px; line-height: 1.5; }
+    .comment-composer { display: grid; flex: 0 0 auto; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; padding: 10px; border-top: 1px solid var(--line-soft); background: #101a2a; }
+    .comment-input { width: 100%; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; outline: none; background: var(--field); color: var(--text); font: inherit; }
+    .comment-input:focus { border-color: var(--blue); }
+    .comment-submit { padding: 0 11px; border: 1px solid rgba(91, 156, 255, .3); border-radius: 7px; background: var(--blue-soft); color: #8ab6ff; font-size: 10px; font-weight: 650; cursor: pointer; }
+    .task-shell[data-view="workspace"] .comments-thread { flex: 1; max-height: none; }
+    .task-footer {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 18px;
+      padding: 13px 2px 0;
+      border-top: 1px solid var(--line-soft);
+      color: var(--subtle);
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .footer-updated { display: flex; align-items: center; gap: 11px; }
+    .footer-activity {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: #82adf2;
+      font: inherit;
+      cursor: pointer;
+    }
+    .footer-activity:hover { color: #b7d2ff; text-decoration: underline; text-underline-offset: 3px; }
+    .footer-activity svg { width: 11px; height: 11px; }
+    .task-shell[data-view="workspace"] .task-footer { margin-top: 14px; }
+
+    .source-button {
+      width: 100%;
+      min-height: 39px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 1px solid rgba(91, 156, 255, .25);
+      border-radius: 9px;
+      background: var(--blue-soft);
+      color: #81b0ff;
+      font-size: 12px;
+      font-weight: 650;
+      cursor: pointer;
+    }
+    .source-button:hover { background: rgba(91, 156, 255, .2); }
+    .source-button:disabled { cursor: default; opacity: .75; }
+    .source-button svg { width: 14px; height: 14px; }
+    .source-compact { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+    .source-compact .source-button { width: auto; flex: 1; min-height: 34px; padding: 0 10px; }
+    .source-action-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      min-height: 34px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--field);
+      color: var(--muted);
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .source-action-chip:hover { border-color: #3d5270; color: white; background: var(--field-hover); }
+    .source-action-chip svg { width: 12px; height: 12px; }
+
+    .design-note {
+      padding: 11px 12px;
+      border: 1px solid rgba(91, 156, 255, .19);
+      border-radius: 10px;
+      background: rgba(91, 156, 255, .06);
+      color: #9eafc5;
+      font-size: 11px;
+      line-height: 1.45;
+    }
+    .design-note strong { color: #d7e5f7; }
+
+    .notes-modal {
+      position: fixed;
+      z-index: 50;
+      inset: 0;
+      display: none;
+      place-items: center;
+      padding: 24px;
+      background: rgba(3, 7, 14, .76);
+      backdrop-filter: blur(8px);
+    }
+    .notes-modal.open { display: grid; }
+    .notes-dialog {
+      width: min(1020px, 94vw);
+      height: min(760px, 88vh);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid #31445f;
+      border-radius: 16px;
+      background: #0e1726;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .notes-dialog-header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 18px; border-bottom: 1px solid var(--line); }
+    .notes-dialog-title { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-weight: 650; overflow-wrap: anywhere; text-wrap: balance; }
+    .notes-dialog-title svg { color: var(--blue); }
+    .notes-header-actions { display: flex; align-items: center; gap: 10px; }
+    .notes-mode-switcher { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #0b1320; }
+    .notes-mode-button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+    .notes-mode-button.active { background: var(--field); color: white; }
+    .editor-toolbar { min-height: 44px; display: flex; align-items: center; gap: 4px; padding: 0 14px; border-bottom: 1px solid var(--line-soft); background: #111c2d; }
+    .tool-button { min-width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-weight: 700; }
+    .tool-button:hover { color: var(--text); background: var(--field); }
+    .tool-separator { width: 1px; height: 18px; margin: 0 5px; background: var(--line); }
+    .editor-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; }
+    .editor-pane { min-width: 0; display: flex; flex-direction: column; }
+    .editor-pane + .editor-pane { border-left: 1px solid var(--line); }
+    .pane-label { min-height: 34px; display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; }
+    textarea {
+      flex: 1;
+      width: 100%;
+      resize: none;
+      border: 0;
+      background: #0b1320;
+      color: #d6dee9;
+      padding: 18px;
+      outline: 0;
+      font-family: var(--font-mono, Consolas, monospace);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+    .preview-pane { padding: 18px 22px; overflow: auto; color: #cbd5e1; line-height: 1.65; }
+    .preview-pane h3 { margin-top: 0; color: white; }
+    .preview-pane li { margin: 6px 0; }
+    .preview-pane code { color: #9cc1ff; }
+    .notes-dialog[data-mode="read"] .editor-toolbar { display: none; }
+    .notes-dialog[data-mode="read"] .editor-body { grid-template-columns: 1fr; }
+    .notes-dialog[data-mode="read"] .editor-pane:first-child { display: none; }
+    .notes-dialog[data-mode="read"] .editor-pane:last-child { border-left: 0; }
+    .notes-dialog[data-mode="read"] .pane-label { display: none; }
+    .notes-dialog[data-mode="read"] .preview-pane { padding: 34px 48px; font-size: 15px; }
+    .notes-dialog[data-mode="read"] .edit-only { display: none; }
+    .notes-dialog[data-mode="edit"] .read-only { display: none; }
+    .notes-dialog-footer { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .footer-actions { display: flex; gap: 8px; }
+    .button { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); color: #d7dfea; cursor: pointer; font-weight: 600; }
+    .button svg { width: 12px; height: 12px; }
+    .button.primary { border-color: #4e88dc; background: #3478d4; color: white; }
+    .button:hover { filter: brightness(1.1); }
+    .expanded-comments-shell {
+      flex: 1;
+      width: calc(100% - 36px);
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      margin: 18px auto;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      overflow: hidden;
+      background: #0b1320;
+    }
+    .expanded-comments-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      scrollbar-color: #35455d transparent;
+      scrollbar-width: thin;
+    }
+    .expanded-comments-scroll .comment { grid-template-columns: 32px minmax(0, 1fr); gap: 11px; padding: 16px; }
+    .expanded-comments-scroll .comment-avatar { width: 32px; height: 32px; font-size: 10px; }
+    .expanded-comments-scroll .comment-meta { font-size: 10px; }
+    .expanded-comments-scroll .comment-meta strong { font-size: 11px; }
+    .expanded-comments-scroll .comment-body { font-size: 13px; line-height: 1.6; }
+    .expanded-comments-shell .comment-composer { padding: 13px; }
+    .expanded-comments-shell .comment-input { height: 38px; }
+    .expanded-comments-shell .comment-submit { padding: 0 16px; }
+
+    .toast {
+      position: fixed;
+      z-index: 70;
+      left: 50%;
+      bottom: 24px;
+      transform: translate(-50%, 20px);
+      padding: 10px 14px;
+      border: 1px solid rgba(50, 214, 155, .38);
+      border-radius: 9px;
+      background: #10261f;
+      color: #87e9c8;
+      opacity: 0;
+      transition: opacity .18s ease, transform .18s ease;
+      pointer-events: none;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
+      font-size: 12px;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+    @media (max-width: 760px) {
+      .prototype-bar { align-items: flex-start; flex-direction: column; }
+      .view-switcher { width: 100%; }
+      .view-button { flex: 1; justify-content: center; padding: 0 7px; font-size: 11px; }
+      .stage { padding: 12px; }
+      .task-shell[data-view] { width: 100%; max-width: 100%; height: calc(100vh - 154px); max-height: calc(100vh - 154px); border-radius: 14px; }
+      .task-shell[data-view] .layout { grid-template-columns: 1fr; }
+      .secondary-column, .notes-column { display: contents !important; }
+      .editor-body { grid-template-columns: 1fr; }
+      .notes-dialog[data-mode="edit"] .editor-pane + .editor-pane { display: none; }
+      .notes-modal { padding: 12px; }
+      .notes-dialog { width: calc(100vw - 24px); height: calc(100vh - 24px); }
+      .notes-dialog-title .task-id { display: none; }
+      .notes-header-actions .source-dialog-button { width: 44px; padding: 0; font-size: 0; }
+      .notes-modal .icon-button,
+      .notes-modal .comment-input,
+      .notes-modal .comment-submit { min-height: 44px; }
+      .notes-modal .icon-button { width: 44px; height: 44px; }
+    }
+    @media (hover: none), (pointer: coarse) {
+      .tag-remove, .subtask-actions, .attachment-actions { opacity: 1; }
+      .relationship-kind { width: auto; gap: 5px; padding: 0 8px; }
+      .relationship-kind::after { content: attr(aria-label); font-size: 9px; font-weight: 700; text-transform: uppercase; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .task-shell, .field, .toast { transition: none; }
+      .field:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <svg aria-hidden="true" width="0" height="0" style="position:absolute">
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-popout" viewBox="0 0 24 24"><path d="M14 3h7v7M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></symbol>
+    <symbol id="i-full" viewBox="0 0 24 24"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></symbol>
+    <symbol id="i-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4m0 0c5-3 8 3 14 0v10c-6 3-9-3-14 0"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="m12 3 1.3 4.2L17 9l-3.7 1.8L12 15l-1.3-4.2L7 9l3.7-1.8L12 3ZM5 15l.7 2.3L8 18l-2.3.7L5 21l-.7-2.3L2 18l2.3-.7L5 15Zm14-2 .7 2.3L22 16l-2.3.7L19 19l-.7-2.3L16 16l2.3-.7L19 13Z"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24"><path d="M20 13 13 20a2 2 0 0 1-3 0l-7-7V4h9l8 7a2 2 0 0 1 0 2Z"/><circle cx="8" cy="9" r="1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M15 3h6v6M14 10l7-7M9 21H3v-6M10 14l-7 7"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v11H3z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></symbol>
+    <symbol id="i-repeat" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/></symbol>
+    <symbol id="i-fast-forward" viewBox="0 0 24 24"><path d="m3 5 8 7-8 7V5Zm9 0 8 7-8 7V5Z"/><path d="M21 5v14"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7 7l1-1"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m20 12-8 8a6 6 0 0 1-8-8l9-9a4 4 0 0 1 6 6l-9 9a2 2 0 0 1-3-3l8-8"/></symbol>
+    <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 20"/></symbol>
+    <symbol id="i-blocks" viewBox="0 0 24 24"><rect x="3" y="4" width="6" height="6" rx="1"/><rect x="15" y="14" width="6" height="6" rx="1"/><path d="M9 7h4a4 4 0 0 1 4 4v3M14 11l3 3 3-3"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m4 20 4-1 11-11-3-3L5 16zM14 7l3 3"/></symbol>
+    <symbol id="i-comment" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></symbol>
+    <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6" y="2" width="12" height="20" rx="2"/><path d="M10 5h4M11 19h2"/></symbol>
+  </svg>
+
+  <header class="prototype-bar">
+    <div class="prototype-title">
+      <div class="prototype-mark"><svg><use href="#i-sparkle"/></svg></div>
+      <div>
+        <strong>Task detail redesign</strong>
+        <span>Interactive concept - desktop and touch-optimized mobile views</span>
+      </div>
+    </div>
+    <nav class="view-switcher" aria-label="Mockup view">
+      <button class="view-button active" data-view-button="panel"><svg><use href="#i-panel"/></svg>Side panel</button>
+      <button class="view-button" data-view-button="popout"><svg><use href="#i-popout"/></svg>Popout</button>
+      <button class="view-button" data-view-button="workspace"><svg><use href="#i-full"/></svg>Workspace</button>
+      <button class="view-button" data-view-button="mobile"><svg><use href="#i-mobile"/></svg>Mobile</button>
+    </nav>
+  </header>
+
+  <div class="app-ghost" aria-hidden="true">
+    <aside class="ghost-nav"><div class="ghost-logo"></div><div class="ghost-line"></div><div class="ghost-line"></div><div class="ghost-line"></div><div class="ghost-line"></div></aside>
+    <main class="ghost-content"><div class="ghost-header"></div><div class="ghost-cards"><div class="ghost-card"></div><div class="ghost-card"></div><div class="ghost-card"></div></div></main>
+  </div>
+
+  <main class="stage">
+    <article class="task-shell" id="taskShell" data-view="panel">
+      <header class="task-header">
+        <div class="topline">
+          <div class="source"><span class="source-logo">GH</span> Mission-Control</div>
+          <div class="header-actions">
+            <button class="icon-button" id="cycleView" title="Change view" aria-label="Change task detail view"><svg><use href="#i-popout"/></svg></button>
+            <button class="icon-button" id="closeTask" title="Close" aria-label="Close task detail"><svg><use href="#i-x"/></svg></button>
+          </div>
+        </div>
+        <h1 class="task-title">Reports: cumulative flow diagram for work in progress and workflow bottlenecks</h1>
+        <div class="context-line">
+          <div class="context-main">
+            <span class="context-chip"><svg><use href="#i-folder"/></svg>Reporting &amp; Insights</span>
+            <span class="context-separator" aria-hidden="true">&bull;</span>
+            <span class="task-id" style="margin-left:0">#1786</span>
+          </div>
+          <span class="context-updated">Updated today</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <div class="layout">
+          <div class="column primary-column">
+            <section class="section core-section">
+              <div class="section-body">
+                <button class="complete-button" id="completeButton"><svg><use href="#i-circle"/></svg><span>Mark complete</span></button>
+                <div class="field-grid">
+                  <div class="field status-card">
+                    <button class="status-card-main" type="button" aria-label="Change status">
+                      <span class="field-label"><svg><use href="#i-circle"/></svg>Status</span>
+                      <span class="field-value status-value">To do <svg><use href="#i-down"/></svg></span>
+                    </button>
+                    <div class="status-reason-row">
+                      <button class="status-reason-control" id="statusReasonToggle"><span>Add reason</span><svg><use href="#i-down"/></svg></button>
+                      <button class="reason-ai-button" id="suggestReason" title="Suggest a status reason with AI" aria-label="Suggest a status reason with AI"><svg><use href="#i-sparkle"/></svg></button>
+                    </div>
+                  </div>
+                  <button class="field">
+                    <span class="field-label"><svg><use href="#i-flag"/></svg>Priority</span>
+                    <span class="field-value priority-value">Medium <svg><use href="#i-down"/></svg></span>
+                  </button>
+                  <div class="field related-field-card has-corner-control">
+                    <button class="field-card-main" type="button" aria-label="Change due date">
+                      <span class="field-label"><svg><use href="#i-calendar"/></svg>Due date</span>
+                      <span class="field-value due-value overdue" id="dueDateValue">Jul 27 <span class="overdue-label">Overdue</span><svg><use href="#i-down"/></svg></span>
+                    </button>
+                    <button class="field-corner-control" id="recurrenceShortcut" title="View recurrence settings" aria-label="View recurrence settings">
+                      <svg><use href="#i-repeat"/></svg>
+                    </button>
+                    <button class="field-secondary-control" id="myDayToggle"><svg><use href="#i-sun"/></svg><span>Add to My Day</span></button>
+                  </div>
+                  <div class="field related-field-card">
+                    <button class="field-card-main" type="button" aria-label="Change effort">
+                      <span class="field-label"><svg><use href="#i-clock"/></svg>Effort</span>
+                      <span class="field-value">Medium <svg><use href="#i-down"/></svg></span>
+                    </button>
+                    <button class="field-secondary-control" id="durationControl"><svg><use href="#i-clock"/></svg><span>Duration: 1 hour</span><svg><use href="#i-down"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section tags-section">
+              <div class="section-header">
+                <div class="section-title"><svg><use href="#i-tag"/></svg>Tags</div>
+                <div class="section-actions">
+                  <button class="section-action" id="suggestTags"><svg><use href="#i-sparkle"/></svg><span>Suggest</span></button>
+                  <button class="section-action"><span>Manage</span></button>
+                </div>
+              </div>
+              <div class="section-body">
+                <div class="tag-wrap">
+                  <span class="tag blue">area:insights<button class="tag-remove" aria-label="Remove area insights tag"><svg><use href="#i-x"/></svg></button></span>
+                  <span class="tag green">type:feature<button class="tag-remove" aria-label="Remove type feature tag"><svg><use href="#i-x"/></svg></button></span>
+                  <span class="tag violet">visualization<button class="tag-remove" aria-label="Remove visualization tag"><svg><use href="#i-x"/></svg></button></span>
+                  <button class="add-tag">+ Add tag</button>
+                </div>
+                <div class="suggested-tags" id="suggestedTags">
+                  <span class="suggested-label">Suggested</span>
+                  <button class="suggested-tag">+ analytics</button>
+                  <button class="suggested-tag">+ reporting</button>
+                </div>
+              </div>
+            </section>
+
+            <section class="section subtasks-section">
+              <div class="section-header">
+                <div class="section-title"><svg><use href="#i-list"/></svg>Subtasks <span style="color:var(--subtle)">0/2</span></div>
+              </div>
+              <div class="section-body" style="padding-top:4px;padding-bottom:4px">
+                <div class="subtask">
+                  <span class="check"></span><span class="subtask-title">Define chart data contract</span>
+                  <div class="subtask-actions"><button class="subtask-action" title="Edit subtask" aria-label="Edit subtask"><svg><use href="#i-edit"/></svg></button><button class="subtask-action" title="More subtask actions" aria-label="More subtask actions"><svg><use href="#i-more"/></svg></button><button class="subtask-action danger" title="Delete subtask" aria-label="Delete subtask"><svg><use href="#i-trash"/></svg></button></div>
+                </div>
+                <div class="subtask">
+                  <span class="check"></span><span class="subtask-title">Add cumulative flow visualization</span>
+                  <div class="subtask-actions"><button class="subtask-action" title="Edit subtask" aria-label="Edit subtask"><svg><use href="#i-edit"/></svg></button><button class="subtask-action" title="More subtask actions" aria-label="More subtask actions"><svg><use href="#i-more"/></svg></button><button class="subtask-action danger" title="Delete subtask" aria-label="Delete subtask"><svg><use href="#i-trash"/></svg></button></div>
+                </div>
+                <div class="subtask add-subtask">+ Add subtask</div>
+              </div>
+            </section>
+
+            <section class="section relationships-section">
+              <div class="section-header">
+                <div class="section-title"><svg><use href="#i-link"/></svg>Relationships</div>
+                <button class="section-action">Manage</button>
+              </div>
+              <div class="section-body" style="padding:6px">
+                <div class="relationship-list">
+                  <div class="relationship-row"><span class="relationship-kind" role="img" title="Blocks" aria-label="Blocks"><svg><use href="#i-blocks"/></svg></span><span class="relationship-task">Add report date-range controls</span><span class="relationship-id">#1742</span><svg><use href="#i-popout"/></svg></div>
+                  <div class="relationship-row"><span class="relationship-kind" role="img" title="Related" aria-label="Related"><svg><use href="#i-link"/></svg></span><span class="relationship-task">Task transition history foundation</span><span class="relationship-id">#809</span><svg><use href="#i-popout"/></svg></div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div class="column secondary-column">
+            <section class="section projects-section">
+              <div class="section-header">
+                <div class="section-title"><svg><use href="#i-folder"/></svg>Projects &amp; phases</div>
+                <button class="section-action">Add project</button>
+              </div>
+              <div class="section-body">
+                <div class="project-list">
+                  <div class="project-membership">
+                    <span class="project-dot"></span>
+                    <div class="project-copy"><div class="project-name">Reporting &amp; Insights</div><div class="phase-name">Phase: <strong>Charts &amp; visualization</strong></div></div>
+                    <span class="project-menu"><svg><use href="#i-down"/></svg></span>
+                  </div>
+                  <div class="project-membership">
+                    <span class="project-dot violet"></span>
+                    <div class="project-copy"><div class="project-name">Product analytics</div><div class="phase-name">Phase: <strong>Q3 reporting</strong></div></div>
+                    <span class="project-menu"><svg><use href="#i-down"/></svg></span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section planning-section">
+              <div class="section-header"><div class="section-title">Planning</div></div>
+              <div class="section-body" style="padding:7px">
+                <div class="detail-list">
+                  <div class="detail-row"><span class="detail-label"><svg><use href="#i-bell"/></svg>Reminder</span><span class="detail-value">1 day before due <svg><use href="#i-down"/></svg></span></div>
+                  <div class="recurrence-detail" id="recurrenceDetail">
+                    <div class="detail-row"><span class="detail-label"><svg><use href="#i-repeat"/></svg>Recurrence</span><span class="detail-value">Weekly <svg><use href="#i-down"/></svg></span></div>
+                    <button class="skip-current-button" id="skipToCurrent" title="Skip overdue occurrences and move the due date to Aug 3">
+                      <svg><use href="#i-fast-forward"/></svg>
+                      <span>Skip to current</span>
+                      <span class="skip-current-date">Next: Aug 3</span>
+                    </button>
+                  </div>
+                  <div class="detail-row"><span class="detail-label"><svg><use href="#i-circle"/></svg>Assignee</span><span class="detail-value">Unassigned <svg><use href="#i-down"/></svg></span></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section source-section">
+              <div class="section-header"><div class="section-title">Source &amp; actions</div></div>
+              <div class="section-body">
+                <div class="source-compact">
+                  <button class="source-button" id="sourceButton"><svg><use href="#i-link"/></svg>Open GitHub</button>
+                  <button class="source-action-chip" title="Move to list"><svg><use href="#i-folder"/></svg>Move list</button>
+                  <button class="source-action-chip" title="Move to another source"><svg><use href="#i-popout"/></svg>Move source</button>
+                </div>
+              </div>
+            </section>
+
+            <div class="design-note"><strong>Why this hierarchy:</strong> high-frequency decisions are visible first; movement and source controls are grouped away from task planning to reduce scanning noise.</div>
+          </div>
+
+          <div class="column notes-column">
+            <section class="section notes-content-section">
+              <div class="section-header">
+                <div class="content-tabs" role="tablist" aria-label="Task content">
+                  <button class="content-tab active" id="tab-notes" role="tab" aria-selected="true" aria-controls="panel-notes" tabindex="0" data-content-tab="notes"><svg><use href="#i-note"/></svg>Notes</button>
+                  <button class="content-tab" id="tab-comments" role="tab" aria-selected="false" aria-controls="panel-comments" tabindex="-1" data-content-tab="comments"><svg><use href="#i-comment"/></svg>Comments <span class="content-tab-count">8</span></button>
+                </div>
+                <button class="section-action expand-notes" data-content-action="notes"><svg><use href="#i-expand"/></svg>Open notes</button>
+                <button class="section-action expand-comments" data-content-action="comments" hidden><svg><use href="#i-expand"/></svg>Open comments</button>
+              </div>
+              <div class="section-body" id="panel-notes" role="tabpanel" aria-labelledby="tab-notes" data-content-panel="notes">
+                <div class="notes-preview" tabindex="0" aria-label="Task notes">
+                  <p>Related to <strong>#809</strong>. Depends on the task transition-history foundation.</p>
+                  <p><strong>Summary</strong></p>
+                  <p>Show work in progress over time and make bottlenecks easier to identify.</p>
+                  <p><strong>Acceptance criteria</strong></p>
+                  <p>- Group events by workflow state<br>- Render cumulative bands over time<br>- Support a 30 / 60 / 90 day range<br>- Include empty and loading states</p>
+                  <p><strong>Implementation note</strong></p>
+                  <p>Reuse the task transition history and aggregate snapshots by day.</p>
+                </div>
+                <div class="notes-hint" id="notesOverflowHint"><svg><use href="#i-down"/></svg>More notes below · scroll or open the focused view</div>
+              </div>
+              <div class="section-body" id="panel-comments" role="tabpanel" aria-labelledby="tab-comments" data-content-panel="comments" hidden>
+                <div class="comments-thread" aria-label="GitHub comments">
+                  <div class="comments-scroll" tabindex="0">
+                    <div class="comments-context"><svg><use href="#i-link"/></svg>Synced from GitHub · New replies post to the source thread</div>
+                    <button class="load-comments">View 6 earlier comments</button>
+                    <article class="comment">
+                      <span class="comment-avatar">RS</span>
+                      <div><div class="comment-meta"><strong>rysock</strong> · 2 hours ago</div><div class="comment-body">Could we include cycle-time percentile bands in the first version, or should that follow the base visualization?</div></div>
+                    </article>
+                    <article class="comment">
+                      <span class="comment-avatar">MC</span>
+                      <div><div class="comment-meta"><strong>mchen</strong> · 48 minutes ago</div><div class="comment-body">I would keep the initial chart focused. The transition-history query already gives us what we need for the cumulative bands.</div></div>
+                    </article>
+                  </div>
+                  <div class="comment-composer"><input class="comment-input" aria-label="Add a comment" placeholder="Add a comment…"><button class="comment-submit">Comment</button></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="section attachments-section">
+              <div class="section-header">
+                <div class="section-title"><svg><use href="#i-paperclip"/></svg>Attachments <span style="color:var(--subtle)">2</span></div>
+                <button class="section-action">Add file</button>
+              </div>
+              <div class="section-body">
+                <div class="attachment-list">
+                  <div class="attachment-item">
+                    <span class="attachment-icon image"><svg><use href="#i-image"/></svg></span>
+                    <div class="attachment-copy"><div class="attachment-name">cumulative-flow-reference.png</div><div class="attachment-meta">PNG · 284 KB · added today</div></div>
+                    <div class="attachment-actions"><button class="attachment-action" title="Open attachment" aria-label="Open cumulative flow reference attachment"><svg><use href="#i-popout"/></svg></button><button class="attachment-action remove-attachment" title="Remove attachment" aria-label="Remove cumulative flow reference attachment"><svg><use href="#i-x"/></svg></button></div>
+                  </div>
+                  <div class="attachment-item">
+                    <span class="attachment-icon"><svg><use href="#i-paperclip"/></svg></span>
+                    <div class="attachment-copy"><div class="attachment-name">report-data-contract.pdf</div><div class="attachment-meta">PDF · 96 KB · added yesterday</div></div>
+                    <div class="attachment-actions"><button class="attachment-action" title="Open attachment" aria-label="Open report data contract attachment"><svg><use href="#i-popout"/></svg></button><button class="attachment-action remove-attachment" title="Remove attachment" aria-label="Remove report data contract attachment"><svg><use href="#i-x"/></svg></button></div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <footer class="task-footer">
+          <span>Created Jul 31, 2026 at 9:42 AM</span>
+          <span class="footer-updated"><button class="footer-activity" title="View audit history of task changes"><svg><use href="#i-clock"/></svg>Activity (12)</button><span>Updated Jul 31, 2026 at 12:18 PM</span></span>
+        </footer>
+      </div>
+      <div class="mobile-action-bar" aria-label="Mobile task actions">
+        <button class="mobile-primary-action" id="mobileComplete"><svg><use href="#i-check"/></svg>Complete</button>
+        <button class="mobile-secondary-action" id="mobileMyDay"><svg><use href="#i-sun"/></svg>My Day</button>
+        <button class="mobile-more-action" aria-label="More task actions"><svg><use href="#i-more"/></svg></button>
+      </div>
+    </article>
+  </main>
+
+  <div class="notes-modal" id="notesModal" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+    <div class="notes-dialog" id="notesDialog" data-mode="read">
+      <div class="notes-dialog-header">
+        <div class="notes-dialog-title" id="notesTitle"><svg><use href="#i-note"/></svg>Notes <span class="task-id">Reports: cumulative flow diagram for work in progress and workflow bottlenecks</span></div>
+        <div class="notes-header-actions">
+          <div class="notes-mode-switcher" aria-label="Notes mode">
+            <button class="notes-mode-button active" data-notes-mode="read">Read</button>
+            <button class="notes-mode-button" data-notes-mode="edit">Edit</button>
+          </div>
+          <button class="icon-button close-notes" aria-label="Close notes"><svg><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <div class="editor-toolbar">
+        <button class="tool-button" title="Bold">B</button>
+        <button class="tool-button" title="Italic"><em>I</em></button>
+        <button class="tool-button" title="Link">Link</button>
+        <div class="tool-separator"></div>
+        <button class="tool-button" title="Bulleted list">List</button>
+        <button class="tool-button" title="Code">&lt;/&gt;</button>
+      </div>
+      <div class="editor-body">
+        <div class="editor-pane">
+          <div class="pane-label">Markdown</div>
+          <textarea id="notesText" aria-label="Notes markdown source" spellcheck="true">Related to #809. Depends on the task transition-history foundation.
+
+### Summary
+
+Show work in progress over time and make bottlenecks easier to identify.
+
+### Acceptance criteria
+
+- [ ] Group events by workflow state
+- [ ] Render cumulative bands over time
+- [ ] Support a 30 / 60 / 90 day range
+- [ ] Include empty and loading states</textarea>
+        </div>
+        <div class="editor-pane">
+          <div class="pane-label">Preview</div>
+          <div class="preview-pane" id="expandedNotesPreview">
+            <p>Related to <strong>#809</strong>. Depends on the task transition-history foundation.</p>
+            <h3>Summary</h3>
+            <p>Show work in progress over time and make bottlenecks easier to identify.</p>
+            <h3>Acceptance criteria</h3>
+            <ul>
+              <li>Group events by workflow state</li>
+              <li>Render cumulative bands over time</li>
+              <li>Support a 30 / 60 / 90 day range</li>
+              <li>Include empty and loading states</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="notes-dialog-footer">
+        <span>Autosaved locally - Markdown supported</span>
+        <div class="footer-actions read-only"><button class="button close-notes">Close</button><button class="button primary" id="editNotes">Edit notes</button></div>
+        <div class="footer-actions edit-only"><button class="button" id="cancelEdit">Cancel</button><button class="button primary" id="saveNotes">Save notes</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes-modal" id="commentsModal" role="dialog" aria-modal="true" aria-labelledby="commentsTitle">
+    <div class="notes-dialog">
+      <div class="notes-dialog-header">
+        <div class="notes-dialog-title" id="commentsTitle"><svg><use href="#i-comment"/></svg>Comments <span class="content-tab-count">8</span><span class="task-id">Reports: cumulative flow diagram for work in progress and workflow bottlenecks</span></div>
+        <div class="notes-header-actions">
+          <button class="button source-dialog-button" aria-label="Open comments in GitHub" title="Open comments in GitHub"><svg><use href="#i-popout"/></svg> Open in GitHub</button>
+          <button class="icon-button close-comments" aria-label="Close comments"><svg><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+      <div class="expanded-comments-shell">
+        <div class="comments-context"><svg><use href="#i-link"/></svg>Synced from GitHub · New replies post to the source thread</div>
+        <div class="expanded-comments-scroll" tabindex="0" aria-label="Expanded GitHub comments">
+          <button class="load-comments">Load 4 earlier comments</button>
+          <article class="comment">
+            <span class="comment-avatar">RS</span>
+            <div><div class="comment-meta"><strong>rysock</strong> · 2 hours ago</div><div class="comment-body">Could we include cycle-time percentile bands in the first version, or should that follow the base visualization?</div></div>
+          </article>
+          <article class="comment">
+            <span class="comment-avatar">MC</span>
+            <div><div class="comment-meta"><strong>mchen</strong> · 48 minutes ago</div><div class="comment-body">I would keep the initial chart focused. The transition-history query already gives us what we need for the cumulative bands.</div></div>
+          </article>
+          <article class="comment">
+            <span class="comment-avatar">AD</span>
+            <div><div class="comment-meta"><strong>adele</strong> · 31 minutes ago</div><div class="comment-body">Agreed. Let’s capture percentile bands as a follow-up and keep the acceptance criteria scoped to cumulative flow.</div></div>
+          </article>
+          <article class="comment">
+            <span class="comment-avatar">RS</span>
+            <div><div class="comment-meta"><strong>rysock</strong> · 12 minutes ago</div><div class="comment-body">Updated the task notes. The empty and loading states should be part of the first pass.</div></div>
+          </article>
+        </div>
+        <div class="comment-composer"><input class="comment-input" id="expandedCommentInput" aria-label="Add a comment" placeholder="Add a comment…"><button class="comment-submit">Comment</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">Notes saved</div>
+
+  <script>
+    const shell = document.getElementById("taskShell");
+    const buttons = [...document.querySelectorAll("[data-view-button]")];
+    const cycleButton = document.getElementById("cycleView");
+    const views = ["panel", "popout", "workspace", "mobile"];
+
+    function setView(view) {
+      shell.hidden = false;
+      shell.dataset.view = view;
+      buttons.forEach((button) => button.classList.toggle("active", button.dataset.viewButton === view));
+      const next = views[(views.indexOf(view) + 1) % views.length];
+      cycleButton.title = "Switch to " + (next === "panel" ? "side panel" : next);
+      cycleButton.innerHTML = '<svg><use href="#i-' + (next === "workspace" ? "full" : next) + '"/></svg>';
+      setTimeout(updateNotesOverflowHint, 0);
+    }
+    function updateNotesOverflowHint() {
+      const preview = document.querySelector(".notes-preview");
+      document.getElementById("notesOverflowHint").hidden = preview.scrollHeight <= preview.clientHeight + 1;
+    }
+
+    buttons.forEach((button) => button.addEventListener("click", () => setView(button.dataset.viewButton)));
+    cycleButton.addEventListener("click", () => {
+      const current = views.indexOf(shell.dataset.view);
+      setView(views[(current + 1) % views.length]);
+    });
+
+    const notesModal = document.getElementById("notesModal");
+    const notesDialog = document.getElementById("notesDialog");
+    const notesModeButtons = [...document.querySelectorAll("[data-notes-mode]")];
+    const backgroundRegions = [document.querySelector(".prototype-bar"), document.querySelector(".stage")];
+    let notesTrigger = null;
+    let commentsTrigger = null;
+    function setBackgroundInert(inert) {
+      backgroundRegions.forEach((region) => { region.inert = inert; });
+    }
+    function getFocusable(modal) {
+      return [...modal.querySelectorAll('button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
+        .filter((element) => !element.hidden && element.offsetParent !== null);
+    }
+    function trapFocus(modal, event) {
+      const focusable = getFocusable(modal);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+    function setNotesMode(mode) {
+      notesDialog.dataset.mode = mode;
+      notesModeButtons.forEach((button) => button.classList.toggle("active", button.dataset.notesMode === mode));
+      if (mode === "edit") setTimeout(() => document.getElementById("notesText").focus(), 0);
+    }
+    function openNotes() {
+      notesTrigger = document.activeElement;
+      setNotesMode("read");
+      notesModal.classList.add("open");
+      setBackgroundInert(true);
+      setTimeout(() => notesModal.querySelector(".close-notes").focus(), 0);
+    }
+    function closeNotes() {
+      notesModal.classList.remove("open");
+      setBackgroundInert(false);
+      notesTrigger?.focus();
+    }
+    document.querySelectorAll(".expand-notes").forEach((button) => button.addEventListener("click", openNotes));
+    document.querySelectorAll(".close-notes").forEach((button) => button.addEventListener("click", closeNotes));
+    notesModal.addEventListener("click", (event) => { if (event.target === notesModal) closeNotes(); });
+    notesModeButtons.forEach((button) => button.addEventListener("click", () => setNotesMode(button.dataset.notesMode)));
+    document.getElementById("editNotes").addEventListener("click", () => setNotesMode("edit"));
+    document.getElementById("cancelEdit").addEventListener("click", () => setNotesMode("read"));
+
+    const commentsModal = document.getElementById("commentsModal");
+    function openComments() {
+      commentsTrigger = document.activeElement;
+      commentsModal.classList.add("open");
+      setBackgroundInert(true);
+      setTimeout(() => document.getElementById("expandedCommentInput").focus(), 0);
+    }
+    function closeComments() {
+      commentsModal.classList.remove("open");
+      setBackgroundInert(false);
+      commentsTrigger?.focus();
+    }
+    document.querySelectorAll(".expand-comments").forEach((button) => button.addEventListener("click", openComments));
+    document.querySelectorAll(".close-comments").forEach((button) => button.addEventListener("click", closeComments));
+    commentsModal.addEventListener("click", (event) => { if (event.target === commentsModal) closeComments(); });
+
+    const contentTabs = [...document.querySelectorAll("[data-content-tab]")];
+    const contentPanels = [...document.querySelectorAll("[data-content-panel]")];
+    const contentActions = [...document.querySelectorAll("[data-content-action]")];
+    function setContentTab(tab) {
+      contentTabs.forEach((button) => {
+        const active = button.dataset.contentTab === tab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", String(active));
+        button.tabIndex = active ? 0 : -1;
+      });
+      contentPanels.forEach((panel) => { panel.hidden = panel.dataset.contentPanel !== tab; });
+      contentActions.forEach((action) => { action.hidden = action.dataset.contentAction !== tab; });
+    }
+    contentTabs.forEach((button) => button.addEventListener("click", () => setContentTab(button.dataset.contentTab)));
+    contentTabs.forEach((button, index) => button.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const targetIndex = event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? contentTabs.length - 1
+          : (index + (event.key === "ArrowRight" ? 1 : -1) + contentTabs.length) % contentTabs.length;
+      contentTabs[targetIndex].focus();
+      setContentTab(contentTabs[targetIndex].dataset.contentTab);
+    }));
+
+    const toast = document.getElementById("toast");
+    document.getElementById("saveNotes").addEventListener("click", () => {
+      closeNotes();
+      toast.textContent = "Notes saved";
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 1800);
+    });
+
+    const completeButton = document.getElementById("completeButton");
+    completeButton.addEventListener("click", () => {
+      completeButton.classList.toggle("done");
+      completeButton.querySelector("span").textContent = completeButton.classList.contains("done") ? "Completed" : "Mark complete";
+      completeButton.querySelector("use").setAttribute("href", completeButton.classList.contains("done") ? "#i-check" : "#i-circle");
+    });
+    document.getElementById("mobileComplete").addEventListener("click", () => completeButton.click());
+
+    const statusReasonToggle = document.getElementById("statusReasonToggle");
+    statusReasonToggle.addEventListener("click", () => {
+      const hasReason = statusReasonToggle.classList.toggle("has-reason");
+      statusReasonToggle.querySelector("span").textContent = hasReason ? "Waiting on dependency" : "Add reason";
+    });
+    document.getElementById("suggestReason").addEventListener("click", () => {
+      statusReasonToggle.classList.add("has-reason");
+      statusReasonToggle.querySelector("span").textContent = "Waiting on dependency";
+    });
+
+    const myDayToggle = document.getElementById("myDayToggle");
+    myDayToggle.addEventListener("click", () => {
+      const active = myDayToggle.classList.toggle("active");
+      myDayToggle.querySelector("span").textContent = active ? "On My Day" : "Add to My Day";
+    });
+    document.getElementById("mobileMyDay").addEventListener("click", () => myDayToggle.click());
+
+    document.getElementById("recurrenceShortcut").addEventListener("click", () => {
+      const recurrenceDetail = document.getElementById("recurrenceDetail");
+      recurrenceDetail.scrollIntoView({ behavior: "smooth", block: "center" });
+      recurrenceDetail.classList.add("focused");
+      setTimeout(() => recurrenceDetail.classList.remove("focused"), 1400);
+    });
+
+    document.getElementById("skipToCurrent").addEventListener("click", (event) => {
+      const dueDateValue = document.getElementById("dueDateValue");
+      dueDateValue.classList.remove("overdue");
+      dueDateValue.innerHTML = 'Aug 3 <svg><use href="#i-down"/></svg>';
+      event.currentTarget.remove();
+      toast.textContent = "Due date moved to Aug 3";
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 1800);
+    });
+
+    document.getElementById("suggestTags").addEventListener("click", () => {
+      document.getElementById("suggestedTags").classList.toggle("open");
+    });
+    document.querySelectorAll(".tag-remove").forEach((button) => button.addEventListener("click", () => button.closest(".tag").remove()));
+    document.querySelectorAll(".suggested-tag").forEach((button) => button.addEventListener("click", () => {
+      button.textContent = "Added";
+      button.disabled = true;
+    }));
+    document.querySelectorAll(".remove-attachment").forEach((button) => button.addEventListener("click", () => button.closest(".attachment-item").remove()));
+    document.querySelectorAll(".load-comments").forEach((button) => button.addEventListener("click", () => {
+      button.textContent = "All comments loaded";
+      button.disabled = true;
+    }));
+
+    document.getElementById("closeTask").addEventListener("click", () => {
+      shell.hidden = true;
+      buttons.find((button) => button.classList.contains("active"))?.focus();
+      toast.textContent = "Task detail closed";
+      toast.classList.add("show");
+      setTimeout(() => toast.classList.remove("show"), 1800);
+    });
+
+    const notesText = document.getElementById("notesText");
+    const expandedNotesPreview = document.getElementById("expandedNotesPreview");
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
+    }
+    function renderNotes(markdown) {
+      expandedNotesPreview.innerHTML = markdown.split("\n").map((line) => {
+        const escaped = escapeHtml(line).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        if (escaped.startsWith("### ")) return `<h3>${escaped.slice(4)}</h3>`;
+        if (/^- \[[ x]\] /.test(escaped)) return `<p>• ${escaped.replace(/^- \[[ x]\] /, "")}</p>`;
+        return escaped ? `<p>${escaped}</p>` : "";
+      }).join("");
+    }
+    notesText.addEventListener("input", () => renderNotes(notesText.value));
+
+    document.addEventListener("keydown", (event) => {
+      const activeModal = notesModal.classList.contains("open") ? notesModal : commentsModal.classList.contains("open") ? commentsModal : null;
+      if (event.key === "Tab" && activeModal) trapFocus(activeModal, event);
+      if (event.key === "Escape" && notesModal.classList.contains("open")) {
+        event.preventDefault();
+        closeNotes();
+      }
+      if (event.key === "Escape" && commentsModal.classList.contains("open")) {
+        event.preventDefault();
+        closeComments();
+      }
+      const typing = event.target.matches("input, textarea, [contenteditable='true']");
+      if (typing || activeModal) return;
+      if (event.key === "1") setView("panel");
+      if (event.key === "2") setView("popout");
+      if (event.key === "3") setView("workspace");
+      if (event.key === "4") setView("mobile");
+    });
+
+    const params = new URLSearchParams(location.search);
+    const commentsSupported = params.get("source") !== "local";
+    if (!commentsSupported) {
+      document.getElementById("tab-comments").hidden = true;
+      document.querySelector(".source").innerHTML = '<span class="source-logo">MC</span> Mission Control';
+      const sourceButton = document.getElementById("sourceButton");
+      sourceButton.innerHTML = '<svg><use href="#i-list"/></svg>Mission Control';
+      sourceButton.title = "Stored locally in Mission Control";
+      sourceButton.disabled = true;
+      setContentTab("notes");
+    }
+    if (views.includes(params.get("view"))) setView(params.get("view"));
+    if (params.get("notes") === "open" || params.get("notes") === "edit") openNotes();
+    if (params.get("notes") === "edit") setNotesMode("edit");
+    if (commentsSupported && params.get("content") === "comments") setContentTab("comments");
+    if (commentsSupported && params.get("comments") === "open") {
+      setContentTab("comments");
+      openComments();
+    }
+    setTimeout(updateNotesOverflowHint, 0);
+    if (params.get("scroll") === "bottom") setTimeout(() => {
+      const content = document.querySelector(".content");
+      content.scrollTop = content.scrollHeight;
+    }, 0);
+  </script>
+</body>
+</html>

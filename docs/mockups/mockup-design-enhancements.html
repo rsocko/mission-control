@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Design Enhancements (Sidebar, Micro-copy, Themes)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    :root {
+      --accent: #3b82f6;
+      --accent-light: #dbeafe;
+      --accent-dark: #2563eb;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .tab-button {
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+
+    .tab-button:active,
+    .swatch:active,
+    .preview-button:active {
+      transform: scale(0.96);
+    }
+
+    .tab-button.active {
+      background: var(--accent-light);
+      border-color: rgba(59, 130, 246, 0.22);
+      color: var(--accent-dark);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .nav-item {
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+
+    .nav-item:hover { background: #f3f4f6; }
+
+    .nav-item.active {
+      background: var(--accent-light);
+      color: var(--accent-dark);
+    }
+
+    .nav-item.active i { color: var(--accent); }
+
+    .callout-line {
+      position: absolute;
+      background: #cbd5e1;
+      transform-origin: left center;
+      height: 1px;
+    }
+
+    .callout-box {
+      position: absolute;
+      max-width: 220px;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 10px 12px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+    }
+
+    .swatch {
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .accent-text { color: var(--accent); }
+    .accent-text-dark { color: var(--accent-dark); }
+    .accent-bg { background: var(--accent); }
+    .accent-bg-light { background: var(--accent-light); }
+    .accent-border { border-color: var(--accent); }
+
+    .preview-button {
+      background: var(--accent);
+      transition: background-color 0.18s ease, transform 0.18s ease;
+    }
+
+    .preview-button:hover { background: var(--accent-dark); }
+
+    .preview-progress-fill,
+    .preview-sidebar-indicator,
+    .preview-check,
+    .preview-stat-icon,
+    .preview-icon-chip,
+    .preview-active-pill,
+    .preview-active-dot {
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <header class="bg-white border-b border-gray-200 px-6 py-4">
+    <div class="flex items-center gap-3">
+      <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+      <div>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+        <p class="text-sm text-gray-500">Design enhancements mockup</p>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-6">
+    <div class="mb-6">
+      <h2 class="text-2xl font-semibold text-gray-900 text-balance">Mission Control — Design Enhancements (Sidebar, Micro-copy, Themes)</h2>
+      <p class="text-sm text-gray-500 mt-1 text-pretty">Three focused UI improvements for navigation clarity, kinder copy, and live personalization.</p>
+    </div>
+
+    <div class="bg-white rounded-lg border border-gray-200 p-2 inline-flex gap-2 mb-6">
+      <button class="tab-button active px-4 py-2 rounded-md border border-transparent text-sm font-medium text-gray-600" data-tab="sidebar-grouping">
+        1. Sidebar Category Grouping
+      </button>
+      <button class="tab-button px-4 py-2 rounded-md border border-transparent text-sm font-medium text-gray-600" data-tab="micro-copy">
+        2. Encouraging Micro-copy
+      </button>
+      <button class="tab-button px-4 py-2 rounded-md border border-transparent text-sm font-medium text-gray-600" data-tab="accent-themes">
+        3. Accent Color Themes
+      </button>
+    </div>
+
+    <section id="sidebar-grouping" class="tab-panel active">
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900">Current Sidebar</h3>
+            <span class="text-xs font-medium px-2 py-1 rounded-full bg-gray-100 text-gray-600">Before</span>
+          </div>
+          <div class="border border-gray-200 rounded-xl p-4 bg-gray-50">
+            <div class="bg-white rounded-lg border border-gray-200 p-3 w-full max-w-xs">
+              <div class="space-y-1">
+                <div class="nav-item active flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm cursor-pointer">
+                  <i class="fas fa-house text-gray-400 w-4"></i>
+                  <span>Dashboard</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-sun text-gray-400 w-4"></i>
+                  <span>My Day</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-table-columns text-gray-400 w-4"></i>
+                  <span>Kanban</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-robot text-gray-400 w-4"></i>
+                  <span>AI Assistant</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-inbox text-gray-400 w-4"></i>
+                  <span>Triage Queue</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-briefcase text-gray-400 w-4"></i>
+                  <span>Portfolio</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-gear text-gray-400 w-4"></i>
+                  <span>Settings</span>
+                </div>
+              </div>
+            </div>
+            <p class="text-sm text-gray-500 mt-4">Everything competes at the same level, so planning, tracking, and tooling feel blended together.</p>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-5 relative overflow-hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-semibold text-gray-900">Proposed Sidebar</h3>
+            <span class="text-xs font-medium px-2 py-1 rounded-full bg-green-100 text-green-700">After</span>
+          </div>
+          <div class="border border-gray-200 rounded-xl p-4 bg-gray-50 relative min-h-[720px]">
+            <div class="bg-white rounded-lg border border-gray-200 p-3 w-full max-w-xs">
+              <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 px-2">Command</div>
+              <div class="space-y-1">
+                <div class="nav-item active flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm cursor-pointer">
+                  <i class="fas fa-house text-blue-600 w-4"></i>
+                  <span>Dashboard</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-sun text-gray-400 w-4"></i>
+                  <span>My Day</span>
+                </div>
+              </div>
+
+              <div class="border-t border-gray-100 mt-5 mb-1.5"></div>
+              <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Do</div>
+              <div class="space-y-1 mt-1.5">
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-check-double text-gray-400 w-4"></i>
+                  <span>Tasks</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-table-columns text-gray-400 w-4"></i>
+                  <span>Kanban</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-folder text-gray-400 w-4"></i>
+                  <span>Projects</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-water text-gray-400 w-4"></i>
+                  <span>Wave Planner</span>
+                </div>
+              </div>
+
+              <div class="border-t border-gray-100 mt-5 mb-1.5"></div>
+              <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Track</div>
+              <div class="space-y-1 mt-1.5">
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-repeat text-gray-400 w-4"></i>
+                  <span>Routines</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-bullseye text-gray-400 w-4"></i>
+                  <span>Goals</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-bolt text-gray-400 w-4"></i>
+                  <span>Energy Log</span>
+                </div>
+              </div>
+
+              <div class="border-t border-gray-100 mt-5 mb-1.5"></div>
+              <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Review</div>
+              <div class="space-y-1 mt-1.5">
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-chart-column text-gray-400 w-4"></i>
+                  <span>Weekly Reset</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-calendar-days text-gray-400 w-4"></i>
+                  <span>Monthly Reset</span>
+                </div>
+              </div>
+
+              <div class="border-t border-gray-100 mt-5 mb-1.5"></div>
+              <div class="text-[10px] font-bold text-gray-400 uppercase tracking-widest px-2">Tools</div>
+              <div class="space-y-1 mt-1.5">
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-inbox text-gray-400 w-4"></i>
+                  <span>Triage Queue</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-robot text-gray-400 w-4"></i>
+                  <span>AI Assistant</span>
+                </div>
+                <div class="nav-item flex items-center gap-2.5 px-2 py-1.5 rounded-md text-sm text-gray-700 cursor-pointer">
+                  <i class="fas fa-gear text-gray-400 w-4"></i>
+                  <span>Settings</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="callout-box top-[48px] right-3">
+              <p class="text-xs font-semibold text-gray-900">Mental model</p>
+              <p class="text-xs text-gray-600 mt-1">Command → Do → Track → Review → Tools</p>
+            </div>
+            <div class="callout-line top-[92px] left-[280px] w-[110px] rotate-[8deg]"></div>
+
+            <div class="callout-box top-[310px] right-8">
+              <p class="text-xs font-semibold text-green-700">NEW</p>
+              <p class="text-xs text-gray-600 mt-1">Routines and energy tracking get their own home</p>
+            </div>
+            <div class="callout-line top-[356px] left-[280px] w-[145px] rotate-[2deg]"></div>
+
+            <div class="callout-box top-[492px] right-10">
+              <p class="text-xs font-semibold text-green-700">NEW</p>
+              <p class="text-xs text-gray-600 mt-1">Periodic reflection rituals</p>
+            </div>
+            <div class="callout-line top-[528px] left-[280px] w-[128px] -rotate-[8deg]"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="micro-copy" class="tab-panel">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">Empty My Day</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            No tasks for today.
+          </div>
+          <div class="bg-green-50 rounded p-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ After</span></div>
+            Your day is open. What matters most?
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">All Tasks Complete</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            All tasks completed.
+          </div>
+          <div class="bg-green-50 rounded p-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ After</span></div>
+            Everything done. That's a good day. ✓
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">Overdue Tasks</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            <span class="inline-flex items-center gap-1 text-red-600 font-medium">3 tasks overdue</span>
+          </div>
+          <div class="rounded p-3 text-sm text-amber-900 bg-amber-50">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">✓ After</span></div>
+            3 slipped — pick one to start fresh.
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">Empty Routines</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            No routines configured.
+          </div>
+          <div class="bg-green-50 rounded p-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ After</span></div>
+            Start with one small routine. That's enough.
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">Broken Streak</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            Streak reset to 0.
+          </div>
+          <div class="bg-green-50 rounded p-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ After</span></div>
+            Streak paused — you'll pick it back up. No guilt here.
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-4">
+          <div class="text-xs text-gray-400 uppercase tracking-wide mb-3">No Focus 3 Set</div>
+          <div class="bg-gray-100 rounded p-3 text-sm text-gray-500 mb-3">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">✗ Before</span></div>
+            No focus items selected.
+          </div>
+          <div class="bg-green-50 rounded p-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2 mb-1"><span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">✓ After</span></div>
+            Pick your top 3 for today. The rest can wait.
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-4 mt-6">
+        <div class="flex items-center gap-2 mb-3">
+          <i class="fas fa-circle-info text-blue-600"></i>
+          <h3 class="font-semibold text-gray-900">MC Micro-copy Principles</h3>
+        </div>
+        <ul class="space-y-2 text-sm text-gray-700">
+          <li>✓ Direct but warm — no filler, but no harshness either</li>
+          <li>✓ Action-oriented — every empty state suggests what to do next</li>
+          <li>✓ No shame language — never use 'failed', 'missed', 'behind'</li>
+          <li>✓ Celebrate completion — make finishing things feel good</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="accent-themes" class="tab-panel">
+      <div class="space-y-6">
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <div class="mb-4">
+            <label class="text-sm font-medium text-gray-900">Accent Color</label>
+          </div>
+          <div class="flex items-center gap-4 mb-3">
+            <button class="swatch selected ring-2 ring-offset-2 ring-blue-400 w-8 h-8 rounded-full border-2 border-white" style="background:#3b82f6;" data-name="Blue" data-accent="#3b82f6" data-light="#dbeafe" data-dark="#2563eb" aria-label="Blue theme"></button>
+            <button class="swatch w-8 h-8 rounded-full border-2 border-white" style="background:#10b981;" data-name="Green" data-accent="#10b981" data-light="#d1fae5" data-dark="#059669" aria-label="Green theme"></button>
+            <button class="swatch w-8 h-8 rounded-full border-2 border-white" style="background:#8b5cf6;" data-name="Purple" data-accent="#8b5cf6" data-light="#ede9fe" data-dark="#7c3aed" aria-label="Purple theme"></button>
+            <button class="swatch w-8 h-8 rounded-full border-2 border-white" style="background:#f59e0b;" data-name="Amber" data-accent="#f59e0b" data-light="#fef3c7" data-dark="#d97706" aria-label="Amber theme"></button>
+            <button class="swatch w-8 h-8 rounded-full border-2 border-white" style="background:#f43f5e;" data-name="Rose" data-accent="#f43f5e" data-light="#ffe4e6" data-dark="#e11d48" aria-label="Rose theme"></button>
+          </div>
+          <p id="theme-label" class="text-xs text-gray-500">Current: Blue</p>
+        </div>
+
+        <div class="bg-white rounded-lg border border-gray-200 p-5">
+          <div class="border border-gray-200 rounded-2xl overflow-hidden bg-gray-50">
+            <div class="bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <i class="fas fa-satellite-dish accent-text text-lg"></i>
+                <div>
+                  <div class="font-semibold text-gray-900">Mission Control</div>
+                  <div class="text-xs text-gray-500">Mini dashboard preview</div>
+                </div>
+              </div>
+              <div class="preview-active-pill accent-bg-light px-3 py-1 rounded-full text-xs font-medium accent-text-dark">Dashboard active</div>
+            </div>
+
+            <div class="grid grid-cols-[220px_1fr] min-h-[480px]">
+              <aside class="bg-white border-r border-gray-200 p-4">
+                <div class="space-y-1">
+                  <div class="flex items-center gap-3 px-3 py-2 rounded-lg accent-bg-light accent-text-dark relative">
+                    <span class="preview-sidebar-indicator absolute left-0 top-2 bottom-2 w-1 rounded-r-full accent-bg"></span>
+                    <i class="fas fa-house w-4 ml-2"></i>
+                    <span class="text-sm font-medium">Dashboard</span>
+                  </div>
+                  <div class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">
+                    <i class="fas fa-sun w-4 text-gray-400"></i>
+                    <span>My Day</span>
+                  </div>
+                  <div class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100">
+                    <i class="fas fa-repeat w-4 text-gray-400"></i>
+                    <span>Routines</span>
+                  </div>
+                </div>
+              </aside>
+
+              <div class="p-5">
+                <div class="grid grid-cols-2 gap-4 mb-5">
+                  <div class="bg-white rounded-lg border border-gray-200 p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-sm text-gray-500">Today's Focus</p>
+                        <p class="text-2xl font-semibold text-gray-900">3</p>
+                      </div>
+                      <div class="preview-stat-icon w-10 h-10 rounded-lg flex items-center justify-center accent-bg-light">
+                        <i class="fas fa-bullseye accent-text"></i>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="bg-white rounded-lg border border-gray-200 p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-sm text-gray-500">Momentum</p>
+                        <p class="text-2xl font-semibold text-gray-900">82%</p>
+                      </div>
+                      <div class="preview-stat-icon w-10 h-10 rounded-lg flex items-center justify-center accent-bg-light">
+                        <i class="fas fa-bolt accent-text"></i>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="bg-white rounded-lg border border-gray-200 p-4 mb-5">
+                  <div class="flex items-center justify-between mb-3">
+                    <div>
+                      <h3 class="font-medium text-gray-900">Weekly progress</h3>
+                      <p class="text-sm text-gray-500">A compact preview of the active accent.</p>
+                    </div>
+                    <div class="preview-icon-chip accent-bg-light w-9 h-9 rounded-lg flex items-center justify-center">
+                      <i class="fas fa-chart-line accent-text"></i>
+                    </div>
+                  </div>
+                  <div class="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="preview-progress-fill accent-bg h-full rounded-full" style="width: 68%;"></div>
+                  </div>
+                  <div class="flex items-center justify-between text-xs text-gray-500 mt-2">
+                    <span>68% complete</span>
+                    <span>17 / 25 tasks done</span>
+                  </div>
+                </div>
+
+                <div class="bg-white rounded-lg border border-gray-200 p-4">
+                  <div class="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 class="font-medium text-gray-900">Today</h3>
+                      <p class="text-sm text-gray-500">Accent color applied across action surfaces.</p>
+                    </div>
+                    <button class="preview-button text-white text-sm font-medium px-4 py-2 rounded-md">Primary</button>
+                  </div>
+
+                  <div class="space-y-3">
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-3">
+                        <div class="preview-check accent-bg w-5 h-5 rounded-md flex items-center justify-center text-white text-[11px]">
+                          <i class="fas fa-check"></i>
+                        </div>
+                        <span class="text-sm text-gray-700">Review triage queue</span>
+                      </div>
+                      <span class="text-xs text-gray-400">Done</span>
+                    </div>
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-3">
+                        <div class="w-5 h-5 rounded-md border border-gray-300 bg-white"></div>
+                        <span class="text-sm text-gray-700">Set focus 3</span>
+                      </div>
+                      <span class="preview-active-dot accent-text text-xs font-medium">Up next</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const tabButtons = document.querySelectorAll('[data-tab]');
+    const tabPanels = document.querySelectorAll('.tab-panel');
+
+    tabButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        const target = button.getAttribute('data-tab');
+
+        tabButtons.forEach((item) => item.classList.remove('active'));
+        tabPanels.forEach((panel) => panel.classList.remove('active'));
+
+        button.classList.add('active');
+        document.getElementById(target).classList.add('active');
+      });
+    });
+
+    const root = document.documentElement;
+    const themeLabel = document.getElementById('theme-label');
+    const swatches = document.querySelectorAll('.swatch');
+
+    swatches.forEach((swatch) => {
+      swatch.addEventListener('click', () => {
+        const accent = swatch.dataset.accent;
+        const light = swatch.dataset.light;
+        const dark = swatch.dataset.dark;
+        const name = swatch.dataset.name;
+
+        root.style.setProperty('--accent', accent);
+        root.style.setProperty('--accent-light', light);
+        root.style.setProperty('--accent-dark', dark);
+        themeLabel.textContent = `Current: ${name}`;
+
+        swatches.forEach((item) => {
+          item.classList.remove('selected', 'ring-2', 'ring-offset-2', 'ring-blue-400');
+        });
+        swatch.classList.add('selected');
+        swatch.classList.add('ring-2', 'ring-offset-2', 'ring-blue-400');
+      });
+    });
+  </script>
+</body>
+</html>

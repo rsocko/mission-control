@@ -1,0 +1,844 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control - Revised Task Row Actions</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #070b14;
+      --surface-0: #0b1220;
+      --surface-1: #101a2a;
+      --surface-2: #17243a;
+      --surface-3: #20304a;
+      --border: #27364e;
+      --border-soft: #1b293d;
+      --text: #eef3fa;
+      --text-2: #b6c1d1;
+      --muted: #7f8da3;
+      --accent: #5b9cff;
+      --accent-soft: rgba(91, 156, 255, .14);
+      --amber: #f4bf52;
+      --orange: #fb923c;
+      --green: #34d399;
+      --purple: #c084fc;
+      --red: #fb7185;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .46);
+      font-family: Inter, "Segoe UI", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background:
+        radial-gradient(circle at 80% 0, rgba(53, 103, 185, .16), transparent 35%),
+        var(--bg);
+      color: var(--text);
+      font-size: 14px;
+    }
+    button, textarea { font: inherit; }
+    button { color: inherit; }
+    button:focus-visible, textarea:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    svg {
+      width: 16px;
+      height: 16px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.8;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
+
+    .prototype-bar {
+      position: sticky;
+      z-index: 30;
+      top: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 68px;
+      padding: 12px 22px;
+      border-bottom: 1px solid var(--border-soft);
+      background: rgba(7, 11, 20, .92);
+      backdrop-filter: blur(18px);
+    }
+    .prototype-title { display: flex; align-items: center; gap: 12px; min-width: 220px; }
+    .prototype-mark {
+      display: grid;
+      width: 36px;
+      height: 36px;
+      place-items: center;
+      border: 1px solid rgba(91, 156, 255, .35);
+      border-radius: 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .prototype-title strong { display: block; }
+    .prototype-title span { display: block; margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .controls { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+    .control-group {
+      display: flex;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: var(--surface-0);
+    }
+    .control {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .control:hover { color: var(--text); background: var(--surface-2); }
+    .control.active { color: white; background: var(--surface-3); box-shadow: inset 0 0 0 1px #344b6a; }
+
+    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 60px; }
+    .intro {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 22px;
+      align-items: end;
+      margin-bottom: 20px;
+    }
+    h1 { margin: 0 0 7px; font-size: clamp(22px, 3vw, 32px); letter-spacing: -.03em; }
+    .intro p { max-width: 760px; margin: 0; color: var(--text-2); line-height: 1.55; }
+    .decision {
+      max-width: 360px;
+      padding: 10px 13px;
+      border: 1px solid rgba(52, 211, 153, .28);
+      border-radius: 10px;
+      background: rgba(52, 211, 153, .07);
+      color: #9be8cc;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 260px;
+      gap: 18px;
+      align-items: start;
+    }
+    .canvas-card, .guide-card {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(15, 24, 39, .86);
+      box-shadow: var(--shadow);
+    }
+    .canvas-card { min-width: 0; overflow: visible; }
+    .canvas-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: center;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .canvas-head strong { display: block; font-size: 13px; }
+    .canvas-head span { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+    .width-readout {
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface-0);
+      color: var(--text-2);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .stage { min-height: 460px; padding: 44px 24px 80px; overflow: visible; }
+    .task-list {
+      position: relative;
+      width: 100%;
+      max-width: 880px;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-0);
+      overflow: visible;
+      transition: max-width .25s ease;
+    }
+    body[data-width="full"] .task-list { max-width: 880px; }
+    body[data-width="medium"] .task-list { max-width: 620px; }
+    body[data-width="narrow"] .task-list { max-width: 410px; }
+    .list-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 48px;
+      padding: 0 15px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .list-header strong { font-size: 13px; }
+    .list-header span { color: var(--muted); font-size: 11px; }
+
+    .task-row {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 62px;
+      padding: 9px 13px;
+      border-bottom: 1px solid var(--border-soft);
+      transition: background-color .14s;
+    }
+    .task-row:last-child { border-bottom: 0; border-radius: 0 0 11px 11px; }
+    .task-row.demo { background: rgba(91, 156, 255, .055); }
+    body:not([data-state="rest"]) .task-row.demo { background: var(--surface-1); }
+    body[data-state="focus"] .task-row.demo { box-shadow: inset 0 0 0 2px var(--accent); }
+    .completion {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 20px;
+      border: 2px solid #52627a;
+      border-radius: 50%;
+      background: transparent;
+      cursor: pointer;
+    }
+    .source {
+      display: grid;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+      place-items: center;
+      border-radius: 5px;
+      background: #293c5d;
+      color: #a9c9ff;
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .drag {
+      display: none;
+      width: 18px;
+      height: 30px;
+      flex: 0 0 18px;
+      place-items: center;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: grab;
+    }
+    body[data-surface="myday"] .drag { display: grid; }
+    .task-copy { min-width: 0; flex: 1 1 auto; }
+    .task-title {
+      display: block;
+      overflow: hidden;
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .meta { display: flex; align-items: center; gap: 7px; margin-top: 4px; min-width: 0; color: var(--muted); font-size: 11px; }
+    .tag { padding: 1px 6px; border-radius: 999px; background: rgba(192, 132, 252, .12); color: #d8b4fe; }
+
+    .actions {
+      display: flex;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border-radius: 8px;
+      background: var(--surface-0);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .13s;
+    }
+    body:not([data-state="rest"]) .demo .actions { opacity: 1; pointer-events: auto; }
+    .action, .state-button {
+      position: relative;
+      display: grid;
+      width: 29px;
+      height: 29px;
+      flex: 0 0 29px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .action:hover, .action.active, .state-button:hover { background: var(--surface-2); color: var(--text); }
+    .action.myday, .state-button.myday { color: var(--amber); }
+    .action.focus { color: var(--purple); }
+    .action.schedule, .action.calendar { color: #7db1ff; }
+    .action[disabled], .state-button[disabled] { cursor: not-allowed; opacity: .3; }
+    .action[disabled]:hover, .state-button[disabled]:hover { background: transparent; }
+    .dashboard-only, .myday-only { display: none; }
+    body[data-surface="dashboard"] .dashboard-only { display: grid; }
+    body[data-surface="myday"] .myday-only { display: grid; }
+
+    .notes-indicator .dot {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      width: 6px;
+      height: 6px;
+      border: 1px solid var(--surface-0);
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    body[data-notes="empty"] .notes-indicator.persistent { display: none; }
+    body[data-notes="existing"] .action.add-notes { display: none; }
+    .state-strip { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+    .pill {
+      min-height: 22px;
+      padding: 2px 6px;
+      border: 1px solid rgba(251, 146, 60, .35);
+      border-radius: 5px;
+      background: rgba(251, 146, 60, .1);
+      color: #fdba74;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    button.pill { cursor: pointer; }
+    button.pill:hover { background: rgba(251, 146, 60, .18); }
+    .status-pill { border-color: rgba(192, 132, 252, .3); background: rgba(192, 132, 252, .1); color: #d8b4fe; }
+    .due-control {
+      min-height: 28px;
+      padding: 0 6px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .due-control:hover { background: var(--surface-2); color: var(--text); }
+    body[data-date="none"] .due-control { display: none; }
+    body[data-date="dated"] .action.calendar { display: none; }
+    body[data-readonly="true"] .due-control { cursor: default; pointer-events: none; }
+
+    body[data-width="medium"] .action.secondary,
+    body[data-width="narrow"] .action,
+    body[data-width="narrow"] .myday-only,
+    body[data-width="narrow"] .dashboard-only { display: none; }
+    body[data-width="narrow"] .actions { display: none; }
+    body[data-width="narrow"] .meta .tag,
+    body[data-width="narrow"] .status-pill { display: none; }
+    body[data-width="narrow"] .state-strip { gap: 2px; }
+    body[data-width="narrow"] .pill { padding-inline: 4px; }
+    body[data-width="narrow"] .due-control { max-width: 66px; overflow: hidden; text-overflow: ellipsis; }
+    body[data-width="medium"][data-readonly="true"] .action.calendar,
+    body[data-width="medium"][data-readonly="true"] .action.add-notes { display: none; }
+
+    .popover {
+      position: fixed;
+      z-index: 12;
+      width: 220px;
+      padding: 7px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: #101a2a;
+      box-shadow: 0 18px 45px rgba(0, 0, 0, .5);
+    }
+    .popover-title { padding: 7px 9px 8px; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .menu-item {
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      text-align: left;
+    }
+    .menu-item:hover, .menu-item.selected { background: var(--surface-2); color: var(--text); }
+    .menu-item svg { color: var(--accent); }
+    .menu-item .shortcut { margin-left: auto; color: var(--muted); font-size: 10px; }
+    .menu-separator { height: 1px; margin: 5px 7px; background: var(--border-soft); }
+    .option-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+    .option-dot.critical { background: var(--red); }
+    .option-dot.high { background: var(--orange); }
+    .option-dot.medium { background: var(--amber); }
+    .option-dot.low { background: #60a5fa; }
+    .option-dot.progress { background: var(--purple); }
+    .option-dot.done { background: var(--green); }
+
+    .guide-card { padding: 17px; }
+    .guide-card h2 { margin: 0 0 13px; font-size: 13px; }
+    .legend { display: grid; gap: 11px; }
+    .legend-item { display: grid; grid-template-columns: 26px 1fr; gap: 9px; align-items: start; }
+    .legend-icon {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border-radius: 7px;
+      background: var(--surface-2);
+      color: var(--accent);
+    }
+    .legend-item strong { display: block; color: var(--text-2); font-size: 11px; }
+    .legend-item span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.42; }
+    .contract { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border-soft); }
+    .contract strong { display: block; margin-bottom: 7px; font-size: 11px; }
+    .contract ul { margin: 0; padding-left: 17px; color: var(--muted); font-size: 10px; line-height: 1.65; }
+    .state-caption {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: 13px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .state-caption code { padding: 3px 6px; border-radius: 5px; background: var(--surface-2); color: #aac8f7; }
+
+    .notes-overlay {
+      position: fixed;
+      z-index: 100;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(0, 0, 0, .68);
+      backdrop-filter: blur(5px);
+    }
+    .notes-dialog {
+      display: flex;
+      width: min(920px, 96vw);
+      height: min(650px, 90vh);
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 17px;
+      background: var(--surface-1);
+      box-shadow: var(--shadow);
+    }
+    .notes-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 15px 18px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+    .notes-header > svg { color: var(--accent); }
+    .notes-heading { min-width: 0; flex: 1; }
+    .notes-heading strong, .notes-heading span { display: block; }
+    .notes-heading span { overflow: hidden; margin-top: 2px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .mode-switch { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); }
+    .mode-button { min-height: 32px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+    .mode-button.active { background: var(--surface-2); color: var(--text); }
+    .close-button { display: grid; width: 40px; height: 40px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+    .close-button:hover { background: var(--surface-2); color: var(--text); }
+    .notes-content { min-height: 0; flex: 1; padding: 20px; }
+    .notes-read { width: min(680px, 100%); margin: 0 auto; color: var(--text-2); line-height: 1.7; }
+    .notes-read h3 { color: var(--text); }
+    .notes-edit { display: grid; height: 100%; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .notes-edit textarea, .notes-preview {
+      width: 100%;
+      height: 100%;
+      min-height: 240px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      background: var(--surface-0);
+      color: var(--text-2);
+      line-height: 1.55;
+    }
+    .notes-edit textarea { resize: none; outline: none; }
+    .notes-preview { color: var(--muted); }
+    .notes-footer { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-soft); }
+    .footer-button { min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; }
+    .footer-button.primary { background: var(--accent); color: white; font-weight: 700; }
+
+    @media (max-width: 900px) {
+      .prototype-bar { align-items: flex-start; flex-direction: column; }
+      .controls { justify-content: flex-start; }
+      .workspace { grid-template-columns: 1fr; }
+      .guide-card { display: none; }
+      .intro { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .notes-edit { grid-template-columns: 1fr; }
+      .notes-preview { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body data-width="full" data-state="hover" data-surface="dashboard" data-readonly="false" data-notes="existing" data-date="dated">
+  <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+    <symbol id="i-satellite" viewBox="0 0 24 24"><path d="m13 7 4-4 4 4-4 4"/><path d="m11 9-4 4"/><path d="M5 11 2 14l8 8 3-3"/><path d="M16 13a5 5 0 0 1-5 5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h14v12H9l-4 4z"/><path d="M8 8h8M8 12h6"/></symbol>
+    <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 5h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-status" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M22 12h-3"/></symbol>
+    <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="17" r="1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+  </svg>
+
+  <header class="prototype-bar">
+    <div class="prototype-title">
+      <div class="prototype-mark"><svg><use href="#i-satellite"></use></svg></div>
+      <div><strong>Revised task row actions</strong><span>Issue #1257 - state first, actions on demand</span></div>
+    </div>
+    <div class="controls" aria-label="Prototype controls">
+      <div class="control-group">
+        <button class="control active" data-set="surface" data-value="dashboard">Dashboard</button>
+        <button class="control" data-set="surface" data-value="myday">My Day</button>
+      </div>
+      <div class="control-group">
+        <button class="control active" data-set="width" data-value="full">Full</button>
+        <button class="control" data-set="width" data-value="medium">Medium</button>
+        <button class="control" data-set="width" data-value="narrow">Narrow</button>
+      </div>
+      <div class="control-group">
+        <button class="control active" data-set="state" data-value="hover">Hover</button>
+        <button class="control" data-set="state" data-value="focus">Focus</button>
+        <button class="control" data-set="state" data-value="rest">Rest</button>
+      </div>
+      <div class="control-group">
+        <button class="control active" data-set="notes" data-value="existing">Has notes</button>
+        <button class="control" data-set="notes" data-value="empty">No notes</button>
+      </div>
+      <div class="control-group">
+        <button class="control active" data-set="date" data-value="dated">Dated</button>
+        <button class="control" data-set="date" data-value="none">No date</button>
+      </div>
+      <div class="control-group">
+        <button class="control active" data-set="readonly" data-value="false">Writable</button>
+        <button class="control" data-set="readonly" data-value="true">Read only</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="intro">
+      <div>
+        <h1>Show state always; reveal mutations on demand</h1>
+        <p>Applicable state stays visible. Hover or keyboard focus reveals actions that add or change state. Existing due dates and notes become their own direct entry points.</p>
+      </div>
+      <div class="decision"><strong>Revised:</strong> no title-edit shortcut. Notes opens the existing expanded Notes dialog.</div>
+    </section>
+
+    <div class="workspace">
+      <section class="canvas-card">
+        <div class="canvas-head">
+          <div><strong id="surface-title">Dashboard task list</strong><span id="surface-subtitle">Priority and Status badges continue to filter</span></div>
+          <div class="width-readout" id="width-readout">Container >= 768px</div>
+        </div>
+        <div class="stage">
+          <div class="task-list">
+            <div class="list-header"><strong id="list-title">Tasks</strong><span>3 open</span></div>
+
+            <div class="task-row demo">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion" aria-label="Complete task"></button>
+              <span class="source" aria-label="GitHub">GH</span>
+              <div class="task-copy">
+                <span class="task-title">Prepare launch readiness review with the mobile team</span>
+                <div class="meta"><span>mission-control</span><span class="tag">release</span><span>3/5 subtasks</span></div>
+              </div>
+
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze" data-action="snooze"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action myday-only focus" aria-label="Focus on task" title="Focus"><svg><use href="#i-target"></use></svg></button>
+                <button class="action myday-only schedule" aria-label="Time-block task" title="Time-block"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action calendar" aria-label="Add due date" title="Add due date" data-action="date"><svg><use href="#i-calendar"></use></svg></button>
+                <button class="action add-notes" aria-label="Add notes" title="Add notes" data-action="notes"><svg><use href="#i-note"></use></svg></button>
+                <button class="action secondary" aria-label="Set status" title="Set status" data-action="status"><svg><use href="#i-status"></use></svg></button>
+                <button class="action secondary" aria-label="Set priority" title="Set priority" data-action="priority"><svg><use href="#i-flag"></use></svg></button>
+              </div>
+
+              <div class="state-strip" aria-label="Task state">
+                <button class="state-button myday" aria-label="Remove from My Day" title="In My Day"><svg><use href="#i-sun"></use></svg></button>
+                <button class="state-button notes-indicator persistent" aria-label="Open notes" title="Open notes" data-action="notes"><svg><use href="#i-note"></use></svg><span class="dot"></span></button>
+                <button class="pill status-pill" title="Filter by In Progress">In progress</button>
+                <button class="pill" title="Filter by High priority">P1</button>
+                <button class="due-control" aria-label="Change due date" title="Change due date" data-action="date">Mon, Aug 3</button>
+              </div>
+
+              <div class="popover" id="date-popover" hidden>
+                <div class="popover-title">Set due date</div>
+                <button class="menu-item"><svg><use href="#i-calendar"></use></svg>Today<span class="shortcut">Aug 1</span></button>
+                <button class="menu-item"><svg><use href="#i-calendar"></use></svg>Tomorrow<span class="shortcut">Aug 2</span></button>
+                <button class="menu-item"><svg><use href="#i-calendar"></use></svg>Next Monday<span class="shortcut">Aug 3</span></button>
+                <button class="menu-item"><svg><use href="#i-calendar"></use></svg>Pick date</button>
+                <div class="menu-separator dated-only"></div>
+                <button class="menu-item dated-only">Clear due date</button>
+              </div>
+
+              <div class="popover" id="snooze-popover" hidden>
+                <div class="popover-title">Snooze until</div>
+                <button class="menu-item"><svg><use href="#i-clock"></use></svg>Later today</button>
+                <button class="menu-item"><svg><use href="#i-clock"></use></svg>Tomorrow</button>
+                <button class="menu-item"><svg><use href="#i-clock"></use></svg>Next Monday</button>
+                <button class="menu-item"><svg><use href="#i-calendar"></use></svg>Pick date</button>
+              </div>
+
+              <div class="popover" id="status-popover" hidden>
+                <div class="popover-title">Set status</div>
+                <button class="menu-item"><span class="option-dot"></span>To Do</button>
+                <button class="menu-item selected"><span class="option-dot progress"></span>In Progress</button>
+                <button class="menu-item"><span class="option-dot done"></span>Done</button>
+                <button class="menu-item"><span class="option-dot critical"></span>Cancelled</button>
+              </div>
+
+              <div class="popover" id="priority-popover" hidden>
+                <div class="popover-title">Set priority</div>
+                <button class="menu-item"><span class="option-dot critical"></span>Critical <span class="shortcut">P0</span></button>
+                <button class="menu-item selected"><span class="option-dot high"></span>High <span class="shortcut">P1</span></button>
+                <button class="menu-item"><span class="option-dot medium"></span>Medium <span class="shortcut">P2</span></button>
+                <button class="menu-item"><span class="option-dot low"></span>Low <span class="shortcut">P3</span></button>
+                <button class="menu-item"><span class="option-dot"></span>None</button>
+              </div>
+            </div>
+
+            <div class="task-row">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion" aria-label="Complete task"></button><span class="source">MC</span>
+              <div class="task-copy"><span class="task-title">Review connector retry telemetry</span><div class="meta"><span>Engineering</span><span class="tag">observability</span></div></div>
+              <div class="state-strip"><span class="pill">P2</span><span class="due-control">Tue, Aug 4</span></div>
+            </div>
+            <div class="task-row">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion" aria-label="Complete task"></button><span class="source">TD</span>
+              <div class="task-copy"><span class="task-title">Draft August planning notes</span><div class="meta"><span>Personal</span></div></div>
+            </div>
+          </div>
+
+          <div class="state-caption">
+            <span id="state-description">Hover reveals mutation shortcuts while state remains visible.</span>
+            <code id="state-token">dashboard / full / hover</code>
+          </div>
+        </div>
+      </section>
+
+      <aside class="guide-card">
+        <h2>Revised contract</h2>
+        <div class="legend">
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-calendar"></use></svg></div><div><strong>Date is the trigger</strong><span>Existing date pill opens the picker; calendar appears only when undated.</span></div></div>
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-note"></use></svg></div><div><strong>Reuse Notes dialog</strong><span>Existing notes open Read; empty notes open Edit.</span></div></div>
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-status"></use></svg></div><div><strong>Status picker</strong><span>To Do, In Progress, Done, and Cancelled.</span></div></div>
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-clock"></use></svg></div><div><strong>Snooze picker</strong><span>Explicit timing replaces one-click tomorrow.</span></div></div>
+        </div>
+        <div class="contract">
+          <strong>Not included</strong>
+          <ul>
+            <li>No inline title-edit action</li>
+            <li>No duplicate calendar beside a date</li>
+            <li>No new notes preview surface</li>
+            <li>No changed badge-filter semantics</li>
+          </ul>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="notes-overlay" id="notes-overlay" hidden>
+    <section class="notes-dialog" role="dialog" aria-modal="true" aria-labelledby="notes-title">
+      <header class="notes-header">
+        <svg><use href="#i-note"></use></svg>
+        <div class="notes-heading"><strong id="notes-title">Notes</strong><span>Prepare launch readiness review with the mobile team</span></div>
+        <div class="mode-switch">
+          <button class="mode-button active" data-notes-mode="read">Read</button>
+          <button class="mode-button" data-notes-mode="edit">Edit</button>
+        </div>
+        <button class="close-button" aria-label="Close expanded notes" id="close-notes"><svg><use href="#i-close"></use></svg></button>
+      </header>
+      <div class="notes-content">
+        <article class="notes-read" id="notes-read">
+          <h3>Launch readiness review</h3>
+          <p>Confirm the remaining mobile release checks and collect sign-off from each owner.</p>
+          <ul><li>Validate production telemetry</li><li>Confirm rollback owner</li><li>Review App Store notes</li></ul>
+        </article>
+        <div class="notes-edit" id="notes-edit" hidden>
+          <textarea aria-label="Edit notes">## Launch readiness review
+
+Confirm the remaining mobile release checks and collect sign-off from each owner.</textarea>
+          <div class="notes-preview">Markdown preview appears here as you edit.</div>
+        </div>
+      </div>
+      <footer class="notes-footer" id="notes-footer" hidden>
+        <button class="footer-button" data-notes-mode="read">Cancel</button>
+        <button class="footer-button primary">Save notes</button>
+      </footer>
+    </section>
+  </div>
+
+  <script>
+    const body = document.body;
+    const popovers = {
+      date: document.getElementById('date-popover'),
+      snooze: document.getElementById('snooze-popover'),
+      status: document.getElementById('status-popover'),
+      priority: document.getElementById('priority-popover')
+    };
+    const notesOverlay = document.getElementById('notes-overlay');
+    const notesRead = document.getElementById('notes-read');
+    const notesEdit = document.getElementById('notes-edit');
+    const notesFooter = document.getElementById('notes-footer');
+
+    const descriptions = {
+      hover: 'Hover reveals mutation shortcuts while state remains visible.',
+      focus: 'Keyboard focus reveals the same shortcuts as hover.',
+      rest: 'At rest, only applicable task state remains visible.',
+      date: 'The existing date pill and the undated calendar action share one picker.',
+      snooze: 'Snooze now asks when instead of immediately choosing tomorrow.',
+      status: 'Status editing is separate from the Dashboard filter badge.',
+      priority: 'Priority editing is separate from the Dashboard filter badge.',
+      notes: 'The row opens the established expanded Notes dialog directly.'
+    };
+
+    function closePopovers() {
+      Object.values(popovers).forEach((popover) => { popover.hidden = true; });
+      document.querySelectorAll('.active.action, .active.state-button, .active.due-control').forEach((element) => element.classList.remove('active'));
+    }
+
+    function positionPopover(popover, trigger) {
+      const triggerRect = trigger.getBoundingClientRect();
+      const popoverRect = popover.getBoundingClientRect();
+      const gap = 6;
+      const edge = 12;
+      const left = Math.min(
+        window.innerWidth - popoverRect.width - edge,
+        Math.max(edge, triggerRect.right - popoverRect.width)
+      );
+      const below = triggerRect.bottom + gap;
+      const top = below + popoverRect.height <= window.innerHeight - edge
+        ? below
+        : Math.max(edge, triggerRect.top - popoverRect.height - gap);
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+    }
+
+    function syncControls() {
+      document.querySelectorAll('.control-group').forEach((group) => {
+        const first = group.querySelector('.control');
+        if (!first) return;
+        const key = first.dataset.set;
+        group.querySelectorAll('.control').forEach((button) => {
+          button.classList.toggle('active', button.dataset.value === body.dataset[key]);
+        });
+      });
+    }
+
+    function update() {
+      const width = body.dataset.width;
+      const surface = body.dataset.surface;
+      const state = body.dataset.state;
+      const widthText = { full: 'Container >= 768px', medium: 'Container 480-767px', narrow: 'Container < 480px' };
+      document.getElementById('width-readout').textContent = widthText[width];
+      document.getElementById('surface-title').textContent = surface === 'dashboard' ? 'Dashboard task list' : 'My Day task list';
+      document.getElementById('surface-subtitle').textContent = surface === 'dashboard'
+        ? 'Priority and Status badges continue to filter'
+        : 'Focus, time-block, and drag behavior remain';
+      document.getElementById('list-title').textContent = surface === 'dashboard' ? 'Tasks' : 'My Day';
+      document.getElementById('state-description').textContent = descriptions[state];
+      document.getElementById('state-token').textContent = `${surface} / ${width} / ${state}`;
+
+      document.querySelectorAll('.dated-only').forEach((element) => {
+        element.hidden = body.dataset.date !== 'dated';
+      });
+
+      const readOnly = body.dataset.readonly === 'true';
+      document.querySelectorAll('[data-action="date"], [data-action="snooze"], [data-action="status"], [data-action="priority"]').forEach((button) => {
+        button.disabled = readOnly;
+      });
+      document.querySelectorAll('.action.add-notes').forEach((button) => {
+        button.disabled = readOnly;
+      });
+      document.querySelector('[data-notes-mode="edit"]').hidden = readOnly;
+      syncControls();
+    }
+
+    document.querySelectorAll('.control').forEach((button) => {
+      button.addEventListener('click', () => {
+        body.dataset[button.dataset.set] = button.dataset.value;
+        closePopovers();
+        update();
+      });
+    });
+
+    function setNotesMode(mode) {
+      const editing = mode === 'edit';
+      notesRead.hidden = editing;
+      notesEdit.hidden = !editing;
+      notesFooter.hidden = !editing;
+      document.querySelectorAll('[data-notes-mode]').forEach((button) => {
+        button.classList.toggle('active', button.dataset.notesMode === mode);
+      });
+      if (editing) requestAnimationFrame(() => notesEdit.querySelector('textarea').focus());
+    }
+
+    function openNotes() {
+      closePopovers();
+      body.dataset.state = 'notes';
+      notesOverlay.hidden = false;
+      setNotesMode(body.dataset.notes === 'existing' ? 'read' : 'edit');
+      update();
+    }
+
+    document.querySelectorAll('[data-notes-mode]').forEach((button) => {
+      button.addEventListener('click', () => setNotesMode(button.dataset.notesMode));
+    });
+    document.getElementById('close-notes').addEventListener('click', () => {
+      notesOverlay.hidden = true;
+      body.dataset.state = 'focus';
+      update();
+    });
+
+    document.querySelectorAll('[data-action]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (button.disabled) return;
+        const action = button.dataset.action;
+        if (action === 'notes') {
+          openNotes();
+          return;
+        }
+        closePopovers();
+        body.dataset.state = action;
+        popovers[action].hidden = false;
+        button.classList.add('active');
+        update();
+        positionPopover(popovers[action], button);
+      });
+    });
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      if (!notesOverlay.hidden) {
+        notesOverlay.hidden = true;
+      } else {
+        closePopovers();
+      }
+      body.dataset.state = 'focus';
+      update();
+    });
+
+    notesOverlay.addEventListener('click', (event) => {
+      if (event.target !== notesOverlay) return;
+      notesOverlay.hidden = true;
+      body.dataset.state = 'focus';
+      update();
+    });
+
+    update();
+  </script>
+</body>
+</html>

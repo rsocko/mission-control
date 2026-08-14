@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Day - Issue #2051 UI concepts</title>
+  <style>
+    :root {
+      --background: #020617;
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #1e293b;
+      --border-subtle: #162032;
+      --border-strong: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-tertiary: #8b9ab5;
+      --text-muted: #8190a6;
+      --blue: #3b82f6;
+      --blue-light: #60a5fa;
+      --purple: #9333ea;
+      --amber: #f59e0b;
+      --green: #10b981;
+      --red: #ef4444;
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-width: 1120px;
+      background: #050914;
+      color: var(--text-primary);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    button { font: inherit; }
+
+    .review-bar {
+      height: 82px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      background: #080d1a;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .review-title { min-width: 280px; }
+    .review-title h1 { margin: 0 0 4px; font-size: 16px; }
+    .review-title p { margin: 0; color: var(--text-tertiary); font-size: 12px; }
+
+    .concept-tabs {
+      display: flex;
+      gap: 6px;
+      flex: 1;
+    }
+
+    .concept-tab {
+      min-width: 150px;
+      padding: 9px 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      background: var(--surface-0);
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .concept-tab strong,
+    .concept-tab span { display: block; }
+    .concept-tab strong { color: var(--text-primary); font-size: 12px; margin-bottom: 2px; }
+    .concept-tab span { font-size: 10px; }
+    .concept-tab.active {
+      border-color: rgba(96, 165, 250, .7);
+      background: rgba(30, 64, 175, .24);
+      box-shadow: 0 0 0 1px rgba(59, 130, 246, .12);
+    }
+
+    .recommendation-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 6px;
+      margin-left: 5px;
+      color: #93c5fd;
+      background: rgba(30, 64, 175, .35);
+      border: 1px solid rgba(59, 130, 246, .35);
+      border-radius: 999px;
+      font-size: 8px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .shell {
+      height: calc(100vh - 82px);
+      display: flex;
+      background: var(--background);
+      overflow: hidden;
+    }
+
+    .global-nav {
+      width: 58px;
+      flex: 0 0 58px;
+      padding: 10px 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      background: #080d18;
+      border-right: 1px solid var(--border);
+    }
+
+    .brand {
+      width: 34px;
+      height: 34px;
+      margin-bottom: 10px;
+      display: grid;
+      place-items: center;
+      border-radius: 9px;
+      background: var(--blue);
+      font-weight: 800;
+      font-size: 11px;
+    }
+
+    .nav-icon {
+      width: 34px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border: 0;
+      border-radius: 8px;
+      color: var(--text-muted);
+      background: transparent;
+      cursor: default;
+      font-size: 12px;
+    }
+
+    .nav-icon.active {
+      color: #fbbf24;
+      background: rgba(245, 158, 11, .12);
+    }
+
+    .nav-spacer { flex: 1; }
+
+    .dashboard-filters {
+      display: none;
+      width: 218px;
+      flex: 0 0 218px;
+      overflow-y: auto;
+      padding: 14px 12px;
+      background: var(--surface-0);
+      border-right: 1px solid var(--border);
+    }
+
+    .shell.with-left-filters .dashboard-filters { display: block; }
+
+    .filter-heading {
+      margin: 2px 4px 14px;
+      display: flex;
+      justify-content: space-between;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .filter-section {
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 12px;
+    }
+
+    .filter-section h4 {
+      margin: 0 6px 7px;
+      color: var(--text-muted);
+      font-size: 9px;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .filter-option {
+      padding: 6px 7px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-radius: 5px;
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .filter-option.selected {
+      color: #bfdbfe;
+      background: rgba(37, 99, 235, .17);
+    }
+
+    .filter-count { color: var(--text-muted); font-size: 10px; }
+
+    .workspace {
+      min-width: 0;
+      flex: 1;
+      display: flex;
+    }
+
+    .main {
+      min-width: 0;
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+    }
+
+    .content {
+      max-width: 896px;
+      margin: 0 auto;
+    }
+
+    .shell.with-left-filters .main { padding-left: 18px; padding-right: 18px; }
+
+    .page-header {
+      min-height: 34px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .page-title h2 {
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 20px;
+      font-weight: 650;
+    }
+
+    .sun { color: var(--amber); font-size: 18px; }
+    .date { margin: 3px 0 0; color: var(--text-tertiary); font-size: 12px; }
+
+    .page-actions {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      white-space: nowrap;
+    }
+
+    .button {
+      height: 29px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text-tertiary);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .button.segment {
+      padding: 0 5px;
+      background: var(--surface-2);
+    }
+
+    .segment b {
+      padding: 4px 7px;
+      border-radius: 4px;
+      color: var(--text-primary);
+      background: var(--surface-1);
+      font-weight: 600;
+    }
+
+    .button.purple { color: white; background: #7e22ce; border-color: #7e22ce; }
+    .button.blue { color: white; background: #2563eb; border-color: #2563eb; }
+
+    .stats {
+      margin-bottom: 24px;
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-0);
+    }
+
+    .stat {
+      min-width: 50px;
+      text-align: center;
+    }
+
+    .stat strong { display: block; font-size: 17px; }
+    .stat span {
+      color: var(--text-tertiary);
+      font-size: 9px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    .divider { width: 1px; height: 32px; background: var(--border-strong); }
+    .progress { flex: 1; }
+    .progress-track { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+    .progress-fill { width: 25%; height: 100%; border-radius: inherit; background: var(--green); }
+    .progress small { display: block; margin-top: 4px; color: var(--text-tertiary); font-size: 10px; }
+    .energy { color: #6ee7b7; font-size: 11px; }
+
+    .top-filter-toolbar {
+      display: none;
+      min-height: 42px;
+      margin: -8px 0 18px;
+      padding: 6px 8px;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+    }
+
+    .shell.with-top-toolbar .top-filter-toolbar { display: flex; }
+
+    .status-tabs {
+      display: none;
+      gap: 4px;
+      margin-left: auto;
+    }
+
+    .shell.recommended .status-tabs { display: flex; }
+
+    .filter-chip {
+      height: 27px;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--text-secondary);
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      font-size: 10px;
+    }
+
+    .filter-chip.active {
+      color: #bfdbfe;
+      border-color: rgba(59, 130, 246, .55);
+      background: rgba(30, 64, 175, .24);
+    }
+
+    .search {
+      min-width: 160px;
+      flex: 1;
+      color: var(--text-muted);
+    }
+
+    .top-grid { display: block; margin-bottom: 24px; }
+    .shell.recommended .top-grid,
+    .shell.with-top-toolbar .top-grid,
+    .shell.with-left-filters .top-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+
+    .card {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+    }
+
+    .card-header {
+      min-height: 44px;
+      padding: 10px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      color: var(--text-tertiary);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow .zap { color: #fbbf24; }
+    .eyebrow .live-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--blue);
+      box-shadow: 0 0 0 4px rgba(59, 130, 246, .12);
+    }
+
+    .tiny-controls { display: flex; gap: 6px; align-items: center; }
+    .tiny-pill {
+      padding: 4px 7px;
+      border-radius: 5px;
+      color: var(--text-tertiary);
+      background: var(--surface-2);
+      font-size: 9px;
+    }
+    .tiny-pill.active { color: var(--text-primary); background: var(--surface-3); }
+    .collapse { color: var(--text-muted); font-size: 14px; }
+
+    .focus-list { padding: 10px 14px; }
+    .focus-row {
+      min-height: 41px;
+      padding: 7px 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-radius: 5px;
+    }
+
+    .number {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      display: grid;
+      place-items: center;
+      color: var(--blue-light);
+      background: rgba(30, 64, 175, .35);
+      border: 1px solid rgba(59, 130, 246, .3);
+      border-radius: 50%;
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .task-copy { min-width: 0; flex: 1; }
+    .task-copy strong {
+      display: block;
+      overflow: hidden;
+      color: var(--text-primary);
+      font-size: 12px;
+      font-weight: 550;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .task-copy small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 9px; }
+    .source-icon { color: #a78bfa; font-size: 10px; }
+    .priority { width: 7px; height: 7px; border-radius: 50%; background: var(--amber); }
+
+    .focus-footer {
+      padding: 0 14px 12px;
+      display: flex;
+      gap: 7px;
+    }
+
+    .ai-button {
+      width: 100%;
+      height: 29px;
+      color: var(--text-tertiary);
+      border: 1px dashed var(--border-strong);
+      border-radius: 5px;
+      background: transparent;
+      font-size: 10px;
+    }
+
+    .in-progress-card { display: none; }
+    .shell.recommended .in-progress-card,
+    .shell.with-top-toolbar .in-progress-card,
+    .shell.with-left-filters .in-progress-card { display: block; }
+
+    .in-progress-card {
+      border-color: rgba(59, 130, 246, .38);
+      background:
+        linear-gradient(145deg, rgba(30, 64, 175, .16), transparent 65%),
+        var(--surface-1);
+      box-shadow: inset 3px 0 0 rgba(59, 130, 246, .82);
+    }
+
+    .in-progress-body { padding: 8px 14px 11px; }
+    .active-task {
+      padding: 9px 8px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .active-task:last-child { border-bottom: 0; }
+    .play {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      display: grid;
+      place-items: center;
+      color: #93c5fd;
+      border-radius: 50%;
+      background: rgba(37, 99, 235, .22);
+      font-size: 9px;
+    }
+    .status-pill {
+      padding: 3px 6px;
+      color: #93c5fd;
+      border: 1px solid rgba(59, 130, 246, .34);
+      border-radius: 999px;
+      background: rgba(30, 64, 175, .2);
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .routines {
+      margin-bottom: 24px;
+      padding: 10px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      color: var(--text-secondary);
+      background: var(--surface-1);
+      font-size: 11px;
+    }
+
+    .routine-dots { display: flex; gap: 5px; }
+    .routine-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--surface-3); }
+    .routine-dot.done { background: var(--green); }
+
+    .section { margin-bottom: 24px; }
+    .section-title {
+      margin: 0 0 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-tertiary);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .task-list {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface-1);
+    }
+
+    .task-row {
+      min-height: 52px;
+      padding: 9px 13px;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .task-row:last-child { border-bottom: 0; }
+
+    .checkbox {
+      width: 17px;
+      height: 17px;
+      flex: 0 0 17px;
+      border: 1px solid var(--border-strong);
+      border-radius: 50%;
+    }
+
+    .row-actions { display: flex; gap: 5px; opacity: .75; }
+    .row-action {
+      padding: 4px 6px;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 9px;
+    }
+
+    .inline-status {
+      margin-right: 3px;
+      padding: 2px 5px;
+      color: #93c5fd;
+      border-radius: 999px;
+      background: rgba(37, 99, 235, .15);
+      font-size: 8px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .side-panel {
+      width: 320px;
+      flex: 0 0 320px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--surface-1);
+      border-left: 1px solid var(--border);
+    }
+
+    .side-panel-title {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .side-scroll { overflow-y: auto; padding: 16px; }
+
+    .do-next {
+      margin-bottom: 16px;
+      padding: 12px;
+      border: 1px solid rgba(126, 34, 206, .32);
+      border-radius: var(--radius-md);
+      background: linear-gradient(145deg, rgba(88, 28, 135, .22), rgba(30, 64, 175, .14));
+    }
+
+    .do-next h4,
+    .quick-schedule h4,
+    .suggestions h4 {
+      margin: 0 0 7px;
+      color: #d8b4fe;
+      font-size: 10px;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    .do-next p,
+    .quick-schedule p { margin: 0 0 9px; color: var(--text-tertiary); font-size: 10px; }
+    .do-next .button { width: 100%; background: #7e22ce; border-color: #7e22ce; color: white; }
+
+    .quick-schedule { margin-bottom: 18px; }
+    .quick-schedule h4,
+    .suggestions h4 { color: var(--text-tertiary); }
+    .schedule-box {
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      background: var(--surface-0);
+      color: var(--text-secondary);
+      font-size: 10px;
+      line-height: 1.5;
+    }
+
+    .suggestion-group {
+      margin-bottom: 7px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+    }
+
+    .suggestion-head {
+      padding: 8px 9px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: var(--text-secondary);
+      background: var(--surface-0);
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .suggestion-head em { color: var(--text-muted); font-style: normal; }
+
+    .concept-note {
+      position: fixed;
+      right: 336px;
+      bottom: 16px;
+      z-index: 5;
+      width: 280px;
+      padding: 10px 12px;
+      color: #cbd5e1;
+      border: 1px solid rgba(96, 165, 250, .35);
+      border-radius: var(--radius-md);
+      background: rgba(8, 13, 26, .94);
+      box-shadow: 0 10px 25px rgba(0, 0, 0, .35);
+      font-size: 10px;
+      line-height: 1.45;
+    }
+
+    .concept-note strong { display: block; margin-bottom: 3px; color: #93c5fd; font-size: 11px; }
+    .shell.current .concept-note strong { color: var(--text-secondary); }
+    .shell.with-left-filters .concept-note { right: 336px; }
+
+    @media (max-width: 1280px) {
+      .side-panel { width: 285px; flex-basis: 285px; }
+      .concept-note { right: 300px; }
+      .page-actions .button:nth-last-child(-n+2) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar">
+    <div class="review-title">
+      <h1>My Day / #2051</h1>
+      <p>Make "in progress" work unmistakable without turning My Day into Dashboard.</p>
+    </div>
+    <nav class="concept-tabs" aria-label="Mockup concepts">
+      <button class="concept-tab active" data-concept="current">
+        <strong>1. Current baseline</strong>
+        <span>Existing hierarchy</span>
+      </button>
+      <button class="concept-tab" data-concept="recommended">
+        <strong>2. Split focus <i class="recommendation-badge">Recommended</i></strong>
+        <span>Focus 3 + In Progress</span>
+      </button>
+      <button class="concept-tab" data-concept="toolbar">
+        <strong>3. Dashboard toolbar</strong>
+        <span>Useful, but more controls</span>
+      </button>
+      <button class="concept-tab" data-concept="full">
+        <strong>4. Full filters</strong>
+        <span>Left rail + toolbar</span>
+      </button>
+    </nav>
+  </header>
+
+  <div class="shell current" id="mockup">
+    <nav class="global-nav" aria-label="Primary navigation">
+      <div class="brand">MC</div>
+      <div class="nav-icon">DB</div>
+      <div class="nav-icon active">DAY</div>
+      <div class="nav-icon">MX</div>
+      <div class="nav-icon">PRJ</div>
+      <div class="nav-spacer"></div>
+      <div class="nav-icon">CFG</div>
+    </nav>
+
+    <aside class="dashboard-filters" aria-label="Dashboard-style filters">
+      <div class="filter-heading"><span>Filters</span><span>&lt;</span></div>
+      <section class="filter-section">
+        <h4>Quick filters</h4>
+        <div class="filter-option selected"><span>My Day</span><span class="filter-count">8</span></div>
+        <div class="filter-option"><span>Overdue</span><span class="filter-count">3</span></div>
+        <div class="filter-option"><span>High priority</span><span class="filter-count">2</span></div>
+      </section>
+      <section class="filter-section">
+        <h4>Status</h4>
+        <div class="filter-option selected"><span>In progress</span><span class="filter-count">2</span></div>
+        <div class="filter-option"><span>To do</span><span class="filter-count">6</span></div>
+        <div class="filter-option"><span>Done</span><span class="filter-count">2</span></div>
+      </section>
+      <section class="filter-section">
+        <h4>Sources</h4>
+        <div class="filter-option"><span>All sources</span><span class="filter-count">8</span></div>
+        <div class="filter-option"><span>GitHub</span><span class="filter-count">3</span></div>
+        <div class="filter-option"><span>Microsoft Todo</span><span class="filter-count">4</span></div>
+        <div class="filter-option"><span>Local</span><span class="filter-count">1</span></div>
+      </section>
+      <section class="filter-section">
+        <h4>Projects</h4>
+        <div class="filter-option"><span>Mission Control</span><span class="filter-count">5</span></div>
+        <div class="filter-option"><span>Personal</span><span class="filter-count">3</span></div>
+      </section>
+    </aside>
+
+    <div class="workspace">
+      <main class="main">
+        <div class="content">
+          <header class="page-header">
+            <div class="page-title">
+              <h2><span class="sun">*</span> My Day</h2>
+              <p class="date">Wednesday, August 5</p>
+            </div>
+            <div class="page-actions">
+              <span class="button segment"><b>List</b> Timeline</span>
+              <span class="button">Calendar</span>
+              <span class="button">Timer</span>
+              <span class="button purple">What's Next?</span>
+              <span class="button blue">AI Plan Day</span>
+              <span class="button">Calm</span>
+            </div>
+          </header>
+
+          <section class="stats" aria-label="Daily progress">
+            <div class="stat"><strong>8</strong><span>Tasks</span></div>
+            <div class="divider"></div>
+            <div class="stat"><strong>2</strong><span>Done</span></div>
+            <div class="divider"></div>
+            <div class="stat"><strong>2.5h</strong><span>Scheduled</span></div>
+            <div class="divider"></div>
+            <div class="progress">
+              <div class="progress-track"><div class="progress-fill"></div></div>
+              <small>25% complete</small>
+            </div>
+            <div class="energy">Medium energy</div>
+          </section>
+
+          <section class="top-filter-toolbar" aria-label="Dashboard-style top toolbar">
+            <span class="filter-chip search">Search or filter My Day...</span>
+            <span class="filter-chip active">Status: In progress</span>
+            <span class="filter-chip">Source</span>
+            <span class="filter-chip">Project</span>
+            <span class="filter-chip">Group: Status</span>
+            <span class="filter-chip">Sort</span>
+          </section>
+
+          <div class="top-grid">
+            <section class="card focus-card">
+              <header class="card-header">
+                <span class="eyebrow"><span class="zap">!</span> Focus 3</span>
+                <span class="tiny-controls">
+                  <span class="tiny-pill active">Today</span>
+                  <span class="tiny-pill">This Week</span>
+                  <span class="collapse">^</span>
+                </span>
+              </header>
+              <div class="focus-list">
+                <div class="focus-row">
+                  <span class="number">1</span>
+                  <span class="source-icon">GH</span>
+                  <span class="task-copy"><strong>Review connector retry behavior</strong><small>Mission Control</small></span>
+                  <span class="priority"></span>
+                </div>
+                <div class="focus-row">
+                  <span class="number">2</span>
+                  <span class="source-icon">TD</span>
+                  <span class="task-copy"><strong>Prepare roadmap discussion notes</strong><small>Work</small></span>
+                </div>
+                <div class="focus-row">
+                  <span class="number">3</span>
+                  <span class="source-icon">GH</span>
+                  <span class="task-copy"><strong>Ship My Day status improvements</strong><small>Mission Control</small></span>
+                </div>
+              </div>
+              <footer class="focus-footer"><button class="ai-button">AI Suggest</button></footer>
+            </section>
+
+            <section class="card in-progress-card">
+              <header class="card-header">
+                <span class="eyebrow"><span class="live-dot"></span> In Progress <span style="color:#60a5fa">(2)</span></span>
+                <span class="tiny-controls"><span class="tiny-pill">View all</span></span>
+              </header>
+              <div class="in-progress-body">
+                <div class="active-task">
+                  <span class="play">&gt;</span>
+                  <span class="task-copy"><strong>Review connector retry behavior</strong><small>Started 48 min ago - GitHub</small></span>
+                  <span class="status-pill">Active</span>
+                </div>
+                <div class="active-task">
+                  <span class="play">&gt;</span>
+                  <span class="task-copy"><strong>Draft Q3 team objectives</strong><small>Updated 12 min ago - Microsoft Todo</small></span>
+                  <span class="status-pill">Active</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <section class="routines">
+            <span><strong>Today's routines</strong> &nbsp; 3 of 5 complete</span>
+            <span class="routine-dots">
+              <i class="routine-dot done"></i><i class="routine-dot done"></i><i class="routine-dot done"></i>
+              <i class="routine-dot"></i><i class="routine-dot"></i>
+            </span>
+          </section>
+
+          <section class="section">
+            <h3 class="section-title">
+              <span>Today's Focus (8)</span>
+              <span class="status-tabs">
+                <span class="filter-chip active">All 8</span>
+                <span class="filter-chip">In progress 2</span>
+                <span class="filter-chip">To do 6</span>
+              </span>
+              <span>Select</span>
+            </h3>
+            <div class="task-list">
+              <div class="task-row">
+                <span class="checkbox"></span>
+                <span class="source-icon">GH</span>
+                <span class="task-copy"><strong>Review connector retry behavior</strong><small><span class="inline-status">In progress</span> Mission Control - High priority</small></span>
+                <span class="row-actions"><i class="row-action">Focus</i><i class="row-action">Schedule</i></span>
+              </div>
+              <div class="task-row">
+                <span class="checkbox"></span>
+                <span class="source-icon">TD</span>
+                <span class="task-copy"><strong>Draft Q3 team objectives</strong><small><span class="inline-status">In progress</span> Work - Due today</small></span>
+                <span class="row-actions"><i class="row-action">Focus</i><i class="row-action">Schedule</i></span>
+              </div>
+              <div class="task-row">
+                <span class="checkbox"></span>
+                <span class="source-icon">GH</span>
+                <span class="task-copy"><strong>Ship My Day status improvements</strong><small>Mission Control - Medium priority</small></span>
+                <span class="row-actions"><i class="row-action">Focus</i><i class="row-action">Schedule</i></span>
+              </div>
+              <div class="task-row">
+                <span class="checkbox"></span>
+                <span class="source-icon">TD</span>
+                <span class="task-copy"><strong>Prepare roadmap discussion notes</strong><small>Work - 45 min</small></span>
+                <span class="row-actions"><i class="row-action">Focus</i><i class="row-action">Schedule</i></span>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+
+      <aside class="side-panel" aria-label="Plan and focus suggestions">
+        <div class="side-panel-title">Plan &amp; Focus</div>
+        <div class="side-scroll">
+          <section class="do-next">
+            <h4>Do Next</h4>
+            <p>Get AI-powered focus recommendation</p>
+            <span class="button">Suggest Next Task</span>
+          </section>
+          <section class="quick-schedule">
+            <h4>Quick Schedule</h4>
+            <p>Drag or click tasks above, then assign a time block.</p>
+            <div class="schedule-box"><strong>150min scheduled today</strong><br>330min free (8h workday)</div>
+          </section>
+          <section class="suggestions">
+            <h4>Suggestions</h4>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Yesterday's Incomplete</span><em>3 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Overdue</span><em>2 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Due Today</span><em>4 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Due This Week</span><em>6 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>High Priority</span><em>2 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>AI Recommended</span><em>3 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Recently Added</span><em>5 +</em></div></div>
+            <div class="suggestion-group"><div class="suggestion-head"><span>Carried Forward</span><em>1 +</em></div></div>
+          </section>
+        </div>
+      </aside>
+    </div>
+
+    <aside class="concept-note" id="concept-note">
+      <strong>Current baseline</strong>
+      Focus 3 consumes the full content width, while status is only visible inside task metadata. In-progress work has no dedicated hierarchy.
+    </aside>
+  </div>
+
+  <script>
+    const shell = document.getElementById('mockup');
+    const note = document.getElementById('concept-note');
+    const notes = {
+      current: [
+        'Current baseline',
+        'Focus 3 consumes the full content width, while status is only visible inside task metadata. In-progress work has no dedicated hierarchy.'
+      ],
+      recommended: [
+        'Recommendation: split the top zone',
+        'Keep Focus 3 visible at half width and place a strong In Progress callout beside it. Add only local status chips above the daily list; no new left navigation.'
+      ],
+      toolbar: [
+        'Top toolbar: selectively useful',
+        'Search plus one-click status filtering can help on unusually busy days. Source, project, group, and sort duplicate Dashboard behavior and add control weight.'
+      ],
+      full: [
+        'Full Dashboard filters: too much noise',
+        'The left filter rail, daily workspace, and Plan & Focus rail create three competing columns. It narrows task content and changes My Day from planning to task administration.'
+      ]
+    };
+
+    function setConcept(concept) {
+      shell.className = 'shell';
+      if (concept === 'current') shell.classList.add('current');
+      if (concept === 'recommended') shell.classList.add('recommended');
+      if (concept === 'toolbar') shell.classList.add('with-top-toolbar');
+      if (concept === 'full') shell.classList.add('with-top-toolbar', 'with-left-filters');
+      document.querySelectorAll('.concept-tab').forEach((tab) => {
+        tab.classList.toggle('active', tab.dataset.concept === concept);
+      });
+      note.innerHTML = '<strong>' + notes[concept][0] + '</strong>' + notes[concept][1];
+    }
+
+    document.querySelectorAll('.concept-tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        const concept = tab.dataset.concept;
+        setConcept(concept);
+        history.replaceState(null, '', concept === 'current' ? location.pathname : '#' + concept);
+      });
+    });
+
+    const initialConcept = location.hash.slice(1);
+    if (notes[initialConcept]) setConcept(initialConcept);
+  </script>
+</body>
+</html>

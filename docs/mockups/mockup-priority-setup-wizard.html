@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Priority Setup Wizard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --z-sticky: 20;
+      --z-backdrop: 40;
+      --z-modal: 50;
+    }
+
+    * { box-sizing: border-box; }
+    html { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+    button, input, textarea { font: inherit; }
+
+    .app-header { background: rgba(17,24,39,0.92); border-bottom: 1px solid var(--surface-2); backdrop-filter: blur(12px); }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background-color 0.15s ease, color 0.15s ease;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #fff; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .sidebar {
+      width: 224px;
+      background: rgba(17,24,39,0.88);
+      border-right: 1px solid rgba(51,65,85,0.75);
+    }
+    .sidebar-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 8px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--gray-400);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .sidebar-item:hover { background: var(--surface-2); color: #fff; }
+    .sidebar-item.active { background: rgba(30,58,138,0.48); color: var(--accent-400); }
+
+    .shell-panel {
+      background: linear-gradient(180deg, rgba(17,24,39,0.98), rgba(11,17,32,0.98));
+      border: 1px solid rgba(51,65,85,0.85);
+      border-radius: 18px;
+      box-shadow: 0 18px 44px rgba(2,6,23,0.38);
+    }
+
+    .dashboard-layer {
+      filter: blur(4px) saturate(0.9);
+      transform: scale(1.01);
+      opacity: 0.62;
+      pointer-events: none;
+      user-select: none;
+    }
+    .dashboard-metric,
+    .dashboard-card,
+    .dashboard-row {
+      background: rgba(17,24,39,0.82);
+      border: 1px solid rgba(51,65,85,0.7);
+      border-radius: 16px;
+      box-shadow: 0 14px 34px rgba(2,6,23,0.2);
+    }
+    .dashboard-row {
+      border-radius: 14px;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+
+    .wizard-shell {
+      position: fixed;
+      inset: 0;
+      z-index: var(--z-backdrop);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+      background: linear-gradient(180deg, rgba(2,6,23,0.38), rgba(2,6,23,0.76));
+      backdrop-filter: blur(10px);
+    }
+    .wizard-modal {
+      width: min(620px, calc(100vw - 32px));
+      position: relative;
+      z-index: var(--z-modal);
+      overflow: hidden;
+    }
+    .wizard-stepper {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid rgba(51,65,85,0.7);
+    }
+    .step-button {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--gray-500);
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      cursor: pointer;
+      transition: background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.18s ease;
+      white-space: nowrap;
+    }
+    .step-button:hover { color: #e2e8f0; border-color: rgba(51,65,85,0.9); }
+    .step-button.active { background: var(--accent-500); color: #fff; }
+    .step-button.completed { color: #d1fae5; }
+    .step-button.completed .step-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      background: rgba(16,185,129,0.16);
+      color: var(--success);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .step-button.future .step-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      border: 1px solid rgba(71,85,105,0.9);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gray-600);
+      font-size: 0.68rem;
+    }
+
+    .wizard-steps {
+      position: relative;
+      min-height: 424px;
+      overflow: hidden;
+      transition: height 0.24s ease;
+      margin-top: 24px;
+    }
+    .wizard-step {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transform: translateX(18px) scale(0.985);
+      pointer-events: none;
+      transition: opacity 0.24s ease, transform 0.24s ease;
+      display: flex;
+      flex-direction: column;
+    }
+    .wizard-step.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--accent-400);
+      background: rgba(30,58,138,0.24);
+      border: 1px solid rgba(59,130,246,0.16);
+      width: fit-content;
+    }
+    .subtle-panel {
+      background: rgba(15,23,42,0.6);
+      border: 1px solid rgba(51,65,85,0.72);
+      border-radius: 16px;
+    }
+    .mini-stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.88);
+      border: 1px solid rgba(51,65,85,0.72);
+      color: var(--gray-400);
+      padding: 4px 9px;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+    .rank-list { display: grid; gap: 10px; }
+    .rank-row {
+      display: grid;
+      grid-template-columns: 20px 52px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(15,23,42,0.72);
+      border: 1px solid rgba(51,65,85,0.78);
+      transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+    }
+    .rank-row:hover {
+      border-color: rgba(96,165,250,0.28);
+      transform: translateY(-1px);
+    }
+    .rank-row.dragging {
+      background: linear-gradient(180deg, rgba(30,41,59,0.9), rgba(17,24,39,1));
+      border-color: rgba(96,165,250,0.64);
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.24), 0 16px 34px rgba(2,6,23,0.32);
+    }
+    .rank-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      padding: 7px 10px;
+      border-radius: 12px;
+      background: rgba(59,130,246,0.14);
+      color: var(--accent-400);
+      font-size: 0.76rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .grip {
+      color: var(--gray-600);
+      font-size: 0.84rem;
+      text-align: center;
+    }
+    .row-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.95rem;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(51,65,85,0.72);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      white-space: nowrap;
+    }
+    .pill-critical { background: rgba(239,68,68,0.14); color: #fca5a5; }
+    .pill-high { background: rgba(245,158,11,0.14); color: #fcd34d; }
+    .pill-medium { background: rgba(59,130,246,0.14); color: #93c5fd; }
+    .pill-standard { background: rgba(100,116,139,0.16); color: #cbd5e1; }
+    .person-card {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(15,23,42,0.7);
+      border: 1px solid rgba(51,65,85,0.72);
+    }
+    .field,
+    .textarea {
+      width: 100%;
+      background: rgba(11,17,32,0.9);
+      border: 1px solid rgba(71,85,105,0.92);
+      border-radius: 12px;
+      color: #f8fafc;
+      padding: 11px 13px;
+      outline: none;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .field::placeholder,
+    .textarea::placeholder { color: var(--gray-500); }
+    .field:focus,
+    .textarea:focus {
+      border-color: var(--accent-500);
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.2), 0 0 18px rgba(59,130,246,0.12);
+    }
+    .textarea { min-height: 82px; resize: none; }
+    .preview-card {
+      border-radius: 16px;
+      border: 1px dashed rgba(71,85,105,0.86);
+      background: rgba(15,23,42,0.42);
+      color: var(--gray-400);
+    }
+    .wizard-footer {
+      margin-top: 24px;
+      padding-top: 18px;
+      border-top: 1px solid rgba(51,65,85,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .footer-link {
+      color: var(--gray-400);
+      font-size: 0.82rem;
+      font-weight: 500;
+      transition: color 0.15s ease;
+    }
+    .footer-link:hover { color: #fff; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-radius: 12px;
+      padding: 10px 16px;
+      font-size: 0.84rem;
+      font-weight: 600;
+      transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-outline {
+      border: 1px solid rgba(71,85,105,0.92);
+      color: #e2e8f0;
+      background: rgba(15,23,42,0.65);
+    }
+    .btn-outline:hover { border-color: rgba(96,165,250,0.42); background: rgba(30,41,59,0.84); }
+    .btn-primary {
+      border: 1px solid rgba(59,130,246,0.7);
+      background: var(--accent-500);
+      color: #fff;
+      box-shadow: 0 12px 28px rgba(37,99,235,0.22);
+    }
+    .btn-primary:hover { background: var(--accent-600); }
+    .btn-primary:disabled,
+    .btn-outline:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .progress-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(71,85,105,0.88);
+      transition: background-color 0.18s ease, transform 0.18s ease;
+    }
+    .progress-dot.active { background: var(--accent-400); transform: scale(1.15); }
+    .progress-dot.complete { background: var(--success); }
+    .launch-panel {
+      padding: 18px;
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(30,58,138,0.22), rgba(15,23,42,0.68));
+      border: 1px solid rgba(96,165,250,0.18);
+    }
+
+    @media (max-width: 900px) {
+      .sidebar { display: none; }
+      .wizard-shell { padding: 16px; }
+    }
+    @media (max-width: 720px) {
+      .wizard-stepper {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .rank-row {
+        grid-template-columns: 20px 44px minmax(0, 1fr);
+      }
+      .rank-row .pill { grid-column: 2 / -1; justify-self: start; margin-top: 6px; }
+      .wizard-footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      .wizard-step { transform: none; }
+      .rank-row:hover { transform: none; }
+      .btn:active { transform: none; }
+      .progress-dot.active { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header px-5 py-2.5 flex items-center justify-between sticky top-0" style="z-index: var(--z-sticky);">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link active">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-bell text-sm"></i></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sync-alt text-sm"></i></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sliders text-sm"></i></button>
+    </div>
+  </header>
+
+  <div class="flex min-h-[calc(100vh-45px)]">
+    <aside class="sidebar p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-5 dashboard-layer">
+      <div>
+        <div class="sidebar-label">Views</div>
+        <div class="space-y-1">
+          <div class="sidebar-item active"><i class="fas fa-house text-xs w-4"></i><span>Today</span><span class="ml-auto text-xs">28</span></div>
+          <div class="sidebar-item"><i class="fas fa-wave-square text-xs w-4"></i><span>Wave Planning</span></div>
+          <div class="sidebar-item"><i class="fas fa-list-check text-xs w-4"></i><span>Triage Queue</span></div>
+          <div class="sidebar-item"><i class="fas fa-chart-simple text-xs w-4"></i><span>Smart Scores</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="sidebar-label">Sources</div>
+        <div class="space-y-1">
+          <div class="sidebar-item"><i class="fab fa-github text-purple-400 text-xs w-4"></i><span>GitHub Issues</span><span class="ml-auto text-xs">12</span></div>
+          <div class="sidebar-item"><i class="fas fa-square-check text-blue-400 text-xs w-4"></i><span>Microsoft Todo</span><span class="ml-auto text-xs">18</span></div>
+          <div class="sidebar-item"><i class="fas fa-calendar text-amber-400 text-xs w-4"></i><span>Outlook Calendar</span><span class="ml-auto text-xs">5</span></div>
+          <div class="sidebar-item"><i class="fas fa-envelope text-emerald-400 text-xs w-4"></i><span>Outlook Email</span><span class="ml-auto text-xs">8</span></div>
+        </div>
+      </div>
+      <div class="mt-auto pt-4 border-t border-slate-800 text-xs text-slate-400 space-y-2">
+        <div class="flex items-center justify-between"><span>Sync health</span><span class="text-emerald-300">All green</span></div>
+        <div class="flex items-center justify-between"><span>Unread alerts</span><span>7</span></div>
+      </div>
+    </aside>
+
+    <main class="flex-1 p-5 dashboard-layer">
+      <section class="grid grid-cols-1 xl:grid-cols-[1.3fr_0.7fr] gap-5">
+        <div class="space-y-5">
+          <div class="grid sm:grid-cols-3 gap-4">
+            <div class="dashboard-metric p-4">
+              <div class="text-xs text-slate-400">Top score</div>
+              <div class="text-2xl font-semibold mt-2">91</div>
+              <div class="text-xs text-blue-300 mt-2">Mission Control sprint cleanup</div>
+            </div>
+            <div class="dashboard-metric p-4">
+              <div class="text-xs text-slate-400">Due today</div>
+              <div class="text-2xl font-semibold mt-2">6</div>
+              <div class="text-xs text-amber-300 mt-2">2 meetings, 4 follow-ups</div>
+            </div>
+            <div class="dashboard-metric p-4">
+              <div class="text-xs text-slate-400">Needs reply</div>
+              <div class="text-2xl font-semibold mt-2">9</div>
+              <div class="text-xs text-emerald-300 mt-2">Email + GitHub threads</div>
+            </div>
+          </div>
+
+          <div class="dashboard-card p-5">
+            <div class="flex items-center justify-between mb-4">
+              <div>
+                <h2 class="text-lg font-semibold">Recommended next</h2>
+                <p class="text-sm text-slate-400 mt-1">AI-ranked tasks across all connected systems.</p>
+              </div>
+              <span class="mini-stat"><i class="fas fa-brain text-blue-400"></i>Priority engine calibrating</span>
+            </div>
+            <div class="space-y-3">
+              <div class="dashboard-row p-4 flex items-center gap-4">
+                <span class="rank-chip">91</span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-medium">Finalize Priority Entities flow copy</div>
+                  <div class="text-xs text-slate-400 mt-1">Mission Control • GitHub Issues • Sarah C. blocked on review</div>
+                </div>
+                <span class="pill pill-critical">Critical</span>
+              </div>
+              <div class="dashboard-row p-4 flex items-center gap-4">
+                <span class="rank-chip">84</span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-medium">Reply to Nate about product polish notes</div>
+                  <div class="text-xs text-slate-400 mt-1">Outlook Email • 3 unread replies • RyMessage</div>
+                </div>
+                <span class="pill pill-high">High</span>
+              </div>
+              <div class="dashboard-row p-4 flex items-center gap-4">
+                <span class="rank-chip">73</span>
+                <div class="min-w-0 flex-1">
+                  <div class="text-sm font-medium">Prep tonight's planning block</div>
+                  <div class="text-xs text-slate-400 mt-1">Outlook Calendar • 6:00 PM • Home Automation</div>
+                </div>
+                <span class="pill pill-medium">Medium</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-card p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div>
+              <h2 class="text-lg font-semibold">Scoring signals</h2>
+              <p class="text-sm text-slate-400 mt-1">What the model is weighting right now.</p>
+            </div>
+            <span class="mini-stat"><i class="fas fa-sliders text-slate-300"></i>Warm-up</span>
+          </div>
+          <div class="space-y-3">
+            <div class="subtle-panel p-4">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-slate-300">Source priority</span>
+                <span class="text-blue-300 font-medium">Not set</span>
+              </div>
+              <div class="mt-3 h-2 rounded-full bg-slate-900 overflow-hidden"><div class="h-full rounded-full bg-blue-500" style="width: 26%"></div></div>
+            </div>
+            <div class="subtle-panel p-4">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-slate-300">Project importance</span>
+                <span class="text-blue-300 font-medium">Partial</span>
+              </div>
+              <div class="mt-3 h-2 rounded-full bg-slate-900 overflow-hidden"><div class="h-full rounded-full bg-amber-400" style="width: 42%"></div></div>
+            </div>
+            <div class="subtle-panel p-4">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-slate-300">People context</span>
+                <span class="text-slate-400 font-medium">Missing</span>
+              </div>
+              <div class="mt-3 h-2 rounded-full bg-slate-900 overflow-hidden"><div class="h-full rounded-full bg-slate-600" style="width: 12%"></div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="wizard-shell">
+    <section class="shell-panel wizard-modal p-6 md:p-7" aria-label="Priority setup wizard">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <span class="eyebrow"><i class="fas fa-ranking-star"></i>First-launch setup</span>
+          <h2 class="text-[1.75rem] font-semibold mt-4">Priority Entities</h2>
+          <p class="text-sm text-slate-400 mt-2 max-w-[58ch]">Get to your first trustworthy score by ranking the systems, projects, and people that actually move your day.</p>
+        </div>
+        <span class="mini-stat"><i class="fas fa-clock text-blue-400"></i>About 2 minutes</span>
+      </div>
+
+      <div class="wizard-stepper mt-6" role="tablist" aria-label="Wizard steps">
+        <button type="button" class="step-button" data-step="1" data-label="Sources" role="tab" aria-selected="true"><span class="step-icon">1</span><span>Sources</span></button>
+        <button type="button" class="step-button" data-step="2" data-label="Projects" role="tab" aria-selected="false"><span class="step-icon">2</span><span>Projects</span></button>
+        <button type="button" class="step-button" data-step="3" data-label="People" role="tab" aria-selected="false"><span class="step-icon">3</span><span>People</span></button>
+        <button type="button" class="step-button" data-step="4" data-label="Review" role="tab" aria-selected="false"><span class="step-icon">4</span><span>Review</span></button>
+      </div>
+
+      <div class="wizard-steps">
+        <div class="wizard-step active" data-panel="1" role="tabpanel">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-semibold">What matters most?</div>
+              <p class="text-sm text-slate-400 mt-2 max-w-[60ch]">Drag your connected sources in order of importance. The AI scoring engine uses this to prioritize tasks from each system.</p>
+            </div>
+            <span class="mini-stat"><i class="fas fa-brain text-blue-400"></i>Weights source trust</span>
+          </div>
+          <div class="rank-list mt-6">
+            <div class="rank-row dragging">
+              <i class="fas fa-grip-vertical grip"></i>
+              <span class="rank-chip">#1</span>
+              <div class="min-w-0 flex items-center gap-3">
+                <span class="row-icon" style="background: rgba(168,85,247,0.16); color: #d8b4fe;"><i class="fab fa-github"></i></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold">GitHub Issues</div>
+                  <div class="text-xs text-slate-400 mt-1">Code and engineering work</div>
+                </div>
+              </div>
+              <span class="mini-stat">Strongest signal</span>
+            </div>
+            <div class="rank-row">
+              <i class="fas fa-grip-vertical grip"></i>
+              <span class="rank-chip">#2</span>
+              <div class="min-w-0 flex items-center gap-3">
+                <span class="row-icon" style="background: rgba(59,130,246,0.16); color: #93c5fd;"><i class="fas fa-square-check"></i></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold">Microsoft Todo</div>
+                  <div class="text-xs text-slate-400 mt-1">Personal tasks and lists</div>
+                </div>
+              </div>
+              <span class="mini-stat">Daily execution</span>
+            </div>
+            <div class="rank-row">
+              <i class="fas fa-grip-vertical grip"></i>
+              <span class="rank-chip">#3</span>
+              <div class="min-w-0 flex items-center gap-3">
+                <span class="row-icon" style="background: rgba(245,158,11,0.16); color: #fcd34d;"><i class="fas fa-calendar"></i></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold">Outlook Calendar</div>
+                  <div class="text-xs text-slate-400 mt-1">Meetings and events</div>
+                </div>
+              </div>
+              <span class="mini-stat">Time anchors</span>
+            </div>
+            <div class="rank-row">
+              <i class="fas fa-grip-vertical grip"></i>
+              <span class="rank-chip">#4</span>
+              <div class="min-w-0 flex items-center gap-3">
+                <span class="row-icon" style="background: rgba(16,185,129,0.16); color: #86efac;"><i class="fas fa-envelope"></i></span>
+                <div class="min-w-0">
+                  <div class="text-sm font-semibold">Outlook Email</div>
+                  <div class="text-xs text-slate-400 mt-1">Messages and follow-ups</div>
+                </div>
+              </div>
+              <span class="mini-stat">Context + replies</span>
+            </div>
+          </div>
+          <div class="preview-card mt-auto p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div>
+                <div class="text-sm font-semibold text-slate-200">Next up: rank your active projects</div>
+                <div class="text-xs text-slate-500 mt-1">We will turn the top positions into Critical and High scoring tiers.</div>
+              </div>
+              <i class="fas fa-arrow-right text-slate-500"></i>
+            </div>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-panel="2" role="tabpanel" aria-hidden="true">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-semibold">Which projects need the most attention?</div>
+              <p class="text-sm text-slate-400 mt-2 max-w-[60ch]">Drag to rank. Top projects will score higher in your task list.</p>
+            </div>
+            <span class="mini-stat"><i class="fas fa-diagram-project text-blue-400"></i>Auto-tiered by order</span>
+          </div>
+          <div class="rank-list mt-6">
+            <div class="rank-row dragging"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#1</span><div class="min-w-0"><div class="text-sm font-semibold">Mission Control</div><div class="text-xs text-slate-400 mt-1">Product prototype and scoring engine</div></div><span class="pill pill-critical">Critical</span></div>
+            <div class="rank-row"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#2</span><div class="min-w-0"><div class="text-sm font-semibold">RyMessage</div><div class="text-xs text-slate-400 mt-1">Design system and adjacent product work</div></div><span class="pill pill-critical">Critical</span></div>
+            <div class="rank-row"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#3</span><div class="min-w-0"><div class="text-sm font-semibold">Home Automation</div><div class="text-xs text-slate-400 mt-1">Garage, camera, and energy integrations</div></div><span class="pill pill-high">High</span></div>
+            <div class="rank-row"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#4</span><div class="min-w-0"><div class="text-sm font-semibold">Kitchen Renovation</div><div class="text-xs text-slate-400 mt-1">Orders, schedules, and contractor follow-ups</div></div><span class="pill pill-high">High</span></div>
+            <div class="rank-row"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#5</span><div class="min-w-0"><div class="text-sm font-semibold">3D Printing</div><div class="text-xs text-slate-400 mt-1">Prototype parts and enclosure iterations</div></div><span class="pill pill-medium">Medium</span></div>
+            <div class="rank-row"><i class="fas fa-grip-vertical grip"></i><span class="rank-chip">#6</span><div class="min-w-0"><div class="text-sm font-semibold">Someday Ideas</div><div class="text-xs text-slate-400 mt-1">Backlog concepts and low-pressure experiments</div></div><span class="pill pill-standard">Standard</span></div>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-panel="3" role="tabpanel" aria-hidden="true">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-semibold">Who matters in your world?</div>
+              <p class="text-sm text-slate-400 mt-2 max-w-[60ch]">Add people who appear in your tasks. The AI will boost tasks involving higher-ranked people.</p>
+            </div>
+            <span class="mini-stat"><i class="fas fa-user-group text-blue-400"></i>Contextual boosts</span>
+          </div>
+          <div class="subtle-panel p-4 mt-6">
+            <label class="text-xs font-semibold tracking-[0.08em] uppercase text-slate-400 block mb-2">Add person</label>
+            <div class="flex flex-col sm:flex-row gap-3">
+              <input class="field flex-1" type="text" placeholder="Name, team, or email">
+              <button class="btn btn-primary sm:w-auto w-full"><i class="fas fa-plus"></i>Add person</button>
+            </div>
+          </div>
+          <div class="grid gap-3 mt-5">
+            <article class="person-card">
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div class="text-sm font-semibold">Sarah C.</div>
+                  <div class="text-xs text-slate-500 mt-1">Priority rank #1</div>
+                </div>
+                <span class="pill pill-critical">Critical</span>
+              </div>
+              <textarea class="textarea">My manager — Head of Engineering. Owns sprint priorities.</textarea>
+            </article>
+            <article class="person-card">
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div class="text-sm font-semibold">Nate K.</div>
+                  <div class="text-xs text-slate-500 mt-1">Priority rank #2</div>
+                </div>
+                <span class="pill pill-high">High</span>
+              </div>
+              <textarea class="textarea">Design lead. Reviews all product work.</textarea>
+            </article>
+            <article class="person-card">
+              <div class="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <div class="text-sm font-semibold">Alex P.</div>
+                  <div class="text-xs text-slate-500 mt-1">Priority rank #3</div>
+                </div>
+                <span class="pill pill-medium">Medium</span>
+              </div>
+              <textarea class="textarea">Supplier contact for prototypes and fabrication questions.</textarea>
+            </article>
+          </div>
+        </div>
+
+        <div class="wizard-step" data-panel="4" role="tabpanel" aria-hidden="true">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="text-xl font-semibold">Your scoring engine is ready</div>
+              <p class="text-sm text-slate-400 mt-2 max-w-[60ch]">Review the signals you configured, then launch into your first ranked task list.</p>
+            </div>
+            <span class="mini-stat"><i class="fas fa-rocket text-blue-400"></i>Ready to launch</span>
+          </div>
+          <div class="launch-panel mt-6">
+            <div class="text-sm font-semibold">Setup summary</div>
+            <div class="grid sm:grid-cols-3 gap-3 mt-4">
+              <div class="subtle-panel p-4">
+                <div class="text-xs uppercase tracking-[0.12em] text-slate-500">Top source</div>
+                <div class="text-sm font-semibold mt-2">GitHub Issues</div>
+                <div class="text-xs text-slate-400 mt-2">Engineering work gets first-class weighting.</div>
+              </div>
+              <div class="subtle-panel p-4">
+                <div class="text-xs uppercase tracking-[0.12em] text-slate-500">Critical projects</div>
+                <div class="text-sm font-semibold mt-2">Mission Control, RyMessage</div>
+                <div class="text-xs text-slate-400 mt-2">Top-ranked projects receive the strongest boost.</div>
+              </div>
+              <div class="subtle-panel p-4">
+                <div class="text-xs uppercase tracking-[0.12em] text-slate-500">Key people</div>
+                <div class="text-sm font-semibold mt-2">Sarah C., Nate K.</div>
+                <div class="text-xs text-slate-400 mt-2">Tasks involving them will rise faster.</div>
+              </div>
+            </div>
+            <div class="subtle-panel p-4 mt-4 flex items-center justify-between gap-4">
+              <div>
+                <div class="text-sm font-semibold">Live scoring starts on your dashboard</div>
+                <div class="text-xs text-slate-400 mt-1">You can fine-tune priorities later in Settings → Priority Entities.</div>
+              </div>
+              <button class="btn btn-primary whitespace-nowrap"><i class="fas fa-wand-magic-sparkles"></i>Launch Mission Control</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wizard-footer">
+        <div class="flex items-center justify-between gap-4 sm:flex-1">
+          <a href="#" class="footer-link">Skip for now</a>
+          <div class="flex items-center gap-3 text-xs text-slate-500">
+            <div class="flex items-center gap-2" id="progressDots" aria-hidden="true">
+              <span class="progress-dot active"></span>
+              <span class="progress-dot"></span>
+              <span class="progress-dot"></span>
+              <span class="progress-dot"></span>
+            </div>
+            <span id="progressLabel">25% complete</span>
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3">
+          <button type="button" class="btn btn-outline" id="backButton"><i class="fas fa-arrow-left"></i>Back</button>
+          <button type="button" class="btn btn-primary" id="continueButton">Continue <i class="fas fa-arrow-right"></i></button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const stepButtons = Array.from(document.querySelectorAll('.step-button'));
+    const stepPanels = Array.from(document.querySelectorAll('.wizard-step'));
+    const progressDots = Array.from(document.querySelectorAll('.progress-dot'));
+    const stepsContainer = document.querySelector('.wizard-steps');
+    const backButton = document.getElementById('backButton');
+    const continueButton = document.getElementById('continueButton');
+    const progressLabel = document.getElementById('progressLabel');
+    let currentStep = 1;
+
+    function setStepButtonContent(button, step, state) {
+      const label = button.dataset.label;
+
+      if (state === 'completed') {
+        button.innerHTML = `<span class="step-icon"><i class="fas fa-check"></i></span><span>${label}</span>`;
+        return;
+      }
+
+      button.innerHTML = `<span class="step-icon">${step}</span><span>${label}</span>`;
+    }
+
+    function renderSteps(step) {
+      currentStep = step;
+
+      stepButtons.forEach((button, index) => {
+        const buttonStep = index + 1;
+        const isActive = buttonStep === step;
+        const isCompleted = buttonStep < step;
+
+        button.classList.remove('active', 'completed', 'future');
+
+        if (isActive) {
+          button.classList.add('active');
+          setStepButtonContent(button, buttonStep, 'active');
+        } else if (isCompleted) {
+          button.classList.add('completed');
+          setStepButtonContent(button, buttonStep, 'completed');
+        } else {
+          button.classList.add('future');
+          setStepButtonContent(button, buttonStep, 'future');
+        }
+
+        button.setAttribute('aria-selected', String(isActive));
+      });
+
+      stepPanels.forEach((panel, index) => {
+        const isActive = index + 1 === step;
+        panel.classList.toggle('active', isActive);
+        panel.setAttribute('aria-hidden', String(!isActive));
+      });
+
+      const activePanel = stepPanels[step - 1];
+      if (activePanel && stepsContainer) {
+        stepsContainer.style.height = `${Math.max(424, activePanel.scrollHeight)}px`;
+      }
+
+      progressDots.forEach((dot, index) => {
+        dot.classList.remove('active', 'complete');
+        if (index + 1 < step) dot.classList.add('complete');
+        if (index + 1 === step) dot.classList.add('active');
+      });
+
+      progressLabel.textContent = `${Math.round((step / 4) * 100)}% complete`;
+      backButton.disabled = step === 1;
+      continueButton.innerHTML = step === 4
+        ? 'Finish <i class="fas fa-check"></i>'
+        : 'Continue <i class="fas fa-arrow-right"></i>';
+    }
+
+    stepButtons.forEach((button, index) => {
+      button.addEventListener('click', () => renderSteps(index + 1));
+    });
+
+    backButton.addEventListener('click', () => {
+      if (currentStep > 1) renderSteps(currentStep - 1);
+    });
+
+    continueButton.addEventListener('click', () => {
+      renderSteps(currentStep < 4 ? currentStep + 1 : 4);
+    });
+
+    renderSteps(1);
+    window.addEventListener('resize', () => renderSteps(currentStep));
+  </script>
+</body>
+</html>

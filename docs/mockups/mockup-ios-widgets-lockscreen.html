@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Widgets, Lock Screen &amp; StandBy</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    :root {
+      --page-bg: #0f172a;
+      --widget-bg: rgba(15, 23, 42, 0.54);
+      --widget-border: rgba(255, 255, 255, 0.12);
+      --widget-highlight: rgba(255, 255, 255, 0.16);
+      --ios-text: #f8fafc;
+      --ios-muted: rgba(226, 232, 240, 0.72);
+      --ios-soft: rgba(226, 232, 240, 0.48);
+    }
+
+    body {
+      font-family: "SF Pro Rounded", "SF Pro Display", "SF UI Rounded", ui-rounded, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #0f172a;
+      background:
+        radial-gradient(circle at top left, rgba(59, 130, 246, 0.18), transparent 30%),
+        radial-gradient(circle at top right, rgba(168, 85, 247, 0.14), transparent 28%),
+        linear-gradient(180deg, #0f172a 0%, #111827 100%);
+      color: var(--ios-text);
+    }
+
+    .ios-widget {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+        var(--widget-bg);
+      border: 1px solid var(--widget-border);
+      box-shadow:
+        inset 0 1px 0 var(--widget-highlight),
+        inset 0 -10px 24px rgba(15, 23, 42, 0.18),
+        0 16px 38px rgba(2, 6, 23, 0.34);
+      backdrop-filter: blur(24px) saturate(1.2);
+      -webkit-backdrop-filter: blur(24px) saturate(1.2);
+    }
+
+    .ios-widget::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(255, 255, 255, 0.10), transparent 38%, transparent 62%, rgba(255, 255, 255, 0.04));
+    }
+
+    .small-widget { width: 155px; height: 155px; border-radius: 22px; }
+    .medium-widget { width: 329px; height: 155px; border-radius: 20px; }
+    .large-widget { width: 329px; height: 345px; max-height: 345px; border-radius: 20px; box-sizing: border-box; }
+    .xlarge-widget { width: 675px; height: 345px; max-height: 345px; border-radius: 20px; box-sizing: border-box; }
+
+    .widget-shell { display: flex; flex-direction: column; gap: 10px; }
+    .widget-label { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(191, 219, 254, 0.82); }
+
+    .app-glyph {
+      width: 22px;
+      height: 22px;
+      border-radius: 7px;
+      background: linear-gradient(135deg, rgba(96, 165, 250, 0.95), rgba(168, 85, 247, 0.95));
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 6px 14px rgba(37, 99, 235, 0.28);
+    }
+
+    .progress-ring {
+      width: 92px;
+      height: 92px;
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at center, rgba(15, 23, 42, 0.92) 0 55%, transparent 56%),
+        conic-gradient(#60a5fa 0 66.66%, rgba(148, 163, 184, 0.24) 66.66% 100%);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+    }
+
+    .ios-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 999px;
+      border: 1.5px solid rgba(226, 232, 240, 0.46);
+      background: rgba(255, 255, 255, 0.05);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .ios-checkbox.checked {
+      border-color: rgba(96, 165, 250, 0.95);
+      background: linear-gradient(180deg, rgba(96, 165, 250, 0.98), rgba(59, 130, 246, 0.9));
+      color: white;
+      box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.18);
+    }
+
+    .priority-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+    .task-divider { border-color: rgba(255, 255, 255, 0.08); }
+
+    .timeline-grid {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 10px 12px;
+      align-items: start;
+    }
+
+    .time-label {
+      font-size: 11px;
+      line-height: 1;
+      color: rgba(226, 232, 240, 0.54);
+      padding-top: 8px;
+      letter-spacing: 0.02em;
+    }
+
+    .schedule-card {
+      border-radius: 14px;
+      padding: 8px 10px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    }
+
+    .source-badge {
+      font-size: 10px;
+      padding: 3px 7px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      white-space: nowrap;
+    }
+
+    .widget-action {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(248, 250, 252, 0.94);
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+      padding: 7px 10px;
+    }
+
+    .widget-action.primary {
+      border-color: rgba(56, 189, 248, 0.25);
+      background: rgba(14, 165, 233, 0.18);
+      color: #bae6fd;
+    }
+
+    .mini-widget {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 17px;
+      background: rgba(255, 255, 255, 0.055);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    }
+
+    .mini-widget::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: linear-gradient(145deg, rgba(255, 255, 255, 0.05), transparent 45%);
+    }
+
+    .metric-bar {
+      height: 5px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .surface-note {
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      background: rgba(15, 23, 42, 0.42);
+    }
+
+    .lock-screen {
+      width: 380px;
+      min-height: 760px;
+      border-radius: 38px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at 20% 20%, rgba(96, 165, 250, 0.18), transparent 26%),
+        radial-gradient(circle at 75% 15%, rgba(168, 85, 247, 0.16), transparent 26%),
+        linear-gradient(180deg, #020617 0%, #111827 100%);
+      box-shadow: 0 28px 60px rgba(2, 6, 23, 0.46);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .lock-screen::before {
+      content: "";
+      position: absolute;
+      inset: 14px;
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+
+    .accessory {
+      background: rgba(15, 23, 42, 0.58);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    }
+
+    .standby-shell {
+      width: 760px;
+      min-height: 390px;
+      border-radius: 34px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background:
+        radial-gradient(circle at 10% 50%, rgba(59, 130, 246, 0.16), transparent 28%),
+        radial-gradient(circle at 80% 40%, rgba(168, 85, 247, 0.16), transparent 30%),
+        linear-gradient(135deg, #020617 0%, #111827 55%, #020617 100%);
+      box-shadow: 0 30px 70px rgba(2, 6, 23, 0.5);
+    }
+
+    .pulse-check {
+      animation: fillPulse 1.8s ease-in-out infinite;
+    }
+
+    .toast-pop {
+      animation: toastFade 2.2s ease-in-out infinite;
+    }
+
+    @keyframes fillPulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(96, 165, 250, 0.24); }
+      50% { transform: scale(1.08); box-shadow: 0 0 0 8px rgba(96, 165, 250, 0); }
+    }
+
+    @keyframes toastFade {
+      0%, 100% { opacity: 0.2; transform: translateY(4px); }
+      30%, 70% { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="min-h-screen px-6 py-10 md:px-10">
+  <main class="mx-auto max-w-[1500px]">
+    <header class="mb-10">
+      <p class="text-xs uppercase tracking-[0.35em] text-sky-300/80">Native iOS mockup study</p>
+      <h1 class="mt-3 text-3xl font-semibold text-slate-50 md:text-4xl">Mission Control — Widgets, Lock Screen &amp; StandBy</h1>
+      <p class="mt-3 max-w-3xl text-sm leading-6 text-slate-300/80 md:text-base">
+        Frosted glass widget concepts for Mission Control across the Home Screen, Lock Screen, StandBy, and iOS 17 interactive states.
+      </p>
+    </header>
+
+    <section class="mb-12">
+      <div class="mb-5 flex items-end justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.28em] text-slate-400">Section 1</p>
+          <h2 class="mt-1 text-2xl font-semibold text-slate-100">Home Screen Widgets</h2>
+        </div>
+        <p class="text-sm text-slate-400">Dark material widgets with iOS-standard spacing, corner radii, and rounded typography.</p>
+      </div>
+
+      <div class="flex flex-wrap items-start gap-8">
+        <div class="widget-shell">
+          <span class="widget-label">Small Widget · 155×155</span>
+          <article class="ios-widget small-widget p-4">
+            <div class="flex items-start justify-between">
+              <div class="app-glyph flex items-center justify-center text-[10px] text-white">
+                <i class="fas fa-satellite-dish"></i>
+              </div>
+              <span class="text-[11px] font-medium text-slate-300/80">Today</span>
+            </div>
+            <div class="mt-2 flex flex-1 flex-col items-center justify-center">
+              <div class="progress-ring flex items-center justify-center">
+                <div class="text-center">
+                  <p class="text-lg font-semibold text-white">6</p>
+                  <p class="text-[11px] text-slate-300/80">of 9</p>
+                </div>
+              </div>
+              <p class="mt-4 text-center text-[13px] font-medium text-slate-50">Design homepage</p>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Medium Widget · 329×155</span>
+          <article class="ios-widget medium-widget p-4">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="text-[17px] font-semibold text-white">6 Remaining</h3>
+              </div>
+              <span class="rounded-full bg-white/8 px-2 py-1 text-[11px] text-slate-200">Live</span>
+            </div>
+            <div class="mt-3 space-y-2">
+              <div class="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/5 px-3 py-2.5">
+                <span class="ios-checkbox checked"><i class="fas fa-check text-[9px]"></i></span>
+                <span class="priority-dot bg-red-400"></span>
+                <span class="text-[13px] text-slate-300 line-through decoration-slate-400/70">Write sprint recap</span>
+              </div>
+              <div class="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/5 px-3 py-2.5">
+                <span class="ios-checkbox"></span>
+                <span class="priority-dot bg-orange-400"></span>
+                <span class="text-[13px] text-white">Design homepage</span>
+              </div>
+              <div class="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/5 px-3 py-2.5">
+                <span class="ios-checkbox"></span>
+                <span class="priority-dot bg-sky-400"></span>
+                <span class="text-[13px] text-white">Clear inbox zero triage</span>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-end">
+              <span class="text-[12px] font-medium text-sky-300">3 more →</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Large Widget · 329×345</span>
+          <article class="ios-widget large-widget p-4">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="text-[18px] font-semibold text-white">Schedule</h3>
+              </div>
+              <span class="rounded-full bg-white/8 px-2 py-1 text-[11px] text-slate-200">9AM–5PM</span>
+            </div>
+            <div class="timeline-grid mt-4">
+              <span class="time-label">9 AM</span>
+              <div class="schedule-card bg-sky-400/16">
+                <div class="flex items-start gap-2">
+                  <span class="ios-checkbox"></span>
+                  <div>
+                    <p class="text-[13px] font-medium text-white">Design homepage</p>
+                    <p class="text-[11px] text-slate-300/75">90 min · Product</p>
+                  </div>
+                </div>
+              </div>
+              <span class="time-label">11 AM</span>
+              <div class="schedule-card bg-violet-400/16">
+                <div class="flex items-start gap-2">
+                  <span class="ios-checkbox"></span>
+                  <div>
+                    <p class="text-[13px] font-medium text-white">Prototype lock screen widgets</p>
+                    <p class="text-[11px] text-slate-300/75">60 min · Design Systems</p>
+                  </div>
+                </div>
+              </div>
+              <span class="time-label">1 PM</span>
+              <div class="schedule-card bg-amber-400/16">
+                <div class="flex items-start gap-2">
+                  <span class="ios-checkbox checked"><i class="fas fa-check text-[9px]"></i></span>
+                  <div>
+                    <p class="text-[13px] font-medium text-slate-200 line-through">Lunch + reset walk</p>
+                    <p class="text-[11px] text-slate-300/75">45 min · Personal</p>
+                  </div>
+                </div>
+              </div>
+              <span class="time-label">2 PM</span>
+              <div class="schedule-card bg-rose-400/16">
+                <div class="flex items-start gap-2">
+                  <span class="ios-checkbox"></span>
+                  <div>
+                    <p class="text-[13px] font-medium text-white">Review launch blockers</p>
+                    <p class="text-[11px] text-slate-300/75">75 min · Critical path</p>
+                  </div>
+                </div>
+              </div>
+              <span class="time-label">4 PM</span>
+              <div class="schedule-card bg-emerald-400/16">
+                <div class="flex items-start gap-2">
+                  <span class="ios-checkbox"></span>
+                  <div>
+                    <p class="text-[13px] font-medium text-white">Send stakeholder update</p>
+                    <p class="text-[11px] text-slate-300/75">30 min · Comms</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-between">
+              <span class="text-[11px] text-slate-400">+ 2 unscheduled</span>
+              <span class="text-[11px] font-medium text-sky-300">View all →</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Extra Large Widget · 675×345</span>
+          <article class="ios-widget xlarge-widget p-5">
+            <div class="grid h-full grid-cols-[1.2fr_1fr] gap-5">
+              <div class="flex h-full flex-col rounded-[18px] border border-white/8 bg-white/5 p-4">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-[11px] uppercase tracking-[0.22em] text-slate-400">Daily overview</p>
+                    <h3 class="mt-1 text-[20px] font-semibold text-white">Today</h3>
+                  </div>
+                  <div class="text-right">
+                    <p class="text-[13px] text-slate-300/80">6 of 9 complete</p>
+                    <div class="mt-2 h-2 w-28 rounded-full bg-white/8">
+                      <div class="h-2 rounded-full bg-sky-400" style="width: 66.66%"></div>
+                    </div>
+                  </div>
+                </div>
+                <div class="mt-4 grid flex-1 grid-cols-2 gap-3">
+                  <div class="rounded-2xl bg-sky-400/12 p-3">
+                    <div class="flex items-center gap-2">
+                      <span class="ios-checkbox"></span>
+                      <span class="text-[13px] font-medium text-white">Design homepage</span>
+                    </div>
+                    <p class="mt-2 text-[11px] text-slate-300/70">Now · 30 min focus block</p>
+                  </div>
+                  <div class="rounded-2xl bg-violet-400/12 p-3">
+                    <div class="flex items-center gap-2">
+                      <span class="ios-checkbox"></span>
+                      <span class="text-[13px] font-medium text-white">Finalize widget copy</span>
+                    </div>
+                    <p class="mt-2 text-[11px] text-slate-300/70">Next · 45 min</p>
+                  </div>
+                  <div class="rounded-2xl bg-emerald-400/12 p-3">
+                    <div class="flex items-center gap-2">
+                      <span class="ios-checkbox checked"><i class="fas fa-check text-[9px]"></i></span>
+                      <span class="text-[13px] font-medium text-slate-200 line-through">Morning planning</span>
+                    </div>
+                    <p class="mt-2 text-[11px] text-slate-300/70">Completed at 8:35 AM</p>
+                  </div>
+                  <div class="rounded-2xl bg-amber-400/12 p-3">
+                    <div class="flex items-center gap-2">
+                      <span class="ios-checkbox"></span>
+                      <span class="text-[13px] font-medium text-white">Review launch blockers</span>
+                    </div>
+                    <p class="mt-2 text-[11px] text-slate-300/70">Important · 75 min</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex h-full flex-col justify-between rounded-[18px] border border-white/8 bg-black/10 p-4">
+                <div>
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <p class="text-[11px] uppercase tracking-[0.22em] text-slate-400">Incoming</p>
+                      <h3 class="mt-1 text-[20px] font-semibold text-white">Triage queue</h3>
+                    </div>
+                    <div class="rounded-2xl bg-rose-500/16 px-3 py-2 text-center">
+                      <p class="text-[10px] uppercase tracking-[0.16em] text-rose-200/80">Count</p>
+                      <p class="text-2xl font-semibold text-white">12</p>
+                    </div>
+                  </div>
+                  <div class="mt-4 space-y-3">
+                    <div class="flex items-start justify-between rounded-2xl bg-white/5 p-3">
+                      <div>
+                        <p class="text-[13px] font-medium text-white">CI failure on release branch</p>
+                        <p class="mt-1 text-[11px] text-slate-300/70">Needs 15 min triage</p>
+                      </div>
+                      <span class="source-badge bg-violet-500/18 text-violet-100">GitHub</span>
+                    </div>
+                    <div class="flex items-start justify-between rounded-2xl bg-white/5 p-3">
+                      <div>
+                        <p class="text-[13px] font-medium text-white">Vendor contract awaiting reply</p>
+                        <p class="mt-1 text-[11px] text-slate-300/70">Due tomorrow</p>
+                      </div>
+                      <span class="source-badge bg-emerald-500/18 text-emerald-100">Email</span>
+                    </div>
+                    <div class="flex items-start justify-between rounded-2xl bg-white/5 p-3">
+                      <div>
+                        <p class="text-[13px] font-medium text-white">Prep notes for product review</p>
+                        <p class="mt-1 text-[11px] text-slate-300/70">Lightweight capture</p>
+                      </div>
+                      <span class="source-badge bg-sky-500/18 text-sky-100">Inbox</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="rounded-2xl border border-white/8 bg-white/5 px-4 py-3">
+                  <p class="text-[11px] uppercase tracking-[0.18em] text-slate-400">Insights</p>
+                  <p class="mt-2 text-[14px] font-medium text-slate-50">85% completion rate this week</p>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-400">Section 2</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-100">Expanded Widget Gallery</h2>
+        <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+          A broader set of configurable surfaces spanning execution, capture, triage, routines, goals, projects, AI guidance, and review. Every concept has one clear glanceable job and no more than two primary interactions.
+        </p>
+      </div>
+
+      <div class="mb-8 grid gap-3 md:grid-cols-3">
+        <div class="surface-note p-4">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-sky-300">Small · launch or glance</p>
+          <p class="mt-2 text-sm text-slate-300">One metric or one intent. The entire surface deep-links; a single AppIntent may run inline.</p>
+        </div>
+        <div class="surface-note p-4">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-violet-300">Medium · decide and act</p>
+          <p class="mt-2 text-sm text-slate-300">Enough context for one decision, with one or two direct actions that avoid opening the app.</p>
+        </div>
+        <div class="surface-note p-4">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-300">Large · coordinate</p>
+          <p class="mt-2 text-sm text-slate-300">Multiple related modules, progress signals, and launch points organized around a workflow.</p>
+        </div>
+      </div>
+
+      <div class="mb-4 flex items-end justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.24em] text-sky-300/80">Small surfaces</p>
+          <h3 class="mt-1 text-xl font-semibold text-white">Fast launchers + single signals</h3>
+        </div>
+        <p class="text-xs text-slate-500">Tap the body to open context · tap the control to run inline</p>
+      </div>
+
+      <div class="mb-10 flex flex-wrap items-start gap-6">
+        <div class="widget-shell">
+          <span class="widget-label">Quick Capture · Small</span>
+          <article class="ios-widget small-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-400/15 text-sky-300"><i class="fas fa-plus"></i></span>
+              <span class="text-[10px] uppercase tracking-[0.16em] text-slate-400">Capture</span>
+            </div>
+            <div>
+              <h4 class="text-[17px] font-semibold text-white">New thought</h4>
+              <p class="mt-1 text-[11px] leading-4 text-slate-400">Skip the inbox form.</p>
+            </div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <button class="rounded-xl bg-white/[0.07] py-2 text-[11px] text-slate-200" aria-label="Capture text"><i class="fas fa-keyboard"></i></button>
+              <button class="rounded-xl bg-white/[0.07] py-2 text-[11px] text-slate-200" aria-label="Capture voice"><i class="fas fa-microphone"></i></button>
+              <button class="rounded-xl bg-white/[0.07] py-2 text-[11px] text-slate-200" aria-label="Capture photo"><i class="fas fa-camera"></i></button>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Focus Launcher · Small</span>
+          <article class="ios-widget small-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-400/15 text-violet-300"><i class="fas fa-bullseye"></i></span>
+              <span class="rounded-full bg-violet-400/[0.12] px-2 py-1 text-[10px] text-violet-200">Ready</span>
+            </div>
+            <div>
+              <p class="text-[11px] text-slate-400">Suggested next</p>
+              <h4 class="mt-1 text-[15px] font-semibold leading-5 text-white">Roadmap draft</h4>
+              <p class="mt-1 text-[11px] text-slate-400">25 min · High energy</p>
+            </div>
+            <button class="widget-action primary w-full !py-1.5"><i class="fas fa-play text-[9px]"></i> Start focus</button>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Routine Check-in · Small</span>
+          <article class="ios-widget small-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-400/15 text-emerald-300"><i class="fas fa-rotate"></i></span>
+              <span class="text-[11px] font-semibold text-amber-200">12 day streak</span>
+            </div>
+            <div>
+              <h4 class="text-[16px] font-semibold text-white">Morning reset</h4>
+              <p class="mt-1 text-[11px] text-slate-400">2 of 3 steps done</p>
+              <div class="metric-bar mt-2"><div class="h-full w-2/3 rounded-full bg-emerald-400"></div></div>
+            </div>
+            <button class="widget-action w-full"><i class="fas fa-check text-[9px]"></i> Check in</button>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Triage Pressure · Small</span>
+          <article class="ios-widget small-widget flex flex-col justify-between p-4">
+            <div class="flex items-center justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-400/15 text-rose-300"><i class="fas fa-layer-group"></i></span>
+              <span class="rounded-full bg-rose-500/[0.14] px-2 py-1 text-[10px] text-rose-200">+4 today</span>
+            </div>
+            <div>
+              <p class="text-[38px] font-semibold leading-none tracking-tight text-white">14</p>
+              <p class="mt-1 text-[11px] text-slate-400">items need a decision</p>
+            </div>
+            <button class="widget-action w-full">Start 5-item sprint</button>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Goal Momentum · Small</span>
+          <article class="ios-widget small-widget flex flex-col justify-between p-4">
+            <div class="flex items-center justify-between">
+              <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-400/15 text-amber-300"><i class="fas fa-flag-checkered"></i></span>
+              <span class="text-[11px] text-slate-400">Q3</span>
+            </div>
+            <div>
+              <div class="flex items-baseline gap-1"><span class="text-[34px] font-semibold leading-none text-white">72</span><span class="text-sm text-slate-400">%</span></div>
+              <p class="mt-1 text-[12px] font-medium leading-4 text-slate-100">Ship mobile companion</p>
+            </div>
+            <div class="metric-bar"><div class="h-full w-[72%] rounded-full bg-amber-400"></div></div>
+          </article>
+        </div>
+      </div>
+
+      <div class="mb-4 flex items-end justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.24em] text-violet-300/80">Medium surfaces</p>
+          <h3 class="mt-1 text-xl font-semibold text-white">Context + a focused decision</h3>
+        </div>
+        <p class="text-xs text-slate-500">Configurable by project, goal, routine, or source</p>
+      </div>
+
+      <div class="mb-10 flex flex-wrap items-start gap-6">
+        <div class="widget-shell">
+          <span class="widget-label">Houston Daily Brief · Medium</span>
+          <article class="ios-widget medium-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-center gap-2">
+                <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-sky-400/15 text-sky-300"><i class="fas fa-rocket"></i></span>
+                <div><h4 class="text-[15px] font-semibold text-white">Houston says</h4><p class="text-[10px] text-slate-400">Based on blockers + deadlines</p></div>
+              </div>
+              <span class="text-[10px] text-slate-500">9:41 AM</span>
+            </div>
+            <p class="text-[13px] leading-5 text-slate-200">Start with the CFO reply. It unblocks the roadmap review and one vendor decision.</p>
+            <div class="flex gap-2">
+              <button class="widget-action primary flex-1"><i class="fas fa-calendar-plus text-[9px]"></i> Plan 25 min</button>
+              <button class="widget-action flex-1"><i class="fas fa-message text-[9px]"></i> Ask why</button>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Project Pulse · Medium</span>
+          <article class="ios-widget medium-widget p-4">
+            <div class="flex items-start justify-between">
+              <div><h4 class="text-[16px] font-semibold text-white">Project pulse</h4><p class="text-[10px] text-slate-400">3 active · 1 at risk</p></div>
+              <button class="widget-action !px-2 !py-1.5" aria-label="Open projects"><i class="fas fa-arrow-up-right-from-square text-[9px]"></i></button>
+            </div>
+            <div class="mt-3 space-y-2.5">
+              <div class="grid grid-cols-[92px_1fr_32px] items-center gap-2"><span class="truncate text-[11px] text-slate-200">iOS launch</span><div class="metric-bar"><div class="h-full w-[78%] rounded-full bg-sky-400"></div></div><span class="text-right text-[10px] text-slate-400">78%</span></div>
+              <div class="grid grid-cols-[92px_1fr_32px] items-center gap-2"><span class="truncate text-[11px] text-rose-200">Q3 roadmap</span><div class="metric-bar"><div class="h-full w-[42%] rounded-full bg-rose-400"></div></div><span class="text-right text-[10px] text-rose-300">risk</span></div>
+              <div class="grid grid-cols-[92px_1fr_32px] items-center gap-2"><span class="truncate text-[11px] text-slate-200">Docs graph</span><div class="metric-bar"><div class="h-full w-[63%] rounded-full bg-violet-400"></div></div><span class="text-right text-[10px] text-slate-400">63%</span></div>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Smart Sort · Medium</span>
+          <article class="ios-widget medium-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <div><h4 class="text-[16px] font-semibold text-white">Priority sort</h4><p class="text-[10px] text-slate-400">14 unsorted tasks</p></div>
+              <span class="rounded-full bg-amber-400/[0.12] px-2 py-1 text-[10px] text-amber-200">2 urgent</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="rounded-xl bg-rose-400/10 p-2.5"><p class="text-[10px] text-rose-200">Highest impact</p><p class="mt-1 truncate text-[12px] font-medium text-white">CFO budget reply</p></div>
+              <div class="rounded-xl bg-sky-400/10 p-2.5"><p class="text-[10px] text-sky-200">Quick win</p><p class="mt-1 truncate text-[12px] font-medium text-white">Approve PR #142</p></div>
+            </div>
+            <button class="widget-action primary w-full"><i class="fas fa-bolt text-[9px]"></i> Sort next five</button>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Document Intelligence · Medium</span>
+          <article class="ios-widget medium-widget flex flex-col justify-between p-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-center gap-2"><span class="flex h-8 w-8 items-center justify-center rounded-xl bg-violet-400/15 text-violet-300"><i class="fas fa-file-waveform"></i></span><div><h4 class="text-[15px] font-semibold text-white">New connections</h4><p class="text-[10px] text-slate-400">Across notes and tasks</p></div></div>
+              <span class="rounded-full bg-violet-500/[0.14] px-2 py-1 text-[10px] text-violet-200">3 found</span>
+            </div>
+            <div class="rounded-xl border border-white/[0.06] bg-white/5 p-2.5">
+              <p class="text-[12px] font-medium text-white">Roadmap notes ↔ vendor launch plan</p>
+              <p class="mt-1 text-[10px] text-slate-400">Shared: mobile beta, legal review, August target</p>
+            </div>
+            <div class="flex gap-2"><button class="widget-action primary flex-1">Review link</button><button class="widget-action flex-1">Dismiss</button></div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Routine Stack · Medium</span>
+          <article class="ios-widget medium-widget p-3">
+            <div class="flex items-center justify-between"><div><h4 class="text-[16px] font-semibold text-white">Evening shutdown</h4><p class="text-[10px] text-slate-400">Keep tomorrow clean</p></div><span class="text-[11px] font-medium text-emerald-300">1 of 3</span></div>
+            <div class="mt-2.5 grid grid-cols-3 gap-2">
+              <button class="rounded-xl bg-emerald-400/[0.12] p-2 text-left"><i class="fas fa-check-circle text-[12px] text-emerald-300"></i><p class="mt-1 text-[10px] text-slate-200">Review today</p></button>
+              <button class="rounded-xl bg-white/[0.06] p-2 text-left"><i class="far fa-circle text-[12px] text-slate-400"></i><p class="mt-1 text-[10px] text-slate-200">Plan tomorrow</p></button>
+              <button class="rounded-xl bg-white/[0.06] p-2 text-left"><i class="far fa-circle text-[12px] text-slate-400"></i><p class="mt-1 text-[10px] text-slate-200">Clear inbox</p></button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <div class="mb-4 flex items-end justify-between gap-4">
+        <div>
+          <p class="text-xs uppercase tracking-[0.24em] text-emerald-300/80">Large surfaces</p>
+          <h3 class="mt-1 text-xl font-semibold text-white">Coordinated dashboards</h3>
+        </div>
+        <p class="text-xs text-slate-500">Best for a dedicated Home Screen or StandBy stack</p>
+      </div>
+
+      <div class="flex flex-wrap items-start gap-8">
+        <div class="widget-shell">
+          <span class="widget-label">Mission Control Quadrant · Large</span>
+          <article class="ios-widget large-widget flex flex-col p-3.5">
+            <div class="mb-2.5 flex items-center justify-between">
+              <div><h4 class="text-[16px] font-semibold text-white">Command quadrant</h4><p class="text-[10px] text-slate-400">Four modes · one-tap actions</p></div>
+              <span class="rounded-full bg-emerald-400/[0.12] px-2 py-1 text-[10px] text-emerald-200">On track</span>
+            </div>
+            <div class="grid min-h-0 flex-1 grid-cols-2 grid-rows-2 gap-2">
+              <section class="mini-widget flex flex-col justify-between bg-sky-400/[0.08] p-2.5">
+                <div class="flex items-start justify-between"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-sky-400/15 text-[11px] text-sky-300"><i class="fas fa-sun"></i></span><span class="text-[10px] text-slate-400">Today</span></div>
+                <div><p class="text-[22px] font-semibold leading-none text-white">3 left</p><p class="mt-1 truncate text-[10px] text-slate-400">Next: CFO reply</p></div>
+                <button class="widget-action primary w-full !py-2">Open my day</button>
+              </section>
+              <section class="mini-widget flex flex-col justify-between bg-rose-400/[0.08] p-2.5">
+                <div class="flex items-start justify-between"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-rose-400/15 text-[11px] text-rose-300"><i class="fas fa-layer-group"></i></span><span class="text-[10px] text-rose-200">+4</span></div>
+                <div><p class="text-[22px] font-semibold leading-none text-white">14</p><p class="mt-1 text-[10px] text-slate-400">awaiting a decision</p></div>
+                <button class="widget-action w-full !py-2">Triage five</button>
+              </section>
+              <section class="mini-widget flex flex-col justify-between bg-violet-400/[0.08] p-2.5">
+                <div class="flex items-start justify-between"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-400/15 text-[11px] text-violet-300"><i class="fas fa-bullseye"></i></span><span class="text-[10px] text-slate-400">Focus</span></div>
+                <div><p class="text-[22px] font-semibold leading-none text-white">25m</p><p class="mt-1 truncate text-[10px] text-slate-400">Roadmap draft</p></div>
+                <button class="widget-action w-full !py-2"><i class="fas fa-play text-[8px]"></i> Start timer</button>
+              </section>
+              <section class="mini-widget flex flex-col justify-between bg-emerald-400/[0.08] p-2.5">
+                <div class="flex items-start justify-between"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-400/15 text-[11px] text-emerald-300"><i class="fas fa-plus"></i></span><span class="text-[10px] text-slate-400">Capture</span></div>
+                <div><p class="text-[13px] font-semibold text-white">Add anything</p><p class="mt-1 text-[10px] text-slate-400">Text, voice, photo</p></div>
+                <div class="grid grid-cols-3 gap-1.5">
+                  <button class="rounded-lg bg-white/[0.08] py-2 text-[10px] text-slate-200" aria-label="Capture text"><i class="fas fa-keyboard"></i></button>
+                  <button class="rounded-lg bg-white/[0.08] py-2 text-[10px] text-slate-200" aria-label="Capture voice"><i class="fas fa-microphone"></i></button>
+                  <button class="rounded-lg bg-white/[0.08] py-2 text-[10px] text-slate-200" aria-label="Capture photo"><i class="fas fa-camera"></i></button>
+                </div>
+              </section>
+            </div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Weekly Review · Large</span>
+          <article class="ios-widget large-widget flex flex-col p-3.5">
+            <div class="flex items-start justify-between">
+              <div><p class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Insights</p><h4 class="mt-1 text-[18px] font-semibold text-white">A strong execution week</h4></div>
+              <span class="rounded-full bg-emerald-400/[0.12] px-2.5 py-1 text-[10px] text-emerald-200">↑ 11%</span>
+            </div>
+            <div class="mt-3 grid grid-cols-3 gap-2">
+              <div class="rounded-2xl bg-sky-400/10 p-2.5"><p class="text-[22px] font-semibold text-white">86%</p><p class="text-[10px] text-slate-400">completion</p></div>
+              <div class="rounded-2xl bg-violet-400/10 p-2.5"><p class="text-[22px] font-semibold text-white">6.4h</p><p class="text-[10px] text-slate-400">deep focus</p></div>
+              <div class="rounded-2xl bg-amber-400/10 p-2.5"><p class="text-[22px] font-semibold text-white">38</p><p class="text-[10px] text-slate-400">triaged</p></div>
+            </div>
+            <div class="mt-2.5 flex-1 rounded-2xl border border-white/[0.06] bg-white/[0.04] p-2.5">
+              <div class="flex items-center justify-between"><p class="text-[11px] font-medium text-slate-200">Daily throughput</p><p class="text-[10px] text-slate-500">Mon–Fri</p></div>
+              <div class="mt-2 flex h-16 items-end justify-between gap-2">
+                <div class="w-full rounded-t-md bg-sky-400/35" style="height: 48%"></div><div class="w-full rounded-t-md bg-sky-400/45" style="height: 68%"></div><div class="w-full rounded-t-md bg-sky-400/55" style="height: 82%"></div><div class="w-full rounded-t-md bg-sky-400/40" style="height: 60%"></div><div class="w-full rounded-t-md bg-emerald-400/70" style="height: 92%"></div>
+              </div>
+            </div>
+            <div class="mt-3 flex gap-2"><button class="widget-action primary flex-1">Open weekly review</button><button class="widget-action flex-1">Plan next week</button></div>
+          </article>
+        </div>
+
+        <div class="widget-shell">
+          <span class="widget-label">Goals + Projects · Large</span>
+          <article class="ios-widget large-widget flex flex-col p-3.5">
+            <div class="flex items-start justify-between"><div><p class="text-[10px] uppercase tracking-[0.18em] text-slate-400">Direction</p><h4 class="mt-1 text-[18px] font-semibold text-white">Goals + active work</h4></div><span class="text-[10px] text-slate-500">Updated 8m ago</span></div>
+            <div class="mt-3 rounded-2xl bg-amber-400/[0.09] p-2.5">
+              <div class="flex items-center justify-between"><div><p class="text-[10px] text-amber-200">Primary goal</p><p class="mt-1 text-[13px] font-medium text-white">Ship mobile companion</p></div><p class="text-xl font-semibold text-white">72%</p></div>
+              <div class="metric-bar mt-3"><div class="h-full w-[72%] rounded-full bg-amber-400"></div></div>
+            </div>
+            <div class="mt-2.5 flex-1 space-y-2">
+              <div class="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2"><div><p class="text-[12px] font-medium text-white">iOS launch</p><p class="text-[10px] text-slate-400">5 tasks · next milestone Friday</p></div><span class="rounded-full bg-sky-400/[0.12] px-2 py-1 text-[10px] text-sky-200">Healthy</span></div>
+              <div class="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2"><div><p class="text-[12px] font-medium text-white">Q3 roadmap</p><p class="text-[10px] text-slate-400">2 blockers · owner response due</p></div><span class="rounded-full bg-rose-400/[0.12] px-2 py-1 text-[10px] text-rose-200">At risk</span></div>
+            </div>
+            <button class="widget-action primary mt-2.5 w-full">Open portfolio</button>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-400">Section 3</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-100">Lock Screen Widgets (iOS 16+ accessories)</h2>
+      </div>
+      <div class="flex flex-wrap items-start gap-8">
+        <article class="lock-screen px-8 pb-10 pt-6">
+          <div class="mx-auto mb-10 h-1.5 w-28 rounded-full bg-white/20"></div>
+          <div class="mt-10 flex flex-col items-center">
+            <div class="accessory mb-4 flex h-16 w-16 items-center justify-center rounded-full">
+              <div class="flex h-11 w-11 items-center justify-center rounded-full bg-sky-400 text-2xl font-semibold text-slate-950">6</div>
+            </div>
+            <div class="accessory mb-4 flex min-h-[54px] w-[290px] items-center justify-center rounded-[18px] px-4 text-center">
+              <p class="text-sm font-medium text-white">Next: Design homepage · 30min</p>
+            </div>
+            <p class="text-sm uppercase tracking-[0.36em] text-slate-300/80">Tuesday, July 28</p>
+            <h3 class="mt-2 text-[96px] font-semibold leading-none tracking-[-0.06em] text-white">9:41</h3>
+            <div class="accessory mt-5 rounded-full px-5 py-2.5">
+              <p class="text-[13px] text-slate-100">📋 6 tasks · ⚡ 3 triage items</p>
+            </div>
+          </div>
+          <div class="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-sky-500/10 to-transparent"></div>
+        </article>
+
+        <div class="max-w-md pt-4 text-sm leading-6 text-slate-300/80">
+          <p class="font-medium text-slate-100">Accessory set</p>
+          <ul class="mt-3 space-y-3">
+            <li>• Circular accessory above the date for quick remaining-task count.</li>
+            <li>• Rectangular accessory for the next planned task and duration.</li>
+            <li>• Inline accessory beneath the date for glanceable tasks + triage totals.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-400">Section 4</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-100">StandBy Mode (iOS 17+)</h2>
+      </div>
+      <article class="standby-shell grid gap-5 p-6 md:grid-cols-[1.1fr_0.9fr]">
+        <div class="flex items-center justify-center rounded-[28px] border border-white/8 bg-black/15">
+          <div class="text-center">
+            <p class="text-lg uppercase tracking-[0.5em] text-slate-400">StandBy</p>
+            <h3 class="mt-3 text-[112px] font-semibold leading-none tracking-[-0.08em] text-red-400">9:41</h3>
+            <p class="mt-2 text-base text-slate-300/80">Wednesday · Bedroom</p>
+          </div>
+        </div>
+        <div class="ios-widget rounded-[28px] p-5">
+          <div class="flex h-full flex-col justify-between">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.24em] text-slate-400">Mission Control</p>
+              <h3 class="mt-1 text-[28px] font-semibold text-white">Tomorrow · 4 tasks planned</h3>
+              <div class="mt-5 space-y-3">
+                <div class="rounded-[18px] border border-white/8 bg-white/6 px-4 py-3">
+                  <p class="text-[15px] font-medium text-white">Prep product review agenda</p>
+                  <p class="mt-1 text-[12px] text-slate-300/75">Deep work · 45 min</p>
+                </div>
+                <div class="rounded-[18px] border border-white/8 bg-white/6 px-4 py-3">
+                  <p class="text-[15px] font-medium text-white">Refine widget animation pass</p>
+                  <p class="mt-1 text-[12px] text-slate-300/75">Design polish · 30 min</p>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-[20px] border border-sky-400/20 bg-sky-400/10 px-4 py-3">
+              <p class="text-[11px] uppercase tracking-[0.22em] text-sky-200/80">Morning nudge</p>
+              <p class="mt-1 text-[16px] font-medium text-white">Start at 8:00 AM</p>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section>
+      <div class="mb-5">
+        <p class="text-xs uppercase tracking-[0.28em] text-slate-400">Section 5</p>
+        <h2 class="mt-1 text-2xl font-semibold text-slate-100">Interactive Widget Demo (iOS 17+)</h2>
+      </div>
+      <div class="flex flex-wrap items-start gap-8">
+        <div class="widget-shell">
+          <span class="widget-label">Interactive Medium Widget · 329×155</span>
+          <article class="ios-widget medium-widget p-4">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="text-[17px] font-semibold text-white">Tasks</h3>
+              </div>
+              <span class="rounded-full bg-emerald-500/16 px-2 py-1 text-[11px] text-emerald-100">Tap to check off</span>
+            </div>
+            <div class="mt-3 space-y-2">
+              <div class="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/5 px-3 py-2.5">
+                <span class="ios-checkbox checked pulse-check"><i class="fas fa-check text-[9px]"></i></span>
+                <span class="priority-dot bg-orange-400"></span>
+                <span class="text-[13px] text-slate-300 line-through decoration-slate-400/70">Design homepage</span>
+              </div>
+              <div class="flex items-center gap-3 rounded-2xl border border-white/6 bg-white/5 px-3 py-2.5 opacity-80">
+                <span class="ios-checkbox"></span>
+                <span class="priority-dot bg-sky-400"></span>
+                <span class="text-[13px] text-white">Triage GitHub mentions</span>
+              </div>
+            </div>
+            <div class="mt-3 flex items-center justify-between">
+              <p class="text-[12px] text-slate-300/75">Checkbox fill + text strike happen in-widget.</p>
+              <span class="toast-pop rounded-full bg-emerald-500/18 px-3 py-1 text-[11px] font-medium text-emerald-100">✓ Completed!</span>
+            </div>
+          </article>
+        </div>
+
+        <div class="max-w-xl pt-3 text-sm leading-6 text-slate-300/80">
+          <p class="font-medium text-slate-100">Interactivity note</p>
+          <p class="mt-2">
+            This concept shows AppIntents-powered interactivity: tapping the checkbox completes the task inline, animates the control state, adds strikethrough to the task text, and briefly confirms success without opening the app.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

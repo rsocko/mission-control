@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Goals & Ideas</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .source-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+    .source-todo { background: #dbeafe; color: #1e40af; }
+    .source-github { background: #f3e8ff; color: #6b21a8; }
+    .source-triage { background: #fef3c7; color: #92400e; }
+    .sidebar-item:hover { background: #f1f5f9; }
+    .goal-card { transition: all 0.15s ease; }
+    .goal-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); border-color: #93c5fd; }
+    .idea-card { transition: all 0.15s ease; }
+    .idea-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); border-color: #fbbf24; }
+    .brainstorm-card { transition: all 0.15s ease; }
+    .brainstorm-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); border-color: #a78bfa; }
+    .tag-pill { font-size: 10px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; }
+    .develop-btn { transition: all 0.15s ease; }
+    .develop-btn:hover { background: #eff6ff; border-color: #93c5fd; }
+    .quick-add-input:focus { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+    .section-header { position: sticky; top: 0; z-index: 10; }
+    .ai-develop-panel { animation: slideUp 0.2s ease-out; }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="mockup-dashboard.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="mockup-kanban.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="mockup-projects.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Projects</a>
+        <a href="mockup-myday.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">My Day</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-md">Goals</a>
+        <a href="mockup-ai-assistant.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="relative">
+        <input type="text" placeholder="Search goals & ideas..." class="w-56 px-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+        <i class="fas fa-search absolute right-3 top-2 text-gray-400 text-sm"></i>
+      </div>
+      <button class="relative p-2 text-gray-500 hover:text-gray-700">
+        <i class="fas fa-bell"></i>
+      </button>
+      <button class="p-2 text-gray-500 hover:text-gray-700">
+        <i class="fas fa-cog"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex h-[calc(100vh-57px)]">
+    <!-- Left Sidebar: Filters -->
+    <aside class="w-56 bg-white border-r border-gray-200 p-4 overflow-y-auto flex-shrink-0">
+      <div class="mb-6">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">View</h3>
+        <div class="space-y-1">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer bg-blue-50">
+            <i class="fas fa-th-large text-blue-600 text-sm w-4"></i>
+            <span class="text-sm font-medium text-blue-700">All</span>
+            <span class="ml-auto text-xs text-blue-600 font-medium">12</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-bullseye text-blue-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Goals</span>
+            <span class="ml-auto text-xs text-gray-400">4</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-lightbulb text-amber-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Ideas</span>
+            <span class="ml-auto text-xs text-gray-400">6</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-brain text-purple-500 text-sm w-4"></i>
+            <span class="text-sm text-gray-700">Brainstorms</span>
+            <span class="ml-auto text-xs text-gray-400">2</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Linked Project</h3>
+        <div class="space-y-1">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-satellite-dish text-blue-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">Mission Control</span>
+            <span class="ml-auto text-xs text-gray-400">3</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-home text-amber-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">Home Automation</span>
+            <span class="ml-auto text-xs text-gray-400">4</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-dollar-sign text-emerald-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">Finance</span>
+            <span class="ml-auto text-xs text-gray-400">2</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-cube text-orange-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">3D Printing</span>
+            <span class="ml-auto text-xs text-gray-400">2</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="text-xs text-gray-400 w-4 text-center">—</span>
+            <span class="text-sm text-gray-500 italic">Unlinked</span>
+            <span class="ml-auto text-xs text-gray-400">1</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-6">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Age</h3>
+        <div class="space-y-1">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="text-sm text-gray-600">Fresh (< 1 week)</span>
+            <span class="ml-auto text-xs text-gray-400">3</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="text-sm text-gray-600">Recent (1-4 weeks)</span>
+            <span class="ml-auto text-xs text-gray-400">5</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <span class="text-sm text-gray-600">Aging (> 1 month)</span>
+            <span class="ml-auto text-xs text-gray-400">4</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-y-auto">
+      <!-- Page Header -->
+      <div class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-900">Goals & Ideas</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Capture aspirations, brainstorm freely, develop ideas into projects</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="text-xs px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-sort text-[10px]"></i> Sort
+            </button>
+            <button class="text-xs px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-plus text-[10px]"></i> Add Goal
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Add -->
+        <div class="mt-4">
+          <div class="relative">
+            <input type="text" placeholder="Quick capture — type an idea, goal, or brainstorm and press Enter... (prefix with #goal, #idea, or #brainstorm)" 
+              class="quick-add-input w-full px-4 py-2.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 transition-all">
+            <div class="absolute right-3 top-2.5 flex items-center gap-2">
+              <span class="text-[10px] text-gray-300 border border-gray-200 rounded px-1.5 py-0.5">Enter ↵</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Area -->
+      <div class="p-6 space-y-8">
+
+        <!-- GOALS Section -->
+        <section>
+          <div class="section-header flex items-center gap-3 mb-4 bg-gray-50 -mx-6 px-6 py-2">
+            <div class="w-7 h-7 bg-blue-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-bullseye text-blue-600 text-xs"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-800">Goals</h3>
+            <span class="text-xs text-gray-400">Long-term outcomes & aspirations</span>
+            <span class="ml-auto text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">4</span>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <!-- Goal Card 1 -->
+            <div class="goal-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start justify-between mb-2">
+                <h4 class="text-sm font-medium text-gray-900 flex-1">Automate entire home end-to-end</h4>
+                <div class="flex items-center gap-1 ml-2">
+                  <button class="develop-btn text-xs px-2 py-1 text-blue-600 border border-blue-200 rounded-md font-medium flex items-center gap-1">
+                    <i class="fas fa-wand-magic-sparkles text-[9px]"></i> Develop
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Lighting, climate, security, irrigation, pool, media — all controlled via HA with zero manual intervention needed day-to-day.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="tag-pill bg-amber-50 text-amber-700">#home</span>
+                  <span class="tag-pill bg-blue-50 text-blue-700">#automation</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] text-gray-400">
+                  <span><i class="fas fa-home text-amber-500 mr-1"></i>Home Auto</span>
+                  <span>· 3w ago</span>
+                </div>
+              </div>
+              <!-- Progress indicator (linked projects) -->
+              <div class="mt-3 pt-3 border-t border-gray-100">
+                <div class="flex items-center gap-2 text-[10px] text-gray-500">
+                  <span>3 linked projects</span>
+                  <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-amber-400 rounded-full" style="width: 35%"></div>
+                  </div>
+                  <span>35%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Goal Card 2 -->
+            <div class="goal-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start justify-between mb-2">
+                <h4 class="text-sm font-medium text-gray-900 flex-1">Ship Mission Control as standalone app</h4>
+                <div class="flex items-center gap-1 ml-2">
+                  <button class="develop-btn text-xs px-2 py-1 text-blue-600 border border-blue-200 rounded-md font-medium flex items-center gap-1">
+                    <i class="fas fa-wand-magic-sparkles text-[9px]"></i> Develop
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Package MC as a deployable Electron/Tauri app with self-contained DB, OAuth, and connector ecosystem.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="tag-pill bg-blue-50 text-blue-700">#dev</span>
+                  <span class="tag-pill bg-purple-50 text-purple-700">#mission-control</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] text-gray-400">
+                  <span><i class="fas fa-satellite-dish text-blue-500 mr-1"></i>MC</span>
+                  <span>· 1w ago</span>
+                </div>
+              </div>
+              <div class="mt-3 pt-3 border-t border-gray-100">
+                <div class="flex items-center gap-2 text-[10px] text-gray-500">
+                  <span>1 linked project</span>
+                  <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-blue-400 rounded-full" style="width: 65%"></div>
+                  </div>
+                  <span>65%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Goal Card 3 -->
+            <div class="goal-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start justify-between mb-2">
+                <h4 class="text-sm font-medium text-gray-900 flex-1">Build personal finance automation</h4>
+                <div class="flex items-center gap-1 ml-2">
+                  <button class="develop-btn text-xs px-2 py-1 text-blue-600 border border-blue-200 rounded-md font-medium flex items-center gap-1">
+                    <i class="fas fa-wand-magic-sparkles text-[9px]"></i> Develop
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Auto-categorize transactions, budget tracking, kid expense attribution, bill pay reminders — all hands-off.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="tag-pill bg-emerald-50 text-emerald-700">#finance</span>
+                  <span class="tag-pill bg-blue-50 text-blue-700">#automation</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] text-gray-400">
+                  <span><i class="fas fa-dollar-sign text-emerald-500 mr-1"></i>Finance</span>
+                  <span>· 2w ago</span>
+                </div>
+              </div>
+              <div class="mt-3 pt-3 border-t border-gray-100">
+                <div class="flex items-center gap-2 text-[10px] text-gray-500">
+                  <span>1 linked project</span>
+                  <div class="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div class="h-full bg-emerald-400 rounded-full" style="width: 45%"></div>
+                  </div>
+                  <span>45%</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Goal Card 4 -->
+            <div class="goal-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start justify-between mb-2">
+                <h4 class="text-sm font-medium text-gray-900 flex-1">Create reliable 3D printing workflow pipeline</h4>
+                <div class="flex items-center gap-1 ml-2">
+                  <button class="develop-btn text-xs px-2 py-1 text-blue-600 border border-blue-200 rounded-md font-medium flex items-center gap-1">
+                    <i class="fas fa-wand-magic-sparkles text-[9px]"></i> Develop
+                  </button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">From model discovery → slicing → queue → print → quality check. Tracked, repeatable, minimal waste.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="tag-pill bg-orange-50 text-orange-700">#3dprint</span>
+                  <span class="tag-pill bg-blue-50 text-blue-700">#workflow</span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] text-gray-400">
+                  <span><i class="fas fa-cube text-orange-500 mr-1"></i>3D Printing</span>
+                  <span>· 5w ago</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- IDEAS Section -->
+        <section>
+          <div class="section-header flex items-center gap-3 mb-4 bg-gray-50 -mx-6 px-6 py-2">
+            <div class="w-7 h-7 bg-amber-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-lightbulb text-amber-600 text-xs"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-800">Ideas</h3>
+            <span class="text-xs text-gray-400">Raw concepts & possibilities</span>
+            <span class="ml-auto text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-medium">6</span>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+            <!-- Idea Card 1 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Voice-controlled task creation via HA</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">"Hey Google, add 'fix the garage door sensor' to my Home Automation list" → MC creates the task</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-amber-50 text-amber-700">#home</span>
+                  <span class="tag-pill bg-purple-50 text-purple-700">#voice</span>
+                </div>
+                <span class="text-[10px] text-gray-400">2d ago</span>
+              </div>
+            </div>
+
+            <!-- Idea Card 2 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Ambient display showing today's focus</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Vobot or e-ink display on desk showing top 3 focus items, next calendar event, active timer</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-blue-50 text-blue-700">#hardware</span>
+                  <span class="tag-pill bg-amber-50 text-amber-700">#vobot</span>
+                </div>
+                <span class="text-[10px] text-gray-400">4d ago</span>
+              </div>
+            </div>
+
+            <!-- Idea Card 3 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">AI agent that triages email into tasks</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Scan inbox, identify actionable items, draft tasks with context, propose priority — run daily</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-purple-50 text-purple-700">#ai</span>
+                  <span class="tag-pill bg-emerald-50 text-emerald-700">#email</span>
+                </div>
+                <span class="text-[10px] text-gray-400">1w ago</span>
+              </div>
+            </div>
+
+            <!-- Idea Card 4 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Print farm dashboard with queue management</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">OctoPrint/Klipper integration, real-time status per printer, filament tracking, auto-schedule queue</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-orange-50 text-orange-700">#3dprint</span>
+                  <span class="tag-pill bg-blue-50 text-blue-700">#dashboard</span>
+                </div>
+                <span class="text-[10px] text-gray-400">2w ago</span>
+              </div>
+            </div>
+
+            <!-- Idea Card 5 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Weekly digest email from Mission Control</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Auto-send summary: tasks completed, tasks overdue, alerts handled, projects progressed this week</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-blue-50 text-blue-700">#mc</span>
+                  <span class="tag-pill bg-emerald-50 text-emerald-700">#notifications</span>
+                </div>
+                <span class="text-[10px] text-gray-400">3w ago</span>
+              </div>
+            </div>
+
+            <!-- Idea Card 6 -->
+            <div class="idea-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-lightbulb text-amber-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Habit tracker integrated with My Day</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Track recurring micro-habits (water, stretch, focus blocks) alongside tasks. Streak visualization.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-rose-50 text-rose-700">#health</span>
+                  <span class="tag-pill bg-blue-50 text-blue-700">#productivity</span>
+                </div>
+                <span class="text-[10px] text-gray-400">4w ago</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- BRAINSTORMS Section -->
+        <section>
+          <div class="section-header flex items-center gap-3 mb-4 bg-gray-50 -mx-6 px-6 py-2">
+            <div class="w-7 h-7 bg-purple-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-brain text-purple-600 text-xs"></i>
+            </div>
+            <h3 class="text-sm font-semibold text-gray-800">Brainstorms</h3>
+            <span class="text-xs text-gray-400">Open questions & explorations</span>
+            <span class="ml-auto text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-medium">2</span>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <!-- Brainstorm Card 1 -->
+            <div class="brainstorm-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-brain text-purple-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">How should MC handle multi-user someday?</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">Currently single-user local-first. If family members want access: separate DBs? Shared instance? Role-based? What's the auth story?</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-purple-50 text-purple-700">#architecture</span>
+                </div>
+                <span class="text-[10px] text-gray-400">3w ago</span>
+              </div>
+              <!-- Thread/notes indicator -->
+              <div class="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 text-[10px] text-gray-400">
+                <i class="fas fa-sticky-note"></i>
+                <span>3 notes attached</span>
+              </div>
+            </div>
+
+            <!-- Brainstorm Card 2 -->
+            <div class="brainstorm-card bg-white border border-gray-200 rounded-lg p-4 cursor-pointer">
+              <div class="flex items-start gap-2 mb-2">
+                <i class="fas fa-brain text-purple-400 text-xs mt-1"></i>
+                <h4 class="text-sm font-medium text-gray-900">Cross-device sync strategy options</h4>
+              </div>
+              <p class="text-xs text-gray-500 mb-3">SQLite + Litestream? CRDTs? Cloud DB with offline cache? Turso/libSQL replication? Need to weigh complexity vs. reliability.</p>
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="tag-pill bg-purple-50 text-purple-700">#sync</span>
+                  <span class="tag-pill bg-purple-50 text-purple-700">#architecture</span>
+                </div>
+                <span class="text-[10px] text-gray-400">2w ago</span>
+              </div>
+              <div class="mt-3 pt-3 border-t border-gray-100 flex items-center gap-2 text-[10px] text-gray-400">
+                <i class="fas fa-sticky-note"></i>
+                <span>5 notes attached</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <!-- Right Sidebar: AI Develop Panel (shows when "Develop" is clicked) -->
+    <aside class="w-80 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 flex flex-col">
+      <div class="p-4 border-b border-gray-100">
+        <div class="flex items-center gap-2 mb-1">
+          <div class="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
+            <i class="fas fa-wand-magic-sparkles text-purple-600 text-xs"></i>
+          </div>
+          <h3 class="text-sm font-semibold text-gray-800">AI: Develop Goal</h3>
+        </div>
+        <p class="text-xs text-gray-500">Expanding "Ship Mission Control as standalone app"</p>
+      </div>
+
+      <div class="ai-develop-panel flex-1 p-4 space-y-4">
+        <!-- AI Analysis -->
+        <div class="bg-purple-50 border border-purple-100 rounded-lg p-3">
+          <p class="text-xs text-purple-800 leading-relaxed">
+            Based on current MC progress (~65% complete), here's a breakdown of what's needed to ship as standalone:
+          </p>
+        </div>
+
+        <!-- Suggested Tasks -->
+        <div>
+          <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Suggested Tasks</h4>
+          <div class="space-y-2">
+            <div class="border border-gray-200 rounded-md p-2.5 hover:border-blue-200 cursor-pointer">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-3.5 h-3.5 border-2 border-dashed border-blue-400 rounded flex items-center justify-center">
+                  <i class="fas fa-plus text-blue-400 text-[6px]"></i>
+                </div>
+                <span class="text-xs font-medium text-gray-800">Evaluate Tauri vs Electron for packaging</span>
+              </div>
+              <p class="text-[10px] text-gray-500 ml-5.5">Compare bundle size, performance, and native API access for desktop deployment</p>
+              <div class="flex items-center gap-2 mt-1.5 ml-5.5">
+                <span class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">~2d effort</span>
+                <span class="text-[9px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded">research</span>
+              </div>
+            </div>
+            <div class="border border-gray-200 rounded-md p-2.5 hover:border-blue-200 cursor-pointer">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-3.5 h-3.5 border-2 border-dashed border-blue-400 rounded flex items-center justify-center">
+                  <i class="fas fa-plus text-blue-400 text-[6px]"></i>
+                </div>
+                <span class="text-xs font-medium text-gray-800">Implement offline-first sync layer</span>
+              </div>
+              <p class="text-[10px] text-gray-500 ml-5.5">SQLite + queue for write-back when offline, reconcile on reconnect</p>
+              <div class="flex items-center gap-2 mt-1.5 ml-5.5">
+                <span class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">~5d effort</span>
+                <span class="text-[9px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded">critical path</span>
+              </div>
+            </div>
+            <div class="border border-gray-200 rounded-md p-2.5 hover:border-blue-200 cursor-pointer">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-3.5 h-3.5 border-2 border-dashed border-blue-400 rounded flex items-center justify-center">
+                  <i class="fas fa-plus text-blue-400 text-[6px]"></i>
+                </div>
+                <span class="text-xs font-medium text-gray-800">Auto-update mechanism</span>
+              </div>
+              <p class="text-[10px] text-gray-500 ml-5.5">Ship new versions to users without manual download (Sparkle/electron-updater)</p>
+              <div class="flex items-center gap-2 mt-1.5 ml-5.5">
+                <span class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">~3d effort</span>
+              </div>
+            </div>
+            <div class="border border-gray-200 rounded-md p-2.5 hover:border-blue-200 cursor-pointer">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-3.5 h-3.5 border-2 border-dashed border-blue-400 rounded flex items-center justify-center">
+                  <i class="fas fa-plus text-blue-400 text-[6px]"></i>
+                </div>
+                <span class="text-xs font-medium text-gray-800">OAuth flow for desktop (localhost redirect)</span>
+              </div>
+              <p class="text-[10px] text-gray-500 ml-5.5">Adapt current Next.js OAuth to work with desktop app's embedded server</p>
+              <div class="flex items-center gap-2 mt-1.5 ml-5.5">
+                <span class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">~2d effort</span>
+              </div>
+            </div>
+            <div class="border border-gray-200 rounded-md p-2.5 hover:border-blue-200 cursor-pointer">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-3.5 h-3.5 border-2 border-dashed border-blue-400 rounded flex items-center justify-center">
+                  <i class="fas fa-plus text-blue-400 text-[6px]"></i>
+                </div>
+                <span class="text-xs font-medium text-gray-800">CI/CD pipeline for desktop builds</span>
+              </div>
+              <p class="text-[10px] text-gray-500 ml-5.5">GitHub Actions: build macOS, Windows, Linux packages on tag push</p>
+              <div class="flex items-center gap-2 mt-1.5 ml-5.5">
+                <span class="text-[9px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">~3d effort</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Suggested Project -->
+        <div>
+          <h4 class="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Suggested Project Structure</h4>
+          <div class="border border-blue-200 bg-blue-50/50 rounded-md p-3">
+            <div class="flex items-center gap-2 mb-2">
+              <i class="fas fa-folder-open text-blue-500 text-xs"></i>
+              <span class="text-xs font-medium text-blue-800">MC Desktop Packaging</span>
+              <span class="text-[9px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">new project</span>
+            </div>
+            <p class="text-[10px] text-blue-700 mb-2">Category: Development · Est. 15 effort-days · 2 phases</p>
+            <div class="space-y-1 text-[10px] text-blue-600">
+              <div class="flex items-center gap-1.5"><i class="fas fa-layer-group text-[8px]"></i> Phase 1: Research & Foundation (3 tasks)</div>
+              <div class="flex items-center gap-1.5"><i class="fas fa-layer-group text-[8px]"></i> Phase 2: Build & Ship (2 tasks)</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center gap-2 pt-2">
+          <button class="flex-1 text-xs px-3 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-md font-medium">
+            <i class="fas fa-check mr-1"></i> Create Project
+          </button>
+          <button class="flex-1 text-xs px-3 py-2 text-gray-600 hover:bg-gray-100 border border-gray-200 rounded-md font-medium">
+            <i class="fas fa-folder-open mr-1"></i> Add to Existing
+          </button>
+        </div>
+        <p class="text-[10px] text-gray-400 text-center">Creates a project with phases — you approve tasks before they're finalized</p>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>

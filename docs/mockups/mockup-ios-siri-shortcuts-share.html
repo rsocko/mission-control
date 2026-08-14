@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Siri, Shortcuts, Share &amp; System Integration</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          boxShadow: {
+            phone: '0 28px 70px rgba(15, 23, 42, 0.65)',
+            card: '0 18px 50px rgba(15, 23, 42, 0.35)'
+          },
+          fontFamily: {
+            sans: ['SF Pro Display', 'SF Pro Text', '-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body {
+      font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    .phone {
+      width: 340px;
+      min-height: 710px;
+      border-radius: 38px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: linear-gradient(180deg, rgba(15,23,42,0.96), rgba(2,6,23,0.98));
+      box-shadow: 0 28px 70px rgba(2, 8, 23, 0.65);
+      overflow: hidden;
+      position: relative;
+    }
+    .phone.light {
+      background: linear-gradient(180deg, #f8fafc, #e2e8f0);
+      color: #0f172a;
+    }
+    .notch {
+      width: 132px;
+      height: 30px;
+      border-radius: 999px;
+      background: #020617;
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+    }
+    .status-bar {
+      font-size: 11px;
+      letter-spacing: 0.01em;
+    }
+    .siri-shell {
+      background: radial-gradient(circle at top, rgba(255,255,255,0.10), transparent 48%), linear-gradient(180deg, rgba(15,23,42,0.75), rgba(2,6,23,0.94));
+      backdrop-filter: blur(22px);
+    }
+    .siri-wave {
+      position: relative;
+      height: 86px;
+      overflow: hidden;
+    }
+    .siri-wave::before,
+    .siri-wave::after {
+      content: '';
+      position: absolute;
+      inset: auto -10% -18px -10%;
+      height: 90px;
+      border-radius: 999px;
+      filter: blur(10px);
+      opacity: 0.95;
+    }
+    .siri-wave::before {
+      background: linear-gradient(90deg, #60a5fa, #a855f7, #ec4899, #f59e0b, #22d3ee, #60a5fa);
+      animation: drift 8s linear infinite;
+    }
+    .siri-wave::after {
+      background: linear-gradient(90deg, rgba(255,255,255,0.15), rgba(96,165,250,0.22), rgba(168,85,247,0.22), rgba(34,211,238,0.18));
+      inset: auto 6% 5px 6%;
+      height: 46px;
+      filter: blur(16px);
+    }
+    @keyframes drift {
+      0% { transform: translateX(-4%); }
+      50% { transform: translateX(4%); }
+      100% { transform: translateX(-4%); }
+    }
+    .shortcut-card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(241,245,249,0.9));
+      border: 1px solid rgba(148,163,184,0.3);
+      color: #0f172a;
+    }
+    .action-row::before {
+      content: '';
+      position: absolute;
+      left: 18px;
+      top: 34px;
+      bottom: -18px;
+      width: 2px;
+      background: linear-gradient(180deg, rgba(148,163,184,0.5), rgba(148,163,184,0));
+    }
+    .action-row:last-child::before { display: none; }
+    .ios-sheet {
+      background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.92));
+      color: #0f172a;
+      border: 1px solid rgba(226,232,240,0.8);
+      box-shadow: 0 24px 60px rgba(15,23,42,0.25);
+    }
+    .settings-panel {
+      background: linear-gradient(180deg, #f8fafc, #eef2ff);
+      color: #0f172a;
+    }
+    .toggle-on {
+      background: linear-gradient(90deg, #34d399, #10b981);
+      position: relative;
+    }
+    .toggle-on::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #fff;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.18);
+    }
+    .toast {
+      background: rgba(15,23,42,0.88);
+      backdrop-filter: blur(18px);
+    }
+    .appclip-card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.98));
+      color: #0f172a;
+      border: 1px solid rgba(226,232,240,0.95);
+    }
+    .hero-grid {
+      background-image: linear-gradient(rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px);
+      background-size: 26px 26px;
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-7xl px-6 py-10 lg:px-10">
+    <header class="hero-grid mb-10 overflow-hidden rounded-[32px] border border-slate-700/70 bg-slate-900/70 px-8 py-10 shadow-card backdrop-blur">
+      <div class="max-w-4xl">
+        <p class="mb-3 text-xs font-semibold uppercase tracking-[0.35em] text-cyan-300">Mission Control iOS platform concepts</p>
+        <h1 class="text-3xl font-semibold text-slate-50 md:text-5xl">Mission Control — Siri, Shortcuts, Share &amp; System Integration</h1>
+        <p class="mt-4 max-w-3xl text-sm leading-7 text-slate-300 md:text-base">A comprehensive iOS system-integration mockup for voice capture, proactive automations, Share Extension capture, Focus-aware task filtering, and lightweight App Clip collaboration. Designed with iOS-native spacing, rounded surfaces, and SF-style typography.</p>
+      </div>
+    </header>
+
+    <section class="mb-12">
+      <div class="mb-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.32em] text-fuchsia-300">Section 1</p>
+        <h2 class="mt-2 text-2xl font-semibold text-white">Siri Interactions</h2>
+        <p class="mt-2 max-w-3xl text-sm text-slate-400">Hands-free capture, progress awareness, and task completion framed as compact Siri response cards over a dark translucent Siri surface.</p>
+      </div>
+      <div class="grid gap-8 md:grid-cols-2 xl:grid-cols-4">
+        <article class="phone siri-shell p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-8 flex items-center justify-between px-2 text-slate-300"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span></div>
+          <p class="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Voice Capture</p>
+          <div class="rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-card backdrop-blur">
+            <div class="text-center">
+              <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-cyan-400 to-blue-600 text-2xl text-white shadow-lg"><i class="fas fa-rocket"></i></div>
+              <p class="text-sm text-slate-300">You said</p>
+              <h3 class="mt-2 text-xl font-semibold text-white">“Hey Siri, add ‘Buy milk’ to Mission Control”</h3>
+            </div>
+            <div class="mt-6 rounded-[24px] border border-emerald-400/20 bg-slate-900/70 p-4">
+              <div class="flex items-start gap-3">
+                <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300"><i class="fas fa-rocket"></i></div>
+                <div>
+                  <p class="text-sm font-semibold text-white">Mission Control</p>
+                  <p class="mt-1 text-sm leading-6 text-slate-300">Added <span class="font-medium text-white">“Buy milk”</span> to your capture queue</p>
+                </div>
+                <div class="ml-auto mt-1 text-emerald-300"><i class="fas fa-circle-check text-xl"></i></div>
+              </div>
+            </div>
+          </div>
+          <div class="mt-auto pt-10"><div class="siri-wave"></div></div>
+        </article>
+
+        <article class="phone siri-shell p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-8 flex items-center justify-between px-2 text-slate-300"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <p class="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Today Summary</p>
+          <div class="rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-card backdrop-blur">
+            <div class="text-center">
+              <p class="text-sm text-slate-300">You asked</p>
+              <h3 class="mt-2 text-xl font-semibold text-white">“What’s on my plate today?”</h3>
+            </div>
+            <div class="mt-6 rounded-[28px] bg-white/95 p-5 text-slate-900 shadow-lg">
+              <div class="mb-4 flex items-center gap-3">
+                <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-white"><i class="fas fa-list-check"></i></div>
+                <div>
+                  <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Mission Control</p>
+                  <h4 class="text-lg font-semibold">Today — 8 tasks</h4>
+                </div>
+              </div>
+              <ol class="space-y-3 text-sm leading-6">
+                <li class="rounded-2xl bg-slate-100 px-3 py-2"><span class="font-semibold">1.</span> Design homepage <span class="float-right rounded-full bg-rose-100 px-2 py-0.5 text-xs font-semibold text-rose-700">High</span></li>
+                <li class="rounded-2xl bg-slate-100 px-3 py-2"><span class="font-semibold">2.</span> Review PR #142 <span class="float-right rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Medium</span></li>
+                <li class="rounded-2xl bg-slate-100 px-3 py-2"><span class="font-semibold">3.</span> Call dentist <span class="float-right rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-700">Low</span></li>
+              </ol>
+              <button class="mt-5 w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white">Open in Mission Control</button>
+            </div>
+          </div>
+          <div class="mt-auto pt-8"><div class="siri-wave"></div></div>
+        </article>
+
+        <article class="phone siri-shell p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-8 flex items-center justify-between px-2 text-slate-300"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <p class="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Progress Check</p>
+          <div class="rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-card backdrop-blur">
+            <div class="text-center">
+              <p class="text-sm text-slate-300">You asked</p>
+              <h3 class="mt-2 text-xl font-semibold text-white">“How am I doing today?”</h3>
+            </div>
+            <div class="mt-6 flex flex-col items-center rounded-[28px] bg-slate-950/80 p-6 text-center">
+              <div class="relative flex h-44 w-44 items-center justify-center rounded-full" style="background: conic-gradient(#38bdf8 0deg, #38bdf8 241deg, rgba(255,255,255,0.12) 241deg, rgba(255,255,255,0.12) 360deg);">
+                <div class="flex h-32 w-32 items-center justify-center rounded-full bg-slate-950 text-center shadow-inner">
+                  <div>
+                    <p class="text-4xl font-semibold text-white">67%</p>
+                    <p class="text-xs uppercase tracking-[0.24em] text-slate-400">Complete</p>
+                  </div>
+                </div>
+              </div>
+              <p class="mt-6 max-w-[220px] text-base font-medium leading-7 text-slate-200">You’ve completed <span class="text-white">6 of 9 tasks</span>. Great pace!</p>
+            </div>
+          </div>
+          <div class="mt-auto pt-8"><div class="siri-wave"></div></div>
+        </article>
+
+        <article class="phone siri-shell p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-8 flex items-center justify-between px-2 text-slate-300"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span></div>
+          <p class="mb-3 text-center text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Quick Complete</p>
+          <div class="rounded-[28px] border border-white/10 bg-white/5 p-5 shadow-card backdrop-blur">
+            <div class="text-center">
+              <p class="text-sm text-slate-300">You said</p>
+              <h3 class="mt-2 text-xl font-semibold text-white">“Mark ‘Buy milk’ as done”</h3>
+            </div>
+            <div class="mt-6 rounded-[28px] border border-emerald-400/25 bg-gradient-to-br from-emerald-500/10 to-cyan-500/10 p-6 text-center">
+              <div class="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-400/18 text-emerald-300 ring-8 ring-emerald-400/10">
+                <i class="fas fa-check text-3xl"></i>
+              </div>
+              <p class="mt-5 text-lg font-semibold text-white">Done!</p>
+              <p class="mt-2 text-sm leading-6 text-slate-300">“Buy milk” marked as complete.</p>
+              <div class="mt-5 flex items-center justify-center gap-2 text-xs font-medium text-emerald-300">
+                <span class="h-2 w-2 rounded-full bg-emerald-300 animate-pulse"></span>
+                Checkmark animation confirmed
+              </div>
+            </div>
+          </div>
+          <div class="mt-auto pt-8"><div class="siri-wave"></div></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.32em] text-amber-300">Section 2</p>
+        <h2 class="mt-2 text-2xl font-semibold text-white">Shortcuts App Cards</h2>
+        <p class="mt-2 max-w-3xl text-sm text-slate-400">Pre-built shortcut recipes and personal automations designed in the visual language of the Shortcuts app: bright icon tiles, stacked action rows, and clear triggers.</p>
+      </div>
+      <div class="grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
+        <article class="shortcut-card rounded-[30px] p-5 shadow-card">
+          <div class="mb-5 flex items-start justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-orange-300 via-amber-400 to-yellow-500 text-2xl text-white shadow-lg"><i class="fas fa-sun"></i></div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Pre-built shortcut</p>
+                <h3 class="text-xl font-semibold">Start My Day</h3>
+              </div>
+            </div>
+            <i class="fas fa-ellipsis text-slate-400"></i>
+          </div>
+          <div class="mb-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700"><i class="fas fa-clock mr-2 text-amber-500"></i>Trigger: <span class="font-semibold">Every day at 8:00 AM</span></div>
+          <div class="space-y-4">
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-600"><i class="fas fa-list-check"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Mission Control</p><p class="font-medium">Get today’s tasks from Mission Control</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600"><i class="fas fa-bell"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Notification</p><p class="font-medium">Show notification with task count</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><i class="fas fa-code-branch"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">If</p><p class="font-medium">If triage queue &gt; 5: suggest triage session</p></div></div>
+          </div>
+        </article>
+
+        <article class="shortcut-card rounded-[30px] p-5 shadow-card">
+          <div class="mb-5 flex items-start justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-sky-400 via-cyan-400 to-indigo-600 text-2xl text-white shadow-lg"><i class="fas fa-building"></i></div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Automation</p>
+                <h3 class="text-xl font-semibold">Office Arrival</h3>
+              </div>
+            </div>
+            <i class="fas fa-location-dot text-sky-500"></i>
+          </div>
+          <div class="mb-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700"><i class="fas fa-location-dot mr-2 text-sky-500"></i>Trigger: <span class="font-semibold">When I arrive at Work</span></div>
+          <div class="space-y-4">
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-violet-100 text-violet-600"><i class="fas fa-briefcase"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Focus</p><p class="font-medium">Set Focus to Work</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-600"><i class="fas fa-filter"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Mission Control</p><p class="font-medium">Filter MC to work projects</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><i class="fas fa-table-list"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Display</p><p class="font-medium">Show today’s work tasks</p></div></div>
+          </div>
+        </article>
+
+        <article class="shortcut-card rounded-[30px] p-5 shadow-card">
+          <div class="mb-5 flex items-start justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-fuchsia-500 via-purple-500 to-cyan-400 text-2xl text-white shadow-lg"><i class="fas fa-wave-square"></i></div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Automation</p>
+                <h3 class="text-xl font-semibold">NFC Desk Tag</h3>
+              </div>
+            </div>
+            <i class="fas fa-wifi text-fuchsia-500"></i>
+          </div>
+          <div class="mb-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700"><i class="fas fa-wave-square mr-2 text-fuchsia-500"></i>Trigger: <span class="font-semibold">NFC Tag “My Desk”</span></div>
+          <div class="space-y-4">
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><i class="fas fa-stopwatch"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Mission Control</p><p class="font-medium">Start focus timer</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-sky-100 text-sky-600"><i class="fas fa-mobile-screen-button"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Dynamic Island</p><p class="font-medium">Show current task on Dynamic Island</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600"><i class="fas fa-moon"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">System</p><p class="font-medium">Set DND</p></div></div>
+          </div>
+        </article>
+
+        <article class="shortcut-card rounded-[30px] p-5 shadow-card">
+          <div class="mb-5 flex items-start justify-between">
+            <div class="flex items-center gap-4">
+              <div class="flex h-16 w-16 items-center justify-center rounded-[22px] bg-gradient-to-br from-indigo-500 via-slate-700 to-slate-900 text-2xl text-white shadow-lg"><i class="fas fa-moon"></i></div>
+              <div>
+                <p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Automation</p>
+                <h3 class="text-xl font-semibold">End of Day</h3>
+              </div>
+            </div>
+            <i class="fas fa-toggle-on text-indigo-500"></i>
+          </div>
+          <div class="mb-4 rounded-2xl bg-slate-100 px-4 py-3 text-sm text-slate-700"><i class="fas fa-circle-notch mr-2 text-indigo-500"></i>Trigger: <span class="font-semibold">When Work Focus turns off</span></div>
+          <div class="space-y-4">
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 text-blue-600"><i class="fas fa-list"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Mission Control</p><p class="font-medium">Get remaining tasks</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-600"><i class="fas fa-comment-dots"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Prompt</p><p class="font-medium">Ask “Move to tomorrow?”</p></div></div>
+            <div class="action-row relative flex gap-3 rounded-2xl bg-white px-4 py-3 shadow-sm"><div class="mt-1 flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-600"><i class="fas fa-calendar-check"></i></div><div><p class="text-xs uppercase tracking-[0.2em] text-slate-500">Mission Control</p><p class="font-medium">Update schedule</p></div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.32em] text-cyan-300">Section 3</p>
+        <h2 class="mt-2 text-2xl font-semibold text-white">Share Extension</h2>
+        <p class="mt-2 max-w-3xl text-sm text-slate-400">Mission Control appears directly in the iOS Share Sheet and captures URLs, selected text, and images into a compact triage-friendly flow with optional metadata.</p>
+      </div>
+      <div class="grid gap-8 xl:grid-cols-3">
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <div class="h-full rounded-[30px] bg-slate-900/5 p-3">
+            <div class="mb-4 rounded-[26px] bg-white px-4 py-4 shadow-lg">
+              <div class="mb-4 flex justify-center"><div class="h-1.5 w-14 rounded-full bg-slate-300"></div></div>
+              <div class="grid grid-cols-4 gap-4 text-center text-[11px] text-slate-600">
+                <div><div class="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-500 text-white"><i class="fab fa-safari"></i></div>Safari</div>
+                <div><div class="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-yellow-400 text-white"><i class="fas fa-note-sticky"></i></div>Notes</div>
+                <div><div class="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-sky-400 text-white"><i class="fas fa-image"></i></div>Photos</div>
+                <div><div class="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500 text-white"><i class="fas fa-message"></i></div>Messages</div>
+                <div class="col-span-4 mt-2 rounded-[24px] border-2 border-blue-500 bg-blue-50 px-4 py-3">
+                  <div class="flex items-center gap-3">
+                    <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white"><i class="fas fa-rocket"></i></div>
+                    <div class="text-left">
+                      <p class="text-sm font-semibold text-slate-900">Mission Control</p>
+                      <p class="text-xs text-slate-500">Highlighted in Share Sheet</p>
+                    </div>
+                    <i class="fas fa-circle-check ml-auto text-xl text-blue-500"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="rounded-[26px] bg-slate-100 px-4 py-4 text-sm text-slate-600 shadow-inner">
+              <p class="font-semibold text-slate-800">Share Sheet Selection</p>
+              <p class="mt-1 leading-6">Users can send links, text, screenshots, and images into Mission Control in one tap from anywhere in iOS.</p>
+            </div>
+          </div>
+        </article>
+
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <div class="ios-sheet rounded-[30px] p-4">
+            <div class="mb-3 flex justify-center"><div class="h-1.5 w-14 rounded-full bg-slate-300"></div></div>
+            <div class="mb-4 flex items-center gap-3">
+              <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white"><i class="fas fa-rocket"></i></div>
+              <div>
+                <h3 class="text-lg font-semibold">Add to Mission Control</h3>
+                <p class="text-xs text-slate-500">Captured content preview</p>
+              </div>
+            </div>
+            <div class="space-y-3 text-sm">
+              <div class="rounded-2xl bg-slate-100 p-3">
+                <div class="mb-1 flex items-center gap-2 text-slate-500"><i class="fab fa-safari text-blue-500"></i> URL from Safari</div>
+                <p class="font-medium text-slate-900">How to run better async retrospectives</p>
+                <p class="mt-1 text-xs text-slate-500">productcraft.example.com/async-retrospectives</p>
+              </div>
+              <div class="rounded-2xl bg-slate-100 p-3">
+                <div class="mb-1 flex items-center gap-2 text-slate-500"><i class="fas fa-note-sticky text-yellow-500"></i> Text selection from Notes</div>
+                <p class="font-medium text-slate-900">“Draft priorities for Q4 planning and send to leadership.”</p>
+              </div>
+              <div class="rounded-2xl bg-slate-100 p-3">
+                <div class="mb-2 flex items-center gap-2 text-slate-500"><i class="fas fa-image text-rose-500"></i> Image from Photos</div>
+                <div class="flex items-center gap-3">
+                  <div class="h-14 w-14 rounded-2xl bg-gradient-to-br from-rose-200 via-amber-100 to-cyan-100 shadow-inner"></div>
+                  <div>
+                    <p class="font-medium text-slate-900">Whiteboard photo</p>
+                    <p class="text-xs text-slate-500">OCR capture</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mt-4 space-y-3">
+              <div class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3"><span class="text-sm font-medium">Project</span><span class="text-sm text-slate-500">Inbox <i class="fas fa-chevron-down ml-2 text-xs"></i></span></div>
+              <div class="flex items-center justify-between rounded-2xl border border-slate-200 bg-white px-4 py-3"><span class="text-sm font-medium">Needs Triage</span><span class="flex h-7 w-12 rounded-full bg-blue-500 p-1"><span class="ml-auto h-5 w-5 rounded-full bg-white"></span></span></div>
+            </div>
+            <div class="mt-5 grid grid-cols-2 gap-3">
+              <button class="rounded-2xl bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-700">Cancel</button>
+              <button class="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white">Add</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span></div>
+          <div class="h-full rounded-[30px] bg-gradient-to-b from-slate-100 to-slate-200 p-4 shadow-inner">
+            <div class="toast mx-auto mt-8 w-fit rounded-full px-5 py-3 text-sm font-semibold text-white shadow-lg"><i class="fas fa-check mr-2 text-emerald-300"></i>Saved to Mission Control</div>
+            <div class="mt-8 space-y-4">
+              <div class="rounded-[28px] bg-white p-4 shadow-lg">
+                <div class="mb-3 flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600"><i class="fab fa-safari"></i></div><div><p class="font-semibold">Safari URL</p><p class="text-xs text-slate-500">Page title + URL + favicon</p></div></div>
+                <p class="text-sm text-slate-700">Saved as a triage item with link metadata.</p>
+              </div>
+              <div class="rounded-[28px] bg-white p-4 shadow-lg">
+                <div class="mb-3 flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-yellow-50 text-yellow-600"><i class="fas fa-note-sticky"></i></div><div><p class="font-semibold">Notes text selection</p><p class="text-xs text-slate-500">Inline text snippet</p></div></div>
+                <p class="text-sm text-slate-700">Captured directly into Mission Control as a task or note.</p>
+              </div>
+              <div class="rounded-[28px] bg-white p-4 shadow-lg">
+                <div class="mb-3 flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600"><i class="fas fa-image"></i></div><div><p class="font-semibold">Photos image</p><p class="text-xs text-slate-500">Thumbnail + OCR capture</p></div></div>
+                <p class="text-sm text-slate-700">Vision/OCR converts snapshots into searchable task captures.</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.32em] text-emerald-300">Section 4</p>
+        <h2 class="mt-2 text-2xl font-semibold text-white">Focus Filters</h2>
+        <p class="mt-2 max-w-3xl text-sm text-slate-400">Project visibility changes with iOS Focus modes so Mission Control feels context-aware instead of one-size-fits-all.</p>
+      </div>
+      <div class="grid gap-8 xl:grid-cols-2">
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <div class="settings-panel rounded-[30px] p-5 shadow-card">
+            <div class="mb-5 flex items-center gap-3"><div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-100 text-violet-600"><i class="fas fa-briefcase"></i></div><div><p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Focus Settings</p><h3 class="text-2xl font-semibold">Work Focus</h3></div></div>
+            <div class="space-y-4">
+              <div class="rounded-3xl bg-white p-4 shadow-sm">
+                <div class="mb-3 flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white"><i class="fas fa-rocket"></i></div><div><p class="font-semibold">Mission Control</p><p class="text-xs text-slate-500">Show only:</p></div></div>
+                <div class="space-y-3 text-sm">
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"><span>Work</span><i class="fas fa-check-circle text-emerald-500"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"><span>Side Project</span><i class="fas fa-check-circle text-emerald-500"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-slate-400"><span>Personal</span><i class="fas fa-circle text-slate-300"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-slate-400"><span>Shopping</span><i class="fas fa-circle text-slate-300"></i></div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between rounded-3xl bg-white p-4 shadow-sm"><div><p class="font-semibold">Today only</p><p class="text-xs text-slate-500">Limit view to today’s tasks</p></div><span class="toggle-on h-7 w-14 rounded-full"></span></div>
+              <div class="rounded-3xl bg-blue-50 p-4 text-sm leading-6 text-blue-900">When Work Focus is active, MC filters to work-related tasks only.</div>
+            </div>
+          </div>
+        </article>
+
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span></div>
+          <div class="settings-panel rounded-[30px] p-5 shadow-card">
+            <div class="mb-5 flex items-center gap-3"><div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-pink-100 text-pink-600"><i class="fas fa-heart"></i></div><div><p class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Focus Settings</p><h3 class="text-2xl font-semibold">Personal Focus</h3></div></div>
+            <div class="space-y-4">
+              <div class="rounded-3xl bg-white p-4 shadow-sm">
+                <div class="mb-3 flex items-center gap-3"><div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white"><i class="fas fa-rocket"></i></div><div><p class="font-semibold">Mission Control</p><p class="text-xs text-slate-500">Show only:</p></div></div>
+                <div class="space-y-3 text-sm">
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-slate-400"><span>Work</span><i class="fas fa-circle text-slate-300"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3 text-slate-400"><span>Side Project</span><i class="fas fa-circle text-slate-300"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"><span>Personal</span><i class="fas fa-check-circle text-emerald-500"></i></div>
+                  <div class="flex items-center justify-between rounded-2xl bg-slate-50 px-4 py-3"><span>Shopping</span><i class="fas fa-check-circle text-emerald-500"></i></div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between rounded-3xl bg-white p-4 shadow-sm"><div><p class="font-semibold">Today only</p><p class="text-xs text-slate-500">Show personal tasks due today</p></div><span class="toggle-on h-7 w-14 rounded-full"></span></div>
+              <div class="rounded-3xl bg-pink-50 p-4 text-sm leading-6 text-pink-900">Personal Focus hides work projects and surfaces errands, home, and life-admin tasks.</div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="mb-6">
+        <p class="text-xs font-semibold uppercase tracking-[0.32em] text-sky-300">Section 5</p>
+        <h2 class="mt-2 text-2xl font-semibold text-white">App Clip</h2>
+        <p class="mt-2 max-w-3xl text-sm text-slate-400">A fast-entry experience for shared checklists in Messages or Safari without requiring the full app install.</p>
+      </div>
+      <div class="grid gap-8 xl:grid-cols-2">
+        <article class="phone light p-4 pt-16">
+          <div class="notch"></div>
+          <div class="status-bar mb-6 flex items-center justify-between px-2 text-slate-500"><span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-full"></i></span></div>
+          <div class="space-y-5">
+            <div class="appclip-card rounded-[28px] p-4 shadow-card">
+              <p class="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Safari App Clip banner</p>
+              <div class="flex items-center gap-3 rounded-[24px] border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                <div class="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-400 to-blue-600 text-white"><i class="fas fa-rocket"></i></div>
+                <div class="min-w-0 flex-1">
+                  <p class="font-semibold">Mission Control</p>
+                  <p class="text-sm text-slate-500">Shared List</p>
+                  <p class="mt-1 text-sm text-slate-900">View trip planning checklist</p>
+                </div>
+                <button class="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Open</button>
+              </div>
+            </div>
+            <div class="appclip-card rounded-[28px] p-5 shadow-card">
+              <div class="mb-4 flex items-center justify-between"><div><p class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">App Clip content</p><h3 class="mt-1 text-2xl font-semibold">Trip Planning 🏖️</h3></div><span class="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-700">Shared list</span></div>
+              <div class="space-y-3 text-sm">
+                <div class="rounded-2xl bg-slate-100 px-4 py-3"><i class="fas fa-check-circle mr-2 text-emerald-500"></i>Book flights</div>
+                <div class="rounded-2xl bg-slate-100 px-4 py-3"><i class="fas fa-check-circle mr-2 text-emerald-500"></i>Reserve hotel</div>
+                <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3"><i class="far fa-circle mr-2 text-slate-400"></i>Pack bags</div>
+                <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3"><i class="far fa-circle mr-2 text-slate-400"></i>Arrange pet sitter</div>
+              </div>
+              <p class="mt-4 text-sm text-slate-500">Shared by Ryan · 4 items</p>
+              <button class="mt-5 w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white"><i class="fas fa-plus mr-2"></i>Add Item</button>
+              <div class="mt-5 rounded-2xl border border-dashed border-blue-300 bg-blue-50 px-4 py-3 text-center text-sm text-blue-900">Get the full app <span class="text-blue-600">with App Store overlay hint</span></div>
+            </div>
+          </div>
+        </article>
+
+        <article class="rounded-[36px] border border-slate-700/70 bg-slate-900/70 p-8 shadow-card backdrop-blur">
+          <div class="mb-6 flex items-center gap-4">
+            <div class="flex h-16 w-16 items-center justify-center rounded-[24px] bg-gradient-to-br from-cyan-400 to-blue-600 text-2xl text-white shadow-lg"><i class="fas fa-mobile-screen"></i></div>
+            <div>
+              <p class="text-xs font-semibold uppercase tracking-[0.28em] text-slate-400">System integration highlights</p>
+              <h3 class="mt-1 text-2xl font-semibold text-white">Why this feels natively iOS</h3>
+            </div>
+          </div>
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="rounded-3xl border border-slate-700 bg-slate-950/60 p-5">
+              <p class="text-sm font-semibold text-white">Siri</p>
+              <p class="mt-2 text-sm leading-6 text-slate-400">Fast capture, conversational summaries, progress snapshots, and completion updates without opening the app.</p>
+            </div>
+            <div class="rounded-3xl border border-slate-700 bg-slate-950/60 p-5">
+              <p class="text-sm font-semibold text-white">Shortcuts</p>
+              <p class="mt-2 text-sm leading-6 text-slate-400">Composable building blocks for routines, arrival-based automations, and end-of-day planning rituals.</p>
+            </div>
+            <div class="rounded-3xl border border-slate-700 bg-slate-950/60 p-5">
+              <p class="text-sm font-semibold text-white">Share Extension</p>
+              <p class="mt-2 text-sm leading-6 text-slate-400">Zero-friction capture of webpages, text snippets, screenshots, and images with triage metadata.</p>
+            </div>
+            <div class="rounded-3xl border border-slate-700 bg-slate-950/60 p-5">
+              <p class="text-sm font-semibold text-white">Focus + App Clip</p>
+              <p class="mt-2 text-sm leading-6 text-slate-400">Context-aware project filtering and lightweight sharing for collaborators who do not yet have the full app.</p>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,57 @@
+{
+  "project": {
+    "name": "Linear inspiration review",
+    "description": "Assess Linear's product patterns against Mission Control's existing capabilities. Prioritize refinements and selective additions without copying team-scale ceremony into a personal command center.",
+    "color": "#8b5cf6",
+    "icon": "lucide:sparkles",
+    "category": "Product Research",
+    "metadata": {
+      "researchStatus": "assessment-complete",
+      "sourceProduct": "Linear",
+      "artifact": "linear-mission-control-assessment.html",
+      "createdAt": "2026-08-05"
+    }
+  },
+  "tasks": [
+    {
+      "title": "Define explainable Project Pulse",
+      "priority": "high",
+      "description": "Evolve the existing computed project health into an explainable Pulse: lifecycle status remains separate; health shows on-track, watch, or off-track with reasons, freshness, trend, and suggested next action."
+    },
+    {
+      "title": "Wire project tags end to end",
+      "priority": "high",
+      "description": "Mission Control already has project_tags storage and overview reads, but no project tag editing API/UI. Keep category as the primary grouping and add tags for cross-cutting themes, goals, contexts, and integrations."
+    },
+    {
+      "title": "Prototype portfolio roadmap timeline",
+      "priority": "high",
+      "description": "Add a projects-only roadmap separate from the task due-date calendar. Reuse project phases, milestones, target dates, dependencies, categories, tags, and computed health; support zoom and grouping."
+    },
+    {
+      "title": "Add drillable scatter insight mode",
+      "priority": "medium",
+      "description": "Extend existing lead-time percentiles and task-age drilldowns with per-task scatter points, P50/P85/P95 bands, source/project segmentation, and click-to-open behavior."
+    },
+    {
+      "title": "Extend command palette scopes and actions",
+      "priority": "medium",
+      "description": "Build on the existing Ctrl+K hybrid search, quick-create parsing, slash search, and G-chords. Add explicit task/project/tag/source scopes and action commands; keep shortcuts discoverable in the palette."
+    },
+    {
+      "title": "Unify inbound triage semantics",
+      "priority": "medium",
+      "description": "Reconcile content triage, Scout actions, connector-created tasks, and notifications into a consistent accept, dismiss, snooze, merge, and route mental model without creating another inbox."
+    },
+    {
+      "title": "Prioritize integration platform capabilities",
+      "priority": "medium",
+      "description": "Favor MCP, inbound/outbound webhooks, n8n, custom REST, and connector capability contracts. Deepen a few high-value flows such as GitHub lifecycle, M365/Planner, browser capture, and actionable monitoring rather than cloning Linear's integration catalog."
+    },
+    {
+      "title": "Defer initiative entity pending evidence",
+      "priority": "low",
+      "description": "Use category plus project tags and smart views as the initiative analog. Reconsider a first-class objective/initiative entity only when curated multi-project goals require ownership, target dates, resources, and rollup history."
+    }
+  ]
+}

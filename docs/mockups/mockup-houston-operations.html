@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mission Control - Houston Flight Director</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #020617;
+    --surface-0: #07101f;
+    --surface-1: #0f172a;
+    --surface-2: #172033;
+    --surface-3: #22304a;
+    --border: #24324a;
+    --border-strong: #3c506f;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --subtle: #64748b;
+    --blue: #60a5fa;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #fb7185;
+    --lane-pc: rgba(59,130,246,.06);
+    --lane-mc: rgba(139,92,246,.06);
+    --lane-cloud: rgba(34,211,238,.05);
+    --lane-sandbox: rgba(251,191,36,.05);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); font-family: Inter, "Segoe UI", system-ui, sans-serif; }
+  button { color: inherit; font: inherit; }
+  button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  .app { min-width: 1120px; min-height: 100vh; background:
+    radial-gradient(circle at 48% -20%, rgba(59,130,246,.14), transparent 36rem),
+    linear-gradient(180deg, #050b16, var(--bg)); }
+  .topbar {
+    height: 58px; display: flex; align-items: center; gap: 18px; padding: 0 18px;
+    border-bottom: 1px solid var(--border); background: rgba(7,16,31,.94); backdrop-filter: blur(16px);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 260px; }
+  .brand-mark {
+    width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px;
+    background: linear-gradient(135deg,#2563eb,#7c3aed); box-shadow: 0 0 28px rgba(96,165,250,.16);
+  }
+  .brand strong, .brand span { display: block; }
+  .brand strong { font-size: 13px; letter-spacing: .01em; }
+  .brand span { margin-top: 1px; color: var(--subtle); font-size: 10px; }
+  .tabs { display: flex; align-self: stretch; gap: 2px; }
+  .tab {
+    padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: transparent;
+    color: var(--muted); cursor: pointer; font-size: 11px; font-weight: 650;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--cyan); }
+  .top-status { display: flex; align-items: center; gap: 12px; margin-left: auto; color: var(--muted); font-size: 10px; }
+  .status-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px color-mix(in srgb,var(--green) 65%,transparent); }
+
+  .screen { display: none; height: calc(100vh - 58px); }
+  .screen.active { display: block; }
+
+  /* Operations */
+  .ops { height: 100%; display: grid; grid-template-columns: 230px minmax(600px,1fr) 300px; grid-template-rows: minmax(420px,1fr) 178px; }
+  .run-list { grid-column: 1; grid-row: 1 / span 2; padding: 14px 11px; border-right: 1px solid var(--border); background: var(--surface-0); overflow: auto; }
+  .eyebrow { color: var(--subtle); font-size: 9px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+  .run-head { display: flex; align-items: center; justify-content: space-between; margin: 5px 4px 12px; }
+  .run-head strong { font-size: 15px; }
+  .count { padding: 2px 6px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 9px; }
+  .run {
+    width: 100%; margin-bottom: 6px; padding: 10px; border: 1px solid transparent; border-radius: 9px;
+    background: transparent; text-align: left; cursor: pointer;
+  }
+  .run:hover { background: var(--surface-1); }
+  .run.active { border-color: var(--border-strong); background: var(--surface-2); }
+  .run-row { display: flex; align-items: center; gap: 7px; }
+  .run-type { width: 7px; height: 7px; border-radius: 50%; background: var(--blue); }
+  .run-type.scout { background: var(--violet); }
+  .run-type.code { background: var(--cyan); }
+  .run-type.workflow { border-radius: 2px; background: var(--green); }
+  .run-type.sandbox { border-radius: 2px; background: var(--amber); }
+  .run b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .run-state { margin-left: auto; color: var(--green); font-size: 9px; }
+  .run p { margin: 6px 0 0 14px; color: var(--subtle); font-size: 9px; line-height: 1.35; }
+  .approval-alert { margin: 14px 4px; padding: 10px; border: 1px solid rgba(251,191,36,.25); border-radius: 9px; background: rgba(251,191,36,.07); }
+  .approval-alert b { display: block; color: var(--amber); font-size: 10px; }
+  .approval-alert span { display: block; margin-top: 4px; color: var(--muted); font-size: 9px; line-height: 1.4; }
+
+  .canvas { grid-column: 2; grid-row: 1; position: relative; overflow: hidden; background:
+    linear-gradient(rgba(148,163,184,.035) 1px, transparent 1px),
+    linear-gradient(90deg,rgba(148,163,184,.035) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .canvas-head {
+    position: absolute; z-index: 10; top: 12px; left: 14px; right: 14px; display: flex; align-items: flex-start; pointer-events: none;
+  }
+  .canvas-head h1 { margin: 3px 0 2px; font-size: 16px; }
+  .canvas-head p { margin: 0; color: var(--muted); font-size: 10px; }
+  .legend { display: flex; gap: 7px; margin-left: auto; pointer-events: auto; }
+  .legend span { padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; background: rgba(7,16,31,.9); color: var(--muted); font-size: 8px; }
+  .view-toggle { padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; background: rgba(7,16,31,.9); color: var(--muted); cursor: pointer; font-size: 8px; }
+  .view-toggle.active { border-color: var(--cyan); color: var(--text); }
+  .lanes { position: absolute; inset: 64px 14px 12px; display: grid; grid-template-columns: 1fr 1.2fr 1.15fr .9fr; gap: 7px; }
+  .lane { position: relative; min-width: 0; border: 1px solid var(--border); border-radius: 11px; overflow: hidden; }
+  .lane.pc { background: var(--lane-pc); }
+  .lane.mc { background: var(--lane-mc); }
+  .lane.cloud { background: var(--lane-cloud); }
+  .lane.sandbox { background: var(--lane-sandbox); border-style: dashed; }
+  .lane-title {
+    display: flex; align-items: center; gap: 6px; height: 31px; padding: 0 9px; border-bottom: 1px solid var(--border);
+    background: rgba(2,6,23,.5); color: var(--muted); font-size: 8px; font-weight: 800; letter-spacing: .08em;
+  }
+  .lane-title i { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .lane-title small { margin-left: auto; color: var(--subtle); font-size: 8px; font-weight: 500; letter-spacing: 0; }
+  .node {
+    position: absolute; z-index: 4; width: calc(100% - 22px); left: 11px; padding: 9px;
+    border: 1px solid var(--border-strong); border-radius: 9px; background: rgba(15,23,42,.95);
+    box-shadow: 0 8px 24px rgba(0,0,0,.25); cursor: pointer; text-align: left;
+  }
+  .node:hover, .node.selected { border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(34,211,238,.12), 0 8px 28px rgba(0,0,0,.34); }
+  .node.agent { border-radius: 18px; }
+  .node.sandbox-node { border-style: double; border-width: 3px; }
+  .node .kind { display: flex; align-items: center; gap: 5px; color: var(--subtle); font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+  .node .kind em { width: 6px; height: 6px; border-radius: 50%; background: var(--blue); }
+  .node .kind em.violet { background: var(--violet); }
+  .node .kind em.cyan { background: var(--cyan); }
+  .node .kind em.green { border-radius: 1px; background: var(--green); }
+  .node .kind em.amber { border-radius: 1px; background: var(--amber); }
+  .node .kind span { margin-left: auto; color: var(--green); letter-spacing: 0; }
+  .node h3 { margin: 5px 0 3px; font-size: 10px; line-height: 1.2; }
+  .node p { margin: 0; overflow: hidden; color: var(--muted); font-size: 8px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+  .caps { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 6px; }
+  .caps b { padding: 2px 4px; border: 1px solid var(--border); border-radius: 4px; color: var(--subtle); font-size: 7px; font-weight: 600; }
+  .caps b.on { color: var(--green); border-color: rgba(52,211,153,.25); }
+  .caps b.wait { color: var(--amber); border-color: rgba(251,191,36,.25); }
+  .n-companion { top: 52px; }
+  .n-local { top: 180px; }
+  .n-houston { top: 52px; }
+  .n-policy { top: 170px; }
+  .n-workflow { top: 278px; }
+  .n-scout { top: 52px; }
+  .n-copilot { top: 178px; }
+  .n-sandbox { top: 116px; }
+  .edge {
+    position: absolute; z-index: 2; height: 1px; transform-origin: left center;
+    background: linear-gradient(90deg,var(--blue),var(--violet)); opacity: .8;
+  }
+  .edge::after { content: ""; position: absolute; right: -1px; top: -3px; width: 6px; height: 6px; border-top: 1px solid var(--cyan); border-right: 1px solid var(--cyan); transform: rotate(45deg); }
+  .edge.dotted { height: 0; border-top: 1px dashed var(--violet); background: none; }
+  .e1 { top: 154px; left: 22%; width: 8%; }
+  .e2 { top: 154px; left: 52%; width: 7%; }
+  .e3 { top: 250px; left: 52%; width: 7%; transform: rotate(-10deg); }
+  .e4 { top: 310px; left: 52%; width: 7%; transform: rotate(13deg); }
+  .e5 { top: 216px; left: 81%; width: 6%; }
+  .edge-label { position: absolute; z-index: 3; padding: 2px 4px; border-radius: 4px; background: var(--bg); color: var(--subtle); font-size: 7px; }
+  .el1 { top: 142px; left: 24%; } .el2 { top: 142px; left: 54%; } .el3 { top: 231px; left: 54%; } .el4 { top: 315px; left: 54%; } .el5 { top: 203px; left: 82%; }
+  .run-table-view { display: none; position: absolute; inset: 64px 14px 12px; overflow: auto; border: 1px solid var(--border); border-radius: 11px; background: rgba(7,16,31,.96); }
+  .run-table-view table { width: 100%; border-collapse: collapse; font-size: 9px; }
+  .run-table-view th { position: sticky; top: 0; padding: 9px; background: var(--surface-2); color: var(--subtle); text-align: left; letter-spacing: .06em; text-transform: uppercase; }
+  .run-table-view td { padding: 10px 9px; border-top: 1px solid var(--border); color: var(--muted); }
+  .run-table-view td:first-child { color: var(--text); font-weight: 650; }
+  .canvas.list-mode .lanes, .canvas.list-mode .edge, .canvas.list-mode .edge-label { display: none; }
+  .canvas.list-mode .run-table-view { display: block; }
+
+  .inspector { grid-column: 3; grid-row: 1 / span 2; border-left: 1px solid var(--border); background: var(--surface-1); overflow: auto; }
+  .inspector-head { padding: 15px; border-bottom: 1px solid var(--border); }
+  .inspector-head .type { color: var(--cyan); font-size: 8px; font-weight: 800; letter-spacing: .1em; }
+  .inspector-head h2 { margin: 5px 0 3px; font-size: 15px; }
+  .inspector-head p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+  .inspect-section { padding: 13px 15px; border-bottom: 1px solid var(--border); }
+  .inspect-section h3 { margin: 0 0 9px; color: var(--subtle); font-size: 8px; letter-spacing: .09em; text-transform: uppercase; }
+  .fact { display: flex; justify-content: space-between; gap: 10px; margin: 7px 0; color: var(--muted); font-size: 9px; }
+  .fact b { color: var(--text); font-weight: 600; text-align: right; }
+  .grant { display: flex; align-items: center; gap: 7px; margin: 6px 0; color: var(--muted); font-size: 9px; }
+  .grant i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .grant i.wait { background: var(--amber); }
+  .grant i.off { background: var(--red); }
+  .receipt { padding: 9px; border-left: 2px solid var(--green); border-radius: 0 7px 7px 0; background: rgba(52,211,153,.06); color: var(--muted); font-size: 9px; line-height: 1.45; }
+  .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .action { padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); cursor: pointer; font-size: 8px; }
+  .action.primary { border-color: #2563eb; background: #2563eb; color: white; }
+  .action.danger { color: var(--red); }
+
+  .timeline { grid-column: 2; border-top: 1px solid var(--border); background: var(--surface-0); overflow: hidden; }
+  .timeline-head { height: 31px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 8px; }
+  .timeline-head strong { color: var(--text); font-size: 9px; }
+  .ruler { position: relative; margin-left: auto; width: 58%; display: flex; justify-content: space-between; color: var(--subtle); }
+  .spans { padding: 8px 12px; }
+  .span-row { height: 25px; display: grid; grid-template-columns: 150px 1fr 42px; align-items: center; gap: 8px; color: var(--muted); font-size: 8px; }
+  .bar-track { position: relative; height: 7px; border-radius: 4px; background: rgba(148,163,184,.08); }
+  .span-bar { position: absolute; top: 0; bottom: 0; left: var(--x); width: var(--w); border-radius: 4px; background: var(--c); box-shadow: 0 0 10px color-mix(in srgb,var(--c) 28%,transparent); }
+  .span-row time { color: var(--subtle); text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Voice */
+  .voice-screen { height: 100%; display: grid; grid-template-columns: minmax(560px,1fr) 340px; }
+  .voice-stage { position: relative; display: grid; place-items: center; overflow: hidden; }
+  .voice-stage::before { content: ""; position: absolute; inset: 8%; border: 1px solid rgba(96,165,250,.08); border-radius: 50%; }
+  .voice-wrap { position: relative; width: min(520px,70vw); text-align: center; }
+  .orb {
+    --state: var(--blue); position: relative; width: 230px; height: 230px; margin: 0 auto 34px;
+    border-radius: 50%; perspective: 700px; isolation: isolate;
+    filter: drop-shadow(0 0 26px color-mix(in srgb,var(--state) 22%,transparent));
+  }
+  .orb::before, .orb::after { content: ""; position: absolute; z-index: 2; border-radius: 50%; pointer-events: none; }
+  .orb::before {
+    inset: 24px; border: 1px solid color-mix(in srgb,var(--state) 58%,white);
+    box-shadow: inset 0 0 28px color-mix(in srgb,var(--state) 18%,transparent), 0 0 32px color-mix(in srgb,var(--state) 18%,transparent);
+    transform: rotateX(66deg) rotateZ(-12deg); animation: orbitTilt 7s linear infinite;
+  }
+  .orb::after {
+    inset: -16px; border: 1px dashed color-mix(in srgb,var(--state) 42%,transparent);
+    box-shadow: 0 0 0 12px rgba(96,165,250,.018), 0 0 0 34px rgba(96,165,250,.012);
+    animation: rotate 19s linear infinite;
+  }
+  .constellation-canvas { position: absolute; z-index: 1; width: 340px; height: 340px; left: -55px; top: -55px; }
+  .core-shell {
+    position: absolute; z-index: 3; inset: 61px; border-radius: 50%;
+    border: 1px solid color-mix(in srgb,var(--state) 72%,white);
+    background:
+      radial-gradient(circle at 38% 34%,rgba(255,255,255,.72),transparent 3%),
+      radial-gradient(circle at 45% 42%,color-mix(in srgb,var(--state) 72%,white),var(--state) 16%,color-mix(in srgb,var(--state) 35%,#07101f) 43%,rgba(2,6,23,.72) 70%);
+    box-shadow: inset -15px -18px 28px rgba(0,0,0,.58), inset 8px 8px 24px rgba(255,255,255,.08), 0 0 26px color-mix(in srgb,var(--state) 45%,transparent);
+    animation: coreBreathe 2.6s ease-in-out infinite;
+  }
+  .core-shell::before {
+    content: ""; position: absolute; inset: 17%; border-radius: 42% 58% 55% 45%;
+    border: 1px solid color-mix(in srgb,var(--state) 55%,white); opacity: .62;
+    animation: morphCore 5s ease-in-out infinite alternate;
+  }
+  .core-shell::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 5px; height: 5px; border-radius: 50%;
+    background: white; box-shadow: 0 0 8px 3px white, 0 0 22px 8px var(--state); transform: translate(-50%,-50%);
+  }
+  .orb[data-state="listening"] { --state: var(--cyan); }
+  .orb[data-state="thinking"] { --state: var(--violet); }
+  .orb[data-state="speaking"] { --state: var(--green); }
+  .orb[data-state="approval"] { --state: var(--amber); }
+  .orb[data-state="error"] { --state: var(--red); }
+  @keyframes rotate { to { transform: rotate(360deg); } }
+  @keyframes orbitTilt { to { transform: rotateX(66deg) rotateZ(348deg); } }
+  @keyframes coreBreathe { 50% { transform: scale(1.075); filter: brightness(1.18); } }
+  @keyframes morphCore { to { border-radius: 61% 39% 44% 56%; transform: rotate(115deg) scale(.88); } }
+  .state-label { font-size: 10px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; color: var(--cyan); }
+  .voice-wrap h1 { margin: 8px 0 10px; font-size: 25px; letter-spacing: -.03em; }
+  .transcript { min-height: 44px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+  .wave { height: 34px; display: flex; align-items: center; justify-content: center; gap: 3px; margin: 12px 0; }
+  .wave i { width: 3px; height: var(--h); border-radius: 4px; background: var(--cyan); opacity: .8; animation: wave 700ms ease-in-out infinite alternate; animation-delay: var(--d); }
+  @keyframes wave { to { transform: scaleY(.35); opacity: .35; } }
+  .state-controls { display: flex; justify-content: center; flex-wrap: wrap; gap: 6px; }
+  .state-control { padding: 6px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); color: var(--muted); cursor: pointer; font-size: 9px; }
+  .state-control.active { color: white; border-color: var(--blue); background: rgba(59,130,246,.18); }
+  .voice-side { padding: 17px; border-left: 1px solid var(--border); background: var(--surface-0); overflow: auto; }
+  .voice-card { margin-top: 11px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  .voice-card h3 { margin: 0 0 8px; font-size: 11px; }
+  .dispatch-path { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 9px; }
+  .dispatch-path b { padding: 4px 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); }
+  .approval-card { border-color: rgba(251,191,36,.35); background: rgba(251,191,36,.06); }
+
+  /* Companion */
+  .companion-screen { height: 100%; display: grid; place-items: center; background: radial-gradient(circle at 50% 40%,rgba(59,130,246,.1),transparent 36rem); }
+  .desktop { width: 900px; height: 560px; position: relative; border: 1px solid var(--border); border-radius: 14px; background:
+    linear-gradient(135deg,rgba(14,116,144,.08),rgba(88,28,135,.08)), #050b16; box-shadow: 0 30px 80px rgba(0,0,0,.5); }
+  .taskbar { position: absolute; left: 0; right: 0; bottom: 0; height: 43px; display: flex; align-items: center; justify-content: center; border-top: 1px solid var(--border); background: rgba(15,23,42,.92); }
+  .tray { position: absolute; right: 12px; display: flex; gap: 7px; color: var(--muted); font-size: 9px; }
+  .tray-orb { width: 17px; height: 17px; border-radius: 50%; background: radial-gradient(circle,var(--cyan),#1e3a8a 70%); box-shadow: 0 0 12px rgba(34,211,238,.4); }
+  .companion-panel { position: absolute; right: 17px; bottom: 52px; width: 310px; border: 1px solid var(--border-strong); border-radius: 12px; background: rgba(15,23,42,.98); box-shadow: 0 20px 60px rgba(0,0,0,.55); overflow: hidden; }
+  .companion-head { display: flex; align-items: center; gap: 9px; padding: 12px; border-bottom: 1px solid var(--border); }
+  .mini-orb { width: 28px; height: 28px; border-radius: 50%; background: radial-gradient(circle at 35% 28%,white,transparent 12%),radial-gradient(circle,var(--cyan),#1e3a8a 70%); }
+  .companion-head b, .companion-head span { display: block; }
+  .companion-head b { font-size: 11px; } .companion-head span { color: var(--muted); font-size: 8px; }
+  .paired { margin-left: auto; color: var(--green); font-size: 8px; }
+  .companion-body { padding: 11px 12px; }
+  .companion-run { padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); }
+  .companion-run + .companion-run { margin-top: 6px; }
+  .companion-run b { display: block; font-size: 9px; }
+  .companion-run span { display: block; margin-top: 3px; color: var(--muted); font-size: 8px; }
+  .companion-menu { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-top: 9px; }
+  .companion-menu button { padding: 7px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2); color: var(--muted); cursor: pointer; font-size: 8px; }
+  .companion-stop { width: 100%; margin-top: 7px; padding: 7px; border: 1px solid rgba(251,113,133,.25); border-radius: 6px; background: rgba(251,113,133,.07); color: var(--red); cursor: pointer; font-size: 8px; }
+  .hotkey { position: absolute; left: 50%; top: 45%; transform: translate(-50%,-50%); width: 420px; padding: 16px; border: 1px solid var(--border-strong); border-radius: 14px; background: rgba(7,16,31,.94); text-align: center; box-shadow: 0 22px 70px rgba(0,0,0,.5); }
+  .hotkey .hint { color: var(--subtle); font-size: 8px; letter-spacing: .09em; text-transform: uppercase; }
+  .hotkey p { margin: 10px 0; color: var(--muted); font-size: 12px; }
+  .keys { display: inline-flex; gap: 4px; }
+  kbd { padding: 5px 7px; border: 1px solid var(--border-strong); border-bottom-width: 3px; border-radius: 6px; background: var(--surface-2); color: var(--text); font-size: 9px; }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">H</div>
+      <div><strong>Houston Flight Director</strong><span>Voice, delegation, and execution custody</span></div>
+    </div>
+    <nav class="tabs" aria-label="Mockup views">
+      <button class="tab active" data-screen="operations">Operations</button>
+      <button class="tab" data-screen="voice">Houston Voice</button>
+      <button class="tab" data-screen="companion">Companion</button>
+    </nav>
+    <div class="top-status">
+      <span class="status-chip"><i class="dot"></i> All systems nominal</span>
+      <span>4 active runs</span>
+      <span style="color:var(--amber)">1 approval</span>
+    </div>
+  </header>
+
+  <section class="screen active" id="operations">
+    <div class="ops">
+      <aside class="run-list">
+        <div class="eyebrow">Mission queue</div>
+        <div class="run-head"><strong>Active operations</strong><span class="count">4</span></div>
+        <button class="run active"><span class="run-row"><i class="run-type"></i><b>Prepare launch readiness brief</b><span class="run-state">Running</span></span><p>Houston coordinating 4 executors</p></button>
+        <button class="run"><span class="run-row"><i class="run-type scout"></i><b>Reconcile meeting commitments</b><span class="run-state">Claimed</span></span><p>Scout · Microsoft 365</p></button>
+        <button class="run"><span class="run-row"><i class="run-type code"></i><b>Fix connector retry race</b><span class="run-state">Running</span></span><p>Copilot · GitHub Cloud</p></button>
+        <button class="run"><span class="run-row"><i class="run-type workflow"></i><b>Morning triage v4</b><span class="run-state">Step 3/6</span></span><p>MC host · deterministic</p></button>
+        <button class="run"><span class="run-row"><i class="run-type sandbox"></i><b>Verify vendor portal status</b><span class="run-state" style="color:var(--amber)">Approval</span></span><p>Sandbox · expires in 04:12</p></button>
+        <div class="approval-alert"><b>Approval required</b><span>Browser Operator is ready to click "Submit order." A visual confirmation is required.</span></div>
+        <div class="eyebrow" style="margin:18px 4px 8px">Completed today</div>
+        <button class="run"><span class="run-row"><i class="run-type scout"></i><b>Extract email follow-ups</b><span class="run-state">Done</span></span><p>7 tasks proposed · 5 accepted</p></button>
+        <button class="run"><span class="run-row"><i class="run-type code"></i><b>Dependency update</b><span class="run-state">Done</span></span><p>PR #2412 · checks passed</p></button>
+      </aside>
+
+      <main class="canvas">
+        <div class="canvas-head">
+          <div><div class="eyebrow">Live causal graph</div><h1>Prepare launch readiness brief</h1><p>Requested by you · 3m 41s · run a9f2</p></div>
+          <div class="legend"><span>Circles = agents</span><span>Rectangles = services/devices</span><span>Dashed = delegated custody</span><button class="view-toggle active" data-view="graph">Graph</button><button class="view-toggle" data-view="list">List</button></div>
+        </div>
+        <div class="lanes">
+          <section class="lane pc"><div class="lane-title"><i></i> THIS PC <small>RYSOCK-DESKTOP</small></div>
+            <button class="node n-companion selected" data-node="companion"><span class="kind"><em></em> DEVICE ENDPOINT <span>CONNECTED</span></span><h3>Houston Companion</h3><p>Mic muted · paired · outbox 0</p><span class="caps"><b class="on">AUDIO</b><b class="on">NOTIFY</b><b class="wait">APP 1x</b><b>FILES DENIED</b></span></button>
+            <button class="node n-local" data-node="local"><span class="kind"><em></em> LOCAL ACTION <span>DONE</span></span><h3>Open readiness dashboard</h3><p>App launch confirmed in 82 ms</p></button>
+          </section>
+          <section class="lane mc"><div class="lane-title"><i></i> MISSION CONTROL <small>mc-host</small></div>
+            <button class="node agent n-houston" data-node="houston"><span class="kind"><em class="violet"></em> ORCHESTRATOR <span>RUNNING</span></span><h3>Houston</h3><p>Coordinating evidence and execution</p><span class="caps"><b class="on">READ</b><b class="on">DELEGATE</b><b class="wait">WRITE REVIEW</b></span></button>
+            <button class="node n-policy" data-node="policy"><span class="kind"><em class="violet"></em> POLICY BROKER <span>ACTIVE</span></span><h3>Scope and approval</h3><p>4 grants · 1 action awaiting review</p></button>
+            <button class="node n-workflow" data-node="workflow"><span class="kind"><em class="green"></em> WORKFLOW <span>STEP 3/6</span></span><h3>Morning Triage v4</h3><p>Retry 1/3 · next attempt in 12s</p></button>
+          </section>
+          <section class="lane cloud"><div class="lane-title"><i></i> TENANT / CLOUD <small>2 executors</small></div>
+            <button class="node agent n-scout" data-node="scout"><span class="kind"><em class="violet"></em> DELEGATED <span>CLAIMED</span></span><h3>Scout</h3><p>Microsoft 365 · evidence 7/14</p><span class="caps"><b class="on">MAIL READ</b><b class="wait">TASK WRITE</b><b>SEND DENIED</b></span></button>
+            <button class="node n-copilot" data-node="copilot"><span class="kind"><em class="cyan"></em> CODING SESSION <span>RUNNING</span></span><h3>GitHub Copilot</h3><p>8 files +214 -62 · tests 41/48</p><span class="caps"><b class="on">FILES RW</b><b class="on">SHELL RUN</b><b class="wait">PR 1x</b></span></button>
+          </section>
+          <section class="lane sandbox"><div class="lane-title"><i></i> SANDBOX <small>expires 04:12</small></div>
+            <button class="node sandbox-node n-sandbox" data-node="sandbox"><span class="kind"><em class="amber"></em> COMPUTER USE <span style="color:var(--amber)">APPROVAL</span></span><h3>Browser Operator</h3><p>Next: click "Submit order"</p><span class="caps"><b class="on">SCREEN</b><b class="wait">CLICK 1x</b><b>HOST DENIED</b></span></button>
+          </section>
+        </div>
+        <span class="edge e1"></span><span class="edge-label el1">authenticated events</span>
+        <span class="edge dotted e2"></span><span class="edge-label el2">delegated</span>
+        <span class="edge dotted e3"></span><span class="edge-label el3">coding task</span>
+        <span class="edge e4"></span><span class="edge-label el4">workflow</span>
+        <span class="edge dotted e5"></span><span class="edge-label el5">sandbox job</span>
+        <div class="run-table-view">
+          <table>
+            <thead><tr><th>Executor</th><th>Type</th><th>Locality</th><th>Status</th><th>Elapsed</th><th>Current step</th></tr></thead>
+            <tbody>
+              <tr><td>Houston Companion</td><td>Device endpoint</td><td>This PC</td><td style="color:var(--green)">Connected</td><td>03:41</td><td>Mic muted; outbox empty</td></tr>
+              <tr><td>Houston</td><td>Orchestrator</td><td>MC host</td><td style="color:var(--green)">Running</td><td>03:39</td><td>Coordinating evidence</td></tr>
+              <tr><td>Scope and approval</td><td>Policy broker</td><td>MC host</td><td style="color:var(--green)">Active</td><td>03:38</td><td>One action awaiting review</td></tr>
+              <tr><td>Scout</td><td>Delegated specialist</td><td>Microsoft 365</td><td style="color:var(--green)">Claimed</td><td>02:51</td><td>Evidence 7 of 14</td></tr>
+              <tr><td>GitHub Copilot</td><td>Coding session</td><td>GitHub Cloud</td><td style="color:var(--green)">Running</td><td>02:46</td><td>Tests 41 of 48</td></tr>
+              <tr><td>Morning Triage v4</td><td>Workflow</td><td>MC host</td><td style="color:var(--green)">Step 3/6</td><td>01:28</td><td>Retry in 12 seconds</td></tr>
+              <tr><td>Browser Operator</td><td>Computer use</td><td>Sandbox</td><td style="color:var(--amber)">Approval</td><td>00:48</td><td>Ready to submit order</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </main>
+
+      <aside class="inspector">
+        <div class="inspector-head"><span class="type" id="inspectType">DEVICE ENDPOINT</span><h2 id="inspectTitle">Houston Companion</h2><p id="inspectSummary">Paired local endpoint. It can handle audio and narrowly allowlisted device actions, but it is not an autonomous agent.</p></div>
+        <div class="inspect-section"><h3>Execution custody</h3><div class="fact"><span>Locality</span><b id="inspectLocality">THIS PC · RYSOCK-DESKTOP</b></div><div class="fact"><span>Identity</span><b id="inspectIdentity">Companion paired</b></div><div class="fact"><span>Requested by</span><b>Houston · run a9f2</b></div><div class="fact"><span>Data crossing</span><b id="inspectData">Audio after activation</b></div></div>
+        <div class="inspect-section"><h3>Capabilities</h3><div class="grant"><i></i><span>Microphone and speaker · granted</span></div><div class="grant"><i></i><span>Native notifications · granted</span></div><div class="grant"><i class="wait"></i><span>Open approved app · once</span></div><div class="grant"><i class="off"></i><span>Shell and arbitrary files · denied</span></div></div>
+        <div class="inspect-section"><h3>Latest receipt</h3><div class="receipt" id="inspectReceipt">Opened the readiness dashboard in Visual Studio Code. Process response confirmed at 22:31:08. No data left this PC.</div><div class="actions"><button class="action">View evidence</button><button class="action primary">Open full run</button></div></div>
+        <div class="inspect-section"><h3>Reversal</h3><div class="fact"><span>Available action</span><b id="inspectUndo">Close opened window</b></div><button class="action danger">Stop all local actions</button></div>
+      </aside>
+
+      <section class="timeline">
+        <div class="timeline-head"><strong>Critical path</strong><span>End-to-end execution spans</span><div class="ruler"><span>0s</span><span>1s</span><span>2s</span><span>3s</span><span>4s</span></div></div>
+        <div class="spans">
+          <div class="span-row"><span>Houston · plan and route</span><div class="bar-track"><i class="span-bar" style="--x:0%;--w:24%;--c:var(--violet)"></i></div><time>0.94s</time></div>
+          <div class="span-row"><span>Policy · grants</span><div class="bar-track"><i class="span-bar" style="--x:20%;--w:12%;--c:var(--amber)"></i></div><time>0.42s</time></div>
+          <div class="span-row"><span>Scout · M365 evidence</span><div class="bar-track"><i class="span-bar" style="--x:28%;--w:48%;--c:var(--violet)"></i></div><time>1.91s</time></div>
+          <div class="span-row"><span>Copilot · repository checks</span><div class="bar-track"><i class="span-bar" style="--x:34%;--w:61%;--c:var(--cyan)"></i></div><time>2.46s</time></div>
+          <div class="span-row"><span>Houston · synthesize</span><div class="bar-track"><i class="span-bar" style="--x:91%;--w:9%;--c:var(--green)"></i></div><time>0.31s</time></div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="screen" id="voice">
+    <div class="voice-screen">
+      <main class="voice-stage">
+        <div class="voice-wrap">
+          <div class="orb" id="voiceOrb" data-state="listening" aria-hidden="true">
+            <canvas class="constellation-canvas" id="constellationCanvas" width="680" height="680"></canvas>
+            <i class="core-shell"></i>
+          </div>
+          <div class="state-label" id="voiceStateLabel">Listening</div>
+          <h1 id="voiceHeading">Go ahead. I am listening.</h1>
+          <div class="wave" id="wave" aria-hidden="true">
+            <i style="--h:10px;--d:-50ms"></i><i style="--h:22px;--d:-180ms"></i><i style="--h:15px;--d:-330ms"></i><i style="--h:30px;--d:-110ms"></i><i style="--h:18px;--d:-260ms"></i><i style="--h:27px;--d:-420ms"></i><i style="--h:12px;--d:-90ms"></i><i style="--h:21px;--d:-220ms"></i><i style="--h:14px;--d:-370ms"></i>
+          </div>
+          <p class="transcript" id="voiceTranscript">"Ask Scout to find the commitments from today's meetings, then have Copilot check whether the launch blockers are resolved..."</p>
+          <div class="state-controls" aria-label="Preview Houston voice states">
+            <button class="state-control" data-state="idle">Idle</button>
+            <button class="state-control active" data-state="listening">Listening</button>
+            <button class="state-control" data-state="thinking">Thinking</button>
+            <button class="state-control" data-state="speaking">Speaking</button>
+            <button class="state-control" data-state="approval">Approval</button>
+            <button class="state-control" data-state="error">Degraded</button>
+          </div>
+        </div>
+      </main>
+      <aside class="voice-side">
+        <div class="eyebrow">Current voice session</div>
+        <div class="voice-card"><h3>Audio and privacy</h3><div class="fact"><span>Input</span><b>RYSOCK-DESKTOP mic</b></div><div class="fact"><span>Activation</span><b>Push-to-talk</b></div><div class="fact"><span>Raw retention</span><b>Off</b></div><div class="fact"><span>Route</span><b>Local VAD · hosted STT</b></div></div>
+        <div class="voice-card"><h3>Dispatch path</h3><div class="dispatch-path"><b>Houston</b><span>→</span><b>Scout</b><span>+</span><b>Copilot</b></div><p style="color:var(--muted);font-size:9px;line-height:1.5">Houston remains the conversational owner. Specialists retain execution custody and return evidence.</p></div>
+        <div class="voice-card approval-card"><h3 style="color:var(--amber)">Visual approval required</h3><p style="color:var(--muted);font-size:9px;line-height:1.5">Copilot may create a pull request. The approval is for one PR in <b style="color:var(--text)">rsocko/mission-control</b>; spoken confirmation alone is insufficient.</p><div class="actions"><button class="action">Deny</button><button class="action primary">Review request</button></div></div>
+        <div class="voice-card"><h3>Latency</h3><div class="fact"><span>End of turn</span><b>318 ms</b></div><div class="fact"><span>First token</span><b>524 ms</b></div><div class="fact"><span>First audio</span><b>692 ms</b></div></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="screen" id="companion">
+    <div class="companion-screen">
+      <div class="desktop">
+        <div class="hotkey"><div class="hint">Global push-to-talk</div><p>Hold to speak to Houston from any application</p><span class="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Space</kbd></span></div>
+        <div class="companion-panel">
+          <div class="companion-head"><i class="mini-orb"></i><span><b>Houston Companion</b><span>THIS PC · RYSOCK-DESKTOP</span></span><em class="paired">● Paired</em></div>
+          <div class="companion-body">
+            <div class="fact"><span>Microphone</span><b>Muted</b></div><div class="fact"><span>Mission Control</span><b style="color:var(--green)">Connected</b></div><div class="fact"><span>Offline outbox</span><b>0</b></div>
+            <div class="eyebrow" style="margin:11px 0 6px">Current</div>
+            <div class="companion-run"><b>Copilot · MC-hosted worktree</b><span>Running 03:41 · tests 41/48</span></div>
+            <div class="companion-run"><b>Scout · Microsoft 365</b><span style="color:var(--amber)">Waiting for visual approval</span></div>
+            <div class="companion-menu"><button>Quick Add</button><button>Open Houston</button><button>Open Operations</button><button>Device permissions</button></div>
+            <button class="companion-stop">Stop all local actions</button>
+          </div>
+        </div>
+        <div class="taskbar"><span style="color:var(--subtle);font-size:9px">Houston Companion mock desktop</span><div class="tray"><span>Mic muted</span><i class="tray-orb"></i><span>22:33</span></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('.tab');
+  const screens = document.querySelectorAll('.screen');
+  tabs.forEach((tab) => tab.addEventListener('click', () => {
+    tabs.forEach((item) => item.classList.toggle('active', item === tab));
+    screens.forEach((screen) => screen.classList.toggle('active', screen.id === tab.dataset.screen));
+  }));
+
+  const canvas = document.querySelector('.canvas');
+  document.querySelectorAll('.view-toggle').forEach((control) => control.addEventListener('click', () => {
+    const listMode = control.dataset.view === 'list';
+    canvas.classList.toggle('list-mode', listMode);
+    document.querySelectorAll('.view-toggle').forEach((item) => item.classList.toggle('active', item === control));
+  }));
+
+  const nodeData = {
+    companion: ['DEVICE ENDPOINT','Houston Companion','Paired local endpoint. It can handle audio and narrowly allowlisted device actions, but it is not an autonomous agent.','THIS PC · RYSOCK-DESKTOP','Companion paired','Audio after activation','Opened the readiness dashboard in Visual Studio Code. Process response confirmed at 22:31:08. No data left this PC.','Close opened window'],
+    local: ['LOCAL ACTION','Open readiness dashboard','A single allowlisted native command executed through Houston Companion.','THIS PC · RYSOCK-DESKTOP','Companion device grant','No external transfer','Visual Studio Code acknowledged the requested deep link in 82 ms.','Close opened window'],
+    houston: ['ORCHESTRATOR','Houston','Conversational owner coordinating policy, specialists, and the final answer.','MC HOST · houston-worker','Authenticated MC user','Minimum delegated context','Plan created, specialist custody recorded, and response synthesis in progress.','Cancel remaining work'],
+    policy: ['POLICY BROKER','Scope and approval','Server-side authorization for connector, capability, resource, and execution locality.','MC HOST · policy service','Authenticated MC user','Payload hashes only','Four scoped grants issued. One high-impact browser action remains blocked.','Revoke outstanding grants'],
+    workflow: ['WORKFLOW','Morning Triage v4','Deterministic six-step workflow. No model decisions occur inside this node.','MC HOST · workflow engine','Service identity','Connector-scoped fields','Three steps completed; retry 1 of 3 scheduled in 12 seconds.','Run compensation workflow'],
+    scout: ['DELEGATED','Scout','Business M365 specialist polling and claiming work from Mission Control.','MICROSOFT 365 · Work tenant','Microsoft delegated OAuth','14 message references','Seven of fourteen sources reviewed. No write has occurred.','Cancel delegation'],
+    copilot: ['CODING SESSION','GitHub Copilot','Repository work runs in a distinct GitHub-hosted environment.','GITHUB CLOUD · ephemeral environment','GitHub as rsocko','Repository task context','Eight files changed; forty-one of forty-eight checks pass. No PR created yet.','Discard branch or create revert PR'],
+    sandbox: ['SANDBOX','Browser Operator','Computer-use agent isolated from host files and credentials.','SANDBOX · E2B VM','Ephemeral sandbox identity','Allowlisted vendor domain','Observed the order page and paused before the irreversible Submit action.','Destroy sandbox; submitted actions require target reversal']
+  };
+  document.querySelectorAll('.node').forEach((node) => node.addEventListener('click', () => {
+    document.querySelectorAll('.node').forEach((item) => item.classList.toggle('selected', item === node));
+    const data = nodeData[node.dataset.node];
+    document.getElementById('inspectType').textContent = data[0];
+    document.getElementById('inspectTitle').textContent = data[1];
+    document.getElementById('inspectSummary').textContent = data[2];
+    document.getElementById('inspectLocality').textContent = data[3];
+    document.getElementById('inspectIdentity').textContent = data[4];
+    document.getElementById('inspectData').textContent = data[5];
+    document.getElementById('inspectReceipt').textContent = data[6];
+    document.getElementById('inspectUndo').textContent = data[7];
+  }));
+
+  const constellation = (() => {
+    const canvas = document.getElementById('constellationCanvas');
+    const context = canvas.getContext('2d');
+    const orb = document.getElementById('voiceOrb');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const palette = {
+      idle: [96,165,250],
+      listening: [34,211,238],
+      thinking: [167,139,250],
+      speaking: [52,211,153],
+      approval: [251,191,36],
+      error: [251,113,133]
+    };
+    const speeds = { idle: .00005, listening: .00016, thinking: .00028, speaking: .00022, approval: .00008, error: .00013 };
+    const pointCount = 78;
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+    const points = Array.from({ length: pointCount }, (_, index) => {
+      const y = 1 - (index / (pointCount - 1)) * 2;
+      const ringRadius = Math.sqrt(1 - y * y);
+      const theta = goldenAngle * index;
+      return {
+        x: Math.cos(theta) * ringRadius,
+        y,
+        z: Math.sin(theta) * ringRadius,
+        size: index % 11 === 0 ? 2.2 : index % 5 === 0 ? 1.55 : .95,
+        phase: index * 1.73
+      };
+    });
+    const edges = [];
+    points.forEach((point, index) => {
+      const neighbors = points
+        .map((other, otherIndex) => ({
+          otherIndex,
+          distance: Math.hypot(point.x - other.x, point.y - other.y, point.z - other.z)
+        }))
+        .filter(({ otherIndex }) => otherIndex > index)
+        .sort((a, b) => a.distance - b.distance)
+        .slice(0, index % 4 === 0 ? 3 : 2);
+      neighbors.forEach(({ otherIndex, distance }) => {
+        if (distance < .62) edges.push([index, otherIndex]);
+      });
+    });
+    const fragments = Array.from({ length: 18 }, (_, index) => ({
+      angle: (Math.PI * 2 * index) / 18,
+      radius: 118 + (index % 4) * 8,
+      width: 3 + (index % 3) * 2,
+      height: index % 2 ? 9 : 5,
+      depth: Math.sin(index * 2.1),
+      phase: index * .77
+    }));
+
+    const rotatePoint = (point, angleY, angleX) => {
+      const cosY = Math.cos(angleY);
+      const sinY = Math.sin(angleY);
+      const x1 = point.x * cosY - point.z * sinY;
+      const z1 = point.x * sinY + point.z * cosY;
+      const cosX = Math.cos(angleX);
+      const sinX = Math.sin(angleX);
+      return { x: x1, y: point.y * cosX - z1 * sinX, z: point.y * sinX + z1 * cosX };
+    };
+
+    const render = (time = 0) => {
+      const state = orb.dataset.state;
+      const color = palette[state] || palette.idle;
+      const rgb = color.join(',');
+      const logicalSize = 340;
+      const center = logicalSize / 2;
+      context.setTransform(2, 0, 0, 2, 0, 0);
+      context.clearRect(0, 0, logicalSize, logicalSize);
+
+      const glow = context.createRadialGradient(center, center, 4, center, center, 154);
+      glow.addColorStop(0, `rgba(${rgb},.13)`);
+      glow.addColorStop(.46, `rgba(${rgb},.045)`);
+      glow.addColorStop(1, `rgba(${rgb},0)`);
+      context.fillStyle = glow;
+      context.fillRect(0, 0, logicalSize, logicalSize);
+
+      const speed = reducedMotion ? 0 : speeds[state];
+      const angleY = time * speed;
+      const angleX = -.22 + Math.sin(time * .00017) * .1;
+      const pulse = reducedMotion ? 1 : 1 + Math.sin(time * (state === 'speaking' ? .009 : .004)) * .045;
+      const projected = points.map((point) => {
+        const rotated = rotatePoint(point, angleY, angleX);
+        const perspective = 360 / (360 - rotated.z * 95);
+        return {
+          x: center + rotated.x * 91 * perspective * pulse,
+          y: center + rotated.y * 91 * perspective * pulse,
+          z: rotated.z,
+          scale: perspective,
+          size: point.size,
+          phase: point.phase
+        };
+      });
+
+      context.lineWidth = .65;
+      edges.forEach(([fromIndex, toIndex]) => {
+        const from = projected[fromIndex];
+        const to = projected[toIndex];
+        const depth = (from.z + to.z + 2) / 4;
+        context.strokeStyle = `rgba(${rgb},${.08 + depth * .2})`;
+        context.beginPath();
+        context.moveTo(from.x, from.y);
+        context.lineTo(to.x, to.y);
+        context.stroke();
+      });
+
+      projected
+        .slice()
+        .sort((a, b) => a.z - b.z)
+        .forEach((point) => {
+          const depth = (point.z + 1) / 2;
+          const shimmer = reducedMotion ? .75 : .58 + Math.sin(time * .003 + point.phase) * .24;
+          const radius = point.size * point.scale * (.72 + depth * .58);
+          context.fillStyle = `rgba(${rgb},${Math.max(.18, shimmer * (.45 + depth * .55))})`;
+          context.shadowColor = `rgba(${rgb},.8)`;
+          context.shadowBlur = point.size > 2 ? 9 : 4;
+          context.beginPath();
+          context.arc(point.x, point.y, radius, 0, Math.PI * 2);
+          context.fill();
+        });
+      context.shadowBlur = 0;
+
+      context.save();
+      context.translate(center, center);
+      context.strokeStyle = `rgba(${rgb},.22)`;
+      context.lineWidth = .7;
+      context.setLineDash([2, 8]);
+      context.beginPath();
+      context.ellipse(0, 0, 133, 49, angleY * .75 + .45, 0, Math.PI * 2);
+      context.stroke();
+      context.setLineDash([]);
+      fragments.forEach((fragment, index) => {
+        const fragmentAngle = fragment.angle - angleY * (index % 2 ? 1.8 : -1.1);
+        const depthScale = .72 + (Math.sin(fragmentAngle) + 1) * .22;
+        const x = Math.cos(fragmentAngle) * fragment.radius;
+        const y = Math.sin(fragmentAngle) * fragment.radius * .42;
+        context.save();
+        context.translate(x, y);
+        context.rotate(fragmentAngle + time * .00008 * (index % 2 ? 1 : -1));
+        context.strokeStyle = `rgba(${rgb},${.25 + depthScale * .38})`;
+        context.fillStyle = `rgba(${rgb},.06)`;
+        context.lineWidth = .8;
+        context.fillRect(-fragment.width / 2, -fragment.height / 2, fragment.width, fragment.height);
+        context.strokeRect(-fragment.width / 2, -fragment.height / 2, fragment.width, fragment.height);
+        context.restore();
+      });
+      context.restore();
+    };
+
+    let lastFrame = 0;
+    const animate = (time) => {
+      const voiceVisible = document.getElementById('voice').classList.contains('active');
+      if (!document.hidden && voiceVisible && time - lastFrame >= 1000 / 30) {
+        render(time);
+        lastFrame = time;
+      }
+      requestAnimationFrame(animate);
+    };
+    if (reducedMotion) render();
+    else requestAnimationFrame(animate);
+    return { render };
+  })();
+
+  const voiceCopy = {
+    idle: ['Ready','Houston is standing by.','Press and hold to speak.'],
+    listening: ['Listening','Go ahead. I am listening.','"Ask Scout to find the commitments from today\'s meetings, then have Copilot check whether the launch blockers are resolved..."'],
+    thinking: ['Thinking','Routing to the right specialists.','Scout is reviewing Microsoft 365 evidence. Copilot is checking the repository.'],
+    speaking: ['Speaking','Here is the current readiness picture.','Three commitments need owners. Two code blockers are resolved; one test remains failing.'],
+    approval: ['Waiting for approval','One action needs visual confirmation.','Copilot is ready to create a pull request. Review its scope before continuing.'],
+    error: ['Degraded','The voice route is partially unavailable.','Local capture is still available. Hosted speech will retry in 18 seconds.']
+  };
+  document.querySelectorAll('.state-control').forEach((control) => control.addEventListener('click', () => {
+    document.querySelectorAll('.state-control').forEach((item) => item.classList.toggle('active', item === control));
+    const state = control.dataset.state;
+    const copy = voiceCopy[state];
+    document.getElementById('voiceOrb').dataset.state = state;
+    constellation.render(performance.now());
+    document.getElementById('voiceStateLabel').textContent = copy[0];
+    document.getElementById('voiceHeading').textContent = copy[1];
+    document.getElementById('voiceTranscript').textContent = copy[2];
+    document.getElementById('wave').style.visibility = ['listening','speaking'].includes(state) ? 'visible' : 'hidden';
+  }));
+</script>
+</body>
+</html>

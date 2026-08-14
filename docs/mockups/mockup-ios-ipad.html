@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — iPad App &amp; Multitasking</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+    :root {
+      --bg: #0f172a;
+      --bg-deep: #020617;
+      --panel: rgba(15, 23, 42, 0.9);
+      --panel-2: rgba(15, 23, 42, 0.78);
+      --line: rgba(148, 163, 184, 0.16);
+      --line-strong: rgba(148, 163, 184, 0.28);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --accent-2: #38bdf8;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 25%),
+        radial-gradient(circle at top right, rgba(168, 85, 247, 0.1), transparent 24%),
+        var(--bg);
+    }
+
+    .page-shell { max-width: 1440px; margin: 0 auto; }
+    .glass {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      box-shadow: 0 20px 60px rgba(2, 6, 23, 0.4);
+      backdrop-filter: blur(18px);
+    }
+
+    .section-card {
+      border-radius: 28px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.72), rgba(2, 6, 23, 0.82));
+      border: 1px solid rgba(148, 163, 184, 0.12);
+      box-shadow: 0 22px 55px rgba(2, 6, 23, 0.42);
+    }
+
+    .section-label {
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #7dd3fc;
+    }
+
+    .ipad-frame {
+      position: relative;
+      width: 1100px;
+      max-width: 100%;
+      margin: 0 auto;
+      padding: 14px;
+      border-radius: 36px;
+      background: linear-gradient(145deg, #0b1220, #1e293b);
+      box-shadow: 0 32px 80px rgba(2, 6, 23, 0.55);
+    }
+
+    .ipad-frame::before {
+      content: '';
+      position: absolute;
+      inset: 8px;
+      border-radius: 30px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      pointer-events: none;
+    }
+
+    .ipad-camera {
+      position: absolute;
+      top: 50%;
+      left: 12px;
+      transform: translateY(-50%);
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, 0.95);
+      box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.35);
+    }
+
+    .ipad-screen {
+      position: relative;
+      width: 100%;
+      min-height: 768px;
+      overflow: hidden;
+      border-radius: 22px;
+      background:
+        linear-gradient(180deg, rgba(15, 23, 42, 0.96), rgba(2, 6, 23, 0.98)),
+        #020617;
+      border: 1px solid rgba(148, 163, 184, 0.08);
+    }
+
+    .sidebar-material {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.76));
+      backdrop-filter: blur(26px);
+      border-right: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-radius: 16px;
+      padding: 11px 14px;
+      color: #cbd5e1;
+      font-size: 0.92rem;
+      font-weight: 500;
+    }
+
+    .nav-item.active {
+      color: #eff6ff;
+      background: linear-gradient(90deg, rgba(59, 130, 246, 0.22), rgba(56, 189, 248, 0.08));
+      border: 1px solid rgba(96, 165, 250, 0.28);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .task-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(15, 23, 42, 0.8);
+      box-shadow: 0 12px 24px rgba(2, 6, 23, 0.22);
+    }
+
+    .schedule-grid {
+      position: relative;
+      display: grid;
+      grid-template-columns: 72px minmax(0, 1fr);
+      gap: 12px 18px;
+    }
+
+    .time-slot {
+      display: contents;
+    }
+
+    .time-label {
+      color: #64748b;
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding-top: 6px;
+    }
+
+    .slot-line {
+      position: relative;
+      padding-top: 2px;
+      min-height: 76px;
+    }
+
+    .slot-line::before {
+      content: '';
+      position: absolute;
+      top: 12px;
+      left: 0;
+      right: 0;
+      border-top: 1px solid rgba(148, 163, 184, 0.08);
+    }
+
+    .now-line {
+      position: absolute;
+      left: 72px;
+      right: 0;
+      top: 324px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      z-index: 3;
+    }
+
+    .now-line .label {
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: rgba(239, 68, 68, 0.16);
+      color: #fca5a5;
+      font-size: 0.72rem;
+      font-weight: 700;
+      border: 1px solid rgba(239, 68, 68, 0.24);
+    }
+
+    .now-line .bar {
+      flex: 1;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(239, 68, 68, 0.95), rgba(248, 113, 113, 0.35));
+    }
+
+    .detail-panel {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.9));
+      border-left: 1px solid rgba(148, 163, 184, 0.14);
+      box-shadow: -22px 0 40px rgba(2, 6, 23, 0.3);
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(15, 23, 42, 0.7);
+      font-size: 0.76rem;
+      color: #cbd5e1;
+    }
+
+    .pointer {
+      width: 0;
+      height: 0;
+      border-left: 12px solid rgba(255, 255, 255, 0.9);
+      border-top: 9px solid transparent;
+      border-bottom: 9px solid transparent;
+      transform: rotate(-12deg);
+      filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.35));
+    }
+
+    .browser-card, .capture-panel, .floating-window, .drop-target {
+      border-radius: 22px;
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(15, 23, 42, 0.78);
+      box-shadow: 0 18px 40px rgba(2, 6, 23, 0.32);
+    }
+
+    .dashed-zone {
+      border: 2px dashed rgba(96, 165, 250, 0.45);
+      background: rgba(30, 41, 59, 0.55);
+    }
+
+    .slide-over-shell {
+      position: absolute;
+      top: 42px;
+      right: 36px;
+      width: 320px;
+      min-height: 654px;
+      border-radius: 30px;
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.96));
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55);
+      overflow: hidden;
+    }
+
+    .quick-task {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: rgba(15, 23, 42, 0.75);
+      border: 1px solid rgba(148, 163, 184, 0.12);
+    }
+
+    .checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(96, 165, 250, 0.45);
+      background: rgba(30, 41, 59, 0.72);
+    }
+
+    .blurred-host {
+      filter: blur(2px);
+      opacity: 0.45;
+      transform: scale(0.98);
+    }
+
+    .window-shadow { box-shadow: 0 22px 48px rgba(2, 6, 23, 0.42); }
+
+    .drag-card {
+      transform: rotate(-4deg);
+      box-shadow: 0 18px 34px rgba(2, 6, 23, 0.42);
+      border: 1px solid rgba(96, 165, 250, 0.28);
+      background: linear-gradient(180deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.94));
+    }
+
+    .scribble {
+      font-family: 'Comic Sans MS', 'Marker Felt', cursive;
+      color: #67e8f9;
+      font-size: 1.12rem;
+      transform: rotate(-2deg);
+    }
+
+    .drop-target.active {
+      border-color: rgba(96, 165, 250, 0.42);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+      background: rgba(30, 41, 59, 0.72);
+    }
+
+    .caption {
+      color: #cbd5e1;
+      font-size: 0.95rem;
+    }
+
+    .mini-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <main class="page-shell px-6 py-10 lg:px-10">
+    <header class="mb-10">
+      <div class="glass rounded-[28px] px-7 py-6">
+        <p class="section-label mb-2">Mission Control</p>
+        <div class="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <h1 class="text-3xl font-bold text-slate-50 md:text-4xl">Mission Control — iPad App &amp; Multitasking</h1>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400 md:text-base">
+              Dark-mode iPad concepts for full-screen planning, drag-and-drop capture, Slide Over, Stage Manager, and Apple Pencil workflows.
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs text-slate-300">
+            <span class="pill"><i class="fa-solid fa-table-columns text-sky-400"></i> Landscape sidebar layout</span>
+            <span class="pill"><i class="fa-solid fa-hand-pointer text-cyan-400"></i> Pointer-friendly targets</span>
+            <span class="pill"><i class="fa-solid fa-pencil text-violet-400"></i> Scribble + drag &amp; drop</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="space-y-10">
+      <section class="section-card p-6 md:p-8">
+        <div class="mb-6 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p class="section-label">Section 1</p>
+            <h2 class="mt-2 text-2xl font-semibold text-slate-50">Full-Screen iPad Layout (Landscape)</h2>
+            <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+              Mission Control in a dense, desktop-like iPad layout with a translucent sidebar, time-blocked Today view, and a slide-in task detail panel.
+            </p>
+          </div>
+          <div class="pill"><i class="fa-solid fa-arrow-pointer text-slate-300"></i> Trackpad hover cues</div>
+        </div>
+
+        <div class="ipad-frame">
+          <div class="ipad-camera"></div>
+          <div class="ipad-screen">
+            <div class="grid h-full" style="grid-template-columns: 280px minmax(0, 1fr) 320px;">
+              <aside class="sidebar-material flex h-full flex-col px-4 py-5">
+                <div class="mb-5 flex items-center gap-3 rounded-2xl border border-white/5 bg-white/5 px-3 py-3">
+                  <div class="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 text-lg font-bold text-white">R</div>
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Mission Control</p>
+                    <p class="mt-1 text-sm font-semibold text-slate-100">Good morning, Ryan</p>
+                  </div>
+                </div>
+
+                <nav class="space-y-1.5">
+                  <div class="nav-item active">
+                    <span class="flex items-center gap-3"><i class="fa-solid fa-sun text-amber-400"></i>Today</span>
+                    <i class="fa-solid fa-chevron-right text-xs text-slate-500"></i>
+                  </div>
+                  <div class="nav-item">
+                    <span class="flex items-center gap-3"><i class="fa-solid fa-layer-group text-sky-400"></i>Triage</span>
+                    <span class="rounded-full bg-sky-500/15 px-2 py-0.5 text-xs font-semibold text-sky-300">12</span>
+                  </div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-inbox text-violet-400"></i>Inbox</span></div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-table-cells-large text-emerald-400"></i>Kanban</span></div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-bullseye text-rose-400"></i>Goals</span></div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-timeline text-cyan-400"></i>Timeline</span></div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-folder-tree text-amber-300"></i>Projects</span></div>
+                  <div class="nav-item"><span class="flex items-center gap-3"><i class="fa-solid fa-chart-pie text-blue-300"></i>Insights</span></div>
+                </nav>
+
+                <div class="mt-6 rounded-3xl border border-white/5 bg-black/10 p-3">
+                  <div class="mb-3 flex items-center justify-between">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Projects</p>
+                    <i class="fa-solid fa-chevron-down text-xs text-slate-500"></i>
+                  </div>
+                  <div class="space-y-2 text-sm">
+                    <div class="flex items-center justify-between rounded-2xl bg-white/5 px-3 py-2 text-slate-200">
+                      <span class="flex items-center gap-2"><span class="mini-dot bg-sky-400"></span>Work</span>
+                      <span class="text-xs text-slate-500">18</span>
+                    </div>
+                    <div class="flex items-center justify-between rounded-2xl px-3 py-2 text-slate-300">
+                      <span class="flex items-center gap-2"><span class="mini-dot bg-emerald-400"></span>Personal</span>
+                      <span class="text-xs text-slate-500">7</span>
+                    </div>
+                    <div class="flex items-center justify-between rounded-2xl px-3 py-2 text-slate-300">
+                      <span class="flex items-center gap-2"><span class="mini-dot bg-violet-400"></span>Side Project</span>
+                      <span class="text-xs text-slate-500">4</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-auto space-y-3">
+                  <div class="flex items-center justify-between rounded-2xl border border-white/5 bg-white/5 px-3 py-3 text-sm">
+                    <span class="flex items-center gap-2 text-slate-300"><i class="fa-solid fa-gear text-slate-400"></i>Settings</span>
+                    <span class="flex items-center gap-2 text-emerald-300"><span class="h-2.5 w-2.5 rounded-full bg-emerald-400"></span>Synced</span>
+                  </div>
+                  <button class="flex w-full items-center justify-center gap-2 rounded-2xl bg-sky-500 px-3 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-900/25">
+                    <i class="fa-solid fa-plus"></i> Capture shortcut
+                  </button>
+                </div>
+              </aside>
+
+              <section class="relative h-full overflow-hidden px-6 py-5">
+                <div class="mb-5 flex items-start justify-between">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Today view</p>
+                    <h3 class="mt-1 text-2xl font-semibold text-slate-50">My Day — Monday, Jul 28</h3>
+                    <p class="mt-1 text-sm text-slate-400">8 planned · 3 unscheduled · energy-balanced around meetings</p>
+                  </div>
+                  <button class="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300">
+                    <i class="fa-solid fa-magnifying-glass"></i>
+                  </button>
+                </div>
+
+                <div class="schedule-grid">
+                  <div class="now-line">
+                    <span class="label">2:15 PM</span>
+                    <span class="bar"></span>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">9:00</div>
+                    <div class="slot-line">
+                      <div class="task-card">
+                        <span class="mini-dot bg-amber-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">Standup + blockers review</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-slate-800 px-2 py-1 text-[11px] text-amber-200">Work</span> 30 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">Calendar</span>
+                        <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">10:00</div>
+                    <div class="slot-line">
+                      <div class="task-card cursor-pointer">
+                        <span class="mini-dot bg-red-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">Fix auth timeout in production</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-blue-500/15 px-2 py-1 text-[11px] text-blue-200">Work</span> 90 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">High</span>
+                        <i class="fa-solid fa-grip-lines text-slate-400"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">11:30</div>
+                    <div class="slot-line">
+                      <div class="task-card">
+                        <span class="mini-dot bg-cyan-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">Draft launch checklist</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-violet-500/15 px-2 py-1 text-[11px] text-violet-200">Side Project</span> 45 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">Deep</span>
+                        <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">1:00</div>
+                    <div class="slot-line">
+                      <div class="task-card">
+                        <span class="mini-dot bg-emerald-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">1:1 with manager</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-emerald-500/15 px-2 py-1 text-[11px] text-emerald-200">Work</span> 45 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">Meeting</span>
+                        <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">2:30</div>
+                    <div class="slot-line">
+                      <div class="task-card border-sky-400/30 shadow-sky-950/10">
+                        <span class="mini-dot bg-sky-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">Review Q3 budget proposal</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-slate-800 px-2 py-1 text-[11px] text-sky-200">Work</span> 60 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">Medium</span>
+                        <i class="fa-solid fa-grip-lines text-slate-300"></i>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="time-slot">
+                    <div class="time-label">4:00</div>
+                    <div class="slot-line">
+                      <div class="task-card">
+                        <span class="mini-dot bg-violet-400"></span>
+                        <div>
+                          <p class="text-sm font-semibold text-slate-100">Triage remaining inbox items</p>
+                          <p class="mt-1 text-xs text-slate-400"><span class="rounded-full bg-slate-800 px-2 py-1 text-[11px] text-violet-200">Personal</span> 30 min</p>
+                        </div>
+                        <span class="text-xs text-slate-500">Light</span>
+                        <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-6 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+                  <div class="mb-3 flex items-center justify-between">
+                    <h4 class="text-sm font-semibold text-slate-100">Unscheduled</h4>
+                    <span class="text-xs text-slate-500">Drag into time slots</span>
+                  </div>
+                  <div class="grid gap-3 md:grid-cols-2">
+                    <div class="task-card">
+                      <span class="mini-dot bg-amber-400"></span>
+                      <div>
+                        <p class="text-sm font-semibold text-slate-100">Send vendor renewal reply</p>
+                        <p class="mt-1 text-xs text-slate-400">Work · 20 min</p>
+                      </div>
+                      <span class="text-xs text-red-300">Overdue</span>
+                      <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                    </div>
+                    <div class="task-card">
+                      <span class="mini-dot bg-emerald-400"></span>
+                      <div>
+                        <p class="text-sm font-semibold text-slate-100">Plan workout + groceries</p>
+                        <p class="mt-1 text-xs text-slate-400">Personal · 25 min</p>
+                      </div>
+                      <span class="text-xs text-slate-400">Low</span>
+                      <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="absolute bottom-5 right-8 flex items-center gap-3">
+                  <div class="pointer"></div>
+                  <span class="rounded-full border border-white/10 bg-slate-950/80 px-3 py-1.5 text-xs text-slate-300">Hover cursor for drag handles</span>
+                </div>
+              </section>
+
+              <aside class="detail-panel flex h-full flex-col px-5 py-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Task detail</p>
+                  <button class="flex h-9 w-9 items-center justify-center rounded-xl bg-white/5 text-slate-500"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+
+                <div class="rounded-3xl border border-sky-400/20 bg-sky-500/5 p-4">
+                  <div class="mb-2 flex items-center gap-2">
+                    <span class="mini-dot bg-sky-400"></span>
+                    <span class="text-xs font-semibold uppercase tracking-[0.18em] text-sky-300">Selected task</span>
+                  </div>
+                  <h4 class="text-xl font-semibold text-slate-50">Review Q3 budget proposal</h4>
+                  <p class="mt-2 text-sm leading-6 text-slate-400">
+                    Final pass on team budget assumptions before tomorrow's exec review. Confirm headcount, tooling, and contingency ranges.
+                  </p>
+                </div>
+
+                <div class="mt-5 grid grid-cols-2 gap-3 text-sm">
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Due date</p>
+                    <p class="mt-1 font-medium text-slate-200">Today · 5:00 PM</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Priority</p>
+                    <p class="mt-1 font-medium text-amber-300">High</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Project</p>
+                    <p class="mt-1 font-medium text-slate-200">Work / Finance</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Energy</p>
+                    <p class="mt-1 font-medium text-violet-300">Focused</p>
+                  </div>
+                </div>
+
+                <div class="mt-5 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
+                  <div class="mb-2 flex items-center justify-between">
+                    <h5 class="text-sm font-semibold text-slate-100">Notes</h5>
+                    <span class="text-xs text-slate-500"><i class="fa-solid fa-pen-to-square mr-1"></i>Rich text</span>
+                  </div>
+                  <div class="space-y-3 text-sm leading-6 text-slate-400">
+                    <p><strong class="text-slate-200">Watch for:</strong> duplicate vendor line items and a missing hiring assumption in Q4.</p>
+                    <p><strong class="text-slate-200">Need from Alex:</strong> final cloud spend export before 4 PM.</p>
+                    <p><strong class="text-slate-200">Decision:</strong> keep contingency at 8% unless headcount slips.</p>
+                  </div>
+                </div>
+
+                <div class="mt-5 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
+                  <h5 class="text-sm font-semibold text-slate-100">Activity log</h5>
+                  <div class="mt-3 space-y-3 text-sm">
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2.5 w-2.5 rounded-full bg-sky-400"></span>
+                      <div>
+                        <p class="text-slate-300">Dragged from Unscheduled into 2:30 PM block</p>
+                        <p class="text-xs text-slate-500">2:03 PM</p>
+                      </div>
+                    </div>
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+                      <div>
+                        <p class="text-slate-300">Project tag updated to Work / Finance</p>
+                        <p class="text-xs text-slate-500">1:58 PM</p>
+                      </div>
+                    </div>
+                    <div class="flex gap-3">
+                      <span class="mt-1 h-2.5 w-2.5 rounded-full bg-violet-400"></span>
+                      <div>
+                        <p class="text-slate-300">Captured from Safari research notes</p>
+                        <p class="text-xs text-slate-500">1:42 PM</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-auto grid grid-cols-3 gap-3 pt-5">
+                  <button class="rounded-2xl bg-emerald-500 px-3 py-3 text-sm font-semibold text-emerald-950">Complete</button>
+                  <button class="rounded-2xl bg-amber-500/15 px-3 py-3 text-sm font-semibold text-amber-300">Defer</button>
+                  <button class="rounded-2xl bg-red-500/15 px-3 py-3 text-sm font-semibold text-red-300">Delete</button>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-card p-6 md:p-8">
+        <div class="mb-6">
+          <p class="section-label">Section 2</p>
+          <h2 class="mt-2 text-2xl font-semibold text-slate-50">Split View — MC + Safari</h2>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            A side-by-side multitasking concept where users drag content from Safari directly into Mission Control's capture zone.
+          </p>
+        </div>
+
+        <div class="ipad-frame">
+          <div class="ipad-camera"></div>
+          <div class="ipad-screen p-5">
+            <div class="grid h-full gap-4" style="grid-template-columns: 1fr 1fr;">
+              <div class="capture-panel flex flex-col p-5">
+                <div class="mb-4 flex items-center justify-between">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Mission Control</p>
+                    <h3 class="mt-1 text-xl font-semibold text-slate-50">Capture</h3>
+                  </div>
+                  <span class="pill"><i class="fa-solid fa-square-plus text-sky-400"></i>Inbox</span>
+                </div>
+
+                <div class="mb-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
+                  <p class="text-sm text-slate-300">Quick add from anywhere</p>
+                  <p class="mt-1 text-sm text-slate-500">Paste text, drag URLs, drop screenshots, or capture quoted snippets.</p>
+                </div>
+
+                <div class="dashed-zone flex flex-1 flex-col items-center justify-center rounded-[28px] p-8 text-center">
+                  <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-sky-500/15 text-sky-300">
+                    <i class="fa-solid fa-inbox text-2xl"></i>
+                  </div>
+                  <h4 class="text-xl font-semibold text-slate-100">Drop to capture</h4>
+                  <p class="mt-2 max-w-sm text-sm leading-6 text-slate-400">
+                    Mission Control extracts title, source, and suggested project automatically from dragged content.
+                  </p>
+                </div>
+
+                <div class="mt-4 grid gap-3 md:grid-cols-2">
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Smart routing</p>
+                    <p class="mt-1 text-sm text-slate-300">Tag to Work, Personal, or Side Project</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Accepted types</p>
+                    <p class="mt-1 text-sm text-slate-300">URLs, text, images, quoted snippets</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="browser-card relative overflow-hidden p-0">
+                <div class="border-b border-white/10 bg-white/[0.04] px-5 py-3">
+                  <div class="flex items-center gap-3">
+                    <div class="flex gap-2 text-[10px]">
+                      <span class="h-3 w-3 rounded-full bg-red-400"></span>
+                      <span class="h-3 w-3 rounded-full bg-amber-300"></span>
+                      <span class="h-3 w-3 rounded-full bg-emerald-400"></span>
+                    </div>
+                    <div class="flex-1 rounded-full border border-white/10 bg-slate-950/80 px-4 py-2 text-sm text-slate-400">
+                      https://webkit.org/blog/ipados-productivity-patterns
+                    </div>
+                  </div>
+                </div>
+                <div class="p-6">
+                  <div class="mb-5 rounded-3xl bg-gradient-to-r from-sky-400/20 to-violet-400/20 p-6">
+                    <p class="text-xs uppercase tracking-[0.18em] text-sky-200">Safari</p>
+                    <h3 class="mt-2 text-2xl font-semibold text-white">Designing better drag-and-drop experiences on iPad</h3>
+                    <p class="mt-2 max-w-lg text-sm leading-6 text-slate-300">
+                      Move between apps fluidly with touch, trackpad, and Pencil. Provide confident drop targets, clear hover states, and lightweight capture surfaces.
+                    </p>
+                  </div>
+
+                  <div class="space-y-4 text-sm leading-7 text-slate-400">
+                    <p>Users often collect research while browsing. They need a fast way to preserve intent without switching context or copying content into multiple apps.</p>
+                    <div class="rounded-2xl border border-sky-400/20 bg-sky-500/8 p-4">
+                      <p class="font-medium text-sky-200">Highlighted text</p>
+                      <p class="mt-2 text-slate-300">“Capture should feel as lightweight as selecting text and tossing it into a trusted queue.”</p>
+                    </div>
+                    <div class="grid grid-cols-3 gap-3">
+                      <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3 text-center">
+                        <i class="fa-regular fa-image text-lg text-violet-300"></i>
+                        <p class="mt-2 text-xs text-slate-400">Image</p>
+                      </div>
+                      <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3 text-center">
+                        <i class="fa-solid fa-link text-lg text-sky-300"></i>
+                        <p class="mt-2 text-xs text-slate-400">URL</p>
+                      </div>
+                      <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3 text-center">
+                        <i class="fa-regular fa-file-lines text-lg text-emerald-300"></i>
+                        <p class="mt-2 text-xs text-slate-400">Quote</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div class="absolute left-12 top-[315px] rounded-2xl border border-sky-400/30 bg-slate-900/95 px-4 py-3 shadow-xl shadow-sky-950/30">
+                    <p class="text-xs uppercase tracking-[0.18em] text-sky-300">Dragged selection</p>
+                    <p class="mt-1 text-sm text-slate-200">Safari article + highlighted quote</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="pointer absolute left-1/2 top-[360px] z-20 -translate-x-8 rotate-[18deg]"></div>
+            <div class="absolute left-[46%] top-[338px] z-20 rounded-full border border-sky-400/30 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-200">
+              Drag from Safari into Capture
+            </div>
+          </div>
+        </div>
+
+        <p class="caption mt-5 text-center">Drag URLs, text, or images from any app into Mission Control.</p>
+      </section>
+
+      <section class="section-card p-6 md:p-8">
+        <div class="mb-6">
+          <p class="section-label">Section 3</p>
+          <h2 class="mt-2 text-2xl font-semibold text-slate-50">Slide Over</h2>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            Mission Control becomes a compact, phone-like utility panel for checking off tasks or capturing thoughts alongside another app.
+          </p>
+        </div>
+
+        <div class="ipad-frame">
+          <div class="ipad-camera"></div>
+          <div class="ipad-screen relative overflow-hidden">
+            <div class="blurred-host grid h-full grid-cols-[1.3fr_1fr] gap-6 px-8 py-8">
+              <div class="rounded-[30px] border border-white/8 bg-gradient-to-br from-slate-800/90 to-slate-950 p-7">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Main app</p>
+                    <h3 class="mt-1 text-2xl font-semibold text-slate-100">Notes &amp; Planning Board</h3>
+                  </div>
+                  <span class="pill"><i class="fa-solid fa-table-columns"></i> Focus mode</span>
+                </div>
+                <div class="mt-6 grid grid-cols-2 gap-4">
+                  <div class="h-40 rounded-3xl border border-white/8 bg-white/[0.04]"></div>
+                  <div class="h-40 rounded-3xl border border-white/8 bg-white/[0.04]"></div>
+                  <div class="col-span-2 h-72 rounded-3xl border border-white/8 bg-white/[0.04]"></div>
+                </div>
+              </div>
+              <div class="rounded-[30px] border border-white/8 bg-slate-900/80 p-7">
+                <div class="h-full rounded-[26px] border border-white/8 bg-white/[0.03]"></div>
+              </div>
+            </div>
+
+            <div class="slide-over-shell">
+              <div class="flex items-center justify-center py-2">
+                <span class="h-1.5 w-14 rounded-full bg-slate-600"></span>
+              </div>
+              <div class="px-5 pb-4">
+                <div class="mb-4 flex items-center justify-between">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Mission Control</p>
+                    <h3 class="mt-1 text-xl font-semibold text-slate-50">Today</h3>
+                  </div>
+                  <button class="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/5 text-slate-300">
+                    <i class="fa-solid fa-ellipsis"></i>
+                  </button>
+                </div>
+
+                <div class="space-y-3">
+                  <div class="quick-task">
+                    <div class="checkbox"></div>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-slate-100">Reply to vendor thread</p>
+                      <p class="text-xs text-slate-500">15 min · Work</p>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-xs text-slate-500"></i>
+                  </div>
+                  <div class="quick-task">
+                    <div class="checkbox border-emerald-400/50 bg-emerald-500/15"></div>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-slate-100">Review pull request comments</p>
+                      <p class="text-xs text-slate-500">25 min · Work</p>
+                    </div>
+                    <i class="fa-solid fa-check text-xs text-emerald-300"></i>
+                  </div>
+                  <div class="quick-task">
+                    <div class="checkbox"></div>
+                    <div class="flex-1">
+                      <p class="text-sm font-medium text-slate-100">Book dentist follow-up</p>
+                      <p class="text-xs text-slate-500">Personal · due tomorrow</p>
+                    </div>
+                    <i class="fa-solid fa-chevron-right text-xs text-slate-500"></i>
+                  </div>
+                </div>
+
+                <div class="mt-5 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
+                  <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Quick glance</p>
+                  <div class="mt-3 flex items-center justify-between text-sm">
+                    <span class="text-slate-300">Done today</span>
+                    <span class="font-semibold text-emerald-300">4 / 9</span>
+                  </div>
+                  <div class="mt-2 h-2 rounded-full bg-slate-800">
+                    <div class="h-2 rounded-full bg-emerald-400" style="width: 44%"></div>
+                  </div>
+                </div>
+              </div>
+
+              <button class="absolute bottom-6 right-5 flex items-center gap-2 rounded-full bg-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 shadow-lg shadow-sky-950/40">
+                <i class="fa-solid fa-plus"></i> Quick Capture
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p class="caption mt-5 text-center">Slide Over for quick task management alongside any app.</p>
+      </section>
+
+      <section class="section-card p-6 md:p-8">
+        <div class="mb-6">
+          <p class="section-label">Section 4</p>
+          <h2 class="mt-2 text-2xl font-semibold text-slate-50">Stage Manager (iPadOS 16+)</h2>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            Multiple Mission Control windows coexist with other apps, enabling a main planning workspace plus a focused Quick Capture utility window.
+          </p>
+        </div>
+
+        <div class="ipad-frame">
+          <div class="ipad-camera"></div>
+          <div class="ipad-screen relative overflow-hidden p-7">
+            <div class="absolute left-6 top-7 flex w-36 flex-col gap-3">
+              <div class="rounded-3xl border border-white/8 bg-white/[0.03] p-3 text-sm text-slate-300">
+                <p class="font-semibold text-slate-100">Recent set</p>
+                <p class="mt-1 text-xs text-slate-500">Calendar + Mission Control</p>
+              </div>
+              <div class="rounded-3xl border border-white/8 bg-white/[0.03] p-3 text-sm text-slate-300 opacity-70">
+                <p class="font-semibold text-slate-100">Reference set</p>
+                <p class="mt-1 text-xs text-slate-500">Safari + Notes</p>
+              </div>
+            </div>
+
+            <div class="absolute left-[130px] top-[120px] h-[470px] w-[620px] rounded-[34px] border border-white/8 bg-gradient-to-br from-slate-800/70 to-slate-950/90 p-6 opacity-75">
+              <div class="mb-5 flex items-center justify-between">
+                <div>
+                  <p class="text-xs uppercase tracking-[0.18em] text-slate-500">Calendar</p>
+                  <h3 class="mt-1 text-xl font-semibold text-slate-100">Week of Jul 28</h3>
+                </div>
+                <span class="pill"><i class="fa-solid fa-calendar-days text-emerald-300"></i> Behind</span>
+              </div>
+              <div class="grid h-[360px] grid-cols-5 gap-3">
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3"></div>
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3"></div>
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3"></div>
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3"></div>
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3"></div>
+              </div>
+            </div>
+
+            <div class="floating-window window-shadow absolute left-[220px] top-[56px] h-[575px] w-[620px] overflow-hidden rounded-[34px]">
+              <div class="border-b border-white/10 bg-white/[0.04] px-5 py-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-3">
+                    <span class="h-3 w-3 rounded-full bg-red-400"></span>
+                    <span class="h-3 w-3 rounded-full bg-amber-300"></span>
+                    <span class="h-3 w-3 rounded-full bg-emerald-400"></span>
+                  </div>
+                  <span class="text-xs uppercase tracking-[0.18em] text-slate-500">Main window</span>
+                </div>
+              </div>
+              <div class="p-6">
+                <div class="mb-5 flex items-start justify-between">
+                  <div>
+                    <p class="text-xs uppercase tracking-[0.18em] text-sky-300">Mission Control</p>
+                    <h3 class="mt-1 text-2xl font-semibold text-slate-50">Today &amp; Priorities</h3>
+                  </div>
+                  <div class="pointer rotate-[16deg]"></div>
+                </div>
+                <div class="grid grid-cols-[1.1fr_0.9fr] gap-4">
+                  <div class="space-y-3 rounded-[26px] border border-white/8 bg-white/[0.03] p-4">
+                    <div class="task-card">
+                      <span class="mini-dot bg-red-400"></span>
+                      <div>
+                        <p class="text-sm font-semibold text-slate-100">Submit product review notes</p>
+                        <p class="mt-1 text-xs text-slate-400">Work · 40 min</p>
+                      </div>
+                      <span class="text-xs text-red-300">High</span>
+                      <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                    </div>
+                    <div class="task-card">
+                      <span class="mini-dot bg-sky-400"></span>
+                      <div>
+                        <p class="text-sm font-semibold text-slate-100">Refine capture heuristics</p>
+                        <p class="mt-1 text-xs text-slate-400">Side Project · 50 min</p>
+                      </div>
+                      <span class="text-xs text-sky-300">Focus</span>
+                      <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                    </div>
+                    <div class="task-card">
+                      <span class="mini-dot bg-emerald-400"></span>
+                      <div>
+                        <p class="text-sm font-semibold text-slate-100">Household admin sprint</p>
+                        <p class="mt-1 text-xs text-slate-400">Personal · 30 min</p>
+                      </div>
+                      <span class="text-xs text-emerald-300">Low</span>
+                      <i class="fa-solid fa-grip-lines text-slate-500"></i>
+                    </div>
+                  </div>
+                  <div class="rounded-[26px] border border-white/8 bg-white/[0.03] p-4">
+                    <h4 class="text-sm font-semibold text-slate-100">Insights</h4>
+                    <div class="mt-4 grid gap-3">
+                      <div class="rounded-2xl bg-slate-950/80 p-3">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Focus capacity</p>
+                        <p class="mt-2 text-2xl font-bold text-slate-100">72%</p>
+                      </div>
+                      <div class="rounded-2xl bg-slate-950/80 p-3">
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Inbox pressure</p>
+                        <p class="mt-2 text-2xl font-bold text-amber-300">12 items</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="floating-window window-shadow absolute right-[72px] top-[210px] h-[330px] w-[260px] overflow-hidden rounded-[30px] border-sky-400/20">
+              <div class="border-b border-white/10 bg-sky-500/8 px-4 py-3">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-sky-100">Quick Capture</h4>
+                  <i class="fa-solid fa-wand-magic-sparkles text-sky-300"></i>
+                </div>
+              </div>
+              <div class="p-4">
+                <div class="rounded-2xl border border-dashed border-sky-400/35 bg-slate-950/70 p-4">
+                  <p class="text-sm text-slate-300">Drop or type to capture</p>
+                  <p class="mt-1 text-xs leading-5 text-slate-500">Always-on helper window while the main MC dashboard stays open.</p>
+                </div>
+                <div class="mt-4 space-y-2">
+                  <div class="rounded-2xl bg-white/[0.03] px-3 py-2 text-sm text-slate-300">“Need follow-up with design”</div>
+                  <div class="rounded-2xl bg-white/[0.03] px-3 py-2 text-sm text-slate-300">Link from Safari research</div>
+                </div>
+                <button class="mt-5 w-full rounded-2xl bg-sky-500 px-3 py-3 text-sm font-semibold text-slate-950">Save to inbox</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="caption mt-5 text-center">Stage Manager — resize and arrange Mission Control alongside other apps.</p>
+      </section>
+
+      <section class="section-card p-6 md:p-8">
+        <div class="mb-6">
+          <p class="section-label">Section 5</p>
+          <h2 class="mt-2 text-2xl font-semibold text-slate-50">Apple Pencil / Drag &amp; Drop Detail</h2>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
+            A zoomed interaction state showing draggable tasks, multiple rescheduling targets, and Scribble-powered capture input.
+          </p>
+        </div>
+
+        <div class="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div class="rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-950 p-6 shadow-2xl shadow-slate-950/40">
+            <div class="mb-5 flex items-end justify-between">
+              <div>
+                <p class="section-label">Drag interaction</p>
+                <h3 class="mt-2 text-xl font-semibold text-slate-50">Reschedule by dragging across the planner</h3>
+              </div>
+              <span class="pill"><i class="fa-solid fa-computer-mouse text-slate-300"></i> Cursor + touch supported</span>
+            </div>
+
+            <div class="relative rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
+              <div class="grid grid-cols-[150px_1fr] gap-5">
+                <div class="space-y-3">
+                  <div class="rounded-2xl border border-white/8 bg-slate-950/70 p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Today list</p>
+                    <div class="mt-3 space-y-2">
+                      <div class="rounded-2xl bg-white/[0.03] px-3 py-2 text-sm text-slate-300">Standup</div>
+                      <div class="drag-card rounded-2xl px-3 py-3 text-sm text-slate-100">
+                        <p class="font-semibold">Prepare stakeholder update</p>
+                        <p class="mt-1 text-xs text-slate-400">45 min · Work</p>
+                      </div>
+                      <div class="rounded-2xl bg-white/[0.03] px-3 py-2 text-sm text-slate-300">Inbox review</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="space-y-3">
+                  <div class="drop-target active rounded-3xl p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-xs uppercase tracking-[0.16em] text-sky-300">Drop target</p>
+                        <h4 class="mt-1 text-lg font-semibold text-slate-100">2:30 PM today</h4>
+                      </div>
+                      <span class="rounded-full bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-200">Snap here</span>
+                    </div>
+                  </div>
+                  <div class="drop-target rounded-3xl p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Alternative</p>
+                        <h4 class="mt-1 text-lg font-semibold text-slate-100">Tomorrow · 10:00 AM</h4>
+                      </div>
+                      <span class="text-xs text-slate-500">Different day</span>
+                    </div>
+                  </div>
+                  <div class="drop-target rounded-3xl p-4">
+                    <div class="flex items-center justify-between">
+                      <div>
+                        <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Alternative</p>
+                        <h4 class="mt-1 text-lg font-semibold text-slate-100">Move to project</h4>
+                      </div>
+                      <span class="text-xs text-violet-300">Side Project</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="pointer absolute left-[205px] top-[126px] rotate-[32deg]"></div>
+            </div>
+          </div>
+
+          <div class="rounded-[32px] border border-white/10 bg-gradient-to-br from-slate-900 to-slate-950 p-6 shadow-2xl shadow-slate-950/40">
+            <div class="mb-5">
+              <p class="section-label">Apple Pencil</p>
+              <h3 class="mt-2 text-xl font-semibold text-slate-50">Scribble to capture</h3>
+            </div>
+
+            <div class="rounded-[28px] border border-white/8 bg-white/[0.03] p-5">
+              <div class="rounded-3xl border border-dashed border-cyan-400/35 bg-slate-950/80 p-4">
+                <div class="mb-3 flex items-center justify-between">
+                  <span class="text-sm font-medium text-slate-200">Capture field</span>
+                  <span class="text-xs text-slate-500">Handwriting converts live</span>
+                </div>
+                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                  <p class="scribble">email Alex about revised cloud budget + add Friday follow-up</p>
+                </div>
+                <div class="mt-3 rounded-2xl bg-cyan-500/8 p-3 text-sm text-cyan-100">
+                  Converted text: “Email Alex about revised cloud budget and add Friday follow-up.”
+                </div>
+              </div>
+
+              <div class="mt-5 flex items-start gap-4">
+                <div class="flex-1 space-y-3">
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Detected project</p>
+                    <p class="mt-1 text-sm text-slate-300">Work / Finance</p>
+                  </div>
+                  <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+                    <p class="text-xs uppercase tracking-[0.16em] text-slate-500">Suggested timing</p>
+                    <p class="mt-1 text-sm text-slate-300">Friday morning · 20 min</p>
+                  </div>
+                </div>
+                <div class="rounded-[28px] border border-white/8 bg-gradient-to-b from-slate-200 to-white px-4 py-10 text-center text-slate-700 shadow-xl">
+                  <i class="fa-solid fa-pencil text-2xl"></i>
+                  <p class="mt-2 text-xs font-semibold uppercase tracking-[0.18em]">Pencil</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p class="caption mt-5 text-center">Drag to reschedule, Scribble to capture.</p>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

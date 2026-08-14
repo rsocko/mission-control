@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — watchOS App &amp; Complications</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            page: '#0f172a',
+            oled: '#000000',
+            ink: '#f8fafc',
+            mist: '#cbd5e1',
+            blue: '#3b82f6',
+            blueSoft: '#60a5fa',
+            green: '#22c55e',
+            yellow: '#facc15',
+            orange: '#fb923c',
+            red: '#ef4444'
+          },
+          fontFamily: {
+            sans: ['SF Compact Rounded', 'SF Compact Text', 'Inter', '-apple-system', 'BlinkMacSystemFont', 'sans-serif']
+          },
+          boxShadow: {
+            watch: '0 28px 60px rgba(0,0,0,0.45)'
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body {
+      background: #0f172a;
+      color: #f8fafc;
+      font-family: 'SF Compact Rounded', 'SF Compact Text', Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .watch-shell {
+      width: 238px;
+      height: 292px;
+      padding: 18px;
+      border-radius: 44px;
+      background: linear-gradient(160deg, #3f4756 0%, #141821 28%, #07090d 60%, #2b3340 100%);
+      box-shadow: 0 24px 58px rgba(0,0,0,0.42), inset 0 1px 1px rgba(255,255,255,0.18), inset 0 -1px 1px rgba(255,255,255,0.05);
+      position: relative;
+    }
+
+    .watch-shell::before,
+    .watch-shell::after {
+      content: "";
+      position: absolute;
+      right: -5px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #4b5563, #1f2937);
+    }
+
+    .watch-shell::before {
+      top: 82px;
+      width: 10px;
+      height: 54px;
+    }
+
+    .watch-shell::after {
+      top: 148px;
+      width: 7px;
+      height: 34px;
+    }
+
+    .watch-screen {
+      width: 198px;
+      height: 242px;
+      border-radius: 36px;
+      background: #000;
+      overflow: hidden;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+    }
+
+    .watch-title {
+      font-size: 11px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: #93c5fd;
+      font-weight: 700;
+    }
+
+    .face-grid {
+      background-image:
+        radial-gradient(circle at 50% 32%, rgba(59,130,246,0.14), transparent 34%),
+        radial-gradient(circle at 50% 75%, rgba(255,255,255,0.06), transparent 42%);
+    }
+
+    .ring {
+      border-radius: 999px;
+      position: relative;
+    }
+
+    .ring::after {
+      content: "";
+      position: absolute;
+      inset: 11px;
+      border-radius: inherit;
+      background: #000;
+    }
+
+    .ring-thin::after { inset: 8px; }
+    .ring-fat::after { inset: 15px; }
+
+    .ring-label {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      z-index: 1;
+    }
+
+    .task-row + .task-row {
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .wave span {
+      width: 6px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #60a5fa, #1d4ed8);
+      display: inline-block;
+    }
+
+    .stack-card {
+      background: linear-gradient(180deg, rgba(17,24,39,0.95), rgba(2,6,23,0.98));
+      border: 1px solid rgba(96,165,250,0.18);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.04);
+    }
+  </style>
+</head>
+<body class="min-h-screen">
+  <main class="mx-auto max-w-7xl px-6 py-10">
+    <header class="mb-10">
+      <p class="watch-title mb-3">Mission Control concept</p>
+      <h1 class="text-3xl font-semibold text-ink">Mission Control — watchOS App &amp; Complications</h1>
+      <p class="mt-3 max-w-4xl text-sm leading-6 text-slate-300">High-contrast watch face complications, glanceable app screens, Smart Stack presence, and notification flows designed for a pure-black OLED watchOS experience.</p>
+    </header>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="watch-title">Section 1</p>
+        <h2 class="mt-1 text-2xl font-semibold text-white">Watch Face Complications</h2>
+      </div>
+
+      <div class="grid gap-8 lg:grid-cols-2 2xl:grid-cols-4">
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Corner Complication</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen face-grid flex items-center justify-center">
+              <div class="absolute top-6 text-center">
+                <div class="text-[13px] tracking-[0.35em] text-slate-500">10 09</div>
+              </div>
+              <div class="absolute left-5 top-7 h-8 w-8 rounded-full border border-slate-800 bg-slate-950/70"></div>
+              <div class="absolute right-6 top-6 h-9 w-9 rounded-full" style="background: conic-gradient(#3b82f6 0 67%, rgba(51,65,85,0.75) 67% 100%);">
+                <div class="absolute inset-[5px] rounded-full bg-blue-500 flex items-center justify-center text-base font-semibold text-white">6</div>
+              </div>
+              <div class="text-center">
+                <p class="text-6xl font-semibold tracking-tight text-white">10:09</p>
+                <p class="mt-2 text-sm text-slate-400">Tuesday · Focus Mode</p>
+              </div>
+              <div class="absolute bottom-6 text-center">
+                <p class="text-[12px] text-slate-500">Mission Control corner status</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Graphic Circular</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen face-grid flex items-center justify-center">
+              <div class="ring ring-fat h-[148px] w-[148px]" style="background: conic-gradient(#3b82f6 0 67%, #172033 67% 100%);">
+                <div class="ring-label px-8">
+                  <div>
+                    <p class="text-[10px] font-semibold uppercase tracking-[0.28em] text-blue-300">Current task</p>
+                    <p class="mt-2 text-xl font-semibold leading-6 text-white">Design homepage</p>
+                    <p class="mt-2 text-sm font-medium text-slate-400">23m</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Modular Compact</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen face-grid">
+              <div class="flex h-full items-center justify-center px-4">
+                <div class="w-full rounded-[26px] border border-slate-800 bg-slate-950/90 px-4 py-4 shadow-inner shadow-black/40">
+                  <div class="flex items-center gap-3">
+                    <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500/18 text-blue-300">
+                      <i class="fas fa-satellite-dish text-lg"></i>
+                    </div>
+                    <div>
+                      <p class="text-[11px] font-semibold uppercase tracking-[0.25em] text-slate-500">MC</p>
+                      <p class="mt-1 text-base font-semibold leading-5 text-white">6 tasks</p>
+                    </div>
+                  </div>
+                  <p class="mt-3 text-[15px] font-medium leading-5 text-slate-300">Next: Design homepage</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Extra Large</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen face-grid flex items-center justify-center">
+              <div class="ring h-[176px] w-[176px]" style="background: conic-gradient(#60a5fa 0 67%, #111827 67% 100%);">
+                <div class="ring-label px-8">
+                  <div>
+                    <p class="text-4xl font-semibold tracking-tight text-white">6/9</p>
+                    <p class="text-base font-medium text-slate-300">Today</p>
+                    <div class="mx-auto my-3 h-px w-16 bg-slate-700"></div>
+                    <p class="text-base font-medium leading-5 text-blue-200">Design homepage</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="watch-title">Section 2</p>
+        <h2 class="mt-1 text-2xl font-semibold text-white">Watch App Screens</h2>
+      </div>
+
+      <div class="grid gap-8 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Today List</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 pb-4 pt-5">
+              <div class="flex items-start justify-between">
+                <div>
+                  <h4 class="text-2xl font-semibold text-white">Today</h4>
+                  <p class="text-[12px] text-slate-400">Tue, Jul 28</p>
+                </div>
+                <div class="rounded-full bg-slate-900 px-2 py-1 text-[11px] font-semibold text-blue-300">9 total</div>
+              </div>
+              <div class="mt-4 rounded-[24px] border border-slate-800 bg-slate-950/85">
+                <div class="task-row flex items-center gap-3 px-3 py-3">
+                  <div class="h-6 w-6 rounded-full border-2 border-blue-400"></div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-[15px] font-medium text-white">Design homepage</p>
+                  </div>
+                  <span class="h-2.5 w-2.5 rounded-full bg-red-400"></span>
+                </div>
+                <div class="task-row flex items-center gap-3 px-3 py-3">
+                  <div class="h-6 w-6 rounded-full border-2 border-amber-300"></div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-[15px] font-medium text-white">Review PR #142</p>
+                  </div>
+                  <span class="h-2.5 w-2.5 rounded-full bg-amber-300"></span>
+                </div>
+                <div class="task-row flex items-center gap-3 px-3 py-3">
+                  <div class="flex h-6 w-6 items-center justify-center rounded-full bg-green-500 text-[11px] text-black"><i class="fas fa-check"></i></div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-[15px] font-medium text-slate-500 line-through">Send sprint notes</p>
+                  </div>
+                  <span class="h-2.5 w-2.5 rounded-full bg-green-400"></span>
+                </div>
+                <div class="task-row flex items-center gap-3 px-3 py-3">
+                  <div class="h-6 w-6 rounded-full border-2 border-slate-600"></div>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-[15px] font-medium text-white">Buy groceries</p>
+                  </div>
+                  <span class="h-2.5 w-2.5 rounded-full bg-blue-400"></span>
+                </div>
+              </div>
+              <div class="mt-3 flex items-center justify-between">
+                <p class="text-[13px] font-medium text-slate-300">6 of 9 complete</p>
+                <button class="flex h-11 w-11 items-center justify-center rounded-full bg-blue-500 text-xl text-white shadow-lg shadow-blue-500/20">
+                  <i class="fas fa-plus"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Quick Capture (Voice)</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-5 py-5 text-center">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Quick capture</p>
+              <div class="relative mx-auto mt-4 flex h-28 w-28 items-center justify-center rounded-full" style="background: radial-gradient(circle, rgba(59,130,246,0.22), transparent 58%), conic-gradient(rgba(96,165,250,0.65), rgba(37,99,235,0.16), rgba(96,165,250,0.65));">
+                <div class="absolute inset-[10px] rounded-full bg-black"></div>
+                <div class="relative z-10 flex h-16 w-16 items-center justify-center rounded-full bg-blue-500/20 text-blue-300">
+                  <i class="fas fa-microphone text-3xl"></i>
+                </div>
+              </div>
+              <p class="mt-4 text-lg font-semibold text-white">Speak your task...</p>
+              <div class="wave mt-4 flex items-end justify-center gap-1.5">
+                <span style="height:18px"></span>
+                <span style="height:34px"></span>
+                <span style="height:24px"></span>
+                <span style="height:42px"></span>
+                <span style="height:28px"></span>
+                <span style="height:36px"></span>
+                <span style="height:20px"></span>
+              </div>
+              <div class="mt-5 rounded-[22px] border border-green-500/20 bg-green-500/10 px-3 py-2">
+                <p class="text-[13px] font-medium text-green-300">✓ Added: Buy groceries</p>
+              </div>
+              <button class="mt-5 w-full rounded-full bg-slate-900 py-3 text-[15px] font-semibold text-slate-200">Cancel</button>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Focus Timer</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 py-5 text-center">
+              <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-blue-300">Focus session</p>
+              <div class="ring ring-thin mx-auto mt-3 h-[136px] w-[136px]" style="background: conic-gradient(#3b82f6 0 21%, #1f2937 21% 100%);">
+                <div class="ring-label">
+                  <div>
+                    <p class="text-4xl font-semibold tracking-tight text-white">23:47</p>
+                    <p class="mt-1 text-[12px] text-slate-400">remaining</p>
+                  </div>
+                </div>
+              </div>
+              <p class="mt-4 text-lg font-semibold text-white">Design homepage</p>
+              <div class="mt-4 grid grid-cols-2 gap-2">
+                <button class="rounded-full bg-yellow-400 py-3 text-[15px] font-semibold text-black">Pause</button>
+                <button class="rounded-full bg-red-500 py-3 text-[15px] font-semibold text-white">Stop</button>
+              </div>
+              <p class="mt-3 text-[13px] text-slate-400">Tick every 5 min</p>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Triage Quick View</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 py-5">
+              <div class="flex items-center justify-between">
+                <p class="text-[12px] font-semibold uppercase tracking-[0.24em] text-slate-500">Triage</p>
+                <p class="text-[15px] font-semibold text-white">5/12</p>
+              </div>
+              <div class="mt-4 rounded-[26px] border border-slate-800 bg-slate-950/90 p-4">
+                <div class="inline-flex items-center gap-2 rounded-full bg-white/6 px-3 py-1 text-[12px] font-medium text-slate-200">
+                  <i class="fab fa-github text-sm"></i>
+                  GitHub
+                </div>
+                <p class="mt-4 text-2xl font-semibold leading-7 text-white">Review PR #142</p>
+                <div class="mt-5 space-y-2">
+                  <button class="w-full rounded-full bg-green-500 py-3 text-[16px] font-semibold text-black">✓ Keep</button>
+                  <button class="w-full rounded-full bg-orange-400 py-3 text-[16px] font-semibold text-black">→ Defer</button>
+                </div>
+              </div>
+              <p class="mt-4 text-center text-[13px] text-slate-400">Turn to skip</p>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Daily Summary (Glance)</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 py-5 text-center">
+              <div class="mx-auto flex h-8 w-8 items-center justify-center rounded-full bg-green-500/18 text-green-300">
+                <i class="fas fa-circle-check"></i>
+              </div>
+              <div class="ring mx-auto mt-3 h-[118px] w-[118px]" style="background: conic-gradient(#22c55e 0 67%, #1f2937 67% 100%);">
+                <div class="ring-label">
+                  <div>
+                    <p class="text-3xl font-semibold text-white">67%</p>
+                    <p class="text-[12px] text-slate-400">complete</p>
+                  </div>
+                </div>
+              </div>
+              <p class="mt-4 text-lg font-semibold text-white">6 done · 3 remaining</p>
+              <p class="mt-2 text-[14px] leading-5 text-slate-300">Great pace! On track to finish by 5pm</p>
+              <div class="mt-4 flex items-center justify-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full bg-green-400"></span>
+                <span class="text-[13px] font-medium text-green-300">On track</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="mb-12">
+      <div class="mb-5">
+        <p class="watch-title">Section 3</p>
+        <h2 class="mt-1 text-2xl font-semibold text-white">Smart Stack Widget (watchOS 10+)</h2>
+      </div>
+
+      <div class="flex flex-wrap gap-8">
+        <article>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 py-5">
+              <div class="stack-card rounded-[28px] p-4">
+                <div class="flex items-start justify-between">
+                  <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">Smart Stack</p>
+                    <p class="mt-1 text-xl font-semibold text-white">Mission Control</p>
+                  </div>
+                  <div class="flex h-9 w-9 items-center justify-center rounded-2xl bg-blue-500/20 text-blue-300">
+                    <i class="fas fa-satellite-dish"></i>
+                  </div>
+                </div>
+                <div class="mt-4 rounded-[22px] border border-slate-800 bg-black/80 p-4">
+                  <div class="flex items-start gap-3">
+                    <div class="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full border-2 border-blue-400 text-blue-300">
+                      <i class="fas fa-check text-[11px] opacity-0"></i>
+                    </div>
+                    <div>
+                      <p class="text-lg font-semibold leading-6 text-white">Design homepage</p>
+                      <p class="mt-1 text-[13px] text-blue-300">Tap to complete</p>
+                    </div>
+                  </div>
+                </div>
+                <p class="mt-4 text-[14px] font-medium text-slate-300">5 more tasks today</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <div class="mb-5">
+        <p class="watch-title">Section 4</p>
+        <h2 class="mt-1 text-2xl font-semibold text-white">Notification on Watch</h2>
+      </div>
+
+      <div class="grid gap-8 md:grid-cols-2 xl:max-w-3xl">
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Short Look</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen flex items-center justify-center px-5 text-center">
+              <div>
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-[22px] bg-blue-500/18 text-blue-300">
+                  <i class="fas fa-satellite-dish text-2xl"></i>
+                </div>
+                <p class="mt-5 text-[12px] font-semibold uppercase tracking-[0.3em] text-slate-500">Mission Control</p>
+                <p class="mt-3 text-2xl font-semibold leading-8 text-white">New task from share</p>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article>
+          <h3 class="mb-3 text-sm font-semibold text-slate-200">Long Look</h3>
+          <div class="watch-shell mx-auto">
+            <div class="watch-screen px-4 py-5">
+              <div class="flex items-center gap-3">
+                <div class="flex h-11 w-11 items-center justify-center rounded-2xl bg-blue-500/18 text-blue-300">
+                  <i class="fas fa-satellite-dish"></i>
+                </div>
+                <div>
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.26em] text-slate-500">Mission Control</p>
+                  <p class="text-base font-semibold text-white">Task captured</p>
+                </div>
+              </div>
+              <div class="mt-4 rounded-[24px] border border-slate-800 bg-slate-950/85 p-4">
+                <p class="text-xl font-semibold leading-7 text-white">Read Next.js 16 cache migration notes</p>
+                <p class="mt-2 text-[13px] text-slate-400">Source: Share Sheet · Safari</p>
+              </div>
+              <div class="mt-5 space-y-2">
+                <button class="w-full rounded-full bg-blue-500 py-3 text-[16px] font-semibold text-white">Open</button>
+                <button class="w-full rounded-full bg-slate-900 py-3 text-[16px] font-semibold text-slate-200">Dismiss</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

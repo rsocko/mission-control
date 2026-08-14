@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Document Intelligence Hub</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Geist Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-tertiary: #64748b;
+      --accent: #3b82f6;
+      --accent-hover: #60a5fa;
+      --accent-muted: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #06b6d4;
+      --border: #1e293b;
+      --border-strong: #334155;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────────────── */
+    .sidebar {
+      width: 220px;
+      min-width: 220px;
+      background: var(--surface-0);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 12px 0;
+      gap: 2px;
+    }
+    .sidebar-logo {
+      padding: 0 16px 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text-secondary);
+    }
+    .sidebar-logo .dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: 8px;
+      margin: 0 8px;
+      transition: background 0.1s;
+      position: relative;
+    }
+    .nav-item:hover { background: var(--surface-1); color: var(--text-primary); }
+    .nav-item.active {
+      background: var(--surface-2);
+      color: var(--text-primary);
+    }
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0; top: 4px; bottom: 4px;
+      width: 2px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+    .nav-section {
+      padding: 8px 16px 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-tertiary);
+    }
+
+    /* ── Main Layout ─────────────────────────────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .topbar {
+      background: var(--surface-0);
+      border-bottom: 1px solid var(--border);
+      padding: 0 20px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-shrink: 0;
+    }
+    .topbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .topbar-title .connector-icon {
+      width: 18px; height: 18px;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      border-radius: 4px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+    }
+    .topbar-sep { color: var(--text-tertiary); font-size: 12px; }
+
+    /* ── Tab Bar ─────────────────────────────────────────────────── */
+    .tab-bar {
+      display: flex;
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-0);
+      padding: 0 20px;
+      flex-shrink: 0;
+    }
+    .tab {
+      padding: 10px 16px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+      display: flex; align-items: center; gap: 6px;
+      white-space: nowrap;
+    }
+    .tab:hover { color: var(--text-secondary); }
+    .tab.active {
+      color: var(--text-primary);
+      border-bottom-color: var(--accent);
+    }
+    .tab .badge {
+      background: var(--surface-2);
+      color: var(--text-tertiary);
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .tab.active .badge { background: var(--accent-muted); color: var(--accent-hover); }
+
+    /* ── Content area ────────────────────────────────────────────── */
+    .content-area {
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* ── Action Queue (task list + detail) ─────────────────────── */
+    .task-list-pane {
+      width: 380px;
+      min-width: 300px;
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .task-list-toolbar {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+    }
+    .filter-chip {
+      font-size: 11px; font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 9999px;
+      border: 1px solid var(--border-strong);
+      background: transparent;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s, border-color 0.1s;
+    }
+    .filter-chip:hover { background: var(--surface-2); color: var(--text-secondary); }
+    .filter-chip.active { background: var(--accent-muted); border-color: var(--accent); color: var(--accent-hover); }
+    .task-list-scroll { flex: 1; overflow-y: auto; }
+    .task-list-scroll::-webkit-scrollbar { width: 4px; }
+    .task-list-scroll::-webkit-scrollbar-track { background: transparent; }
+    .task-list-scroll::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+
+    /* ── Task rows ──────────────────────────────────────────────── */
+    .task-group-header {
+      padding: 12px 14px 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--text-tertiary);
+    }
+    .task-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: background 0.1s;
+      border-left: 2px solid transparent;
+    }
+    .task-row:hover { background: var(--surface-1); }
+    .task-row.active {
+      background: var(--surface-2);
+      border-left-color: var(--accent);
+    }
+    .task-check {
+      width: 16px; height: 16px;
+      border: 1.5px solid var(--border-strong);
+      border-radius: 4px;
+      flex-shrink: 0;
+      margin-top: 1px;
+      cursor: pointer;
+      transition: border-color 0.1s;
+    }
+    .task-row:hover .task-check { border-color: var(--accent); }
+    .task-body { flex: 1; min-width: 0; }
+    .task-title {
+      font-size: 13px;
+      font-weight: 400;
+      color: var(--text-primary);
+      line-height: 1.4;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .task-meta {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 3px;
+      flex-wrap: wrap;
+    }
+    .tag-pill {
+      font-size: 10px; font-weight: 500;
+      padding: 1px 6px;
+      border-radius: 9999px;
+      background: var(--surface-2);
+      color: var(--text-tertiary);
+      white-space: nowrap;
+    }
+    .tag-pill.pay { background: #7f1d1d30; color: #fca5a5; }
+    .tag-pill.respond { background: #78350f30; color: #fdba74; }
+    .tag-pill.sign { background: #713f1230; color: #fde68a; }
+    .tag-pill.schedule { background: #14532d30; color: #86efac; }
+    .tag-pill.file { background: #1e3a5f30; color: #93c5fd; }
+    .tag-pill.review { background: #3b0764 30; color: #d8b4fe; }
+    .tag-pill.critical { background: #7f1d1d30; color: #fca5a5; border: 1px solid #7f1d1d50; }
+    .tag-pill.high { background: #78350f30; color: #fdba74; }
+    .due-date { font-size: 10px; color: var(--text-tertiary); }
+    .due-date.overdue { color: #f87171; }
+    .amount-badge {
+      font-size: 10px; font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: #4ade80;
+    }
+
+    /* ── Detail Pane ────────────────────────────────────────────── */
+    .detail-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .detail-header {
+      padding: 16px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .detail-title {
+      font-size: 16px; font-weight: 600;
+      line-height: 1.3;
+      margin-bottom: 8px;
+    }
+    .detail-meta-row {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap;
+    }
+    .detail-meta-chip {
+      font-size: 11px; font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 8px;
+      display: flex; align-items: center; gap: 4px;
+    }
+    .detail-meta-chip.priority-critical { background: #7f1d1d30; color: #fca5a5; border: 1px solid #7f1d1d50; }
+    .detail-meta-chip.priority-high { background: #78350f30; color: #fdba74; border: 1px solid #78350f50; }
+    .detail-meta-chip.priority-medium { background: #78350f20; color: #fde68a; border: 1px solid #78350f30; }
+    .detail-meta-chip.action-pay { background: #7f1d1d20; color: #f87171; border: 1px solid #7f1d1d40; }
+    .detail-meta-chip.action-review { background: #3b076420; color: #c084fc; border: 1px solid #3b076440; }
+    .detail-meta-chip.action-sign { background: #71341220; color: #fcd34d; border: 1px solid #71341240; }
+    .detail-meta-chip.action-file { background: #1e3a5f20; color: #60a5fa; border: 1px solid #1e3a5f40; }
+    .detail-meta-chip.action-respond { background: #78350f20; color: #fb923c; border: 1px solid #78350f40; }
+    .detail-meta-chip.action-schedule { background: #14532d20; color: #4ade80; border: 1px solid #14532d40; }
+    .detail-meta-chip.connector { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+    .detail-meta-chip.date { background: var(--surface-2); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+
+    .detail-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+    .detail-body::-webkit-scrollbar { width: 4px; }
+    .detail-body::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+
+    .detail-section { display: flex; flex-direction: column; gap: 6px; }
+    .detail-section-label {
+      font-size: 10px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-tertiary);
+    }
+    .detail-section-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+
+    /* ── Document Preview Panel ─────────────────────────────────── */
+    .doc-preview-box {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--surface-1);
+    }
+    .doc-preview-header {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; color: var(--text-secondary);
+      background: var(--surface-2);
+    }
+    .doc-preview-header i { color: var(--text-tertiary); }
+    .doc-preview-body {
+      background: #1a2035;
+      min-height: 200px;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 12px;
+      position: relative;
+      padding: 24px;
+    }
+    .doc-preview-pages {
+      display: flex; gap: 8px; align-items: flex-start;
+    }
+    .doc-page-thumb {
+      width: 90px; height: 120px;
+      background: #fff;
+      border-radius: 4px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .doc-page-thumb:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
+    .doc-page-thumb.active { box-shadow: 0 0 0 2px var(--accent), 0 4px 16px rgba(59,130,246,0.3); }
+    .doc-page-thumb-inner {
+      flex: 1; background: #f8f9fa;
+      padding: 8px 6px;
+      display: flex; flex-direction: column; gap: 3px;
+    }
+    .doc-line { height: 4px; border-radius: 2px; background: #dee2e6; }
+    .doc-line.wide { width: 80%; }
+    .doc-line.med { width: 60%; }
+    .doc-line.short { width: 40%; }
+    .doc-line.accent { background: #adb5bd; }
+    .doc-line.gap { height: 8px; background: transparent; }
+    .doc-page-label {
+      font-size: 9px; text-align: center; color: #adb5bd;
+      padding: 3px 0;
+      background: #f1f3f5;
+      border-top: 1px solid #dee2e6;
+    }
+    .doc-preview-actions {
+      display: flex; gap: 6px;
+    }
+    .preview-action-btn {
+      font-size: 11px; font-weight: 500;
+      padding: 5px 10px; border-radius: 8px;
+      border: 1px solid var(--border-strong);
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      cursor: pointer;
+      display: inline-flex; align-items: center; gap: 5px;
+      transition: background 0.1s, color 0.1s;
+    }
+    .preview-action-btn:hover { background: var(--surface-3); color: var(--text-primary); }
+    .preview-action-btn.primary { background: var(--accent); border-color: var(--accent); color: white; }
+    .preview-action-btn.primary:hover { background: var(--accent-hover); }
+
+    /* ── KV fields ──────────────────────────────────────────────── */
+    .kv-grid {
+      display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px;
+      font-size: 12px;
+    }
+    .kv-key { color: var(--text-tertiary); font-weight: 500; }
+    .kv-val { color: var(--text-secondary); }
+    .kv-val.amount { color: #4ade80; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .kv-val.link { color: var(--accent-hover); cursor: pointer; }
+    .kv-val.link:hover { text-decoration: underline; }
+
+    /* ── Alerts panel for Insights tab ─────────────────────────── */
+    .alert-card {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-1);
+      padding: 12px 14px;
+      display: flex; gap: 12px;
+      transition: border-color 0.15s;
+    }
+    .alert-card:hover { border-color: var(--border-strong); }
+    .alert-card.severity-high { border-left: 3px solid #ef4444; }
+    .alert-card.severity-medium { border-left: 3px solid #f59e0b; }
+    .alert-card.severity-low { border-left: 3px solid #3b82f6; }
+    .alert-icon-box {
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      font-size: 14px;
+    }
+    .alert-icon-box.stmt { background: #581c8730; color: #c084fc; }
+    .alert-icon-box.eob { background: #be123c30; color: #fb7185; }
+    .alert-body { flex: 1; min-width: 0; }
+    .alert-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 3px; }
+    .alert-desc { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+    .alert-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 8px;
+    }
+    .alert-tags { display: flex; gap: 4px; }
+    .alert-tag {
+      font-size: 10px; padding: 1px 6px; border-radius: 9999px;
+      font-weight: 500;
+    }
+    .alert-tag.stmt { background: #581c8730; color: #c084fc; }
+    .alert-tag.eob { background: #be123c30; color: #fb7185; }
+    .overdue-bar {
+      height: 4px; background: var(--surface-2); border-radius: 2px;
+      margin-top: 6px; overflow: hidden;
+    }
+    .overdue-fill { height: 100%; border-radius: 2px; }
+    .overdue-fill.mild { background: var(--warning); }
+    .overdue-fill.bad { background: var(--danger); }
+
+    /* ── Stats grid ─────────────────────────────────────────────── */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .stat-card {
+      background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+      padding: 12px 14px;
+    }
+    .stat-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); margin-bottom: 4px; }
+    .stat-value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+    .stat-value.danger { color: var(--danger); }
+    .stat-value.warning { color: var(--warning); }
+    .stat-value.success { color: var(--success); }
+    .stat-value.info { color: var(--info); }
+    .stat-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+
+    /* ── Gallery view (Documents tab) ───────────────────────────── */
+    .doc-gallery { padding: 16px 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; overflow-y: auto; }
+    .doc-gallery::-webkit-scrollbar { width: 4px; }
+    .doc-gallery::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+    .gallery-doc-card {
+      background: var(--surface-1);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      position: relative;
+    }
+    .gallery-doc-card:hover {
+      border-color: var(--border-strong);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .gallery-doc-thumb {
+      height: 120px;
+      background: var(--surface-2);
+      display: flex; align-items: center; justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .gallery-doc-thumb .lines {
+      display: flex; flex-direction: column; gap: 5px; padding: 12px; width: 100%;
+    }
+    .gallery-doc-thumb .line {
+      height: 6px; background: var(--surface-3); border-radius: 3px;
+    }
+    .gallery-doc-thumb .line.accent { background: var(--accent-muted); width: 60%; }
+    .gallery-doc-thumb .line.short { width: 50%; }
+    .gallery-doc-thumb .line.med { width: 75%; }
+    .gallery-doc-card-type-badge {
+      position: absolute; top: 6px; left: 6px;
+      font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .gallery-doc-card-type-badge.invoice { background: #7f1d1d90; color: #fca5a5; border: 1px solid #7f1d1d70; }
+    .gallery-doc-card-type-badge.eob { background: #be123c90; color: #fda4af; border: 1px solid #be123c70; }
+    .gallery-doc-card-type-badge.statement { background: #4c1d9590; color: #d8b4fe; border: 1px solid #4c1d9570; }
+    .gallery-doc-card-type-badge.contract { background: #78350f90; color: #fdba74; border: 1px solid #78350f70; }
+    .gallery-doc-card-type-badge.misc { background: var(--surface-3); color: var(--text-tertiary); }
+    .gallery-doc-action-badge {
+      position: absolute; top: 6px; right: 6px;
+      font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 2px 6px; border-radius: 4px;
+    }
+    .gallery-doc-action-badge.pay { background: #7f1d1d90; color: #fca5a5; }
+    .gallery-doc-action-badge.review { background: #3b076490; color: #d8b4fe; }
+    .gallery-doc-action-badge.sign { background: #71341290; color: #fde68a; }
+    .gallery-doc-action-badge.file { background: #1e3a5f90; color: #93c5fd; }
+    .gallery-doc-info { padding: 10px 10px 8px; }
+    .gallery-doc-title { font-size: 12px; font-weight: 500; color: var(--text-primary); line-height: 1.3; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .gallery-doc-sub { font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; justify-content: space-between; }
+    .gallery-doc-amount { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: #4ade80; }
+
+    /* ── Tab content panels ─────────────────────────────────────── */
+    .tab-panel { display: none; flex: 1; overflow: hidden; }
+    .tab-panel.active { display: flex; }
+
+    .insights-scroll { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 16px; }
+    .insights-scroll::-webkit-scrollbar { width: 4px; }
+    .insights-scroll::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 2px; }
+
+    .section-heading {
+      font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 6px;
+      margin-bottom: 2px;
+    }
+    .section-heading .count { font-size: 11px; background: var(--surface-2); color: var(--text-tertiary); padding: 1px 6px; border-radius: 9999px; font-weight: 600; }
+
+    /* ── Action toolbar in detail pane ───────────────────────────── */
+    .action-toolbar {
+      padding: 10px 20px;
+      border-top: 1px solid var(--border);
+      display: flex; gap: 6px; align-items: center;
+      background: var(--surface-0);
+      flex-shrink: 0;
+    }
+    .spacer { flex: 1; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Sidebar ──────────────────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <span class="dot"></span>
+      Mission Control
+    </div>
+    <div class="nav-section">Core</div>
+    <div class="nav-item"><i class="fa-solid fa-check-square" style="width:14px;font-size:12px;opacity:.7"></i> Tasks</div>
+    <div class="nav-item"><i class="fa-solid fa-calendar-days" style="width:14px;font-size:12px;opacity:.7"></i> Today</div>
+    <div class="nav-item"><i class="fa-solid fa-inbox" style="width:14px;font-size:12px;opacity:.7"></i> Triage <span class="tag-pill" style="margin-left:4px;font-size:9px;padding:1px 5px;">12</span></div>
+    <div class="nav-section" style="margin-top:4px;">Integrations</div>
+    <div class="nav-item active">
+      <i class="fa-solid fa-file-lines" style="width:14px;font-size:12px;opacity:.7"></i> Doc Intelligence
+      <span class="tag-pill" style="margin-left:auto;font-size:9px;padding:1px 5px;background:#1e3a8a30;color:#60a5fa;">7</span>
+    </div>
+    <div class="nav-item"><i class="fa-brands fa-github" style="width:14px;font-size:12px;opacity:.7"></i> GitHub</div>
+    <div class="nav-item"><i class="fa-solid fa-wallet" style="width:14px;font-size:12px;opacity:.7"></i> Finance</div>
+    <div class="nav-item"><i class="fa-solid fa-home" style="width:14px;font-size:12px;opacity:.7"></i> Home</div>
+    <div class="nav-section" style="margin-top:4px;">System</div>
+    <div class="nav-item"><i class="fa-solid fa-sliders" style="width:14px;font-size:12px;opacity:.7"></i> Settings</div>
+  </nav>
+
+  <!-- ── Main content ─────────────────────────────────────────── -->
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <div class="topbar-title">
+        <div class="connector-icon">📄</div>
+        Document Intelligence
+      </div>
+      <span class="topbar-sep">•</span>
+      <span style="font-size:12px;color:var(--text-tertiary)">hub.local:8200</span>
+      <div class="spacer"></div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:#4ade80;">
+        <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+        Connected · synced 2m ago
+      </div>
+      <button class="preview-action-btn" style="font-size:11px;">
+        <i class="fa-solid fa-rotate-right" style="font-size:10px;"></i> Sync
+      </button>
+    </div>
+
+    <!-- Tab Bar -->
+    <div class="tab-bar">
+      <div class="tab active" onclick="showTab('queue')">
+        <i class="fa-solid fa-list-check" style="font-size:11px;"></i>
+        Action Queue
+        <span class="badge">7</span>
+      </div>
+      <div class="tab" onclick="showTab('documents')">
+        <i class="fa-solid fa-folder-open" style="font-size:11px;"></i>
+        Documents
+        <span class="badge">142</span>
+      </div>
+      <div class="tab" onclick="showTab('insights')">
+        <i class="fa-solid fa-chart-bar" style="font-size:11px;"></i>
+        Insights
+        <span class="badge" style="background:#7f1d1d30;color:#f87171;">3 alerts</span>
+      </div>
+    </div>
+
+    <!-- Content Area -->
+    <div class="content-area">
+
+      <!-- ── ACTION QUEUE tab ─────────────────────────────────── -->
+      <div class="tab-panel active" id="tab-queue">
+
+        <!-- Task list pane -->
+        <div class="task-list-pane">
+          <div class="task-list-toolbar">
+            <span class="filter-chip active">All</span>
+            <span class="filter-chip">Pay</span>
+            <span class="filter-chip">Review</span>
+            <span class="filter-chip">Sign</span>
+            <span class="filter-chip">File</span>
+          </div>
+          <div class="task-list-scroll">
+
+            <!-- Group: Critical / Due today -->
+            <div class="task-group-header">Critical · Due today</div>
+
+            <div class="task-row active" onclick="showDetail('pay')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">Pay: Pacific Gas &amp; Electric — $143.22</div>
+                <div class="task-meta">
+                  <span class="tag-pill pay">Pay</span>
+                  <span class="tag-pill critical">Critical</span>
+                  <span class="due-date overdue"><i class="fa-solid fa-clock" style="font-size:8px;"></i> Due today</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task-row" onclick="showDetail('sign')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">Sign: Home Insurance Renewal Policy</div>
+                <div class="task-meta">
+                  <span class="tag-pill sign">Sign</span>
+                  <span class="tag-pill critical">Critical</span>
+                  <span class="due-date overdue"><i class="fa-solid fa-clock" style="font-size:8px;"></i> Due Jul 16</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group: High priority -->
+            <div class="task-group-header" style="margin-top:4px;">High priority</div>
+
+            <div class="task-row" onclick="showDetail('respond')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">Respond to: State Farm — Claim #48391</div>
+                <div class="task-meta">
+                  <span class="tag-pill respond">Respond</span>
+                  <span class="due-date"><i class="fa-solid fa-clock" style="font-size:8px;"></i> Due Jul 20</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task-row" onclick="showDetail('schedule')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">Schedule: Annual Physical Appointment</div>
+                <div class="task-meta">
+                  <span class="tag-pill schedule">Schedule</span>
+                  <span class="due-date"><i class="fa-solid fa-clock" style="font-size:8px;"></i> Due Jul 31</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Group: Medium / New -->
+            <div class="task-group-header" style="margin-top:4px;">Medium</div>
+
+            <div class="task-row" onclick="showDetail('review')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">Review: Lease Amendment — Unit 4B</div>
+                <div class="task-meta">
+                  <span class="tag-pill review">Review</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task-row" onclick="showDetail('file')">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">File: Costco Receipt — $312.45</div>
+                <div class="task-meta">
+                  <span class="tag-pill file">File</span>
+                  <span class="tag-pill" style="background:var(--surface-2);color:var(--text-tertiary);">Low</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="task-row">
+              <div class="task-check"></div>
+              <div class="task-body">
+                <div class="task-title">File: Dental EOB — Aetna Oct 2025</div>
+                <div class="task-meta">
+                  <span class="tag-pill file">File</span>
+                  <span class="tag-pill" style="background:var(--surface-2);color:var(--text-tertiary);">Low</span>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /task-list-scroll -->
+        </div><!-- /task-list-pane -->
+
+        <!-- Detail pane — pay selected -->
+        <div class="detail-pane" id="detail-pay">
+          <div class="detail-header">
+            <div class="detail-title">Pay: Pacific Gas &amp; Electric — $143.22</div>
+            <div class="detail-meta-row">
+              <span class="detail-meta-chip action-pay"><i class="fa-solid fa-credit-card" style="font-size:10px;"></i> Pay</span>
+              <span class="detail-meta-chip priority-critical"><i class="fa-solid fa-triangle-exclamation" style="font-size:10px;"></i> Critical</span>
+              <span class="detail-meta-chip date"><i class="fa-solid fa-clock" style="font-size:10px;"></i> Due today</span>
+              <span class="detail-meta-chip connector"><span style="font-size:11px;">📄</span> Document Intelligence</span>
+            </div>
+          </div>
+          <div class="detail-body">
+
+            <!-- Document preview (generic metadata.previewUrl / previewType='pdf') -->
+            <div class="detail-section">
+              <div class="detail-section-label">Document Preview</div>
+              <div class="doc-preview-box">
+                <div class="doc-preview-header">
+                  <i class="fa-solid fa-file-pdf"></i>
+                  <span>PGE_bill_202506.pdf</span>
+                  <span style="color:var(--text-tertiary)">·</span>
+                  <span style="color:var(--text-tertiary)">2 pages</span>
+                  <div style="margin-left:auto;display:flex;gap:6px;">
+                    <button class="preview-action-btn" style="padding:3px 8px;font-size:10px;"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:9px;"></i> Paperless</button>
+                  </div>
+                </div>
+                <div class="doc-preview-body">
+                  <div class="doc-preview-pages">
+                    <div class="doc-page-thumb active">
+                      <div class="doc-page-thumb-inner">
+                        <div class="doc-line accent wide"></div>
+                        <div class="doc-line gap"></div>
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line med"></div>
+                        <div class="doc-line short"></div>
+                        <div class="doc-line gap"></div>
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line med"></div>
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line short"></div>
+                        <div class="doc-line gap"></div>
+                        <div class="doc-line accent wide"></div>
+                        <div class="doc-line short"></div>
+                      </div>
+                      <div class="doc-page-label">Page 1</div>
+                    </div>
+                    <div class="doc-page-thumb">
+                      <div class="doc-page-thumb-inner">
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line gap"></div>
+                        <div class="doc-line med"></div>
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line short"></div>
+                        <div class="doc-line gap"></div>
+                        <div class="doc-line wide"></div>
+                        <div class="doc-line med"></div>
+                      </div>
+                      <div class="doc-page-label">Page 2</div>
+                    </div>
+                  </div>
+                  <div class="doc-preview-actions">
+                    <button class="preview-action-btn primary"><i class="fa-solid fa-credit-card" style="font-size:10px;"></i> Open to Pay</button>
+                    <button class="preview-action-btn"><i class="fa-solid fa-download" style="font-size:10px;"></i> Download PDF</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Key fields from metadata -->
+            <div class="detail-section">
+              <div class="detail-section-label">Details</div>
+              <div class="kv-grid">
+                <span class="kv-key">Correspondent</span>
+                <span class="kv-val">Pacific Gas &amp; Electric</span>
+                <span class="kv-key">Amount Due</span>
+                <span class="kv-val amount">$143.22</span>
+                <span class="kv-key">Document</span>
+                <span class="kv-val link"><i class="fa-solid fa-arrow-up-right-from-square" style="font-size:10px;"></i> View in Paperless</span>
+                <span class="kv-key">Action Type</span>
+                <span class="kv-val">Pay</span>
+                <span class="kv-key">Urgency</span>
+                <span class="kv-val" style="color:#f87171;">Critical</span>
+                <span class="kv-key">Created</span>
+                <span class="kv-val">Jul 14, 2026</span>
+              </div>
+            </div>
+
+            <!-- AI summary -->
+            <div class="detail-section">
+              <div class="detail-section-label">AI Summary</div>
+              <div class="detail-section-content">
+                Monthly electricity bill from Pacific Gas &amp; Electric for service period June 1–30, 2026. Amount $143.22 is due today. Bill shows 12% increase from last month due to summer AC usage.
+              </div>
+            </div>
+
+          </div><!-- /detail-body -->
+
+          <div class="action-toolbar">
+            <button class="preview-action-btn primary"><i class="fa-solid fa-check" style="font-size:10px;"></i> Mark Complete</button>
+            <button class="preview-action-btn"><i class="fa-solid fa-calendar-plus" style="font-size:10px;"></i> Schedule</button>
+            <button class="preview-action-btn"><i class="fa-solid fa-arrow-right-to-bracket" style="font-size:10px;"></i> Add to Tasks</button>
+            <div class="spacer"></div>
+            <button class="preview-action-btn" style="color:#f87171;border-color:#7f1d1d50;"><i class="fa-solid fa-ban" style="font-size:10px;"></i> Dismiss</button>
+          </div>
+        </div><!-- /detail-pay -->
+
+      </div><!-- /tab-queue -->
+
+      <!-- ── DOCUMENTS tab ─────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-documents" style="flex-direction:column;">
+        <div style="padding:10px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0;">
+          <span style="font-size:11px;color:var(--text-tertiary);">Filter by:</span>
+          <span class="filter-chip active">All types</span>
+          <span class="filter-chip">Invoices</span>
+          <span class="filter-chip">Statements</span>
+          <span class="filter-chip">EOBs</span>
+          <span class="filter-chip">Contracts</span>
+          <div class="spacer"></div>
+          <span style="font-size:11px;color:var(--text-tertiary);">Sort: Date added ↓</span>
+        </div>
+        <div class="doc-gallery" style="flex:1;overflow-y:auto;">
+
+          <!-- Card 1 — Invoice with Pay action -->
+          <div class="gallery-doc-card">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent"></div>
+                <div class="line med"></div>
+                <div class="line short"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge invoice">Invoice</span>
+              <span class="gallery-doc-action-badge pay">Pay</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">PGE Bill — June 2026</div>
+              <div class="gallery-doc-sub">
+                <span>Jul 14, 2026</span>
+                <span class="gallery-doc-amount">$143.22</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 2 — EOB with Review -->
+          <div class="gallery-doc-card">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent" style="background:#be123c40;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+                <div class="line short"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge eob">EOB</span>
+              <span class="gallery-doc-action-badge review">Review</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">Aetna EOB — Dr. Martinez</div>
+              <div class="gallery-doc-sub">
+                <span>Jul 10, 2026</span>
+                <span class="gallery-doc-amount">$87.00</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 3 — Statement with File -->
+          <div class="gallery-doc-card">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent" style="background:#4c1d9540;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+                <div class="line wide"></div>
+                <div class="line short"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge statement">Statement</span>
+              <span class="gallery-doc-action-badge file">File</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">Chase Sapphire — Jun 2026</div>
+              <div class="gallery-doc-sub">
+                <span>Jul 5, 2026</span>
+                <span class="gallery-doc-amount">$2,341.80</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4 — Contract -->
+          <div class="gallery-doc-card">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent" style="background:#78350f40;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+                <div class="line short"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+                <div class="line wide"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge contract">Contract</span>
+              <span class="gallery-doc-action-badge" style="background:#71341290;color:#fde68a;">Sign</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">Home Insurance Renewal</div>
+              <div class="gallery-doc-sub">
+                <span>Jul 3, 2026</span>
+                <span class="gallery-doc-amount">$1,240/yr</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 5 — Misc filed -->
+          <div class="gallery-doc-card" style="opacity:0.6;">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent"></div>
+                <div class="line wide"></div>
+                <div class="line short"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge misc">Receipt</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">Costco Receipt</div>
+              <div class="gallery-doc-sub">
+                <span>Jun 28, 2026</span>
+                <span class="gallery-doc-amount">$312.45</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 6 -->
+          <div class="gallery-doc-card" style="opacity:0.6;">
+            <div class="gallery-doc-thumb">
+              <div class="lines">
+                <div class="line accent" style="background:#be123c40;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+                <div class="line" style="height:10px;background:transparent;"></div>
+                <div class="line wide"></div>
+                <div class="line med"></div>
+              </div>
+              <span class="gallery-doc-card-type-badge eob">EOB</span>
+            </div>
+            <div class="gallery-doc-info">
+              <div class="gallery-doc-title">Aetna EOB — Dental Oct 25</div>
+              <div class="gallery-doc-sub">
+                <span>Jun 15, 2026</span>
+                <span class="gallery-doc-amount">$220.00</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /tab-documents -->
+
+      <!-- ── INSIGHTS tab ──────────────────────────────────────── -->
+      <div class="tab-panel" id="tab-insights" style="flex-direction:column;">
+        <div class="insights-scroll">
+
+          <!-- Stats row -->
+          <div>
+            <div class="section-heading" style="margin-bottom:8px;"><i class="fa-solid fa-chart-bar" style="font-size:11px;color:var(--text-tertiary);"></i> This Month</div>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-label">Actions Pending</div>
+                <div class="stat-value danger">7</div>
+                <div class="stat-sub">3 critical</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Docs Processed</div>
+                <div class="stat-value info">48</div>
+                <div class="stat-sub">+12 this week</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">Missing Stmts</div>
+                <div class="stat-value warning">2</div>
+                <div class="stat-sub">Chase, Fidelity</div>
+              </div>
+              <div class="stat-card">
+                <div class="stat-label">EOB Unmatched</div>
+                <div class="stat-value warning">1</div>
+                <div class="stat-sub">$87 unresolved</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Missing Statements -->
+          <div>
+            <div class="section-heading"><i class="fa-solid fa-file-invoice" style="font-size:11px;color:var(--text-tertiary);"></i> Missing Statements <span class="count">2</span></div>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+
+              <div class="alert-card severity-high">
+                <div class="alert-icon-box stmt"><i class="fa-solid fa-file-invoice"></i></div>
+                <div class="alert-body">
+                  <div class="alert-title">Chase Sapphire — July 2026 Statement</div>
+                  <div class="alert-desc">Expected monthly statement not received. Last received: June 5, 2026. <strong>21 days overdue.</strong></div>
+                  <div class="overdue-bar"><div class="overdue-fill bad" style="width:100%;"></div></div>
+                  <div class="alert-footer">
+                    <div class="alert-tags">
+                      <span class="alert-tag stmt">Statement Tracking</span>
+                    </div>
+                    <button class="preview-action-btn" style="font-size:10px;padding:3px 8px;">View in Paperless</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="alert-card severity-medium">
+                <div class="alert-icon-box stmt"><i class="fa-solid fa-file-invoice"></i></div>
+                <div class="alert-body">
+                  <div class="alert-title">Fidelity 401k — Q2 2026 Statement</div>
+                  <div class="alert-desc">Expected quarterly statement not received. Last received: Q1 2026 (Apr 2). <strong>9 days overdue.</strong></div>
+                  <div class="overdue-bar"><div class="overdue-fill mild" style="width:45%;"></div></div>
+                  <div class="alert-footer">
+                    <div class="alert-tags">
+                      <span class="alert-tag stmt">Statement Tracking</span>
+                    </div>
+                    <button class="preview-action-btn" style="font-size:10px;padding:3px 8px;">View in Paperless</button>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- EOB Matching -->
+          <div>
+            <div class="section-heading"><i class="fa-solid fa-stethoscope" style="font-size:11px;color:var(--text-tertiary);"></i> Unmatched EOBs <span class="count">1</span></div>
+            <div style="margin-top:8px;">
+              <div class="alert-card severity-medium">
+                <div class="alert-icon-box eob"><i class="fa-solid fa-stethoscope"></i></div>
+                <div class="alert-body">
+                  <div class="alert-title">Aetna EOB — Dr. Martinez — $87.00</div>
+                  <div class="alert-desc">EOB from 2026-07-10 has no matching bill. Provider: Dr. Ana Martinez. Patient responsibility: $87.00. Service: Office Visit.</div>
+                  <div class="alert-footer">
+                    <div class="alert-tags">
+                      <span class="alert-tag eob">EOB Matching</span>
+                    </div>
+                    <button class="preview-action-btn" style="font-size:10px;padding:3px 8px;">View EOB</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Module status -->
+          <div>
+            <div class="section-heading"><i class="fa-solid fa-plug-circle-check" style="font-size:11px;color:var(--text-tertiary);"></i> Module Status</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
+              <div class="stat-card" style="padding:10px 12px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:#4ade80;display:inline-block;"></span>
+                  <span style="font-size:11px;font-weight:600;color:var(--text-secondary);">Action Queue</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-tertiary);">7 pending · synced 2m ago</div>
+              </div>
+              <div class="stat-card" style="padding:10px 12px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+                  <span style="font-size:11px;font-weight:600;color:var(--text-secondary);">Statements</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-tertiary);">2 missing · 12 tracked</div>
+              </div>
+              <div class="stat-card" style="padding:10px 12px;">
+                <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                  <span style="width:6px;height:6px;border-radius:50%;background:#f59e0b;display:inline-block;"></span>
+                  <span style="font-size:11px;font-weight:600;color:var(--text-secondary);">EOB Matching</span>
+                </div>
+                <div style="font-size:10px;color:var(--text-tertiary);">1 unmatched · 9 filed</div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div><!-- /tab-insights -->
+
+    </div><!-- /content-area -->
+  </div><!-- /main -->
+
+  <script>
+    function showTab(tabName) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+
+      const tabs = document.querySelectorAll('.tab');
+      const map = { queue: 0, documents: 1, insights: 2 };
+      tabs[map[tabName]].classList.add('active');
+
+      document.getElementById('tab-' + tabName).classList.add('active');
+    }
+
+    function showDetail(type) {
+      document.querySelectorAll('.task-row').forEach(r => r.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+    }
+  </script>
+</body>
+</html>

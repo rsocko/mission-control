@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 2 Mockup – Unified Tokenized Filter (Option A)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      padding: 40px;
+      line-height: 1.5;
+    }
+    h1 { color: #58a6ff; margin-bottom: 8px; font-size: 1.3rem; }
+    .subtitle { color: #8b949e; margin-bottom: 32px; font-size: 0.85rem; }
+    .mockup-container { max-width: 1100px; margin: 0 auto; }
+
+    /* Layout: sidebar + main */
+    .app-layout {
+      display: flex;
+      gap: 0;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 480px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px;
+      background: #0d1117;
+      border-right: 1px solid #21262d;
+      padding: 12px;
+      flex-shrink: 0;
+    }
+    .sidebar-section { margin-bottom: 16px; }
+    .sidebar-section-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #8b949e;
+      font-weight: 600;
+      margin-bottom: 6px;
+      padding: 0 6px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      border-radius: 5px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .sidebar-item:hover { background: #161b22; }
+    .sidebar-item.active { background: #1f6feb22; }
+    .sidebar-item .indicator {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      border: 1.5px solid #484f58;
+      flex-shrink: 0;
+    }
+    .sidebar-item.active .indicator {
+      background: #58a6ff;
+      border-color: #58a6ff;
+    }
+    .sidebar-item .label { flex: 1; }
+    .sidebar-item .count { color: #484f58; font-size: 0.7rem; }
+    .sidebar-item .icon-img { width: 14px; height: 14px; border-radius: 3px; background: #30363d; }
+
+    /* Negation indicator in sidebar */
+    .sidebar-item.negated {
+      background: rgba(248, 81, 73, 0.08);
+    }
+    .sidebar-item.negated .indicator {
+      background: none;
+      border-color: #f85149;
+      position: relative;
+    }
+    .sidebar-item.negated .indicator::after {
+      content: '';
+      position: absolute;
+      top: 50%; left: -1px; right: -1px;
+      height: 1.5px;
+      background: #f85149;
+      transform: rotate(-45deg);
+    }
+    .sidebar-item.negated .label {
+      text-decoration: line-through;
+      color: #8b949e;
+    }
+
+    /* Main content */
+    .main-content {
+      flex: 1;
+      background: #161b22;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Unified filter input (replaces pills row) */
+    .filter-input-wrapper {
+      position: relative;
+      margin-bottom: 12px;
+    }
+    .filter-input {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 6px 10px;
+      flex-wrap: wrap;
+      min-height: 38px;
+      transition: border-color 0.15s;
+    }
+    .filter-input:focus-within { border-color: #58a6ff; }
+    .filter-input .search-icon { color: #8b949e; font-size: 0.85rem; flex-shrink: 0; }
+
+    /* Token pills inside input */
+    .token-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 500;
+      white-space: nowrap;
+      animation: pill-in 0.15s ease-out;
+    }
+    @keyframes pill-in { from { transform: scale(0.9); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .token-source { background: rgba(56, 139, 253, 0.15); color: #79c0ff; border: 1px solid rgba(56, 139, 253, 0.3); }
+    .token-priority { background: #da3633; color: #fff; }
+    .token-tag { background: rgba(63, 185, 80, 0.2); color: #7ee787; border: 1px solid rgba(63, 185, 80, 0.3); }
+    .token-status { background: rgba(210, 153, 34, 0.2); color: #e3b341; border: 1px solid rgba(210, 153, 34, 0.3); }
+    .token-negated { background: rgba(248, 81, 73, 0.15); color: #f85149; border: 1px solid rgba(248, 81, 73, 0.3); }
+    .token-close { cursor: pointer; opacity: 0.6; margin-left: 2px; font-size: 0.8rem; }
+    .token-close:hover { opacity: 1; }
+
+    .filter-input input {
+      flex: 1;
+      min-width: 140px;
+      background: none;
+      border: none;
+      outline: none;
+      color: #c9d1d9;
+      font-size: 0.82rem;
+    }
+    .filter-input input::placeholder { color: #484f58; }
+    .input-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    .input-actions button {
+      background: none;
+      border: none;
+      color: #8b949e;
+      cursor: pointer;
+      font-size: 0.8rem;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .input-actions button:hover { color: #c9d1d9; background: #21262d; }
+
+    /* Autocomplete dropdown */
+    .autocomplete {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: 260px;
+      background: #1c2128;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      padding: 4px;
+      z-index: 100;
+    }
+    .autocomplete-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 5px;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+    .autocomplete-item:hover, .autocomplete-item.active { background: #21262d; }
+    .autocomplete-item .icon { font-size: 0.9rem; width: 18px; text-align: center; }
+    .autocomplete-item .text { color: #c9d1d9; font-family: monospace; font-size: 0.75rem; }
+    .autocomplete-item .hint { color: #484f58; margin-left: auto; font-size: 0.68rem; }
+
+    /* Match count */
+    .match-count {
+      text-align: right;
+      font-size: 0.72rem;
+      color: #8b949e;
+      margin-bottom: 6px;
+    }
+
+    /* Task list */
+    .task-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px;
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px 8px 0 0;
+    }
+    .task-header h2 { font-size: 0.9rem; font-weight: 600; }
+    .task-header h2 span { color: #8b949e; font-weight: 400; font-size: 0.8rem; }
+    .task-header .controls { display: flex; gap: 4px; }
+    .task-header .controls button {
+      background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+      padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; cursor: pointer;
+    }
+    .task-list { border: 1px solid #21262d; border-top: none; border-radius: 0 0 8px 8px; flex: 1; overflow: auto; }
+    .group-header {
+      padding: 6px 14px; font-size: 0.72rem; font-weight: 600;
+      color: #58a6ff; background: #0d1117; border-bottom: 1px solid #21262d;
+    }
+    .task-row {
+      display: flex; align-items: center; padding: 9px 14px;
+      border-bottom: 1px solid #21262d; gap: 8px; font-size: 0.8rem;
+    }
+    .task-row:last-child { border-bottom: none; }
+    .task-row .checkbox { width: 14px; height: 14px; border: 1.5px solid #484f58; border-radius: 50%; flex-shrink: 0; }
+    .task-row .highlight { background: rgba(210, 153, 34, 0.3); border-radius: 2px; padding: 0 2px; }
+    .task-row .issue-num { color: #8b949e; font-size: 0.72rem; }
+    .task-row .tags { display: flex; gap: 3px; margin-left: auto; }
+    .task-row .tag { font-size: 0.62rem; padding: 1px 5px; border-radius: 999px; border: 1px solid; }
+    .tag-green { color: #7ee787; border-color: rgba(63,185,80,0.4); }
+    .tag-blue { color: #79c0ff; border-color: rgba(56,139,253,0.4); }
+
+    /* Scenario labels */
+    .scenario { margin-top: 48px; padding-top: 24px; border-top: 1px solid #21262d; }
+    .scenario-label {
+      display: inline-block; background: #1f6feb33; color: #58a6ff;
+      padding: 3px 10px; border-radius: 4px; font-size: 0.7rem;
+      font-weight: 600; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    /* Annotation */
+    .annotation {
+      margin-top: 40px; padding: 16px; background: #161b22;
+      border: 1px solid #30363d; border-radius: 8px;
+    }
+    .annotation h3 { color: #58a6ff; font-size: 0.9rem; margin-bottom: 8px; }
+    .annotation ul { padding-left: 20px; font-size: 0.78rem; color: #8b949e; }
+    .annotation li { margin-bottom: 6px; }
+    .annotation code { background: #21262d; padding: 1px 4px; border-radius: 3px; font-size: 0.72rem; color: #79c0ff; }
+    .annotation strong { color: #c9d1d9; }
+
+    /* Callout box */
+    .callout {
+      margin-top: 16px; padding: 12px 14px;
+      background: rgba(210, 153, 34, 0.08);
+      border: 1px solid rgba(210, 153, 34, 0.3);
+      border-radius: 6px;
+      font-size: 0.78rem; color: #e3b341;
+    }
+    .callout strong { color: #e3b341; }
+  </style>
+</head>
+<body>
+  <div class="mockup-container">
+    <h1>Phase 2: Unified Tokenized Filter (Option A)</h1>
+    <p class="subtitle">Single token input replaces the pills row. Sidebar clicks add/remove tokens. Bidirectional sync. Issues #700, #707, #1070</p>
+
+    <!-- Scenario 1: Full unified layout -->
+    <span class="scenario-label">Scenario: Sidebar + Unified Token Input — Bidirectional</span>
+
+    <div class="app-layout">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Sources</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="icon-img"></span>
+            <span class="label">GitHub Issues</span>
+            <span class="count">82</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="icon-img"></span>
+            <span class="label">Todoist</span>
+            <span class="count">45</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="icon-img"></span>
+            <span class="label">Linear</span>
+            <span class="count">23</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Priority</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="label">High</span>
+            <span class="count">12</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">Medium</span>
+            <span class="count">89</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">Low</span>
+            <span class="count">34</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Tags</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="label">area:tasks</span>
+            <span class="count">42</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">type:feature</span>
+            <span class="count">31</span>
+          </div>
+          <div class="sidebar-item negated">
+            <span class="indicator"></span>
+            <span class="label">wontfix</span>
+            <span class="count">8</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">type:bug</span>
+            <span class="count">27</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main content -->
+      <div class="main-content">
+        <!-- Unified token input (REPLACES pills row) -->
+        <div class="filter-input-wrapper">
+          <div class="filter-input">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-source">source:github-issues <span class="token-close">×</span></span>
+            <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+            <span class="token-pill token-tag">tag:area:tasks <span class="token-close">×</span></span>
+            <span class="token-pill token-negated">-tag:wontfix <span class="token-close">×</span></span>
+            <input type="text" value="connector" placeholder="" />
+            <div class="input-actions">
+              <button title="Clear all">Clear</button>
+              <button title="Save as view">💾</button>
+            </div>
+          </div>
+
+          <!-- Autocomplete (shown when typing free text) -->
+          <div class="autocomplete">
+            <div class="autocomplete-item active">
+              <span class="icon">⚡</span>
+              <span class="text">title:connector</span>
+              <span class="hint">title match</span>
+            </div>
+            <div class="autocomplete-item">
+              <span class="icon">🏷️</span>
+              <span class="text">tag:connector</span>
+              <span class="hint">tag match</span>
+            </div>
+            <div class="autocomplete-item">
+              <span class="icon">📋</span>
+              <span class="text">list:connector</span>
+              <span class="hint">list match</span>
+            </div>
+            <div class="autocomplete-item">
+              <span class="icon">📝</span>
+              <span class="text">connector</span>
+              <span class="hint">free text search</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="match-count">Showing 6 of 82 tasks</div>
+
+        <!-- Task list -->
+        <div class="task-header">
+          <h2>Filtered Tasks <span>(6)</span></h2>
+          <div class="controls">
+            <button>⊙ Done</button>
+            <button>↕ Priority</button>
+            <button>+ Add Task</button>
+          </div>
+        </div>
+        <div class="task-list">
+          <div class="group-header">▼ TO DO (4)</div>
+          <div class="task-row">
+            <div class="checkbox"></div>
+            <span>Home Assistant <span class="highlight">connector</span> device alerts <span class="issue-num">#152</span></span>
+            <div class="tags">
+              <span class="tag tag-green">type:feature</span>
+              <span class="tag tag-blue">area:tasks</span>
+            </div>
+          </div>
+          <div class="task-row">
+            <div class="checkbox"></div>
+            <span>GitHub <span class="highlight">connector</span> webhook events <span class="issue-num">#201</span></span>
+            <div class="tags">
+              <span class="tag tag-blue">area:tasks</span>
+            </div>
+          </div>
+          <div class="task-row">
+            <div class="checkbox"></div>
+            <span>Refactor <span class="highlight">connector</span> architecture <span class="issue-num">#445</span></span>
+            <div class="tags">
+              <span class="tag tag-blue">area:tasks</span>
+            </div>
+          </div>
+          <div class="group-header">▼ IN PROGRESS (2)</div>
+          <div class="task-row">
+            <div class="checkbox"></div>
+            <span><span class="highlight">Connector</span> health dashboard <span class="issue-num">#312</span></span>
+            <div class="tags">
+              <span class="tag tag-blue">area:tasks</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario 2: Sidebar click adds token -->
+    <div class="scenario">
+      <span class="scenario-label">Interaction: Sidebar Click → Token Added</span>
+      <div style="display: flex; gap: 24px; align-items: flex-start;">
+        <div style="flex: 1;">
+          <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 12px;"><strong>Before:</strong> User clicks "Medium" in Priority section</p>
+          <div class="filter-input" style="max-width: 500px;">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-source">source:github-issues <span class="token-close">×</span></span>
+            <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+            <input type="text" placeholder="Filter tasks..." />
+          </div>
+        </div>
+        <div style="color: #58a6ff; font-size: 1.5rem; padding-top: 24px;">→</div>
+        <div style="flex: 1;">
+          <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 12px;"><strong>After:</strong> Token appears in input, sidebar shows active state</p>
+          <div class="filter-input" style="max-width: 500px;">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-source">source:github-issues <span class="token-close">×</span></span>
+            <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+            <span class="token-pill token-priority" style="background: #d29922;">priority:medium <span class="token-close">×</span></span>
+            <input type="text" placeholder="Filter tasks..." />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario 3: Negation display -->
+    <div class="scenario">
+      <span class="scenario-label">Negation: Typed in input → Reflected in sidebar</span>
+      <div style="display: flex; gap: 24px; align-items: flex-start;">
+        <div style="flex: 1;">
+          <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 12px;">User types <code style="background:#21262d;padding:2px 5px;border-radius:3px;color:#f85149;">-tag:wontfix</code> in the token input</p>
+          <p style="font-size: 0.78rem; color: #8b949e; margin-bottom: 12px;">Sidebar reflects it as a strikethrough with ⊘ indicator — but sidebar itself cannot create negations (only remove them by clicking the × on the token).</p>
+          <div class="sidebar" style="width: 200px; border-radius: 8px; border: 1px solid #21262d;">
+            <div class="sidebar-section">
+              <div class="sidebar-section-title">Tags</div>
+              <div class="sidebar-item active">
+                <span class="indicator"></span>
+                <span class="label">area:tasks</span>
+              </div>
+              <div class="sidebar-item negated">
+                <span class="indicator"></span>
+                <span class="label">wontfix</span>
+              </div>
+              <div class="sidebar-item">
+                <span class="indicator"></span>
+                <span class="label">type:bug</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="flex: 1;">
+          <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 12px;">Token input shows negation as red pill:</p>
+          <div class="filter-input" style="max-width: 450px; margin-top: 12px;">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-tag">tag:area:tasks <span class="token-close">×</span></span>
+            <span class="token-pill token-negated">-tag:wontfix <span class="token-close">×</span></span>
+            <input type="text" placeholder="Filter tasks..." />
+          </div>
+          <p style="font-size: 0.72rem; color: #484f58; margin-top: 8px;">Negations: only via token input or "+ Add Filter" builder (Phase 3)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Annotations -->
+    <div class="annotation">
+      <h3>Design Decisions — Unified Model (Option A)</h3>
+      <ul>
+        <li><strong>Pills row removed:</strong> The token input IS the single place where active filters are displayed. No separate pills row above.</li>
+        <li><strong>Sidebar = shortcut panel:</strong> Clicking a sidebar item adds/removes a token in the unified input. Sidebar shows active state (filled dot) synced with tokens.</li>
+        <li><strong>Bidirectional sync:</strong> Removing a token from the input deselects it in the sidebar. Adding via sidebar appears in the input.</li>
+        <li><strong>Negation (advanced):</strong> Only creatable via typing <code>-tag:X</code> or the Phase 3 builder. Sidebar shows negated items with strikethrough + ⊘ indicator but doesn't create them.</li>
+        <li><strong>Collapsed sidebar:</strong> When sidebar is collapsed to icon rail, the token input is self-describing — all active filters are visible as pills.</li>
+        <li><strong>Clear all:</strong> Button in the input clears all tokens AND deselects everything in the sidebar.</li>
+        <li><strong>Save as view:</strong> Saves the full token set (including negations and free text) as a named view.</li>
+      </ul>
+      <div class="callout">
+        <strong>Migration note:</strong> In Phase 1 (current), the pills row and keyword input coexist. In Phase 2, the pills row merges into the token input. The sidebar continues to work as before but now syncs with tokens instead of a separate pill display.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Settings & Connectors</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .connector-card { transition: all 0.15s ease; }
+    .connector-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .toggle-active { background: #3b82f6; }
+    .toggle-inactive { background: #d1d5db; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Timeline</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-sm text-gray-500">Settings</span>
+    </div>
+  </header>
+
+  <div class="flex h-[calc(100vh-57px)]">
+    <!-- Settings Sidebar -->
+    <aside class="w-56 bg-white border-r border-gray-200 p-4 overflow-y-auto flex-shrink-0">
+      <nav class="space-y-1">
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-blue-700 bg-blue-50 rounded-md">
+          <i class="fas fa-plug w-4"></i>Connectors
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-sync w-4"></i>Sync Settings
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-brain w-4"></i>AI Provider
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-columns w-4"></i>Views & Layout
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-bell w-4"></i>Notifications
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-database w-4"></i>Database
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">
+          <i class="fas fa-download w-4"></i>Backup & Export
+        </a>
+      </nav>
+    </aside>
+
+    <!-- Main Settings Area -->
+    <main class="flex-1 overflow-y-auto p-6">
+      <div class="max-w-4xl">
+        <div class="flex items-center justify-between mb-6">
+          <div>
+            <h2 class="text-xl font-semibold text-gray-900">Connectors</h2>
+            <p class="text-sm text-gray-500 mt-1">Manage your data source connections. Each connector syncs tasks and/or alerts from an external service.</p>
+          </div>
+          <button class="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">
+            <i class="fas fa-plus mr-1.5"></i>Add Connector
+          </button>
+        </div>
+
+        <!-- Active Connectors -->
+        <div class="space-y-4">
+          <!-- Microsoft Todo -->
+          <div class="connector-card bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-4">
+                <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i class="fas fa-check-square text-blue-600"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-medium text-gray-900">Microsoft Todo</h3>
+                    <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Connected</span>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-0.5">Syncing 3 lists: Work, Ideas, Personal</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><i class="fas fa-tasks mr-1"></i>18 tasks</span>
+                    <span><i class="fas fa-sync mr-1"></i>Every 5 min</span>
+                    <span><i class="fas fa-clock mr-1"></i>Last sync: 2 min ago</span>
+                    <span class="text-green-500"><i class="fas fa-check-circle mr-1"></i>Healthy</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-5 toggle-active rounded-full relative cursor-pointer">
+                  <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5 shadow-sm"></div>
+                </div>
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-v"></i></button>
+              </div>
+            </div>
+
+            <!-- Expanded Config (example) -->
+            <div class="mt-4 pt-4 border-t border-gray-100">
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">Sync Mode</label>
+                  <select class="w-full border border-gray-200 rounded-md px-3 py-1.5 text-sm">
+                    <option selected>Polling (every 5 min)</option>
+                    <option>Polling (every 15 min)</option>
+                    <option>Polling (every 30 min)</option>
+                    <option>Manual only</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">Capabilities</label>
+                  <div class="flex items-center gap-3 mt-1">
+                    <label class="text-xs flex items-center gap-1"><input type="checkbox" checked class="rounded border-gray-300 w-3.5 h-3.5 text-blue-600"> Read</label>
+                    <label class="text-xs flex items-center gap-1"><input type="checkbox" checked class="rounded border-gray-300 w-3.5 h-3.5 text-blue-600"> Write</label>
+                    <label class="text-xs flex items-center gap-1"><input type="checkbox" checked class="rounded border-gray-300 w-3.5 h-3.5 text-blue-600"> Complete</label>
+                    <label class="text-xs flex items-center gap-1"><input type="checkbox" class="rounded border-gray-300 w-3.5 h-3.5 text-blue-600"> Delete</label>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">Lists to Sync</label>
+                  <div class="flex flex-wrap gap-1">
+                    <span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Work <i class="fas fa-times ml-1 text-blue-400 cursor-pointer"></i></span>
+                    <span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Ideas <i class="fas fa-times ml-1 text-blue-400 cursor-pointer"></i></span>
+                    <span class="text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full">Personal <i class="fas fa-times ml-1 text-blue-400 cursor-pointer"></i></span>
+                    <button class="text-xs text-blue-600 px-2 py-0.5">+ Add list</button>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs text-gray-500 block mb-1">Authentication</label>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs text-green-600"><i class="fas fa-lock mr-1"></i>OAuth2 token valid</span>
+                    <button class="text-xs text-blue-600 hover:text-blue-800">Re-authenticate</button>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 mt-4">
+                <button class="px-3 py-1.5 bg-blue-600 text-white text-xs rounded-md hover:bg-blue-700">Save Changes</button>
+                <button class="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs rounded-md hover:bg-gray-50">Test Connection</button>
+                <button class="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs rounded-md hover:bg-gray-50">Force Sync Now</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- GitHub Issues -->
+          <div class="connector-card bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-4">
+                <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i class="fab fa-github text-purple-600"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-medium text-gray-900">GitHub Issues</h3>
+                    <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Connected</span>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-0.5">Syncing 4 repos: ideation, webapp, api, home-automation</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><i class="fas fa-tasks mr-1"></i>12 open issues</span>
+                    <span><i class="fas fa-sync mr-1"></i>Every 10 min</span>
+                    <span><i class="fas fa-clock mr-1"></i>Last sync: 5 min ago</span>
+                    <span class="text-green-500"><i class="fas fa-check-circle mr-1"></i>Healthy</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-5 toggle-active rounded-full relative cursor-pointer">
+                  <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5 shadow-sm"></div>
+                </div>
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-v"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Outlook Calendar -->
+          <div class="connector-card bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-4">
+                <div class="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i class="fas fa-calendar text-amber-600"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-medium text-gray-900">Outlook Calendar</h3>
+                    <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Connected</span>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-0.5">Generating alerts for upcoming events (next 24h)</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><i class="fas fa-bell mr-1"></i>5 alerts</span>
+                    <span><i class="fas fa-sync mr-1"></i>Every 15 min</span>
+                    <span><i class="fas fa-clock mr-1"></i>Last sync: syncing...</span>
+                    <span class="text-blue-500"><i class="fas fa-sync fa-spin mr-1"></i>Syncing</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-5 toggle-active rounded-full relative cursor-pointer">
+                  <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5 shadow-sm"></div>
+                </div>
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-v"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Outlook Email -->
+          <div class="connector-card bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-4">
+                <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i class="fas fa-envelope text-green-600"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-medium text-gray-900">Outlook Email (Flagged)</h3>
+                    <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Connected</span>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-0.5">Tracking flagged and important emails as alerts</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><i class="fas fa-bell mr-1"></i>8 alerts</span>
+                    <span><i class="fas fa-sync mr-1"></i>Every 5 min</span>
+                    <span><i class="fas fa-clock mr-1"></i>Last sync: 1 min ago</span>
+                    <span class="text-green-500"><i class="fas fa-check-circle mr-1"></i>Healthy</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-5 toggle-active rounded-full relative cursor-pointer">
+                  <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5 shadow-sm"></div>
+                </div>
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-v"></i></button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Custom DB -->
+          <div class="connector-card bg-white border border-gray-200 rounded-lg p-5">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-4">
+                <div class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <i class="fas fa-database text-gray-600"></i>
+                </div>
+                <div>
+                  <div class="flex items-center gap-2">
+                    <h3 class="font-medium text-gray-900">Home Automation DB</h3>
+                    <span class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Connected</span>
+                  </div>
+                  <p class="text-sm text-gray-500 mt-0.5">Custom REST API — http://homeserver:3001/api/tasks</p>
+                  <div class="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span><i class="fas fa-tasks mr-1"></i>4 tasks</span>
+                    <span><i class="fas fa-sync mr-1"></i>On demand</span>
+                    <span><i class="fas fa-clock mr-1"></i>Last sync: 1 hour ago</span>
+                    <span class="text-green-500"><i class="fas fa-check-circle mr-1"></i>Healthy</span>
+                  </div>
+                </div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="w-10 h-5 toggle-active rounded-full relative cursor-pointer">
+                  <div class="w-4 h-4 bg-white rounded-full absolute top-0.5 right-0.5 shadow-sm"></div>
+                </div>
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-v"></i></button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add Connector Templates -->
+        <div class="mt-8">
+          <h3 class="font-medium text-gray-900 mb-3">Available Connector Templates</h3>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fas fa-sticky-note text-yellow-500 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Notion</p>
+              <p class="text-[10px] text-gray-400">Coming soon</p>
+            </div>
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fab fa-jira text-blue-500 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Jira</p>
+              <p class="text-[10px] text-gray-400">Coming soon</p>
+            </div>
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fas fa-code text-gray-500 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Custom REST API</p>
+              <p class="text-[10px] text-gray-400">Template available</p>
+            </div>
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fab fa-slack text-purple-500 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Slack</p>
+              <p class="text-[10px] text-gray-400">Coming soon</p>
+            </div>
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fab fa-trello text-blue-400 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Trello</p>
+              <p class="text-[10px] text-gray-400">Coming soon</p>
+            </div>
+            <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-blue-400 hover:bg-blue-50/50 cursor-pointer transition-colors">
+              <i class="fas fa-plus text-gray-400 text-xl mb-2"></i>
+              <p class="text-sm font-medium text-gray-700">Build Your Own</p>
+              <p class="text-[10px] text-gray-400">Use the SDK</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

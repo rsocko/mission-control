@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Control – Layout Mockups</title>
+<style>
+:root {
+  --bg: #020617; --s0: #0b1120; --s1: #111827; --s2: #1e293b; --s3: #334155;
+  --bd: #1e293b; --bds: #162032; --bdf: #334155;
+  --t1: #f8fafc; --t2: #94a3b8; --t3: #64748b;
+  --acc: #3b82f6; --acc4: #60a5fa; --accm: #1e3a8a;
+  --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+  --gh: #a855f7; --eml: #10b981;
+  --r: 8px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',-apple-system,sans-serif;background:var(--bg);color:var(--t1);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;overflow:hidden;height:100vh}
+
+/* ── Switcher ── */
+#switcher{position:fixed;top:0;left:0;right:0;z-index:999;background:#0d1117;border-bottom:2px solid var(--acc);padding:10px 20px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#switcher h2{font-size:12px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.05em;margin-right:6px}
+#switcher button{padding:5px 12px;border-radius:6px;border:1px solid var(--bdf);background:var(--s1);color:var(--t2);font-size:12px;font-weight:500;cursor:pointer;transition:all .15s}
+#switcher button:hover{background:var(--s2);color:var(--t1)}
+#switcher button.active{background:var(--acc);color:#fff;border-color:var(--acc)}
+#switcher .note{margin-left:auto;font-size:11px;color:var(--t3)}
+
+/* ── Panels ── */
+.panel{display:none;position:absolute;top:48px;left:0;right:0;bottom:0}
+.panel.active{display:flex}
+
+/* ── Shared pieces ── */
+.nav-link{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--r);font-size:13px;font-weight:500;color:var(--t2);text-decoration:none;white-space:nowrap;transition:all .1s}
+.nav-link:hover{background:var(--s2);color:var(--t1)}
+.nav-link.on{background:rgba(59,130,246,.15);color:var(--acc4)}
+.ndiv{width:1px;height:16px;background:rgba(148,163,184,.2);margin:0 4px;flex-shrink:0}
+
+.icon-btn{display:flex;align-items:center;gap:4px;padding:5px 7px;border-radius:var(--r);font-size:12px;font-weight:500;color:var(--t3);background:transparent;border:none;cursor:pointer;transition:all .1s}
+.icon-btn:hover{background:var(--s2);color:var(--t2)}
+.badge{background:var(--err);color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:99px;min-width:16px;text-align:center}
+.hdot{width:8px;height:8px;border-radius:50%;display:inline-block;background:var(--ok)}
+
+.search-box{display:flex;align-items:center;gap:6px;padding:5px 10px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);color:var(--t3);font-size:13px;flex-shrink:0}
+.quick-add{display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);color:var(--t3);font-size:13px;width:100%}
+.quick-add .plus{color:var(--acc);font-size:16px;font-weight:700}
+.quick-add .lb{margin-left:auto;padding:2px 8px;border-radius:var(--r);background:var(--accm);color:var(--acc4);font-size:12px;font-weight:500}
+
+.banners{display:flex;gap:6px;padding:6px 16px;background:var(--s0);border-bottom:1px solid var(--bds);overflow-x:auto;flex-shrink:0}
+.bp{display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bds);font-size:12px;font-weight:500;color:var(--t2);white-space:nowrap;cursor:pointer}
+
+/* Content columns */
+.sidebar{width:210px;flex-shrink:0;background:var(--s0);border-right:1px solid var(--bds);padding:10px;overflow-y:auto}
+.stitle{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--t3);margin:12px 0 4px}
+.sitem{display:flex;align-items:center;gap:7px;padding:4px 7px;border-radius:6px;font-size:13px;color:var(--t2);cursor:pointer;transition:all .1s}
+.sitem:hover{background:var(--s2);color:var(--t1)}
+.sitem .ct{margin-left:auto;font-size:11px;color:var(--t3)}
+.tpill{display:inline-block;padding:2px 7px;border-radius:99px;font-size:11px;font-weight:500;margin:2px;cursor:pointer}
+.syncr{display:flex;align-items:center;gap:5px;padding:2px 0;font-size:11px;color:var(--t3)}
+.syncr .sd{width:6px;height:6px;border-radius:50%}
+
+.content{flex:1;overflow-y:auto;padding:14px 20px;min-width:0}
+.fbar{display:flex;align-items:center;gap:7px;margin-bottom:10px;font-size:12px;color:var(--t2)}
+.fpill{display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:var(--s2);font-size:12px}
+.shdr{font-size:12px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.03em;margin-bottom:6px}
+.trow{display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:6px;cursor:pointer;transition:background .1s}
+.trow:hover{background:var(--s2)}
+.tchk{width:16px;height:16px;border-radius:3px;border:2px solid var(--t3);flex-shrink:0}
+.ticon{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;background:var(--gh);color:#fff}
+.ttitle{flex:1;font-size:13px;min-width:0}
+.tmeta{font-size:11px;color:var(--t3)}
+.pbadge{padding:1px 6px;border-radius:6px;font-size:11px;font-weight:600}
+.p1{background:rgba(239,68,68,.2);color:#f87171}
+.p2{background:rgba(245,158,11,.2);color:#fbbf24}
+
+.alerts{width:270px;flex-shrink:0;background:var(--s0);border-left:1px solid var(--bds);padding:10px;overflow-y:auto}
+.alerts h3{font-size:14px;font-weight:600;margin-bottom:10px}
+.acard{padding:8px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bds);margin-bottom:6px;font-size:12px;cursor:pointer;transition:border-color .15s}
+.acard:hover{border-color:var(--bdf)}
+.acard .at{font-weight:500;color:var(--t1);margin-bottom:2px}
+.acard .am{color:var(--t3);font-size:11px}
+
+/* ── Left Nav (wide: icons + text) ── */
+.lnav{width:72px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:10px 0;overflow-y:auto}
+.lnav .brand{width:36px;height:36px;border-radius:var(--r);background:linear-gradient(135deg,var(--acc),#6366f1);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;color:#fff;margin-bottom:14px;flex-shrink:0}
+.lni{display:flex;flex-direction:column;align-items:center;gap:2px;padding:7px 4px;border-radius:var(--r);color:var(--t3);width:60px;text-align:center;cursor:pointer;transition:all .1s;margin-bottom:1px;position:relative;text-decoration:none}
+.lni:hover{background:var(--s2);color:var(--t1)}
+.lni.on{color:var(--acc4);background:rgba(59,130,246,.12)}
+.lni.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:18px;border-radius:0 3px 3px 0;background:var(--acc)}
+.lni .nl{font-size:10px;font-weight:500;line-height:1.1}
+.nsep{width:32px;height:1px;background:var(--bd);margin:5px 0;flex-shrink:0}
+.lnav .bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:2px}
+
+/* ── Left Nav (compact: icon only) ── */
+.lnav-c{width:48px;flex-shrink:0;background:var(--s1);border-right:1px solid var(--bd);display:flex;flex-direction:column;align-items:center;padding:8px 0;overflow-y:auto}
+.lnav-c .brand{width:32px;height:32px;border-radius:var(--r);background:linear-gradient(135deg,var(--acc),#6366f1);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;color:#fff;margin-bottom:12px;flex-shrink:0}
+.cni{position:relative;display:flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:var(--r);color:var(--t3);cursor:pointer;transition:all .1s;margin-bottom:1px}
+.cni:hover{background:var(--s2);color:var(--t1)}
+.cni.on{color:var(--acc4);background:rgba(59,130,246,.12)}
+.cni.on::before{content:'';position:absolute;left:0;top:50%;transform:translateY(-50%);width:3px;height:16px;border-radius:0 3px 3px 0;background:var(--acc)}
+.cni .tip{position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);background:var(--s3);color:var(--t1);padding:3px 9px;border-radius:6px;font-size:12px;font-weight:500;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .12s;box-shadow:var(--shadow-md);z-index:10}
+.cni:hover .tip{opacity:1}
+.csep{width:22px;height:1px;background:var(--bd);margin:4px 0;flex-shrink:0}
+.lnav-c .bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:2px}
+
+/* Right-area for left-nav layouts */
+.rarea{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+
+/* Toolbar button (enriched) */
+.tbtn{display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);color:var(--t2);font-size:12px;font-weight:500;cursor:pointer;transition:all .1s}
+.tbtn:hover{background:var(--s2);border-color:var(--bdf);color:var(--t1)}
+.tdiv{width:1px;height:18px;background:var(--bd);flex-shrink:0}
+
+/* Top bar */
+.topbar{display:flex;align-items:center;padding:0 16px;height:42px;background:var(--s1);border-bottom:1px solid var(--bd);flex-shrink:0}
+.topbar .left{display:flex;align-items:center;gap:6px;flex:1;min-width:0}
+.topbar .right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.topbar .brand-text{display:flex;align-items:center;gap:7px;margin-right:10px;flex-shrink:0}
+.topbar .brand-text span{font-size:15px;font-weight:600}
+
+/* Slim toolbar */
+.slim-bar{display:flex;align-items:center;gap:10px;padding:6px 16px;background:var(--s0);border-bottom:1px solid var(--bds);flex-shrink:0}
+
+/* 3-col body */
+.body3{flex:1;display:flex;min-height:0;overflow:hidden}
+</style>
+</head>
+<body>
+
+<div id="switcher">
+  <h2>Layout Mockups</h2>
+  <button class="active" onclick="show('a',this)">A: Current</button>
+  <button onclick="show('b',this)">B: Left Nav + Text</button>
+  <button onclick="show('c',this)">C: Left Icon-Only</button>
+  <button onclick="show('d',this)">D: Enriched Toolbar</button>
+  <button onclick="show('e',this)">E: Hybrid Rail</button>
+  <span class="note">Click to switch</span>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     A: CURRENT LAYOUT (BASELINE)
+     ════════════════════════════════════════════════ -->
+<div id="p-a" class="panel active" style="flex-direction:column">
+  <!-- Top Nav -->
+  <div class="topbar">
+    <div class="left">
+      <div class="brand-text"><span style="color:var(--acc4)">🛰</span><span>Mission Control</span></div>
+      <div style="display:flex;align-items:center;gap:2px">
+        <a class="nav-link on">📊 Dashboard</a>
+        <a class="nav-link">☀️ My Day</a>
+        <a class="nav-link">📁 Projects</a>
+        <a class="nav-link">📋 Kanban</a>
+        <a class="nav-link">🎯 Goals</a>
+        <span class="ndiv"></span>
+        <a class="nav-link">🔁 Routines</a>
+        <a class="nav-link">📥 Triage</a>
+        <a class="nav-link">📅 Timeline</a>
+        <span class="ndiv"></span>
+        <a class="nav-link">🤖 AI</a>
+        <a class="nav-link">⋯ More</a>
+      </div>
+    </div>
+    <div class="right">
+      <button class="icon-btn">⚡ Zen</button>
+      <button class="icon-btn">🌙 Calm</button>
+      <button class="icon-btn">✅ <span class="badge">3</span></button>
+      <button class="icon-btn"><span class="hdot"></span></button>
+      <button class="icon-btn">🔄 Sync</button>
+    </div>
+  </div>
+  <!-- Toolbar -->
+  <div class="slim-bar">
+    <div class="search-box" style="width:190px">🔍 Search <span style="margin-left:auto;font-size:11px;color:var(--t3)">⌘K</span></div>
+    <div style="flex:1;display:flex;justify-content:center;padding:0 12px">
+      <div class="quick-add" style="max-width:560px"><span class="plus">+</span>Add task to To Do...<span class="lb">✏️ To Do ▾</span></div>
+    </div>
+    <div style="width:270px;flex-shrink:0"></div>
+  </div>
+  <!-- Banners -->
+  <div class="banners">
+    <div class="bp">🎯 ONE THING</div>
+    <div class="bp">📊 KPIs</div>
+    <div class="bp" style="color:var(--ok)">🏆 RECENT WINS <strong style="color:#4ade80">172 completed this week</strong></div>
+    <div class="bp">🔁 ROUTINE SNAPSHOT <span style="color:var(--t3)">View all →</span></div>
+  </div>
+  <!-- 3-column body -->
+  <div class="body3">
+    <div class="sidebar">
+      <div class="stitle">Sources</div>
+      <div class="sitem" style="color:var(--t1)">📦 All Sources <span class="ct">743</span></div>
+      <div class="sitem"><span style="color:var(--acc)">✅</span> To Do <span class="ct" style="color:var(--acc)">↻</span></div>
+      <div class="sitem"><span style="color:var(--gh)">🐙</span> GitHub <span class="ct" style="color:var(--gh)">↻</span></div>
+      <div class="sitem"><span style="color:var(--eml)">📧</span> Email (alerts)</div>
+      <div class="stitle">Quick Filters</div>
+      <div class="stitle">Projects</div>
+      <div class="sitem">● Medfield Soccer Cha…</div>
+      <div class="sitem">● Mission Control</div>
+      <div class="stitle">Tags (GitHub)</div>
+      <div style="padding:0 4px">
+        <span class="tpill" style="background:rgba(168,85,247,.2);color:#c084fc">enhancement</span>
+        <span class="tpill" style="background:rgba(59,130,246,.2);color:#60a5fa">HASS 3D Printer</span>
+        <span class="tpill" style="background:rgba(239,68,68,.2);color:#f87171">bug</span>
+        <span class="tpill" style="background:var(--s2);color:var(--t2)">feature</span>
+      </div>
+      <div style="margin-top:auto;padding-top:16px">
+        <div class="stitle">Sync Status</div>
+        <div class="syncr"><span class="sd" style="background:var(--acc)"></span> To Do <span style="margin-left:auto;color:var(--warn)">⊘ 16m</span></div>
+        <div class="syncr"><span class="sd" style="background:var(--gh)"></span> GitHub <span style="margin-left:auto;color:var(--warn)">⊘ 26m</span></div>
+        <div class="syncr"><span class="sd" style="background:var(--eml)"></span> Email <span style="margin-left:auto;color:var(--ok)">⊘ 1m</span></div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="fbar">
+        Filtering: <span class="fpill"><span style="color:var(--gh)">●</span> github-issues ✕</span>
+        <span style="color:var(--acc);cursor:pointer">Clear all</span>
+        <span style="margin-left:auto;padding:3px 9px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);font-size:12px;cursor:pointer">💾 Save as view</span>
+      </div>
+      <h2 style="font-size:16px;font-weight:600;margin-bottom:10px">Filtered Tasks <span style="color:var(--t3);font-weight:400">(743)</span></h2>
+      <div class="shdr">▾ TO DO (45)</div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Backup status <span class="tmeta">#309 · homelab-config</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Review recent PRs and test shipped features <span class="tmeta">#478</span></div><span style="color:var(--warn)">★</span><span class="pbadge p1">P1</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Better formatting of alerts - CALL TO ACTION <span class="tmeta">#471</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">BUG: can't hide an alert <span class="tmeta">#470</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Obsidian Plugs &amp; Config to setup <span class="tmeta">#308 · 0/21</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Triage - SNOOZE doesn't move it from view <span class="tmeta">#458</span></div><span class="pbadge p2">P2</span></div>
+    </div>
+    <div class="alerts">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <h3>Alerts <span class="badge" style="margin-left:5px">49</span></h3>
+        <span style="font-size:11px;color:var(--t3);cursor:pointer">Mark all read 📄</span>
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:10px">
+        <span style="padding:2px 7px;border-radius:99px;background:var(--s2);color:var(--t2);font-size:11px;cursor:pointer">All severity ▾</span>
+        <span style="padding:2px 7px;border-radius:99px;background:var(--s2);color:var(--t2);font-size:11px;cursor:pointer">Unread</span>
+        <span style="padding:2px 7px;border-radius:99px;background:var(--s2);color:var(--t2);font-size:11px;cursor:pointer">↓ Newest</span>
+      </div>
+      <div class="acard" style="border-left:3px solid var(--acc)"><div class="at">[AgentSessionThread] Reviewing home lab repository for backup strategy</div><div class="am">agent_session_finished in rsocko/homelab-config</div><div class="am">9h ago · Open →</div></div>
+      <div class="acard"><div class="at">[PullRequest] Creating mock ups for mobile companion</div><div class="am">state_change in rsocko/mission-control</div><div class="am">1d ago · Open →</div></div>
+      <div class="acard" style="border-left:3px solid var(--warn)"><div class="at">[Issue] Import issue with Leave Request Power Apps</div><div class="am">subscribed in rdorrani/PowerApps</div><div class="am">1d ago · Open →</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     B: LEFT NAV WITH ICONS + TEXT BELOW
+     ════════════════════════════════════════════════ -->
+<div id="p-b" class="panel" style="flex-direction:row">
+  <div class="lnav">
+    <div class="brand">MC</div>
+    <a class="lni on"><span style="font-size:16px">📊</span><span class="nl">Dashboard</span></a>
+    <a class="lni"><span style="font-size:16px">☀️</span><span class="nl">My Day</span></a>
+    <a class="lni"><span style="font-size:16px">📁</span><span class="nl">Projects</span></a>
+    <a class="lni"><span style="font-size:16px">📋</span><span class="nl">Kanban</span></a>
+    <a class="lni"><span style="font-size:16px">🎯</span><span class="nl">Goals</span></a>
+    <div class="nsep"></div>
+    <a class="lni"><span style="font-size:16px">🔁</span><span class="nl">Routines</span></a>
+    <a class="lni"><span style="font-size:16px">📥</span><span class="nl">Triage</span></a>
+    <a class="lni"><span style="font-size:16px">📅</span><span class="nl">Timeline</span></a>
+    <div class="nsep"></div>
+    <a class="lni"><span style="font-size:16px">🤖</span><span class="nl">AI</span></a>
+    <div class="bottom">
+      <div class="nsep"></div>
+      <a class="lni"><span style="font-size:16px">⚡</span><span class="nl">Zen</span></a>
+      <a class="lni"><span style="font-size:16px">🌙</span><span class="nl">Calm</span></a>
+      <a class="lni" style="position:relative"><span style="font-size:16px">🔔</span><span class="nl">Alerts</span><span class="badge" style="position:absolute;top:2px;right:2px;font-size:9px;padding:0 4px">49</span></a>
+      <a class="lni"><span style="font-size:16px">⚙️</span><span class="nl">Settings</span></a>
+      <div class="nsep"></div>
+      <a class="lni"><span class="hdot" style="width:10px;height:10px"></span><span class="nl" style="color:var(--ok)">Healthy</span></a>
+      <a class="lni"><span style="font-size:16px">🔄</span><span class="nl">Sync</span></a>
+    </div>
+  </div>
+  <div class="rarea">
+    <!-- Toolbar -->
+    <div class="slim-bar">
+      <div class="search-box" style="width:170px">🔍 Search <span style="margin-left:auto;font-size:11px;color:var(--t3)">⌘K</span></div>
+      <div style="flex:1;display:flex;justify-content:center;padding:0 12px">
+        <div class="quick-add" style="max-width:520px"><span class="plus">+</span>Add task to To Do...<span class="lb">✏️ To Do ▾</span></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <button class="icon-btn">✅ <span class="badge" style="font-size:10px">3</span></button>
+      </div>
+    </div>
+    <!-- Banners -->
+    <div class="banners">
+      <div class="bp">🎯 ONE THING</div>
+      <div class="bp">📊 KPIs</div>
+      <div class="bp" style="color:var(--ok)">🏆 <strong style="color:#4ade80">172 completed</strong></div>
+      <div class="bp">🔁 ROUTINE SNAPSHOT</div>
+    </div>
+    <!-- Body -->
+    <div class="body3">
+      <div class="sidebar" style="width:195px">
+        <div class="stitle">Sources</div>
+        <div class="sitem" style="color:var(--t1)">📦 All Sources <span class="ct">743</span></div>
+        <div class="sitem"><span style="color:var(--acc)">✅</span> To Do</div>
+        <div class="sitem"><span style="color:var(--gh)">🐙</span> GitHub</div>
+        <div class="sitem"><span style="color:var(--eml)">📧</span> Email</div>
+        <div class="stitle">Projects</div>
+        <div class="sitem">● Medfield Soccer</div>
+        <div class="sitem">● Mission Control</div>
+        <div class="stitle">Tags</div>
+        <div style="padding:0 4px">
+          <span class="tpill" style="background:rgba(168,85,247,.2);color:#c084fc">enhancement</span>
+          <span class="tpill" style="background:rgba(239,68,68,.2);color:#f87171">bug</span>
+          <span class="tpill" style="background:var(--s2);color:var(--t2)">feature</span>
+        </div>
+        <div style="margin-top:auto;padding-top:12px">
+          <div class="stitle">Sync Status</div>
+          <div class="syncr"><span class="sd" style="background:var(--acc)"></span> To Do <span style="margin-left:auto;color:var(--warn)">16m</span></div>
+          <div class="syncr"><span class="sd" style="background:var(--gh)"></span> GitHub <span style="margin-left:auto;color:var(--warn)">26m</span></div>
+          <div class="syncr"><span class="sd" style="background:var(--eml)"></span> Email <span style="margin-left:auto;color:var(--ok)">1m</span></div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="fbar">
+          Filtering: <span class="fpill"><span style="color:var(--gh)">●</span> github-issues ✕</span>
+          <span style="color:var(--acc);cursor:pointer">Clear all</span>
+          <span style="margin-left:auto;padding:3px 9px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);font-size:12px;cursor:pointer">💾 Save as view</span>
+        </div>
+        <h2 style="font-size:16px;font-weight:600;margin-bottom:10px">Filtered Tasks <span style="color:var(--t3);font-weight:400">(743)</span></h2>
+        <div class="shdr">▾ TO DO (45)</div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Backup status <span class="tmeta">#309 · homelab-config</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Review recent PRs and test shipped features <span class="tmeta">#478</span></div><span style="color:var(--warn)">★</span><span class="pbadge p1">P1</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Better formatting of alerts - CALL TO ACTION <span class="tmeta">#471</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">BUG: can't hide an alert <span class="tmeta">#470</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Obsidian Plugs &amp; Config to setup <span class="tmeta">#308 · 0/21</span></div><span class="pbadge p2">P2</span></div>
+      </div>
+      <div class="alerts">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h3>Alerts <span class="badge" style="margin-left:5px">49</span></h3>
+          <span style="font-size:11px;color:var(--t3);cursor:pointer">Mark all read</span>
+        </div>
+        <div class="acard" style="border-left:3px solid var(--acc)"><div class="at">[AgentSessionThread] Reviewing home lab repo</div><div class="am">9h ago · Open →</div></div>
+        <div class="acard"><div class="at">[PullRequest] Creating mock ups for mobile</div><div class="am">1d ago · Open →</div></div>
+        <div class="acard" style="border-left:3px solid var(--warn)"><div class="at">[Issue] Import issue with Leave Request</div><div class="am">1d ago · Open →</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     C: LEFT NAV ICON-ONLY + HOVER TOOLTIPS
+     ════════════════════════════════════════════════ -->
+<div id="p-c" class="panel" style="flex-direction:row">
+  <div class="lnav-c">
+    <div class="brand">MC</div>
+    <div class="cni on"><span style="font-size:15px">📊</span><span class="tip">Dashboard</span></div>
+    <div class="cni"><span style="font-size:15px">☀️</span><span class="tip">My Day</span></div>
+    <div class="cni"><span style="font-size:15px">📁</span><span class="tip">Projects</span></div>
+    <div class="cni"><span style="font-size:15px">📋</span><span class="tip">Kanban</span></div>
+    <div class="cni"><span style="font-size:15px">🎯</span><span class="tip">Goals</span></div>
+    <div class="csep"></div>
+    <div class="cni"><span style="font-size:15px">🔁</span><span class="tip">Routines</span></div>
+    <div class="cni"><span style="font-size:15px">📥</span><span class="tip">Triage</span></div>
+    <div class="cni"><span style="font-size:15px">📅</span><span class="tip">Timeline</span></div>
+    <div class="csep"></div>
+    <div class="cni"><span style="font-size:15px">🤖</span><span class="tip">AI Assistant</span></div>
+    <div class="bottom">
+      <div class="csep"></div>
+      <div class="cni"><span style="font-size:15px">⚡</span><span class="tip">Zen Mode</span></div>
+      <div class="cni"><span style="font-size:15px">🌙</span><span class="tip">Calm Mode</span></div>
+      <div class="cni" style="position:relative"><span style="font-size:15px">🔔</span><span class="tip">Alerts</span><span class="badge" style="position:absolute;top:-1px;right:-2px;font-size:8px;padding:0 3px">49</span></div>
+      <div class="cni"><span style="font-size:15px">⚙️</span><span class="tip">Settings</span></div>
+      <div class="csep"></div>
+      <div class="cni"><span class="hdot" style="width:8px;height:8px"></span><span class="tip">System Healthy · Sync: 1m ago</span></div>
+      <div class="cni"><span style="font-size:15px">🔄</span><span class="tip">Sync Now</span></div>
+    </div>
+  </div>
+  <div class="rarea">
+    <div class="slim-bar">
+      <div style="font-size:13px;color:var(--t3);display:flex;align-items:center;gap:5px;flex-shrink:0"><span style="color:var(--t1);font-weight:500">Dashboard</span> · All Sources</div>
+      <div style="flex:1;display:flex;justify-content:center;padding:0 12px">
+        <div class="quick-add" style="max-width:500px"><span class="plus">+</span>Add task to To Do...<span class="lb">✏️ To Do ▾</span></div>
+      </div>
+      <div class="search-box" style="width:160px">🔍 Search <span style="margin-left:auto;font-size:11px;color:var(--t3)">⌘K</span></div>
+    </div>
+    <div class="banners">
+      <div class="bp">🎯 ONE THING</div>
+      <div class="bp">📊 KPIs</div>
+      <div class="bp" style="color:var(--ok)">🏆 <strong style="color:#4ade80">172 completed</strong></div>
+      <div class="bp">🔁 ROUTINE SNAPSHOT</div>
+    </div>
+    <div class="body3">
+      <div class="sidebar" style="width:195px">
+        <div class="stitle">Sources</div>
+        <div class="sitem" style="color:var(--t1)">📦 All Sources <span class="ct">743</span></div>
+        <div class="sitem"><span style="color:var(--acc)">✅</span> To Do</div>
+        <div class="sitem"><span style="color:var(--gh)">🐙</span> GitHub</div>
+        <div class="sitem"><span style="color:var(--eml)">📧</span> Email</div>
+        <div class="stitle">Projects</div>
+        <div class="sitem">● Medfield Soccer</div>
+        <div class="sitem">● Mission Control</div>
+        <div class="stitle">Tags</div>
+        <div style="padding:0 4px">
+          <span class="tpill" style="background:rgba(168,85,247,.2);color:#c084fc">enhancement</span>
+          <span class="tpill" style="background:rgba(239,68,68,.2);color:#f87171">bug</span>
+        </div>
+      </div>
+      <div class="content">
+        <div class="fbar">
+          Filtering: <span class="fpill"><span style="color:var(--gh)">●</span> github-issues ✕</span>
+          <span style="color:var(--acc);cursor:pointer">Clear all</span>
+        </div>
+        <h2 style="font-size:16px;font-weight:600;margin-bottom:10px">Filtered Tasks <span style="color:var(--t3);font-weight:400">(743)</span></h2>
+        <div class="shdr">▾ TO DO (45)</div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Backup status <span class="tmeta">#309</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Review recent PRs and test shipped features <span class="tmeta">#478</span></div><span style="color:var(--warn)">★</span><span class="pbadge p1">P1</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Better formatting of alerts <span class="tmeta">#471</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">BUG: can't hide an alert <span class="tmeta">#470</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Obsidian Plugs &amp; Config to setup <span class="tmeta">#308 · 0/21</span></div><span class="pbadge p2">P2</span></div>
+      </div>
+      <div class="alerts">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h3>Alerts <span class="badge" style="margin-left:5px">49</span></h3>
+        </div>
+        <div class="acard" style="border-left:3px solid var(--acc)"><div class="at">[AgentSessionThread] Reviewing home lab repo</div><div class="am">9h ago · Open →</div></div>
+        <div class="acard"><div class="at">[PullRequest] Creating mock ups for mobile</div><div class="am">1d ago · Open →</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     D: CURRENT TOP NAV + ENRICHED TOOLBAR
+     ════════════════════════════════════════════════ -->
+<div id="p-d" class="panel" style="flex-direction:column">
+  <div class="topbar">
+    <div class="left">
+      <div class="brand-text"><span style="color:var(--acc4)">🛰</span><span>Mission Control</span></div>
+      <div style="display:flex;align-items:center;gap:2px">
+        <a class="nav-link on">📊 Dashboard</a>
+        <a class="nav-link">☀️ My Day</a>
+        <a class="nav-link">📁 Projects</a>
+        <a class="nav-link">📋 Kanban</a>
+        <a class="nav-link">🎯 Goals</a>
+        <span class="ndiv"></span>
+        <a class="nav-link">🔁 Routines</a>
+        <a class="nav-link">📥 Triage</a>
+        <a class="nav-link">📅 Timeline</a>
+        <span class="ndiv"></span>
+        <a class="nav-link">🤖 AI</a>
+        <a class="nav-link">⋯ More</a>
+      </div>
+    </div>
+    <div class="right">
+      <button class="icon-btn">⚡ Zen</button>
+      <button class="icon-btn">🌙 Calm</button>
+      <button class="icon-btn">✅ <span class="badge">3</span></button>
+      <button class="icon-btn"><span class="hdot"></span></button>
+      <button class="icon-btn">🔄 Sync</button>
+    </div>
+  </div>
+  <!-- ENRICHED TOOLBAR — fills the whitespace -->
+  <div class="slim-bar" style="gap:8px">
+    <div class="search-box" style="width:170px">🔍 Search <span style="margin-left:auto;font-size:11px;color:var(--t3)">⌘K</span></div>
+    <div class="tdiv"></div>
+    <div style="flex:1;max-width:440px">
+      <div class="quick-add"><span class="plus">+</span>Add task to To Do...<span class="lb">✏️ To Do ▾</span></div>
+    </div>
+    <div class="tdiv"></div>
+    <div style="display:flex;align-items:center;gap:5px;margin-left:auto">
+      <button class="tbtn">📥 Triage <span class="badge" style="background:var(--warn);font-size:9px">12</span></button>
+      <button class="tbtn">🎯 One Thing</button>
+      <div class="tdiv"></div>
+      <button class="tbtn" style="color:var(--acc4)">🤖 Ask AI</button>
+    </div>
+  </div>
+  <div class="banners">
+    <div class="bp">📊 KPIs</div>
+    <div class="bp" style="color:var(--ok)">🏆 RECENT WINS <strong style="color:#4ade80">172 completed this week</strong></div>
+    <div class="bp">🔁 ROUTINE SNAPSHOT</div>
+  </div>
+  <div class="body3">
+    <div class="sidebar">
+      <div class="stitle">Sources</div>
+      <div class="sitem" style="color:var(--t1)">📦 All Sources <span class="ct">743</span></div>
+      <div class="sitem"><span style="color:var(--acc)">✅</span> To Do</div>
+      <div class="sitem"><span style="color:var(--gh)">🐙</span> GitHub</div>
+      <div class="sitem"><span style="color:var(--eml)">📧</span> Email</div>
+      <div class="stitle">Projects</div>
+      <div class="sitem">● Medfield Soccer</div>
+      <div class="sitem">● Mission Control</div>
+      <div class="stitle">Tags</div>
+      <div style="padding:0 4px">
+        <span class="tpill" style="background:rgba(168,85,247,.2);color:#c084fc">enhancement</span>
+        <span class="tpill" style="background:rgba(239,68,68,.2);color:#f87171">bug</span>
+        <span class="tpill" style="background:var(--s2);color:var(--t2)">feature</span>
+      </div>
+      <div style="margin-top:auto;padding-top:16px">
+        <div class="stitle">Sync Status</div>
+        <div class="syncr"><span class="sd" style="background:var(--acc)"></span> To Do <span style="margin-left:auto;color:var(--warn)">16m</span></div>
+        <div class="syncr"><span class="sd" style="background:var(--gh)"></span> GitHub <span style="margin-left:auto;color:var(--warn)">26m</span></div>
+        <div class="syncr"><span class="sd" style="background:var(--eml)"></span> Email <span style="margin-left:auto;color:var(--ok)">1m</span></div>
+      </div>
+    </div>
+    <div class="content">
+      <div class="fbar">
+        Filtering: <span class="fpill"><span style="color:var(--gh)">●</span> github-issues ✕</span>
+        <span style="color:var(--acc);cursor:pointer">Clear all</span>
+        <span style="margin-left:auto;padding:3px 9px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);font-size:12px;cursor:pointer">💾 Save as view</span>
+      </div>
+      <h2 style="font-size:16px;font-weight:600;margin-bottom:10px">Filtered Tasks <span style="color:var(--t3);font-weight:400">(743)</span></h2>
+      <div class="shdr">▾ TO DO (45)</div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Backup status <span class="tmeta">#309</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Review recent PRs and test shipped features <span class="tmeta">#478</span></div><span style="color:var(--warn)">★</span><span class="pbadge p1">P1</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Better formatting of alerts - CALL TO ACTION <span class="tmeta">#471</span></div><span class="pbadge p2">P2</span></div>
+      <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">BUG: can't hide an alert <span class="tmeta">#470</span></div><span class="pbadge p2">P2</span></div>
+    </div>
+    <div class="alerts">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <h3>Alerts <span class="badge" style="margin-left:5px">49</span></h3>
+      </div>
+      <div class="acard" style="border-left:3px solid var(--acc)"><div class="at">[AgentSessionThread] Reviewing home lab repo</div><div class="am">9h ago · Open →</div></div>
+      <div class="acard"><div class="at">[PullRequest] Creating mock ups for mobile</div><div class="am">1d ago · Open →</div></div>
+      <div class="acard" style="border-left:3px solid var(--warn)"><div class="at">[Issue] Import issue with Leave Request</div><div class="am">1d ago · Open →</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     E: HYBRID — ICON RAIL + ENRICHED TOOLBAR
+     ════════════════════════════════════════════════ -->
+<div id="p-e" class="panel" style="flex-direction:row">
+  <div class="lnav-c">
+    <div class="brand">MC</div>
+    <div class="cni on"><span style="font-size:15px">📊</span><span class="tip">Dashboard</span></div>
+    <div class="cni"><span style="font-size:15px">☀️</span><span class="tip">My Day</span></div>
+    <div class="cni"><span style="font-size:15px">📁</span><span class="tip">Projects</span></div>
+    <div class="cni"><span style="font-size:15px">📋</span><span class="tip">Kanban</span></div>
+    <div class="cni"><span style="font-size:15px">🎯</span><span class="tip">Goals</span></div>
+    <div class="csep"></div>
+    <div class="cni"><span style="font-size:15px">🔁</span><span class="tip">Routines</span></div>
+    <div class="cni"><span style="font-size:15px">📥</span><span class="tip">Triage</span></div>
+    <div class="cni"><span style="font-size:15px">📅</span><span class="tip">Timeline</span></div>
+    <div class="csep"></div>
+    <div class="cni"><span style="font-size:15px">🤖</span><span class="tip">AI Assistant</span></div>
+    <div class="bottom">
+      <div class="csep"></div>
+      <div class="cni"><span style="font-size:15px">⚙️</span><span class="tip">Settings</span></div>
+      <div class="cni"><span class="hdot" style="width:8px;height:8px"></span><span class="tip">All systems healthy</span></div>
+    </div>
+  </div>
+  <div class="rarea">
+    <!-- Enriched toolbar -->
+    <div class="slim-bar" style="gap:8px">
+      <div class="search-box" style="width:150px">🔍 Search <span style="margin-left:auto;font-size:10px;color:var(--t3)">⌘K</span></div>
+      <div class="tdiv"></div>
+      <div style="flex:1;display:flex;justify-content:center;padding:0 8px">
+        <div class="quick-add" style="max-width:460px;padding:6px 10px"><span class="plus">+</span>Add task to To Do...<span class="lb">✏️ To Do ▾</span></div>
+      </div>
+      <div class="tdiv"></div>
+      <div style="display:flex;align-items:center;gap:5px;flex-shrink:0">
+        <button class="tbtn" style="padding:3px 7px">📥 Triage <span class="badge" style="background:var(--warn);font-size:9px">12</span></button>
+        <button class="tbtn" style="padding:3px 7px">🎯 Focus</button>
+        <div class="tdiv"></div>
+        <button class="icon-btn">⚡</button>
+        <button class="icon-btn">🌙</button>
+        <button class="icon-btn">✅ <span class="badge" style="font-size:9px">3</span></button>
+        <div class="tdiv"></div>
+        <button class="icon-btn" style="color:var(--t2)">🔄</button>
+      </div>
+    </div>
+    <!-- Banners -->
+    <div class="banners">
+      <div class="bp" style="padding:4px 10px">🎯 ONE THING</div>
+      <div class="bp" style="padding:4px 10px">📊 KPIs</div>
+      <div class="bp" style="padding:4px 10px;color:var(--ok)">🏆 <strong style="color:#4ade80">172 completed</strong></div>
+      <div class="bp" style="padding:4px 10px">🔁 ROUTINE</div>
+    </div>
+    <!-- Body -->
+    <div class="body3">
+      <div class="sidebar" style="width:195px">
+        <div class="stitle">Sources</div>
+        <div class="sitem" style="color:var(--t1)">📦 All Sources <span class="ct">743</span></div>
+        <div class="sitem"><span style="color:var(--acc)">✅</span> To Do</div>
+        <div class="sitem"><span style="color:var(--gh)">🐙</span> GitHub</div>
+        <div class="sitem"><span style="color:var(--eml)">📧</span> Email</div>
+        <div class="stitle">Projects</div>
+        <div class="sitem">● Medfield Soccer</div>
+        <div class="sitem">● Mission Control</div>
+        <div class="stitle">Tags</div>
+        <div style="padding:0 4px">
+          <span class="tpill" style="background:rgba(168,85,247,.2);color:#c084fc">enhancement</span>
+          <span class="tpill" style="background:rgba(239,68,68,.2);color:#f87171">bug</span>
+          <span class="tpill" style="background:var(--s2);color:var(--t2)">feature</span>
+        </div>
+        <div style="margin-top:auto;padding-top:12px">
+          <div class="stitle">Sync Status</div>
+          <div class="syncr"><span class="sd" style="background:var(--acc)"></span> To Do <span style="margin-left:auto;color:var(--warn)">16m</span></div>
+          <div class="syncr"><span class="sd" style="background:var(--gh)"></span> GitHub <span style="margin-left:auto;color:var(--warn)">26m</span></div>
+          <div class="syncr"><span class="sd" style="background:var(--eml)"></span> Email <span style="margin-left:auto;color:var(--ok)">1m</span></div>
+        </div>
+      </div>
+      <div class="content">
+        <div class="fbar">
+          Filtering: <span class="fpill"><span style="color:var(--gh)">●</span> github-issues ✕</span>
+          <span style="color:var(--acc);cursor:pointer">Clear all</span>
+          <span style="margin-left:auto;padding:3px 9px;border-radius:var(--r);background:var(--s1);border:1px solid var(--bd);font-size:12px;cursor:pointer">💾 Save as view</span>
+        </div>
+        <h2 style="font-size:16px;font-weight:600;margin-bottom:10px">Filtered Tasks <span style="color:var(--t3);font-weight:400">(743)</span></h2>
+        <div class="shdr">▾ TO DO (45)</div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Backup status <span class="tmeta">#309</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Review recent PRs and test shipped features <span class="tmeta">#478</span></div><span style="color:var(--warn)">★</span><span class="pbadge p1">P1</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Better formatting of alerts - CALL TO ACTION <span class="tmeta">#471</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">BUG: can't hide an alert <span class="tmeta">#470</span></div><span class="pbadge p2">P2</span></div>
+        <div class="trow"><div class="tchk"></div><div class="ticon">⚡</div><div class="ttitle">Obsidian Plugs &amp; Config to setup <span class="tmeta">#308 · 0/21</span></div><span class="pbadge p2">P2</span></div>
+      </div>
+      <div class="alerts">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <h3>Alerts <span class="badge" style="margin-left:5px">49</span></h3>
+          <span style="font-size:11px;color:var(--t3);cursor:pointer">Mark all read</span>
+        </div>
+        <div style="display:flex;gap:4px;margin-bottom:8px">
+          <span style="padding:2px 7px;border-radius:99px;background:var(--s2);color:var(--t2);font-size:11px;cursor:pointer">Unread</span>
+          <span style="padding:2px 7px;border-radius:99px;background:var(--s2);color:var(--t2);font-size:11px;cursor:pointer">↓ Newest</span>
+        </div>
+        <div class="acard" style="border-left:3px solid var(--acc)"><div class="at">[AgentSessionThread] Reviewing home lab repo</div><div class="am">9h ago · Open →</div></div>
+        <div class="acard"><div class="at">[PullRequest] Creating mock ups for mobile companion</div><div class="am">1d ago · Open →</div></div>
+        <div class="acard" style="border-left:3px solid var(--warn)"><div class="at">[Issue] Import issue with Leave Request Power Apps</div><div class="am">1d ago · Open →</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(id, btn) {
+  document.querySelectorAll('.panel').forEach(function(p) { p.classList.remove('active'); });
+  document.querySelectorAll('#switcher button').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('p-' + id).classList.add('active');
+  btn.classList.add('active');
+}
+</script>
+</body>
+</html>

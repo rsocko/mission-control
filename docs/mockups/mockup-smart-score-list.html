@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Smart Score View</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .app-header {
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--surface-2);
+    }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background-color 0.15s ease, color 0.15s ease;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #fff; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .sidebar {
+      width: 220px;
+      background: var(--surface-1);
+      border-right: 1px solid var(--surface-2);
+    }
+    .sidebar-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 8px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--gray-400);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .sidebar-item:hover { background: var(--surface-2); color: #fff; }
+    .sidebar-item.active { background: rgba(30, 58, 138, 0.48); color: var(--accent-400); }
+
+    .panel {
+      background: var(--surface-1);
+      border: 1px solid var(--surface-2);
+      border-radius: 16px;
+      box-shadow: 0 16px 40px rgba(2, 6, 23, 0.36);
+    }
+    .search-input {
+      background: var(--surface-0);
+      border: 1px solid var(--surface-3);
+      color: #e2e8f0;
+    }
+    .search-input::placeholder { color: var(--gray-500); }
+
+    .toolbar-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-0);
+      color: var(--gray-400);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .toggle {
+      width: 38px;
+      height: 22px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.2);
+      border: 1px solid rgba(96,165,250,0.35);
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(59,130,246,0.08);
+    }
+    .toggle::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 18px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--accent-500);
+      box-shadow: 0 2px 8px rgba(59,130,246,0.45);
+    }
+
+    .task-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 14px 18px minmax(0, 1fr) 92px 48px;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+      transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+    }
+    .task-row:hover { background: rgba(30, 41, 59, 0.58); }
+    .task-row:last-child { border-bottom: none; }
+    .task-row.snoozed { opacity: 0.68; }
+    .grab-handle {
+      width: 14px;
+      height: 24px;
+      color: var(--gray-600);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+    .task-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-0);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.03);
+    }
+    .task-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: #f8fafc;
+    }
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .source-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .source-todo { background: rgba(59,130,246,0.16); color: #93c5fd; border-color: rgba(96,165,250,0.24); }
+    .source-github { background: rgba(168,85,247,0.16); color: #d8b4fe; border-color: rgba(216,180,254,0.24); }
+    .source-calendar { background: rgba(245,158,11,0.16); color: #fcd34d; border-color: rgba(252,211,77,0.24); }
+    .source-email { background: rgba(16,185,129,0.16); color: #6ee7b7; border-color: rgba(110,231,183,0.24); }
+
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .entity-person { background: rgba(59,130,246,0.14); color: #93c5fd; border-color: rgba(96,165,250,0.22); }
+    .entity-project { background: rgba(168,85,247,0.14); color: #d8b4fe; border-color: rgba(216,180,254,0.22); }
+    .entity-domain { background: rgba(16,185,129,0.14); color: #6ee7b7; border-color: rgba(110,231,183,0.22); }
+    .entity-team { background: rgba(245,158,11,0.14); color: #fcd34d; border-color: rgba(252,211,77,0.22); }
+
+    .due-date {
+      font-size: 0.78rem;
+      text-align: right;
+      color: var(--gray-400);
+      font-variant-numeric: tabular-nums;
+    }
+    .due-date.none { color: var(--gray-500); }
+    .score-badge {
+      width: 44px;
+      height: 36px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.88rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+    }
+    .score-high { background: var(--accent-500); color: #fff; }
+    .score-mid { background: rgba(245,158,11,0.13); color: #fbbf24; }
+    .score-low { background: var(--surface-3); color: var(--gray-500); }
+
+    .tooltip-card {
+      position: absolute;
+      top: 60px;
+      right: 82px;
+      width: 260px;
+      background: #0f172a;
+      border: 1px solid rgba(96,165,250,0.18);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 18px 40px rgba(2,6,23,0.55);
+      z-index: 4;
+    }
+    .tooltip-card::before {
+      content: '';
+      position: absolute;
+      top: -6px;
+      right: 30px;
+      width: 12px;
+      height: 12px;
+      transform: rotate(45deg);
+      background: #0f172a;
+      border-top: 1px solid rgba(96,165,250,0.18);
+      border-left: 1px solid rgba(96,165,250,0.18);
+    }
+    .progress-track {
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(51,65,85,0.8);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent-400), var(--accent-500));
+    }
+    .tooltip-row {
+      display: grid;
+      grid-template-columns: 1fr 30px;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+      font-size: 0.72rem;
+    }
+
+    .stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.7);
+      border: 1px solid rgba(51,65,85,0.8);
+      color: var(--gray-400);
+      font-size: 0.72rem;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link active">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="relative">
+        <input type="text" placeholder="Search scored tasks..." class="search-input w-56 px-3 py-1.5 text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+      </div>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sync-alt text-sm"></i></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md relative"><i class="fas fa-bell text-sm"></i><span class="absolute -top-0 -right-0 w-3.5 h-3.5 bg-red-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold">4</span></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-cog text-sm"></i></button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <aside class="sidebar p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-5">
+      <div>
+        <div class="sidebar-label">Sources</div>
+        <div class="space-y-1">
+          <div class="sidebar-item active"><i class="fas fa-layer-group text-xs w-4"></i><span>All Sources</span><span class="ml-auto text-xs">26</span></div>
+          <div class="sidebar-item"><i class="fas fa-check-square text-blue-400 text-xs w-4"></i><span>Microsoft Todo</span><span class="ml-auto text-xs">11</span></div>
+          <div class="sidebar-item"><i class="fab fa-github text-purple-300 text-xs w-4"></i><span>GitHub Issues</span><span class="ml-auto text-xs">7</span></div>
+          <div class="sidebar-item"><i class="fas fa-calendar text-amber-300 text-xs w-4"></i><span>Calendar</span><span class="ml-auto text-xs">4</span></div>
+          <div class="sidebar-item"><i class="fas fa-envelope text-emerald-300 text-xs w-4"></i><span>Email</span><span class="ml-auto text-xs">4</span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sidebar-label">Lists</div>
+        <div class="space-y-1">
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-purple-400"></span><span>Mission Control</span><span class="ml-auto text-xs">8</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span>Work Sprint</span><span class="ml-auto text-xs">6</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Home Automation</span><span class="ml-auto text-xs">5</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span>3D Printing</span><span class="ml-auto text-xs">4</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-slate-500"></span><span>Someday</span><span class="ml-auto text-xs">3</span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <div class="sidebar-label" style="margin-bottom:0">Priorities</div>
+          <a href="#" class="text-[11px] text-slate-500 hover:text-blue-300 transition-colors">Manage</a>
+        </div>
+        <div class="space-y-1.5">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-300">
+            <span class="text-[10px] text-slate-500 w-3 font-medium">1</span>
+            <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+            <span>Sarah C.</span>
+            <span class="ml-auto text-[10px] text-slate-600">Critical</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-300">
+            <span class="text-[10px] text-slate-500 w-3 font-medium">2</span>
+            <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+            <span>Mission Control</span>
+            <span class="ml-auto text-[10px] text-slate-600">Critical</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-300">
+            <span class="text-[10px] text-slate-500 w-3 font-medium">3</span>
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            <span>RyMessage</span>
+            <span class="ml-auto text-[10px] text-slate-600">High</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-300">
+            <span class="text-[10px] text-slate-500 w-3 font-medium">4</span>
+            <span class="w-2 h-2 rounded-full bg-amber-400"></span>
+            <span>Home Automation</span>
+            <span class="ml-auto text-[10px] text-slate-600">High</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-400">
+            <span class="text-[10px] text-slate-500 w-3 font-medium">5</span>
+            <span class="w-2 h-2 rounded-full bg-rose-400"></span>
+            <span>3D Printing</span>
+            <span class="ml-auto text-[10px] text-slate-600">Med</span>
+          </div>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-slate-500">
+            <span class="text-[10px] text-slate-600 w-3 font-medium">6</span>
+            <span class="w-2 h-2 rounded-full bg-slate-500"></span>
+            <span>Kitchen Reno</span>
+            <span class="ml-auto text-[10px] text-slate-600">Std</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-auto pt-4 border-t border-slate-800">
+        <div class="sidebar-label">Scoring model</div>
+        <div class="space-y-2 text-xs text-slate-400">
+          <div class="flex items-center justify-between"><span>Priorities synced</span><span class="text-emerald-300">12</span></div>
+          <div class="flex items-center justify-between"><span>Last refresh</span><span>2m ago</span></div>
+          <div class="flex items-center justify-between"><span>Snoozed tasks</span><span>3</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto p-5">
+      <div class="panel overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-base font-semibold">Unified Task List</h2>
+            <p class="text-sm text-slate-400 mt-1">All tasks across Todo, GitHub, Calendar, and Email.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            <span class="toolbar-chip" style="background: rgba(59,130,246,0.12); border-color: rgba(96,165,250,0.3); color: #93c5fd;"><i class="fas fa-arrow-down-wide-short text-[11px]"></i>Sort by: <strong>Smart Score</strong> <i class="fas fa-chevron-down text-[9px] ml-1 opacity-60"></i></span>
+            <span class="toolbar-chip"><i class="fas fa-filter text-[11px]"></i>Open only</span>
+            <span class="toolbar-chip"><i class="fas fa-eye text-[11px]"></i>Scores visible</span>
+          </div>
+        </div>
+
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <span class="stat-pill"><i class="fas fa-bolt text-blue-400"></i>8 surfaced now</span>
+            <span class="stat-pill"><i class="fas fa-clock text-amber-300"></i>1 snoozed</span>
+          </div>
+          <span>Showing 9 of 26 tasks</span>
+        </div>
+
+        <div>
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Follow up with Sarah on Q3 report draft</div>
+              <div class="meta-line">
+                <span class="source-badge source-todo">TODO</span>
+                <span class="entity-chip entity-person"><i class="fas fa-user text-[10px]"></i>Sarah C.</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Q3 Planning</span>
+                <span class="entity-chip entity-team"><i class="fas fa-users text-[10px]"></i>Leadership</span>
+              </div>
+            </div>
+            <div class="due-date">Due today</div>
+            <div class="score-badge score-high">92</div>
+          </div>
+
+          <div class="task-row" style="background: rgba(30,41,59,0.35);">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Fix Mission Control quick-add parsing regression</div>
+              <div class="meta-line">
+                <span class="source-badge source-github">GH</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Mission Control</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>n8n Sync</span>
+                <span class="entity-chip entity-person"><i class="fas fa-user text-[10px]"></i>Ry</span>
+              </div>
+              <div class="tooltip-card">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <div class="text-sm font-semibold">Score Breakdown</div>
+                    <div class="text-[11px] text-slate-400 mt-1">Why this surfaced near the top</div>
+                  </div>
+                  <div class="text-lg font-bold text-blue-400">88</div>
+                </div>
+                <div class="tooltip-row"><div><div class="flex justify-between mb-1"><span>Project rank</span><span>35</span></div><div class="progress-track"><div class="progress-fill" style="width: 88%;"></div></div></div><div></div></div>
+                <div class="tooltip-row"><div><div class="flex justify-between mb-1"><span>Urgency</span><span>28</span></div><div class="progress-track"><div class="progress-fill" style="width: 70%; background: linear-gradient(90deg, #38bdf8, #60a5fa);"></div></div></div><div></div></div>
+                <div class="tooltip-row"><div><div class="flex justify-between mb-1"><span>Behavior</span><span>18</span></div><div class="progress-track"><div class="progress-fill" style="width: 45%; background: linear-gradient(90deg, #818cf8, #a78bfa);"></div></div></div><div></div></div>
+                <div class="tooltip-row"><div><div class="flex justify-between mb-1"><span>Freshness</span><span>7</span></div><div class="progress-track"><div class="progress-fill" style="width: 18%; background: linear-gradient(90deg, #34d399, #6ee7b7);"></div></div></div><div></div></div>
+                <div class="mt-3 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+                  <span class="text-slate-400">Total</span>
+                  <span class="font-semibold text-white">88</span>
+                </div>
+              </div>
+            </div>
+            <div class="due-date">Tomorrow</div>
+            <div class="score-badge score-high">88</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Reply to GitHub issue about capture attachments</div>
+              <div class="meta-line">
+                <span class="source-badge source-github">GH</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Capture UX</span>
+                <span class="entity-chip entity-person"><i class="fas fa-user text-[10px]"></i>Sarah C.</span>
+              </div>
+            </div>
+            <div class="due-date">Thu 2:00 PM</div>
+            <div class="score-badge score-high">84</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Schedule next week's team retro</div>
+              <div class="meta-line">
+                <span class="source-badge source-calendar">CAL</span>
+                <span class="entity-chip entity-team"><i class="fas fa-users text-[10px]"></i>Platform Team</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Sprint 29</span>
+              </div>
+            </div>
+            <div class="due-date">Fri</div>
+            <div class="score-badge score-mid">71</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Print revised camera mount prototype</div>
+              <div class="meta-line">
+                <span class="source-badge source-todo">TODO</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>3D Printing</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Garage Lab</span>
+              </div>
+            </div>
+            <div class="due-date">No date</div>
+            <div class="score-badge score-mid">67</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Review Home Assistant energy dashboard alerts</div>
+              <div class="meta-line">
+                <span class="source-badge source-email">EMAIL</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>Home Automation</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Energy Board</span>
+              </div>
+            </div>
+            <div class="due-date none">No date</div>
+            <div class="score-badge score-mid">58</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Reorder drawer slides for kitchen island</div>
+              <div class="meta-line">
+                <span class="source-badge source-email">EMAIL</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Kitchen Renovation</span>
+                <span class="entity-chip entity-person"><i class="fas fa-user text-[10px]"></i>West Elm</span>
+              </div>
+            </div>
+            <div class="due-date">Jul 12</div>
+            <div class="score-badge score-mid">54</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Update n8n package-ingest workflow mapping</div>
+              <div class="meta-line">
+                <span class="source-badge source-github">GH</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Mission Control</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>Automation</span>
+              </div>
+            </div>
+            <div class="due-date none">No date</div>
+            <div class="score-badge score-mid">52</div>
+          </div>
+
+          <div class="task-row snoozed">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Fix garage door sensor false positive</div>
+              <div class="meta-line">
+                <span class="source-badge source-todo">TODO</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>Home Automation</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Garage</span>
+                <span class="text-[11px] text-slate-500 inline-flex items-center gap-1"><i class="fas fa-clock"></i>Snoozed until tomorrow</span>
+              </div>
+            </div>
+            <div class="due-date none">No date</div>
+            <div class="score-badge score-low">44</div>
+          </div>
+
+          <div class="task-row">
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="task-title">Close stale issue on Copilot Space sync</div>
+              <div class="meta-line">
+                <span class="source-badge source-github">GH</span>
+                <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Ideation</span>
+                <span class="entity-chip entity-domain"><i class="fas fa-globe text-[10px]"></i>Copilot Space</span>
+              </div>
+            </div>
+            <div class="due-date">Mon</div>
+            <div class="score-badge score-low">39</div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

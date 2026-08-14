@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="980" viewBox="0 0 1440 980" role="img" aria-labelledby="title desc">
+  <title id="title">Mission Control sequential-project next-task UX proposal</title>
+  <desc id="desc">Two desktop mockups show available actions on the Projects landing page and an Available now lens in the project Plan list.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000" flood-opacity=".3"/>
+    </filter>
+    <style>
+      text { font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+      .muted { fill: #94a3b8; }
+      .faint { fill: #64748b; }
+      .body { fill: #cbd5e1; }
+      .strong { fill: #f8fafc; }
+      .label { font-size: 12px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
+      .small { font-size: 12px; }
+      .bodytext { font-size: 14px; }
+      .heading { font-size: 22px; font-weight: 750; }
+      .subheading { font-size: 15px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect width="1440" height="980" fill="url(#bg)"/>
+  <text x="60" y="58" class="strong heading">#1315 · Sequential projects — UX proposal</text>
+  <text x="60" y="84" class="muted bodytext">Surface the available action where users choose work; keep the full sequence visible where users plan work.</text>
+
+  <!-- Projects landing -->
+  <g transform="translate(60 120)" filter="url(#shadow)">
+    <rect width="640" height="720" rx="20" fill="#0f172a" stroke="#273449"/>
+    <rect width="78" height="720" rx="20" fill="#0b1220"/>
+    <rect x="78" width="562" height="54" rx="20" fill="#111c2f"/>
+    <circle cx="39" cy="42" r="15" fill="#7c3aed"/>
+    <text x="32" y="47" fill="#fff" font-size="14" font-weight="800">M</text>
+    <g fill="#64748b">
+      <rect x="25" y="94" width="28" height="28" rx="8"/>
+      <rect x="25" y="138" width="28" height="28" rx="8"/>
+      <rect x="25" y="182" width="28" height="28" rx="8" fill="#6d28d9"/>
+      <rect x="25" y="226" width="28" height="28" rx="8"/>
+    </g>
+    <text x="104" y="34" class="strong subheading">Projects</text>
+    <text x="104" y="76" class="faint small">See what is moving and where to pick up next.</text>
+
+    <text x="104" y="116" fill="#a78bfa" class="label">Available now</text>
+    <rect x="104" y="134" width="512" height="108" rx="12" fill="#111c2f" stroke="#334155"/>
+    <circle cx="132" cy="164" r="14" fill="#312e81"/>
+    <path d="M126 164h12M132 158v12" stroke="#a78bfa" stroke-width="2" stroke-linecap="round"/>
+    <text x="158" y="161" class="strong subheading">Website launch</text>
+    <text x="158" y="181" class="faint small">Sequential · by project</text>
+    <rect x="126" y="198" width="69" height="23" rx="11.5" fill="#153a35"/>
+    <circle cx="140" cy="209.5" r="4" fill="#34d399"/>
+    <text x="150" y="214" fill="#6ee7b7" class="small" font-weight="700">NEXT</text>
+    <text x="208" y="214" class="body bodytext">Approve final homepage copy</text>
+    <text x="585" y="214" class="faint bodytext">›</text>
+
+    <rect x="104" y="254" width="512" height="126" rx="12" fill="#111c2f" stroke="#334155"/>
+    <circle cx="132" cy="284" r="14" fill="#3b1d2d"/>
+    <path d="M126 284h12M132 278v12" stroke="#fb7185" stroke-width="2" stroke-linecap="round"/>
+    <text x="158" y="281" class="strong subheading">Q4 customer research</text>
+    <text x="158" y="301" class="faint small">Sequential · by section · 2 tracks ready</text>
+    <text x="126" y="330" fill="#6ee7b7" class="small" font-weight="700">INTERVIEWS</text>
+    <text x="224" y="330" class="body bodytext">Schedule Acme stakeholder</text>
+    <text x="126" y="356" fill="#6ee7b7" class="small" font-weight="700">ANALYSIS</text>
+    <text x="224" y="356" class="body bodytext">Tag first five transcripts</text>
+
+    <text x="104" y="426" class="muted label">All active projects</text>
+    <rect x="104" y="444" width="512" height="64" rx="12" fill="#0d1627" stroke="#223047"/>
+    <circle cx="132" cy="476" r="10" fill="#164e63"/>
+    <text x="154" y="472" class="strong bodytext" font-weight="700">Team offsite</text>
+    <text x="154" y="491" class="faint small">8 tasks · 40% complete</text>
+    <text x="586" y="482" class="faint bodytext">›</text>
+
+    <rect x="104" y="520" width="512" height="78" rx="12" fill="#0d1627" stroke="#713f12" stroke-dasharray="4 4"/>
+    <circle cx="132" cy="551" r="10" fill="#713f12"/>
+    <text x="154" y="548" class="strong bodytext" font-weight="700">Vendor migration</text>
+    <text x="154" y="568" fill="#fbbf24" class="small">Needs attention · no incomplete task</text>
+    <rect x="482" y="540" width="110" height="30" rx="8" fill="#422006"/>
+    <text x="498" y="560" fill="#fbbf24" class="small" font-weight="700">Review project</text>
+
+    <rect x="104" y="628" width="512" height="60" rx="10" fill="#121a2c"/>
+    <circle cx="126" cy="658" r="10" fill="#312e81"/>
+    <text x="146" y="654" class="body bodytext" font-weight="700">Why this works</text>
+    <text x="146" y="673" class="faint small">Landing answers “what can I do?” without hiding project health.</text>
+  </g>
+
+  <!-- Plan list -->
+  <g transform="translate(740 120)" filter="url(#shadow)">
+    <rect width="640" height="720" rx="20" fill="#0f172a" stroke="#273449"/>
+    <rect x="0" width="640" height="54" rx="20" fill="#111c2f"/>
+    <text x="24" y="34" class="strong subheading">Website launch</text>
+    <text x="24" y="85" class="faint small">PROJECT  /  PLAN</text>
+    <text x="24" y="120" class="strong heading">Plan</text>
+    <text x="24" y="143" class="muted small">Organize tasks into phases. The first incomplete task is available now.</text>
+
+    <rect x="24" y="164" width="230" height="38" rx="10" fill="#0b1220" stroke="#334155"/>
+    <rect x="28" y="168" width="92" height="30" rx="7" fill="#6d28d9"/>
+    <text x="51" y="188" fill="#fff" class="small" font-weight="700">All tasks</text>
+    <text x="137" y="188" class="muted small" font-weight="700">Available now</text>
+    <rect x="430" y="164" width="186" height="38" rx="10" fill="#0b1220" stroke="#334155"/>
+    <text x="448" y="188" class="muted small">⌕  Filter tasks…</text>
+
+    <rect x="24" y="222" width="592" height="196" rx="14" fill="#111c2f" stroke="#334155"/>
+    <rect x="24" y="222" width="4" height="196" rx="2" fill="#8b5cf6"/>
+    <text x="48" y="254" class="strong subheading">1 · Final content</text>
+    <text x="538" y="254" class="faint small">1 / 4 done</text>
+    <line x1="48" y1="271" x2="592" y2="271" stroke="#263449"/>
+    <circle cx="65" cy="296" r="8" fill="none" stroke="#34d399" stroke-width="2"/>
+    <rect x="84" y="283" width="48" height="24" rx="12" fill="#153a35"/>
+    <text x="94" y="300" fill="#6ee7b7" font-size="10" font-weight="800">NEXT</text>
+    <text x="144" y="300" class="strong bodytext" font-weight="700">Approve final homepage copy</text>
+    <line x1="48" y1="320" x2="592" y2="320" stroke="#263449"/>
+    <circle cx="65" cy="346" r="8" fill="none" stroke="#475569" stroke-width="2"/>
+    <rect x="84" y="333" width="50" height="24" rx="12" fill="#1e293b"/>
+    <text x="94" y="350" class="faint" font-size="10" font-weight="800">LATER</text>
+    <text x="146" y="350" class="muted bodytext">Load approved copy into CMS</text>
+    <line x1="48" y1="370" x2="592" y2="370" stroke="#263449"/>
+    <circle cx="65" cy="393" r="8" fill="none" stroke="#475569" stroke-width="2"/>
+    <text x="84" y="398" class="muted bodytext">Run content QA</text>
+
+    <rect x="24" y="434" width="592" height="152" rx="14" fill="#111c2f" stroke="#334155"/>
+    <rect x="24" y="434" width="4" height="152" rx="2" fill="#0ea5e9"/>
+    <text x="48" y="466" class="strong subheading">2 · Release</text>
+    <text x="530" y="466" class="faint small">0 / 3 done</text>
+    <line x1="48" y1="483" x2="592" y2="483" stroke="#263449"/>
+    <circle cx="65" cy="510" r="8" fill="none" stroke="#475569" stroke-width="2"/>
+    <rect x="84" y="497" width="50" height="24" rx="12" fill="#1e293b"/>
+    <text x="94" y="514" class="faint" font-size="10" font-weight="800">LATER</text>
+    <text x="146" y="514" class="muted bodytext">Deploy production build</text>
+    <line x1="48" y1="534" x2="592" y2="534" stroke="#263449"/>
+    <circle cx="65" cy="559" r="8" fill="none" stroke="#475569" stroke-width="2"/>
+    <text x="84" y="564" class="muted bodytext">Verify analytics events</text>
+
+    <rect x="24" y="610" width="592" height="78" rx="10" fill="#121a2c"/>
+    <circle cx="46" cy="638" r="10" fill="#153a35"/>
+    <text x="42.5" y="642" fill="#6ee7b7" font-size="12" font-weight="800">i</text>
+    <text x="64" y="635" class="body bodytext" font-weight="700">Available now is a lens, not a task status.</text>
+    <text x="64" y="656" class="faint small">Completing Next advances the sequence automatically.</text>
+    <text x="64" y="674" fill="#a78bfa" class="small" font-weight="700">Project settings: Sequential · Entire project ▾</text>
+  </g>
+
+  <g transform="translate(60 884)">
+    <rect width="1320" height="56" rx="14" fill="#111c2f" stroke="#334155"/>
+    <circle cx="30" cy="28" r="13" fill="#312e81"/>
+    <text x="25" y="33" fill="#c4b5fd" font-size="14" font-weight="800">1</text>
+    <text x="54" y="25" class="strong bodytext" font-weight="700">Recommendation</text>
+    <text x="54" y="44" class="muted small">Do both, narrowly: show available actions on Projects; add an “Available now” lens only for sequential Plan lists. Do not add a generic “Next” filter.</text>
+  </g>
+</svg>

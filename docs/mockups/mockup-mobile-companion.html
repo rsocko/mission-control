@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Mobile Companion Mockups</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; background: #0f172a; color: #e2e8f0; }
+    .phone {
+      width: 360px;
+      height: 780px;
+      background: #020617;
+      border: 1px solid #334155;
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow: 0 20px 45px rgba(0,0,0,0.45);
+    }
+    .status-bar { font-size: 11px; color: #94a3b8; }
+    .badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+    .badge-todo { background: #1e3a8a33; color: #93c5fd; border: 1px solid #3b82f633; }
+    .badge-github { background: #6b21a833; color: #d8b4fe; border: 1px solid #a855f733; }
+    .badge-mail { background: #14532d33; color: #86efac; border: 1px solid #22c55e33; }
+    .chip { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid #334155; color: #cbd5e1; }
+    .chip.active { background: #1e3a8a; border-color: #3b82f6; color: #dbeafe; }
+    .triage-card { background: #111827; border: 1px solid #334155; border-radius: 16px; }
+    .tab { font-size: 11px; color: #64748b; }
+    .tab.active { color: #60a5fa; }
+  </style>
+</head>
+<body>
+  <main class="px-6 py-10">
+    <header class="mb-8">
+      <h1 class="text-2xl font-semibold text-slate-100">Mobile Companion Mockups</h1>
+      <p class="text-sm text-slate-400 mt-1">Today, Triage, and Capture optimized for fast mobile execution.</p>
+    </header>
+
+    <section class="flex flex-wrap gap-8">
+      <!-- Screen 1: Today / My Day -->
+      <article class="phone">
+        <div class="px-5 pt-3 pb-2 status-bar flex items-center justify-between">
+          <span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span>
+        </div>
+        <div class="px-5 pb-2">
+          <h2 class="text-lg font-semibold text-slate-100">My Day</h2>
+          <p class="text-xs text-slate-400">Tuesday, Jul 21 · 6 planned</p>
+        </div>
+        <div class="px-4 pb-3">
+          <div class="bg-slate-900 border border-slate-700 rounded-xl p-3">
+            <p class="text-xs text-slate-400 uppercase tracking-wide">Now</p>
+            <p class="text-sm mt-1 font-medium">Fix auth timeout in production</p>
+            <p class="text-xs text-slate-400 mt-0.5">10:00–11:00 · GitHub #142</p>
+          </div>
+        </div>
+        <div class="px-4 space-y-2">
+          <div class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-between">
+            <div><p class="text-xs text-slate-400">11:30</p><p class="text-sm">Review budget proposal</p></div>
+            <span class="badge badge-todo">MS Todo</span>
+          </div>
+          <div class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 flex items-center justify-between opacity-75">
+            <div><p class="text-xs text-slate-400">1:00</p><p class="text-sm">1:1 with Manager</p></div>
+            <span class="badge" style="background:#78350f33;color:#fcd34d;border:1px solid #f59e0b33;">Calendar</span>
+          </div>
+        </div>
+        <div class="px-4 mt-4">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Suggestions</h3>
+          <div class="space-y-2">
+            <div class="triage-card px-3 py-2 flex items-center justify-between">
+              <div><p class="text-sm">Yesterday: Deploy prototype</p><p class="text-xs text-slate-400">Carry forward</p></div>
+              <button class="text-xs px-2 py-1 rounded bg-blue-600 text-white">Add</button>
+            </div>
+            <div class="triage-card px-3 py-2 flex items-center justify-between">
+              <div><p class="text-sm">Overdue: Vendor renewal</p><p class="text-xs text-slate-400">1d overdue</p></div>
+              <button class="text-xs px-2 py-1 rounded bg-blue-600 text-white">Add</button>
+            </div>
+          </div>
+        </div>
+        <div class="mt-4 border-t border-slate-800 px-6 py-3 flex items-center justify-between">
+          <span class="tab active"><i class="fas fa-sun block text-center mb-1"></i>Today</span>
+          <span class="tab"><i class="fas fa-layer-group block text-center mb-1"></i>Triage</span>
+          <span class="tab"><i class="fas fa-plus-circle block text-center mb-1"></i>Capture</span>
+          <span class="tab"><i class="fas fa-inbox block text-center mb-1"></i>Inbox</span>
+          <span class="tab"><i class="fas fa-ellipsis-h block text-center mb-1"></i>More</span>
+        </div>
+      </article>
+
+      <!-- Screen 2: Triage -->
+      <article class="phone">
+        <div class="px-5 pt-3 pb-2 status-bar flex items-center justify-between">
+          <span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span>
+        </div>
+        <div class="px-5 pb-2 flex items-center justify-between">
+          <div>
+            <h2 class="text-lg font-semibold text-slate-100">Triage Queue</h2>
+            <p class="text-xs text-slate-400">24 items · session target: 10</p>
+          </div>
+          <span class="text-xs px-2 py-1 rounded-full bg-blue-900 text-blue-300">3 processed</span>
+        </div>
+        <div class="px-4 flex gap-2 overflow-x-auto pb-3">
+          <span class="chip active">All</span>
+          <span class="chip">Overdue</span>
+          <span class="chip">GitHub</span>
+          <span class="chip">Email</span>
+          <span class="chip">15m tasks</span>
+        </div>
+        <div class="px-4">
+          <div class="triage-card p-4">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="font-medium text-slate-100">Investigate flaky CI run</h3>
+                <p class="text-xs text-slate-400 mt-1">repo/webapp · failing on lint workflow</p>
+              </div>
+              <span class="badge badge-github">GitHub</span>
+            </div>
+            <div class="mt-4 grid grid-cols-2 gap-2 text-xs">
+              <button class="px-2 py-2 rounded bg-emerald-700 text-emerald-100">Keep</button>
+              <button class="px-2 py-2 rounded bg-blue-700 text-blue-100">Plan</button>
+              <button class="px-2 py-2 rounded bg-amber-700 text-amber-100">Defer</button>
+              <button class="px-2 py-2 rounded bg-slate-700 text-slate-100">Archive</button>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-3">Swipe: ↑ Keep · → Plan · ← Defer · ↓ Archive</p>
+          </div>
+        </div>
+        <div class="px-4 mt-3">
+          <div class="triage-card p-4 opacity-85">
+            <div class="flex items-start justify-between">
+              <div>
+                <h3 class="font-medium text-slate-100">Follow up on legal contract draft</h3>
+                <p class="text-xs text-slate-400 mt-1">flagged email · 2 attachments</p>
+              </div>
+              <span class="badge badge-mail">Email</span>
+            </div>
+          </div>
+        </div>
+        <div class="px-4 mt-4">
+          <div class="bg-slate-900 border border-slate-700 rounded-xl p-3">
+            <p class="text-xs text-slate-400">Session progress</p>
+            <div class="w-full h-2 rounded-full bg-slate-700 mt-2">
+              <div class="h-2 rounded-full bg-blue-500" style="width: 30%"></div>
+            </div>
+            <p class="text-xs text-slate-400 mt-2">3 / 10 done</p>
+          </div>
+        </div>
+        <div class="mt-6 border-t border-slate-800 px-6 py-3 flex items-center justify-between">
+          <span class="tab"><i class="fas fa-sun block text-center mb-1"></i>Today</span>
+          <span class="tab active"><i class="fas fa-layer-group block text-center mb-1"></i>Triage</span>
+          <span class="tab"><i class="fas fa-plus-circle block text-center mb-1"></i>Capture</span>
+          <span class="tab"><i class="fas fa-inbox block text-center mb-1"></i>Inbox</span>
+          <span class="tab"><i class="fas fa-ellipsis-h block text-center mb-1"></i>More</span>
+        </div>
+      </article>
+
+      <!-- Screen 3: Capture -->
+      <article class="phone">
+        <div class="px-5 pt-3 pb-2 status-bar flex items-center justify-between">
+          <span>9:41</span><span><i class="fas fa-signal mr-1"></i><i class="fas fa-wifi mr-1"></i><i class="fas fa-battery-three-quarters"></i></span>
+        </div>
+        <div class="px-5 pb-2">
+          <h2 class="text-lg font-semibold text-slate-100">Quick Capture</h2>
+        </div>
+        <div class="px-4">
+          <div class="triage-card p-3">
+            <label class="text-xs text-slate-400">Task or note</label>
+            <textarea class="w-full mt-2 h-28 bg-slate-950 border border-slate-700 rounded-lg text-sm p-3 text-slate-100" placeholder="Draft proposal summary for Friday review..."></textarea>
+            <div class="flex gap-2 mt-3 flex-wrap">
+              <span class="chip active">Needs triage</span>
+              <span class="chip">Work</span>
+              <span class="chip">High energy</span>
+              <span class="chip">Due tomorrow</span>
+            </div>
+          </div>
+        </div>
+        <div class="px-4 mt-3 grid grid-cols-2 gap-2 text-xs">
+          <button class="py-3 rounded-xl bg-blue-700 text-blue-100"><i class="fas fa-microphone mr-2"></i>Voice</button>
+          <button class="py-3 rounded-xl bg-slate-700 text-slate-100"><i class="fas fa-share-nodes mr-2"></i>Share</button>
+        </div>
+        <div class="px-4 mt-3">
+          <button class="w-full py-3 rounded-xl bg-emerald-600 text-white font-medium">Save to Inbox</button>
+        </div>
+        <div class="px-4 mt-4">
+          <h3 class="text-xs uppercase tracking-wide text-slate-400 mb-2">Recent captures</h3>
+          <div class="space-y-2">
+            <div class="triage-card px-3 py-2">
+              <p class="text-sm">Idea: improve triage heuristics for low-effort tasks</p>
+              <p class="text-xs text-slate-400 mt-0.5">Saved 8m ago · needs triage</p>
+            </div>
+            <div class="triage-card px-3 py-2">
+              <p class="text-sm">Shared link: Next.js 16 caching changes</p>
+              <p class="text-xs text-slate-400 mt-0.5">Browser share · 22m ago</p>
+            </div>
+          </div>
+        </div>
+        <div class="mt-8 border-t border-slate-800 px-6 py-3 flex items-center justify-between">
+          <span class="tab"><i class="fas fa-sun block text-center mb-1"></i>Today</span>
+          <span class="tab"><i class="fas fa-layer-group block text-center mb-1"></i>Triage</span>
+          <span class="tab active"><i class="fas fa-plus-circle block text-center mb-1"></i>Capture</span>
+          <span class="tab"><i class="fas fa-inbox block text-center mb-1"></i>Inbox</span>
+          <span class="tab"><i class="fas fa-ellipsis-h block text-center mb-1"></i>More</span>
+        </div>
+      </article>
+    </section>
+  </main>
+</body>
+</html>

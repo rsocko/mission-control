@@ -21,10 +21,9 @@ sources.
 
 Publication pushes the image without a mutable tag, records the resulting
 `sha256` digest, attaches a BuildKit-generated SBOM, and signs a GitHub
-attestation containing SLSA provenance whose resolved source dependency is the
-verified commit. Its versioned
-[build type](provenance-build-type-v1.md) defines the source, trigger, builder,
-and invocation fields. Consumers should deploy
+attestation containing GitHub-generated SLSA provenance for that exact image
+digest. The workflow's source verification and detached checkout ensure the
+attested build uses the verified commit. Consumers should deploy
 `ghcr.io/<owner>/<repository>@sha256:<digest>`, never a mutable tag.
 
 ## Repository configuration

@@ -159,62 +159,11 @@ jobs:
           echo "Published ${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
-      - name: Create source-accurate provenance predicate
-        id: provenance
-        shell: bash
-        run: |
-          set -euo pipefail
-          predicate_path="${RUNNER_TEMP}/provenance.json"
-          build_type="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/main/docs/public/provenance-build-type-v1.md"
-          builder_id="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/.github/workflows/publish-container.yml@refs/heads/main"
-          source_uri="git+${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}@refs/heads/main"
-          invocation_id="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}"
-
-          jq -n \
-            --arg build_type "${build_type}" \
-            --arg builder_id "${builder_id}" \
-            --arg event_name "${GITHUB_EVENT_NAME}" \
-            --arg source_sha "${SOURCE_SHA}" \
-            --arg source_uri "${source_uri}" \
-            --arg invocation_id "${invocation_id}" \
-            '{
-              buildDefinition: {
-                buildType: $build_type,
-                externalParameters: {
-                  source: {
-                    uri: $source_uri,
-                    digest: {gitCommit: $source_sha}
-                  },
-                  trigger: $event_name
-                },
-                internalParameters: {},
-                resolvedDependencies: [{
-                  uri: $source_uri,
-                  digest: {gitCommit: $source_sha}
-                }]
-              },
-              runDetails: {
-                builder: {
-                  id: $builder_id
-                },
-                metadata: {
-                  invocationId: $invocation_id
-                }
-              }
-            }' > "${predicate_path}"
-
-          jq -e --arg source_sha "${SOURCE_SHA}" \
-            '.buildDefinition.resolvedDependencies[0].digest.gitCommit == $source_sha' \
-            "${predicate_path}" > /dev/null
-          echo "path=${predicate_path}" >> "$GITHUB_OUTPUT"
-
       - name: Attest build provenance
-        uses: actions/attest@daf44fb950173508f38bd2406030372c1d1162b1 # v3.0.0
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.publish.outputs.digest }}
-          predicate-type: https://slsa.dev/provenance/v1
-          predicate-path: ${{ steps.provenance.outputs.path }}
           push-to-registry: true
 
       - name: Log out of GHCR

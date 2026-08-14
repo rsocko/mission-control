@@ -157,15 +157,26 @@ for (const file of workflowFiles) {
       'git merge-base --is-ancestor "${SOURCE_SHA}" "${trusted_main_sha}"',
       'git checkout --detach "${SOURCE_SHA}"',
       'actual_sha="$(git rev-parse HEAD)"',
-      'provenance-build-type-v1.md',
-      'externalParameters: {',
-      'builder: {',
-      'id: $builder_id',
-      'digest: {gitCommit: $source_sha}',
-      'predicate-type: https://slsa.dev/provenance/v1',
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
     }
+    const attestationSteps =
+      publish.steps?.filter((step) => step.uses?.startsWith('actions/attest@')) ?? [];
+    assert.equal(attestationSteps.length, 1, `${file} publish job must have exactly one attestation`);
+    assert.equal(
+      attestationSteps[0].uses,
+      'actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d',
+      `${file} attestation must pin a default-provenance-capable actions/attest release`,
+    );
+    assert.deepEqual(
+      attestationSteps[0].with,
+      {
+        'subject-name': '${{ steps.image.outputs.name }}',
+        'subject-digest': '${{ steps.publish.outputs.digest }}',
+        'push-to-registry': true,
+      },
+      `${file} attestation must use supported default provenance for the published digest`,
+    );
     assert.doesNotMatch(
       source,
       /\bgit\s+fetch\b/u,

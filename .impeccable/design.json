@@ -1,0 +1,400 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-14T17:30:52.489Z",
+  "title": "Design System: Mission Control",
+  "extensions": {
+    "colorMeta": {
+      "background": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "#020617",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "surface-0": {
+        "role": "neutral",
+        "displayName": "Chrome",
+        "canonical": "#0b1120",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "surface-1": {
+        "role": "neutral",
+        "displayName": "Panel",
+        "canonical": "#111827",
+        "tonalRamp": ["#020617", "#0b1120", "#111827", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "surface-2": {
+        "role": "neutral",
+        "displayName": "Raised",
+        "canonical": "#1e293b",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "surface-3": {
+        "role": "neutral",
+        "displayName": "Pressed",
+        "canonical": "#334155",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Quiet Stroke",
+        "canonical": "#1e293b",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "border-subtle": {
+        "role": "neutral",
+        "displayName": "Subtle Stroke",
+        "canonical": "#162032",
+        "tonalRamp": ["#020617", "#0b1120", "#162032", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Strong Stroke",
+        "canonical": "#334155",
+        "tonalRamp": ["#020617", "#0b1120", "#0f172a", "#1e293b", "#334155", "#64748b", "#cbd5e1", "#f8fafc"]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Primary Text",
+        "canonical": "#f8fafc",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f8fafc"]
+      },
+      "text-secondary": {
+        "role": "neutral",
+        "displayName": "Secondary Text",
+        "canonical": "#94a3b8",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#94a3b8", "#cbd5e1", "#f8fafc"]
+      },
+      "text-tertiary": {
+        "role": "neutral",
+        "displayName": "Tertiary Text",
+        "canonical": "#8b9ab5",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#8b9ab5", "#cbd5e1", "#f8fafc"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Muted Text",
+        "canonical": "#8190a6",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#475569", "#64748b", "#8190a6", "#cbd5e1", "#f8fafc"]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Action Blue",
+        "canonical": "#3b82f6",
+        "tonalRamp": ["#172554", "#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#93c5fd", "#eff6ff"]
+      },
+      "accent-soft": {
+        "role": "primary",
+        "displayName": "Soft Action Blue",
+        "canonical": "#60a5fa",
+        "tonalRamp": ["#172554", "#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#60a5fa", "#bfdbfe", "#eff6ff"]
+      },
+      "accent-action": {
+        "role": "primary",
+        "displayName": "Action Blue Fill",
+        "canonical": "#2563eb",
+        "tonalRamp": ["#172554", "#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#93c5fd", "#eff6ff"]
+      },
+      "accent-muted": {
+        "role": "primary",
+        "displayName": "Deep Blue Tint",
+        "canonical": "#1e3a8a",
+        "tonalRamp": ["#172554", "#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#93c5fd", "#eff6ff"]
+      },
+      "success": {
+        "role": "secondary",
+        "displayName": "Success Green",
+        "canonical": "#10b981",
+        "tonalRamp": ["#022c22", "#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#6ee7b7", "#ecfdf5"]
+      },
+      "success-muted": {
+        "role": "secondary",
+        "displayName": "Muted Success Green",
+        "canonical": "#065f46",
+        "tonalRamp": ["#022c22", "#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#6ee7b7", "#ecfdf5"]
+      },
+      "warning": {
+        "role": "secondary",
+        "displayName": "Warning Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": ["#451a03", "#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fffbeb"]
+      },
+      "warning-muted": {
+        "role": "secondary",
+        "displayName": "Muted Warning Amber",
+        "canonical": "#92400e",
+        "tonalRamp": ["#451a03", "#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fffbeb"]
+      },
+      "danger": {
+        "role": "secondary",
+        "displayName": "Danger Red",
+        "canonical": "#ef4444",
+        "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fef2f2"]
+      },
+      "danger-muted": {
+        "role": "secondary",
+        "displayName": "Muted Danger Red",
+        "canonical": "#991b1b",
+        "tonalRamp": ["#450a0a", "#7f1d1d", "#991b1b", "#b91c1c", "#dc2626", "#ef4444", "#fca5a5", "#fef2f2"]
+      },
+      "info": {
+        "role": "secondary",
+        "displayName": "Information Cyan",
+        "canonical": "#06b6d4",
+        "tonalRamp": ["#083344", "#164e63", "#155e75", "#0e7490", "#0891b2", "#06b6d4", "#67e8f9", "#ecfeff"]
+      },
+      "info-muted": {
+        "role": "secondary",
+        "displayName": "Muted Information Cyan",
+        "canonical": "#155e75",
+        "tonalRamp": ["#083344", "#164e63", "#155e75", "#0e7490", "#0891b2", "#06b6d4", "#67e8f9", "#ecfeff"]
+      },
+      "source-todo": {
+        "role": "secondary",
+        "displayName": "Todo Source Blue",
+        "canonical": "#3b82f6",
+        "tonalRamp": ["#172554", "#1e3a8a", "#1e40af", "#1d4ed8", "#2563eb", "#3b82f6", "#93c5fd", "#eff6ff"]
+      },
+      "source-github": {
+        "role": "secondary",
+        "displayName": "GitHub Source Purple",
+        "canonical": "#a855f7",
+        "tonalRamp": ["#3b0764", "#581c87", "#6b21a8", "#7e22ce", "#9333ea", "#a855f7", "#d8b4fe", "#faf5ff"]
+      },
+      "source-calendar": {
+        "role": "secondary",
+        "displayName": "Calendar Source Amber",
+        "canonical": "#f59e0b",
+        "tonalRamp": ["#451a03", "#78350f", "#92400e", "#b45309", "#d97706", "#f59e0b", "#fcd34d", "#fffbeb"]
+      },
+      "source-email": {
+        "role": "secondary",
+        "displayName": "Email Source Green",
+        "canonical": "#10b981",
+        "tonalRamp": ["#022c22", "#064e3b", "#065f46", "#047857", "#059669", "#10b981", "#6ee7b7", "#ecfdf5"]
+      },
+      "source-custom": {
+        "role": "neutral",
+        "displayName": "Custom Source Slate",
+        "canonical": "#64748b",
+        "tonalRamp": ["#020617", "#0f172a", "#1e293b", "#334155", "#475569", "#64748b", "#cbd5e1", "#f8fafc"]
+      }
+    },
+    "typographyMeta": {
+      "heading": {
+        "displayName": "Page Heading",
+        "purpose": "Page titles and strongest section headings."
+      },
+      "body": {
+        "displayName": "Interface Body",
+        "purpose": "Task text, descriptions, and controls."
+      },
+      "label": {
+        "displayName": "Operational Label",
+        "purpose": "Metadata, badges, compact controls, and state labels."
+      },
+      "mono": {
+        "displayName": "Operational Mono",
+        "purpose": "IDs, times, routes, shortcuts, and tabular values."
+      }
+    },
+    "shadows": [
+      {
+        "name": "low",
+        "value": "0 1px 2px rgba(0, 0, 0, 0.3)",
+        "purpose": "Subtle separation for cards and standard controls."
+      },
+      {
+        "name": "elevated",
+        "value": "0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3)",
+        "purpose": "Dropdowns and temporarily lifted content."
+      },
+      {
+        "name": "floating",
+        "value": "0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4)",
+        "purpose": "Popovers, tooltips, modals, and overlays."
+      },
+      {
+        "name": "focus-glow",
+        "value": "0 0 12px -2px var(--accent), 0 0 4px -1px var(--accent)",
+        "purpose": "Focused text fields and input wrappers only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "fast",
+        "value": "100ms ease",
+        "purpose": "Hover and compact control feedback."
+      },
+      {
+        "name": "base",
+        "value": "150ms ease",
+        "purpose": "Default color, border, and shadow transitions."
+      },
+      {
+        "name": "slow",
+        "value": "300ms ease",
+        "purpose": "Shell expansion and larger state changes."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The solid blue action for the primary operation in a region.",
+      "html": "<button class=\"ds-btn-primary\">Save changes</button>",
+      "css": ".ds-btn-primary { height: 36px; padding: 8px 16px; border: 0; border-radius: var(--radius-md); background: var(--accent-600); color: #fff; font: 500 14px/1 var(--font-geist-sans), sans-serif; box-shadow: var(--shadow-sm); transition: background-color var(--transition-base), transform var(--transition-base); } .ds-btn-primary:hover { background: var(--accent-500); } .ds-btn-primary:focus-visible { outline: 2px solid var(--accent-500); outline-offset: 2px; } .ds-btn-primary:active { transform: scale(.96); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "A neutral bordered action for supporting operations.",
+      "html": "<button class=\"ds-btn-secondary\">Review</button>",
+      "css": ".ds-btn-secondary { height: 36px; padding: 8px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-secondary); font: 500 14px/1 var(--font-geist-sans), sans-serif; transition: background-color var(--transition-base), color var(--transition-base), transform var(--transition-base); } .ds-btn-secondary:hover { background: var(--surface-3); color: var(--text-primary); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--accent-500); outline-offset: 2px; } .ds-btn-secondary:active { transform: scale(.96); }"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A compact chrome field with the shared text-entry glow.",
+      "html": "<label class=\"ds-input\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"></circle><path d=\"m20 20-3.5-3.5\"></path></svg><input type=\"search\" placeholder=\"Search tasks…\"></label>",
+      "css": ".ds-input { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-0); color: var(--text-muted); transition: border-color var(--transition-base), box-shadow var(--transition-base); } .ds-input:focus-within { border-color: var(--border-focus); box-shadow: var(--shadow-focus-glow); } .ds-input svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; } .ds-input input { width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: 400 14px/1.5 var(--font-geist-sans), sans-serif; } .ds-input:hover { border-color: var(--border-strong); }"
+    },
+    {
+      "name": "Active Navigation Item",
+      "kind": "nav",
+      "description": "The desktop rail locator with a raised surface and narrow blue marker.",
+      "html": "<a class=\"ds-nav-active\" href=\"#\"><span class=\"ds-nav-marker\"></span><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"></rect><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\" rx=\"1\"></rect><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"></rect><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\" rx=\"1\"></rect></svg><span>Dashboard</span></a>",
+      "css": ".ds-nav-active { position: relative; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 10px; border-radius: var(--radius-md); background: var(--surface-2); color: var(--text-primary); font: 500 13px/1 var(--font-geist-sans), sans-serif; text-decoration: none; transition: background-color 200ms ease; } .ds-nav-active:hover { background: var(--surface-3); } .ds-nav-active:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } .ds-nav-active svg { width: 22px; height: 22px; fill: none; stroke: var(--accent-soft); stroke-width: 1.8; } .ds-nav-marker { position: absolute; left: 0; width: 3px; height: 16px; border-radius: 0 2px 2px 0; background: var(--accent); }"
+    },
+    {
+      "name": "Semantic Badge",
+      "kind": "chip",
+      "refersTo": "badge",
+      "description": "A labeled status pill using a muted solid field and complete border.",
+      "html": "<span class=\"ds-badge-success\"><span class=\"ds-badge-dot\"></span>Synced</span>",
+      "css": ".ds-badge-success { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid color-mix(in srgb, var(--success) 20%, transparent); border-radius: var(--radius-full); background: color-mix(in srgb, var(--success-muted) 30%, transparent); color: var(--success); font: 500 12px/1.4 var(--font-geist-sans), sans-serif; transition: border-color var(--transition-fast); } .ds-badge-success:hover { border-color: color-mix(in srgb, var(--success) 40%, transparent); } .ds-badge-success:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-badge-dot { width: 6px; height: 6px; border-radius: 9999px; background: var(--success); }"
+    },
+    {
+      "name": "Operational Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The default solid panel with a quiet complete border.",
+      "html": "<section class=\"ds-card\"><h3>Plan &amp; Focus</h3><p>Choose the next task from current priorities.</p></section>",
+      "css": ".ds-card { padding: 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-sm); transition: border-color var(--transition-base); } .ds-card:hover { border-color: var(--border-strong); } .ds-card:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-card h3 { margin: 0 0 6px; font: 600 16px/1.2 var(--font-geist-sans), sans-serif; } .ds-card p { margin: 0; color: var(--text-tertiary); font: 400 14px/1.5 var(--font-geist-sans), sans-serif; }"
+    },
+    {
+      "name": "Semantic Assessment Panel",
+      "kind": "custom",
+      "description": "A solid tinted insight container with a complete semantic border.",
+      "html": "<section class=\"ds-assessment\"><span class=\"ds-assessment-dot\"></span><div><strong>Pattern detected</strong><p>Tuesday completion is consistently strongest.</p></div></section>",
+      "css": ".ds-assessment { display: flex; gap: 10px; padding: 16px; border: 1px solid color-mix(in srgb, var(--info) 30%, transparent); border-radius: var(--radius-lg); background: color-mix(in srgb, var(--info-muted) 20%, transparent); color: var(--text-primary); } .ds-assessment:hover { border-color: color-mix(in srgb, var(--info) 45%, transparent); } .ds-assessment:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; } .ds-assessment-dot { width: 8px; height: 8px; margin-top: 4px; flex: 0 0 auto; border-radius: 9999px; background: var(--info); } .ds-assessment strong { color: var(--info); font: 600 12px/1.4 var(--font-geist-sans), sans-serif; } .ds-assessment p { margin: 4px 0 0; color: var(--text-secondary); font: 400 14px/1.5 var(--font-geist-sans), sans-serif; }"
+    },
+    {
+      "name": "Compact KPI Bar",
+      "kind": "custom",
+      "description": "The shared collapsible desktop summary with divided inline metrics instead of standalone cards.",
+      "html": "<section class=\"ds-kpi-bar\"><button class=\"ds-kpi-header\" aria-expanded=\"true\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m9 18 6-6-6-6\"></path></svg><span>KPIs</span></button><div class=\"ds-kpi-row\"><button class=\"ds-kpi-metric\"><span class=\"ds-kpi-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M9 11l3 3L22 4\"></path><path d=\"M21 12a9 9 0 1 1-5.3-8.2\"></path></svg></span><span><small>Completed</small><strong>12</strong></span></button><button class=\"ds-kpi-metric\"><span class=\"ds-kpi-icon ds-kpi-icon-warning\">!</span><span><small>Overdue</small><strong>3</strong></span></button></div></section>",
+      "css": ".ds-kpi-bar { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-primary); } .ds-kpi-header { display: flex; width: 100%; height: 40px; align-items: center; gap: 8px; padding: 0 16px; border: 0; background: transparent; color: var(--text-muted); font: 600 12px/1 var(--font-geist-sans), sans-serif; letter-spacing: .14em; text-transform: uppercase; } .ds-kpi-header:hover { background: var(--surface-2); } .ds-kpi-header:focus-visible, .ds-kpi-metric:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; } .ds-kpi-header svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; transform: rotate(90deg); } .ds-kpi-row { display: flex; min-width: 560px; border-top: 1px solid var(--border); } .ds-kpi-metric { display: flex; min-height: 56px; min-width: 0; flex: 1; align-items: center; gap: 8px; padding: 0 12px; border: 0; border-right: 1px solid var(--border); background: transparent; color: inherit; text-align: left; } .ds-kpi-metric:hover { background: var(--surface-2); } .ds-kpi-icon { display: inline-flex; width: 28px; height: 28px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--radius-md); background: color-mix(in srgb, var(--success-muted) 30%, transparent); color: var(--success); font: 600 14px/1 sans-serif; } .ds-kpi-icon-warning { background: color-mix(in srgb, var(--warning-muted) 30%, transparent); color: var(--warning); } .ds-kpi-icon svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; } .ds-kpi-metric small { display: block; color: var(--text-muted); font: 400 12px/1.2 var(--font-geist-sans), sans-serif; } .ds-kpi-metric strong { display: block; margin-top: 2px; color: var(--text-primary); font: 600 16px/1 var(--font-geist-sans), sans-serif; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Mobile Attention Queue",
+      "kind": "nav",
+      "description": "The first mobile dashboard region, prioritizing urgent queues before status and secondary destinations.",
+      "html": "<section class=\"ds-attention\"><span class=\"ds-attention-label\">Needs Attention</span><a href=\"#\" class=\"ds-attention-action\"><span class=\"ds-attention-icon\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M12 9v4\"></path><path d=\"M12 17h.01\"></path><path d=\"M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0Z\"></path></svg></span><span class=\"ds-attention-copy\"><strong>Fix Overdue</strong><small>Reschedule or complete</small></span><span class=\"ds-attention-badge\">3 overdue</span></a></section>",
+      "css": ".ds-attention { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface-1); color: var(--text-primary); } .ds-attention-label { color: var(--text-muted); font: 600 12px/1 var(--font-geist-sans), sans-serif; letter-spacing: .08em; text-transform: uppercase; } .ds-attention-action { display: flex; min-height: 44px; align-items: center; gap: 12px; margin: 12px -4px 0; padding: 10px; border-radius: var(--radius-lg); color: inherit; text-decoration: none; transition: background-color var(--transition-base); } .ds-attention-action:hover { background: var(--surface-2); } .ds-attention-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; } .ds-attention-icon { display: inline-flex; width: 36px; height: 36px; flex: 0 0 auto; align-items: center; justify-content: center; border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger-muted) 30%, transparent); color: var(--danger); } .ds-attention-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; } .ds-attention-copy { min-width: 0; flex: 1; } .ds-attention-copy strong, .ds-attention-copy small { display: block; } .ds-attention-copy strong { font: 500 14px/1.3 var(--font-geist-sans), sans-serif; } .ds-attention-copy small { margin-top: 2px; color: var(--text-muted); font: 400 12px/1.3 var(--font-geist-sans), sans-serif; } .ds-attention-badge { padding: 2px 8px; border-radius: var(--radius-full); background: color-mix(in srgb, var(--danger-muted) 30%, transparent); color: #fca5a5; font: 600 12px/1.4 var(--font-geist-sans), sans-serif; white-space: nowrap; }"
+    },
+    {
+      "name": "Compact Empty State",
+      "kind": "custom",
+      "description": "A short in-place empty result that releases unused viewport height while preserving status meaning.",
+      "html": "<section class=\"ds-empty\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M22 11.1V12a10 10 0 1 1-5.9-9.1\"></path><path d=\"m9 11 3 3L22 4\"></path></svg><strong>All caught up</strong><p>No notifications match this view</p></section>",
+      "css": ".ds-empty { padding: 24px 20px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-secondary); text-align: center; } .ds-empty svg { display: block; width: 24px; height: 24px; margin: 0 auto 8px; fill: none; stroke: var(--success); stroke-width: 2; } .ds-empty strong { display: block; font: 500 14px/1.4 var(--font-geist-sans), sans-serif; } .ds-empty p { margin: 4px 0 0; color: var(--text-muted); font: 400 12px/1.4 var(--font-geist-sans), sans-serif; } .ds-empty:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Operational Command Center",
+    "overview": "Mission Control is a dark-first hybrid workspace: a dense desktop operational command center and a guided mobile action surface. Its visual hierarchy comes from disciplined slate surfaces, quiet borders, compact type, and small semantic signals rather than decorative effects. Desktop preserves broad scanability; mobile deliberately sequences the most urgent work before summary and secondary navigation.\n\nBlue identifies action, selection, focus, and progress. Other hues carry explicit status, priority, source, or project meaning. Compact summaries, empty states, and notices reduce vertical occupation without removing labels or actions. Assessment surfaces favor solid semantic fills and restrained tonal backgrounds; purple-to-indigo decoration is not part of the operational container language.",
+    "keyCharacteristics": [
+      "Dense desktop command center paired with a guided, action-first mobile sequence",
+      "Solid tonal surfaces separated by quiet full borders",
+      "Semantic color expressed through text, badges, progress fills, border tints, and dots",
+      "Compact shared summaries, notices, and empty states that return space to live work",
+      "Fast state transitions with stronger motion reserved for direct manipulation",
+      "Responsive shell that swaps the desktop rail for mobile header and bottom navigation"
+    ],
+    "rules": [
+      {
+        "name": "The Solid Signal Rule",
+        "body": "Operational cards, recommendations, schedule blocks, insights, and progress bars use a solid neutral or semantic fill. Do not use purple/indigo gradients to manufacture importance.",
+        "section": "colors"
+      },
+      {
+        "name": "The Semantic Evidence Rule",
+        "body": "Color must correspond to an action, state, priority, project, or source and must be reinforced by text, iconography, or position.",
+        "section": "colors"
+      },
+      {
+        "name": "The One-Family Rule",
+        "body": "Build hierarchy with Geist size, weight, color, and spacing; do not introduce a display face.",
+        "section": "typography"
+      },
+      {
+        "name": "The Dense Rhythm Rule",
+        "body": "Whitespace separates groups and establishes scan order; it is not decorative. Prefer the established 4px rhythm and avoid oversized empty bands.",
+        "section": "layout"
+      },
+      {
+        "name": "The Context-Adaptive Density Rule",
+        "body": "Preserve simultaneous scan breadth on desktop; on mobile, spend the first viewport on immediate action and defer status and navigation behind it.",
+        "section": "layout"
+      },
+      {
+        "name": "The Surface-First Rule",
+        "body": "Establish hierarchy with tonal surfaces and quiet borders before adding shadow.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Focus-Is-Input Rule",
+        "body": "The accent glow communicates text entry. Buttons use visible focus rings; selected rows use contained rings or surface changes.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Complete Container Rule",
+        "body": "Status and assessment containers use a full neutral or semantic border. Reserve unilateral bars for native navigation location or quoted content.",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do use solid surface steps and quiet complete borders for operational hierarchy.",
+      "Do use dots, text, icons, and solid progress fills for project, phase, source, priority, and health signals.",
+      "Do keep common state transitions at 100–150ms and reserve 300–500ms movement for shell expansion, progress interpolation, and direct manipulation.",
+      "Do use skeletons for content loading and visible focus treatment for keyboard interaction.",
+      "Do preserve compact spacing and at least 40px touch targets in mobile navigation and high-frequency actions.",
+      "Do collapse or shrink empty operational regions so the remaining live work keeps viewport priority.",
+      "Do put urgent mobile actions before status summaries and secondary destinations."
+    ],
+    "donts": [
+      "Don't use purple/indigo or multicolor gradients as generic emphasis on cards, assessment panels, schedule blocks, or data bars.",
+      "Don't use thick left borders or inset side stripes on ordinary content containers; use a full border or a small semantic dot.",
+      "Don't use the blue accent decoratively or let connector hues take over a panel.",
+      "Don't add shadows where a surface step and border already establish hierarchy.",
+      "Don't add a second icon library or a decorative display typeface.",
+      "Don't exceed 300ms for ordinary state feedback.",
+      "Don't turn desktop KPI summaries into oversized standalone metric cards.",
+      "Don't let a mobile status summary or destination menu outrank Needs Attention."
+    ]
+  }
+}

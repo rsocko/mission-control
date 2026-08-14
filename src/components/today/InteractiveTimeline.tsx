@@ -87,11 +87,11 @@ const MAX_DURATION = 240;
 const DEFAULT_DURATION = 30;
 
 const PRIORITY_BORDER: Record<string, string> = {
-  critical: 'border-l-red-500',
-  high: 'border-l-orange-500',
-  medium: 'border-l-yellow-500',
-  low: 'border-l-[var(--border)]',
-  none: 'border-l-[var(--border)]',
+  critical: 'border-red-500/60',
+  high: 'border-orange-500/60',
+  medium: 'border-yellow-500/60',
+  low: 'border-[var(--border)]',
+  none: 'border-[var(--border)]',
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -356,7 +356,7 @@ function ScheduledBlock({
       style={style}
       data-resize-duration={task.taskId}
       data-resize-value={resizeDuration}
-      className={`absolute rounded-md border border-purple-800/40 border-l-2 bg-purple-900/30 transition-shadow duration-150 group/block flex cursor-grab flex-col overflow-hidden active:cursor-grabbing ${priorityBorder} ${
+      className={`absolute rounded-md border bg-[var(--surface-2)] transition-shadow duration-150 group/block flex cursor-grab flex-col overflow-hidden active:cursor-grabbing ${priorityBorder} ${
         isDragging ? 'shadow-xl' : 'shadow-sm hover:shadow-md'
       }`}
     >
@@ -368,12 +368,12 @@ function ScheduledBlock({
       >
         <div className="flex items-center gap-1.5">
           <ConnectorIcon type={task.connectorType} size={10} />
-          <span className="text-xs font-medium text-purple-200 truncate">{task.title}</span>
+          <span className="truncate text-xs font-medium text-[var(--text-primary)]">{task.title}</span>
         </div>
         {heightSlots >= 2 && (
           <div className="flex items-center gap-1 mt-0.5">
-            <Clock size={8} className="text-purple-400" />
-            <span className="text-[9px] tabular-nums text-purple-400">
+            <Clock size={8} className="text-[var(--accent-400)]" />
+            <span className="text-[9px] tabular-nums text-[var(--accent-400)]">
               {task.scheduledTime} · {formatDuration(isResizing ? resizeDuration : duration)}
             </span>
           </div>

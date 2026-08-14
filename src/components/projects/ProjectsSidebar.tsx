@@ -473,6 +473,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
               <Tooltip content="New Project">
                 <button
                   onClick={() => setShowCreateModal(true)}
+                  aria-label="New project"
                   className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--accent-400)] transition-colors"
                 >
                   <Plus size={12} />

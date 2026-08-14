@@ -1,4 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useVoiceCapture } from '@/lib/hooks/useVoiceCapture';
 
@@ -60,6 +62,15 @@ describe('useVoiceCapture microphone permission', () => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.clearAllMocks();
+  });
+
+  it('keeps the server snapshot deterministic when browser speech APIs exist', () => {
+    function SupportProbe() {
+      const { isSupported } = useVoiceCapture();
+      return createElement('span', null, String(isSupported));
+    }
+
+    expect(renderToString(createElement(SupportProbe))).toBe('<span>false</span>');
   });
 
   it('does not pre-acquire the microphone in a non-Edge PWA', async () => {

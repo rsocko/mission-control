@@ -386,6 +386,18 @@ describe('durable sync job queue', () => {
     });
   });
 
+  it('skips a fenced connector while claiming unrelated queued work', () => {
+    const fenced = queue.enqueueSyncJob('github-fenced');
+    const available = queue.enqueueSyncJob('github-available');
+
+    expect(queue.claimNextSyncJob(
+      'worker-a',
+      queue.getSyncLeaseMs(),
+      new Set(['github-fenced']),
+    )?.id).toBe(available.id);
+    expect(queue.getSyncJob(fenced.id)).toMatchObject({ status: 'queued' });
+  });
+
   it('recovers an expired active job by preserving its queued follow-up', async () => {
     const running = queue.enqueueSyncJob('github-expired-follow-up', { maxAttempts: 2 });
     expect(queue.claimNextSyncJob('worker-a', 1)?.id).toBe(running.id);

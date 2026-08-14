@@ -316,10 +316,18 @@ export function enqueueSyncJobInCurrentTransaction(
   return enqueueSyncJobRecord(connectorId, options);
 }
 
-export function claimNextSyncJob(owner: string, leaseMs = getSyncLeaseMs()): SyncJob | null {
+export function claimNextSyncJob(
+  owner: string,
+  leaseMs = getSyncLeaseMs(),
+  excludedConnectorIds: ReadonlySet<string> = new Set(),
+): SyncJob | null {
   const now = new Date();
   const nowIso = now.toISOString();
   const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+  const excluded = [...excludedConnectorIds];
+  const exclusionClause = excluded.length > 0
+    ? `AND connector_id NOT IN (${excluded.map(() => '?').join(', ')})`
+    : '';
   const transaction = sqlite.transaction(() => {
     recoverExpiredSyncJobs(nowIso);
 
@@ -343,6 +351,7 @@ export function claimNextSyncJob(owner: string, leaseMs = getSyncLeaseMs()): Syn
       WHERE status = 'queued'
         AND cancel_requested_at IS NULL
         AND available_at <= ?
+        ${exclusionClause}
         AND NOT EXISTS (
           SELECT 1
           FROM connector_operation_leases
@@ -355,7 +364,7 @@ export function claimNextSyncJob(owner: string, leaseMs = getSyncLeaseMs()): Syn
         )
       ORDER BY full DESC, scheduled_for ASC, created_at ASC
       LIMIT 1
-    `).get(nowIso) as SyncJobDatabaseRow | undefined;
+    `).get(nowIso, ...excluded) as SyncJobDatabaseRow | undefined;
     if (!candidate) return null;
     if (
       isGitHubConnector(candidate.connectorId)

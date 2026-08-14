@@ -108,7 +108,9 @@ boundary:
    request upgrades a queued incremental job.
 3. A worker atomically claims one job, increments its attempt, records its
    owner, and renews an expiring lease. Renew, complete, fail, and graceful
-   release are qualified by both job ID and lease owner.
+   release are qualified by both job ID and lease owner. The duration budget is
+   also a hard execution boundary: the worker aborts the connector when it is
+   reached.
 4. Worker loss leaves the job `running` until its lease expires. The next claim
    transaction immediately requeues it with the same ID and `recovery` source,
    or marks it failed when the bounded attempt count is exhausted. Connector
@@ -121,16 +123,22 @@ boundary:
 6. `SIGTERM` stops new claims and schedules, allows the active job to finish
    within `MC_SYNC_WORKER_SHUTDOWN_GRACE_MS`, then releases its lease for
    retry if the grace period expires.
-7. Worker sync events are written to `sync_job_events`. The existing
+7. After cancellation, lease loss, or duration timeout, the worker allows
+   `MC_SYNC_WORKER_ABORT_GRACE_MS` for cooperative cleanup. If the connector
+   promise still does not settle, that connector remains fenced in memory while
+   the worker resumes claims for other connectors. The abandoned execution
+   cannot complete its durable job after losing ownership, and its connector is
+   not reclaimed until the promise settles.
+8. Worker sync events are written to `sync_job_events`. The existing
    `/api/sync/stream` SSE endpoint emits event IDs, accepts `Last-Event-ID` (or
    a `cursor` query parameter), and replays from that durable cursor.
    Observability-write failures are logged but never fail connector work.
-8. After pending task pushes and before ordinary task/notification pulls, the
+9. After pending task pushes and before ordinary task/notification pulls, the
    scheduler invokes optional connector-owned `syncDomainData`. This phase uses
    the same durable job, lease heartbeat, retry, cancellation, and terminal
    result boundary as the rest of the connector run. Finance transaction
    snapshots therefore cannot bypass queue deduplication or worker recovery.
-9. Connector persistence bounds synchronous SQLite work. Task pages use small
+10. Connector persistence bounds synchronous SQLite work. Task pages use small
    mutation batches, source-list discovery chunks bulk inserts, and retention
    yields between independent records while keeping each archive/delete
    transaction atomic. Task-owned relationship columns used during archival
@@ -198,6 +206,20 @@ always-200 process-liveness probe. Docker's end-to-end probe latency and
 restart count are controlled by the Docker daemon and are not available
 inside an unprivileged container; operators should correlate the app fields
 with `docker inspect`/daemon metrics rather than mounting the Docker socket.
+
+### Stuck connector recovery
+
+Lease loss, cancellation, and duration timeout recover automatically after the
+abort grace period: unrelated connectors continue while the affected connector
+stays fenced. An expired lease is reported as `action required` even when worker
+telemetry is fresh.
+
+If the abandoned connector promise does not eventually settle, restart only the
+worker process after confirming the affected job lease has expired. In Compose,
+use `docker compose restart mission-control-worker`. Durable recovery requeues
+the expired job without restarting the web container. Do not scale up a second
+worker to recover it; concurrent worker replicas cannot fence remote connector
+side effects.
 
 Structured logs mark event-loop degradation/recovery, lease recovery, job
 attempts, duration-budget violations, worker shutdown recovery, and missing
@@ -360,8 +382,9 @@ degradation.
 | `MC_SYNC_JOB_MAX_ATTEMPTS` | `3` | Maximum attempts after worker/connector failure |
 | `MC_SYNC_JOB_RETRY_BASE_MS` | `30000` | Exponential retry base, capped at 15 minutes |
 | `MC_SYNC_API_WAIT_TIMEOUT_MS` | `900000` | Compatibility wait for `/api/sync` |
-| `MC_SYNC_DURATION_BUDGET_MS` | `300000` | Over-budget alert threshold |
+| `MC_SYNC_DURATION_BUDGET_MS` | `300000` | Hard connector execution budget and over-budget alert threshold |
 | `MC_SYNC_WORKER_POLL_MS` | `500` | Queue poll interval |
+| `MC_SYNC_WORKER_ABORT_GRACE_MS` | `30000` | Cooperative cleanup grace after cancellation, lease loss, or duration timeout |
 | `MC_SYNC_WORKER_SHUTDOWN_GRACE_MS` | `30000` | Graceful active-job drain budget |
 | `MC_SYNC_WORKER_REPLICA_COUNT` | `1` | Required single-worker deployment invariant |
 | `MC_TELEMETRY_STALE_MS` | `30000` | Worker heartbeat age before automatic sync requires operator attention |

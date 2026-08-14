@@ -32,6 +32,7 @@ export type SyncJobExecutor = (
 ) => Promise<SyncResult>;
 
 class WorkerShutdownError extends Error {}
+class SyncExecutionTimeoutError extends Error {}
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -52,6 +53,7 @@ export class SyncWorker {
   readonly ownerId: string;
   private readonly execute: SyncJobExecutor;
   private readonly pollIntervalMs: number;
+  private readonly abortGraceMs: number;
   private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
@@ -62,19 +64,31 @@ export class SyncWorker {
         promise: Promise<void>;
       }
     | null = null;
+  private readonly abandoned = new Map<string, {
+    job: SyncJob;
+    promise: Promise<void>;
+  }>();
 
-  constructor(execute: SyncJobExecutor, options: { ownerId?: string; pollIntervalMs?: number } = {}) {
+  constructor(
+    execute: SyncJobExecutor,
+    options: { ownerId?: string; pollIntervalMs?: number; abortGraceMs?: number } = {},
+  ) {
     this.execute = execute;
     this.ownerId = options.ownerId ?? `${hostname()}:${process.pid}:${randomUUID()}`;
     this.pollIntervalMs = options.pollIntervalMs
       ?? positiveInteger(process.env.MC_SYNC_WORKER_POLL_MS, 500);
+    this.abortGraceMs = options.abortGraceMs
+      ?? positiveInteger(process.env.MC_SYNC_WORKER_ABORT_GRACE_MS, 30_000);
   }
 
   start(): void {
     if (this.loopPromise) return;
     this.stopping = false;
     setSyncEventPersistence((event) => {
-      if (this.active) persistSyncJobEvent(this.active.job.id, event);
+      const activeJob = this.active?.job.connectorId === event.connectorId
+        ? this.active.job
+        : this.abandoned.get(event.connectorId)?.job;
+      if (activeJob) persistSyncJobEvent(activeJob.id, event);
     });
     const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
     pruneSyncJobs(retentionDays);
@@ -103,7 +117,11 @@ export class SyncWorker {
           'Recovered overdue sync schedules',
         );
       }
-      const job = claimNextSyncJob(this.ownerId);
+      const job = claimNextSyncJob(
+        this.ownerId,
+        getSyncLeaseMs(),
+        new Set(this.abandoned.keys()),
+      );
       if (!job) {
         await this.delay(this.pollIntervalMs);
         continue;
@@ -111,7 +129,7 @@ export class SyncWorker {
       const controller = new AbortController();
       const promise = this.executeJob(job, controller);
       this.active = { job, controller, promise };
-      await promise;
+      await this.waitForJob(job, controller, promise);
       if (this.active?.job.id === job.id) this.active = null;
       setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
     }
@@ -134,6 +152,17 @@ export class SyncWorker {
       }
     }, heartbeatMs);
     heartbeat.unref();
+    const executionTimeout = setTimeout(() => {
+      controller.abort(new SyncExecutionTimeoutError(
+        `Sync execution exceeded its ${job.durationBudgetMs}ms duration budget`,
+      ));
+    }, job.durationBudgetMs);
+    executionTimeout.unref();
+    const stopTimers = () => {
+      clearInterval(heartbeat);
+      clearTimeout(executionTimeout);
+    };
+    controller.signal.addEventListener('abort', stopTimers, { once: true });
 
     syncLogger.info(
       {
@@ -160,18 +189,18 @@ export class SyncWorker {
               modeRevision: job.identityModeRevision,
             }),
       });
-      linkSyncLogToJob(job, result);
       if (controller.signal.aborted) {
-        const retry = controller.signal.reason instanceof WorkerShutdownError;
+        const cancelled = isSyncJobCancellationRequested(job.id, this.ownerId);
         failSyncJob(
           job,
           this.ownerId,
           controller.signal.reason instanceof Error
             ? controller.signal.reason.message
             : 'Sync cancelled',
-          { retry, cancelled: isSyncJobCancellationRequested(job.id, this.ownerId) },
+          { retry: !cancelled, cancelled },
         );
       } else if (!result.success) {
+        linkSyncLogToJob(job, result);
         const status = failSyncJob(
           job,
           this.ownerId,
@@ -182,6 +211,7 @@ export class SyncWorker {
           'Sync worker job failed',
         );
       } else {
+        linkSyncLogToJob(job, result);
         completeSyncJob(job.id, this.ownerId, result);
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
@@ -192,14 +222,11 @@ export class SyncWorker {
       const message = error instanceof Error ? error.message : String(error);
       try {
         const staleIdentityContext = error instanceof StaleGitHubIdentityContextError;
-        const retry = !staleIdentityContext && (
-          !controller.signal.aborted
-          || controller.signal.reason instanceof WorkerShutdownError
-        );
+        const cancelled = !staleIdentityContext
+          && isSyncJobCancellationRequested(job.id, this.ownerId);
         failSyncJob(job, this.ownerId, message, {
-          retry,
-          cancelled: !staleIdentityContext
-            && isSyncJobCancellationRequested(job.id, this.ownerId),
+          retry: !staleIdentityContext && !cancelled,
+          cancelled,
           terminal: staleIdentityContext,
         });
       } catch (recordError) {
@@ -213,8 +240,51 @@ export class SyncWorker {
         'Sync worker execution failed',
       );
     } finally {
-      clearInterval(heartbeat);
+      controller.signal.removeEventListener('abort', stopTimers);
+      stopTimers();
     }
+  }
+
+  private async waitForJob(
+    job: SyncJob,
+    controller: AbortController,
+    promise: Promise<void>,
+  ): Promise<void> {
+    if (!controller.signal.aborted) {
+      let onAbort: (() => void) | undefined;
+      const aborted = new Promise<void>((resolve) => {
+        onAbort = () => resolve();
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+      });
+      await Promise.race([
+        promise,
+        aborted,
+      ]);
+      if (onAbort) controller.signal.removeEventListener('abort', onAbort);
+    }
+    if (!controller.signal.aborted) return;
+
+    const completed = await Promise.race([
+      promise.then(() => true),
+      this.delay(this.abortGraceMs).then(() => false),
+    ]);
+    if (completed) return;
+
+    this.abandoned.set(job.connectorId, { job, promise });
+    void promise.finally(() => {
+      if (this.abandoned.get(job.connectorId)?.promise === promise) {
+        this.abandoned.delete(job.connectorId);
+      }
+    });
+    syncLogger.error(
+      {
+        jobId: job.id,
+        connectorId: job.connectorId,
+        abortGraceMs: this.abortGraceMs,
+        reason: controller.signal.reason,
+      },
+      'Sync execution did not stop after abort grace; connector fenced while worker continues',
+    );
   }
 
   async stop(graceMs = positiveInteger(process.env.MC_SYNC_WORKER_SHUTDOWN_GRACE_MS, 30_000)): Promise<void> {

@@ -15,6 +15,7 @@ import {
 import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/components/ui/CompletionBurst';
 import { BadgeSettingsCard } from './BadgeSettingsCard';
 import { NavBadgeSettingsCard } from './NavBadgeSettingsCard';
+import { SyncIconSettingsCard } from './SyncIconSettingsCard';
 import { CaptureDestinationSection, InboxListsSection } from './CaptureSettingsSection';
 import { settingsLogger } from '@/lib/client-logger';
 import { toast } from 'sonner';
@@ -183,6 +184,8 @@ function GeneralSettingsSection() {
           </button>
         </div>
       </div>
+
+      <SyncIconSettingsCard />
 
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5">
         <div className="mb-4 flex items-center gap-2">

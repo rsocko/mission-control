@@ -1,9 +1,12 @@
 'use client';
 
 import { motion } from 'motion/react';
+import Link from 'next/link';
 import {
+  ArrowUpRight,
   CheckCircle2,
   ChevronDown,
+  CircleDollarSign,
   ListTodo,
   Loader2,
   Search,
@@ -20,6 +23,11 @@ import {
 import { formatInlineInput, formatJson } from '@/lib/ai/chatFormatters';
 import { getToolName, type ToolPart } from '@/lib/ai/chatMessageFactory';
 import {
+  FINANCE_TOOL_NAMES,
+  financeToolOutputSchema,
+  type FinanceToolOutput,
+} from '@/lib/finance/houston-contracts';
+import {
   dayPlanResultSchema,
   taskMutationResultSchema,
   taskSearchResultSchema,
@@ -35,6 +43,7 @@ const NATIVE_TASK_TOOLS = new Set([
   'completeTask',
   'updateTaskPriority',
 ]);
+const FINANCE_TOOLS = new Set<string>(FINANCE_TOOL_NAMES);
 const NATIVE_WIDGET_RESOURCE_BY_TOOL = {
   searchTriage: TRIAGE_SUMMARY_RESOURCE_URI,
 } as const;
@@ -50,7 +59,232 @@ export function ToolCard({ part }: { part: ToolPart }) {
     return <NativeTaskToolCard part={part} toolName={toolName} />;
   }
 
+  if (FINANCE_TOOLS.has(toolName)) {
+    return <FinanceToolCard part={part} toolName={toolName} />;
+  }
+
   return <GenericToolCard part={part} toolName={toolName} />;
+}
+
+const FINANCE_PRESENTATION: Record<string, { label: string; loading: string }> = {
+  getHouseholdFinanceSummary: { label: 'Household finance summary', loading: 'Calculating household totals' },
+  searchFinanceTransactions: { label: 'Finance transactions', loading: 'Searching persisted transactions' },
+  getPendingFinanceExceptions: { label: 'Finance exceptions', loading: 'Loading attribution exceptions' },
+  getKidSpending: { label: 'Kid spending', loading: 'Calculating household member spending' },
+  getFinanceObligations: { label: 'Finance obligations', loading: 'Loading recurring obligations' },
+  getFinanceConnectorHealth: { label: 'Finance connector health', loading: 'Checking projection freshness' },
+};
+
+function FinanceToolCard({ part, toolName }: { part: ToolPart; toolName: string }) {
+  const presentation = FINANCE_PRESENTATION[toolName];
+  if (part.state === 'output-error') {
+    return (
+      <StateMessage tone="error" title={`${presentation.label} failed`}>
+        {part.errorText || 'The finance result is unavailable.'}
+      </StateMessage>
+    );
+  }
+  if (part.state !== 'output-available') {
+    return (
+      <StateMessage title={presentation.label}>
+        <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+        <span>{presentation.loading}...</span>
+      </StateMessage>
+    );
+  }
+  const parsed = financeToolOutputSchema.safeParse(part.output);
+  if (!parsed.success) return <InvalidResultState />;
+  const result = parsed.data;
+  return (
+    <motion.section
+      initial="hidden"
+      animate="show"
+      variants={scaleIn}
+      className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-1)]"
+      aria-label={presentation.label}
+    >
+      <header className="flex items-start gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
+        <CircleDollarSign size={17} className="mt-0.5 text-emerald-300" aria-hidden="true" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-semibold text-[var(--text-primary)]">{presentation.label}</span>
+          <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+            {financeSubtitle(result)}
+          </span>
+        </span>
+        <FreshnessBadge freshness={result.meta.freshness} />
+      </header>
+      <div className="space-y-3 p-3">
+        {renderFinanceBody(result)}
+        <FinanceProvenance result={result} />
+        <Link
+          href={result.meta.deepLink}
+          className="inline-flex min-h-8 items-center gap-1 text-xs font-medium text-[var(--accent-400)] hover:underline focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        >
+          Open Finance <ArrowUpRight size={13} aria-hidden="true" />
+        </Link>
+      </div>
+    </motion.section>
+  );
+}
+
+function financeSubtitle(result: FinanceToolOutput): string {
+  switch (result.kind) {
+    case 'household-finance-summary':
+      return `${formatCurrency(result.missionControlCalculated.totalSpending)} across ${result.missionControlCalculated.transactionCount} transactions`;
+    case 'finance-transaction-search':
+      return `${result.transactions.length} transaction${result.transactions.length === 1 ? '' : 's'}`;
+    case 'pending-finance-exceptions':
+      return `${result.exceptions.length} exception${result.exceptions.length === 1 ? '' : 's'} needing review`;
+    case 'kid-spending':
+      return `${result.kidName}: ${formatCurrency(result.missionControlCalculated.totalSpending)}`;
+    case 'finance-obligations':
+      return `${result.obligations.length} obligation${result.obligations.length === 1 ? '' : 's'} within ${result.horizonDays} days`;
+    case 'finance-connector-health':
+      return `Projection is ${result.missionControlCalculated.overall}`;
+  }
+}
+
+function renderFinanceBody(result: FinanceToolOutput) {
+  switch (result.kind) {
+    case 'household-finance-summary':
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <MetricChip label="Spending" value={formatCurrency(result.missionControlCalculated.totalSpending)} />
+            <MetricChip label="Transactions" value={result.missionControlCalculated.transactionCount} />
+          </div>
+          <FinanceRows rows={result.missionControlCalculated.byCategory.map(row => ({
+            primary: row.category,
+            secondary: `${row.transactionCount} transaction${row.transactionCount === 1 ? '' : 's'}`,
+            value: formatCurrency(row.amount),
+          }))} empty="No spending in this period." />
+        </div>
+      );
+    case 'finance-transaction-search':
+      return <FinanceRows rows={transactionRows(result.transactions)} empty="No matching transactions." />;
+    case 'pending-finance-exceptions':
+      return <FinanceRows rows={result.exceptions.map(item => ({
+        primary: item.merchant,
+        secondary: `${item.date} · Tyrion-derived: ${item.reason}`,
+        value: item.confidence ?? 'review',
+      }))} empty="No attribution exceptions need review." />;
+    case 'kid-spending':
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <MetricChip label="Spending" value={formatCurrency(result.missionControlCalculated.totalSpending)} />
+            <MetricChip label="Transactions" value={result.missionControlCalculated.transactionCount} />
+          </div>
+          <FinanceRows rows={transactionRows(result.recentTransactions)} empty="No spending in this period." />
+        </div>
+      );
+    case 'finance-obligations':
+      return (
+        <div className="space-y-2">
+          <MetricChip label="Estimated monthly" value={formatCurrency(result.missionControlCalculated.estimatedMonthlyAmount)} />
+          <FinanceRows rows={result.obligations.map(({ factsViaTyrionBridge: item }) => ({
+            primary: item.merchant,
+            secondary: [item.frequency, item.nextExpectedDate].filter(Boolean).join(' · '),
+            value: formatCurrency(item.amount),
+          }))} empty="No recurring obligations in this horizon." />
+        </div>
+      );
+    case 'finance-connector-health':
+      return <FinanceRows rows={[
+        {
+          primary: 'Persisted Bridge projection',
+          secondary: result.bridgeProjection.lastSuccessfulSyncAt
+            ? `Last successful sync ${formatTimestamp(result.bridgeProjection.lastSuccessfulSyncAt)}`
+            : 'No successful sync recorded',
+          value: result.bridgeProjection.status,
+        },
+        {
+          primary: 'Tyrion attribution',
+          secondary: result.tyrionAttribution.lastSuccessfulAt
+            ? `Last successful run ${formatTimestamp(result.tyrionAttribution.lastSuccessfulAt)}`
+            : 'No successful attribution run recorded',
+          value: result.tyrionAttribution.status,
+        },
+        ...result.datasets.map(dataset => ({
+          primary: dataset.name,
+          secondary: `${dataset.itemCount} projected item${dataset.itemCount === 1 ? '' : 's'}`,
+          value: dataset.freshness,
+        })),
+      ]} empty="Finance health is unavailable." />;
+  }
+}
+
+function transactionRows(transactions: Array<{
+  factsViaTyrionBridge: { merchant: string; date: string; amount: number; category: string | null };
+  tyrionDerived: { kidName: string | null };
+}>) {
+  return transactions.map(({ factsViaTyrionBridge: facts, tyrionDerived }) => ({
+    primary: facts.merchant,
+    secondary: [facts.date, facts.category, tyrionDerived.kidName && `Tyrion: ${tyrionDerived.kidName}`].filter(Boolean).join(' · '),
+    value: formatCurrency(facts.amount),
+  }));
+}
+
+function FinanceRows({
+  rows,
+  empty,
+}: {
+  rows: Array<{ primary: string; secondary: string; value: string }>;
+  empty: string;
+}) {
+  if (rows.length === 0) return <EmptyState>{empty}</EmptyState>;
+  return (
+    <div className="divide-y divide-[var(--border-subtle)] rounded-md border border-[var(--border-subtle)]">
+      {rows.map((row, index) => (
+        <div key={`${row.primary}-${index}`} className="flex items-start justify-between gap-3 px-2.5 py-2 text-xs">
+          <span className="min-w-0">
+            <span className="block truncate font-medium text-[var(--text-primary)]">{row.primary}</span>
+            <span className="mt-0.5 block text-[var(--text-muted)]">{row.secondary}</span>
+          </span>
+          <span className="shrink-0 font-medium tabular-nums text-[var(--text-secondary)]">{row.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FinanceProvenance({ result }: { result: FinanceToolOutput }) {
+  return (
+    <div className="space-y-1 text-[11px] text-[var(--text-muted)]">
+      <p>
+        Source as of {result.meta.sourceAsOf ? formatTimestamp(result.meta.sourceAsOf) : 'unavailable'}
+        {result.meta.coverage ? ` · coverage ${result.meta.coverage.start} to ${result.meta.coverage.end}` : ''}
+        {result.meta.truncated ? ' · result truncated' : ''}
+      </p>
+      <p>{result.meta.provenance.filter(item => item.included).map(item => item.label).join(' · ')}</p>
+    </div>
+  );
+}
+
+function FreshnessBadge({ freshness }: { freshness: FinanceToolOutput['meta']['freshness'] }) {
+  const tone = freshness === 'fresh'
+    ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+    : freshness === 'unavailable'
+      ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
+      : 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone}`}>{freshness}</span>;
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatTimestamp(value: string): string {
+  return new Date(value).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
 }
 
 function TriageToolCard({ part }: { part: ToolPart }) {

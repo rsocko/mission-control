@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, taskTags, taskProjects, taskSchedules, taskAttachments, tags, connectorConfigs, sourceLists, listGroups } from '@/db/schema';
 import { eq, and, isNull, count } from 'drizzle-orm';
-import { ApiErrors } from '@/lib/api-error';
+import { apiError, ApiErrors } from '@/lib/api-error';
 import { computeFieldMappings, isGitHubNativeTransfer } from '@/lib/connectors/field-mapper';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
 import { connectorRegistry } from '@/lib/connectors';
@@ -79,6 +79,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Target connector does not support task creation' },
         { status: 400 },
+      );
+    }
+    if (
+      targetSourceListId
+      && task.connectorInstanceId === targetConnectorInstanceId
+      && task.sourceListId === targetSourceListId
+    ) {
+      return apiError(
+        'This task is already in the selected destination',
+        'SAME_SOURCE_DESTINATION',
+        409,
       );
     }
 

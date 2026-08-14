@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, like } from 'drizzle-orm';
 import { runTransaction, sqlite } from '@/db';
 import {
   myDayExclusions,
@@ -24,6 +24,9 @@ const WRITE_BACK_FRESHNESS_MS = 60 * 60 * 1_000;
 const WRITE_BACK_EXHAUSTED_ATTEMPTS = 3;
 const SOURCE_LOOKBACK_MS = 90 * 24 * 60 * 60 * 1_000;
 const SOURCE_BATCH_SIZE = 500;
+export const FINANCE_TASK_PROMOTION_DAILY_CAP = 25;
+export const FINANCE_MY_DAY_DAILY_CAP = 8;
+const MY_DAY_DUE_SOON_DAYS = 2;
 const TASK_CONNECTOR_TYPE = 'mission-control';
 const TASK_CONNECTOR_INSTANCE_ID = 'mission-control';
 
@@ -56,6 +59,10 @@ export interface FinanceAttentionRoutingResult {
   tasksCreated: number;
   tasksUpdated: number;
   tasksSettled: number;
+  taskPromoted: number;
+  autoIncluded: number;
+  deferred: number;
+  settled: number;
   stalePreserved: number;
   statusOnly: number;
 }
@@ -280,6 +287,7 @@ function attentionMetadata(
   return {
     ...record(existing),
     financeAttention: {
+      ...record(record(existing).financeAttention),
       contractVersion: '1.0',
       signalFamily: signal.signalKind === 'writeBackFailed' ? 'writeBack' : 'attribution',
       signalKind: signal.signalKind,
@@ -287,6 +295,7 @@ function attentionMetadata(
       sourceRef: signal.sourceRef,
       activityKey: signal.activityKey,
       sourceLifecycle: signal.sourceLifecycle,
+      conditionSince: signal.conditionSince,
       sourceAsOf: signal.sourceAsOf,
       decisionAt: decisionAt.toISOString(),
       route,
@@ -507,8 +516,14 @@ function createOrUpdateTask(
         || previousAttention.sourceLifecycle !== 'open'
       );
     const metadata = attentionMetadata(signal, 'task', decisionAt, existing.metadata);
-    if (wasCompleted && !resurface) metadata.verificationPending = true;
-    else delete metadata.verificationPending;
+    if (wasCompleted && !resurface) {
+      metadata.verificationPending = true;
+    } else {
+      delete metadata.verificationPending;
+      if (resurface) {
+        record(metadata.financeAttention).promotedAt = decisionAt.toISOString();
+      }
+    }
     transaction.update(tasks).set({
       ...(resurface
         ? {
@@ -522,8 +537,14 @@ function createOrUpdateTask(
       updatedAt: decisionAt.toISOString(),
       metadata,
     }).where(eq(tasks.id, existing.id)).run();
-    return { task: findTask(transaction, sourceId)!, created: false };
+    return {
+      task: findTask(transaction, sourceId)!,
+      created: false,
+      promoted: resurface,
+    };
   }
+  const metadata = attentionMetadata(signal, 'task', decisionAt);
+  record(metadata.financeAttention).promotedAt = decisionAt.toISOString();
   const task = {
     id: financeAttentionTaskId(signal),
     sourceId,
@@ -543,35 +564,136 @@ function createOrUpdateTask(
     lastSyncedAt: decisionAt.toISOString(),
     sourceListId: 'local',
     sourceListName: 'Local',
-    metadata: attentionMetadata(signal, 'task', decisionAt),
+    metadata,
     syncStatus: 'synced',
   };
   const inserted = transaction.insert(tasks).values(task).onConflictDoNothing({
     target: [tasks.sourceId, tasks.connectorInstanceId],
   }).run();
-  return { task: findTask(transaction, sourceId)!, created: inserted.changes > 0 };
+  return {
+    task: findTask(transaction, sourceId)!,
+    created: inserted.changes > 0,
+    promoted: inserted.changes > 0,
+  };
 }
 
-function projectTaskToMyDay(
+function requiresTaskPromotion(
+  task: typeof tasks.$inferSelect | undefined,
+  signal: FinanceAttentionSignal,
+): boolean {
+  if (!task) return true;
+  if (task.status !== 'done' && task.status !== 'cancelled') return false;
+  const previousAttention = record(record(task.metadata).financeAttention);
+  return previousAttention.route === 'settled'
+    || previousAttention.route === 'statusOnly'
+    || previousAttention.sourceLifecycle !== 'open'
+    || signal.sourceLifecycle !== 'open';
+}
+
+function promotionCountForDay(
   transaction: Parameters<typeof createNotificationsInTransaction>[0],
-  taskId: string,
   decisionAt: Date,
-): void {
+): number {
   const date = formatDateInLocalTimezone(decisionAt);
-  const excluded = transaction.select({ id: myDayExclusions.id })
-    .from(myDayExclusions)
-    .where(and(eq(myDayExclusions.taskId, taskId), eq(myDayExclusions.date, date)))
-    .get();
-  if (excluded) return;
-  const digest = createHash('sha256').update(`${taskId}\0${date}`).digest('hex').slice(0, 24);
-  transaction.insert(myDayItems).values({
-    id: `finance-myday-${digest}`,
-    taskId,
-    date,
-    addedAt: decisionAt.toISOString(),
-    isAutoIncluded: true,
-    order: 0,
-  }).onConflictDoNothing().run();
+  return transaction.select({
+    sourceId: tasks.sourceId,
+    createdAt: tasks.createdAt,
+    metadata: tasks.metadata,
+  }).from(tasks).where(like(tasks.sourceId, 'finance-attention:%')).all().filter((task) => {
+    const attention = record(record(task.metadata).financeAttention);
+    const promotedAt = typeof attention.promotedAt === 'string'
+      ? attention.promotedAt
+      : task.createdAt;
+    return validTimestamp(promotedAt) !== null
+      && formatDateInLocalTimezone(new Date(promotedAt)) === date;
+  }).length;
+}
+
+function taskDueRank(task: typeof tasks.$inferSelect, today: string): number | null {
+  if (!task.dueDate) return null;
+  const dueDate = task.dueDate.slice(0, 10);
+  const dueSoon = new Date(`${today}T12:00:00`);
+  dueSoon.setDate(dueSoon.getDate() + MY_DAY_DUE_SOON_DAYS);
+  if (dueDate <= today) return 0;
+  return dueDate <= formatDateInLocalTimezone(dueSoon) ? 1 : null;
+}
+
+function rebuildFinanceMyDay(
+  transaction: Parameters<typeof createNotificationsInTransaction>[0],
+  decisionAt: Date,
+): { autoIncluded: number; deferred: number } {
+  const date = formatDateInLocalTimezone(decisionAt);
+  const financeTasks = transaction.select().from(tasks)
+    .where(like(tasks.sourceId, 'finance-attention:%'))
+    .all();
+  const financeTaskIds = new Set(financeTasks.map((task) => task.id));
+  const dayItems = transaction.select().from(myDayItems)
+    .where(eq(myDayItems.date, date))
+    .all();
+
+  for (const item of dayItems) {
+    if (item.isAutoIncluded && financeTaskIds.has(item.taskId)) {
+      transaction.delete(myDayItems).where(eq(myDayItems.id, item.id)).run();
+    }
+  }
+
+  const manualTaskIds = new Set(
+    dayItems.filter((item) => !item.isAutoIncluded).map((item) => item.taskId),
+  );
+  const excludedTaskIds = new Set(
+    transaction.select({ taskId: myDayExclusions.taskId })
+      .from(myDayExclusions)
+      .where(eq(myDayExclusions.date, date))
+      .all()
+      .map((row) => row.taskId),
+  );
+  const candidates = financeTasks.flatMap((task) => {
+    if (
+      task.status === 'done'
+      || task.status === 'cancelled'
+      || task.localDisposition !== 'active'
+      || manualTaskIds.has(task.id)
+      || excludedTaskIds.has(task.id)
+    ) {
+      return [];
+    }
+    const attention = record(record(task.metadata).financeAttention);
+    const signalKind = typeof attention.signalKind === 'string' ? attention.signalKind : '';
+    const dueRank = taskDueRank(task, date);
+    const policyRank = dueRank
+      ?? (signalKind === 'writeBackFailed' ? 2 : task.priority === 'critical' ? 3 : null);
+    if (policyRank === null) return [];
+    const conditionSince = typeof attention.conditionSince === 'string'
+      ? attention.conditionSince
+      : task.createdAt;
+    return [{ task, policyRank, conditionSince }];
+  }).sort((left, right) =>
+    left.policyRank - right.policyRank
+    || left.conditionSince.localeCompare(right.conditionSince)
+    || left.task.id.localeCompare(right.task.id));
+
+  const selected = candidates.slice(0, FINANCE_MY_DAY_DAILY_CAP);
+  const maxOrder = dayItems
+    .filter((item) => !item.isAutoIncluded || !financeTaskIds.has(item.taskId))
+    .reduce((maximum, item) => Math.max(maximum, item.order), 0);
+  selected.forEach(({ task }, index) => {
+    const digest = createHash('sha256')
+      .update(`${task.id}\0${date}`)
+      .digest('hex')
+      .slice(0, 24);
+    transaction.insert(myDayItems).values({
+      id: `finance-myday-${digest}`,
+      taskId: task.id,
+      date,
+      addedAt: decisionAt.toISOString(),
+      isAutoIncluded: true,
+      order: maxOrder + index + 1,
+    }).onConflictDoNothing().run();
+  });
+  return {
+    autoIncluded: selected.length,
+    deferred: Math.max(0, candidates.length - selected.length),
+  };
 }
 
 export class FinanceAttentionRoutingError extends Error {
@@ -596,56 +718,23 @@ export async function reconcileFinanceAttention(input: {
         tasksCreated: 0,
         tasksUpdated: 0,
         tasksSettled: 0,
+        taskPromoted: 0,
+        autoIncluded: 0,
+        deferred: 0,
+        settled: 0,
         stalePreserved: 0,
         statusOnly: 0,
       };
-      const routeSignals = (signals: FinanceAttentionSignal[]) => {
-        summary.evaluated += signals.length;
-        for (const signal of signals) {
-          const sourceId = financeAttentionSourceId(signal);
-          const task = findTask(transaction, sourceId);
-          const notification = findNotification(transaction, sourceId);
-          const route = selectFinanceAttentionRoute(signal, decisionAt);
-          if (route === 'settled') {
-            if (settleTask(transaction, task, signal, decisionAt)) summary.tasksSettled++;
-            if (settleNotification(transaction, notification, signal, decisionAt, task?.id ?? null)) {
-              summary.notificationsUpdated++;
-            }
-            continue;
-          }
-          if (route === 'stale') {
-            preserveStale(transaction, notification, task, signal, decisionAt);
-            summary.stalePreserved++;
-            continue;
-          }
-          if (route === 'statusOnly') {
-            preserveStatusOnly(transaction, notification, task, signal, decisionAt);
-            summary.statusOnly++;
-            continue;
-          }
-          if (route === 'actionableNotification' && !task) {
-            const routed = createOrUpdateNotification(transaction, signal, decisionAt);
-            if (routed.created) summary.notificationsCreated++;
-            else summary.notificationsUpdated++;
-            hasPendingDelivery ||= routed.deliveryEvents.some((event) => event.status === 'pending');
-            continue;
-          }
-          const routedTask = createOrUpdateTask(transaction, signal, decisionAt);
-          if (routedTask.created) summary.tasksCreated++;
-          else summary.tasksUpdated++;
-          settleNotification(transaction, notification, signal, decisionAt, routedTask.task.id);
-          if (routedTask.task.status === 'done' || routedTask.task.status === 'cancelled') {
-            transaction.delete(myDayItems).where(eq(myDayItems.taskId, routedTask.task.id)).run();
-          } else {
-            projectTaskToMyDay(transaction, routedTask.task.id, decisionAt);
-          }
-        }
+      const signals: FinanceAttentionSignal[] = [];
+      const collectSignals = (batch: FinanceAttentionSignal[]) => {
+        summary.evaluated += batch.length;
+        signals.push(...batch);
       };
       const since = new Date(decisionAt.getTime() - SOURCE_LOOKBACK_MS).toISOString();
       let attributionCursor: SourceCursor | null = null;
       while (true) {
         const rows = loadAttributionBatch(input.connectorId, since, attributionCursor);
-        routeSignals(rows.map((row) => attributionSignal(input.connectorId, row)));
+        collectSignals(rows.map((row) => attributionSignal(input.connectorId, row)));
         if (rows.length < SOURCE_BATCH_SIZE) break;
         const last = rows.at(-1)!;
         attributionCursor = { updatedAt: last.updatedAt, id: last.id };
@@ -653,11 +742,78 @@ export async function reconcileFinanceAttention(input: {
       let writeBackCursor: SourceCursor | null = null;
       while (true) {
         const rows = loadWriteBackBatch(input.connectorId, since, writeBackCursor);
-        routeSignals(rows.map((row) => writeBackSignal(input.connectorId, row)));
+        collectSignals(rows.map((row) => writeBackSignal(input.connectorId, row)));
         if (rows.length < SOURCE_BATCH_SIZE) break;
         const last = rows.at(-1)!;
         writeBackCursor = { updatedAt: last.updatedAt, id: last.id };
       }
+
+      let promotionsRemaining = Math.max(
+        0,
+        FINANCE_TASK_PROMOTION_DAILY_CAP - promotionCountForDay(transaction, decisionAt),
+      );
+      signals.sort((left, right) => {
+        const leftRoute = selectFinanceAttentionRoute(left, decisionAt);
+        const rightRoute = selectFinanceAttentionRoute(right, decisionAt);
+        const leftRank = leftRoute === 'task'
+          ? left.signalKind === 'writeBackFailed' ? 0 : 1
+          : 2;
+        const rightRank = rightRoute === 'task'
+          ? right.signalKind === 'writeBackFailed' ? 0 : 1
+          : 2;
+        return leftRank - rightRank
+          || left.conditionSince.localeCompare(right.conditionSince)
+          || left.sourceRef.localeCompare(right.sourceRef);
+      });
+
+      for (const signal of signals) {
+        const sourceId = financeAttentionSourceId(signal);
+        const task = findTask(transaction, sourceId);
+        const notification = findNotification(transaction, sourceId);
+        const route = selectFinanceAttentionRoute(signal, decisionAt);
+        if (route === 'settled') {
+          summary.settled++;
+          if (settleTask(transaction, task, signal, decisionAt)) {
+            summary.tasksSettled++;
+          }
+          if (settleNotification(transaction, notification, signal, decisionAt, task?.id ?? null)) {
+            summary.notificationsUpdated++;
+          }
+          continue;
+        }
+        if (route === 'stale') {
+          preserveStale(transaction, notification, task, signal, decisionAt);
+          summary.stalePreserved++;
+          continue;
+        }
+        if (route === 'statusOnly') {
+          preserveStatusOnly(transaction, notification, task, signal, decisionAt);
+          summary.statusOnly++;
+          continue;
+        }
+        if (route === 'actionableNotification' && !task) {
+          const routed = createOrUpdateNotification(transaction, signal, decisionAt);
+          if (routed.created) summary.notificationsCreated++;
+          else summary.notificationsUpdated++;
+          hasPendingDelivery ||= routed.deliveryEvents.some((event) => event.status === 'pending');
+          continue;
+        }
+        if (requiresTaskPromotion(task, signal)) {
+          if (promotionsRemaining === 0) {
+            summary.deferred++;
+            continue;
+          }
+          promotionsRemaining--;
+        }
+        const routedTask = createOrUpdateTask(transaction, signal, decisionAt);
+        if (routedTask.created) summary.tasksCreated++;
+        else summary.tasksUpdated++;
+        if (routedTask.promoted) summary.taskPromoted++;
+        settleNotification(transaction, notification, signal, decisionAt, routedTask.task.id);
+      }
+      const myDay = rebuildFinanceMyDay(transaction, decisionAt);
+      summary.autoIncluded = myDay.autoIncluded;
+      summary.deferred += myDay.deferred;
       return summary;
     });
     if (hasPendingDelivery) wakeNotificationDeliveryDispatcher();

@@ -28,6 +28,10 @@ let financeAttentionSourceId:
   typeof import('@/lib/finance/attention-routing')['financeAttentionSourceId'];
 let financeAttentionTaskId:
   typeof import('@/lib/finance/attention-routing')['financeAttentionTaskId'];
+let FINANCE_TASK_PROMOTION_DAILY_CAP:
+  typeof import('@/lib/finance/attention-routing')['FINANCE_TASK_PROMOTION_DAILY_CAP'];
+let FINANCE_MY_DAY_DAILY_CAP:
+  typeof import('@/lib/finance/attention-routing')['FINANCE_MY_DAY_DAILY_CAP'];
 
 function iso(hoursAgo: number): string {
   return new Date(now.getTime() - hoursAgo * 60 * 60 * 1000).toISOString();
@@ -76,9 +80,13 @@ function seedAttribution({
 function seedAttributionBatch({
   count,
   status = 'open',
+  firstObservedHoursAgo = 2,
+  lastObservedHoursAgo = 1,
 }: {
   count: number;
   status?: 'open' | 'resolved';
+  firstObservedHoursAgo?: number;
+  lastObservedHoursAgo?: number;
 }): void {
   const insert = sqlite.prepare(`
     INSERT INTO finance_attribution_exceptions (
@@ -100,9 +108,9 @@ function seedAttributionBatch({
         status,
         status === 'resolved' ? 'resolved' : 'pending',
         `fingerprint-bulk-${suffix}`,
-        iso(2),
-        iso(2),
-        iso(1),
+        iso(firstObservedHoursAgo),
+        iso(firstObservedHoursAgo),
+        iso(lastObservedHoursAgo),
         now.toISOString(),
       );
     }
@@ -171,6 +179,8 @@ beforeAll(async () => {
   ({
     financeAttentionSourceId,
     financeAttentionTaskId,
+    FINANCE_TASK_PROMOTION_DAILY_CAP,
+    FINANCE_MY_DAY_DAILY_CAP,
     reconcileFinanceAttention,
     selectFinanceAttentionRoute,
   } = await import('@/lib/finance/attention-routing'));
@@ -252,6 +262,19 @@ describe.sequential('finance attention routing', () => {
     `).get()).toEqual({ target: '/finance/review' });
   });
 
+  it('promotes attribution exactly at the 24-hour boundary', async () => {
+    seedAttribution({ hoursAgo: 24, sourceHoursAgo: 0 });
+
+    const result = await reconcileFinanceAttention({ connectorId, now });
+
+    expect(result).toMatchObject({
+      taskPromoted: 1,
+      tasksCreated: 1,
+      autoIncluded: 0,
+      deferred: 0,
+    });
+  });
+
   it('drains actionable attention across source batches without duplicate replay', async () => {
     seedAttributionBatch({ count: 501 });
 
@@ -286,6 +309,98 @@ describe.sequential('finance attention routing', () => {
     expect(count('notifications')).toBe(1);
   });
 
+  it('bounds a freshly re-observed 90-day attribution backlog across reruns', async () => {
+    const backlogSize = 501;
+    const firstDeferred = backlogSize - FINANCE_TASK_PROMOTION_DAILY_CAP;
+    seedAttributionBatch({
+      count: backlogSize,
+      firstObservedHoursAgo: 89 * 24,
+      lastObservedHoursAgo: 1,
+    });
+
+    const first = await reconcileFinanceAttention({ connectorId, now });
+    const replay = await reconcileFinanceAttention({ connectorId, now });
+
+    expect(first).toMatchObject({
+      evaluated: backlogSize,
+      taskPromoted: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      tasksCreated: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      autoIncluded: 0,
+      deferred: firstDeferred,
+    });
+    expect(replay).toMatchObject({
+      taskPromoted: 0,
+      tasksCreated: 0,
+      deferred: firstDeferred,
+    });
+    expect(count('tasks')).toBe(FINANCE_TASK_PROMOTION_DAILY_CAP);
+    expect(count('my_day_items')).toBe(0);
+
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1_000);
+    sqlite.prepare(`
+      UPDATE finance_attribution_exceptions
+      SET last_observed_at = ?, updated_at = ?
+      WHERE connector_id = ?
+    `).run(tomorrow.toISOString(), tomorrow.toISOString(), connectorId);
+    const carryForward = await reconcileFinanceAttention({ connectorId, now: tomorrow });
+    expect(carryForward).toMatchObject({
+      taskPromoted: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      tasksCreated: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      deferred: firstDeferred - FINANCE_TASK_PROMOTION_DAILY_CAP,
+    });
+    expect(count('tasks')).toBe(FINANCE_TASK_PROMOTION_DAILY_CAP * 2);
+  });
+
+  it('prioritizes exhausted write-backs before medium attribution promotion', async () => {
+    seedAttributionBatch({
+      count: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      firstObservedHoursAgo: 48,
+      lastObservedHoursAgo: 1,
+    });
+    seedWriteBack({ id: 'audit-priority' });
+
+    const result = await reconcileFinanceAttention({ connectorId, now });
+
+    expect(result.taskPromoted).toBe(FINANCE_TASK_PROMOTION_DAILY_CAP);
+    expect(result.deferred).toBe(1);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM tasks
+      WHERE title = 'Resolve a failed finance write-back'
+    `).get()).toEqual({ count: 1 });
+    expect(count('my_day_items')).toBe(1);
+  });
+
+  it('does not charge routine legacy-task syncs against today promotion cap', async () => {
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1_000);
+    seedAttribution({ hoursAgo: 48, sourceHoursAgo: 25 });
+    await reconcileFinanceAttention({ connectorId, now: yesterday });
+    sqlite.prepare(`
+      UPDATE tasks
+      SET metadata = json_remove(metadata, '$.financeAttention.promotedAt')
+    `).run();
+    sqlite.prepare(`
+      UPDATE finance_attribution_exceptions
+      SET last_observed_at = ?, updated_at = ?
+      WHERE id = 'exception-attribution-one'
+    `).run(iso(2), iso(2));
+    await reconcileFinanceAttention({
+      connectorId,
+      now: new Date(now.getTime() - 60 * 60 * 1_000),
+    });
+    seedAttributionBatch({
+      count: FINANCE_TASK_PROMOTION_DAILY_CAP,
+      firstObservedHoursAgo: 48,
+      lastObservedHoursAgo: 1,
+    });
+
+    const result = await reconcileFinanceAttention({ connectorId, now });
+
+    expect(result.taskPromoted).toBe(FINANCE_TASK_PROMOTION_DAILY_CAP);
+    expect(result.deferred).toBe(0);
+    expect(count('tasks')).toBe(FINANCE_TASK_PROMOTION_DAILY_CAP + 1);
+  });
+
   it('rolls back every source batch when later routing fails', async () => {
     seedAttributionBatch({ count: 501 });
     sqlite.exec(`
@@ -308,7 +423,7 @@ describe.sequential('finance attention routing', () => {
     expect(count('notifications')).toBe(501);
   });
 
-  it('promotes a prolonged ambiguity to one task and one My Day item under concurrent replay', async () => {
+  it('promotes a prolonged ambiguity without automatically scheduling medium backlog', async () => {
     seedAttribution({ hoursAgo: 25, sourceHoursAgo: 1 });
 
     const results = await Promise.all([
@@ -319,7 +434,7 @@ describe.sequential('finance attention routing', () => {
 
     expect(results[0].tasksCreated).toBe(1);
     expect(count('tasks')).toBe(1);
-    expect(count('my_day_items')).toBe(1);
+    expect(count('my_day_items')).toBe(0);
     expect(count('notifications')).toBe(0);
     const taskSignal = {
       connectorId,
@@ -383,7 +498,52 @@ describe.sequential('finance attention routing', () => {
     expect(task.description).toBe('A confirmed Finance change could not be verified. Review it in Finance.');
     expect(task.description).not.toContain('Private upstream');
     expect(task.metadata).not.toContain('upstream-sensitive-one');
+    expect(sqlite.prepare(`SELECT due_date AS dueDate FROM tasks`).get()).toEqual({
+      dueDate: null,
+    });
     expect(count('my_day_items')).toBe(1);
+  });
+
+  it('caps My Day, repairs prior auto-inclusions, and preserves manual choices', async () => {
+    for (let index = 0; index < FINANCE_MY_DAY_DAILY_CAP + 2; index++) {
+      seedWriteBack({ id: `audit-my-day-${index}` });
+    }
+    seedAttribution({ hoursAgo: 25, sourceHoursAgo: 1 });
+    seedAttribution({
+      id: 'exception-attribution-manual',
+      hoursAgo: 25,
+      sourceHoursAgo: 1,
+    });
+    await reconcileFinanceAttention({ connectorId, now });
+    const attributionTasks = sqlite.prepare(`
+      SELECT id FROM tasks
+      WHERE title = 'Review a finance attribution exception'
+      ORDER BY id
+    `).all() as Array<{ id: string }>;
+    sqlite.prepare(`
+      INSERT INTO my_day_items (id, task_id, date, added_at, is_auto_included, "order")
+      VALUES ('incorrect-finance-auto', ?, '2026-08-11', ?, 1, 99)
+    `).run(attributionTasks[0]!.id, now.toISOString());
+    sqlite.prepare(`
+      INSERT INTO my_day_items (id, task_id, date, added_at, is_auto_included, "order")
+      VALUES ('manual-finance-choice', ?, '2026-08-11', ?, 0, 100)
+    `).run(attributionTasks[1]!.id, now.toISOString());
+
+    const replay = await reconcileFinanceAttention({ connectorId, now });
+
+    expect(replay.autoIncluded).toBe(FINANCE_MY_DAY_DAILY_CAP);
+    expect(replay.deferred).toBe(2);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM my_day_items
+      WHERE date = '2026-08-11' AND is_auto_included = 1
+    `).get()).toEqual({ count: FINANCE_MY_DAY_DAILY_CAP });
+    expect(sqlite.prepare(`
+      SELECT id, is_auto_included AS isAutoIncluded
+      FROM my_day_items WHERE id = 'manual-finance-choice'
+    `).get()).toEqual({ id: 'manual-finance-choice', isAutoIncluded: 0 });
+    expect(sqlite.prepare(`
+      SELECT id FROM my_day_items WHERE id = 'incorrect-finance-auto'
+    `).get()).toBeUndefined();
   });
 
   it('settles projected attention when the authoritative source resolves', async () => {
@@ -432,7 +592,7 @@ describe.sequential('finance attention routing', () => {
 
     await reconcileFinanceAttention({ connectorId, now });
     expect(sqlite.prepare(`SELECT status FROM tasks`).get()).toEqual({ status: 'todo' });
-    expect(count('my_day_items')).toBe(1);
+    expect(count('my_day_items')).toBe(0);
   });
 
   it('does not create or reopen attention from stale source state', async () => {

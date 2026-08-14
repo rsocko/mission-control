@@ -197,8 +197,10 @@ export class FinanceManagerConnector implements IConnector {
         {
           evaluated: attention.evaluated,
           notificationsCreated: attention.notificationsCreated,
-          tasksCreated: attention.tasksCreated,
-          tasksSettled: attention.tasksSettled,
+          taskPromoted: attention.taskPromoted,
+          autoIncluded: attention.autoIncluded,
+          deferred: attention.deferred,
+          settled: attention.settled,
           stalePreserved: attention.stalePreserved,
         },
         'Finance attention routing completed',

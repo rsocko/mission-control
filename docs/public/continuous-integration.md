@@ -17,14 +17,26 @@ when the workflow itself is dispatched from `main`. A read-only job fetches
 `origin/main` and verifies that SHA is an ancestor before the privileged job
 checks out the exact commit and repeats both the checkout and ancestry checks.
 Branch names and the dispatch context's default SHA are never publication
-sources.
+sources. Manual runs support `explicit`, `next_major`, `next_minor`, and
+`next_patch` version modes and may optionally update `latest`.
 
-Publication pushes the image without a mutable tag, records the resulting
-`sha256` digest, attaches a BuildKit-generated SBOM, and signs a GitHub
-attestation containing GitHub-generated SLSA provenance for that exact image
-digest. The workflow's source verification and detached checkout ensure the
-attested build uses the verified commit. Consumers should deploy
-`ghcr.io/<owner>/<repository>@sha256:<digest>`, never a mutable tag.
+All publications are globally serialized so semantic-version discovery cannot
+race another publication. A successful automatic publication reserves both the
+next patch version (starting at `0.1.0` in a registry with no semantic tags) and
+`sha-<7-character-commit>`. The workflow builds and pushes by digest, attaches a
+BuildKit-generated SBOM, and signs GitHub-generated SLSA provenance for that
+exact digest before promoting it to the semantic-version tag, SHA tag, and
+`latest`. It refuses to overwrite either immutable tag and verifies every
+promoted tag resolves to the attested digest.
+
+Active-development deployments should use:
+
+```sh
+docker pull ghcr.io/rsocko/mission-control:latest
+```
+
+Use `sha-<7-character-commit>`, a semantic-version tag, or the full
+`sha256` digest for rollback and release pinning.
 
 ## Repository configuration
 
@@ -34,15 +46,14 @@ creator actions disabled, no additional patterns, and full-length commit SHA
 pinning required. The workflows intentionally use native Docker commands rather
 than Docker-maintained actions.
 
-After the first successful publication, connect the GHCR package to this
-repository and set the package visibility to **Public** so anonymous digest
-pulls work. Keep package write access inherited from the repository; do not add
-personal access tokens or repository secrets. Validate the published artifact
-with:
+Connect the GHCR package to this repository and set the package visibility to
+**Public** so anonymous pulls work. Keep package write access inherited from the
+repository; do not add personal access tokens or repository secrets. Validate a
+published artifact with:
 
 ```sh
-docker pull ghcr.io/<owner>/<repository>@sha256:<digest>
+docker pull ghcr.io/rsocko/mission-control:latest
 gh attestation verify \
-  oci://ghcr.io/<owner>/<repository>@sha256:<digest> \
-  --repo <owner>/<repository>
+  oci://ghcr.io/rsocko/mission-control@sha256:<digest> \
+  --repo rsocko/mission-control
 ```

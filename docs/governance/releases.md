@@ -18,8 +18,10 @@ A release must:
 Release workflows must use immutable action references. Publishing jobs must not
 run for untrusted pull requests or expose protected environments or secrets.
 
-Container releases use immutable digests. Mutable convenience tags, if
-published, are not sufficient for deployment pinning.
+Active-development container deployments may follow
+`ghcr.io/rsocko/mission-control:latest`. Every trusted main publication also
+creates immutable semantic-version and `sha-<7-character-commit>` tags for
+rollback; formal releases should pin one of those tags or the full digest.
 
 ## Package status
 

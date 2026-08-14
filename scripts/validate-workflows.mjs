@@ -105,6 +105,46 @@ for (const file of workflowFiles) {
       },
       `${file} manual publication must require an explicit full commit SHA`,
     );
+    assert.deepEqual(
+      workflow.on.workflow_dispatch?.inputs?.version_mode,
+      {
+        description: 'How to determine the immutable image tag',
+        required: true,
+        type: 'choice',
+        default: 'next_patch',
+        options: ['explicit', 'next_major', 'next_minor', 'next_patch'],
+      },
+      `${file} manual publication must support established semantic version modes`,
+    );
+    assert.deepEqual(
+      workflow.on.workflow_dispatch?.inputs?.image_tag,
+      {
+        description: 'Explicit image tag when version_mode=explicit',
+        required: false,
+        default: '',
+        type: 'string',
+      },
+      `${file} manual publication must accept an explicit immutable tag`,
+    );
+    assert.deepEqual(
+      workflow.on.workflow_dispatch?.inputs?.push_latest,
+      {
+        description: 'Also promote the image to latest',
+        required: true,
+        type: 'choice',
+        default: 'true',
+        options: ['false', 'true'],
+      },
+      `${file} manual publication must make latest promotion explicit`,
+    );
+    assert.deepEqual(
+      workflow.concurrency,
+      {
+        group: 'publish-container',
+        'cancel-in-progress': false,
+      },
+      `${file} must serialize every automatic and manual publication`,
+    );
 
     const prepare = workflow.jobs?.prepare;
     const publish = workflow.jobs?.publish;
@@ -157,6 +197,15 @@ for (const file of workflowFiles) {
       'git merge-base --is-ancestor "${SOURCE_SHA}" "${trusted_main_sha}"',
       'git checkout --detach "${SOURCE_SHA}"',
       'actual_sha="$(git rev-parse HEAD)"',
+      'export VERSION_MODE="next_patch"',
+      'sha_tag="sha-${SOURCE_SHA:0:7}"',
+      'python3 .github/scripts/resolve_registry_version.py',
+      'require_absent "${IMAGE}:${VERSION_TAG}"',
+      'require_absent "${IMAGE}:${SHA_TAG}"',
+      'docker buildx imagetools create',
+      'verification_refs+=("${sha_ref}")',
+      'verification_refs+=("${latest_ref}")',
+      'verify_digest "${reference}"',
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
     }
@@ -177,6 +226,15 @@ for (const file of workflowFiles) {
       },
       `${file} attestation must use supported default provenance for the published digest`,
     );
+    const loginIndex = publish.steps.findIndex((step) => step.name === 'Log in to GHCR');
+    const resolveIndex = publish.steps.findIndex((step) => step.name === 'Resolve immutable publication tags');
+    const buildIndex = publish.steps.findIndex((step) => step.name === 'Build and publish digest-oriented image');
+    const attestIndex = publish.steps.findIndex((step) => step.name === 'Attest build provenance');
+    const promoteIndex = publish.steps.findIndex((step) => step.name === 'Promote attested digest to requested tags');
+    assert.ok(loginIndex >= 0 && resolveIndex > loginIndex, `${file} must resolve versions after GHCR login`);
+    assert.ok(buildIndex > resolveIndex, `${file} must resolve and reserve immutable tags before building`);
+    assert.ok(attestIndex > buildIndex, `${file} must attest the digest after building`);
+    assert.ok(promoteIndex > attestIndex, `${file} must promote only the attested digest`);
     assert.doesNotMatch(
       source,
       /\bgit\s+fetch\b/u,

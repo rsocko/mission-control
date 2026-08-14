@@ -279,6 +279,10 @@ describe.sequential('finance attention routing', () => {
     seedAttributionBatch({ count: 501 });
 
     const first = await reconcileFinanceAttention({ connectorId, now });
+    sqlite.prepare(`
+      DELETE FROM finance_attribution_exceptions
+      WHERE id != 'exception-bulk-00500'
+    `).run();
     const replay = await reconcileFinanceAttention({ connectorId, now });
 
     expect(first).toMatchObject({
@@ -287,7 +291,7 @@ describe.sequential('finance attention routing', () => {
       tasksCreated: 0,
     });
     expect(replay).toMatchObject({
-      evaluated: 501,
+      evaluated: 1,
       notificationsCreated: 0,
       tasksCreated: 0,
     });

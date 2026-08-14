@@ -13,7 +13,7 @@ import {
 import {
   createNotificationsInTransaction,
   wakeNotificationDeliveryDispatcher,
-  type CreateNotificationResult,
+  type CreateNotificationInput,
 } from '@/lib/notifications/service';
 import { syncFinanceProviderPresentation } from '@/lib/finance-insights/notification-ingestion';
 import { formatDateInLocalTimezone } from '@/lib/utils/date';
@@ -460,13 +460,12 @@ function preserveStatusOnly(
   }
 }
 
-function createOrUpdateNotification(
-  transaction: Parameters<typeof createNotificationsInTransaction>[0],
+function financeAttentionNotificationInput(
   signal: FinanceAttentionSignal,
   decisionAt: Date,
-): CreateNotificationResult {
+): CreateNotificationInput {
   const sourceId = financeAttentionSourceId(signal);
-  const result = createNotificationsInTransaction(transaction, [{
+  return {
     id: financeAttentionNotificationId(signal),
     sourceId,
     connectorType: 'finance-manager',
@@ -494,9 +493,7 @@ function createOrUpdateNotification(
       notificationType: 'financeAttributionReview',
       ...attentionMetadata(signal, 'actionableNotification', decisionAt),
     },
-  }], { now: decisionAt, wakeDispatcher: false })[0]!;
-  syncFinanceProviderPresentation(transaction, [result]);
-  return result;
+  };
 }
 
 function createOrUpdateTask(
@@ -726,6 +723,7 @@ export async function reconcileFinanceAttention(input: {
         statusOnly: 0,
       };
       const signals: FinanceAttentionSignal[] = [];
+      const pendingNotifications: FinanceAttentionSignal[] = [];
       const collectSignals = (batch: FinanceAttentionSignal[]) => {
         summary.evaluated += batch.length;
         signals.push(...batch);
@@ -769,9 +767,9 @@ export async function reconcileFinanceAttention(input: {
       for (const signal of signals) {
         const sourceId = financeAttentionSourceId(signal);
         const task = findTask(transaction, sourceId);
-        const notification = findNotification(transaction, sourceId);
         const route = selectFinanceAttentionRoute(signal, decisionAt);
         if (route === 'settled') {
+          const notification = findNotification(transaction, sourceId);
           summary.settled++;
           if (settleTask(transaction, task, signal, decisionAt)) {
             summary.tasksSettled++;
@@ -782,20 +780,19 @@ export async function reconcileFinanceAttention(input: {
           continue;
         }
         if (route === 'stale') {
+          const notification = findNotification(transaction, sourceId);
           preserveStale(transaction, notification, task, signal, decisionAt);
           summary.stalePreserved++;
           continue;
         }
         if (route === 'statusOnly') {
+          const notification = findNotification(transaction, sourceId);
           preserveStatusOnly(transaction, notification, task, signal, decisionAt);
           summary.statusOnly++;
           continue;
         }
         if (route === 'actionableNotification' && !task) {
-          const routed = createOrUpdateNotification(transaction, signal, decisionAt);
-          if (routed.created) summary.notificationsCreated++;
-          else summary.notificationsUpdated++;
-          hasPendingDelivery ||= routed.deliveryEvents.some((event) => event.status === 'pending');
+          pendingNotifications.push(signal);
           continue;
         }
         if (requiresTaskPromotion(task, signal)) {
@@ -809,7 +806,21 @@ export async function reconcileFinanceAttention(input: {
         if (routedTask.created) summary.tasksCreated++;
         else summary.tasksUpdated++;
         if (routedTask.promoted) summary.taskPromoted++;
+        const notification = findNotification(transaction, sourceId);
         settleNotification(transaction, notification, signal, decisionAt, routedTask.task.id);
+      }
+      if (pendingNotifications.length > 0) {
+        const routed = createNotificationsInTransaction(
+          transaction,
+          pendingNotifications.map((signal) => financeAttentionNotificationInput(signal, decisionAt)),
+          { now: decisionAt, wakeDispatcher: false },
+        );
+        syncFinanceProviderPresentation(transaction, routed);
+        for (const result of routed) {
+          if (result.created) summary.notificationsCreated++;
+          else summary.notificationsUpdated++;
+          hasPendingDelivery ||= result.deliveryEvents.some((event) => event.status === 'pending');
+        }
       }
       const myDay = rebuildFinanceMyDay(transaction, decisionAt);
       summary.autoIncluded = myDay.autoIncluded;

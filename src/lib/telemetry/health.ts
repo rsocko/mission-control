@@ -76,7 +76,9 @@ export function getRuntimeDegradations(
     degradations.push(`${syncQueue.overBudget} sync job(s) exceeded their duration budget`);
   }
   if (syncQueue.expiredLeases > 0) {
-    degradations.push(`${syncQueue.expiredLeases} sync job lease(s) expired`);
+    degradations.push(
+      `action required: ${syncQueue.expiredLeases} sync job lease(s) expired`,
+    );
   }
   const freshProcesses = processes.filter(
     (runtime) => now - new Date(runtime.heartbeatAt).getTime() <= telemetryStaleMs,

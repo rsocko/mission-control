@@ -26,11 +26,12 @@ const queueMocks = vi.hoisted(() => ({
   releaseSyncJob: vi.fn(() => true),
   renewSyncJobLease: vi.fn(() => true),
 }));
-
-vi.mock('@/lib/sync/job-queue', () => queueMocks);
-vi.mock('@/lib/sync/events', () => ({
+const eventMocks = vi.hoisted(() => ({
   setSyncEventPersistence: vi.fn(),
 }));
+
+vi.mock('@/lib/sync/job-queue', () => queueMocks);
+vi.mock('@/lib/sync/events', () => eventMocks);
 vi.mock('@/lib/logger', () => ({
   syncLogger: {
     info: vi.fn(),
@@ -204,6 +205,34 @@ describe('sync worker runtime', () => {
     );
   });
 
+  it('retries an abort-aware connector after its duration budget expires', async () => {
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob
+      .mockReturnValueOnce(job({ durationBudgetMs: 5 }))
+      .mockReturnValue(null);
+    const execute = vi.fn((
+      _connectorId: string,
+      options: { signal?: AbortSignal },
+    ) => new Promise<SyncResult>((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+        once: true,
+      });
+    }));
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
+
+    worker.start();
+    await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalledOnce());
+    await worker.stop();
+
+    expect(queueMocks.failSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      'worker-a',
+      'Sync execution exceeded its 5ms duration budget',
+      { retry: true, cancelled: false, terminal: false },
+    );
+  });
+
   it('retains active ownership until timed-out shutdown work has quiesced', async () => {
     const { SyncWorker } = await import('@/lib/sync/worker');
     let finish: ((result: SyncResult) => void) | undefined;
@@ -225,6 +254,75 @@ describe('sync worker runtime', () => {
       'worker-a',
       'Worker shutdown grace period expired',
       { retry: true, cancelled: false },
+    );
+  });
+
+  it('continues with another connector when aborted execution ignores its grace period', async () => {
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob
+      .mockReturnValueOnce(job({
+        connectorId: 'todo-1',
+        durationBudgetMs: 5,
+        identityMode: null,
+        identityModeRevision: null,
+      }))
+      .mockReturnValueOnce(job({
+        id: 'job-2',
+        connectorId: 'github-1',
+      }))
+      .mockReturnValue(null);
+    let finishAbandoned: ((result: SyncResult) => void) | undefined;
+    const execute = vi.fn((connectorId: string) => {
+      if (connectorId === 'todo-1') {
+        return new Promise<SyncResult>((resolve) => {
+          finishAbandoned = resolve;
+        });
+      }
+      return Promise.resolve(result(true));
+    });
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(execute, {
+      ownerId: 'worker-a',
+      pollIntervalMs: 1,
+      abortGraceMs: 1,
+    });
+
+    worker.start();
+    await waitFor(() => expect(execute).toHaveBeenCalledWith(
+      'github-1',
+      expect.objectContaining({ jobId: 'job-2' }),
+    ));
+    await worker.stop();
+
+    expect(queueMocks.claimNextSyncJob).toHaveBeenNthCalledWith(
+      2,
+      'worker-a',
+      30_000,
+      new Set(['todo-1']),
+    );
+    expect(queueMocks.completeSyncJob).toHaveBeenCalledWith(
+      'job-2',
+      'worker-a',
+      expect.objectContaining({ success: true }),
+    );
+    const persistEvent = eventMocks.setSyncEventPersistence.mock.calls[0]?.[0];
+    persistEvent?.({
+      type: 'sync:start',
+      connectorId: 'todo-1',
+      connectorName: 'To Do',
+      phase: 'tasks',
+    });
+    expect(queueMocks.persistSyncJobEvent).toHaveBeenCalledWith(
+      'job-1',
+      expect.objectContaining({ connectorId: 'todo-1' }),
+    );
+
+    finishAbandoned?.(result(true));
+    await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalled());
+    expect(queueMocks.completeSyncJob).not.toHaveBeenCalledWith(
+      'job-1',
+      expect.anything(),
+      expect.anything(),
     );
   });
 });

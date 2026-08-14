@@ -136,6 +136,7 @@ function runtime(
         memoryCriticalPercent: 85,
         memoryEvents: null,
         restartCount: null,
+        restartCountSource: 'unavailable',
         unavailable: [],
       },
       ...(role === 'web'
@@ -188,7 +189,7 @@ describe('runtime health degradation', () => {
       'liveness health check missed its startup deadline',
       '2 connector schedules are overdue',
       '1 sync job(s) exceeded their duration budget',
-      '1 sync job lease(s) expired',
+      'action required: 1 sync job lease(s) expired',
     ]));
   });
 

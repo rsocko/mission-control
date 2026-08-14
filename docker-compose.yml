@@ -1,0 +1,88 @@
+# Docker Compose for deploying Mission Control locally.
+
+services:
+  mission-control:
+    build: .
+    image: mission-control:local
+    container_name: mission-control
+    restart: "on-failure:${MC_WEB_RESTART_ATTEMPTS:-5}"
+    init: true
+    stop_grace_period: 40s
+    cpus: "${MC_WEB_CPUS:-1.5}"
+    mem_limit: "${MC_WEB_MEMORY:-2g}"
+    cpu_shares: 1024
+    env_file: .env.local
+    environment:
+      - PORT=3099
+      - MC_DB_PATH=/app/data/mission-control.db
+      - MC_SYNC_EXECUTION_MODE=worker
+      - MC_PROCESS_ROLE=web
+      - MC_DEPLOYMENT_REVISION=${MC_DEPLOYMENT_REVISION:-local}
+      - NODE_OPTIONS=${MC_WEB_NODE_OPTIONS:---max-old-space-size=1536}
+      - MC_MEMORY_WARNING_PERCENT=${MC_MEMORY_WARNING_PERCENT:-70}
+      - MC_MEMORY_CRITICAL_PERCENT=${MC_MEMORY_CRITICAL_PERCENT:-85}
+      - MC_MEMORY_CRITICAL_SAMPLES=${MC_MEMORY_CRITICAL_SAMPLES:-3}
+      - MC_RESTART_STABILIZATION_MS=${MC_RESTART_STABILIZATION_MS:-60000}
+    volumes:
+      - mc_data:/app/data
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mission-control.rule=Host(`${MC_HOSTNAME:-mc.example.com}`)"
+      - "traefik.http.routers.mission-control.entrypoints=web"
+      - "traefik.http.services.mission-control.loadbalancer.server.port=3099"
+      - "traefik.http.services.mission-control.loadbalancer.healthcheck.path=/api/health/ready"
+      - "traefik.http.services.mission-control.loadbalancer.healthcheck.interval=10s"
+      - "traefik.docker.network=traefik"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3099/api/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  mission-control-worker:
+    build: .
+    image: mission-control:local
+    container_name: mission-control-worker
+    restart: unless-stopped
+    init: true
+    command: ["node", "dist/sync-worker.cjs"]
+    stop_grace_period: 40s
+    cpus: "${MC_SYNC_WORKER_CPUS:-1.0}"
+    mem_limit: "${MC_SYNC_WORKER_MEMORY:-1g}"
+    cpu_shares: 256
+    depends_on:
+      mission-control:
+        condition: service_healthy
+    env_file: .env.local
+    environment:
+      - MC_DB_PATH=/app/data/mission-control.db
+      - MC_SYNC_EXECUTION_MODE=worker
+      - MC_PROCESS_ROLE=worker
+      - MC_DEPLOYMENT_REVISION=${MC_DEPLOYMENT_REVISION:-local}
+      - MC_SYNC_WORKER_REPLICA_COUNT=1
+      - MC_WEB_READINESS_URL=http://mission-control:3099/api/health/ready
+      - MC_WEB_READINESS_MAX_ATTEMPTS=${MC_WEB_READINESS_MAX_ATTEMPTS:-30}
+      - MC_WEB_READINESS_RETRY_INTERVAL_MS=${MC_WEB_READINESS_RETRY_INTERVAL_MS:-2000}
+      - MC_WEB_READINESS_REQUEST_TIMEOUT_MS=${MC_WEB_READINESS_REQUEST_TIMEOUT_MS:-2000}
+      - NODE_OPTIONS=${MC_WORKER_NODE_OPTIONS:---max-old-space-size=768}
+    volumes:
+      - mc_data:/app/data
+    networks:
+      - traefik
+    healthcheck:
+      test: ["CMD", "node", "scripts/sync-worker-healthcheck.mjs"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  mc_data:
+    driver: local
+
+networks:
+  traefik:
+    external: true

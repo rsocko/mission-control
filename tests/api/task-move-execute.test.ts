@@ -42,10 +42,14 @@ const mockDb = {
 const mockTxDelete = vi.fn();
 const mockTxValues = vi.fn();
 const mockTxUpdates = vi.fn();
+const mockTxRun = vi.fn(() => ({ changes: 0 }));
+const mockTxUpdateRun = vi.fn(() => ({ changes: 1 }));
 const txSelectResults: unknown[][] = [];
 let txSelectCallIndex = 0;
 const mockRunTransaction = vi.fn((fn: (tx: unknown) => unknown) => {
   const tx = {
+    all: vi.fn(() => []),
+    run: mockTxRun,
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
@@ -62,7 +66,7 @@ const mockRunTransaction = vi.fn((fn: (tx: unknown) => unknown) => {
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mockTxUpdates(values);
-        return { where: vi.fn(() => ({ run: vi.fn() })) };
+        return { where: vi.fn(() => ({ run: mockTxUpdateRun })) };
       }),
     })),
     delete: vi.fn((table: unknown) => {
@@ -115,6 +119,7 @@ vi.mock('drizzle-orm', () => ({
   isNull: vi.fn(() => 'is-null-condition'),
   inArray: vi.fn(() => 'in-array-condition'),
   count: vi.fn(() => 'count-fn'),
+  sql: vi.fn(() => 'sql-query'),
 }));
 
 // ─── Connector mock ──────────────────────────────────────────────────────────
@@ -1214,9 +1219,7 @@ describe('POST /api/tasks/move/execute', () => {
       connectorType: 'github-issues',
       parentId: expect.any(String),
     }));
-    expect(mockTxUpdates).toHaveBeenCalledWith({
-      taskId: expect.any(String),
-    });
+    expect(mockTxRun).toHaveBeenCalled();
   });
 
   it('creates Microsoft To Do steps and preserves GitHub subtask details in notes', async () => {
@@ -1289,7 +1292,6 @@ describe('POST /api/tasks/move/execute', () => {
 
     txSelectResults.push(
       [], // parent projects
-      [], // parent linked sources
       [{ taskId: 'sub-1', tagId: 'tag-1' }],
       [{ taskId: 'sub-1', projectId: 'project-1' }],
       [{
@@ -1478,7 +1480,8 @@ describe('POST /api/tasks/move/execute', () => {
       traceId: 'deadbeef',
     });
     expect(mockDeleteTask).toHaveBeenCalledWith('new-source-123');
-    expect(mockRunTransaction).not.toHaveBeenCalled();
+    expect(mockRunTransaction).toHaveBeenCalledTimes(3); // claim, cleanup, and release
+    expect(mockTxValues).not.toHaveBeenCalled();
     expect(mockMoveLogError).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'task_move',

@@ -2,56 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
-
-type ReferenceDisposition =
-  | 'repoint'
-  | 'rebuild'
-  | 'source-operation'
-  | 'history'
-  | 'lineage'
-  | 'external-identity';
-
-const TASK_REFERENCE_COLUMN_POLICIES = {
-  'agent_dispatch_attempts.provider_task_id': 'external-identity',
-  'agent_dispatches.provider_task_id': 'external-identity',
-  'alerts.related_task_id': 'repoint',
-  'focus_items.task_id': 'repoint',
-  'github_bulk_transfer_events.task_id': 'history',
-  'github_bulk_transfer_items.task_id': 'history',
-  'github_bulk_transfer_successions.task_id': 'history',
-  'github_identity_comparison_records.local_task_id': 'history',
-  'github_identity_sub_issue_population_members.local_task_id': 'history',
-  'github_identity_task_transfer_reconciliations.source_task_id': 'lineage',
-  'github_identity_task_transfer_reconciliations.successor_task_id': 'lineage',
-  'github_write_outcome_events.task_id': 'history',
-  'my_day_exclusions.task_id': 'repoint',
-  'my_day_items.task_id': 'repoint',
-  'notifications.related_task_id': 'repoint',
-  'priority_sync_log.task_id': 'repoint',
-  'project_auto_include_exclusions.task_id': 'repoint',
-  'project_phase_items.task_id': 'repoint',
-  'scout_reconciliation_evaluations.task_id': 'history',
-  'scout_reconciliation_suggestions.task_id': 'repoint',
-  'scout_reconciliation_task_state.task_id': 'repoint',
-  'sync_deletion_candidates.task_id': 'source-operation',
-  'sync_deletion_snapshots.original_task_id': 'history',
-  'sync_deletion_snapshots.restored_task_id': 'history',
-  'task_attachments.task_id': 'rebuild',
-  'task_dependencies.depends_on_task_id': 'repoint',
-  'task_dependencies.task_id': 'repoint',
-  'task_field_states.task_id': 'source-operation',
-  'task_history_events.task_id': 'history',
-  'task_linked_sources.task_id': 'repoint',
-  'task_projects.task_id': 'repoint',
-  'task_schedules.task_id': 'repoint',
-  'task_source_write_leases.task_id': 'history',
-  'task_tags.task_id': 'repoint',
-  'task_triage_log.task_id': 'repoint',
-  'tasks.parent_id': 'repoint',
-  'weekly_one_thing.task_id': 'repoint',
-  'work_todo_outbound_changes.remote_task_id': 'external-identity',
-  'work_todo_outbound_changes.task_id': 'source-operation',
-} as const satisfies Record<string, ReferenceDisposition>;
+import { TASK_REFERENCE_COLUMN_POLICIES } from '@/lib/tasks/task-reference-repoint';
 
 describe('task reference inventory', () => {
   const dbPath = join(process.cwd(), 'data', `task-reference-inventory-${process.pid}-${Date.now()}.db`);

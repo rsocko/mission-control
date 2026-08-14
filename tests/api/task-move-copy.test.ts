@@ -27,6 +27,11 @@ const txOps: Array<{ op: string; table?: string; values?: unknown; set?: unknown
 
 function createTxMock() {
   return {
+    all: vi.fn(() => []),
+    run: vi.fn(() => {
+      txOps.push({ op: 'run' });
+      return { changes: 1 };
+    }),
     select: vi.fn(() => {
       txOps.push({ op: 'select' });
       return chainable([]);
@@ -47,7 +52,11 @@ function createTxMock() {
       return {
         set: vi.fn((s: unknown) => {
           opEntry.set = s;
-          return { where: vi.fn(() => chainable(undefined)) };
+          return {
+            where: vi.fn(() => ({
+              run: vi.fn(() => ({ changes: 1 })),
+            })),
+          };
         }),
       };
     }),
@@ -91,6 +100,7 @@ vi.mock('@/db/schema', () => ({
   myDayItems: { taskId: 'task_id' },
   focusItems: { taskId: 'task_id' },
   taskSchedules: { taskId: 'task_id' },
+  taskAttachments: { taskId: 'task_id' },
   projectPhaseItems: { taskId: 'task_id' },
   weeklyOneThing: { taskId: 'task_id' },
   connectorConfigs: { id: 'id', type: 'type' },
@@ -189,11 +199,12 @@ describe('POST /api/tasks/[id]/move — reference migration (PR #303)', () => {
     mockDb.select.mockImplementation(() => {
       callCount++;
       if (callCount === 1) return chainable([{ id: 'inst-2', type: 'microsoft-todo' }]);
-      return chainable([{
+      if (callCount === 2) return chainable([{
         id: 'task-1', connectorInstanceId: 'inst-1', connectorType: 'local',
         title: 'My Task', description: 'desc', status: 'todo', priority: 'high',
         dueDate: '2026-08-01', createdAt: '2026-07-01', completedAt: null,
       }]);
+      return chainable([]);
     });
 
     const { POST } = await import('@/app/api/tasks/[id]/move/route');
@@ -216,10 +227,11 @@ describe('POST /api/tasks/[id]/move — reference migration (PR #303)', () => {
     mockDb.select.mockImplementation(() => {
       callCount++;
       if (callCount === 1) return chainable([{ id: 'inst-2', type: 'local' }]);
-      return chainable([{
+      if (callCount === 2) return chainable([{
         id: 'task-1', connectorInstanceId: 'inst-1', connectorType: 'local',
         title: 'Test', status: 'todo', priority: 'medium',
       }]);
+      return chainable([]);
     });
 
     const { POST } = await import('@/app/api/tasks/[id]/move/route');
@@ -235,15 +247,12 @@ describe('POST /api/tasks/[id]/move — reference migration (PR #303)', () => {
 
     // Verify multiple reference tables were touched in the transaction
     const insertOps = txOps.filter(op => op.op === 'insert');
-    const updateOps = txOps.filter(op => op.op === 'update');
+    const repointOps = txOps.filter(op => op.op === 'run');
     const deleteOps = txOps.filter(op => op.op === 'delete');
 
-    // At minimum: insert new task, update references, both dependency directions, and child tasks
+    // At minimum: insert the successor and invoke the complete shared repoint inventory.
     expect(insertOps.length).toBeGreaterThanOrEqual(1); // new task
-    expect(updateOps.length).toBeGreaterThanOrEqual(8);
-    expect(updateOps).toContainEqual(expect.objectContaining({
-      table: 'projectAutoIncludeExclusions',
-    }));
+    expect(repointOps.length).toBeGreaterThanOrEqual(15);
     expect(deleteOps.length).toBeGreaterThanOrEqual(2); // old taskTags, taskProjects, task
   });
 });

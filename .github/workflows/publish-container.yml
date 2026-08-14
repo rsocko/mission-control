@@ -282,8 +282,8 @@ jobs:
             local reference="$1"
             local promoted_digest
             promoted_digest="$(
-              docker buildx imagetools inspect "${reference}" |
-                awk '/^Digest:/ { print $2; exit }'
+              docker buildx imagetools inspect "${reference}" \
+                --format '{{.Manifest.Digest}}'
             )"
             if [[ "${promoted_digest}" != "${DIGEST}" ]]; then
               echo "::error::${reference} resolved to ${promoted_digest}, expected ${DIGEST}"

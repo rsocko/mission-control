@@ -257,6 +257,57 @@ describe('project hierarchy service', () => {
     expect(audits).toHaveLength(1);
   });
 
+  it('rejects reusing a command ID for a different request', async () => {
+    const { projectId, phaseIds } = await seedProject('command-conflict');
+    const {
+      applyProjectHierarchyCommand,
+      ProjectHierarchyServiceError,
+    } = await import('@/lib/projects/hierarchy-service');
+    const commandId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+
+    applyProjectHierarchyCommand({
+      projectId,
+      request: {
+        commandId,
+        expectedRevision: 0,
+        command: {
+          type: 'reorder_phases',
+          orderedPhaseIds: [phaseIds[1], phaseIds[0]],
+        },
+      },
+    });
+
+    expect(() => applyProjectHierarchyCommand({
+      projectId,
+      request: {
+        commandId,
+        expectedRevision: 1,
+        command: {
+          type: 'reorder_phases',
+          orderedPhaseIds: [phaseIds[0], phaseIds[1]],
+        },
+      },
+    })).toThrowError(ProjectHierarchyServiceError);
+    try {
+      applyProjectHierarchyCommand({
+        projectId,
+        request: {
+          commandId,
+          expectedRevision: 1,
+          command: {
+            type: 'reorder_phases',
+            orderedPhaseIds: [phaseIds[0], phaseIds[1]],
+          },
+        },
+      });
+    } catch (error) {
+      expect(error).toMatchObject({
+        status: 409,
+        code: 'COMMAND_ID_CONFLICT',
+      });
+    }
+  });
+
   it('rejects stale revisions with the current authoritative snapshot', async () => {
     const { projectId, phaseIds, taskIds } = await seedProject('stale');
     const {

@@ -27,6 +27,7 @@ import {
 } from '@/lib/connectors/monarch-money/config';
 import { TyrionBridgeUrlValidationError } from '@/lib/connectors/monarch-money/bridge-url';
 import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -84,11 +85,16 @@ export async function GET(request: Request) {
     );
 
     // Enrich lists with real task counts and resolved display name
-    const enrichedLists = lists.map(sl => ({
-      ...sl,
-      name: resolveSourceListDisplayName(sl),
-      taskCount: countMap.get(`${sl.connectorInstanceId}:${sl.sourceId}`) || 0,
-    }));
+    const configById = new Map(configs.map(config => [config.id, config]));
+    const enrichedLists = lists.map(sl => {
+      const connector = configById.get(sl.connectorInstanceId);
+      return {
+        ...sl,
+        name: resolveSourceListDisplayName(sl),
+        taskCount: countMap.get(`${sl.connectorInstanceId}:${sl.sourceId}`) || 0,
+        selectedForSync: connector ? isSourceListSelected(connector, sl) : false,
+      };
+    });
 
     // Get last successful sync time per connector
     const lastSyncs = await db
@@ -345,14 +351,27 @@ export async function PATCH(request: Request) {
         return ApiErrors.conflict('Bridge tier cannot change after the first baseline');
       }
     } else {
-      await db.update(connectorConfigs)
-        .set({ ...updates, updatedAt: now })
-        .where(eq(connectorConfigs.id, id));
+      const applyUpdate = async () => {
+        await db.update(connectorConfigs)
+          .set({ ...updates, updatedAt: now })
+          .where(eq(connectorConfigs.id, id));
+      };
+      if (
+        existing?.type === 'github-issues'
+        && (updates.settings !== undefined || updates.syncedLists !== undefined)
+      ) {
+        await runWithConnectorOperationLease(id, 'retention', applyUpdate);
+      } else {
+        await applyUpdate();
+      }
     }
     await syncScheduler.reconcileScheduleFromDb(id);
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ConnectorOperationBusyError) {
+      return ApiErrors.conflict('Connector has an active operation');
+    }
     if (error instanceof TyrionBridgeUrlValidationError) {
       return ApiErrors.badRequest(error.message);
     }

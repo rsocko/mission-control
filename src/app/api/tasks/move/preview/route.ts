@@ -9,6 +9,7 @@ import { connectorRegistry } from '@/lib/connectors';
 import { syncScheduler } from '@/lib/sync';
 import type { ConnectorCapabilities } from '@/types';
 import { isPublicDemoMode } from '@/lib/public-demo';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 /**
  * POST /api/tasks/move/preview
@@ -100,13 +101,18 @@ export async function POST(request: Request) {
       )
       .orderBy(sourceLists.sortOrder, sourceLists.name);
 
-    const targetLists = targetListRows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      sourceId: row.sourceId,
-      groupId: row.groupId,
-      groupName: row.groupName,
-    }));
+    const targetLists = targetListRows
+      .filter(row => isSourceListSelected(targetConnector, row))
+      .map((row) => ({
+        id: row.id,
+        name: row.name,
+        sourceId: row.sourceId,
+        groupId: row.groupId,
+        groupName: row.groupName,
+      }));
+    if (targetSourceListId && !targetLists.some(list => list.sourceId === targetSourceListId)) {
+      return ApiErrors.badRequest('Target list is not selected for sync');
+    }
 
     const [schedule] = await db
       .select({

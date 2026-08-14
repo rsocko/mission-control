@@ -104,6 +104,7 @@ export interface SourceList {
   sortOrder?: number;
   icon?: string | null;
   iconColor?: string | null;
+  selectedForSync?: boolean;
 }
 
 export interface EnabledSource {

@@ -912,6 +912,11 @@ function SourceListSection({
                     <span className="inline-flex items-center gap-1.5 truncate">
                       {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
                       <span className="truncate">{sl.name}</span>
+                      {sl.selectedForSync === false && (
+                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-amber-400">
+                          Not syncing
+                        </span>
+                      )}
                     </span>
                     {sl.taskCount > 0 && (
                       <AnimatedCounter value={sl.taskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0" />
@@ -960,6 +965,11 @@ function SourceListSection({
                     <span className="inline-flex items-center gap-1.5 truncate">
                       {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
                       <span className="truncate">{sl.name}</span>
+                      {sl.selectedForSync === false && (
+                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-amber-400">
+                          Not syncing
+                        </span>
+                      )}
                     </span>
                     {sl.taskCount > 0 && (
                       <AnimatedCounter value={sl.taskCount} className="text-xs text-[var(--text-muted)] tabular-nums shrink-0" />

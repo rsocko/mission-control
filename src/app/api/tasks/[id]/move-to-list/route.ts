@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
-import { tasks, sourceLists } from '@/db/schema';
+import { connectorConfigs, tasks, sourceLists } from '@/db/schema';
 import { eq, and } from 'drizzle-orm';
 import { connectorRegistry } from '@/lib/connectors';
 import logger from '@/lib/logger';
@@ -9,6 +9,7 @@ import { ApiErrors } from '@/lib/api-error';
 import { resolveTaskEditPolicy } from '@/lib/tasks/edit-policy';
 import { isDemoMode } from '@/lib/mode';
 import { syncScheduler } from '@/lib/sync';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 /**
  * POST /api/tasks/[id]/move-to-list — Move a task to a different list within the same connector.
@@ -66,6 +67,12 @@ export async function POST(
     const targetList = targetListRows[0];
     if (targetList.connectorInstanceId !== task.connectorInstanceId) {
       return ApiErrors.badRequest('Target list must belong to the task source');
+    }
+    const [targetConnector] = await db.select().from(connectorConfigs)
+      .where(eq(connectorConfigs.id, targetList.connectorInstanceId))
+      .limit(1);
+    if (!targetConnector || !isSourceListSelected(targetConnector, targetList)) {
+      return ApiErrors.badRequest('Target list is not selected for sync');
     }
 
     let newSourceId: string | undefined;

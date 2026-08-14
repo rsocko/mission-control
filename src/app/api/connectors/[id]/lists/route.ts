@@ -4,6 +4,7 @@ import { connectorConfigs, sourceLists, tasks, listGroups } from '@/db/schema';
 import { asc, eq, and, sql, ne } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { ApiErrors } from '@/lib/api-error';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 export async function GET(
   _request: Request,
@@ -12,7 +13,12 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [connector] = await db.select({ id: connectorConfigs.id })
+    const [connector] = await db.select({
+      id: connectorConfigs.id,
+      type: connectorConfigs.type,
+      settings: connectorConfigs.settings,
+      syncedLists: connectorConfigs.syncedLists,
+    })
       .from(connectorConfigs)
       .where(eq(connectorConfigs.id, id))
       .limit(1);
@@ -38,14 +44,17 @@ export async function GET(
 
     const countMap = new Map(taskCounts.map(tc => [tc.sourceListId, tc.count]));
 
-    const listsWithCounts = lists.map(sl => ({
-      ...sl,
-      name: resolveSourceListDisplayName(sl),
-      taskCount: countMap.get(sl.sourceId) || 0,
-    }));
+    const listsWithCounts = lists
+      .filter(sl => isSourceListSelected(connector, sl))
+      .map(sl => ({
+        ...sl,
+        name: resolveSourceListDisplayName(sl),
+        taskCount: countMap.get(sl.sourceId) || 0,
+        selectedForSync: true,
+      }));
 
     // Fetch list groups referenced by these lists
-    const groupIds = [...new Set(lists.map(l => l.groupId).filter(Boolean))] as string[];
+    const groupIds = [...new Set(listsWithCounts.map(l => l.groupId).filter(Boolean))] as string[];
     let groups: { id: string; name: string; sortOrder: number }[] = [];
     if (groupIds.length > 0) {
       groups = await db.select({

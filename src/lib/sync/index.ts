@@ -708,19 +708,21 @@ export class SyncScheduler {
 
       // ─── PHASE 3: DISCOVER LISTS — Persist source lists locally ─────
       let discoveredLists: Array<{ id: string; name: string }> = [];
+      let deletionAuthoritative = isFullSync;
+      const deletionProtectedSourceListIds = new Set(getInaccessibleGitHubSourceListIds(connector));
       try {
         const remoteSourceLists = await withSyncPhaseTiming(
           connectorId,
           'list-discovery',
           async () => {
             const sourceLists = await connector.fetchSourceLists();
-            const inaccessibleSourceListIds = getInaccessibleGitHubSourceListIds(connector);
             await upsertSourceLists(
               connectorId,
               sourceLists,
               identityPhase,
               identityComparison,
-              inaccessibleSourceListIds,
+              deletionProtectedSourceListIds,
+              connector.type === 'github-issues',
             );
             return sourceLists;
           },
@@ -736,6 +738,14 @@ export class SyncScheduler {
           id: l.sourceId,
           name: resolveSourceListDisplayName(l),
         }));
+        if (connector.type === 'github-issues') {
+          const configuredSourceListIds = new Set(remoteSourceLists.map(list => list.sourceId));
+          for (const list of persistedLists) {
+            if (!configuredSourceListIds.has(list.sourceId)) {
+              deletionProtectedSourceListIds.add(list.sourceId);
+            }
+          }
+        }
 
         syncEventBus.emitSyncEvent({
           type: 'sync:lists-discovered',
@@ -746,6 +756,7 @@ export class SyncScheduler {
 
         await autoAssignFolderGroups(connector, remoteSourceLists);
       } catch (err) {
+        deletionAuthoritative = false;
         identityComparison?.markIneligible('source_list_observation_failed');
         errors.push(`Source list discovery failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -766,11 +777,12 @@ export class SyncScheduler {
           connectorId,
           connector,
           remoteTaskPages,
-          isFullSync,
+          deletionAuthoritative,
           discoveredLists,
           details,
           identityPhase,
           identityComparison,
+          deletionProtectedSourceListIds,
         ),
       );
       tasksAdded += upsertResult.added;

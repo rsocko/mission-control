@@ -411,6 +411,7 @@ describe('connector settings refresh before sync', () => {
       'shadow_write',
       undefined,
       expect.any(Set),
+      true,
     );
     expect(mocks.staleConnector.fetchSourceLists).not.toHaveBeenCalled();
     expect(mocks.staleConnector.fetchTasks).not.toHaveBeenCalled();

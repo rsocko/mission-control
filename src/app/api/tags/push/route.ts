@@ -7,6 +7,7 @@ import { syncScheduler } from '@/lib/sync';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { executeFencedGitHubSourceMutation } from '@/lib/external-identities';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 /**
  * POST /api/tags/push — Push a hub tag to a source connector as a label/category.
@@ -49,7 +50,12 @@ export async function POST(request: Request) {
 
     // Verify connector exists and is not deleted
     const [connectorRow] = await db
-      .select({ id: connectorConfigs.id, type: connectorConfigs.type })
+      .select({
+        id: connectorConfigs.id,
+        type: connectorConfigs.type,
+        settings: connectorConfigs.settings,
+        syncedLists: connectorConfigs.syncedLists,
+      })
       .from(connectorConfigs)
       .where(
         and(
@@ -61,6 +67,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: 'Connector not found or deleted' },
         { status: 404 },
+      );
+    }
+    if (!isSourceListSelected(connectorRow, list)) {
+      return NextResponse.json(
+        { error: 'sourceListId is not selected for sync' },
+        { status: 400 },
       );
     }
 

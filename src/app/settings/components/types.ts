@@ -1,7 +1,12 @@
 // Shared types and constants for settings components
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
+import {
+  isSourceListSelected,
+  normalizeSyncedLists,
+} from '@/lib/connectors/source-list-selection';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
+export { isSourceListSelected, normalizeSyncedLists };
 
 export interface ConnectorConfig {
   id: string;
@@ -34,6 +39,7 @@ export interface SourceList {
   hidden?: boolean;
   icon?: string | null;
   iconColor?: string | null;
+  selectedForSync?: boolean;
 }
 
 export interface ListGroup {
@@ -183,32 +189,4 @@ export const FINANCE_CONNECTOR_TYPES = new Set<string>(FINANCE_PROVIDER_ALIASES)
 
 export function isFinanceConnectorType(type: string) {
   return FINANCE_CONNECTOR_TYPES.has(type);
-}
-
-export function normalizeSyncedLists(syncedLists: unknown): string[] {
-  if (Array.isArray(syncedLists)) {
-    return syncedLists.filter((value): value is string => typeof value === 'string');
-  }
-
-  if (typeof syncedLists === 'string') {
-    try {
-      const parsed = JSON.parse(syncedLists);
-      return Array.isArray(parsed)
-        ? parsed.filter((value): value is string => typeof value === 'string')
-        : [];
-    } catch {
-      return [];
-    }
-  }
-
-  return [];
-}
-
-export function isSourceListSelected(connector: ConnectorConfig, sourceList: SourceList): boolean {
-  const syncedLists = connector.type === 'github-issues'
-    ? normalizeSyncedLists(connector.settings.repos)
-    : normalizeSyncedLists(connector.syncedLists);
-  return (connector.type !== 'github-issues' && syncedLists.length === 0)
-    || syncedLists.includes(sourceList.sourceId)
-    || syncedLists.includes(sourceList.id);
 }

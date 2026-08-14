@@ -42,6 +42,7 @@ import {
   resolveTaskEditPolicies,
   type ConnectorEditPolicyContext,
 } from '@/lib/tasks/edit-policy';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import { evaluateRulesForTasks } from '@/lib/rules';
 import {
   MAX_TASK_PAGE_SIZE,
@@ -738,10 +739,17 @@ export async function POST(request: Request) {
     let connectorInstanceId = isRemote
       ? requestedConnectorInstanceId ?? 'local'
       : 'local';
+    let requestedSourceList: {
+      id: string;
+      sourceId: string;
+      connectorInstanceId: string;
+    } | null = null;
     const shouldWriteThrough = Boolean(isRemote) && !isDemoMode();
 
     if (isRemote && sourceListId) {
       const matchingLists = await db.select({
+        id: sourceLists.id,
+        sourceId: sourceLists.sourceId,
         connectorInstanceId: sourceLists.connectorInstanceId,
       })
         .from(sourceLists)
@@ -758,6 +766,7 @@ export async function POST(request: Request) {
       if (!requestedConnectorInstanceId && matchingLists.length > 1) {
         return ApiErrors.badRequest('connectorInstanceId is required for an ambiguous sourceListId');
       }
+      requestedSourceList = matchingLists[0];
       connectorInstanceId = matchingLists[0].connectorInstanceId;
     }
 
@@ -784,6 +793,8 @@ export async function POST(request: Request) {
       const [selectedConnector] = await db.select({
         enabled: connectorConfigs.enabled,
         type: connectorConfigs.type,
+        settings: connectorConfigs.settings,
+        syncedLists: connectorConfigs.syncedLists,
       })
         .from(connectorConfigs)
         .where(and(
@@ -795,6 +806,9 @@ export async function POST(request: Request) {
       }
       if (!selectedConnector.enabled) {
         return ApiErrors.forbidden('Connector is disabled');
+      }
+      if (requestedSourceList && !isSourceListSelected(selectedConnector, requestedSourceList)) {
+        return ApiErrors.badRequest('sourceListId is not selected for sync');
       }
       const caps = await getConnectorCapabilities(connectorInstanceId);
       if (

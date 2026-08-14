@@ -6,6 +6,7 @@ import {
   myDayItems,
   projectAutoIncludeExclusions,
   projectPhaseItems,
+  sourceLists,
   taskDependencies,
   taskProjects,
   taskSchedules,
@@ -13,9 +14,10 @@ import {
   tasks,
   weeklyOneThing,
 } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { and, eq, or } from 'drizzle-orm';
 import { dbLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 /**
  * POST /api/tasks/[id]/move — Move a task to a different source/connector
@@ -52,6 +54,19 @@ export async function POST(
       );
     }
     const targetConnectorType = connectorConfig[0].type;
+    let resolvedTargetListId: string | undefined;
+    if (targetListId) {
+      const [targetList] = await db.select().from(sourceLists)
+        .where(and(
+          eq(sourceLists.connectorInstanceId, targetConnectorInstanceId),
+          or(eq(sourceLists.id, targetListId), eq(sourceLists.sourceId, targetListId)),
+        ))
+        .limit(1);
+      if (!targetList || !isSourceListSelected(connectorConfig[0], targetList)) {
+        return ApiErrors.badRequest('Target list is not selected for sync');
+      }
+      resolvedTargetListId = targetList.sourceId;
+    }
 
     // Fetch the source task
     const sourceTask = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
@@ -91,7 +106,7 @@ export async function POST(
           completedAt: src.completedAt,
           depth: 0,
           isChecklistItem: false,
-          sourceListId: targetListId || undefined,
+          sourceListId: resolvedTargetListId,
           metadata: '{}',
           syncStatus: 'pending_push',
           lastSyncedAt: now,

@@ -350,6 +350,25 @@ export default function SettingsPage() {
     }
   }
 
+  async function purgeRetainedSourceList(connectorId: string, sourceListId: string) {
+    const response = await fetch(
+      `/api/connectors/${encodeURIComponent(connectorId)}/retained-lists/${encodeURIComponent(sourceListId)}`,
+      { method: 'DELETE' },
+    );
+    const data = await response.json().catch(() => null) as { error?: string; deletedTasks?: number } | null;
+    if (!response.ok) {
+      throw new Error(data?.error || 'Failed to delete retained repository items');
+    }
+
+    await fetchData();
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
+      queryClient.invalidateQueries({ queryKey: ['myDay'] }),
+    ]);
+    const { toast } = await import('sonner');
+    toast.success(`${data?.deletedTasks ?? 0} retained item${data?.deletedTasks === 1 ? '' : 's'} deleted from Mission Control`);
+  }
+
   // Optimistically update a source list's name in local state (called by ListGroupsSection after rename)
   // Returns a cleanup function to clear the pending rename guard once the API has committed.
   const handleRenameList = useCallback((sourceListId: string, newName: string) => {
@@ -572,6 +591,7 @@ export default function SettingsPage() {
                   onSync={triggerSync}
                   onDelete={deleteConnector}
                   onUpdate={updateConnector}
+                  onPurgeSourceList={purgeRetainedSourceList}
                   onAdd={() => setShowAddModal(true)}
                   selectedConnector={selectedConnector}
                   onSelect={setSelectedConnector}

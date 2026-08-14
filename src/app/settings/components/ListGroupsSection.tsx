@@ -26,7 +26,12 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { settingsLogger } from '@/lib/client-logger';
-import type { ConnectorConfig, SourceList, ListGroup } from './types';
+import {
+  isSourceListSelected,
+  type ConnectorConfig,
+  type SourceList,
+  type ListGroup,
+} from './types';
 import { getConnectorDisplayName } from '@/lib/connectors/display-name';
 import { runSourceListRenameRequest } from '../source-list-renames';
 
@@ -64,7 +69,15 @@ function ListGroupsSection({
   const [localUngroupedOrder, setLocalUngroupedOrder] = useState<string[]>([]);
   const [collapseAllVersion, setCollapseAllVersion] = useState<{ version: number; collapsed: boolean }>({ version: 1, collapsed: true });
 
+  const connectorById = new Map(connectors.map((connector) => [connector.id, connector]));
   const connectorNameById = new Map(connectors.map((connector) => [connector.id, getConnectorDisplayName(connector)]));
+  const sourceListsWithSelection = sourceLists.map((sourceList) => {
+    const connector = connectorById.get(sourceList.connectorInstanceId);
+    return {
+      ...sourceList,
+      selectedForSync: connector ? isSourceListSelected(connector, sourceList) : false,
+    };
+  });
   const sortedGroups = [...listGroups].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
 
   // Keep local group order in sync with props
@@ -76,7 +89,7 @@ function ListGroupsSection({
     ? localGroupOrder.map((id) => sortedGroups.find((g) => g.id === id)).filter(Boolean) as ListGroup[]
     : sortedGroups;
 
-   const sortedSourceLists = [...sourceLists].sort((a, b) => {
+  const sortedSourceLists = [...sourceListsWithSelection].sort((a, b) => {
     const connectorNameCompare = (connectorNameById.get(a.connectorInstanceId) || a.connectorInstanceId)
       .localeCompare(connectorNameById.get(b.connectorInstanceId) || b.connectorInstanceId);
 
@@ -86,14 +99,14 @@ function ListGroupsSection({
   });
 
   // Ungrouped lists sorted by sortOrder then name
-  const ungroupedVisible = sourceLists
+  const ungroupedVisible = sourceListsWithSelection
     .filter((sl) => !sl.groupId && !sl.hidden)
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.name.localeCompare(b.name));
 
   // Keep local ungrouped order in sync
   useEffect(() => {
     setLocalUngroupedOrder(ungroupedVisible.map((sl) => sl.id));
-  }, [sourceLists]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sourceLists, connectors]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const orderedUngrouped = localUngroupedOrder.length > 0
     ? localUngroupedOrder.map((id) => ungroupedVisible.find((sl) => sl.id === id)).filter(Boolean) as SourceList[]
@@ -298,7 +311,7 @@ function ListGroupsSection({
                         <SortableGroupCard
                           key={group.id}
                           group={group}
-                          assignedLists={sourceLists.filter((sourceList) => sourceList.groupId === group.id)}
+                          assignedLists={sourceListsWithSelection.filter((sourceList) => sourceList.groupId === group.id)}
                           connectorNameById={connectorNameById}
                           onUpdateGroup={onUpdateGroup}
                           onDeleteGroup={onDeleteGroup}
@@ -347,14 +360,14 @@ function ListGroupsSection({
                 </div>
 
                 {/* Hidden lists disclosure */}
-                {sourceLists.filter((sl) => sl.hidden).length > 0 && (
+                {sourceListsWithSelection.filter((sl) => sl.hidden).length > 0 && (
                   <details className="mt-4">
                     <summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-[var(--text-muted)] [&::-webkit-details-marker]:hidden">
                       <EyeOff size={12} />
-                      {sourceLists.filter((sl) => sl.hidden).length} hidden list{sourceLists.filter((sl) => sl.hidden).length === 1 ? '' : 's'}
+                      {sourceListsWithSelection.filter((sl) => sl.hidden).length} hidden list{sourceListsWithSelection.filter((sl) => sl.hidden).length === 1 ? '' : 's'}
                     </summary>
                     <div className="mt-2 space-y-1.5">
-                      {sourceLists
+                      {sourceListsWithSelection
                         .filter((sl) => sl.hidden)
                         .sort((a, b) => a.name.localeCompare(b.name))
                         .map((sourceList) => (
@@ -364,6 +377,7 @@ function ListGroupsSection({
                                 <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
                               )}
                               <p className="truncate text-sm text-[var(--text-muted)]">{sourceList.name}</p>
+                              <SourceSyncBadge sourceList={sourceList} />
                             </div>
                             <button
                               type="button"
@@ -532,6 +546,7 @@ function AllSourceListItem({
                   <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
                 )}
                 <p className="truncate text-sm font-medium text-[var(--text-primary)]">{sourceList.name}</p>
+                <SourceSyncBadge sourceList={sourceList} />
                 <button
                   type="button"
                   onClick={() => { setEditName(sourceList.name); setEditing(true); }}
@@ -735,6 +750,7 @@ function SortableUngroupedItem({
                 <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
               )}
               <p className="truncate text-sm text-[var(--text-primary)]">{sourceList.name}</p>
+              <SourceSyncBadge sourceList={sourceList} />
               <button
                 type="button"
                 onClick={() => { setEditName(sourceList.name); setEditing(true); }}
@@ -1140,6 +1156,7 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
                 <IconRenderer value={sourceList.icon} size={16} color={sourceList.iconColor || undefined} />
             )}
             <p className="truncate text-sm text-[var(--text-primary)]">{sourceList.name}</p>
+            <SourceSyncBadge sourceList={sourceList} />
             <button
               type="button"
               onClick={() => { setEditName(sourceList.name); setEditing(true); }}
@@ -1161,6 +1178,14 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
   );
 }
 
+function SourceSyncBadge({ sourceList }: { sourceList: SourceList }) {
+  if (sourceList.selectedForSync !== false) return null;
+  return (
+    <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.06em] text-amber-400">
+      Not syncing
+    </span>
+  );
+}
 
 
 export { ListGroupsSection, EmojiPickerButton };

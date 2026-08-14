@@ -89,7 +89,7 @@ function asSettingsRecord(settings: ConnectorConfig['settings']): Record<string,
 // --- Connectors Section ----------------------------------------------------
 
 function ConnectorsSection({
-  connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onAdd, selectedConnector, onSelect,
+  connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
   deletedConnectors, onRestore, onPermanentDelete,
 }: {
   connectors: ConnectorConfig[];
@@ -100,6 +100,7 @@ function ConnectorsSection({
   onSync: (id?: string) => void;
   onDelete: (id: string) => void;
   onUpdate: (id: string, updates: Partial<ConnectorConfig>) => Promise<void>;
+  onPurgeSourceList: (connectorId: string, sourceListId: string) => Promise<void>;
   onAdd: () => void;
   selectedConnector: string | null;
   onSelect: (id: string | null) => void;
@@ -229,6 +230,7 @@ function ConnectorsSection({
                         connector={conn}
                         sourceLists={connSourceLists}
                         onUpdate={onUpdate}
+                        onPurgeSourceList={onPurgeSourceList}
                         onDelete={onDelete}
                         confirmDelete={confirmDelete}
                         setConfirmDelete={setConfirmDelete}
@@ -649,6 +651,7 @@ function ConnectorEditPanel(props: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
   onUpdate: (id: string, updates: Partial<ConnectorConfig>) => Promise<void>;
+  onPurgeSourceList: (connectorId: string, sourceListId: string) => Promise<void>;
   onDelete: (id: string) => void;
   confirmDelete: string | null;
   setConfirmDelete: (id: string | null) => void;
@@ -682,11 +685,12 @@ function ConnectorEditPanel(props: {
 }
 
 function DefaultConnectorEditPanel({
-  connector, sourceLists, onUpdate, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh,
+  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh,
 }: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
   onUpdate: (id: string, updates: Partial<ConnectorConfig>) => Promise<void>;
+  onPurgeSourceList: (connectorId: string, sourceListId: string) => Promise<void>;
   onDelete: (id: string) => void;
   confirmDelete: string | null;
   setConfirmDelete: (id: string | null) => void;
@@ -694,6 +698,8 @@ function DefaultConnectorEditPanel({
   onHealthRefresh: (id: string) => void;
 }) {
   const [editSyncMode, setEditSyncMode] = useState(connector.syncMode);
+  const [confirmPurgeSourceList, setConfirmPurgeSourceList] = useState<string | null>(null);
+  const [purgingSourceList, setPurgingSourceList] = useState<string | null>(null);
   const [editInterval, setEditInterval] = useState(connector.pollIntervalMinutes || 5);
   const [editCaps, setEditCaps] = useState<Record<string, boolean>>(connector.capabilities || {});
   const [editName, setEditName] = useState(getConnectorDisplayName(connector));
@@ -1127,9 +1133,54 @@ function DefaultConnectorEditPanel({
                         <div className="mt-1 flex items-center gap-2 text-xs text-[var(--text-muted)]">
                           <span className="tabular-nums">{sl.taskCount} items</span>
                           <span className={selectedForSync ? 'text-emerald-400' : 'text-[var(--text-muted)]'}>
-                            {selectedForSync ? 'Selected for sync' : 'Not selected'}
+                            {selectedForSync ? 'Selected for sync' : 'Not syncing'}
                           </span>
                         </div>
+                        {!selectedForSync && isGitHubConnector && (
+                          <div className="mt-2">
+                            {confirmPurgeSourceList === sl.id ? (
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs text-red-400">Delete these items from Mission Control only?</span>
+                                <button
+                                  type="button"
+                                  disabled={purgingSourceList === sl.id}
+                                  onClick={async () => {
+                                    setPurgingSourceList(sl.id);
+                                    setSaveError('');
+                                    try {
+                                      await onPurgeSourceList(connector.id, sl.id);
+                                      setConfirmPurgeSourceList(null);
+                                    } catch (error) {
+                                      setSaveError(error instanceof Error ? error.message : 'Failed to delete retained items');
+                                    } finally {
+                                      setPurgingSourceList(null);
+                                    }
+                                  }}
+                                  className="inline-flex items-center gap-1 rounded bg-red-900/40 px-2 py-1 text-xs text-red-300 hover:bg-red-900/60 disabled:opacity-50"
+                                >
+                                  {purgingSourceList === sl.id ? <Loader2 size={10} className="animate-spin" /> : <Trash2 size={10} />}
+                                  Delete from MC
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setConfirmPurgeSourceList(null)}
+                                  className="rounded px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmPurgeSourceList(sl.id)}
+                                className="inline-flex items-center gap-1 text-xs text-red-400 hover:text-red-300"
+                              >
+                                <Trash2 size={10} />
+                                Delete retained items from MC
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>

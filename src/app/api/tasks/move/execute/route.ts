@@ -43,6 +43,7 @@ import {
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
 import { refreshGitHubIssueMetadata } from '@/lib/connectors/github-issues/issue-transformer';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 
 type SourceAction = 'move' | 'copy';
 type SubtaskStrategy =
@@ -255,6 +256,15 @@ export async function POST(request: Request) {
         ),
       )
       .limit(1);
+    if (
+      targetSourceListId
+      && (!targetListRow || !isSourceListSelected(targetConnectorRow, targetListRow))
+    ) {
+      return failureResponse(
+        ApiErrors.badRequest('Target list is not selected for sync'),
+        'destination_list_not_selected',
+      );
+    }
     const targetListName = targetListRow?.name ?? targetSourceListId;
 
     // ── Fetch task tags ──────────────────────────────────────────────────────

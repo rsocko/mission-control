@@ -20,7 +20,7 @@ function saveRecentMoveTarget(id: string) {
 }
 
 interface BulkMoveDropdownProps {
-  sourceLists: Array<{ id: string; sourceId: string; name: string }>;
+  sourceLists: Array<{ id: string; sourceId: string; name: string; selectedForSync?: boolean }>;
   onMove: (targetListId: string) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
@@ -49,16 +49,17 @@ export function BulkMoveDropdown({ sourceLists, onMove, disabled = false, disabl
 
   const recentIds = getRecentMoveTargets();
   const isSearching = search.length > 0;
+  const availableSourceLists = sourceLists.filter((list) => list.selectedForSync !== false);
 
   const searchResults = isSearching
-    ? sourceLists.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
+    ? availableSourceLists.filter((l) => l.name.toLowerCase().includes(search.toLowerCase()))
     : [];
 
   const recentLists = !isSearching
-    ? recentIds.map((id) => sourceLists.find((l) => l.sourceId === id)).filter(Boolean) as typeof sourceLists
+    ? recentIds.map((id) => availableSourceLists.find((l) => l.sourceId === id)).filter(Boolean) as typeof sourceLists
     : [];
   const restLists = !isSearching
-    ? sourceLists.filter((l) => !recentIds.includes(l.sourceId))
+    ? availableSourceLists.filter((l) => !recentIds.includes(l.sourceId))
     : [];
 
   function handleSelect(list: { id: string; sourceId: string }) {

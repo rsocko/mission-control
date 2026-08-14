@@ -38,6 +38,7 @@ export interface SourceItem {
   connectorType: string;
   /** For lists, the connector instance that owns it */
   connectorInstanceId?: string;
+  selectedForSync?: boolean;
 }
 
 export interface KanbanColumn {

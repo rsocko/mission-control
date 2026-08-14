@@ -17,6 +17,7 @@ interface SourceListResponseItem {
   sourceId: string;
   name: string;
   connectorInstanceId: string;
+  selectedForSync?: boolean;
 }
 
 export function useKanbanSources() {
@@ -57,6 +58,7 @@ export function useKanbanSources() {
             type: 'list',
             connectorType: parentConnector?.type || '',
             connectorInstanceId: list.connectorInstanceId,
+            selectedForSync: list.selectedForSync,
           });
         }
 

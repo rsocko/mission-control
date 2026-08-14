@@ -41,6 +41,7 @@ function TagsSection() {
     sourceId: string;
     name: string;
     type: string;
+    selectedForSync?: boolean;
   };
 
   type ConnectorInfo = {
@@ -133,7 +134,7 @@ function TagsSection() {
   const pushableSourceLists = useMemo(() => {
     return connectorSourceLists.filter((sl) => {
       const conn = connectors.find((c) => c.id === sl.connectorInstanceId);
-      return conn?.capabilities?.tagWriteBack;
+      return sl.selectedForSync !== false && conn?.capabilities?.tagWriteBack;
     });
   }, [connectorSourceLists, connectors]);
 

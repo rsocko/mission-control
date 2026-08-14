@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DefaultConnectorEditPanel } from '@/app/settings/components/ConnectorsSection';
+import { ListGroupsSection } from '@/app/settings/components/ListGroupsSection';
 import { isSourceListSelected, type ConnectorConfig, type SourceList } from '@/app/settings/components/types';
 
 const connector: ConnectorConfig = {
@@ -48,6 +49,7 @@ describe('GitHub connector settings', () => {
         connector={connector}
         sourceLists={[]}
         onUpdate={onUpdate}
+        onPurgeSourceList={vi.fn()}
         onDelete={vi.fn()}
         confirmDelete={null}
         setConfirmDelete={vi.fn()}
@@ -84,6 +86,7 @@ describe('GitHub connector settings', () => {
         connector={connector}
         sourceLists={[]}
         onUpdate={onUpdate}
+        onPurgeSourceList={vi.fn()}
         onDelete={vi.fn()}
         confirmDelete={null}
         setConfirmDelete={vi.fn()}
@@ -125,5 +128,91 @@ describe('GitHub connector settings', () => {
       syncedLists: [],
     }, sourceList)).toBe(false);
     expect(isSourceListSelected({ ...connector, syncedLists: [] }, sourceList)).toBe(true);
+  });
+
+  it('labels retained repositories on the list groups screen', () => {
+    const sourceLists: SourceList[] = [
+      {
+        id: 'github-1:octo/existing',
+        connectorInstanceId: connector.id,
+        sourceId: 'octo/existing',
+        name: 'Active repository',
+        type: 'repo',
+        taskCount: 1,
+        lastSyncedAt: '2026-08-08T00:00:00.000Z',
+        groupId: null,
+      },
+      {
+        id: 'github-1:octo/removed',
+        connectorInstanceId: connector.id,
+        sourceId: 'octo/removed',
+        name: 'Removed repository',
+        type: 'repo',
+        taskCount: 2,
+        lastSyncedAt: '2026-08-08T00:00:00.000Z',
+        groupId: null,
+      },
+    ];
+
+    render(
+      <ListGroupsSection
+        connectors={[connector]}
+        sourceLists={sourceLists}
+        listGroups={[]}
+        loading={false}
+        onCreateGroup={vi.fn()}
+        onUpdateGroup={vi.fn()}
+        onDeleteGroup={vi.fn()}
+        onAssignList={vi.fn()}
+        onRefresh={vi.fn()}
+        onRenameList={vi.fn(() => vi.fn())}
+      />,
+    );
+
+    expect(screen.getAllByText('Active repository')).toHaveLength(2);
+    expect(screen.getAllByText('Removed repository')).toHaveLength(2);
+    expect(screen.getAllByText('Not syncing')).toHaveLength(2);
+    expect(screen.getByText('All Lists (2)')).toBeInTheDocument();
+  });
+
+  it('offers an MC-only purge for a retained repository', async () => {
+    const onPurgeSourceList = vi.fn().mockResolvedValue(undefined);
+    const retainedConnector = {
+      ...connector,
+      settings: { ...connector.settings, repos: [] },
+      syncedLists: [],
+    };
+    const retainedList: SourceList = {
+      id: 'github-1:octo/removed',
+      connectorInstanceId: connector.id,
+      sourceId: 'octo/removed',
+      name: 'Removed repository',
+      type: 'repo',
+      taskCount: 2,
+      lastSyncedAt: '2026-08-08T00:00:00.000Z',
+      groupId: null,
+    };
+
+    render(
+      <DefaultConnectorEditPanel
+        connector={retainedConnector}
+        sourceLists={[retainedList]}
+        onUpdate={vi.fn()}
+        onPurgeSourceList={onPurgeSourceList}
+        onDelete={vi.fn()}
+        confirmDelete={null}
+        setConfirmDelete={vi.fn()}
+        onHealthRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Not syncing')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete retained items from MC' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete from MC' }));
+
+    await waitFor(() => expect(onPurgeSourceList).toHaveBeenCalledWith(
+      connector.id,
+      retainedList.id,
+    ));
   });
 });

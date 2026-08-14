@@ -121,6 +121,11 @@ export function SourcesDropdown({
                             />
                             <List size={14} className="text-[var(--text-muted)] flex-shrink-0" />
                             <span className="truncate">{list.name}</span>
+                            {list.selectedForSync === false && (
+                              <span className="ml-auto shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-amber-400">
+                                Not syncing
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>

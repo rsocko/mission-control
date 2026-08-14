@@ -32,6 +32,7 @@ export async function upsertSourceLists(
   identityPhase: GitHubIdentityPhase | null = null,
   identityComparison?: GitHubIdentityComparisonRuntime,
   inaccessibleSourceListIds: ReadonlySet<string> = new Set(),
+  preserveStaleLists = false,
 ): Promise<Map<string, string>> {
   const now = new Date().toISOString();
   const discoveredListIds = new Set<string>();
@@ -148,6 +149,7 @@ export async function upsertSourceLists(
   // Remove stale lists (use pre-fetched data)
   for (const row of existingRows) {
     if (!discoveredListIds.has(row.id)) {
+      if (preserveStaleLists) continue;
       if (inaccessibleSourceListIds.has(row.sourceId)) {
         identityComparison?.observeResolvedBatch('deletion', [{
           candidateKey: `source_list:${row.sourceId}`,

@@ -25,6 +25,7 @@ beforeAll(async () => {
     type: 'github-issues',
     name: 'GitHub',
     capabilities: {},
+    settings: { repos: ['repo-1'] },
     credentials: { accessToken: 'invented-github-token' },
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
@@ -108,6 +109,7 @@ describe('GET /api/connectors list queries', () => {
       expect.objectContaining({
         id: 'source-list-1',
         taskCount: 1,
+        selectedForSync: true,
       }),
     ]);
   });

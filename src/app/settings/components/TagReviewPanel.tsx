@@ -57,6 +57,7 @@ interface SourceListInfo {
   sourceId: string;
   name: string;
   type: string;
+  selectedForSync?: boolean;
 }
 
 interface ConnectorInfo {
@@ -231,7 +232,7 @@ function TagReviewPanel() {
   const pushableSourceLists = useMemo(() =>
     connectorSourceLists.filter(sl => {
       const conn = connectors.find(c => c.id === sl.connectorInstanceId);
-      return conn?.capabilities?.tagWriteBack;
+      return sl.selectedForSync !== false && conn?.capabilities?.tagWriteBack;
     }),
   [connectorSourceLists, connectors]);
 

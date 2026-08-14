@@ -3,11 +3,19 @@
 import { motion } from 'motion/react';
 import { Loader2 } from 'lucide-react';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
-import { ToolCard } from '@/components/ai/ToolCard';
+import { ToolCard, type ToolApprovalHandler } from '@/components/ai/ToolCard';
 import { isTextLikePart, isToolPart, shouldHidePart, type ChatMessage } from '@/lib/ai/chatMessageFactory';
 import { fadeSlideUp } from '@/lib/motion';
 
-export function ChatMessageRow({ message, loading }: { message: ChatMessage; loading: boolean }) {
+export function ChatMessageRow({
+  message,
+  loading,
+  onApprovalResponse,
+}: {
+  message: ChatMessage;
+  loading: boolean;
+  onApprovalResponse?: ToolApprovalHandler;
+}) {
   const visibleParts = message.parts.filter(part => !shouldHidePart(part));
   const showThinking = message.role === 'assistant' && loading && visibleParts.length === 0;
   const hasToolParts = visibleParts.some(isToolPart);
@@ -34,7 +42,13 @@ export function ChatMessageRow({ message, loading }: { message: ChatMessage; loa
             );
           }
 
-          return isToolPart(part) ? <ToolCard key={`${message.id}-tool-${index}`} part={part} /> : null;
+          return isToolPart(part) ? (
+            <ToolCard
+              key={`${message.id}-tool-${index}`}
+              part={part}
+              onApprovalResponse={onApprovalResponse}
+            />
+          ) : null;
         })}
 
         {showThinking ? (

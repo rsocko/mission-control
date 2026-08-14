@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { getAIRouteOutcome, getResolvedAIConfig, streamChat } from '@/lib/ai';
 import { aiLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
@@ -11,6 +12,55 @@ import {
   getAIOverloadDetails,
   type AIAdmission,
 } from '@/lib/ai/admission-controller';
+import {
+  convertToModelMessages,
+  getToolName,
+  InvalidToolApprovalSignatureError,
+  isToolUIPart,
+  safeValidateUIMessages,
+  type InferUITools,
+  type ModelMessage,
+  type UIMessage,
+} from 'ai';
+import { createHoustonTools } from '@/lib/ai/tools';
+import {
+  getHoustonToolApprovalSecret,
+  HoustonToolApprovalConfigurationError,
+  verifyHoustonToolApprovalSignature,
+} from '@/lib/ai/tool-approval-config';
+import {
+  recordHoustonFinanceApprovalAudit,
+} from '@/lib/finance/houston-tools';
+import {
+  assignFinanceTransactionKidInputSchema,
+  updateFinanceTransactionCategoryInputSchema,
+} from '@/lib/finance/houston-contracts';
+
+const FINANCE_MUTATION_TOOLS = new Set([
+  'assignFinanceTransactionKid',
+  'updateFinanceTransactionCategory',
+]);
+type HoustonTools = ReturnType<typeof createHoustonTools>;
+type HoustonUIMessage = UIMessage<unknown, never, InferUITools<HoustonTools>>;
+
+export class InvalidAIChatMessagesError extends Error {
+  constructor() {
+    super('The chat message history is invalid.');
+    this.name = 'InvalidAIChatMessagesError';
+  }
+}
+
+class InvalidFinanceApprovalError extends InvalidAIChatMessagesError {
+  constructor(
+    readonly toolName: string,
+    readonly toolCallId: string,
+    readonly decision: 'approve' | 'deny',
+    readonly toolInput: unknown,
+  ) {
+    super();
+    this.name = 'InvalidFinanceApprovalError';
+  }
+}
 
 /**
  * POST /api/ai — Chat with the AI assistant
@@ -26,6 +76,7 @@ export async function POST(request: Request) {
     );
   }
   let chatAdmission: AIAdmission | null = null;
+  const requestCorrelationId = randomUUID();
   let operationFinished = false;
   const finishOperation = () => {
     if (operationFinished) return;
@@ -65,14 +116,51 @@ export async function POST(request: Request) {
       chatAdmission = await acquireOllamaAdmissionWithTimeout(operationSignal);
     }
 
-    const { result, context } = await streamChat(normalizeMessages(messages), {
+    const normalized = await normalizeMessages(messages);
+    const approvalSecret = getHoustonToolApprovalSecret();
+    const deniedCalls = financeApprovalParts(normalized.uiMessages, false);
+    const approvedCalls = financeApprovalParts(normalized.uiMessages, true);
+    const recordDeniedApprovals = () => {
+      for (const denied of deniedCalls) {
+        recordHoustonFinanceApprovalAudit({
+          correlationId: requestCorrelationId,
+          toolName: denied.toolName,
+          toolCallId: denied.toolCallId,
+          decision: 'deny',
+          outcome: 'denied',
+          durationMs: 0,
+          approvalSecret,
+          toolInput: denied.toolInput,
+        });
+      }
+    };
+    recordDeniedApprovals();
+    const { result, context } = await streamChat(normalized.modelMessages, {
       contextPrefix: aiContext.contextPrefix,
       sources: aiContext.sources,
       abortSignal: operationSignal,
       admission: chatAdmission ?? undefined,
       onFinish: finishOperation,
       onAbort: finishOperation,
-      onError: finishOperation,
+      onError: (error) => {
+        if (InvalidToolApprovalSignatureError.isInstance(error)) {
+          for (const responded of approvedCalls) {
+            recordHoustonFinanceApprovalAudit({
+              correlationId: requestCorrelationId,
+              toolName: responded.toolName,
+              toolCallId: responded.toolCallId,
+              decision: 'approve',
+              outcome: 'invalid-approval',
+              durationMs: 0,
+              approvalSecret,
+              toolInput: responded.toolInput,
+            });
+          }
+        }
+        finishOperation();
+      },
+      financeMutationsAllowed: deniedCalls.length === 0 && approvedCalls.length === 0,
+      correlationId: requestCorrelationId,
     });
     return result.toUIMessageStreamResponse({
       headers: {
@@ -87,6 +175,25 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     finishOperation();
+    if (error instanceof InvalidFinanceApprovalError) {
+      recordHoustonFinanceApprovalAudit({
+        correlationId: requestCorrelationId,
+        toolName: error.toolName,
+        toolCallId: error.toolCallId,
+        decision: error.decision,
+        outcome: 'invalid-approval',
+        durationMs: 0,
+        approvalSecret: getHoustonToolApprovalSecret(),
+        toolInput: error.toolInput,
+      });
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof InvalidAIChatMessagesError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof HoustonToolApprovalConfigurationError) {
+      return Response.json({ error: error.message }, { status: 503 });
+    }
     const overload = getAIOverloadDetails(error);
     if (overload) {
       aiLogger.warn({ code: overload.code }, 'AI chat capacity exhausted');
@@ -138,61 +245,92 @@ async function buildContextPrefix(): Promise<{ contextPrefix?: string; sources: 
   };
 }
 
-function normalizeMessages(messages: unknown[]): Array<{ role: 'user' | 'assistant'; content: string }> {
-  return messages.flatMap(message => {
-    if (!message || typeof message !== 'object') return [];
+export async function normalizeMessages(messages: unknown): Promise<{
+  uiMessages: HoustonUIMessage[];
+  modelMessages: ModelMessage[];
+}> {
+  const approvalSecret = getHoustonToolApprovalSecret();
+  const tools = createHoustonTools(approvalSecret);
+  const validated = await safeValidateUIMessages<HoustonUIMessage>({ messages, tools });
+  if (!validated.success || validated.data.some(message =>
+    message.role !== 'user'
+    && message.role !== 'assistant'
+    || message.parts.some(part => part.type === 'dynamic-tool')
+  )) {
+    throw new InvalidAIChatMessagesError();
+  }
+  validateFinanceApprovalParts(validated.data, approvalSecret);
+  return {
+    uiMessages: validated.data,
+    modelMessages: await convertToModelMessages(validated.data, { tools }),
+  };
+}
 
-    const role = (message as { role?: string }).role === 'assistant' ? 'assistant' : 'user';
-
-    if (typeof (message as { content?: unknown }).content === 'string') {
-      return [{ role, content: (message as { content: string }).content }];
+function validateFinanceApprovalParts(
+  messages: HoustonUIMessage[],
+  approvalSecret: string,
+): void {
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (!isToolUIPart(part)) continue;
+      const toolName = getToolName(part);
+      if (!FINANCE_MUTATION_TOOLS.has(toolName)) continue;
+      const parsed = toolName === 'assignFinanceTransactionKid'
+        ? assignFinanceTransactionKidInputSchema.safeParse(part.input)
+        : updateFinanceTransactionCategoryInputSchema.safeParse(part.input);
+      const approval = 'approval' in part ? part.approval : undefined;
+      if (!parsed.success || !approval) throw new InvalidAIChatMessagesError();
+      const decision = 'approved' in approval && approval.approved === false
+        ? 'deny'
+        : 'approve';
+      if (
+        typeof approval.signature !== 'string'
+        || !verifyHoustonToolApprovalSignature({
+          secret: approvalSecret,
+          signature: approval.signature,
+          approvalId: approval.id,
+          toolCallId: part.toolCallId,
+          toolName,
+          toolInput: parsed.data,
+        })
+      ) {
+        throw new InvalidFinanceApprovalError(
+          toolName,
+          part.toolCallId,
+          decision,
+          parsed.data,
+        );
+      }
     }
-
-    const parts = Array.isArray((message as { parts?: unknown[] }).parts)
-      ? (message as { parts: unknown[] }).parts
-      : [];
-
-    const content = parts
-      .map(part => normalizePart(part))
-      .filter(Boolean)
-      .join('\n\n')
-      .trim();
-
-    return content ? [{ role, content }] : [];
-  });
+  }
 }
 
-function normalizePart(part: unknown): string {
-  if (!part || typeof part !== 'object') return '';
-
-  if ((part as { type?: string }).type === 'text' && typeof (part as { text?: unknown }).text === 'string') {
-    return (part as { text: string }).text;
+function financeApprovalParts(
+  messages: HoustonUIMessage[],
+  approved: boolean,
+): Array<{ toolName: string; toolCallId: string; toolInput: unknown }> {
+  const calls: Array<{
+    toolName: string;
+    toolCallId: string;
+    toolInput: unknown;
+  }> = [];
+  const latestMessage = messages.at(-1);
+  if (!latestMessage) return calls;
+  for (const part of latestMessage.parts) {
+    if (
+      isToolUIPart(part)
+      && part.state === 'approval-responded'
+      && part.approval.approved === approved
+    ) {
+      const toolName = getToolName(part);
+      if (FINANCE_MUTATION_TOOLS.has(toolName)) {
+        calls.push({
+          toolName,
+          toolCallId: part.toolCallId,
+          toolInput: part.input,
+        });
+      }
+    }
   }
-
-  const type = (part as { type?: string }).type;
-  if (!type || (!type.startsWith('tool-') && type !== 'dynamic-tool')) {
-    return '';
-  }
-
-  const toolName = type === 'dynamic-tool'
-    ? String((part as { toolName?: unknown }).toolName || 'tool')
-    : type.replace('tool-', '');
-
-  const input = (part as { input?: unknown }).input;
-  const output = (part as { output?: unknown }).output;
-  const errorText = (part as { errorText?: unknown }).errorText;
-
-  const lines = [`[Tool ${toolName}]`];
-  if (input !== undefined) lines.push(`Input: ${safeStringify(input)}`);
-  if (output !== undefined) lines.push(`Result: ${safeStringify(output)}`);
-  if (typeof errorText === 'string' && errorText) lines.push(`Error: ${errorText}`);
-  return lines.join('\n');
-}
-
-function safeStringify(value: unknown) {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return calls;
 }

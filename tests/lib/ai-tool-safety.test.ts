@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { restrictToolsAfterTriage } from '@/lib/ai/tool-safety';
+import {
+  excludeFinanceMutations,
+  restrictToolsAfterTriage,
+} from '@/lib/ai/tool-safety';
 
 describe('Houston tool safety', () => {
   it('allows only read-only follow-up tools after untrusted triage content is returned', () => {
@@ -40,8 +43,8 @@ describe('Houston tool safety', () => {
     expect(activeTools).not.toContain('getKidSpending');
     expect(activeTools).not.toContain('getFinanceObligations');
     expect(activeTools).not.toContain('getFinanceConnectorHealth');
-    expect(activeTools).not.toContain('assignFinanceTransaction');
-    expect(activeTools).not.toContain('updateFinanceCategory');
+    expect(activeTools).not.toContain('assignFinanceTransactionKid');
+    expect(activeTools).not.toContain('updateFinanceTransactionCategory');
   });
 
   it('keeps only the six finance reads available after finance intent preceded triage', () => {
@@ -59,8 +62,8 @@ describe('Houston tool safety', () => {
       'getFinanceObligations',
       'getFinanceConnectorHealth',
     ]));
-    expect(activeTools).not.toContain('assignFinanceTransaction');
-    expect(activeTools).not.toContain('updateFinanceCategory');
+    expect(activeTools).not.toContain('assignFinanceTransactionKid');
+    expect(activeTools).not.toContain('updateFinanceTransactionCategory');
   });
 
   it('leaves tools available when no triage content was consumed', () => {
@@ -71,6 +74,18 @@ describe('Houston tool safety', () => {
         }],
       }],
     })).toBeUndefined();
+  });
+
+  it('disables both finance mutations while an approval response is resumed', () => {
+    expect(excludeFinanceMutations([
+      'searchTasks',
+      'getHouseholdFinanceSummary',
+      'assignFinanceTransactionKid',
+      'updateFinanceTransactionCategory',
+    ])).toEqual([
+      'searchTasks',
+      'getHouseholdFinanceSummary',
+    ]);
   });
 
   it('allows only reads after persisted finance content enters model context', () => {
@@ -88,6 +103,7 @@ describe('Houston tool safety', () => {
     expect(activeTools).not.toContain('completeTask');
     expect(activeTools).not.toContain('updateTaskPriority');
     expect(activeTools).not.toContain('intakeDocument');
-    expect(activeTools).not.toContain('updateFinanceCategory');
+    expect(activeTools).not.toContain('assignFinanceTransactionKid');
+    expect(activeTools).not.toContain('updateFinanceTransactionCategory');
   });
 });

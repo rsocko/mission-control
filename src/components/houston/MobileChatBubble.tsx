@@ -4,7 +4,7 @@ import { memo, useCallback, useState } from 'react';
 import { motion, type Variants, useReducedMotion } from 'motion/react';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
-import { ToolCard } from '@/components/ai/ToolCard';
+import { ToolCard, type ToolApprovalHandler } from '@/components/ai/ToolCard';
 import { isTextLikePart, isToolPart, shouldHidePart, type ChatMessage } from '@/lib/ai/chatMessageFactory';
 
 /** Time gap (ms) that triggers showing a timestamp between message groups */
@@ -19,6 +19,7 @@ type MobileChatBubbleProps = {
   previousTimestamp?: string;
   /** Timestamp of this message (ISO string) */
   timestamp?: string;
+  onApprovalResponse?: ToolApprovalHandler;
 };
 
 const bubbleEntryVariants: Variants = {
@@ -47,6 +48,7 @@ export const MobileChatBubble = memo(function MobileChatBubble({
   previousMessage,
   previousTimestamp,
   timestamp,
+  onApprovalResponse,
 }: MobileChatBubbleProps) {
   const [showTime, setShowTime] = useState(false);
   const prefersReducedMotion = useReducedMotion();
@@ -122,7 +124,7 @@ export const MobileChatBubble = memo(function MobileChatBubble({
                 }
                 return isToolPart(part) ? (
                   <div key={`${message.id}-tool-${index}`} className="w-full">
-                    <ToolCard part={part} />
+                    <ToolCard part={part} onApprovalResponse={onApprovalResponse} />
                   </div>
                 ) : null;
               })}

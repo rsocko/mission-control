@@ -408,6 +408,14 @@ export async function updateFinanceCategory(
   categoryId: string,
   idempotencyKey: string = randomUUID(),
   signal?: AbortSignal,
+  expectedTransactionVersion?: {
+    sourceFingerprint: string;
+    lastSeenAt: string;
+    assignedKidId: string | null;
+    confirmedCategory: string | null;
+    manualDecidedAt: string | null;
+    categoryName: string;
+  },
 ): Promise<{ idempotencyKey: string; status: 'updated' }> {
   const transaction = sqlite.prepare(`
     SELECT id, upstream_transaction_id AS upstreamTransactionId
@@ -442,6 +450,43 @@ export async function updateFinanceCategory(
       return 'conflict' as const;
     }
     if (existing?.status === 'succeeded') return 'succeeded' as const;
+    if (expectedTransactionVersion) {
+      const current = sqlite.prepare(`
+        SELECT source_fingerprint AS sourceFingerprint,
+               last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
+               confirmed_category AS confirmedCategory,
+               manual_decided_at AS manualDecidedAt
+        FROM finance_transactions
+        WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
+      `).get(transactionId, config.id) as {
+        sourceFingerprint: string;
+        lastSeenAt: string;
+        assignedKidId: string | null;
+        confirmedCategory: string | null;
+        manualDecidedAt: string | null;
+      } | undefined;
+      if (
+        !current
+        || current.sourceFingerprint !== expectedTransactionVersion.sourceFingerprint
+        || current.lastSeenAt !== expectedTransactionVersion.lastSeenAt
+        || current.assignedKidId !== expectedTransactionVersion.assignedKidId
+        || current.confirmedCategory !== expectedTransactionVersion.confirmedCategory
+        || current.manualDecidedAt !== expectedTransactionVersion.manualDecidedAt
+      ) {
+        return 'transaction-conflict' as const;
+      }
+      const currentCategory = sqlite.prepare(`
+        SELECT name FROM finance_categories
+        WHERE connector_id = ? AND upstream_category_id = ?
+          AND is_active = 1 AND source_is_active = 1
+      `).get(config.id, categoryId) as { name: string } | undefined;
+      if (
+        !currentCategory
+        || currentCategory.name !== expectedTransactionVersion.categoryName
+      ) {
+        return 'category-conflict' as const;
+      }
+    }
     const otherProcessingMutation = sqlite.prepare(`
       SELECT 1
       FROM finance_mutation_audit
@@ -486,6 +531,12 @@ export async function updateFinanceCategory(
   if (claim === 'succeeded') return { idempotencyKey, status: 'updated' };
   if (claim === 'conflict') {
     throw new MonarchBridgeError('idempotency_conflict', 'Idempotency key was already used', false, 409);
+  }
+  if (claim === 'transaction-conflict') {
+    throw new MonarchBridgeError('transaction_conflict', 'Finance transaction changed after approval', false, 409);
+  }
+  if (claim === 'category-conflict') {
+    throw new MonarchBridgeError('category_conflict', 'Finance category changed after approval', false, 409);
   }
   if (claim === 'processing') {
     throw new MonarchBridgeError('mutation_in_progress', 'Category update is already in progress', true, 409);

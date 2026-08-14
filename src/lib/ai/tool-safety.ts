@@ -11,6 +11,11 @@ const FINANCE_READ_ONLY_TOOLS = [
   'getFinanceConnectorHealth',
 ] as const;
 
+const FINANCE_MUTATION_TOOLS = [
+  'assignFinanceTransactionKid',
+  'updateFinanceTransactionCategory',
+] as const;
+
 const READ_ONLY_TOOLS = [
   'getTaskSummary',
   'searchTasks',
@@ -23,6 +28,13 @@ const READ_ONLY_TOOLS = [
   'searchTriage',
   ...FINANCE_READ_ONLY_TOOLS,
 ] as const;
+
+export function excludeFinanceMutations<T extends string>(toolNames: T[]): T[] {
+  return toolNames.filter(toolName =>
+    !FINANCE_MUTATION_TOOLS.includes(
+      toolName as typeof FINANCE_MUTATION_TOOLS[number],
+    ));
+}
 
 /**
  * Triage and finance projections can contain external text. Do not let either

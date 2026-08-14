@@ -3,7 +3,7 @@ import { notificationTools } from './notification-tools';
 import { reasoningTools } from './reasoning-tools';
 import { intakeTools } from './intake-tools';
 import { triageTools } from './triage-tools';
-import { financeTools } from './finance-tools';
+import { createFinanceMutationTools, financeTools } from './finance-tools';
 
 export const aiTools = {
   ...taskTools,
@@ -13,3 +13,10 @@ export const aiTools = {
   ...triageTools,
   ...financeTools,
 };
+
+export function createHoustonTools(approvalSecret: string) {
+  return {
+    ...aiTools,
+    ...createFinanceMutationTools(approvalSecret),
+  };
+}

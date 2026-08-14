@@ -9,6 +9,7 @@ import { TypingIndicator } from '@/components/houston/TypingIndicator';
 import { SuggestionChip } from '@/components/ai/ChatWidgets';
 import type { ChatMessage } from '@/lib/ai/chatMessageFactory';
 import type { ProviderInfo } from '@/lib/ai/chatTypes';
+import type { ToolApprovalHandler } from '@/components/ai/ToolCard';
 
 const mobileSuggestions = [
   ["What's overdue?", "What's overdue?"],
@@ -28,6 +29,7 @@ type MobileChatViewProps = {
   onNewChat?: () => void;
   onSend: (text?: string) => void | Promise<void>;
   providerInfo: ProviderInfo | null;
+  onApprovalResponse?: ToolApprovalHandler;
 };
 
 /**
@@ -46,6 +48,7 @@ export function MobileChatView({
   onNewChat,
   onSend,
   providerInfo,
+  onApprovalResponse,
 }: MobileChatViewProps) {
   const prefersReducedMotion = useReducedMotion() ?? false;
   return (
@@ -95,6 +98,7 @@ export function MobileChatView({
                   previousMessage={prev}
                   timestamp={message.createdAt ? new Date(message.createdAt).toISOString() : new Date().toISOString()}
                   previousTimestamp={prev?.createdAt ? new Date(prev.createdAt).toISOString() : undefined}
+                  onApprovalResponse={onApprovalResponse}
                 />
               );
             })}

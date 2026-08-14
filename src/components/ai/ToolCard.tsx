@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import Link from 'next/link';
 import {
@@ -24,7 +25,12 @@ import { formatInlineInput, formatJson } from '@/lib/ai/chatFormatters';
 import { getToolName, type ToolPart } from '@/lib/ai/chatMessageFactory';
 import {
   FINANCE_TOOL_NAMES,
+  FINANCE_MUTATION_TOOL_NAMES,
+  assignFinanceTransactionKidInputSchema,
+  assignFinanceTransactionKidOutputSchema,
   financeToolOutputSchema,
+  updateFinanceTransactionCategoryInputSchema,
+  updateFinanceTransactionCategoryOutputSchema,
   type FinanceToolOutput,
 } from '@/lib/finance/houston-contracts';
 import {
@@ -43,12 +49,26 @@ const NATIVE_TASK_TOOLS = new Set([
   'completeTask',
   'updateTaskPriority',
 ]);
-const FINANCE_TOOLS = new Set<string>(FINANCE_TOOL_NAMES);
+const FINANCE_TOOLS = new Set<string>([
+  ...FINANCE_TOOL_NAMES,
+  ...FINANCE_MUTATION_TOOL_NAMES,
+]);
 const NATIVE_WIDGET_RESOURCE_BY_TOOL = {
   searchTriage: TRIAGE_SUMMARY_RESOURCE_URI,
 } as const;
 
-export function ToolCard({ part }: { part: ToolPart }) {
+export type ToolApprovalHandler = (
+  part: ToolPart,
+  approved: boolean,
+) => Promise<void>;
+
+export function ToolCard({
+  part,
+  onApprovalResponse,
+}: {
+  part: ToolPart;
+  onApprovalResponse?: ToolApprovalHandler;
+}) {
   const toolName = getToolName(part);
 
   if (Object.hasOwn(NATIVE_WIDGET_RESOURCE_BY_TOOL, toolName)) {
@@ -60,7 +80,17 @@ export function ToolCard({ part }: { part: ToolPart }) {
   }
 
   if (FINANCE_TOOLS.has(toolName)) {
-    return <FinanceToolCard part={part} toolName={toolName} />;
+    return FINANCE_MUTATION_TOOL_NAMES.includes(
+      toolName as typeof FINANCE_MUTATION_TOOL_NAMES[number],
+    )
+      ? (
+          <FinanceMutationToolCard
+            part={part}
+            toolName={toolName}
+            onApprovalResponse={onApprovalResponse}
+          />
+        )
+      : <FinanceToolCard part={part} toolName={toolName} />;
   }
 
   return <GenericToolCard part={part} toolName={toolName} />;
@@ -74,6 +104,162 @@ const FINANCE_PRESENTATION: Record<string, { label: string; loading: string }> =
   getFinanceObligations: { label: 'Finance obligations', loading: 'Loading recurring obligations' },
   getFinanceConnectorHealth: { label: 'Finance connector health', loading: 'Checking projection freshness' },
 };
+
+const FINANCE_MUTATION_PRESENTATION = {
+  assignFinanceTransactionKid: {
+    label: 'Assign transaction to household member',
+    applying: 'Applying approved kid assignment',
+  },
+  updateFinanceTransactionCategory: {
+    label: 'Update transaction category',
+    applying: 'Applying approved category update',
+  },
+} as const;
+
+function FinanceMutationToolCard({
+  part,
+  toolName,
+  onApprovalResponse,
+}: {
+  part: ToolPart;
+  toolName: string;
+  onApprovalResponse?: ToolApprovalHandler;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+  const presentation = FINANCE_MUTATION_PRESENTATION[
+    toolName as keyof typeof FINANCE_MUTATION_PRESENTATION
+  ];
+  const respond = async (approved: boolean) => {
+    if (!onApprovalResponse || submitting) return;
+    setSubmitting(true);
+    try {
+      await onApprovalResponse(part, approved);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (part.state === 'approval-requested') {
+    const proposal = mutationProposal(part, toolName);
+    if (!proposal) return <InvalidResultState />;
+    return (
+      <section
+        className="overflow-hidden rounded-lg border border-amber-400/40 bg-[var(--surface-1)]"
+        aria-label={`${presentation.label} approval required`}
+      >
+        <header className="flex items-start gap-3 border-b border-[var(--border-subtle)] px-3 py-2.5">
+          <TriangleAlert size={17} className="mt-0.5 text-amber-300" aria-hidden="true" />
+          <span>
+            <span className="block text-sm font-semibold text-[var(--text-primary)]">
+              Approval required
+            </span>
+            <span className="block text-xs text-[var(--text-muted)]">{presentation.label}</span>
+          </span>
+        </header>
+        <div className="space-y-3 p-3">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+            {proposal.map(([label, value]) => (
+              <div key={label} className="contents">
+                <dt className="text-[var(--text-muted)]">{label}</dt>
+                <dd className="min-w-0 truncate text-[var(--text-primary)]">{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-[var(--text-muted)]">
+            This financial change will execute only after you approve this exact proposal.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void respond(true)}
+              disabled={submitting || !onApprovalResponse}
+              className="min-h-10 rounded-md bg-emerald-600 px-3 text-sm font-medium text-white disabled:opacity-50"
+              aria-label={`Approve ${presentation.label.toLowerCase()}`}
+            >
+              {submitting ? 'Submitting...' : 'Approve'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void respond(false)}
+              disabled={submitting || !onApprovalResponse}
+              className="min-h-10 rounded-md border border-[var(--border)] px-3 text-sm font-medium text-[var(--text-primary)] disabled:opacity-50"
+              aria-label={`Deny ${presentation.label.toLowerCase()}`}
+            >
+              Deny
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  if (part.state === 'output-denied') {
+    return (
+      <StateMessage title={`${presentation.label} denied`}>
+        No finance mutation was executed.
+      </StateMessage>
+    );
+  }
+  if (part.state === 'output-error') {
+    return (
+      <StateMessage tone="error" title={`${presentation.label} failed`}>
+        {part.errorText || 'The approved finance mutation failed.'}
+      </StateMessage>
+    );
+  }
+  if (part.state !== 'output-available') {
+    return (
+      <StateMessage title={presentation.label}>
+        <Loader2 size={14} className="animate-spin" aria-hidden="true" />
+        <span>{presentation.applying}...</span>
+      </StateMessage>
+    );
+  }
+
+  const result = toolName === 'assignFinanceTransactionKid'
+    ? assignFinanceTransactionKidOutputSchema.safeParse(part.output)
+    : updateFinanceTransactionCategoryOutputSchema.safeParse(part.output);
+  if (!result.success) return <InvalidResultState />;
+  if (result.data.status === 'failed') {
+    return (
+      <StateMessage tone="error" title={`${presentation.label} failed`}>
+        {result.data.error.message}
+        {result.data.error.retryable ? ' You can review current state and make a new proposal.' : ''}
+      </StateMessage>
+    );
+  }
+  const detail = result.data.kind === 'finance-kid-assignment'
+    ? `Assigned to ${result.data.missionControlConfirmed.kidName}`
+    : `Category confirmed as ${result.data.factsViaTyrionBridge.category}`;
+  return (
+    <StateMessage title={`${presentation.label} complete`}>
+      <CheckCircle2 size={14} className="text-emerald-300" aria-hidden="true" />
+      <span>{detail}{result.data.replayed ? ' (already applied)' : ''}</span>
+    </StateMessage>
+  );
+}
+
+function mutationProposal(part: ToolPart, toolName: string): Array<[string, string]> | null {
+  if (part.state !== 'approval-requested') return null;
+  if (toolName === 'assignFinanceTransactionKid') {
+    const parsed = assignFinanceTransactionKidInputSchema.safeParse(part.input);
+    if (!parsed.success) return null;
+    return [
+      ['Transaction', `${parsed.data.expected.merchant} on ${parsed.data.expected.date}`],
+      ['Amount', formatCurrency(parsed.data.expected.amount)],
+      ['Current kid', parsed.data.expected.kidName ?? 'Unassigned'],
+      ['New kid', parsed.data.kidName],
+    ];
+  }
+  const parsed = updateFinanceTransactionCategoryInputSchema.safeParse(part.input);
+  if (!parsed.success) return null;
+  return [
+    ['Transaction', `${parsed.data.expected.merchant} on ${parsed.data.expected.date}`],
+    ['Amount', formatCurrency(parsed.data.expected.amount)],
+    ['Current category', parsed.data.expected.category ?? 'Uncategorized'],
+    ['New category', parsed.data.categoryName],
+  ];
+}
 
 function FinanceToolCard({ part, toolName }: { part: ToolPart; toolName: string }) {
   const presentation = FINANCE_PRESENTATION[toolName];

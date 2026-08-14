@@ -708,6 +708,13 @@
       "when": 1786677600000,
       "tag": "0100_repair_github_issue_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1786681274871,
+      "tag": "0101_first_thunderbolts",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { formatResult } from '@/lib/ai/chatFormatters';
 import type { ChatMessage, HubProject, ProviderInfo, SidebarResult } from '@/lib/ai/chatTypes';
+import type { ToolApprovalHandler } from '@/components/ai/ToolCard';
 
 const suggestionPrompts = [
   ["What's overdue?", "What's overdue?"],
@@ -48,6 +49,7 @@ type AIChatTabProps = {
   onKeyDown: KeyboardEventHandler<HTMLTextAreaElement>;
   onRunFeature: (endpoint: string, title: string, method?: string) => void | Promise<void>;
   onSend: (text?: string) => void | Promise<void>;
+  onApprovalResponse?: ToolApprovalHandler;
   projects: HubProject[];
   providerInfo: ProviderInfo | null;
   sidebarResult: SidebarResult | null;
@@ -65,6 +67,7 @@ export function AIChatTab({
   onKeyDown,
   onRunFeature,
   onSend,
+  onApprovalResponse,
   projects,
   providerInfo,
   sidebarResult,
@@ -99,7 +102,14 @@ export function AIChatTab({
             </div>
           ) : (
             <div className="max-w-3xl mx-auto space-y-4" role="log" aria-live="polite" aria-label="Chat messages">
-              {messages.map(message => <ChatMessageRow key={message.id} message={message} loading={loading} />)}
+              {messages.map(message => (
+                <ChatMessageRow
+                  key={message.id}
+                  message={message}
+                  loading={loading}
+                  onApprovalResponse={onApprovalResponse}
+                />
+              ))}
               <div ref={messagesEndRef} />
             </div>
           )}

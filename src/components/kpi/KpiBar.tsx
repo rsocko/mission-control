@@ -263,16 +263,6 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
     }
   }, [router, onFilterClick, quickFilter]);
 
-  // ── Grid Columns (responsive) ───────────────────────────────────────
-
-  const gridCols = visibleCards.length <= 3
-    ? 'grid-cols-2 sm:grid-cols-3'
-    : visibleCards.length === 4
-    ? 'grid-cols-2 sm:grid-cols-2 md:grid-cols-4'
-    : visibleCards.length <= 5
-    ? 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5'
-    : 'grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6';
-
   if (loading) {
     return (
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] overflow-hidden">
@@ -290,9 +280,9 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
           <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">KPIs</span>
         </button>
         {!collapsed && (
-          <div className={`grid ${gridCols} gap-2 md:gap-3 p-3`}>
+          <div className="flex divide-x divide-[var(--border)] border-t border-[var(--border)]">
             {Array.from({ length: config.visibleSlots }).map((_, i) => (
-              <div key={i} className="bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-3 h-[88px] animate-pulse" />
+              <div key={i} className="h-14 flex-1 animate-pulse bg-[var(--surface-2)]" />
             ))}
           </div>
         )}
@@ -329,10 +319,9 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
             className="overflow-hidden"
           >
-      {/* Mobile: horizontal scroll wrapper */}
-      <div className="md:block overflow-x-auto -mx-2 px-2 md:mx-0 md:px-0 scrollbar-none">
+      <div className="overflow-x-auto border-t border-[var(--border)] scrollbar-none">
         <motion.div
-          className={`grid ${gridCols} gap-2 md:gap-3 min-w-[480px] md:min-w-0`}
+          className="flex min-w-[560px] divide-x divide-[var(--border)]"
           variants={staggerContainer}
           initial="hidden"
           animate="show"
@@ -354,7 +343,7 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
                   initial="enter"
                   animate="center"
                   exit="exit"
-                  className="relative group"
+                  className="group relative flex min-w-0 flex-1"
                 >
                   <KpiCard
                     definition={def}
@@ -362,6 +351,7 @@ export function KpiBar({ preset, quickFilter, onFilterClick, unreadNotifications
                     onClick={def.clickAction ? () => handleCardClick(slug) : undefined}
                     active={isFilterActive}
                     compact={visibleCards.length >= 6}
+                    inline
                   />
                   {/* Dismiss button for auto-surfaced cards */}
                   {isAutoSurfaced && (

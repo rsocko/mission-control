@@ -26,6 +26,8 @@ jobs:
         include:
           - name: Workflow policy
             command: npm run ci:workflows
+          - name: Impeccable integration
+            command: npm run impeccable:validate
           - name: Lint
             command: npm run lint
           - name: Unit tests

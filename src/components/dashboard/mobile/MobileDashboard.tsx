@@ -76,34 +76,22 @@ function useMobileDashboardData() {
 
 // ─── Subcomponents ──────────────────────────────────────────────────────────
 
-/** F-83: Compact metrics grid — today's status at a glance */
+/** F-83: Compact operational summary — today's status at a glance */
 function StatusSnapshot({ stats }: { stats: TodayStats }) {
   return (
-    <section className="rounded-2xl bg-[var(--surface-1)] border border-[var(--border)] p-4">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-          Today
-        </span>
-        <span className="text-xs text-emerald-400 font-medium">
-          {stats.completionPct}% complete
-        </span>
-      </div>
-      <div className="grid grid-cols-4 gap-2 text-center">
+    <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="text-xl font-bold text-white">{stats.totalOpen + stats.completedToday}</p>
-          <p className="text-[0.625rem] text-[var(--text-muted)] mt-0.5">Total</p>
+          <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Today</span>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            <span className="font-semibold text-[var(--text-primary)]">{stats.inProgress}</span> in progress
+            <span aria-hidden="true"> · </span>
+            <span className="font-semibold text-red-400">{stats.overdue}</span> overdue
+          </p>
         </div>
-        <div>
-          <p className="text-xl font-bold text-emerald-400">{stats.completedToday}</p>
-          <p className="text-[0.625rem] text-[var(--text-muted)] mt-0.5">Done</p>
-        </div>
-        <div>
-          <p className="text-xl font-bold text-amber-400">{stats.inProgress}</p>
-          <p className="text-[0.625rem] text-[var(--text-muted)] mt-0.5">In Progress</p>
-        </div>
-        <div>
-          <p className="text-xl font-bold text-red-400">{stats.overdue}</p>
-          <p className="text-[0.625rem] text-[var(--text-muted)] mt-0.5">Overdue</p>
+        <div className="text-right">
+          <p className="text-base font-semibold tabular-nums text-emerald-400">{stats.completionPct}%</p>
+          <p className="text-xs text-[var(--text-muted)]">{stats.completedToday} of {stats.totalOpen + stats.completedToday} done</p>
         </div>
       </div>
     </section>
@@ -199,38 +187,32 @@ function ActionQueues({ queues }: { queues: QueueCounts }) {
   );
 }
 
-/** F-85: Quick navigation — go places fast */
+/** F-85: Compact action strip — secondary destinations after urgent work */
 function GoTo() {
   const destinations = [
-    { href: '/today', icon: Sun, label: 'My Day', color: 'text-amber-400', bg: 'bg-amber-500/10' },
-    { href: '/triage', icon: Layers, label: 'Triage', color: 'text-sky-400', bg: 'bg-sky-500/10' },
-    { href: '/quick-sort', icon: Zap, label: 'Sort', color: 'text-amber-300', bg: 'bg-amber-400/10' },
-    { href: '/goals', icon: Target, label: 'Goals', color: 'text-rose-400', bg: 'bg-rose-500/10' },
-    { href: '/routines', icon: Repeat, label: 'Routines', color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-    { href: '/insights', icon: Activity, label: 'Insights', color: 'text-pink-400', bg: 'bg-pink-500/10' },
-    { href: '/matrix', icon: Grid2X2, label: 'Matrix', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+    { href: '/today', icon: Sun, label: 'My Day', color: 'text-amber-400' },
+    { href: '/triage', icon: Layers, label: 'Triage', color: 'text-sky-400' },
+    { href: '/quick-sort', icon: Zap, label: 'Sort', color: 'text-amber-300' },
+    { href: '/goals', icon: Target, label: 'Goals', color: 'text-rose-400' },
+    { href: '/routines', icon: Repeat, label: 'Routines', color: 'text-emerald-400' },
+    { href: '/insights', icon: Activity, label: 'Insights', color: 'text-cyan-400' },
+    { href: '/matrix', icon: Grid2X2, label: 'Matrix', color: 'text-blue-400' },
   ];
 
   return (
-    <section className="rounded-2xl bg-[var(--surface-1)] border border-[var(--border)] p-4">
-      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-        Go To
-      </span>
-      <div className="mt-3 grid grid-cols-3 gap-2">
+    <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] px-4 py-3">
+      <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Go To</span>
+      <div className="mt-2 flex gap-1 overflow-x-auto pb-1 scrollbar-none">
         {destinations.map((d) => {
           const Icon = d.icon;
           return (
             <Link
               key={d.href}
               href={d.href}
-              className={cn(
-                'flex flex-col items-center gap-1.5 py-3 rounded-xl transition-colors',
-                d.bg,
-                'hover:brightness-125'
-              )}
+              className="flex min-h-11 shrink-0 items-center gap-1.5 rounded-[var(--radius-md)] px-2.5 text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
             >
-              <Icon size={20} className={d.color} />
-              <span className="text-xs text-[var(--text-secondary)] font-medium">{d.label}</span>
+              <Icon size={15} className={d.color} />
+              <span className="text-xs font-medium">{d.label}</span>
             </Link>
           );
         })}
@@ -298,9 +280,9 @@ function MobileDashboardSkeleton() {
  * Mobile-optimized dashboard — a launchpad for action.
  *
  * Philosophy: "What should I go DO right now?"
- * - Status snapshot (today's numbers at a glance)
  * - Action queues (things that need attention — triage, sort, overdue)
- * - Quick navigation grid (jump to any section fast)
+ * - Compact status snapshot
+ * - Secondary navigation strip
  * - Recent wins (lightweight momentum, not analytics)
  *
  * Analytics/trends/historical data live in /insights.
@@ -321,8 +303,8 @@ export function MobileDashboard() {
 
   return (
     <div className="space-y-3 pb-20">
-      <StatusSnapshot stats={data.today} />
       <ActionQueues queues={data.queues} />
+      <StatusSnapshot stats={data.today} />
       <GoTo />
       <RecentWins items={data.recentActivity} />
     </div>

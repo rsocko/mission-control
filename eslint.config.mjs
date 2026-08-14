@@ -29,11 +29,14 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "dist/**",
     "next-env.d.ts",
     // Archived documentation — not part of the active build
     "docs/**",
     // One-off migration scripts
     "scripts/**",
+    // Reviewed third-party provider build; validated separately by impeccable:validate
+    ".github/skills/impeccable/**",
     // Docs screenshot suite — uses separate Playwright config, not part of main build
     "tests/docs/**",
     "playwright.docs.config.ts",

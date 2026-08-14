@@ -2477,9 +2477,10 @@ export default function ProjectDetailPage() {
                                 style={{ scrollMarginTop: stickyHeaderHeight + 24 }}
                               >
                                 {/* ── Phase Header ── */}
-                                <div className="relative rounded-t-[var(--radius-lg)] bg-gradient-to-r from-[var(--surface-1)] to-[var(--surface-0)]" style={{ borderLeft: `3px solid ${phaseColor}` }}>
+                                <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
                                   <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                                     <div className="flex min-w-0 gap-3">
+                                      <span className="mt-4 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: phaseColor }} aria-hidden="true" />
                                       <button
                                         type="button"
                                         {...dragHandleProps}

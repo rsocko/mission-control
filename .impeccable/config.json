@@ -1,0 +1,20 @@
+{
+  "detector": {
+    "designSystem": {
+      "enabled": true
+    },
+    "ignoreFiles": [],
+    "ignoreRules": [],
+    "ignoreValues": []
+  },
+  "hook": {
+    "enabled": true,
+    "limits": {
+      "maxChars": 4000,
+      "maxFileBytes": 131072,
+      "maxFindings": 5
+    },
+    "quiet": true
+  },
+  "updateCheck": false
+}

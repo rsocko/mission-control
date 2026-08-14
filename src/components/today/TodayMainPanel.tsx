@@ -620,10 +620,10 @@ export function TodayMainPanel({
         <EnergyCheckIn currentLevel={energyLevel} onEnergySet={(level) => onSetEnergyLevel(level)} />
 
         {focusTask && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-800/40 rounded-lg">
+          <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-purple-400 uppercase tracking-wide mb-1 flex items-center gap-1"><Target size={11} /> Focusing On</p>
+                <p className="mb-1 flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-[var(--accent-400)]"><Target size={11} /> Focusing On</p>
                 <h3 className="text-base font-semibold text-[var(--text-primary)]">{focusTask.title}</h3>
                 <p className="text-xs text-[var(--text-tertiary)] mt-0.5"><ConnectorIcon type={focusTask.connectorType} size={12} /> {focusTask.sourceListName || focusTask.connectorType}</p>
               </div>
@@ -658,12 +658,12 @@ export function TodayMainPanel({
         )}
 
         {dayPlan && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/40 rounded-lg">
+          <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4">
             <div className="flex items-center justify-between mb-3"><p className="text-xs font-medium text-blue-400 uppercase tracking-wide flex items-center gap-1"><Wand2 size={11} /> AI Day Plan</p><button onClick={() => onSetDayPlan(null)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-xs">?</button></div>
             <p className="text-sm text-[var(--text-secondary)] mb-3">{dayPlan.summary}</p>
             <div className="space-y-1">
               {dayPlan.plan.map((block, index) => (
-                <div key={index} className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs ${block.type === 'calendar' ? 'bg-amber-900/20 border-l-2 border-amber-500' : block.type === 'break' ? 'bg-[var(--surface-0)] border-l-2 border-[var(--border)]' : block.type === 'focus' ? 'bg-purple-900/20 border-l-2 border-purple-500' : 'bg-blue-900/20 border-l-2 border-blue-500'}`}>
+                <div key={index} className={`flex items-center gap-3 rounded-md border px-3 py-2 text-xs ${block.type === 'calendar' ? 'border-amber-500/40 bg-amber-900/20' : block.type === 'break' ? 'border-[var(--border)] bg-[var(--surface-0)]' : block.type === 'focus' ? 'border-[var(--accent)]/40 bg-[var(--accent-muted)]/20' : 'border-cyan-500/40 bg-cyan-900/20'}`}>
                   <span className="text-[var(--text-muted)] font-mono w-12 shrink-0">{block.time}</span>
                   <span className="text-[var(--text-primary)] flex-1 font-medium">{block.title}</span>
                   <span className="text-[var(--text-muted)]">{block.duration}m</span>
@@ -1069,7 +1069,7 @@ export function InProgressPanel({
   onStartFocus: (item: MyDayItem) => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-blue-500/35 bg-gradient-to-br from-blue-950/25 to-[var(--surface-1)] shadow-[inset_3px_0_0_rgba(59,130,246,0.8)]">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-blue-500/35 bg-[var(--surface-1)]">
       <div className="flex items-center justify-between border-b border-blue-500/15 px-4 py-3">
         <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-blue-300">
           <CircleDot size={13} className="text-blue-400" />

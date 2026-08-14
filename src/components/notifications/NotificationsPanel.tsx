@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Bell,
   BellRing,
+  CheckCircle2,
   ClipboardCheck,
   Inbox,
   Info,
@@ -300,8 +301,8 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
             </button>
           </div>
         ) : visibleCount === 0 ? (
-          <div className="text-center py-12">
-            <div className="text-3xl mb-2">🎉</div>
+          <div className="py-6 text-center">
+            <CheckCircle2 size={24} className="mx-auto mb-2 text-emerald-400" aria-hidden="true" />
             <p className="text-sm text-[var(--text-secondary)]">All caught up</p>
             <p className="text-xs text-[var(--text-muted)] mt-1">
               No notifications match this view

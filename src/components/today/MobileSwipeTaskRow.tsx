@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils';
 import { triggerHaptic, triggerHapticFeedback } from '@/lib/utils/haptics';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { isInactiveTaskStatus, PRIORITY_DOT_COLORS } from '@/lib/constants/task-formatting';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { MyDayItem } from './types';
 import {
@@ -21,14 +21,6 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition } from '@/types';
-
-const PRIORITY_DOT_COLORS: Record<string, string> = {
-  critical: 'bg-rose-400',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-300',
-  low: 'bg-sky-400',
-  none: 'bg-gray-500',
-};
 
 const SWIPE_THRESHOLD = 80;
 const FULL_SWIPE_THRESHOLD = 160;
@@ -65,11 +57,11 @@ interface MobileSwipeTaskRowProps {
  * Mobile-optimized task row with swipe gestures.
  *
  * Covers:
- * - F-18: Each row: priority dot, title, project tag, due indicator
+ * - F-18: Each row: completion control, priority dot, title, project tag, due indicator
  * - F-24: Left swipe: reveal "Not Today" action (short swipe reveals, full swipe executes)
  * - F-25: Right swipe: reveal scheduling tray
  * - F-26: Scheduling tray options: Tomorrow, Pick Day, Snooze (1hr/3hr/tonight)
- * - F-27: Tap dot/checkbox to complete
+ * - F-27: Tap completion circle to complete
  * - F-28: Add haptic feedback on swipe threshold
  */
 export function MobileSwipeTaskRow({
@@ -297,37 +289,50 @@ export function MobileSwipeTaskRow({
         onDragEnd={handleDragEnd}
         onClick={() => onTap(item)}
       >
-        {/* Priority dot / checkbox (F-27) */}
+        {/* Completion control (F-27) */}
         <CompletionBurst celebrating={isCompleting}>
           <button
             onClick={handleCompleteTap}
             disabled={isCompleting || !canEditStatus}
             title={!canEditStatus ? taskFieldBlockedReason(item.editPolicy, 'status') : undefined}
             className={cn(
-              'w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center -ml-1',
-              isCompleting && 'border-2 border-green-400 bg-green-400 text-white'
+              'w-11 h-11 flex-shrink-0 flex items-center justify-center -ml-1 disabled:opacity-50'
             )}
             aria-label={`Complete ${item.title}`}
           >
-            {isCompleting ? (
-              <Check size={16} aria-hidden="true" />
-            ) : (
-              <span
-                className={cn('w-3 h-3 rounded-full', PRIORITY_DOT_COLORS[item.priority] || PRIORITY_DOT_COLORS.none)}
-                aria-hidden="true"
-              />
-            )}
+            <span
+              data-testid="completion-indicator"
+              className={cn(
+                'w-6 h-6 rounded-full border-2 flex items-center justify-center transition-[border-color,background-color,color,transform] duration-200',
+                isCompleting
+                  ? 'border-green-400 bg-green-400 text-white'
+                  : 'border-[var(--border-strong)] active:border-green-500 active:bg-green-900/30'
+              )}
+              aria-hidden="true"
+            >
+              {isCompleting && <Check size={14} />}
+            </span>
           </button>
         </CompletionBurst>
 
         {/* Title + project tag + due indicator */}
         <div className="flex-1 min-w-0">
-          <p className={cn(
-            'text-sm font-medium truncate',
-            isCompleting ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'
-          )}>
-            {item.title}
-          </p>
+          <div className="flex items-center gap-2">
+            {item.priority !== 'none' && (
+              <span
+                data-testid="priority-indicator"
+                className={cn('w-2 h-2 rounded-full flex-shrink-0', PRIORITY_DOT_COLORS[item.priority])}
+                title={`${item.priority} priority`}
+                aria-hidden="true"
+              />
+            )}
+            <p className={cn(
+              'text-sm font-medium truncate',
+              isCompleting ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'
+            )}>
+              {item.title}
+            </p>
+          </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             {/* Project tag (hub project name) */}
             {item.hubProjectIds && item.hubProjectIds.length > 0 && projects.length > 0 && (() => {

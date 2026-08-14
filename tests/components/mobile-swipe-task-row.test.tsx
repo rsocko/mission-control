@@ -130,6 +130,19 @@ describe('MobileSwipeTaskRow haptics', () => {
     expect(triggerHapticFeedback).toHaveBeenCalledTimes(2);
   });
 
+  it('shows a visible completion circle separately from task priority', () => {
+    renderRow();
+
+    const completionButton = screen.getByRole('button', { name: 'Complete Review haptics' });
+    const completionIndicator = screen.getByTestId('completion-indicator');
+    const priorityIndicator = screen.getByTestId('priority-indicator');
+
+    expect(completionButton).toContainElement(completionIndicator);
+    expect(completionIndicator).toHaveClass('w-6', 'h-6', 'border-2');
+    expect(completionIndicator).not.toContainElement(priorityIndicator);
+    expect(priorityIndicator).toHaveClass('bg-orange-400');
+  });
+
   it('shows the shared checked treatment while completion is in progress', () => {
     render(
       <MobileSwipeTaskRow
@@ -145,9 +158,10 @@ describe('MobileSwipeTaskRow haptics', () => {
     );
 
     const completionButton = screen.getByRole('button', { name: 'Complete Review haptics' });
+    const completionIndicator = screen.getByTestId('completion-indicator');
     expect(completionButton).toBeDisabled();
-    expect(completionButton).toHaveClass('bg-green-400', 'text-white');
-    expect(completionButton.querySelector('svg')).toBeInTheDocument();
+    expect(completionIndicator).toHaveClass('bg-green-400', 'text-white');
+    expect(completionIndicator.querySelector('svg')).toBeInTheDocument();
   });
 
   it('offers local-only mirror disposition actions in the mobile tray', () => {

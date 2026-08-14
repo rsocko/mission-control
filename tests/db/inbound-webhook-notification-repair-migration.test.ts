@@ -63,6 +63,7 @@ describe('inbound webhook notification repair migration', () => {
         .filter(Boolean);
       for (const statement of statements) sqlite.exec(statement);
       _repairInboundWebhookNotificationActions(sqlite);
+      _repairInboundWebhookNotificationActions(sqlite);
 
       const notification = sqlite.prepare(`
         SELECT metadata, is_actionable, primary_action_id

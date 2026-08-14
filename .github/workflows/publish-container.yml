@@ -12,12 +12,35 @@ on:
         description: Full commit SHA from the main branch history to publish
         required: true
         type: string
+      version_mode:
+        description: How to determine the immutable image tag
+        required: true
+        type: choice
+        default: next_patch
+        options:
+          - explicit
+          - next_major
+          - next_minor
+          - next_patch
+      image_tag:
+        description: Explicit image tag when version_mode=explicit
+        required: false
+        default: ""
+        type: string
+      push_latest:
+        description: Also promote the image to latest
+        required: true
+        type: choice
+        default: "true"
+        options:
+          - "false"
+          - "true"
 
 permissions:
   contents: read
 
 concurrency:
-  group: publish-container-${{ github.event.workflow_run.head_sha || inputs.commit }}
+  group: publish-container
   cancel-in-progress: false
 
 jobs:
@@ -91,6 +114,8 @@ jobs:
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
       image: ${{ steps.image.outputs.name }}
+      version_tag: ${{ steps.tags.outputs.resolved_tag }}
+      sha_tag: ${{ steps.tags.outputs.sha_tag }}
     steps:
       - name: Check out current main history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -129,6 +154,65 @@ jobs:
         shell: bash
         run: echo "${GHCR_TOKEN}" | docker login ghcr.io --username "${GITHUB_ACTOR}" --password-stdin
 
+      - name: Resolve immutable publication tags
+        id: tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EXPLICIT_TAG: ${{ inputs.image_tag }}
+          REGISTRY_PASSWORD: ${{ github.token }}
+          REGISTRY_REPOSITORY: ${{ steps.image.outputs.name }}
+          REGISTRY_USERNAME: ${{ github.actor }}
+          REQUESTED_MODE: ${{ inputs.version_mode }}
+          REQUESTED_PUSH_LATEST: ${{ inputs.push_latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "workflow_run" ]]; then
+            export VERSION_MODE="next_patch"
+            push_latest="true"
+            sha_tag="sha-${SOURCE_SHA:0:7}"
+          else
+            export VERSION_MODE="${REQUESTED_MODE}"
+            push_latest="${REQUESTED_PUSH_LATEST}"
+            sha_tag=""
+          fi
+
+          python3 .github/scripts/resolve_registry_version.py
+          echo "sha_tag=${sha_tag}" >> "$GITHUB_OUTPUT"
+          echo "push_latest=${push_latest}" >> "$GITHUB_OUTPUT"
+
+      - name: Reject immutable tag overwrite
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+          VERSION_TAG: ${{ steps.tags.outputs.resolved_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_absent() {
+            local reference="$1"
+            local output=""
+            for attempt in 1 2 3; do
+              if output="$(docker manifest inspect "${reference}" 2>&1)"; then
+                echo "::error::Immutable image tag already exists: ${reference}"
+                return 1
+              fi
+              if grep -Eqi 'manifest unknown|no such manifest|manifest.*not found' <<<"${output}"; then
+                return 0
+              fi
+              sleep "${attempt}"
+            done
+            echo "::error::Could not prove immutable image tag is absent: ${reference}"
+            return 1
+          }
+
+          require_absent "${IMAGE}:${VERSION_TAG}"
+          if [[ -n "${SHA_TAG}" ]]; then
+            require_absent "${IMAGE}:${SHA_TAG}"
+          fi
+
       - name: Create isolated Buildx builder
         shell: bash
         run: docker buildx create --driver docker-container --use
@@ -146,7 +230,7 @@ jobs:
             --file Dockerfile \
             --platform linux/amd64 \
             --build-arg "MC_BUILD_SHA=${SOURCE_SHA}" \
-            --build-arg "MC_DEPLOYMENT_REVISION=sha-${SOURCE_SHA}" \
+            --build-arg "MC_DEPLOYMENT_REVISION=${{ steps.tags.outputs.resolved_tag }}" \
             --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
             --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
             --attest type=sbom \
@@ -165,6 +249,98 @@ jobs:
           subject-name: ${{ steps.image.outputs.name }}
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
+
+      - name: Promote attested digest to requested tags
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ steps.image.outputs.name }}
+          PUSH_LATEST: ${{ steps.tags.outputs.push_latest }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+          VERSION_TAG: ${{ steps.tags.outputs.resolved_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_absent() {
+            local reference="$1"
+            local output=""
+            for attempt in 1 2 3; do
+              if output="$(docker manifest inspect "${reference}" 2>&1)"; then
+                echo "::error::Immutable image tag appeared before promotion: ${reference}"
+                return 1
+              fi
+              if grep -Eqi 'manifest unknown|no such manifest|manifest.*not found' <<<"${output}"; then
+                return 0
+              fi
+              sleep "${attempt}"
+            done
+            echo "::error::Could not prove immutable image tag is absent: ${reference}"
+            return 1
+          }
+
+          verify_digest() {
+            local reference="$1"
+            local promoted_digest
+            promoted_digest="$(
+              docker buildx imagetools inspect "${reference}" |
+                awk '/^Digest:/ { print $2; exit }'
+            )"
+            if [[ "${promoted_digest}" != "${DIGEST}" ]]; then
+              echo "::error::${reference} resolved to ${promoted_digest}, expected ${DIGEST}"
+              return 1
+            fi
+          }
+
+          version_ref="${IMAGE}:${VERSION_TAG}"
+          require_absent "${version_ref}"
+          promotion_args=(--tag "${version_ref}")
+          verification_refs=("${version_ref}")
+
+          if [[ -n "${SHA_TAG}" ]]; then
+            sha_ref="${IMAGE}:${SHA_TAG}"
+            require_absent "${sha_ref}"
+            promotion_args+=(--tag "${sha_ref}")
+            verification_refs+=("${sha_ref}")
+          fi
+          if [[ "${PUSH_LATEST}" == "true" ]]; then
+            latest_ref="${IMAGE}:latest"
+            promotion_args+=(--tag "${latest_ref}")
+            verification_refs+=("${latest_ref}")
+          fi
+
+          docker buildx imagetools create \
+            "${promotion_args[@]}" \
+            "${IMAGE}@${DIGEST}"
+
+          for reference in "${verification_refs[@]}"; do
+            verify_digest "${reference}"
+          done
+
+      - name: Publish image summary
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          IMAGE: ${{ steps.image.outputs.name }}
+          PUSH_LATEST: ${{ steps.tags.outputs.push_latest }}
+          SHA_TAG: ${{ steps.tags.outputs.sha_tag }}
+          VERSION_TAG: ${{ steps.tags.outputs.resolved_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Mission Control container"
+            echo
+            echo "Digest: \`${IMAGE}@${DIGEST}\`"
+            echo
+            echo "Immutable version: \`${IMAGE}:${VERSION_TAG}\`"
+            if [[ -n "${SHA_TAG}" ]]; then
+              echo
+              echo "Immutable source: \`${IMAGE}:${SHA_TAG}\`"
+            fi
+            if [[ "${PUSH_LATEST}" == "true" ]]; then
+              echo
+              echo "Active development: \`${IMAGE}:latest\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Log out of GHCR
         if: ${{ always() }}

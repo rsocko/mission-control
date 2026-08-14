@@ -234,6 +234,11 @@ vi.mock('@/lib/api-error', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetAttachmentContent.mockReset();
+  mockGetAttachmentContent.mockResolvedValue({
+    contentBase64: 'cmVtb3RlIGNvbnRlbnQ=',
+    contentType: 'text/plain',
+  });
   selectCallIndex = 0;
   selectResults.length = 0;
   txSelectCallIndex = 0;
@@ -651,6 +656,137 @@ describe('POST /api/tasks/move/execute', () => {
 
     expect(response.status).toBe(413);
     expect(mockGetAttachmentContent).not.toHaveBeenCalled();
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it('accepts the exact attachment count limit', async () => {
+    selectResults.push([{
+      id: 'task-1', title: 'Attachment count boundary', description: null,
+      connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1',
+      sourceListId: 'list-a', sourceId: 'ms-source-1', status: 'todo',
+      priority: 'none', metadata: null,
+    }]);
+    selectResults.push([{
+      id: 'inst-2', type: 'github-issues', name: 'GitHub',
+      capabilities: { read: true, write: true, taskCreate: true, attachments: true },
+    }]);
+    selectResults.push([{ id: 'target-list-row', name: 'acme/repo', sourceId: 'acme/repo' }]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    mockListAttachments.mockResolvedValueOnce(Array.from({ length: 50 }, (_, index) => ({
+      id: `remote-${index}`,
+      name: `attachment-${index}.txt`,
+      contentType: 'text/plain',
+      size: 0,
+    })));
+    mockGetAttachmentContent.mockResolvedValue({
+      contentBase64: '',
+      contentType: 'text/plain',
+    });
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const response = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'acme/repo',
+        sourceAction: 'move',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mockGetAttachmentContent).toHaveBeenCalledTimes(50);
+    expect(mockCreateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the exact declared aggregate attachment byte limit', async () => {
+    selectResults.push([{
+      id: 'task-1', title: 'Attachment byte boundary', description: null,
+      connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1',
+      sourceListId: 'list-a', sourceId: 'ms-source-1', status: 'todo',
+      priority: 'none', metadata: null,
+    }]);
+    selectResults.push([{
+      id: 'inst-2', type: 'github-issues', name: 'GitHub',
+      capabilities: { read: true, write: true, taskCreate: true, attachments: true },
+    }]);
+    selectResults.push([{ id: 'target-list-row', name: 'acme/repo', sourceId: 'acme/repo' }]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    mockListAttachments.mockResolvedValueOnce([
+      { id: 'remote-1', name: 'one.bin', contentType: 'application/octet-stream', size: 10 * 1024 * 1024 },
+      { id: 'remote-2', name: 'two.bin', contentType: 'application/octet-stream', size: 10 * 1024 * 1024 },
+      { id: 'remote-3', name: 'three.bin', contentType: 'application/octet-stream', size: 5 * 1024 * 1024 },
+    ]);
+    mockGetAttachmentContent.mockResolvedValue({
+      contentBase64: '',
+      contentType: 'application/octet-stream',
+    });
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const response = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'acme/repo',
+        sourceAction: 'move',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(201);
+    expect(mockCreateTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects materialized content above the aggregate byte limit before destination creation', async () => {
+    selectResults.push([{
+      id: 'task-1', title: 'Materialized attachment boundary', description: null,
+      connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1',
+      sourceListId: 'list-a', sourceId: 'ms-source-1', status: 'todo',
+      priority: 'none', metadata: null,
+    }]);
+    selectResults.push([{
+      id: 'inst-2', type: 'github-issues', name: 'GitHub',
+      capabilities: { read: true, write: true, taskCreate: true, attachments: true },
+    }]);
+    selectResults.push([{ id: 'target-list-row', name: 'acme/repo', sourceId: 'acme/repo' }]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    mockListAttachments.mockResolvedValueOnce([
+      { id: 'remote-1', name: 'one.bin', contentType: 'application/octet-stream', size: 0 },
+      { id: 'remote-2', name: 'two.bin', contentType: 'application/octet-stream', size: 0 },
+      { id: 'remote-3', name: 'three.bin', contentType: 'application/octet-stream', size: 0 },
+    ]);
+    const tenMiB = Buffer.alloc(10 * 1024 * 1024).toString('base64');
+    const fiveMiBAndOne = Buffer.alloc(5 * 1024 * 1024 + 1).toString('base64');
+    mockGetAttachmentContent
+      .mockResolvedValueOnce({ contentBase64: tenMiB, contentType: 'application/octet-stream' })
+      .mockResolvedValueOnce({ contentBase64: tenMiB, contentType: 'application/octet-stream' })
+      .mockResolvedValueOnce({ contentBase64: fiveMiBAndOne, contentType: 'application/octet-stream' });
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const response = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'acme/repo',
+        sourceAction: 'move',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(413);
+    expect(mockGetAttachmentContent).toHaveBeenCalledTimes(3);
     expect(mockCreateTask).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { sqlite } from '@/db';
 import type { FinanceFreshnessState } from '@/db/finance-schema';
 import { listAttributionExceptions } from '@/lib/connectors/monarch-money/attribution-service';
@@ -25,7 +26,22 @@ import {
   type KidSpendingOutput,
   type PendingFinanceExceptionsInput,
   type PendingFinanceExceptionsOutput,
+  type AssignFinanceTransactionKidInput,
+  type AssignFinanceTransactionKidOutput,
+  type UpdateFinanceTransactionCategoryInput,
+  type UpdateFinanceTransactionCategoryOutput,
+  assignFinanceTransactionKidOutputSchema,
+  updateFinanceTransactionCategoryOutputSchema,
 } from './houston-contracts';
+import {
+  applyManualAttributionDecision,
+  FinanceAttributionMutationError,
+} from '@/lib/connectors/monarch-money/attribution-service';
+import {
+  MonarchBridgeError,
+} from '@/lib/connectors/monarch-money/client';
+import { updateFinanceCategory } from '@/lib/connectors/monarch-money/snapshot-sync';
+import type { ConnectorConfig } from '@/types';
 
 const MAX_OUTPUT_BYTES = 16 * 1024;
 const DAY_MS = 86_400_000;
@@ -62,10 +78,13 @@ type TransactionProjectionMeta = {
 };
 
 type SafeTransactionRow = {
+  id: string;
+  connectorId: string;
   date: string;
   amount: number;
   merchant: string | null;
   category: string | null;
+  confirmedCategory: string | null;
   pending: number;
   recurring: number;
   kidName: string | null;
@@ -79,6 +98,10 @@ type SafeTransactionRow = {
     | 'unassigned'
     | 'unavailable'
     | null;
+  assignedKidId: string | null;
+  sourceFingerprint: string;
+  lastSeenAt: string;
+  manualDecidedAt: string | null;
 };
 
 function safeText(value: unknown, fallback: string, maxLength: number): string {
@@ -130,6 +153,7 @@ async function selectConnector(signal?: AbortSignal) {
       'No enabled finance connector is configured.',
     );
   }
+
   if (connectors.length > 1) {
     throw new HoustonFinanceToolError(
       'finance_connector_ambiguous',
@@ -140,6 +164,56 @@ async function selectConnector(signal?: AbortSignal) {
   return {
     id: connectors[0].id,
     pollIntervalMinutes: connectors[0].pollIntervalMinutes ?? undefined,
+  };
+}
+
+function loadFinanceConnectorConfig(connectorId: string): ConnectorConfig {
+  const row = sqlite.prepare(`
+    SELECT id, type, name, enabled, sync_mode AS syncMode,
+           poll_interval_minutes AS pollIntervalMinutes, capabilities,
+           credentials, settings, synced_lists AS syncedLists
+    FROM connector_configs
+    WHERE id = ? AND enabled = 1 AND deleted_at IS NULL
+  `).get(connectorId) as {
+    id: string;
+    type: string;
+    name: string;
+    enabled: number;
+    syncMode: string;
+    pollIntervalMinutes: number | null;
+    capabilities: string;
+    credentials: string;
+    settings: string;
+    syncedLists: string;
+  } | undefined;
+  if (!row) {
+    throw new HoustonFinanceToolError(
+      'finance_not_configured',
+      'No enabled finance connector is configured.',
+    );
+  }
+  const capabilityValues = JSON.parse(row.capabilities) as Record<string, unknown>;
+  const capability = (name: string) => capabilityValues[name] === true;
+  return {
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    enabled: row.enabled === 1,
+    syncMode: row.syncMode as ConnectorConfig['syncMode'],
+    pollIntervalMinutes: row.pollIntervalMinutes ?? undefined,
+    capabilities: {
+      read: capability('read'),
+      write: capability('write'),
+      delete: capability('delete'),
+      sync: capability('sync'),
+      subtasks: capability('subtasks'),
+      lists: capability('lists'),
+      tags: capability('tags'),
+      tagWriteBack: capability('tagWriteBack'),
+    },
+    credentials: JSON.parse(row.credentials) as Record<string, string>,
+    settings: JSON.parse(row.settings) as Record<string, unknown>,
+    syncedLists: JSON.parse(row.syncedLists) as string[],
   };
 }
 
@@ -215,6 +289,31 @@ function provenance(
       kind: 'mission-control-calculated' as const,
       label: 'Mission Control-calculated aggregates',
       included: missionControlCalculated,
+    },
+  ];
+}
+
+function mutationProvenance(confirmed: boolean) {
+  return [
+    {
+      kind: 'monarch-fact' as const,
+      label: 'Monarch facts via Tyrion Bridge',
+      included: true,
+    },
+    {
+      kind: 'tyrion-derived' as const,
+      label: 'Tyrion-derived attribution/conclusions',
+      included: true,
+    },
+    {
+      kind: 'mission-control-calculated' as const,
+      label: 'Mission Control-calculated aggregates',
+      included: false,
+    },
+    {
+      kind: 'mission-control-confirmed' as const,
+      label: 'Mission Control-confirmed decision',
+      included: confirmed,
     },
   ];
 }
@@ -326,7 +425,10 @@ function output<T>(schema: { parse(value: unknown): T }, value: unknown): T {
 }
 
 function safeTransaction(row: SafeTransactionRow) {
+  const transactionRef = opaqueDigest('txn', row.connectorId, row.id);
+  const stateToken = transactionStateToken(row);
   return {
+    target: { transactionRef, stateToken },
     factsViaTyrionBridge: {
       date: row.date,
       amount: roundCurrency(row.amount),
@@ -342,6 +444,30 @@ function safeTransaction(row: SafeTransactionRow) {
       method: row.method,
     },
   };
+}
+
+function opaqueDigest(prefix: 'txn' | 'state', ...values: Array<string | number | null>): string {
+  const digest = createHash('sha256')
+    .update(JSON.stringify([prefix, ...values]))
+    .digest('base64url');
+  return `${prefix}_${digest}`;
+}
+
+function transactionStateToken(row: SafeTransactionRow): string {
+  return opaqueDigest(
+    'state',
+    row.connectorId,
+    row.id,
+    row.date,
+    row.amount,
+    row.merchant,
+    row.category,
+    row.confirmedCategory,
+    row.assignedKidId,
+    row.sourceFingerprint,
+    row.lastSeenAt,
+    row.manualDecidedAt,
+  );
 }
 
 function resolveKid(kidName: string): {
@@ -397,7 +523,7 @@ function queryTransactions(
     parameters.push(`%${input.query.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
   }
   if (input.category) {
-    conditions.push('lower(COALESCE(t.confirmed_category, t.original_category, ?)) = lower(?)');
+    conditions.push('lower(COALESCE(categories.name, t.confirmed_category, t.original_category, ?)) = lower(?)');
     parameters.push('', input.category);
   }
   if (input.kidId) {
@@ -411,13 +537,21 @@ function queryTransactions(
   const limit = input.limit ?? 15;
   parameters.push(limit + 1);
   const rows = sqlite.prepare(`
-    SELECT t.date, t.amount, t.merchant_name AS merchant,
-           COALESCE(t.confirmed_category, t.original_category) AS category,
+    SELECT t.id, t.connector_instance_id AS connectorId,
+           t.date, t.amount, t.merchant_name AS merchant,
+           COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
+           t.confirmed_category AS confirmedCategory,
            t.is_pending AS pending, t.is_recurring AS recurring,
            profiles.name AS kidName, t.attribution_status AS attributionStatus,
-           t.attribution_confidence AS confidence, t.attribution_method AS method
+           t.attribution_confidence AS confidence, t.attribution_method AS method,
+           t.assigned_kid_id AS assignedKidId,
+           t.source_fingerprint AS sourceFingerprint, t.last_seen_at AS lastSeenAt,
+           t.manual_decided_at AS manualDecidedAt
     FROM finance_transactions t
     LEFT JOIN kid_profiles profiles ON profiles.id = t.assigned_kid_id
+    LEFT JOIN finance_categories categories
+      ON categories.connector_id = t.connector_instance_id
+      AND categories.upstream_category_id = t.confirmed_category
     WHERE ${conditions.join(' AND ')}
     ORDER BY t.date DESC, t.id DESC
     LIMIT ?
@@ -450,12 +584,19 @@ export async function getHouseholdFinanceSummary(
     transactionCount: number;
   };
   const categoryRows = sqlite.prepare(`
-    SELECT COALESCE(confirmed_category, original_category, 'Uncategorized') AS category,
-           COALESCE(SUM(ABS(amount)), 0) AS amount, COUNT(*) AS transactionCount
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND lifecycle_status = 'active'
-      AND date >= ? AND date <= ?
-    GROUP BY COALESCE(confirmed_category, original_category, 'Uncategorized')
+    SELECT COALESCE(categories.name, transactions.confirmed_category,
+                    transactions.original_category, 'Uncategorized') AS category,
+           COALESCE(SUM(ABS(transactions.amount)), 0) AS amount,
+           COUNT(*) AS transactionCount
+    FROM finance_transactions transactions
+    LEFT JOIN finance_categories categories
+      ON categories.connector_id = transactions.connector_instance_id
+      AND categories.upstream_category_id = transactions.confirmed_category
+    WHERE transactions.connector_instance_id = ?
+      AND transactions.lifecycle_status = 'active'
+      AND transactions.date >= ? AND transactions.date <= ?
+    GROUP BY COALESCE(categories.name, transactions.confirmed_category,
+                      transactions.original_category, 'Uncategorized')
     ORDER BY amount DESC, category
     LIMIT 13
   `).all(connector.id, range.startDate, range.endDate) as Array<{
@@ -754,6 +895,468 @@ export async function getFinanceConnectorHealth(
       provenance: provenance(true, true, true),
     },
   });
+}
+
+export type HoustonFinanceApprovalAuditOutcome =
+  | 'denied'
+  | 'succeeded'
+  | 'failed'
+  | 'stale'
+  | 'invalid-approval';
+
+export function financeApprovalCallHash(
+  approvalSecret: string,
+  toolName: string,
+  toolCallId: string,
+  toolInput: unknown,
+): string {
+  const inputDigest = createHash('sha256')
+    .update(JSON.stringify(toolInput))
+    .digest('base64url');
+  return createHmac('sha256', approvalSecret)
+    .update(`houston-finance-approval-v2\0${toolName}\0${toolCallId}\0${inputDigest}`)
+    .digest('base64url');
+}
+
+export function recordHoustonFinanceApprovalAudit(input: {
+  correlationId: string;
+  toolName: string;
+  toolCallId: string;
+  toolInput: unknown;
+  decision: 'approve' | 'deny';
+  outcome: HoustonFinanceApprovalAuditOutcome;
+  durationMs: number;
+  approvalSecret: string;
+}): void {
+  sqlite.prepare(`
+    INSERT INTO houston_finance_action_audit (
+      id, correlation_id, call_hash, tool, decision, outcome, duration_ms, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    randomUUID(),
+    safeText(input.correlationId, 'unavailable', 128),
+    financeApprovalCallHash(
+      input.approvalSecret,
+      input.toolName,
+      input.toolCallId,
+      input.toolInput,
+    ),
+    input.toolName,
+    input.decision,
+    input.outcome,
+    Math.max(0, Math.round(input.durationMs)),
+    new Date().toISOString(),
+  );
+}
+
+type MutationExecutionOptions = {
+  approvalSecret: string;
+  toolCallId: string;
+  correlationId: string;
+  signal?: AbortSignal;
+  now?: Date;
+};
+
+function findMutationTarget(
+  connectorId: string,
+  transactionRef: string,
+  expected: AssignFinanceTransactionKidInput['expected'],
+): SafeTransactionRow {
+  const rows = sqlite.prepare(`
+    SELECT t.id, t.connector_instance_id AS connectorId,
+           t.date, t.amount, t.merchant_name AS merchant,
+           COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
+           t.confirmed_category AS confirmedCategory,
+           t.is_pending AS pending, t.is_recurring AS recurring,
+           profiles.name AS kidName, t.attribution_status AS attributionStatus,
+           t.attribution_confidence AS confidence, t.attribution_method AS method,
+           t.assigned_kid_id AS assignedKidId,
+           t.source_fingerprint AS sourceFingerprint, t.last_seen_at AS lastSeenAt,
+           t.manual_decided_at AS manualDecidedAt
+    FROM finance_transactions t
+    LEFT JOIN kid_profiles profiles ON profiles.id = t.assigned_kid_id
+    LEFT JOIN finance_categories categories
+      ON categories.connector_id = t.connector_instance_id
+      AND categories.upstream_category_id = t.confirmed_category
+    WHERE t.connector_instance_id = ? AND t.lifecycle_status = 'active'
+      AND t.date = ? AND t.amount = ?
+    ORDER BY t.id
+    LIMIT 50
+  `).all(connectorId, expected.date, expected.amount) as SafeTransactionRow[];
+  const target = rows.find(row => opaqueEqual(
+    opaqueDigest('txn', row.connectorId, row.id),
+    transactionRef,
+  ));
+  if (!target) {
+    throw new HoustonFinanceToolError(
+      'finance_unavailable',
+      'The approved finance target is no longer available.',
+    );
+  }
+  return target;
+}
+
+function assertExpectedTransactionState(
+  target: SafeTransactionRow,
+  expected: AssignFinanceTransactionKidInput['expected'],
+): void {
+  const safe = safeTransaction(target);
+  if (
+    safe.target.stateToken !== expected.stateToken
+    || safe.factsViaTyrionBridge.date !== expected.date
+    || safe.factsViaTyrionBridge.amount !== expected.amount
+    || safe.factsViaTyrionBridge.merchant !== expected.merchant
+    || safe.factsViaTyrionBridge.category !== expected.category
+    || safe.tyrionDerived.kidName !== expected.kidName
+  ) {
+    throw new HoustonFinanceToolError(
+      'finance_unavailable',
+      'The finance target changed after it was proposed. Review the current state and approve a new proposal.',
+    );
+  }
+}
+
+function assertMutationProjectionFresh(
+  connectorId: string,
+  pollIntervalMinutes: number | undefined,
+  requireAttribution: boolean,
+  now: Date,
+): void {
+  const base = transactionMeta(connectorId, pollIntervalMinutes, now);
+  const projection = requireAttribution
+    ? applyAttributionFreshness(base, pollIntervalMinutes, now)
+    : base;
+  if (projection.freshness !== 'fresh') {
+    throw new HoustonFinanceToolError(
+      'finance_unavailable',
+      'The finance projection is not current. Refresh finance data and approve a new proposal.',
+    );
+  }
+}
+
+function opaqueEqual(left: string, right: string): boolean {
+  const leftBytes = Buffer.from(left);
+  const rightBytes = Buffer.from(right);
+  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
+}
+
+function resolveProjectedKid(connectorId: string, kidName: string) {
+  const rows = sqlite.prepare(`
+    SELECT profiles.id, profiles.name
+    FROM kid_profiles profiles
+    INNER JOIN finance_attribution_subjects subjects
+      ON subjects.kid_id = profiles.id AND subjects.connector_id = ?
+    INNER JOIN finance_sync_state state
+      ON state.connector_id = subjects.connector_id
+      AND state.attribution_policy_version = subjects.policy_version
+    WHERE lower(profiles.name) = lower(?)
+    ORDER BY profiles.id
+    LIMIT 2
+  `).all(connectorId, kidName) as Array<{ id: string; name: string }>;
+  if (rows.length === 0) {
+    throw new HoustonFinanceToolError('finance_kid_not_found', 'No current household member matches that name.');
+  }
+  if (rows.length > 1) {
+    throw new HoustonFinanceToolError('finance_kid_ambiguous', 'More than one current household member matches that name.');
+  }
+  return rows[0];
+}
+
+function resolveProjectedCategory(connectorId: string, categoryName: string) {
+  const rows = sqlite.prepare(`
+    SELECT upstream_category_id AS upstreamCategoryId, name
+    FROM finance_categories
+    WHERE connector_id = ? AND is_active = 1 AND source_is_active = 1
+      AND lower(name) = lower(?)
+    ORDER BY upstream_category_id
+    LIMIT 2
+  `).all(connectorId, categoryName) as Array<{ upstreamCategoryId: string; name: string }>;
+  if (rows.length === 0) {
+    throw new HoustonFinanceToolError('finance_unavailable', 'No current finance category matches that name.');
+  }
+  if (rows.length > 1) {
+    throw new HoustonFinanceToolError('finance_unavailable', 'More than one current finance category matches that name.');
+  }
+  return rows[0];
+}
+
+function mutationIdempotencyKey(
+  options: MutationExecutionOptions,
+  toolName: string,
+  toolInput: unknown,
+): string {
+  return `houston:${financeApprovalCallHash(
+    options.approvalSecret,
+    toolName,
+    options.toolCallId,
+    toolInput,
+  )}`;
+}
+
+function mutationFailure(
+  kind: 'finance-kid-assignment' | 'finance-category-update',
+  error: unknown,
+) {
+  let code:
+    | 'target_not_found'
+    | 'target_stale'
+    | 'kid_not_found'
+    | 'kid_ambiguous'
+    | 'category_not_found'
+    | 'category_ambiguous'
+    | 'mutation_conflict'
+    | 'upstream_unavailable'
+    | 'mutation_unavailable' = 'mutation_unavailable';
+  let message = 'The approved finance mutation could not be completed.';
+  let retryable = false;
+  if (error instanceof HoustonFinanceToolError) {
+    if (error.code === 'finance_kid_not_found') code = 'kid_not_found';
+    else if (error.code === 'finance_kid_ambiguous') code = 'kid_ambiguous';
+    else if (/changed after it was proposed|projection is not current/.test(error.message)) code = 'target_stale';
+    else if (/target is no longer available/.test(error.message)) code = 'target_not_found';
+    else if (/No current finance category/.test(error.message)) code = 'category_not_found';
+    else if (/More than one current finance category/.test(error.message)) code = 'category_ambiguous';
+    message = error.message;
+  } else if (error instanceof FinanceAttributionMutationError) {
+    code = /conflict|superseded|idempotency/.test(error.code)
+      ? 'mutation_conflict'
+      : 'mutation_unavailable';
+    message = code === 'mutation_conflict'
+      ? 'The attribution state changed before the approved decision could be applied.'
+      : 'The approved kid assignment could not be completed.';
+  } else if (error instanceof MonarchBridgeError) {
+    code = /conflict|in_progress|idempotency/.test(error.code)
+      ? 'mutation_conflict'
+      : 'upstream_unavailable';
+    message = code === 'mutation_conflict'
+      ? 'Another category update conflicts with this approved proposal.'
+      : 'The Tyrion Bridge did not verify the approved category update.';
+    retryable = error.retryable;
+  }
+  return {
+    kind,
+    status: 'failed' as const,
+    error: { code, message, retryable },
+    provenance: mutationProvenance(false),
+  };
+}
+
+function replayedKidAssignment(idempotencyKey: string): string | null {
+  const rows = sqlite.prepare(`
+    SELECT profiles.name AS kidName
+    FROM finance_attribution_audit audit
+    LEFT JOIN kid_profiles profiles ON profiles.id = audit.requested_kid_id
+    WHERE audit.idempotency_key = ? AND audit.result_status = 'resolved'
+    LIMIT 2
+  `).all(idempotencyKey) as Array<{ kidName: string | null }>;
+  if (rows.length > 1) {
+    throw new FinanceAttributionMutationError(
+      'idempotency_conflict',
+      'Approval identity matched more than one attribution decision',
+      409,
+    );
+  }
+  return rows.length === 1
+    ? safeText(rows[0].kidName, 'Household member', 100)
+    : null;
+}
+
+function replayedCategoryUpdate(idempotencyKey: string): string | null {
+  const rows = sqlite.prepare(`
+    SELECT categories.name AS categoryName
+    FROM finance_mutation_audit audit
+    LEFT JOIN finance_categories categories
+      ON categories.connector_id = audit.connector_id
+      AND categories.upstream_category_id = audit.requested_value
+    WHERE audit.idempotency_key = ? AND audit.status = 'succeeded'
+    LIMIT 2
+  `).all(idempotencyKey) as Array<{ categoryName: string | null }>;
+  if (rows.length > 1) {
+    throw new MonarchBridgeError(
+      'idempotency_conflict',
+      'Approval identity matched more than one category update',
+      false,
+      409,
+    );
+  }
+  return rows.length === 1
+    ? safeText(rows[0].categoryName, 'Previously approved category', 100)
+    : null;
+}
+
+export async function assignFinanceTransactionKid(
+  input: AssignFinanceTransactionKidInput,
+  options: MutationExecutionOptions,
+): Promise<AssignFinanceTransactionKidOutput> {
+  const startedAt = performance.now();
+  let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
+  try {
+    throwIfAborted(options.signal);
+    const idempotencyKey = mutationIdempotencyKey(
+      options,
+      'assignFinanceTransactionKid',
+      input,
+    );
+    const replayedKidName = replayedKidAssignment(idempotencyKey);
+    if (replayedKidName) {
+      outcome = 'succeeded';
+      return assignFinanceTransactionKidOutputSchema.parse({
+        kind: 'finance-kid-assignment',
+        status: 'updated',
+        missionControlConfirmed: { kidName: replayedKidName },
+        replayed: true,
+        provenance: mutationProvenance(true),
+      });
+    }
+    const connector = await selectConnector(options.signal);
+    const transaction = findMutationTarget(connector.id, input.transactionRef, input.expected);
+    const kid = resolveProjectedKid(connector.id, input.kidName);
+    assertMutationProjectionFresh(
+      connector.id,
+      connector.pollIntervalMinutes,
+      true,
+      options.now ?? new Date(),
+    );
+    assertExpectedTransactionState(transaction, input.expected);
+    const result = applyManualAttributionDecision({
+      connectorId: connector.id,
+      transactionId: transaction.id,
+      action: 'assign-kid',
+      kidId: kid.id,
+      idempotencyKey,
+      actorType: 'parent-admin',
+      expectedTransactionVersion: {
+        sourceFingerprint: transaction.sourceFingerprint,
+        lastSeenAt: transaction.lastSeenAt,
+        assignedKidId: transaction.assignedKidId,
+        confirmedCategory: transaction.confirmedCategory,
+        manualDecidedAt: transaction.manualDecidedAt,
+      },
+    });
+    outcome = 'succeeded';
+    return assignFinanceTransactionKidOutputSchema.parse({
+      kind: 'finance-kid-assignment',
+      status: 'updated',
+      missionControlConfirmed: { kidName: safeText(kid.name, 'Household member', 100) },
+      replayed: result.replayed,
+      provenance: mutationProvenance(true),
+    });
+  } catch (error) {
+    if (
+      (
+        error instanceof HoustonFinanceToolError
+        && /changed after it was proposed|projection is not current/.test(error.message)
+      )
+      || (
+        error instanceof FinanceAttributionMutationError
+        && error.code === 'transaction_conflict'
+      )
+    ) {
+      outcome = 'stale';
+    }
+    return assignFinanceTransactionKidOutputSchema.parse(
+      mutationFailure('finance-kid-assignment', error),
+    );
+  } finally {
+    recordHoustonFinanceApprovalAudit({
+      correlationId: options.correlationId,
+      toolName: 'assignFinanceTransactionKid',
+      toolCallId: options.toolCallId,
+      decision: 'approve',
+      outcome,
+      durationMs: performance.now() - startedAt,
+      approvalSecret: options.approvalSecret,
+      toolInput: input,
+    });
+  }
+}
+
+export async function updateFinanceTransactionCategory(
+  input: UpdateFinanceTransactionCategoryInput,
+  options: MutationExecutionOptions,
+): Promise<UpdateFinanceTransactionCategoryOutput> {
+  const startedAt = performance.now();
+  let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
+  try {
+    throwIfAborted(options.signal);
+    const idempotencyKey = mutationIdempotencyKey(
+      options,
+      'updateFinanceTransactionCategory',
+      input,
+    );
+    const replayedCategoryName = replayedCategoryUpdate(idempotencyKey);
+    if (replayedCategoryName) {
+      outcome = 'succeeded';
+      return updateFinanceTransactionCategoryOutputSchema.parse({
+        kind: 'finance-category-update',
+        status: 'updated',
+        factsViaTyrionBridge: { category: replayedCategoryName },
+        replayed: true,
+        provenance: mutationProvenance(true),
+      });
+    }
+    const connector = await selectConnector(options.signal);
+    const transaction = findMutationTarget(connector.id, input.transactionRef, input.expected);
+    const category = resolveProjectedCategory(connector.id, input.categoryName);
+    assertMutationProjectionFresh(
+      connector.id,
+      connector.pollIntervalMinutes,
+      false,
+      options.now ?? new Date(),
+    );
+    assertExpectedTransactionState(transaction, input.expected);
+    const config = loadFinanceConnectorConfig(connector.id);
+    await updateFinanceCategory(
+      config,
+      transaction.id,
+      category.upstreamCategoryId,
+      idempotencyKey,
+      options.signal,
+      {
+        sourceFingerprint: transaction.sourceFingerprint,
+        lastSeenAt: transaction.lastSeenAt,
+        assignedKidId: transaction.assignedKidId,
+        confirmedCategory: transaction.confirmedCategory,
+        manualDecidedAt: transaction.manualDecidedAt,
+        categoryName: category.name,
+      },
+    );
+    outcome = 'succeeded';
+    return updateFinanceTransactionCategoryOutputSchema.parse({
+      kind: 'finance-category-update',
+      status: 'updated',
+      factsViaTyrionBridge: { category: safeText(category.name, 'Category', 100) },
+      replayed: false,
+      provenance: mutationProvenance(true),
+    });
+  } catch (error) {
+    if (
+      (
+        error instanceof HoustonFinanceToolError
+        && /changed after it was proposed|projection is not current/.test(error.message)
+      )
+      || (
+        error instanceof MonarchBridgeError
+        && error.code === 'transaction_conflict'
+      )
+    ) {
+      outcome = 'stale';
+    }
+    return updateFinanceTransactionCategoryOutputSchema.parse(
+      mutationFailure('finance-category-update', error),
+    );
+  } finally {
+    recordHoustonFinanceApprovalAudit({
+      correlationId: options.correlationId,
+      toolName: 'updateFinanceTransactionCategory',
+      toolCallId: options.toolCallId,
+      decision: 'approve',
+      outcome,
+      durationMs: performance.now() - startedAt,
+      approvalSecret: options.approvalSecret,
+      toolInput: input,
+    });
+  }
 }
 
 export {

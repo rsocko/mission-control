@@ -364,6 +364,24 @@ export const financeMutationAudit = sqliteTable('finance_mutation_audit', {
   index('idx_finance_mutation_attention_scan').on(table.connectorId, table.updatedAt, table.id),
 ]);
 
+export const houstonFinanceActionAudit = sqliteTable('houston_finance_action_audit', {
+  id: text('id').primaryKey(),
+  correlationId: text('correlation_id').notNull(),
+  callHash: text('call_hash').notNull(),
+  tool: text('tool')
+    .$type<'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory'>()
+    .notNull(),
+  decision: text('decision').$type<'approve' | 'deny'>().notNull(),
+  outcome: text('outcome')
+    .$type<'denied' | 'succeeded' | 'failed' | 'stale' | 'invalid-approval'>()
+    .notNull(),
+  durationMs: integer('duration_ms').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_houston_finance_action_call').on(table.callHash, table.createdAt),
+  index('idx_houston_finance_action_correlation').on(table.correlationId, table.createdAt),
+]);
+
 export const financeAttributionSubjects = sqliteTable('finance_attribution_subjects', {
   id: text('id').primaryKey(),
   connectorId: text('connector_id').notNull(),

@@ -27,6 +27,8 @@ import {
 import { getBackgroundAiTask, submitBackgroundAiTask } from '@/lib/ai/backgroundAiTaskManager';
 import { useBackgroundAiTasks } from '@/lib/ai/useBackgroundAiTasks';
 import { uiLogger } from '@/lib/client-logger';
+import type { ToolApprovalHandler } from '@/components/ai/ToolCard';
+import { getToolName, type ToolPart } from '@/lib/ai/chatMessageFactory';
 
 const tabs: ReadonlyArray<{ id: AITab; label: string }> = [
   { id: 'chat', label: 'Chat' },
@@ -55,28 +57,26 @@ export default function AIPage() {
     fetch('/api/ai/provider').then(response => response.json()).then(setProviderInfo).catch(err => { uiLogger.error('Failed to fetch AI provider info', { err }); });
   }, []);
 
-  const sendMessage = useCallback(async (text?: string) => {
-    if (loading) return;
-    const msg = text || input.trim();
-    if (!msg) return;
-
-    const nextMessages = [...messages, createUserMessage(msg)];
+  const submitChat = useCallback((
+    nextMessages: ChatMessage[],
+    label: string,
+    fallbackPrompt?: string,
+  ) => {
     const assistantMessage = createAssistantMessage();
     const taskId = getChatTaskId();
     setMessages(nextMessages);
-    setInput('');
     setLoading(true);
 
     submitBackgroundAiTask<ChatMessage[]>({
       id: taskId,
       category: 'chat',
-      label: msg.length > 60 ? `${msg.slice(0, 57)}…` : msg,
+      label: label.length > 60 ? `${label.slice(0, 57)}…` : label,
       execute: async signal => {
         const response = await fetch('/api/ai', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: nextMessages }), signal });
         if (!response.ok) {
           const error = await readJsonSafely(response);
-          if (error?.fallback) {
-            const result = [...nextMessages, createAssistantTextMessage(await getLocalFallback(msg))];
+          if (error?.fallback && fallbackPrompt) {
+            const result = [...nextMessages, createAssistantTextMessage(await getLocalFallback(fallbackPrompt))];
             setCachedChatMessages(result);
             setMessages(result);
             return result;
@@ -107,8 +107,11 @@ export default function AIPage() {
       if (!task || task.status === 'running' || task.status === 'pending') return void requestAnimationFrame(waitForTask);
       if (task.status === 'completed' && task.result) setMessages(task.result);
       if (task.status === 'failed') {
-        getLocalFallback(msg).then(fallback => {
-          const result = [...nextMessages, createAssistantTextMessage(`⚠️ ${task.error || fallback}`)];
+        const fallback = fallbackPrompt
+          ? getLocalFallback(fallbackPrompt)
+          : Promise.resolve('The approval response could not be processed.');
+        fallback.then(message => {
+          const result = [...nextMessages, createAssistantTextMessage(`⚠️ ${task.error || message}`)];
           setCachedChatMessages(result);
           setMessages(result);
         });
@@ -117,7 +120,50 @@ export default function AIPage() {
     };
 
     requestAnimationFrame(waitForTask);
-  }, [input, loading, messages]);
+  }, []);
+
+  const sendMessage = useCallback(async (text?: string) => {
+    if (loading) return;
+    const msg = text || input.trim();
+    if (!msg) return;
+    setInput('');
+    submitChat([...messages, createUserMessage(msg)], msg, msg);
+  }, [input, loading, messages, submitChat]);
+
+  const handleApprovalResponse = useCallback<ToolApprovalHandler>(async (
+    requestedPart,
+    approved,
+  ) => {
+    if (loading || requestedPart.state !== 'approval-requested') return;
+    const nextMessages = messages.map(message => ({
+      ...message,
+      parts: message.parts.map(part => {
+        if (
+          !('toolCallId' in part)
+          || part.toolCallId !== requestedPart.toolCallId
+          || !('approval' in part)
+          || part.approval?.id !== requestedPart.approval.id
+          || part.state !== 'approval-requested'
+        ) {
+          return part;
+        }
+        return {
+          ...part,
+          state: 'approval-responded' as const,
+          approval: {
+            ...part.approval,
+            approved,
+            reason: approved ? 'User explicitly approved this proposal.' : 'User denied this proposal.',
+          },
+        };
+      }),
+    })) as ChatMessage[];
+    const toolName = getToolName(requestedPart as ToolPart);
+    submitChat(
+      nextMessages,
+      `${approved ? 'Approve' : 'Deny'} ${toolName}`,
+    );
+  }, [loading, messages, submitChat]);
 
   const handleKeyDown = useCallback<KeyboardEventHandler<HTMLTextAreaElement>>(event => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -173,6 +219,7 @@ export default function AIPage() {
             onKeyDown={handleKeyDown}
             onNewChat={handleMobileNewChat}
             onSend={sendMessage}
+            onApprovalResponse={handleApprovalResponse}
             providerInfo={providerInfo}
           />
         ) : (
@@ -186,7 +233,7 @@ export default function AIPage() {
           <div className="flex-1 min-h-0">
             <AnimatePresence initial={false} mode="wait">
               <motion.div key={activeTab} initial={{ opacity: 0, y: 12, filter: 'blur(4px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} exit={{ opacity: 0, y: -12, filter: 'blur(2px)' }} transition={{ duration: 0.2 }} className="h-full">
-                {activeTab === 'chat' ? <AIChatTab input={input} inputRef={inputRef} isAiActive={isAiActive} loading={loading} messages={messages} messagesEndRef={messagesEndRef} onClearSidebar={() => setSidebarResult(null)} onInputChange={setInput} onKeyDown={handleKeyDown} onRunFeature={runFeature} onSend={sendMessage} projects={projects} providerInfo={providerInfo} sidebarResult={sidebarResult} /> : null}
+                {activeTab === 'chat' ? <AIChatTab input={input} inputRef={inputRef} isAiActive={isAiActive} loading={loading} messages={messages} messagesEndRef={messagesEndRef} onApprovalResponse={handleApprovalResponse} onClearSidebar={() => setSidebarResult(null)} onInputChange={setInput} onKeyDown={handleKeyDown} onRunFeature={runFeature} onSend={sendMessage} projects={projects} providerInfo={providerInfo} sidebarResult={sidebarResult} /> : null}
                 {activeTab === 'agents' ? <div className="flex h-full items-center justify-center p-6"><div className="w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-6 text-center"><h2 className="text-lg font-semibold text-[var(--text-primary)]">Agents</h2><p className="mt-2 text-sm text-[var(--text-secondary)]">The agents workspace is being connected. This tab is reserved for the upcoming agent controls.</p></div></div> : null}
                 {activeTab === 'insights' ? <AIInsightsPanel /> : null}
               </motion.div>

@@ -2,7 +2,7 @@
  * API Route Tests - Sync, Triage, AI paths
  * Tests #111
  */
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
@@ -372,15 +372,52 @@ describe('PATCH /api/triage/[id]', () => {
 // ─── AI API ────────────────────────────────────────────────────────────────
 
 describe('POST /api/ai', () => {
+  beforeEach(() => {
+    vi.stubEnv(
+      'MC_HOUSTON_TOOL_APPROVAL_SECRET',
+      'invented-route-test-approval-secret-32-bytes',
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('should stream a response for valid messages', async () => {
+    const { POST } = await import('@/app/api/ai/route');
+    const request = new Request('http://localhost:3099/api/ai', {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: [{
+          id: 'invented-user-message',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }],
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await POST(request);
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ['missing', ''],
+    ['short', 'too-short'],
+  ])('should fail closed when the approval secret is %s', async (_case, secret) => {
+    vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
       method: 'POST',
       body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
       headers: { 'Content-Type': 'application/json' },
     });
+
     const response = await POST(request);
-    expect(response.status).toBe(200);
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Houston finance approvals are unavailable because the server approval secret is not configured correctly.',
+    });
   });
 
   it('should return 400 when messages is missing', async () => {

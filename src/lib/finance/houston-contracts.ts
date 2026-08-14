@@ -9,6 +9,11 @@ export const FINANCE_TOOL_NAMES = [
   'getFinanceConnectorHealth',
 ] as const;
 
+export const FINANCE_MUTATION_TOOL_NAMES = [
+  'assignFinanceTransactionKid',
+  'updateFinanceTransactionCategory',
+] as const;
+
 export const financeFreshnessSchema = z.enum([
   'fresh',
   'stale',
@@ -58,7 +63,12 @@ export const financeObligationsInputSchema = z.object({
 export const financeConnectorHealthInputSchema = z.object({}).strict();
 
 const provenanceEntrySchema = z.object({
-  kind: z.enum(['monarch-fact', 'tyrion-derived', 'mission-control-calculated']),
+  kind: z.enum([
+    'monarch-fact',
+    'tyrion-derived',
+    'mission-control-calculated',
+    'mission-control-confirmed',
+  ]),
   label: z.string().max(80),
   included: z.boolean(),
 }).strict();
@@ -99,7 +109,13 @@ export const householdFinanceSummaryOutputSchema = z.object({
   meta: financeToolMetaSchema,
 }).strict();
 
+export const financeTransactionTargetSchema = z.object({
+  transactionRef: z.string().regex(/^txn_[A-Za-z0-9_-]{43}$/),
+  stateToken: z.string().regex(/^state_[A-Za-z0-9_-]{43}$/),
+}).strict();
+
 const transactionSchema = z.object({
+  target: financeTransactionTargetSchema,
   factsViaTyrionBridge: z.object({
     date: calendarDateSchema,
     amount: z.number().finite(),
@@ -122,6 +138,82 @@ const transactionSchema = z.object({
     ]).nullable(),
   }).strict(),
 }).strict();
+
+const expectedTransactionStateSchema = z.object({
+  date: calendarDateSchema,
+  amount: z.number().finite(),
+  merchant: z.string().trim().min(1).max(120),
+  category: z.string().trim().min(1).max(100).nullable(),
+  kidName: z.string().trim().min(1).max(100).nullable(),
+  stateToken: z.string().regex(/^state_[A-Za-z0-9_-]{43}$/),
+}).strict();
+
+export const assignFinanceTransactionKidInputSchema = z.object({
+  transactionRef: z.string().regex(/^txn_[A-Za-z0-9_-]{43}$/),
+  expected: expectedTransactionStateSchema,
+  kidName: z.string().trim().min(1).max(100),
+}).strict();
+
+export const updateFinanceTransactionCategoryInputSchema = z.object({
+  transactionRef: z.string().regex(/^txn_[A-Za-z0-9_-]{43}$/),
+  expected: expectedTransactionStateSchema,
+  categoryName: z.string().trim().min(1).max(100),
+}).strict();
+
+const financeMutationErrorSchema = z.object({
+  code: z.enum([
+    'approval_unavailable',
+    'target_not_found',
+    'target_stale',
+    'kid_not_found',
+    'kid_ambiguous',
+    'category_not_found',
+    'category_ambiguous',
+    'mutation_conflict',
+    'upstream_unavailable',
+    'mutation_unavailable',
+  ]),
+  message: z.string().max(180),
+  retryable: z.boolean(),
+}).strict();
+
+const financeMutationProvenanceSchema = z.array(provenanceEntrySchema).length(4);
+
+export const assignFinanceTransactionKidOutputSchema = z.discriminatedUnion('status', [
+  z.object({
+    kind: z.literal('finance-kid-assignment'),
+    status: z.literal('updated'),
+    missionControlConfirmed: z.object({
+      kidName: z.string().max(100),
+    }).strict(),
+    replayed: z.boolean(),
+    provenance: financeMutationProvenanceSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('finance-kid-assignment'),
+    status: z.literal('failed'),
+    error: financeMutationErrorSchema,
+    provenance: financeMutationProvenanceSchema,
+  }).strict(),
+]);
+
+export const updateFinanceTransactionCategoryOutputSchema = z.discriminatedUnion('status', [
+  z.object({
+    kind: z.literal('finance-category-update'),
+    status: z.literal('updated'),
+    factsViaTyrionBridge: z.object({
+      category: z.string().max(100),
+    }).strict(),
+    replayed: z.boolean(),
+    provenance: financeMutationProvenanceSchema,
+  }).strict(),
+  z.object({
+    kind: z.literal('finance-category-update'),
+    status: z.literal('failed'),
+    error: financeMutationErrorSchema,
+    provenance: financeMutationProvenanceSchema,
+  }).strict(),
+]);
 
 export const financeTransactionSearchOutputSchema = z.object({
   kind: z.literal('finance-transaction-search'),
@@ -218,10 +310,14 @@ export type PendingFinanceExceptionsInput = z.input<typeof pendingFinanceExcepti
 export type KidSpendingInput = z.input<typeof kidSpendingInputSchema>;
 export type FinanceObligationsInput = z.input<typeof financeObligationsInputSchema>;
 export type FinanceConnectorHealthInput = z.input<typeof financeConnectorHealthInputSchema>;
+export type AssignFinanceTransactionKidInput = z.input<typeof assignFinanceTransactionKidInputSchema>;
+export type UpdateFinanceTransactionCategoryInput = z.input<typeof updateFinanceTransactionCategoryInputSchema>;
 export type HouseholdFinanceSummaryOutput = z.infer<typeof householdFinanceSummaryOutputSchema>;
 export type FinanceTransactionSearchOutput = z.infer<typeof financeTransactionSearchOutputSchema>;
 export type PendingFinanceExceptionsOutput = z.infer<typeof pendingFinanceExceptionsOutputSchema>;
 export type KidSpendingOutput = z.infer<typeof kidSpendingOutputSchema>;
 export type FinanceObligationsOutput = z.infer<typeof financeObligationsOutputSchema>;
 export type FinanceConnectorHealthOutput = z.infer<typeof financeConnectorHealthOutputSchema>;
+export type AssignFinanceTransactionKidOutput = z.infer<typeof assignFinanceTransactionKidOutputSchema>;
+export type UpdateFinanceTransactionCategoryOutput = z.infer<typeof updateFinanceTransactionCategoryOutputSchema>;
 export type FinanceToolOutput = z.infer<typeof financeToolOutputSchema>;

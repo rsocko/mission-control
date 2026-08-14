@@ -801,6 +801,13 @@ interface ManualDecisionInput {
   actorType: ActorType;
   exceptionId?: string | null;
   auditAction?: 'approve' | 'manual-resolve';
+  expectedTransactionVersion?: {
+    sourceFingerprint: string;
+    lastSeenAt: string;
+    assignedKidId: string | null;
+    confirmedCategory: string | null;
+    manualDecidedAt: string | null;
+  };
 }
 
 interface AttributionActionAudit {
@@ -889,16 +896,44 @@ export function applyManualAttributionDecision(input: ManualDecisionInput): {
       return true;
     }
     const transaction = sqlite.prepare(`
-      SELECT id, manual_decided_at AS manualDecidedAt FROM finance_transactions
+      SELECT id, source_fingerprint AS sourceFingerprint,
+             last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
+             confirmed_category AS confirmedCategory,
+             manual_decided_at AS manualDecidedAt
+      FROM finance_transactions
       WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
     `).get(input.transactionId, input.connectorId) as
-      | { id: string; manualDecidedAt: string | null }
+      | {
+          id: string;
+          sourceFingerprint: string;
+          lastSeenAt: string;
+          assignedKidId: string | null;
+          confirmedCategory: string | null;
+          manualDecidedAt: string | null;
+        }
       | undefined;
     if (!transaction) {
       throw new FinanceAttributionMutationError(
         'transaction_not_found',
         'Finance transaction was not found',
         404,
+      );
+    }
+    const expectedVersion = input.expectedTransactionVersion;
+    if (
+      expectedVersion
+      && (
+        transaction.sourceFingerprint !== expectedVersion.sourceFingerprint
+        || transaction.lastSeenAt !== expectedVersion.lastSeenAt
+        || transaction.assignedKidId !== expectedVersion.assignedKidId
+        || transaction.confirmedCategory !== expectedVersion.confirmedCategory
+        || transaction.manualDecidedAt !== expectedVersion.manualDecidedAt
+      )
+    ) {
+      throw new FinanceAttributionMutationError(
+        'transaction_conflict',
+        'Finance transaction changed after approval',
+        409,
       );
     }
     if (input.action === 'assign-kid') {

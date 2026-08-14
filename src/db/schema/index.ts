@@ -273,6 +273,7 @@ export {
   financeRecurringObligations,
   financeBudgetSnapshots,
   financeMutationAudit,
+  houstonFinanceActionAudit,
   financeAttributionSubjects,
   financeAttributionExceptions,
   financeAttributionAudit,

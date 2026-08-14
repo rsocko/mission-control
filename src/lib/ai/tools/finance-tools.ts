@@ -7,6 +7,8 @@ import {
   getPendingFinanceExceptions,
   HoustonFinanceToolError,
   searchFinanceTransactions,
+  assignFinanceTransactionKid,
+  updateFinanceTransactionCategory,
 } from '@/lib/finance/houston-tools';
 import {
   financeConnectorHealthInputSchema,
@@ -21,6 +23,10 @@ import {
   kidSpendingOutputSchema,
   pendingFinanceExceptionsInputSchema,
   pendingFinanceExceptionsOutputSchema,
+  assignFinanceTransactionKidInputSchema,
+  assignFinanceTransactionKidOutputSchema,
+  updateFinanceTransactionCategoryInputSchema,
+  updateFinanceTransactionCategoryOutputSchema,
 } from '@/lib/finance/houston-contracts';
 
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
@@ -109,3 +115,41 @@ export const financeTools = {
     ),
   }),
 };
+
+type HoustonToolContext = {
+  correlationId?: unknown;
+};
+
+function correlationId(context: unknown): string {
+  const value = (context as HoustonToolContext | undefined)?.correlationId;
+  return typeof value === 'string' && value.length > 0 ? value : 'unavailable';
+}
+
+export function createFinanceMutationTools(approvalSecret: string) {
+  return {
+    assignFinanceTransactionKid: tool({
+      description: 'Propose assigning one current finance transaction to a current household member. This always requires explicit user approval.',
+      inputSchema: zodSchema(assignFinanceTransactionKidInputSchema),
+      outputSchema: zodSchema(assignFinanceTransactionKidOutputSchema),
+      needsApproval: true,
+      execute: (input, options) => assignFinanceTransactionKid(input, {
+        approvalSecret,
+        toolCallId: options.toolCallId,
+        correlationId: correlationId(options.experimental_context),
+        signal: options.abortSignal,
+      }),
+    }),
+    updateFinanceTransactionCategory: tool({
+      description: 'Propose changing one current finance transaction to a current finance category. This always requires explicit user approval.',
+      inputSchema: zodSchema(updateFinanceTransactionCategoryInputSchema),
+      outputSchema: zodSchema(updateFinanceTransactionCategoryOutputSchema),
+      needsApproval: true,
+      execute: (input, options) => updateFinanceTransactionCategory(input, {
+        approvalSecret,
+        toolCallId: options.toolCallId,
+        correlationId: correlationId(options.experimental_context),
+        signal: options.abortSignal,
+      }),
+    }),
+  };
+}

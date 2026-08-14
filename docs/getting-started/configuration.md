@@ -96,6 +96,13 @@ private key and token-encryption key in the deployment secret store.
 | `AI_APPROVED_AZURE_HOSTS` | — | Additional trusted Azure endpoint hostnames |
 | `AI_APPROVED_BIFROST_HOSTS` | — | Additional trusted Bifrost endpoint hostnames |
 | `AI_APPROVED_OPENAI_HOSTS` | — | Additional trusted OpenAI-compatible endpoint hostnames |
+| `MC_HOUSTON_TOOL_APPROVAL_SECRET` | — | Required server-only secret of at least 32 bytes for AI SDK-signed Houston finance approvals; use the same secret on every web instance |
+
+Houston refuses AI chat requests when `MC_HOUSTON_TOOL_APPROVAL_SECRET` is
+missing or shorter than 32 UTF-8 bytes. The secret signs approval requests and
+is never returned to the browser or written to logs. Generate it in the
+deployment secret manager and keep the value identical across instances so an
+approval issued by one instance can be verified by another.
 
 :::info[Azure OpenAI]
 For Azure, set `AI_PROVIDER=azure` plus `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`.

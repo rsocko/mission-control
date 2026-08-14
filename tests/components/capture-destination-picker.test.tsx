@@ -147,6 +147,11 @@ describe('mobile capture destination picker', () => {
       const putRequests = mockFetch.mock.calls.filter(([, init]) => init?.method === 'PUT');
       expect(putRequests).toHaveLength(0);
     });
+    expect(JSON.parse(
+      window.localStorage.getItem('mission-control:configured-capture-destination:v1') ?? '{}',
+    )).toEqual(expect.objectContaining({
+      destination: { connectorType: 'local' },
+    }));
 
     fireEvent.change(screen.getByLabelText('Task or note'), {
       target: { value: 'Review capture flow' },
@@ -249,7 +254,7 @@ describe('mobile capture destination picker', () => {
   });
 
   it('uses the cached configured destination during an offline cold start', async () => {
-    window.localStorage.setItem('mission-control:capture-destination', JSON.stringify({
+    window.localStorage.setItem('mission-control:configured-capture-destination:v1', JSON.stringify({
       destination: {
         connectorType: 'microsoft-todo',
         connectorInstanceId: 'todo-1',
@@ -283,6 +288,31 @@ describe('mobile capture destination picker', () => {
         sourceListId: 'work-list',
         sourceListName: 'Work',
       });
+    });
+  });
+
+  it('ignores a legacy sticky override and uses the configured default', async () => {
+    window.localStorage.setItem('mission-control:capture-destination', JSON.stringify({
+      destination: {
+        connectorType: 'github',
+        connectorInstanceId: 'github-1',
+        sourceListId: 'rsocko/tyrion',
+        sourceListName: 'rsocko/tyrion',
+      },
+      source: {
+        id: 'github-1',
+        type: 'github',
+        name: 'GitHub',
+        listSelectionMode: 'required',
+      },
+    }));
+
+    render(<CapturePageInner />);
+
+    const sourcePicker = await screen.findByRole('combobox', { name: 'Destination source' });
+    expect(sourcePicker).toHaveTextContent('local');
+    await waitFor(() => {
+      expect(window.localStorage.getItem('mission-control:capture-destination')).toBeNull();
     });
   });
 });

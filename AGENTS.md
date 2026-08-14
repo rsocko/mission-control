@@ -42,6 +42,17 @@ When you need to spin up a test instance of Mission Control (e.g., to validate a
 - DB migrations run automatically via `src/db/index.ts` on first connection (no manual `db:migrate` needed for dev).
 - The `data/` directory is gitignored — dev databases are local-only.
 
+## Pull Request Creation
+
+Before invoking the app-native `create_pull_request` tool, push the current branch and verify that its head exists on the remote:
+
+```bash
+git push --set-upstream origin HEAD
+git ls-remote --exit-code --heads origin "$(git branch --show-current)"
+```
+
+Do not invoke `create_pull_request` unless both commands succeed. Repeat this preflight after renaming a branch. If the push or verification fails, surface that error instead of submitting a PR request with a missing head branch.
+
 ## Task Completion Workflow
 
 After completing any requested task, perform the following self-review before considering work done:

@@ -288,7 +288,11 @@ function AppShellInner({
       <DopamineMenu />
 
       {/* Left Nav Rail (desktop only) */}
-      <NavRail features={features} isAiActive={isAiActive} />
+      <NavRail
+        features={features}
+        isAiActive={isAiActive}
+        isSyncing={syncProgress.isSyncing}
+      />
 
       {/* Right area: toolbar + content */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">

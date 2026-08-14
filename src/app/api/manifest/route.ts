@@ -48,16 +48,16 @@ export async function GET() {
         url: '/icons',
         description: 'Search and copy icons from multiple sources',
         icons: [
-          { src: '/icon-v2-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/icon-v3-192.png', sizes: '192x192', type: 'image/png' },
         ],
       },
       ...enabledShortcuts,
     ],
     icons: [
-      { src: '/icon-v2-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-v2-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-v2-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-      { src: '/icon-maskable-v2-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icon-v3-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-v3-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-v3-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: '/icon-maskable-v3-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
   };
 

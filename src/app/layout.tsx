@@ -43,11 +43,11 @@ export const metadata: Metadata = {
     icon: [
       { url: "/favicon.svg", type: "image/svg+xml" },
       { url: "/favicon.ico", sizes: "32x32" },
-      { url: "/icon-v2-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icon-v2-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icon-v3-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-v3-512.png", sizes: "512x512", type: "image/png" },
     ],
     apple: [
-      { url: "/icon-maskable-v2-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-maskable-v3-192.png", sizes: "192x192", type: "image/png" },
     ],
   },
   appleWebApp: {

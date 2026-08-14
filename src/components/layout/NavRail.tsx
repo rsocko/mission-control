@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { MissionControlIcon } from '@/components/ui/MissionControlIcon';
+import { SyncingMissionControlIcon } from '@/components/ui/SyncingMissionControlIcon';
 import { BRAND_GRADIENT_END, BRAND_GRADIENT_START } from '@/lib/brand';
 import { usePathname } from 'next/navigation';
 import {
@@ -116,9 +117,10 @@ const bottomItems: NavRailItem[] = [
 interface NavRailProps {
   features: { aiEnabled: boolean; financeEnabled?: boolean } | null;
   isAiActive: boolean;
+  isSyncing?: boolean;
 }
 
-export function NavRail({ features, isAiActive }: NavRailProps) {
+export function NavRail({ features, isAiActive, isSyncing = false }: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
   const [hovered, setHovered] = useState(false);
@@ -184,7 +186,11 @@ export function NavRail({ features, isAiActive }: NavRailProps) {
       {/* Brand */}
       <div className="flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
-          <MissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
+          {isSyncing ? (
+            <SyncingMissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
+          ) : (
+            <MissionControlIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
+          )}
         </span>
         <span className={cn(
           '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',

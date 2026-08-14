@@ -3,10 +3,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 
-function renderNavRail({ isAiActive = false }: { isAiActive?: boolean } = {}) {
+function renderNavRail({
+  isAiActive = false,
+  isSyncing = false,
+}: {
+  isAiActive?: boolean;
+  isSyncing?: boolean;
+} = {}) {
   return render(
     <TooltipProvider>
-      <NavRail features={{ aiEnabled: true, financeEnabled: true }} isAiActive={isAiActive} />
+      <NavRail
+        features={{ aiEnabled: true, financeEnabled: true }}
+        isAiActive={isAiActive}
+        isSyncing={isSyncing}
+      />
     </TooltipProvider>
   );
 }
@@ -89,6 +99,24 @@ describe('NavRail', () => {
       'text-[9px]'
     );
     expect(screen.getByText('Houston: working')).toHaveStyle({ color: '#a855f7' });
+  });
+
+  it('replaces the static brand mark with the alternating signal while syncing', () => {
+    renderNavRail({ isSyncing: true });
+
+    const syncIcon = screen.getByTestId('mission-control-sync-icon');
+    const outbound = syncIcon.querySelector('[data-signal-direction="outbound"]');
+    const inbound = syncIcon.querySelector('[data-signal-direction="inbound"]');
+    const pathData = (group: Element | null) =>
+      Array.from(group?.querySelectorAll('path') ?? [], path => path.getAttribute('d'));
+
+    expect(syncIcon).toBeInTheDocument();
+    expect(document.querySelector('.lucide-satellite')).not.toBeInTheDocument();
+    expect(pathData(inbound)).toEqual(pathData(outbound));
+    expect(inbound?.querySelector('g')).toHaveAttribute(
+      'transform',
+      'matrix(-1 0 0 -1 14.8 34.6)'
+    );
   });
 
   it('groups navigation by purpose', () => {

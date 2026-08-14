@@ -91,6 +91,8 @@ interface AddTaskModalProps {
   onSubmit: () => void;
   /** Pre-select a project by ID when opening from a project detail page */
   initialProjectId?: string;
+  /** Let the caller attach the task after creation through its domain workflow. */
+  deferProjectAssignment?: boolean;
   /** Pre-select a list by sourceId when opening with a list filter active */
   initialListId?: string;
   /** Called with the new task ID after successful creation */
@@ -130,6 +132,7 @@ export function AddTaskModal({
   onClose,
   onSubmit,
   initialProjectId,
+  deferProjectAssignment = false,
   initialListId,
   onTaskCreated,
   initialTemplateId,
@@ -313,7 +316,7 @@ export function AddTaskModal({
           sourceListName: (selectedListId ? availableLists.find(l => l.sourceId === selectedListId)?.name : destination.listName) || undefined,
           tags: selectedTags.map(t => t.id),
           tagSlugs: prefillTagSlugs,
-          projectIds: selectedProjectId ? [selectedProjectId] : [],
+          projectIds: selectedProjectId && !deferProjectAssignment ? [selectedProjectId] : [],
           subtasks: subtasks.length > 0 ? subtasks : undefined,
           estimatedDuration: estimatedDuration || undefined,
           effort: effort || undefined,

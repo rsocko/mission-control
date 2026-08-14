@@ -67,4 +67,58 @@ describe('AddTaskModal submission guard', () => {
     resolveTaskRequest?.(new Response(JSON.stringify({ id: 'task-1' })));
     await waitFor(() => expect(screen.queryByText('Adding...')).not.toBeInTheDocument());
   });
+
+  it('defers a preselected project assignment to the caller when requested', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        return Promise.resolve(new Response(JSON.stringify({ id: 'task-1' })));
+      }
+      if (url === '/api/tags') {
+        return Promise.resolve(new Response(JSON.stringify({ tags: [] })));
+      }
+      if (url === '/api/hub-projects') {
+        return Promise.resolve(new Response(JSON.stringify({
+          projects: [{ id: 'project-1', name: 'Project 1', color: '#3b82f6' }],
+        })));
+      }
+      if (url === '/api/subtask-templates') {
+        return Promise.resolve(new Response(JSON.stringify({ templates: [] })));
+      }
+      void init;
+      return Promise.resolve(new Response(JSON.stringify({})));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const destination: ComponentProps<typeof AddTaskModal>['initialDestination'] = {
+      id: 'local',
+      label: 'Local',
+      connectorType: 'local',
+      account: null,
+      color: '#999999',
+    };
+
+    render(
+      <TooltipProvider>
+        <AddTaskModal
+          initialInput="Create project task"
+          initialParsed={null}
+          initialDestination={destination}
+          destinations={[destination]}
+          initialProjectId="project-1"
+          deferProjectAssignment
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    await waitFor(() => {
+      const taskCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks');
+      expect(JSON.parse(String(taskCall?.[1]?.body))).toEqual(
+        expect.objectContaining({ projectIds: [] }),
+      );
+    });
+  });
 });

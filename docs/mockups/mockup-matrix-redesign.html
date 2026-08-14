@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mission Control - Matrix Redesign Concepts</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #020617;
+    --surface-0: #08101f;
+    --surface-1: #0f172a;
+    --surface-2: #172033;
+    --surface-3: #22304a;
+    --border: #24324a;
+    --border-strong: #3a4b68;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --subtle: #64748b;
+    --accent: #60a5fa;
+    --danger: #fb7185;
+    --warning: #fbbf24;
+    --success: #34d399;
+    --violet: #a78bfa;
+    --font: "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-width: 920px; background: var(--bg); color: var(--text); font-family: var(--font); }
+  button, input, select { font: inherit; }
+  button { color: inherit; }
+  .topbar {
+    height: 66px; display: flex; align-items: center; gap: 18px; padding: 0 24px;
+    background: rgba(8,16,31,.96); border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 11px; min-width: 242px; }
+  .brand-mark {
+    width: 31px; height: 31px; display: grid; place-items: center; border-radius: 9px;
+    background: linear-gradient(135deg,#2563eb,#7c3aed); font-weight: 800;
+  }
+  .brand strong { display: block; font-size: 14px; }
+  .brand span { display: block; margin-top: 1px; color: var(--subtle); font-size: 11px; }
+  .tabs { display: flex; align-self: stretch; gap: 4px; }
+  .tab {
+    padding: 0 15px; border: 0; border-bottom: 2px solid transparent; background: none;
+    color: var(--muted); cursor: pointer;
+  }
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+  .recommend {
+    margin-left: auto; padding: 6px 10px; border-radius: 999px;
+    background: rgba(52,211,153,.12); color: var(--success); font-size: 11px; font-weight: 700;
+  }
+  .shell { height: calc(100vh - 66px); display: grid; grid-template-columns: 208px minmax(650px,1fr) 300px; }
+  .sidebar { padding: 18px 13px; background: var(--surface-0); border-right: 1px solid var(--border); overflow: auto; }
+  .side-title { margin: 4px 9px 8px; color: var(--subtle); font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+  .filter {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 9px; border: 0;
+    border-radius: 7px; background: transparent; color: var(--muted); text-align: left; cursor: pointer; font-size: 12px;
+  }
+  .filter:hover, .filter.active { background: var(--surface-2); color: var(--text); }
+  .filter .count { margin-left: auto; color: var(--subtle); font-size: 10px; }
+  .swatch { width: 8px; height: 8px; border-radius: 50%; }
+  .side-rule { height: 1px; margin: 14px 9px; background: var(--border); }
+  main { min-width: 0; padding: 18px 20px 20px; overflow: hidden; }
+  .page-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 14px; }
+  .page-head h1 { margin: 0 0 3px; font-size: 18px; letter-spacing: -.02em; }
+  .page-head p { margin: 0; color: var(--muted); font-size: 12px; }
+  .head-actions { display: flex; gap: 7px; margin-left: auto; }
+  .control {
+    height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--surface-1); color: var(--muted); font-size: 11px; cursor: pointer;
+  }
+  .control:hover { border-color: var(--border-strong); color: var(--text); }
+  .plot-card {
+    height: calc(100% - 56px); min-height: 520px; display: flex; flex-direction: column; overflow: hidden;
+    border: 1px solid var(--border); border-radius: 12px; background: var(--surface-0);
+  }
+  .plot-tools {
+    height: 43px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 0 13px;
+    border-bottom: 1px solid var(--border); color: var(--muted); font-size: 10px;
+  }
+  .plot-tools strong, .plot-tools > span { color: var(--text); white-space: nowrap; }
+  .plot-tools .spacer { flex: 1; }
+  .segmented { display: flex; padding: 2px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-1); }
+  .segmented button { padding: 4px 8px; border: 0; border-radius: 5px; background: none; color: var(--subtle); font-size: 10px; cursor: pointer; }
+  .segmented button.active { background: var(--surface-3); color: var(--text); }
+  .plot-wrap { position: relative; flex: 1; min-height: 0; padding: 20px 27px 32px 46px; }
+  .plot {
+    position: relative; width: 100%; height: 100%; overflow: hidden; border-left: 1px solid #475569;
+    border-bottom: 1px solid #475569; background:
+      linear-gradient(90deg, transparent calc(50% - .5px), rgba(148,163,184,.28) 50%, transparent calc(50% + .5px)),
+      linear-gradient(transparent calc(37.5% - .5px), rgba(148,163,184,.28) 37.5%, transparent calc(37.5% + .5px)),
+      linear-gradient(135deg, rgba(15,23,42,.15), rgba(15,23,42,.65));
+  }
+  .plot[data-axis="effort"] {
+    background:
+      linear-gradient(90deg, transparent calc(62.5% - .5px), rgba(148,163,184,.28) 62.5%, transparent calc(62.5% + .5px)),
+      linear-gradient(transparent calc(37.5% - .5px), rgba(148,163,184,.28) 37.5%, transparent calc(37.5% + .5px)),
+      linear-gradient(135deg, rgba(15,23,42,.15), rgba(15,23,42,.65));
+  }
+  .plot::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: .22;
+    background-image: radial-gradient(#64748b 0.7px, transparent 0.7px); background-size: 22px 22px;
+  }
+  .axis { position: absolute; color: var(--subtle); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
+  .axis-y { left: 8px; top: 50%; transform: rotate(-90deg) translateX(-50%); transform-origin: 0 0; }
+  .axis-x { left: 50%; bottom: 7px; transform: translateX(-50%); }
+  .axis-end { position: absolute; color: var(--subtle); font-size: 9px; }
+  .y-hi { top: 7px; left: 39px; } .y-lo { bottom: 29px; left: 39px; }
+  .x-lo { bottom: 17px; left: 48px; } .x-hi { right: 25px; bottom: 17px; }
+  .quad-label { position: absolute; z-index: 10; pointer-events: none; }
+  button.quad-label {
+    padding: 5px; border: 0; border-radius: 6px; background: rgba(2,6,23,.72);
+    font-family: inherit; cursor: pointer; pointer-events: auto;
+  }
+  button.quad-label:hover, button.quad-label:focus-visible { outline: 1px solid var(--border-strong); background: rgba(15,23,42,.78); }
+  .quad-label b { display: block; font-size: 12px; }
+  .quad-label span { color: var(--subtle); font-size: 9px; }
+  .q-schedule { top: 13px; left: 15px; color: #93c5fd; }
+  .q-do { top: 13px; right: 15px; text-align: right; color: #fda4af; }
+  .q-eliminate { bottom: 13px; left: 15px; color: #94a3b8; }
+  .q-delegate { right: 15px; bottom: 13px; text-align: right; color: #fcd34d; }
+  .point {
+    position: absolute; z-index: 3; width: var(--size,10px); height: var(--size,10px); padding: 0;
+    border: 2px solid rgba(255,255,255,.45); border-radius: 50%; background: var(--fill,var(--color,#60a5fa));
+    box-shadow: 0 0 0 3px color-mix(in srgb,var(--color) 15%,transparent); cursor: pointer;
+    transform: translate(-50%,50%); transition: transform 120ms, box-shadow 120ms, opacity 160ms;
+  }
+  .point:hover, .point:focus-visible { z-index: 8; outline: none; transform: translate(-50%,50%) scale(1.7); box-shadow: 0 0 0 5px rgba(255,255,255,.14); }
+  .point::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }
+  .point.overdue { box-shadow: 0 0 0 3px #fb7185, 0 0 0 6px rgba(251,113,133,.24); }
+  .point.missing-size { border-style: dashed; background: transparent; }
+  .point.selected { z-index: 9; box-shadow: 0 0 0 4px white, 0 0 0 7px rgba(96,165,250,.5); }
+  .plot .dimmed { opacity: .13; }
+  .cluster {
+    position: absolute; z-index: 4; display: grid; place-items: center; width: var(--size,42px); height: var(--size,42px);
+    border: 1px solid color-mix(in srgb,var(--color) 80%,white); border-radius: 50%;
+    background: color-mix(in srgb,var(--color) 38%,#0f172a); color: white; font-size: 11px; font-weight: 800;
+    box-shadow: 0 0 0 8px color-mix(in srgb,var(--color) 9%,transparent); cursor: pointer; transform: translate(-50%,50%);
+  }
+  .cluster:hover, .cluster:focus-visible { outline: 2px solid white; outline-offset: 3px; }
+  .tooltip {
+    position: fixed; z-index: 100; width: 225px; display: none; padding: 10px 11px;
+    border: 1px solid var(--border-strong); border-radius: 9px; background: #111b2f; box-shadow: 0 16px 35px rgba(0,0,0,.5); pointer-events: none;
+  }
+  .tooltip strong { display: block; margin-bottom: 6px; font-size: 12px; }
+  .tooltip .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; color: var(--muted); font-size: 10px; }
+  .tooltip p { margin: 7px 0 0; padding-top: 7px; border-top: 1px solid var(--border); color: var(--subtle); font-size: 10px; }
+  .detail { padding: 18px; background: var(--surface-1); border-left: 1px solid var(--border); overflow: auto; }
+  .detail.empty { display: grid; place-content: center; color: var(--subtle); text-align: center; }
+  .empty-icon { width: 46px; height: 46px; display: grid; place-items: center; margin: 0 auto 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); font-size: 20px; }
+  .detail h2 { margin: 4px 0 8px; font-size: 17px; line-height: 1.3; }
+  .detail p { color: var(--muted); font-size: 11px; line-height: 1.6; }
+  .detail-top { display: flex; justify-content: space-between; align-items: center; color: var(--subtle); font-size: 10px; }
+  .close { border: 0; background: none; color: var(--subtle); cursor: pointer; font-size: 17px; }
+  .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 15px 0; }
+  .metric { padding: 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0); }
+  .metric span { display: block; color: var(--subtle); font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+  .metric strong { display: block; margin-top: 4px; font-size: 15px; }
+  .why { padding: 10px; border-left: 2px solid var(--accent); border-radius: 0 7px 7px 0; background: rgba(96,165,250,.08); color: var(--muted); font-size: 10px; line-height: 1.5; }
+  .task-list { margin-top: 12px; }
+  .task-mini { display: block; width: 100%; padding: 9px 0; border: 0; border-bottom: 1px solid var(--border); background: none; text-align: left; cursor: pointer; }
+  .task-mini b { display: block; color: var(--text); font-size: 11px; }
+  .task-mini span { color: var(--subtle); font-size: 9px; }
+  .primary { width: 100%; margin-top: 14px; padding: 9px; border: 0; border-radius: 7px; background: #2563eb; color: white; cursor: pointer; font-size: 11px; font-weight: 700; }
+  .concept { display: none; height: 100%; }
+  .concept.active { display: block; }
+  .note { margin-left: 5px; padding: 3px 7px; border-radius: 999px; background: rgba(96,165,250,.1); color: var(--accent); font-size: 9px; }
+  .zoom { width: 85px; accent-color: #3b82f6; }
+  .density-cell {
+    position: absolute; z-index: 3; display: grid; place-items: center; width: var(--size); height: var(--size);
+    border: 1px solid color-mix(in srgb,var(--color) 72%,white); border-radius: 14px;
+    background: color-mix(in srgb,var(--color) var(--alpha),#0f172a); color: white; font-size: 10px; font-weight: 800;
+    transform: translate(-50%,50%); cursor: pointer;
+  }
+  .constellation .plot { background: linear-gradient(135deg,rgba(15,23,42,.2),rgba(15,23,42,.7)); }
+  .constellation .orbit { position: absolute; width: 150px; height: 150px; border: 1px dashed rgba(148,163,184,.18); border-radius: 50%; transform: translate(-50%,50%); }
+  .legend { display: flex; gap: 12px; }
+  .legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .legend i { width: 7px; height: 7px; border-radius: 50%; }
+  .priority-band {
+    position: absolute; z-index: 10; left: 50%; padding: 1px 4px; border-radius: 4px;
+    background: rgba(2,6,23,.7); color: var(--subtle); font-size: 8px; pointer-events: none;
+    transform: translate(-50%,50%);
+  }
+  .legend { gap: 7px; white-space: nowrap; font-size: 9px; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  .table-panel {
+    position: absolute; z-index: 20; inset: 20px 27px 32px 46px; display: none; overflow: auto;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--surface-0);
+  }
+  .table-panel.active { display: block; }
+  .data-table { width: 100%; border-collapse: collapse; }
+  .data-table caption { padding: 12px 14px; color: var(--muted); text-align: left; font-size: 11px; }
+  .data-table th, .data-table td { padding: 10px 12px; border-top: 1px solid var(--border); text-align: left; font-size: 11px; }
+  .data-table th button { padding: 0; border: 0; background: none; color: var(--muted); cursor: pointer; font-weight: 700; }
+  .data-table tbody tr:hover { background: var(--surface-2); }
+  .data-table td:first-child { color: var(--text); font-weight: 600; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+  }
+  @media (max-height: 720px) {
+    .topbar { height: 58px; }
+    .shell { height: calc(100vh - 58px); }
+    main { padding-top: 12px; padding-bottom: 12px; }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark">M</div>
+    <div><strong>Matrix redesign</strong><span>Interactive implementation guide</span></div>
+  </div>
+  <nav class="tabs" aria-label="Matrix concepts">
+    <button class="tab active" data-concept="adaptive">Priority × Urgency</button>
+    <button class="tab" data-concept="constellation">Priority × Effort</button>
+    <button class="tab" data-concept="density">Density at scale</button>
+  </nav>
+  <span class="recommend">Shared renderer · two presets</span>
+</header>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="side-title">View</div>
+    <button class="filter active" data-filter-group="view"><span>◉</span> All active tasks <span class="count">403</span></button>
+    <button class="filter" data-filter-group="view"><span>○</span> My tasks <span class="count">214</span></button>
+    <button class="filter" id="needs-data-filter" data-filter-group="view"><span>○</span> Needs data <span class="count" id="needs-data-count">20</span></button>
+    <div class="side-rule"></div>
+    <div class="side-title">Projects</div>
+    <button class="filter"><i class="swatch" style="background:#60a5fa"></i> Mission Control <span class="count">142</span></button>
+    <button class="filter"><i class="swatch" style="background:#a78bfa"></i> Home systems <span class="count">74</span></button>
+    <button class="filter"><i class="swatch" style="background:#34d399"></i> Personal <span class="count">96</span></button>
+    <button class="filter"><i class="swatch" style="background:#fbbf24"></i> Operations <span class="count">57</span></button>
+    <div class="side-rule"></div>
+    <div class="side-title">Quick filters</div>
+    <button class="filter"><span style="color:#fb7185">●</span> Overdue <span class="count">23</span></button>
+    <button class="filter"><span style="color:#fbbf24">◆</span> High Smart Score <span class="count">61</span></button>
+    <button class="filter"><span style="background:conic-gradient(#60a5fa 0 50%,#a78bfa 0);display:inline-block;width:9px;height:9px;border-radius:50%"></span> Multiple projects <span class="count">24</span></button>
+  </aside>
+
+  <main>
+    <div class="page-head">
+      <div>
+        <h1>Priority Matrix</h1>
+        <p id="concept-copy">Operational view: due-date pressure against explicit task priority.</p>
+      </div>
+      <div class="head-actions">
+        <select class="control" id="color-mode" aria-label="Color dots by">
+          <option value="project">Color: Project</option>
+          <option value="urgency">Color: Urgency</option>
+          <option value="status">Color: Status</option>
+          <option value="priority">Color: Priority</option>
+        </select>
+        <select class="control" id="size-mode" aria-label="Size dots by">
+          <option value="smart-score">Size: Smart Score</option>
+          <option value="effort">Size: Effort</option>
+          <option value="urgency">Size: Urgency</option>
+          <option value="uniform">Size: Uniform</option>
+        </select>
+        <button class="control" id="table-view" aria-pressed="false">Table view</button>
+      </div>
+    </div>
+
+    <section class="plot-card">
+      <div class="plot-tools">
+        <strong id="plot-title" title="383 plotted · 17 need priority · 3 invalid due dates">383 plotted · 20 excluded</strong>
+        <span id="plot-subtitle">Priority × Urgency · adaptive detail</span>
+        <span class="note" id="lod-note">Clusters + outliers</span>
+        <span class="sr-only" id="viz-announcer" aria-live="polite"></span>
+        <div class="spacer"></div>
+        <div class="legend" id="legend">
+          <span><i style="background:#60a5fa"></i> MC</span>
+          <span><i style="background:#a78bfa"></i> Home</span>
+          <span><i style="background:#34d399"></i> Personal</span>
+          <span><i style="background:#fbbf24"></i> Ops</span>
+        </div>
+        <span>Zoom</span>
+        <input id="zoom" class="zoom" type="range" min="1" max="3" value="1" aria-label="Mock zoom level">
+        <button class="control" id="reset">Reset</button>
+      </div>
+
+      <div class="plot-wrap">
+        <span class="axis axis-y" id="y-axis-label">Priority</span>
+        <span class="axis axis-x" id="x-axis-label">Urgency</span>
+        <span class="axis-end y-hi">High</span><span class="axis-end y-lo">Low</span>
+        <span class="axis-end x-lo">Low</span><span class="axis-end x-hi">High</span>
+
+        <div class="concept active" id="adaptive">
+          <div class="plot" data-plot="adaptive" data-axis="urgency">
+            <span class="priority-band" style="bottom:96%">Critical</span>
+            <span class="priority-band" style="bottom:75%">High</span>
+            <span class="priority-band" style="bottom:50%">Medium</span>
+            <span class="priority-band" style="bottom:25%">Low</span>
+            <button class="quad-label q-schedule" data-quadrant="schedule"><b>Schedule · 97</b><span>High priority, less urgent</span></button>
+            <button class="quad-label q-do" data-quadrant="do"><b>Do first · 112</b><span>High priority and urgent</span></button>
+            <button class="quad-label q-eliminate" data-quadrant="eliminate"><b>Eliminate · 76</b><span>Low priority and urgency</span></button>
+            <button class="quad-label q-delegate" data-quadrant="delegate"><b>Delegate · 98</b><span>Urgent, lower priority</span></button>
+          </div>
+        </div>
+
+        <div class="concept constellation" id="constellation">
+          <div class="plot" data-plot="constellation" data-axis="effort">
+            <span class="priority-band" style="bottom:96%">Critical</span>
+            <span class="priority-band" style="bottom:75%">High</span>
+            <span class="priority-band" style="bottom:50%">Medium</span>
+            <span class="priority-band" style="bottom:25%">Low</span>
+            <button class="quad-label q-schedule" data-quadrant="schedule"><b>Quick wins · 87</b><span>High priority, low effort</span></button>
+            <button class="quad-label q-do" data-quadrant="do"><b>Strategic · 101</b><span>High priority, high effort</span></button>
+            <button class="quad-label q-eliminate" data-quadrant="eliminate"><b>Fill work · 70</b><span>Low priority, low effort</span></button>
+            <button class="quad-label q-delegate" data-quadrant="delegate"><b>Reconsider · 86</b><span>Low priority, high effort</span></button>
+          </div>
+        </div>
+
+        <div class="concept" id="density">
+          <div class="plot" data-plot="density" data-axis="urgency">
+            <span class="priority-band" style="bottom:96%">Critical</span>
+            <span class="priority-band" style="bottom:75%">High</span>
+            <span class="priority-band" style="bottom:50%">Medium</span>
+            <span class="priority-band" style="bottom:25%">Low</span>
+            <button class="quad-label q-schedule" data-quadrant="schedule"><b>Schedule · 51</b><span>Density-first overview</span></button>
+            <button class="quad-label q-do" data-quadrant="do"><b>Do first · 90</b><span>Density-first overview</span></button>
+            <button class="quad-label q-eliminate" data-quadrant="eliminate"><b>Eliminate · 93</b><span>Density-first overview</span></button>
+            <button class="quad-label q-delegate" data-quadrant="delegate"><b>Delegate · 149</b><span>Density-first overview</span></button>
+          </div>
+        </div>
+        <div class="table-panel" id="table-panel">
+          <table class="data-table">
+            <caption>Accessible task representation synchronized with the current Matrix filters.</caption>
+            <thead><tr>
+              <th><button data-sort="name">Task ↕</button></th>
+              <th><button data-sort="priority">Priority ↕</button></th>
+              <th><button data-sort="urgency">Urgency ↕</button></th>
+              <th><button data-sort="dueDateOrder">Due date ↕</button></th>
+              <th><button data-sort="effort">Effort ↕</button></th>
+              <th><button data-sort="score">Smart Score ↕</button></th>
+              <th>Project</th><th>Status</th>
+            </tr></thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <aside id="detail" class="detail empty" aria-live="polite">
+    <div>
+      <div class="empty-icon">↗</div>
+      <strong>Select a task or cluster</strong>
+      <p>Hover for a quick explanation. Click without losing the Matrix context.</p>
+    </div>
+  </aside>
+</div>
+
+<div id="tooltip" class="tooltip" role="tooltip"></div>
+
+<script>
+  const colors = ["#60a5fa", "#a78bfa", "#34d399", "#fbbf24", "#f472b6", "#22d3ee"];
+  const projectNames = ["Mission Control", "Home systems", "Personal", "Operations", "Research", "Household"];
+  const names = [
+    "Review connector retry strategy", "Book annual physical", "Ship Matrix density model",
+    "Renew home insurance", "Prepare Q3 planning notes", "Fix extension auth refresh",
+    "Archive stale intake rules", "Call electrician", "Review dependency graph",
+    "Schedule data migration", "Update project score weights", "Triage overnight imports"
+  ];
+  const clusters = [
+    { x: 76, effortX: 18, y: 100, count: 41, color: 0, size: 51, label: "Launch-critical work" },
+    { x: 63, effortX: 68, y: 75, count: 28, color: 3, size: 46, label: "Operational deadlines" },
+    { x: 31, effortX: 32, y: 100, count: 34, color: 0, size: 48, label: "Strategic backlog" },
+    { x: 20, effortX: 84, y: 75, count: 19, color: 2, size: 41, label: "Planned personal work" },
+    { x: 82, effortX: 12, y: 50, count: 37, color: 1, size: 49, label: "Delegation candidates" },
+    { x: 56, effortX: 57, y: 25, count: 23, color: 3, size: 44, label: "Routine operations" },
+    { x: 27, effortX: 29, y: 25, count: 32, color: 2, size: 47, label: "Low-pressure backlog" },
+    { x: 43, effortX: 87, y: 50, count: 16, color: 1, size: 39, label: "Home maintenance" }
+  ];
+
+  let sizeMode = "smart-score";
+  let colorMode = "project";
+
+  function seededPoints(count, mode) {
+    let seed = mode === "constellation" ? 91 : 47;
+    const random = () => {
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    const points = [];
+    for (let i = 0; i < count; i++) {
+      const quadrant = i % 4;
+      const baseX = quadrant % 2 ? 75 : 25;
+      const baseY = quadrant < 2 ? 75 : 25;
+      const spread = mode === "constellation" ? 18 : 25;
+      const urgency = Math.max(4, Math.min(100, baseX + (random() - .5) * spread * 2));
+      const priority = quadrant < 2
+        ? (random() > .5 ? 100 : 75)
+        : (random() > .5 ? 50 : 25);
+      const effort = i % 13 === 0 ? null : 1 + Math.floor(random() * 5);
+      points.push({
+        x: urgency,
+        y: priority,
+        urgency,
+        dueDateOrder: Math.round(100 - urgency),
+        priority,
+        effort,
+        effortPosition: effort === null ? null : ((effort - 1) / 4) * 100,
+        color: i % 4,
+        projects: i % 29 === 0
+          ? [0,1,2,3,4,5]
+          : i % 11 === 0
+            ? [i % 4, (i + 1) % 4, (i + 2) % 4]
+            : i % 7 === 0
+              ? [i % 4, (i + 1) % 4]
+              : [i % 4],
+        name: names[i % names.length],
+        score: 38 + Math.round(random() * 60),
+        overdue: urgency >= 98
+      });
+    }
+    return points;
+  }
+
+  function attachTooltip(element, html) {
+    const tip = document.getElementById("tooltip");
+    const show = event => {
+      tip.innerHTML = html;
+      tip.style.display = "block";
+      const x = Math.min(window.innerWidth - 245, event.clientX + 13);
+      const y = Math.min(window.innerHeight - 145, event.clientY + 13);
+      tip.style.left = x + "px";
+      tip.style.top = y + "px";
+    };
+    element.addEventListener("pointermove", show);
+    element.addEventListener("focus", () => {
+      element.setAttribute("aria-describedby", "tooltip");
+      const rect = element.getBoundingClientRect();
+      show({ clientX: rect.right, clientY: rect.top });
+    });
+    element.addEventListener("pointerleave", () => tip.style.display = "none");
+    element.addEventListener("blur", () => {
+      element.removeAttribute("aria-describedby");
+      tip.style.display = "none";
+    });
+  }
+
+  function selectMark(element) {
+    document.querySelectorAll(".point.selected").forEach(point => point.classList.remove("selected"));
+    if (element?.classList.contains("point")) element.classList.add("selected");
+  }
+
+  function priorityLabel(value) {
+    if (value >= 90) return "Critical";
+    if (value >= 65) return "High";
+    if (value >= 40) return "Medium";
+    return "Low";
+  }
+
+  function urgencyColor(value) {
+    if (value >= 95) return "#fb7185";
+    if (value >= 65) return "#fb923c";
+    if (value >= 50) return "#fbbf24";
+    if (value >= 20) return "#60a5fa";
+    return "#64748b";
+  }
+
+  function priorityColor(value) {
+    if (value >= 90) return "#fb7185";
+    if (value >= 65) return "#fbbf24";
+    if (value >= 40) return "#60a5fa";
+    return "#94a3b8";
+  }
+
+  function pointColor(point) {
+    if (colorMode === "urgency") return urgencyColor(point.urgency);
+    if (colorMode === "priority") return priorityColor(point.priority);
+    if (colorMode === "status") return ["#60a5fa", "#34d399", "#fbbf24"][point.color % 3];
+    return colors[point.color];
+  }
+
+  function projectLabel(point) {
+    return point.projects.map(index => projectNames[index]).join(", ");
+  }
+
+  function projectPieFill(point) {
+    if (point.projects.length === 1) return colors[point.projects[0]];
+    const visibleProjects = point.projects.length > 4 ? point.projects.slice(0,3) : point.projects;
+    const segments = point.projects.length > 4 ? [...visibleProjects, "more"] : visibleProjects;
+    const slice = 100 / segments.length;
+    return `conic-gradient(${segments.map((project,index) =>
+      project === "more"
+        ? `#64748b ${index * slice}% ${(index + 1) * slice}%`
+        :
+      `${colors[project]} ${index * slice}% ${(index + 1) * slice}%`
+    ).join(",")})`;
+  }
+
+  function pointFill(point) {
+    return colorMode === "project" ? projectPieFill(point) : pointColor(point);
+  }
+
+  function pointDiameter(point) {
+    if (sizeMode === "uniform") return 11;
+    const normalized = sizeMode === "effort"
+      ? point.effort === null ? 0 : (point.effort - 1) / 4
+      : sizeMode === "urgency"
+        ? point.urgency / 100
+        : point.score / 100;
+    return 8 + Math.sqrt(normalized) * 10;
+  }
+
+  function hasMissingSizeValue(point) {
+    return sizeMode === "effort" && point.effort === null;
+  }
+
+  function effortLabel(point) {
+    return point.effort === null ? "Missing" : `${point.effort} / 5`;
+  }
+
+  function dueDateLabel(point) {
+    if (point.urgency >= 98) return "Jul 30 · overdue";
+    if (point.urgency >= 95) return "Jul 31 · today";
+    if (point.urgency >= 75) return "Aug 1";
+    if (point.urgency >= 50) return "Aug 4";
+    if (point.urgency >= 20) return "Aug 14";
+    return "No due date";
+  }
+
+  function openTask(point, element) {
+    selectMark(element);
+    const detail = document.getElementById("detail");
+    detail.className = "detail";
+    detail.innerHTML = `
+      <div class="detail-top"><span>TASK DETAIL</span><button class="close" aria-label="Close detail">×</button></div>
+      <h2>${point.name}</h2>
+      <p><span style="background:${projectPieFill(point)};display:inline-block;width:9px;height:9px;border-radius:50%"></span> ${projectLabel(point)} · In progress</p>
+      <div class="metric-grid">
+        <div class="metric"><span>Priority</span><strong>${priorityLabel(point.priority)}</strong></div>
+        <div class="metric"><span>Urgency</span><strong>${Math.round(point.urgency)}</strong></div>
+        <div class="metric"><span>Due date</span><strong style="font-size:11px">${dueDateLabel(point)}</strong></div>
+        <div class="metric"><span>Effort</span><strong>${effortLabel(point)}</strong></div>
+        <div class="metric"><span>Smart score</span><strong>${point.score}</strong></div>
+      </div>
+      <div class="why">${document.querySelector(".concept.active .plot").dataset.axis === "effort"
+        ? `Placed from explicit ${priorityLabel(point.priority).toLowerCase()} priority and effort ${effortLabel(point)}. Urgency is ${point.urgency}.`
+        : `Placed from explicit ${priorityLabel(point.priority).toLowerCase()} priority and due-date urgency ${Math.round(point.urgency)}.`}</div>
+      <button class="primary">Open full task detail</button>`;
+    detail.querySelector(".close").onclick = clearDetail;
+  }
+
+  function openCluster(cluster) {
+    const detail = document.getElementById("detail");
+    detail.className = "detail";
+    detail.innerHTML = `
+      <div class="detail-top"><span>CLUSTER INSPECTOR</span><button class="close" aria-label="Close detail">×</button></div>
+      <h2>${cluster.count} nearby tasks</h2>
+      <p>${cluster.label}. ${document.querySelector(".concept.active .plot").dataset.axis === "effort" ? "Effort" : "Urgency"} range ${Math.max(0,(document.querySelector(".concept.active .plot").dataset.axis === "effort" ? cluster.effortX : cluster.x)-8)}-${Math.min(100,(document.querySelector(".concept.active .plot").dataset.axis === "effort" ? cluster.effortX : cluster.x)+8)} · Priority range ${Math.max(0,cluster.y-8)}-${Math.min(100,cluster.y+8)}</p>
+      <div class="task-list">
+        ${names.slice(cluster.color,cluster.color+3).map((name,index) => `<button class="task-mini" data-index="${index}"><b>${name}</b><span>Smart Score ${91-index*7} · ${index+1} day${index ? "s" : ""} until due</span></button>`).join("")}
+      </div>
+      <button class="primary" id="zoom-cluster">Zoom into cluster</button>
+      <button class="control" id="inspect-all" style="width:100%;margin-top:8px">Inspect all ${cluster.count} tasks</button>`;
+    detail.querySelector(".close").onclick = clearDetail;
+    detail.querySelectorAll(".task-mini").forEach((button,index) => {
+      button.onclick = () => openTask({
+        name:names[cluster.color+index], x:cluster.x, y:cluster.y, urgency:cluster.x,
+        priority:cluster.y, effort:Math.max(1,Math.round(cluster.effortX / 20)), effortPosition:cluster.effortX,
+        score:91-index*7, color:cluster.color, projects:[cluster.color,(cluster.color + 1) % colors.length]
+      });
+    });
+    detail.querySelector("#zoom-cluster").onclick = () => {
+      document.getElementById("zoom").value = 3;
+      renderCurrent(3);
+    };
+    detail.querySelector("#inspect-all").onclick = () => {
+      detail.querySelector(".task-list").innerHTML = names.map((name,index) =>
+        `<button class="task-mini"><b>${name}</b><span>Smart Score ${Math.max(31,94-index*5)} · cluster member</span></button>`
+      ).join("");
+      detail.querySelector("#inspect-all").remove();
+    };
+  }
+
+  function clearDetail() {
+    selectMark(null);
+    const detail = document.getElementById("detail");
+    detail.className = "detail empty";
+    detail.innerHTML = `<div><div class="empty-icon">↗</div><strong>Select a task or cluster</strong><p>Hover for a quick explanation. Click without losing the Matrix context.</p></div>`;
+  }
+
+  function openNeedsData() {
+    const detail = document.getElementById("detail");
+    detail.className = "detail";
+    detail.innerHTML = `
+      <div class="detail-top"><span>NEEDS DATA</span><button class="close" aria-label="Close detail">×</button></div>
+      <h2>Tasks needing placement data</h2>
+      <p>Grouped by the field required for the active axis preset.</p>
+      <div class="task-list">
+        <button class="task-mini"><b>Missing priority</b><span>17 tasks · excluded from both presets</span></button>
+        <button class="task-mini"><b>Missing effort</b><span>42 tasks · excluded only from Priority × Effort</span></button>
+        <button class="task-mini"><b>Invalid due date</b><span>3 tasks · excluded only from Priority × Urgency</span></button>
+      </div>`;
+    detail.querySelector(".close").onclick = clearDetail;
+  }
+
+  function addPoint(plot, point) {
+    if (plot.dataset.axis === "effort" && point.effort === null) return;
+    const button = document.createElement("button");
+    const projectedX = plot.dataset.axis === "effort" ? point.effortPosition : point.urgency;
+    button.className = "point"
+      + (point.overdue ? " overdue" : "")
+      + (hasMissingSizeValue(point) ? " missing-size" : "");
+    button.style.left = Math.max(2, Math.min(98, projectedX)) + "%";
+    button.style.bottom = Math.max(2, Math.min(98, point.priority)) + "%";
+    button.style.setProperty("--size", pointDiameter(point) + "px");
+    button.style.setProperty("--color", pointColor(point));
+    button.style.setProperty("--fill", pointFill(point));
+    button.dataset.x = projectedX;
+    button.dataset.y = point.priority;
+    button.setAttribute("aria-label", `${point.name}, projects ${projectLabel(point)}, priority ${priorityLabel(point.priority)}, urgency ${Math.round(point.urgency)}, effort ${effortLabel(point)}, Smart Score ${point.score}`);
+    button.onclick = event => openTask(point, event.currentTarget);
+    attachTooltip(button, `<strong>${point.name}</strong><div class="meta"><span>Priority ${priorityLabel(point.priority)}</span><span>Urgency ${Math.round(point.urgency)}</span><span>Due ${dueDateLabel(point)}</span><span>Effort ${effortLabel(point)}</span><span>Smart Score ${point.score}</span><span>Projects ${projectLabel(point)}</span></div><p>${point.overdue ? "Overdue · " : ""}Size: ${sizeMode.replace("-", " ")} · Color: ${colorMode}</p>`);
+    plot.appendChild(button);
+  }
+
+  function addCluster(plot, cluster) {
+    const button = document.createElement("button");
+    button.className = "cluster";
+    const projectedX = plot.dataset.axis === "effort" ? cluster.effortX : cluster.x;
+    button.style.left = Math.max(2, Math.min(98, projectedX)) + "%";
+    button.style.bottom = Math.max(2, Math.min(98, cluster.y)) + "%";
+    button.style.setProperty("--size", cluster.size + "px");
+    button.style.setProperty("--color", colorMode === "urgency" ? urgencyColor(cluster.x) : colors[cluster.color]);
+    if (colorMode === "project") {
+      button.style.background = `conic-gradient(${colors[cluster.color]} 0 55%,${colors[(cluster.color + 1) % colors.length]} 55% 82%,#64748b 82%)`;
+    }
+    button.dataset.x = projectedX;
+    button.dataset.y = cluster.y;
+    button.textContent = cluster.count;
+    button.setAttribute("aria-label", `${cluster.count} tasks, ${cluster.label}`);
+    button.onclick = () => openCluster(cluster);
+    attachTooltip(button, `<strong>${cluster.count} tasks · ${cluster.label}</strong><div class="meta"><span>${plot.dataset.axis === "effort" ? "Effort" : "Urgency"} ${Math.round(projectedX-8)}-${Math.round(projectedX+8)}</span><span>Priority ${cluster.y-8}-${cluster.y+8}</span><span>Average score 76</span><span>4 projects</span></div><p>Click to inspect or zoom</p>`);
+    plot.appendChild(button);
+  }
+
+  function clearMarks(plot) {
+    plot.querySelectorAll(".point,.cluster,.density-cell").forEach(node => node.remove());
+  }
+
+  function renderAdaptive(level) {
+    const plot = document.querySelector('[data-plot="adaptive"]');
+    clearMarks(plot);
+    if (level === 1) {
+      clusters.forEach(cluster => addCluster(plot, cluster));
+      seededPoints(17, "scatter").forEach(point => addPoint(plot, point));
+      document.getElementById("lod-note").textContent = "Clusters + outliers";
+    } else if (level === 2) {
+      clusters.slice(0,4).map(cluster => ({...cluster,count:Math.ceil(cluster.count*.55),size:cluster.size-8})).forEach(cluster => addCluster(plot, cluster));
+      seededPoints(46, "scatter").forEach(point => addPoint(plot, point));
+      document.getElementById("lod-note").textContent = "Mixed detail";
+    } else {
+      seededPoints(92, "scatter").forEach(point => addPoint(plot, point));
+      document.getElementById("lod-note").textContent = "Individual tasks";
+    }
+  }
+
+  function renderConstellation(level = Number(document.getElementById("zoom").value)) {
+    const plot = document.querySelector('[data-plot="constellation"]');
+    clearMarks(plot);
+    if (level === 1) {
+      clusters.forEach(cluster => addCluster(plot, cluster));
+      seededPoints(28, "scatter").forEach(point => addPoint(plot, point));
+    } else if (level === 2) {
+      clusters.slice(0,4).forEach(cluster => addCluster(plot, {...cluster, count:Math.ceil(cluster.count*.55), size:cluster.size-8}));
+      seededPoints(50, "scatter").forEach(point => addPoint(plot, point));
+    } else {
+      seededPoints(92, "scatter").forEach(point => addPoint(plot, point));
+    }
+  }
+
+  function renderDensity() {
+    const plot = document.querySelector('[data-plot="density"]');
+    clearMarks(plot);
+    const cells = [
+      [18,78,16,0],[30,82,22,0],[42,69,13,2],[61,82,28,3],[75,86,41,0],[87,72,21,0],
+      [20,56,10,2],[34,59,15,1],[53,62,20,3],[68,58,14,3],[82,55,25,1],
+      [17,34,12,2],[29,28,22,2],[43,39,17,1],[58,27,13,3],[72,38,20,1],[86,30,30,1],
+      [25,13,8,2],[48,15,9,1],[64,12,11,3],[79,16,16,1]
+    ];
+    cells.forEach(([x,y,count,color]) => {
+      const button = document.createElement("button");
+      button.className = "density-cell";
+      button.style.left = x + "%";
+      button.style.bottom = y + "%";
+      button.style.setProperty("--size", (31 + count * .48) + "px");
+      button.style.setProperty("--color", colorMode === "urgency" ? urgencyColor(x) : colors[color]);
+      button.style.setProperty("--alpha", Math.min(78,25+count) + "%");
+      button.dataset.x = x;
+      button.dataset.y = y;
+      button.textContent = count;
+      button.setAttribute("aria-label", `${count} tasks in density cell`);
+      const cluster = { x,effortX:x,y,count,color,size:40,label:"Density cell" };
+      button.onclick = () => openCluster(cluster);
+      attachTooltip(button, `<strong>${count} tasks in this area</strong><div class="meta"><span>Urgency ${x-7}-${x+7}</span><span>Importance ${y-7}-${y+7}</span><span>Top score 94</span><span>3 projects</span></div><p>Click to inspect or zoom</p>`);
+      plot.appendChild(button);
+    });
+  }
+
+  const copy = {
+    adaptive: ["Operational view: due-date pressure against explicit task priority.", "383 plotted · 20 excluded", "Priority × Urgency · adaptive detail"],
+    constellation: ["Planning view: explicit effort against priority, with urgency visible through color.", "344 plotted · 59 excluded", "Priority × Effort · adaptive detail"],
+    density: ["The same axis semantics, aggregated when the viewport cannot show every task.", "383 plotted · 20 excluded", "Priority × Urgency · density cells"]
+  };
+
+  const tableRows = seededPoints(16, "scatter");
+  function renderTable(sortKey = "score") {
+    const rows = [...tableRows].sort((a,b) => sortKey === "name" ? a.name.localeCompare(b.name) : b[sortKey] - a[sortKey]);
+    document.getElementById("table-body").innerHTML = rows.map(point => `
+      <tr><td>${point.name}</td><td>${priorityLabel(point.priority)}</td><td>${Math.round(point.urgency)}</td><td>${dueDateLabel(point)}</td><td>${effortLabel(point)}</td><td>${point.score}</td>
+      <td><span style="background:${projectPieFill(point)};display:inline-block;width:8px;height:8px;border-radius:50%"></span> ${projectLabel(point)}</td><td>In progress</td></tr>`).join("");
+  }
+
+  function focusQuadrant(quadrant) {
+    const plot = document.querySelector(".concept.active .plot");
+    const xThreshold = plot.dataset.axis === "effort" ? 62.5 : 50;
+    const yThreshold = 62.5;
+    const inQuadrant = (x,y) =>
+      quadrant === "do" ? x >= xThreshold && y >= yThreshold :
+      quadrant === "schedule" ? x < xThreshold && y >= yThreshold :
+      quadrant === "delegate" ? x >= xThreshold && y < yThreshold : x < xThreshold && y < yThreshold;
+    plot.querySelectorAll(".point,.cluster,.density-cell").forEach(mark => {
+      mark.classList.toggle("dimmed", !inQuadrant(Number(mark.dataset.x), Number(mark.dataset.y)));
+    });
+    document.getElementById("lod-note").textContent = `Focused: ${quadrant === "do" ? "Do first" : quadrant[0].toUpperCase()+quadrant.slice(1)}`;
+    announce(document.getElementById("lod-note").textContent);
+  }
+
+  function renderLegend() {
+    const legend = document.getElementById("legend");
+    if (colorMode === "urgency") {
+      legend.innerHTML = `<span title="Urgency 0-19"><i style="background:#64748b"></i> Later</span><span title="Urgency 20-49"><i style="background:#60a5fa"></i> Planned</span><span title="Urgency 50-64"><i style="background:#fbbf24"></i> Soon</span><span title="Urgency 65-94"><i style="background:#fb923c"></i> Near</span><span title="Urgency 95-100"><i style="background:#fb7185"></i> Due</span>`;
+    } else if (colorMode === "status") {
+      legend.innerHTML = `<span><i style="background:#60a5fa"></i> To do</span><span><i style="background:#34d399"></i> In progress</span><span><i style="background:#fbbf24"></i> Waiting</span>`;
+    } else if (colorMode === "priority") {
+      legend.innerHTML = `<span><i style="background:#fb7185"></i> Critical</span><span><i style="background:#fbbf24"></i> High</span><span><i style="background:#60a5fa"></i> Medium</span><span><i style="background:#94a3b8"></i> Low</span>`;
+    } else {
+      legend.innerHTML = `<span><i style="background:#60a5fa"></i> MC</span><span><i style="background:#a78bfa"></i> Home</span><span><i style="background:#34d399"></i> Personal</span><span><i style="background:#fbbf24"></i> Ops</span>`;
+    }
+  }
+
+  function renderCurrent(level = Number(document.getElementById("zoom").value)) {
+    const active = document.querySelector(".concept.active").id;
+    if (active === "adaptive") renderAdaptive(level);
+    else if (active === "constellation") renderConstellation(level);
+    else renderDensity();
+    renderLegend();
+  }
+
+  function announce(message) {
+    document.getElementById("viz-announcer").textContent = "";
+    window.setTimeout(() => {
+      document.getElementById("viz-announcer").textContent = message;
+    }, 20);
+  }
+
+  let colorWasCustomized = false;
+
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
+      document.querySelectorAll(".concept").forEach(item => item.classList.toggle("active", item.id === tab.dataset.concept));
+      const values = copy[tab.dataset.concept];
+      const effortView = tab.dataset.concept === "constellation";
+      document.getElementById("concept-copy").textContent = values[0];
+      document.getElementById("plot-title").textContent = values[1];
+      document.getElementById("plot-title").title = effortView
+        ? "344 plotted · 17 need priority · 42 need effort"
+        : "383 plotted · 17 need priority · 3 invalid due dates";
+      document.getElementById("plot-subtitle").textContent = values[2];
+      document.getElementById("zoom").disabled = tab.dataset.concept === "density";
+      document.getElementById("x-axis-label").textContent = effortView ? "Effort" : "Urgency";
+      document.getElementById("needs-data-count").textContent = effortView ? "59" : "20";
+      if (!colorWasCustomized) {
+        colorMode = effortView ? "urgency" : "project";
+        document.getElementById("color-mode").value = colorMode;
+      }
+      document.getElementById("table-panel").classList.remove("active");
+      document.getElementById("table-view").setAttribute("aria-pressed", "false");
+      document.getElementById("lod-note").textContent =
+        tab.dataset.concept === "adaptive" ? "Clusters + outliers" :
+        tab.dataset.concept === "constellation" ? "Urgency shown by color" : "Maximum density";
+      renderCurrent();
+      announce(`${values[2]}. Size by ${sizeMode.replace("-", " ")}. Color by ${colorMode}.`);
+      clearDetail();
+    });
+  });
+
+  document.getElementById("zoom").addEventListener("input", event => {
+    renderCurrent(Number(event.target.value));
+    announce(`Zoom level ${event.target.value}.`);
+  });
+  document.getElementById("reset").addEventListener("click", () => {
+    document.getElementById("zoom").value = 1;
+    document.querySelectorAll(".dimmed").forEach(mark => mark.classList.remove("dimmed"));
+    renderCurrent(1);
+    clearDetail();
+  });
+  document.querySelectorAll(".plot").forEach(plot => plot.addEventListener("click", event => {
+    if (event.target === plot) clearDetail();
+  }));
+  document.querySelectorAll(".quad-label").forEach(label => label.addEventListener("click", () => focusQuadrant(label.dataset.quadrant)));
+  document.querySelectorAll("[data-filter-group='view']").forEach(filter => filter.addEventListener("click", () => {
+    document.querySelectorAll("[data-filter-group='view']").forEach(item => item.classList.toggle("active", item === filter));
+  }));
+  document.getElementById("needs-data-filter").addEventListener("click", openNeedsData);
+  document.querySelectorAll(".filter:not([data-filter-group])").forEach(filter => filter.addEventListener("click", () => filter.classList.toggle("active")));
+  document.getElementById("table-view").addEventListener("click", event => {
+    const active = document.getElementById("table-panel").classList.toggle("active");
+    event.currentTarget.setAttribute("aria-pressed", String(active));
+    event.currentTarget.textContent = active ? "Matrix view" : "Table view";
+  });
+  document.querySelectorAll("[data-sort]").forEach(button => button.addEventListener("click", () => renderTable(button.dataset.sort)));
+  document.getElementById("size-mode").addEventListener("change", event => {
+    sizeMode = event.currentTarget.value;
+    renderCurrent();
+    announce(`Dot size changed to ${sizeMode.replace("-", " ")}.`);
+  });
+  document.getElementById("color-mode").addEventListener("change", event => {
+    colorMode = event.currentTarget.value;
+    colorWasCustomized = true;
+    renderCurrent();
+    announce(`Dot color changed to ${colorMode}.`);
+  });
+
+  renderAdaptive(1);
+  renderConstellation(1);
+  renderDensity();
+  renderLegend();
+  renderTable();
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+  if (requestedView === "effort") {
+    document.querySelector('[data-concept="constellation"]').click();
+  } else if (requestedView === "density") {
+    document.querySelector('[data-concept="density"]').click();
+  }
+</script>
+</body>
+</html>

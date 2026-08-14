@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Houston AI Icon Variations v3</title>
+<style>
+  :root { --bg: #0f172a; --card-bg: #1e293b; --border: #334155; --text: #e2e8f0; --muted: #94a3b8; --sky: #38bdf8; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 2rem; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); font-size: 0.875rem; margin-bottom: 2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 1.5rem; }
+  .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 1.5rem; }
+  .card h2 { font-size: 1rem; margin-bottom: 0.25rem; }
+  .card .desc { color: var(--muted); font-size: 0.75rem; margin-bottom: 1rem; line-height: 1.5; }
+  .icon-row { display: flex; align-items: center; gap: 1.5rem; margin-bottom: 1rem; }
+  .size-label { color: var(--muted); font-size: 0.625rem; text-align: center; margin-top: 2px; }
+  .preview-nav { display: flex; align-items: center; gap: 0.5rem; background: #0f172a; border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.75rem; color: var(--sky); }
+  .tag { display: inline-block; font-size: 0.625rem; padding: 2px 6px; border-radius: 4px; margin-bottom: 0.5rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tag-cur { background: #1a2332; color: #64748b; }
+  .tag-req { background: #1e3a5f; color: #38bdf8; }
+  .tag-fav { background: #1a3a2a; color: #4ade80; }
+  hr.div { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+</style>
+</head>
+<body>
+
+<!-- Shared SVG defs -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <linearGradient id="rainbow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f87171"/><stop offset="20%" stop-color="#fb923c"/>
+      <stop offset="40%" stop-color="#facc15"/><stop offset="55%" stop-color="#4ade80"/>
+      <stop offset="75%" stop-color="#38bdf8"/><stop offset="100%" stop-color="#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+<h1>Houston Icon Variations v3</h1>
+<p class="subtitle">Refined sparkle variants. Nav icons are <strong>22px</strong> (confirmed from NavRail.tsx <code>size={22}</code>). Showing at 44px, 28px, 22px.</p>
+
+<div class="grid">
+
+  <!-- ========== 0. CURRENT BASELINE ========== -->
+  <div class="card">
+    <span class="tag tag-cur">Current</span>
+    <h2>Headset Only (Baseline)</h2>
+    <p class="desc">Current Lucide Headset in sky-400. No AI signaling.</p>
+    <div class="icon-row">
+      <div>
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5"/>
+        </svg>
+        <div class="size-label">44px</div>
+      </div>
+      <div>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5"/>
+        </svg>
+        <div class="size-label">28px</div>
+      </div>
+      <div>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5"/>
+        </svg>
+        <div class="size-label">22px ← nav</div>
+      </div>
+    </div>
+    <div class="preview-nav">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5"/>
+      </svg>
+      Houston
+    </div>
+  </div>
+
+  <!-- ========== 1. BLUE HEADSET + WHITE SPARKLES ========== -->
+  <div class="card">
+    <span class="tag tag-req">Requested</span>
+    <h2>Blue Headset + White Sparkles</h2>
+    <p class="desc">Sky-400 headset with bright white 4-point star sparkles. High contrast against dark backgrounds — sparkles pop immediately.</p>
+    <div class="icon-row">
+      <div>
+        <svg width="44" height="44" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="#38bdf8" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="#38bdf8" stroke-width="2"/>
+          <!-- Large sparkle — overlaps right arc -->
+          <path d="M19.5 3 L20.8 7.2 L25 8.5 L20.8 9.8 L19.5 14 L18.2 9.8 L14 8.5 L18.2 7.2 Z" fill="white"/>
+          <!-- Medium sparkle — above center-left -->
+          <path d="M13 -2 L13.8 1.2 L17 2 L13.8 2.8 L13 6 L12.2 2.8 L9 2 L12.2 1.2 Z" fill="white"/>
+          <!-- Small sparkle — upper right -->
+          <path d="M24.5 1 L25 2.8 L26.8 3.3 L25 3.8 L24.5 5.6 L24 3.8 L22.2 3.3 L24 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">44px</div>
+      </div>
+      <div>
+        <svg width="28" height="28" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="#38bdf8" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="#38bdf8" stroke-width="2"/>
+          <path d="M19.5 3 L20.8 7.2 L25 8.5 L20.8 9.8 L19.5 14 L18.2 9.8 L14 8.5 L18.2 7.2 Z" fill="white"/>
+          <path d="M13 -2 L13.8 1.2 L17 2 L13.8 2.8 L13 6 L12.2 2.8 L9 2 L12.2 1.2 Z" fill="white"/>
+          <path d="M24.5 1 L25 2.8 L26.8 3.3 L25 3.8 L24.5 5.6 L24 3.8 L22.2 3.3 L24 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">28px</div>
+      </div>
+      <div>
+        <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="#38bdf8" stroke-width="2.5"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="#38bdf8" stroke-width="2.5"/>
+          <path d="M19.5 3 L20.8 7.2 L25 8.5 L20.8 9.8 L19.5 14 L18.2 9.8 L14 8.5 L18.2 7.2 Z" fill="white"/>
+          <path d="M13 -2 L13.8 1.2 L17 2 L13.8 2.8 L13 6 L12.2 2.8 L9 2 L12.2 1.2 Z" fill="white"/>
+          <path d="M24.5 1 L25 2.8 L26.8 3.3 L25 3.8 L24.5 5.6 L24 3.8 L22.2 3.3 L24 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">22px ← nav</div>
+      </div>
+    </div>
+    <div class="preview-nav">
+      <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="#38bdf8" stroke-width="2.5"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="#38bdf8" stroke-width="2.5"/>
+        <path d="M19.5 3 L20.8 7.2 L25 8.5 L20.8 9.8 L19.5 14 L18.2 9.8 L14 8.5 L18.2 7.2 Z" fill="white"/>
+        <path d="M13 -2 L13.8 1.2 L17 2 L13.8 2.8 L13 6 L12.2 2.8 L9 2 L12.2 1.2 Z" fill="white"/>
+        <path d="M24.5 1 L25 2.8 L26.8 3.3 L25 3.8 L24.5 5.6 L24 3.8 L22.2 3.3 L24 2.8 Z" fill="white"/>
+      </svg>
+      Houston
+    </div>
+  </div>
+
+  <!-- ========== 2. BLUE→PURPLE GRADIENT + WHITE SPARKLES (refined) ========== -->
+  <div class="card">
+    <span class="tag tag-fav">Favorite — Refined</span>
+    <h2>Blue→Purple Gradient + White Sparkles</h2>
+    <p class="desc">Your brand gradient headset with bright white sparkles. Cluster pulled tighter and slightly bigger vs. v2. Sparkles are white instead of light purple for better visibility.</p>
+    <div class="icon-row">
+      <div>
+        <svg width="44" height="44" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2"/>
+          <!-- Large sparkle — tighter to arc, bigger -->
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <!-- Medium sparkle — pulled closer -->
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <!-- Small sparkle — tucked closer -->
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">44px</div>
+      </div>
+      <div>
+        <svg width="28" height="28" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2"/>
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">28px</div>
+      </div>
+      <div>
+        <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2.5"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2.5"/>
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">22px ← nav</div>
+      </div>
+    </div>
+    <div class="preview-nav" style="color:#818cf8;">
+      <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2.5"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2.5"/>
+        <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+        <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+        <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+      </svg>
+      Houston
+    </div>
+  </div>
+
+  <!-- ========== 3. RAINBOW HEADSET + WHITE SPARKLES ========== -->
+  <div class="card">
+    <span class="tag tag-req">Requested</span>
+    <h2>Rainbow Gradient + White Sparkles</h2>
+    <p class="desc">Rainbow gradient stroke on the headset combined with bright white sparkle cluster. Maximum "AI" signaling — gradient + sparkles together.</p>
+    <div class="icon-row">
+      <div>
+        <svg width="44" height="44" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">44px</div>
+      </div>
+      <div>
+        <svg width="28" height="28" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">28px</div>
+      </div>
+      <div>
+        <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2.5"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2.5"/>
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+        <div class="size-label">22px ← nav</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;background:#0f172a;border-radius:8px;padding:0.5rem 0.75rem;font-size:0.75rem;">
+      <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2.5"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2.5"/>
+        <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+        <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+        <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+      </svg>
+      <span style="background:linear-gradient(90deg,#f87171,#fb923c,#facc15,#4ade80,#38bdf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:600;">Houston</span>
+    </div>
+  </div>
+
+  <!-- ========== 4. RAINBOW HEADSET (no sparkles, for comparison) ========== -->
+  <div class="card">
+    <span class="tag tag-cur">Comparison</span>
+    <h2>Rainbow Gradient Only</h2>
+    <p class="desc">Just the rainbow gradient on the headset, no sparkles. For comparing whether the sparkles add value on top of the rainbow.</p>
+    <div class="icon-row">
+      <div>
+        <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+        </svg>
+        <div class="size-label">44px</div>
+      </div>
+      <div>
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+        </svg>
+        <div class="size-label">28px</div>
+      </div>
+      <div>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+        </svg>
+        <div class="size-label">22px ← nav</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;background:#0f172a;border-radius:8px;padding:0.5rem 0.75rem;font-size:0.75rem;">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+      </svg>
+      <span style="background:linear-gradient(90deg,#f87171,#fb923c,#facc15,#4ade80,#38bdf8,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:600;">Houston</span>
+    </div>
+  </div>
+
+</div>
+
+<hr class="div">
+
+<h1>Side-by-side at Nav Size (22px)</h1>
+<p class="subtitle">Exactly how each looks as a nav-rail icon at actual size</p>
+
+<div style="display:flex;gap:3rem;flex-wrap:wrap;margin-top:1rem;background:#0f172a;border-radius:12px;padding:1.5rem 2rem;border:1px solid var(--border);align-items:flex-end;">
+
+  <div style="text-align:center;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z"/>
+      <path d="M21 16v2a4 4 0 0 1-4 4h-5"/>
+    </svg>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:4px;">Current</div>
+  </div>
+
+  <div style="text-align:center;">
+    <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="#38bdf8" stroke-width="2.5"/>
+      <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="#38bdf8" stroke-width="2.5"/>
+      <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+      <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+      <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+    </svg>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:4px;">Blue+White✨</div>
+  </div>
+
+  <div style="text-align:center;">
+    <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2.5"/>
+      <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2.5"/>
+      <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+      <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+      <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+    </svg>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:4px;">Brand+White✨</div>
+  </div>
+
+  <div style="text-align:center;">
+    <svg width="22" height="22" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2.5"/>
+      <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2.5"/>
+      <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+      <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+      <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+    </svg>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:4px;">Rainbow+✨</div>
+  </div>
+
+  <div style="text-align:center;">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#rainbow)" stroke-width="2"/>
+      <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#rainbow)" stroke-width="2"/>
+    </svg>
+    <div style="font-size:0.6rem;color:var(--muted);margin-top:4px;">Rainbow only</div>
+  </div>
+
+</div>
+
+<hr class="div">
+
+<h1>Landing Page Hero Icon Options</h1>
+<p class="subtitle">The Houston chat empty-state uses a 64px circle with the icon inside. Comparing two approaches.</p>
+
+<div style="display:flex;gap:2.5rem;flex-wrap:wrap;margin-top:1rem;align-items:flex-start;">
+
+  <!-- Option B fixed: Gradient circle + white headset + sparkles extending beyond -->
+  <div class="card" style="width:240px;text-align:center;">
+    <span class="tag tag-req">Option B (Fixed)</span>
+    <h2>Gradient Circle + White Headset + Sparkles</h2>
+    <p class="desc">White headset stroke on gradient circle (legible), with white sparkles extending beyond the circle — clearly reads as "AI assistant".</p>
+    <div style="margin:1.5rem auto;width:90px;height:90px;position:relative;display:flex;align-items:center;justify-content:center;">
+      <div style="width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#3b82f6,#7c3aed);display:flex;align-items:center;justify-content:center;position:relative;overflow:visible;">
+        <svg width="72" height="72" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);">
+          <!-- Headset in white (readable on gradient bg) -->
+          <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="white" stroke-width="2"/>
+          <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="white" stroke-width="2"/>
+          <!-- Sparkles in white — extending beyond circle -->
+          <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+          <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+          <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+        </svg>
+      </div>
+    </div>
+    <div style="font-weight:600;font-size:0.875rem;">Houston</div>
+    <div style="color:var(--muted);font-size:0.7rem;margin-top:2px;">Powered by GPT-4o via OpenAI</div>
+  </div>
+
+  <!-- Option C: No circle — large HoustonIcon on its own -->
+  <div class="card" style="width:240px;text-align:center;">
+    <span class="tag tag-req">Option C</span>
+    <h2>No Circle — Large HoustonIcon</h2>
+    <p class="desc">Drop the circle entirely. The gradient + sparkles icon IS the hero at 56px. Clean, modern, lets the icon speak for itself.</p>
+    <div style="margin:1.5rem auto;width:90px;height:90px;display:flex;align-items:center;justify-content:center;">
+      <svg width="56" height="56" viewBox="-1 -4 29 29" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 11h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5Zm0 0a9 9 0 1 1 18 0m0 0v5a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3Z" stroke="url(#brand)" stroke-width="2"/>
+        <path d="M21 16v2a4 4 0 0 1-4 4h-5" stroke="url(#brand)" stroke-width="2"/>
+        <path d="M19 2.5 L20.5 7 L25 8.5 L20.5 10 L19 14.5 L17.5 10 L13 8.5 L17.5 7 Z" fill="white"/>
+        <path d="M13.5 -1.5 L14.2 1.5 L17.2 2.2 L14.2 2.9 L13.5 5.9 L12.8 2.9 L9.8 2.2 L12.8 1.5 Z" fill="white"/>
+        <path d="M23.5 1 L24 2.8 L25.8 3.3 L24 3.8 L23.5 5.6 L23 3.8 L21.2 3.3 L23 2.8 Z" fill="white"/>
+      </svg>
+    </div>
+    <div style="font-weight:600;font-size:0.875rem;">Houston</div>
+    <div style="color:var(--muted);font-size:0.7rem;margin-top:2px;">Powered by GPT-4o via OpenAI</div>
+  </div>
+
+</div>
+
+</body>
+</html>

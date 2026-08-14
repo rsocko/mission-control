@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projects Icon Mockup</title>
+  <style>
+    :root { --surface-1: #0d1117; --surface-2: #161b22; --surface-3: #21262d; --border: #30363d; --text-primary: #e6edf3; --text-secondary: #8b949e; --text-muted: #484f58; --accent: #7c3aed; --accent-400: #a78bfa; --accent-900: #4c1d95; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at top, rgba(124, 58, 237, 0.16), transparent 32%), linear-gradient(180deg, #0b0f15 0%, #010409 100%); color: var(--text-primary); padding: 32px; }
+    .page { max-width: 1540px; margin: 0 auto; display: flex; flex-direction: column; gap: 28px; }
+    .hero { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; padding: 24px 26px; background: rgba(22, 27, 34, 0.82); border: 1px solid rgba(167, 139, 250, 0.16); border-radius: 20px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28); backdrop-filter: blur(10px); }
+    .hero-copy { max-width: 760px; } .eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 12px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent-400); }
+    .eyebrow::before { content: ""; width: 8px; height: 8px; border-radius: 999px; background: linear-gradient(135deg, var(--accent-400), #c4b5fd); box-shadow: 0 0 18px rgba(167, 139, 250, 0.55); }
+    h1 { margin: 0; font-size: 30px; line-height: 1.1; letter-spacing: -0.03em; }
+    .hero p { margin: 12px 0 0; max-width: 70ch; font-size: 14px; line-height: 1.65; color: var(--text-secondary); }
+    .spec-card { min-width: 250px; padding: 16px 18px; border-radius: 16px; background: rgba(13, 17, 23, 0.92); border: 1px solid var(--border); align-self: flex-start; }
+    .spec-card h2 { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); } .spec-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 12px; color: var(--text-secondary); } .spec-list strong { color: var(--text-primary); font-weight: 600; }
+    section { display: flex; flex-direction: column; gap: 16px; } .section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: 8px 18px; } .section-head h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; } .section-head p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary); max-width: 74ch; } .section-kicker { font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); font-weight: 700; }
+    .nav-grid { display: flex; flex-wrap: wrap; gap: 18px; }
+    .rail-card { width: 236px; padding: 14px; border-radius: 18px; background: linear-gradient(180deg, rgba(22, 27, 34, 0.94), rgba(13, 17, 23, 0.94)); border: 1px solid var(--border); box-shadow: 0 16px 42px rgba(0, 0, 0, 0.24); } .rail-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; } .rail-card h3 { margin: 0; font-size: 14px; line-height: 1.2; } .rail-card-header p { margin: 6px 0 0; font-size: 11px; line-height: 1.45; color: var(--text-secondary); }
+    .family-badge { flex-shrink: 0; padding: 4px 8px; border-radius: 999px; background: rgba(167, 139, 250, 0.12); border: 1px solid rgba(167, 139, 250, 0.18); color: var(--accent-400); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; }
+    .nav-column { width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-radius: 14px; background: var(--surface-1); border: 1px solid var(--border); overflow: hidden; }
+    .nav-item { position: relative; display: flex; align-items: center; height: 40px; margin: 0 8px; padding: 0 10px; gap: 10px; border-radius: 8px; color: var(--text-secondary); font-size: 13px; font-weight: 500; line-height: 1; } .item-label { white-space: nowrap; }
+    .icon-wrap { width: 22px; height: 22px; flex: 0 0 22px; display: inline-flex; align-items: center; justify-content: center; } .icon-svg { width: 22px; height: 22px; display: block; overflow: visible; } .mirror-v { transform: scaleY(-1); transform-origin: center; }
+    .ic-blue { color: #60a5fa; } .ic-amber { color: #fbbf24; } .ic-violet { color: #a78bfa; } .ic-cyan { color: #22d3ee; } .ic-rose { color: #fb7185; }
+    .nav-item.active { background: rgba(76, 29, 149, 0.3); color: var(--accent-400); } .nav-item.active::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 16px; transform: translateY(-50%); border-radius: 0 2px 2px 0; background: var(--accent); box-shadow: 0 0 12px rgba(124, 58, 237, 0.45); } .nav-item.active .icon-wrap { color: var(--accent-400); }
+    .collapsed-rail-gallery { display: flex; flex-wrap: wrap; gap: 16px; padding: 18px; border-radius: 20px; background: rgba(22, 27, 34, 0.74); border: 1px solid var(--border); } .collapsed-rail-card { width: 84px; display: flex; flex-direction: column; align-items: center; gap: 8px; } .collapsed-rail-title { min-height: 28px; font-size: 10px; line-height: 1.25; color: var(--text-muted); text-align: center; } .collapsed-nav-column { width: 56px; display: flex; flex-direction: column; gap: 2px; padding: 8px 0; border-radius: 14px; background: var(--surface-1); border: 1px solid var(--border); overflow: hidden; align-items: center; } .collapsed-nav-column .nav-item { width: 40px; height: 40px; margin: 0 auto; padding: 0; gap: 0; justify-content: center; border-radius: 10px; } .collapsed-nav-column .item-label { display: none; } .collapsed-nav-column .nav-item.active::before { left: -8px; }
+    .pairing-strip { margin-bottom: 12px; display: grid; gap: 6px; font-size: 11px; color: var(--text-secondary); } .pairing-strip strong { color: var(--text-primary); } .conflict-card { width: 260px; }
+    .view-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; padding: 14px 18px; border-radius: 16px; background: rgba(13, 17, 23, 0.92); border: 1px solid var(--border); }
+    .view-toolbar-copy { font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+    .view-toolbar-copy strong { color: var(--text-primary); }
+    .view-toggle { appearance: none; border: 1px solid rgba(167, 139, 250, 0.28); background: linear-gradient(180deg, rgba(124, 58, 237, 0.24), rgba(76, 29, 149, 0.18)); color: var(--text-primary); border-radius: 999px; padding: 9px 14px; font: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.01em; cursor: pointer; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24); }
+    .view-toggle:hover { border-color: rgba(167, 139, 250, 0.5); }
+    .view-toggle:focus-visible { outline: 2px solid var(--accent-400); outline-offset: 2px; }
+    .page[data-rail-state="collapsed"] .toggleable-grid .nav-column { width: 56px; padding: 8px 0; align-items: center; }
+    .page[data-rail-state="collapsed"] .toggleable-grid .nav-item { width: 40px; margin: 0 auto; padding: 0; gap: 0; justify-content: center; }
+    .page[data-rail-state="collapsed"] .toggleable-grid .nav-item .item-label { display: none; }
+    .page[data-rail-state="collapsed"] .toggleable-grid .nav-item.active::before { left: -8px; }
+    .page[data-rail-state="collapsed"] .toggleable-grid .nav-item.active { border-radius: 10px; }
+    @media (max-width: 900px) { body { padding: 20px; } .hero { padding: 20px; } .view-toolbar { align-items: flex-start; } }
+  </style>
+</head>
+<body>
+  <div class="page" data-rail-state="expanded">
+    <header class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Dark-themed nav rail study</div>
+        <h1>Projects icon mockup</h1>
+        <p>Self-contained file://-safe mockup for comparing Projects icon directions inside the app's dark navigation rail. Every icon below is embedded as inline SVG, so there are no CDN, script, stylesheet, or runtime fetch dependencies.</p>
+      </div>
+      <aside class="spec-card" aria-label="Nav rail sizing summary">
+        <h2>App sizing snapshot</h2>
+        <ul class="spec-list"><li><strong>Icon:</strong> 22 ? 22 px</li><li><strong>Row height:</strong> 40 px</li><li><strong>Font:</strong> 13 px medium</li><li><strong>Rail width:</strong> 200 px</li><li><strong>Active:</strong> accent-400 text + violet bar + rgba(76,29,149,0.3)</li></ul>
+      </aside>
+    </header>
+    <div class="view-toolbar">
+      <div class="view-toolbar-copy"><strong>Rail preview mode:</strong> Toggle the main expanded candidate rails between expanded and collapsed states to compare how each Projects icon reads before and after pin/hover behavior.</div>
+      <button class="view-toggle" type="button" aria-pressed="false" data-toggle-rails>Switch all columns to collapsed</button>
+    </div>
+    <section><div class="section-head"><div><div class="section-kicker">Section 1</div><h2>Expanded Nav ? Full Context</h2><p>Each candidate is shown in a full 5-item rail with Projects active, so you can evaluate recognition, visual balance, and collision risk against Dashboard, My Day, Kanban, and Goals.</p></div></div><div class="nav-grid toggleable-grid">
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Folder Kanban</h3>
+          <p>Current icon ? explicit project container + board cue.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Folder Kanban for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2m4-10v4m4-4v2m4-2v6"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Workflow</h3>
+          <p>Process graph with clear progression between grouped work.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Workflow for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Flow Arrow</h3>
+          <p>Directional flow icon; mirrored vertically to feel more project-like.</p>
+        </div>
+        <span class="family-badge">Phosphor</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Flow Arrow for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg mirror-v" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="m245.66 74.34l-32-32a8 8 0 0 0-11.32 11.32L220.69 72H208c-49.33 0-61.05 28.12-71.38 52.92c-9.38 22.51-16.92 40.59-49.48 42.84a40 40 0 1 0 .1 16c43.26-2.65 54.34-29.15 64.14-52.69C161.41 107 169.33 88 208 88h12.69l-18.35 18.34a8 8 0 0 0 11.32 11.32l32-32a8 8 0 0 0 0-11.32M48 200a24 24 0 1 1 24-24a24 24 0 0 1-24 24"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Chart Gantt</h3>
+          <p>Strong planning/timeline signal with dense bars.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 5h8V2h2v20h-2v-4H6v-3h4v-2H4v-3h6V8H2zm12 0h3v3h-3zm0 5h5v3h-5zm0 5h8v3h-8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Square Chart Gantt</h3>
+          <p>Planning bars inside a container frame.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Square Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 8h7m-8 4h6m-3 4h5"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Chart No Axes Gantt</h3>
+          <p>Minimal gantt silhouette with less chart baggage.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Chart No Axes Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 5h12M4 12h10m-2 7h8"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Chart Gantt</h3>
+          <p>Classic gantt interpretation with open edges.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6h8m-6 10h6M3 3v16a2 2 0 0 0 2 2h16M8 11h7"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Planner Multiple</h3>
+          <p>Feels like many plans grouped under one umbrella.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Planner Multiple for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.05 9H7.06V6h1.99V4.03H7.06v-1c0-1.11.89-1.99 1.99-1.99h5.98V8l2.47-1.5L20 8V1.04h1c1.05 0 2 .96 2 1.99V17c0 1.03-.95 2-2 2H9.05c-1.05 0-1.99-.95-1.99-2v-1h1.99v-2H7.06v-3h1.99zM1 18h2v-3H1v-2h2v-3H1V8h2V5h2v3H3v2h2v3H3v2h2v3H3v2h2v1h16v2H5a2 2 0 0 1-2-2v-1H1z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Flag</h3>
+          <p>Outcome/milestone oriented and very readable at 22px.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Flag for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Flag Triangle Right</h3>
+          <p>Sharper pennant that looks crisp in a rail.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Flag Triangle Right for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 22V2.8a.8.8 0 0 1 1.17-.71l11.38 5.69a.8.8 0 0 1 0 1.44L6 15.5"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Flag Checkered</h3>
+          <p>Completion-heavy; best if projects imply delivery milestones.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Flag Checkered for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.4 6H20v10h-7l-.4-2H7v7H5V4h9zm-.4 8h2v-2h2v-2h-2V8h-2v2l-1-2V6h-2v2H9V6H7v2h2v2H7v2h2v-2h2v2h2v-2l1 2zm-3-4V8h2v2zm3 0h2v2h-2z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Flag Triangle</h3>
+          <p>Compact pennant shape with solid fill weight.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Flag Triangle for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h2v20H7zm12 7l-8 5.6V3.4z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Folder Tree</h3>
+          <p>Structured work inside a containing project space.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Folder Tree for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Zm0 11a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1ZM3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Share Network</h3>
+          <p>Connected initiatives and dependencies.</p>
+        </div>
+        <span class="family-badge">Phosphor</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Share Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M176 160a39.9 39.9 0 0 0-28.62 12.09l-46.1-29.63a39.8 39.8 0 0 0 0-28.92l46.1-29.63a40 40 0 1 0-8.66-13.45l-46.1 29.63a40 40 0 1 0 0 55.82l46.1 29.63A40 40 0 1 0 176 160m0-128a24 24 0 1 1-24 24a24 24 0 0 1 24-24M64 152a24 24 0 1 1 24-24a24 24 0 0 1-24 24m112 72a24 24 0 1 1 24-24a24 24 0 0 1-24 24"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Chart Network</h3>
+          <p>Explicit node-link view of related work.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Chart Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m13.11 7.664l1.78 2.672m-.728 2.452l-3.324 1.424M20 4l-6.06 1.515M3 3v16a2 2 0 0 0 2 2h16"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="9" cy="15" r="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>File Tree Outline</h3>
+          <p>Hierarchy and decomposition without folder semantics.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using File Tree Outline for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 13H7v5h5v2H5V10h2v1h5zM8 4v2H4V4zm2-2H2v6h8zm10 9v2h-4v-2zm2-2h-8v6h8zm-2 9v2h-4v-2zm2-2h-8v6h8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Tree Structure</h3>
+          <p>Balanced branching metaphor for nested work.</p>
+        </div>
+        <span class="family-badge">Phosphor</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Tree Structure for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M160 112h48a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16h-48a16 16 0 0 0-16 16v16h-16a24 24 0 0 0-24 24v32H72v-8a16 16 0 0 0-16-16H24a16 16 0 0 0-16 16v32a16 16 0 0 0 16 16h32a16 16 0 0 0 16-16v-8h32v32a24 24 0 0 0 24 24h16v16a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48a16 16 0 0 0-16-16h-48a16 16 0 0 0-16 16v16h-16a8 8 0 0 1-8-8V88a8 8 0 0 1 8-8h16v16a16 16 0 0 0 16 16M56 144H24v-32h32zm104 16h48v48h-48Zm0-112h48v48h-48Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Tree View Light</h3>
+          <p>Dense tree visualization; best if project = hierarchy.</p>
+        </div>
+        <span class="family-badge">Phosphor</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Tree View Light for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M176 150h32a14 14 0 0 0 14-14v-32a14 14 0 0 0-14-14h-32a14 14 0 0 0-14 14v10H86V78h10a14 14 0 0 0 14-14V32a14 14 0 0 0-14-14H64a14 14 0 0 0-14 14v32a14 14 0 0 0 14 14h10v114a22 22 0 0 0 22 22h66v10a14 14 0 0 0 14 14h32a14 14 0 0 0 14-14v-32a14 14 0 0 0-14-14h-32a14 14 0 0 0-14 14v10H96a10 10 0 0 1-10-10v-66h76v10a14 14 0 0 0 14 14M62 64V32a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2H64a2 2 0 0 1-2-2m112 128a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2h-32a2 2 0 0 1-2-2Zm0-88a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2h-32a2 2 0 0 1-2-2Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>List Tree</h3>
+          <p>Outline/tree hybrid that feels task-oriented.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using List Tree for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 5h13m-8 7h8m-8 7h8M3 10a2 2 0 0 0 2 2h3"/><path d="M3 5v12a2 2 0 0 0 2 2h3"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article></div></section>
+    <section><div class="section-head"><div><div class="section-kicker">Section 2</div><h2>GitHub Projects-Style + Suggestions</h2><p>These options lean closer to GitHub language or broaden the metaphor into portfolio, collection, or planning territory while preserving the same rail proportions and active treatment.</p></div></div><div class="nav-grid toggleable-grid">
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Project</h3>
+          <p>Closest to GitHub Projects language and brand familiarity.</p>
+        </div>
+        <span class="family-badge">Octicon</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Project for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0M1.5 1.75v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25M11.75 3a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-1.5 0v-7.5a.75.75 0 0 1 .75-.75m-8.25.75a.75.75 0 0 1 1.5 0v5.5a.75.75 0 0 1-1.5 0ZM8 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 3"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Table</h3>
+          <p>Simple grid metaphor; neutral and highly legible.</p>
+        </div>
+        <span class="family-badge">Octicon</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Table for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25ZM6.5 6.5v8h7.75a.25.25 0 0 0 .25-.25V6.5Zm8-1.5V1.75a.25.25 0 0 0-.25-.25H6.5V5Zm-13 1.5v7.75c0 .138.112.25.25.25H5v-8ZM5 5V1.5H1.75a.25.25 0 0 0-.25.25V5Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Layers</h3>
+          <p>Projects as stacked scopes, workstreams, or epics.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Layers for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Briefcase</h3>
+          <p>Portfolio/work object metaphor with product-management vibes.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Briefcase for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Rocket</h3>
+          <p>Shipping focus; energetic but less information-dense.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Rocket for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Blocks</h3>
+          <p>Modular work assembled into a larger whole.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Blocks for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/><rect width="8" height="8" x="14" y="2" rx="1"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Box</h3>
+          <p>Single deliverable/package metaphor.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Box for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7l8.7 5l8.7-5M12 22V12"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Network</h3>
+          <p>Abstract but clean representation of connected work.</p>
+        </div>
+        <span class="family-badge">Lucide</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="6" height="6" x="16" y="16" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="9" y="2" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3m-7-4V8"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Clipboard Text</h3>
+          <p>Plan/spec/document framing for project management.</p>
+        </div>
+        <span class="family-badge">MDI</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup using Clipboard Text for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3h-4.18C14.25 1.44 12.53.64 11 1.2c-.86.3-1.5.96-1.82 1.8H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2m-7 0a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h10V5h2v14H5V5h2zm10 4H7V9h10zm-2 4H7v-2h8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article></div></section>
+    <section><div class="section-head"><div><div class="section-kicker">Section 3</div><h2>Collapsed Nav ? Icon-Only Comparison</h2><p>Each Projects candidate is shown as a proper collapsed rail: a narrow 56px icon-only column with all 5 destinations stacked vertically and Projects held in its active state.</p></div></div><div class="collapsed-rail-gallery">
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Folder Kanban</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Folder Kanban for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.93a2 2 0 0 1-1.66-.9l-.82-1.2A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2m4-10v4m4-4v2m4-2v6"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Workflow</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Workflow for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Flow Arrow</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Flow Arrow for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg mirror-v" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="m245.66 74.34l-32-32a8 8 0 0 0-11.32 11.32L220.69 72H208c-49.33 0-61.05 28.12-71.38 52.92c-9.38 22.51-16.92 40.59-49.48 42.84a40 40 0 1 0 .1 16c43.26-2.65 54.34-29.15 64.14-52.69C161.41 107 169.33 88 208 88h12.69l-18.35 18.34a8 8 0 0 0 11.32 11.32l32-32a8 8 0 0 0 0-11.32M48 200a24 24 0 1 1 24-24a24 24 0 0 1-24 24"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Chart Gantt</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M2 5h8V2h2v20h-2v-4H6v-3h4v-2H4v-3h6V8H2zm12 0h3v3h-3zm0 5h5v3h-5zm0 5h8v3h-8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Square Chart Gantt</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Square Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 8h7m-8 4h6m-3 4h5"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Chart No Axes Gantt</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Chart No Axes Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 5h12M4 12h10m-2 7h8"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Chart Gantt</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Chart Gantt for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6h8m-6 10h6M3 3v16a2 2 0 0 0 2 2h16M8 11h7"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Planner Multiple</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Planner Multiple for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M9.05 9H7.06V6h1.99V4.03H7.06v-1c0-1.11.89-1.99 1.99-1.99h5.98V8l2.47-1.5L20 8V1.04h1c1.05 0 2 .96 2 1.99V17c0 1.03-.95 2-2 2H9.05c-1.05 0-1.99-.95-1.99-2v-1h1.99v-2H7.06v-3h1.99zM1 18h2v-3H1v-2h2v-3H1V8h2V5h2v3H3v2h2v3H3v2h2v3H3v2h2v1h16v2H5a2 2 0 0 1-2-2v-1H1z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Flag</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Flag for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 22V4a1 1 0 0 1 .4-.8A6 6 0 0 1 8 2c3 0 5 2 7.333 2q2 0 3.067-.8A1 1 0 0 1 20 4v10a1 1 0 0 1-.4.8A6 6 0 0 1 16 16c-3 0-5-2-8-2a6 6 0 0 0-4 1.528"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Flag Triangle Right</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Flag Triangle Right for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 22V2.8a.8.8 0 0 1 1.17-.71l11.38 5.69a.8.8 0 0 1 0 1.44L6 15.5"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Flag Checkered</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Flag Checkered for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.4 6H20v10h-7l-.4-2H7v7H5V4h9zm-.4 8h2v-2h2v-2h-2V8h-2v2l-1-2V6h-2v2H9V6H7v2h2v2H7v2h2v-2h2v2h2v-2l1 2zm-3-4V8h2v2zm3 0h2v2h-2z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Flag Triangle</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Flag Triangle for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 2h2v20H7zm12 7l-8 5.6V3.4z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Folder Tree</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Folder Tree for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Zm0 11a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1ZM3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Share Network</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Share Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M176 160a39.9 39.9 0 0 0-28.62 12.09l-46.1-29.63a39.8 39.8 0 0 0 0-28.92l46.1-29.63a40 40 0 1 0-8.66-13.45l-46.1 29.63a40 40 0 1 0 0 55.82l46.1 29.63A40 40 0 1 0 176 160m0-128a24 24 0 1 1-24 24a24 24 0 0 1 24-24M64 152a24 24 0 1 1 24-24a24 24 0 0 1-24 24m112 72a24 24 0 1 1 24-24a24 24 0 0 1-24 24"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Chart Network</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Chart Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m13.11 7.664l1.78 2.672m-.728 2.452l-3.324 1.424M20 4l-6.06 1.515M3 3v16a2 2 0 0 0 2 2h16"/><circle cx="12" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="9" cy="15" r="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">File Tree Outline</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using File Tree Outline for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 13H7v5h5v2H5V10h2v1h5zM8 4v2H4V4zm2-2H2v6h8zm10 9v2h-4v-2zm2-2h-8v6h8zm-2 9v2h-4v-2zm2-2h-8v6h8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Tree Structure</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Tree Structure for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M160 112h48a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16h-48a16 16 0 0 0-16 16v16h-16a24 24 0 0 0-24 24v32H72v-8a16 16 0 0 0-16-16H24a16 16 0 0 0-16 16v32a16 16 0 0 0 16 16h32a16 16 0 0 0 16-16v-8h32v32a24 24 0 0 0 24 24h16v16a16 16 0 0 0 16 16h48a16 16 0 0 0 16-16v-48a16 16 0 0 0-16-16h-48a16 16 0 0 0-16 16v16h-16a8 8 0 0 1-8-8V88a8 8 0 0 1 8-8h16v16a16 16 0 0 0 16 16M56 144H24v-32h32zm104 16h48v48h-48Zm0-112h48v48h-48Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Tree View Light</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Tree View Light for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M176 150h32a14 14 0 0 0 14-14v-32a14 14 0 0 0-14-14h-32a14 14 0 0 0-14 14v10H86V78h10a14 14 0 0 0 14-14V32a14 14 0 0 0-14-14H64a14 14 0 0 0-14 14v32a14 14 0 0 0 14 14h10v114a22 22 0 0 0 22 22h66v10a14 14 0 0 0 14 14h32a14 14 0 0 0 14-14v-32a14 14 0 0 0-14-14h-32a14 14 0 0 0-14 14v10H96a10 10 0 0 1-10-10v-66h76v10a14 14 0 0 0 14 14M62 64V32a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2H64a2 2 0 0 1-2-2m112 128a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2h-32a2 2 0 0 1-2-2Zm0-88a2 2 0 0 1 2-2h32a2 2 0 0 1 2 2v32a2 2 0 0 1-2 2h-32a2 2 0 0 1-2-2Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">List Tree</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using List Tree for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M8 5h13m-8 7h8m-8 7h8M3 10a2 2 0 0 0 2 2h3"/><path d="M3 5v12a2 2 0 0 0 2 2h3"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Project</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Project for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0M1.5 1.75v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25M11.75 3a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-1.5 0v-7.5a.75.75 0 0 1 .75-.75m-8.25.75a.75.75 0 0 1 1.5 0v5.5a.75.75 0 0 1-1.5 0ZM8 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 3"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Table</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Table for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25ZM6.5 6.5v8h7.75a.25.25 0 0 0 .25-.25V6.5Zm8-1.5V1.75a.25.25 0 0 0-.25-.25H6.5V5Zm-13 1.5v7.75c0 .138.112.25.25.25H5v-8ZM5 5V1.5H1.75a.25.25 0 0 0-.25.25V5Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Layers</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Layers for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Briefcase</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Briefcase for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 20V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/><rect width="20" height="14" x="2" y="6" rx="2"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Rocket</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Rocket for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09"/><path d="M9 12a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.4 22.4 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 .05 5 .05"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Blocks</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Blocks for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/><rect width="8" height="8" x="14" y="2" rx="1"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Box</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Box for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7l8.7 5l8.7-5M12 22V12"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Network</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Network for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="6" height="6" x="16" y="16" rx="1"/><rect width="6" height="6" x="2" y="16" rx="1"/><rect width="6" height="6" x="9" y="2" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3m-7-4V8"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+    <article class="collapsed-rail-card">
+      <div class="collapsed-rail-title">Clipboard Text</div>
+      <div class="collapsed-nav-column" role="img" aria-label="Collapsed navigation rail mockup using Clipboard Text for Projects">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3h-4.18C14.25 1.44 12.53.64 11 1.2c-.86.3-1.5.96-1.82 1.8H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2m-7 0a1 1 0 0 1 1 1a1 1 0 0 1-1 1a1 1 0 0 1-1-1a1 1 0 0 1 1-1M7 7h10V5h2v14H5V5h2zm10 4H7V9h10zm-2 4H7v-2h8z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+      </div></section>
+    <section><div class="section-head"><div><div class="section-kicker">Section 4</div><h2>Kanban Conflict</h2><p>If Projects adopts a grid, table, or modular metaphor, these pairings keep Kanban visually distinct so the two destinations do not compete in the rail.</p></div></div><div class="nav-grid">
+    <article class="rail-card conflict-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>GitHub-native split</h3>
+          <p>Use the Octicon Project mark for Projects, then keep Kanban literal with a board icon. This most closely mirrors GitHub&#x27;s own distinction.</p>
+        </div>
+      </div>
+      <div class="pairing-strip">
+        <span><strong>Projects:</strong> Project</span>
+        <span><strong>Kanban:</strong> Kanban</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup pairing Project for Projects and Kanban for Kanban">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25V1.75C0 .784.784 0 1.75 0M1.5 1.75v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25M11.75 3a.75.75 0 0 1 .75.75v7.5a.75.75 0 0 1-1.5 0v-7.5a.75.75 0 0 1 .75-.75m-8.25.75a.75.75 0 0 1 1.5 0v5.5a.75.75 0 0 1-1.5 0ZM8 3a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 3"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v14m7-14v8m7-8v18"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card conflict-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Grid vs columns</h3>
+          <p>A table/grid for Projects stays crisp, while a pure column icon clearly reserves the board metaphor for Kanban.</p>
+        </div>
+      </div>
+      <div class="pairing-strip">
+        <span><strong>Projects:</strong> Table</span>
+        <span><strong>Kanban:</strong> View Column</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup pairing Table for Projects and View Column for Kanban">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25ZM6.5 6.5v8h7.75a.25.25 0 0 0 .25-.25V6.5Zm8-1.5V1.75a.25.25 0 0 0-.25-.25H6.5V5Zm-13 1.5v7.75c0 .138.112.25.25.25H5v-8ZM5 5V1.5H1.75a.25.25 0 0 0-.25.25V5Z"/></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 5v13h17V5zm10 2v9h-3V7zM6 7h3v9H6zm13 9h-3V7h3z"/></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card conflict-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Collections vs board</h3>
+          <p>Layers reads as grouped work or initiatives; Trello keeps Kanban unmistakably column-based.</p>
+        </div>
+      </div>
+      <div class="pairing-strip">
+        <span><strong>Projects:</strong> Layers</span>
+        <span><strong>Kanban:</strong> Trello</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup pairing Layers for Projects and Trello for Kanban">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><path d="M7 7h3v9H7zm7 0h3v5h-3z"/></g></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article>
+
+    <article class="rail-card conflict-card">
+      <div class="rail-card-header">
+        <div>
+          <h3>Modules vs lanes</h3>
+          <p>Blocks suggests assembled project pieces, while horizontal panels prevent a grid/table collision with Projects.</p>
+        </div>
+      </div>
+      <div class="pairing-strip">
+        <span><strong>Projects:</strong> Blocks</span>
+        <span><strong>Kanban:</strong> Gallery Horizontal</span>
+      </div>
+      <div class="nav-column" role="img" aria-label="Navigation rail mockup pairing Blocks for Projects and Gallery Horizontal for Kanban">
+        <div class="nav-item">
+          <span class="icon-wrap ic-blue"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg></span>
+          <span class="item-label">Dashboard</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-amber"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg></span>
+          <span class="item-label">My Day</span>
+        </div>
+        <div class="nav-item active">
+          <span class="icon-wrap ic-violet"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M10 22V7a1 1 0 0 0-1-1H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5a1 1 0 0 0-1-1H2"/><rect width="8" height="8" x="14" y="2" rx="1"/></g></svg></span>
+          <span class="item-label">Projects</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-cyan"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M2 3v18"/><rect width="12" height="18" x="6" y="3" rx="2"/><path d="M22 3v18"/></g></svg></span>
+          <span class="item-label">Kanban</span>
+        </div>
+        <div class="nav-item">
+          <span class="icon-wrap ic-rose"><svg class="icon-svg" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span>
+          <span class="item-label">Goals</span>
+        </div>
+      </div>
+    </article></div></section>
+  </div>
+
+  <script>
+    (function () {
+      const page = document.querySelector('.page');
+      const button = document.querySelector('[data-toggle-rails]');
+      if (!page || !button) return;
+
+      function syncButton() {
+        const collapsed = page.dataset.railState === 'collapsed';
+        button.setAttribute('aria-pressed', String(collapsed));
+        button.textContent = collapsed
+          ? 'Switch all columns to expanded'
+          : 'Switch all columns to collapsed';
+      }
+
+      button.addEventListener('click', function () {
+        page.dataset.railState = page.dataset.railState === 'collapsed' ? 'expanded' : 'collapsed';
+        syncButton();
+      });
+
+      syncButton();
+    }());
+  </script>
+</body>
+</html>

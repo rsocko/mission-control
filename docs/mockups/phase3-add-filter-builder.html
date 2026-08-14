@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Phase 3 Mockup – Add Filter Builder (Unified Model)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #c9d1d9;
+      padding: 40px;
+      line-height: 1.5;
+    }
+    h1 { color: #58a6ff; margin-bottom: 8px; font-size: 1.3rem; }
+    .subtitle { color: #8b949e; margin-bottom: 32px; font-size: 0.85rem; }
+    .mockup-container { max-width: 1100px; margin: 0 auto; }
+
+    /* App layout */
+    .app-layout {
+      display: flex;
+      gap: 0;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      overflow: hidden;
+      min-height: 500px;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 200px;
+      background: #0d1117;
+      border-right: 1px solid #21262d;
+      padding: 12px;
+      flex-shrink: 0;
+    }
+    .sidebar-section { margin-bottom: 14px; }
+    .sidebar-section-title {
+      font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px;
+      color: #8b949e; font-weight: 600; margin-bottom: 5px; padding: 0 6px;
+    }
+    .sidebar-item {
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 7px; border-radius: 5px; font-size: 0.75rem; cursor: pointer;
+    }
+    .sidebar-item:hover { background: #161b22; }
+    .sidebar-item.active { background: #1f6feb22; }
+    .sidebar-item .indicator {
+      width: 7px; height: 7px; border-radius: 50%;
+      border: 1.5px solid #484f58; flex-shrink: 0;
+    }
+    .sidebar-item.active .indicator { background: #58a6ff; border-color: #58a6ff; }
+    .sidebar-item .label { flex: 1; }
+    .sidebar-item .count { color: #484f58; font-size: 0.68rem; }
+    .sidebar-item.negated { background: rgba(248,81,73,0.08); }
+    .sidebar-item.negated .indicator { border-color: #f85149; position: relative; }
+    .sidebar-item.negated .indicator::after {
+      content: ''; position: absolute; top: 50%; left: -1px; right: -1px;
+      height: 1.5px; background: #f85149; transform: rotate(-45deg);
+    }
+    .sidebar-item.negated .label { text-decoration: line-through; color: #6e7681; }
+
+    /* Main content */
+    .main-content {
+      flex: 1; background: #161b22; padding: 16px;
+      display: flex; flex-direction: column;
+    }
+
+    /* Filter input */
+    .filter-bar { display: flex; gap: 8px; margin-bottom: 10px; }
+    .filter-input {
+      flex: 1; display: flex; align-items: center; gap: 5px;
+      background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
+      padding: 6px 10px; flex-wrap: wrap; min-height: 38px;
+    }
+    .filter-input:focus-within { border-color: #58a6ff; }
+    .filter-input .search-icon { color: #8b949e; font-size: 0.85rem; }
+    .token-pill {
+      display: inline-flex; align-items: center; gap: 3px;
+      padding: 2px 8px; border-radius: 4px; font-size: 0.72rem;
+      font-weight: 500; white-space: nowrap;
+    }
+    .token-source { background: rgba(56,139,253,0.15); color: #79c0ff; border: 1px solid rgba(56,139,253,0.3); }
+    .token-priority { background: #da3633; color: #fff; }
+    .token-tag { background: rgba(63,185,80,0.2); color: #7ee787; border: 1px solid rgba(63,185,80,0.3); }
+    .token-negated { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
+    .token-date { background: rgba(139,148,158,0.15); color: #c9d1d9; border: 1px solid #30363d; }
+    .token-close { cursor: pointer; opacity: 0.6; margin-left: 2px; font-size: 0.8rem; }
+    .token-close:hover { opacity: 1; }
+    .filter-input input {
+      flex: 1; min-width: 120px; background: none; border: none;
+      outline: none; color: #c9d1d9; font-size: 0.82rem;
+    }
+    .filter-input input::placeholder { color: #484f58; }
+    .clear-btn {
+      background: none; border: none; color: #8b949e;
+      cursor: pointer; font-size: 0.75rem; padding: 2px 6px; border-radius: 3px;
+    }
+    .clear-btn:hover { color: #c9d1d9; background: #21262d; }
+    .save-btn {
+      background: none; border: none; color: #58a6ff;
+      cursor: pointer; font-size: 0.75rem; padding: 2px 6px; border-radius: 3px;
+    }
+
+    /* Add Filter button */
+    .add-filter-btn {
+      display: flex; align-items: center; gap: 4px;
+      background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+      padding: 6px 12px; border-radius: 8px; font-size: 0.78rem;
+      cursor: pointer; white-space: nowrap; flex-shrink: 0;
+    }
+    .add-filter-btn:hover { background: #30363d; border-color: #484f58; }
+    .add-filter-btn .plus { color: #58a6ff; font-weight: bold; }
+
+    /* Dropdown */
+    .dropdown-anchor { position: relative; }
+    .dropdown {
+      position: absolute; top: calc(100% + 6px); right: 0;
+      width: 230px; background: #1c2128; border: 1px solid #30363d;
+      border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      padding: 6px; z-index: 100;
+    }
+    .dropdown-search {
+      width: 100%; background: #0d1117; border: 1px solid #30363d;
+      border-radius: 6px; padding: 7px 10px; color: #c9d1d9;
+      font-size: 0.76rem; margin-bottom: 4px; outline: none;
+    }
+    .dropdown-search:focus { border-color: #58a6ff; }
+    .dropdown-search::placeholder { color: #484f58; }
+    .dropdown-divider { height: 1px; background: #21262d; margin: 4px 0; }
+    .dropdown-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 7px 10px; border-radius: 6px; font-size: 0.78rem; cursor: pointer;
+    }
+    .dropdown-item:hover { background: #21262d; }
+    .dropdown-item.active { background: #1f6feb22; }
+    .dropdown-item .icon { font-size: 0.9rem; width: 18px; text-align: center; }
+    .dropdown-item .label { color: #c9d1d9; }
+
+    /* Value picker sub-dropdown */
+    .value-picker {
+      width: 240px; background: #1c2128; border: 1px solid #30363d;
+      border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      padding: 6px; margin-top: 8px;
+    }
+    .value-picker .header {
+      padding: 6px 10px; font-size: 0.7rem; color: #8b949e;
+      text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .value-picker .header .mode-toggle {
+      font-size: 0.65rem; color: #484f58; cursor: pointer;
+      padding: 2px 6px; border-radius: 3px; border: 1px solid #30363d;
+    }
+    .value-picker .header .mode-toggle:hover { color: #c9d1d9; }
+    .value-picker .header .mode-toggle.active-exclude {
+      color: #f85149; border-color: rgba(248,81,73,0.4);
+    }
+    .value-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; border-radius: 5px; font-size: 0.78rem; cursor: pointer;
+    }
+    .value-item:hover { background: #21262d; }
+    .value-item .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .dot-critical { background: #f85149; }
+    .dot-high { background: #da3633; }
+    .dot-medium { background: #d29922; }
+    .dot-low { background: #3fb950; }
+    .dot-none { background: #484f58; }
+    .value-item .check { color: #58a6ff; margin-left: auto; font-size: 0.72rem; }
+    .value-item .count { color: #484f58; margin-left: auto; font-size: 0.68rem; }
+
+    /* Task list */
+    .match-count { text-align: right; font-size: 0.72rem; color: #8b949e; margin-bottom: 6px; }
+    .task-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 14px; background: #0d1117; border: 1px solid #21262d;
+      border-radius: 8px 8px 0 0;
+    }
+    .task-header h2 { font-size: 0.9rem; font-weight: 600; }
+    .task-header h2 span { color: #8b949e; font-weight: 400; font-size: 0.8rem; }
+    .task-list {
+      border: 1px solid #21262d; border-top: none; border-radius: 0 0 8px 8px;
+      flex: 1; overflow: auto;
+    }
+    .task-row {
+      display: flex; align-items: center; padding: 9px 14px;
+      border-bottom: 1px solid #21262d; gap: 8px; font-size: 0.8rem;
+    }
+    .task-row:last-child { border-bottom: none; }
+    .task-row .checkbox { width: 14px; height: 14px; border: 1.5px solid #484f58; border-radius: 50%; }
+
+    /* Scenarios */
+    .scenario { margin-top: 48px; padding-top: 24px; border-top: 1px solid #21262d; }
+    .scenario-label {
+      display: inline-block; background: #1f6feb33; color: #58a6ff;
+      padding: 3px 10px; border-radius: 4px; font-size: 0.7rem;
+      font-weight: 600; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px;
+    }
+
+    /* Annotation */
+    .annotation {
+      margin-top: 40px; padding: 16px; background: #161b22;
+      border: 1px solid #30363d; border-radius: 8px;
+    }
+    .annotation h3 { color: #58a6ff; font-size: 0.9rem; margin-bottom: 8px; }
+    .annotation ul { padding-left: 20px; font-size: 0.78rem; color: #8b949e; }
+    .annotation li { margin-bottom: 6px; }
+    .annotation code { background: #21262d; padding: 1px 4px; border-radius: 3px; font-size: 0.72rem; color: #79c0ff; }
+    .annotation strong { color: #c9d1d9; }
+    .callout {
+      margin-top: 16px; padding: 12px 14px;
+      background: rgba(63, 185, 80, 0.08);
+      border: 1px solid rgba(63, 185, 80, 0.3);
+      border-radius: 6px; font-size: 0.78rem; color: #7ee787;
+    }
+  </style>
+</head>
+<body>
+  <div class="mockup-container">
+    <h1>Phase 3: "+ Add Filter" Builder Dropdown (Unified Model)</h1>
+    <p class="subtitle">Click-to-build filter UI. Adds tokens to the unified input. Sidebar stays in sync. Negation via builder only. Issue #1069</p>
+
+    <!-- Scenario 1: Dropdown open — category selection -->
+    <span class="scenario-label">Scenario 1: Click "+ Add Filter" — Category Selection</span>
+
+    <div class="app-layout">
+      <!-- Sidebar (synced) -->
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Sources</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="label">GitHub Issues</span>
+            <span class="count">82</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">Todoist</span>
+            <span class="count">45</span>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Priority</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="label">High</span>
+            <span class="count">12</span>
+          </div>
+          <div class="sidebar-item">
+            <span class="indicator"></span>
+            <span class="label">Medium</span>
+            <span class="count">89</span>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">Tags</div>
+          <div class="sidebar-item active">
+            <span class="indicator"></span>
+            <span class="label">area:tasks</span>
+          </div>
+          <div class="sidebar-item negated">
+            <span class="indicator"></span>
+            <span class="label">wontfix</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main -->
+      <div class="main-content">
+        <div class="filter-bar">
+          <div class="filter-input">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-source">source:github-issues <span class="token-close">×</span></span>
+            <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+            <span class="token-pill token-tag">tag:area:tasks <span class="token-close">×</span></span>
+            <span class="token-pill token-negated">-tag:wontfix <span class="token-close">×</span></span>
+            <input type="text" placeholder="Filter tasks..." />
+            <button class="clear-btn">Clear</button>
+            <button class="save-btn">💾</button>
+          </div>
+          <div class="dropdown-anchor">
+            <button class="add-filter-btn"><span class="plus">+</span> Add Filter</button>
+            <div class="dropdown">
+              <input class="dropdown-search" type="text" placeholder="Search filters" />
+              <div class="dropdown-item">
+                <span class="icon">👤</span>
+                <span class="label">Assignee</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">🏷️</span>
+                <span class="label">Tag</span>
+              </div>
+              <div class="dropdown-item active">
+                <span class="icon">⚡</span>
+                <span class="label">Priority</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">📊</span>
+                <span class="label">Status</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">🔌</span>
+                <span class="label">Source</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">📋</span>
+                <span class="label">List</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">📅</span>
+                <span class="label">Due Date</span>
+              </div>
+              <div class="dropdown-divider"></div>
+              <div class="dropdown-item">
+                <span class="icon">💪</span>
+                <span class="label">Effort</span>
+              </div>
+              <div class="dropdown-item">
+                <span class="icon">🔄</span>
+                <span class="label">Micro-Status</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="match-count">Showing 6 of 82 tasks</div>
+        <div class="task-header">
+          <h2>Filtered Tasks <span>(6)</span></h2>
+        </div>
+        <div class="task-list">
+          <div class="task-row"><div class="checkbox"></div><span>Home Assistant connector device alerts #152</span></div>
+          <div class="task-row"><div class="checkbox"></div><span>GitHub connector webhook events #201</span></div>
+          <div class="task-row"><div class="checkbox"></div><span>Refactor connector architecture #445</span></div>
+          <div class="task-row"><div class="checkbox"></div><span>Connector health dashboard #312</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario 2: Value picker with Include/Exclude toggle -->
+    <div class="scenario">
+      <span class="scenario-label">Scenario 2: Value Picker — With "Exclude" Mode Toggle</span>
+
+      <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 16px;">After selecting "Tag" from the category dropdown, the value picker appears. An "Exclude" toggle lets advanced users create negation filters from this UI.</p>
+
+      <div style="display: flex; gap: 20px;">
+        <div class="value-picker">
+          <div class="header">
+            <span>Select Tag — Include</span>
+            <span class="mode-toggle">Exclude</span>
+          </div>
+          <input class="dropdown-search" type="text" placeholder="Search tags..." />
+          <div class="value-item">
+            <span style="color: #7ee787;">●</span>
+            <span>area:tasks</span>
+            <span class="check">✓</span>
+          </div>
+          <div class="value-item">
+            <span style="color: #79c0ff;">●</span>
+            <span>area:notifications</span>
+            <span class="count">18</span>
+          </div>
+          <div class="value-item">
+            <span style="color: #79c0ff;">●</span>
+            <span>area:sync</span>
+            <span class="count">15</span>
+          </div>
+          <div class="value-item">
+            <span style="color: #7ee787;">●</span>
+            <span>type:feature</span>
+            <span class="count">31</span>
+          </div>
+          <div class="value-item">
+            <span style="color: #d29922;">●</span>
+            <span>type:bug</span>
+            <span class="count">27</span>
+          </div>
+        </div>
+
+        <div class="value-picker">
+          <div class="header">
+            <span style="color: #f85149;">Select Tag — Exclude</span>
+            <span class="mode-toggle active-exclude">Include</span>
+          </div>
+          <input class="dropdown-search" type="text" value="wont" placeholder="Search tags..." />
+          <div class="value-item" style="background: rgba(248,81,73,0.1);">
+            <span style="color: #f85149;">⊘</span>
+            <span style="color: #f85149;">wontfix</span>
+            <span class="check" style="color: #f85149;">✓</span>
+          </div>
+          <div class="value-item">
+            <span style="color: #484f58;">○</span>
+            <span>wont-do</span>
+            <span class="count">3</span>
+          </div>
+          <p style="padding: 8px 10px; font-size: 0.68rem; color: #484f58;">
+            Excluded tags add <code style="background:#21262d;padding:1px 3px;border-radius:2px;color:#f85149;font-size:0.65rem;">-tag:X</code> tokens
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario 3: Due Date operator picker -->
+    <div class="scenario">
+      <span class="scenario-label">Scenario 3: Due Date — Operator Picker</span>
+
+      <p style="font-size: 0.82rem; color: #c9d1d9; margin-bottom: 16px;">Due Date filter supports operators for before/after/on a date:</p>
+
+      <div style="display: flex; gap: 20px; align-items: flex-start;">
+        <div class="value-picker">
+          <div class="header"><span>Due Date</span></div>
+          <div class="value-item" style="background: #21262d;">
+            <span>📅</span>
+            <span>Before date</span>
+            <span style="color: #484f58; margin-left: auto; font-size: 0.68rem;">due:&lt;X</span>
+          </div>
+          <div class="value-item">
+            <span>📅</span>
+            <span>After date</span>
+            <span style="color: #484f58; margin-left: auto; font-size: 0.68rem;">due:&gt;X</span>
+          </div>
+          <div class="value-item">
+            <span>📅</span>
+            <span>Overdue</span>
+            <span style="color: #484f58; margin-left: auto; font-size: 0.68rem;">due:overdue</span>
+          </div>
+          <div class="value-item">
+            <span>📅</span>
+            <span>This week</span>
+            <span style="color: #484f58; margin-left: auto; font-size: 0.68rem;">due:week</span>
+          </div>
+          <div class="value-item">
+            <span>📅</span>
+            <span>No due date</span>
+            <span style="color: #484f58; margin-left: auto; font-size: 0.68rem;">due:none</span>
+          </div>
+        </div>
+
+        <div style="padding-top: 16px;">
+          <p style="font-size: 0.78rem; color: #8b949e; margin-bottom: 12px;">Result after selecting "Before date" → "2026-08-01":</p>
+          <div class="filter-input" style="max-width: 500px;">
+            <span class="search-icon">🔍</span>
+            <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+            <span class="token-pill token-date">due:&lt;2026-08-01 <span class="token-close">×</span></span>
+            <input type="text" placeholder="Filter tasks..." />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scenario 4: Full composed — everything together -->
+    <div class="scenario">
+      <span class="scenario-label">Scenario 4: Full Composed — Complex Filter Active</span>
+
+      <div class="filter-bar" style="max-width: 700px;">
+        <div class="filter-input">
+          <span class="search-icon">🔍</span>
+          <span class="token-pill token-source">source:github-issues <span class="token-close">×</span></span>
+          <span class="token-pill token-priority">priority:high <span class="token-close">×</span></span>
+          <span class="token-pill token-tag">tag:area:tasks <span class="token-close">×</span></span>
+          <span class="token-pill token-negated">-tag:wontfix <span class="token-close">×</span></span>
+          <span class="token-pill token-date">due:&lt;2026-08-01 <span class="token-close">×</span></span>
+          <input type="text" value="connector" placeholder="" style="min-width: 80px;" />
+          <button class="clear-btn">Clear</button>
+          <button class="save-btn">💾 Save</button>
+        </div>
+        <button class="add-filter-btn"><span class="plus">+</span> Add Filter</button>
+      </div>
+      <div class="match-count" style="max-width: 700px;">Showing 3 of 82 tasks • 5 filters + keyword active</div>
+    </div>
+
+    <!-- Annotations -->
+    <div class="annotation">
+      <h3>Design Decisions — Phase 3 (Unified Model)</h3>
+      <ul>
+        <li><strong>"+ Add Filter" button:</strong> Always visible next to the token input. Opens category dropdown → value picker. Selected values become tokens.</li>
+        <li><strong>Negation via builder:</strong> Value picker has an "Exclude" mode toggle. When active, selections produce <code>-tag:X</code> tokens (red pills). Sidebar reflects negation with ⊘ + strikethrough but cannot create negations itself.</li>
+        <li><strong>Operators (due date, effort):</strong> Value picker offers preset operator options (before/after/overdue/week). Advanced users can also type <code>due:&lt;2026-08-01</code> directly.</li>
+        <li><strong>Sidebar remains a shortcut:</strong> Only handles simple include/exclude display. Clicks add include tokens. No 3-state interaction — keeps it simple.</li>
+        <li><strong>Token removal:</strong> Backspace in empty input removes last token. × on token removes it. Both deselect in sidebar.</li>
+        <li><strong>Keyboard flow:</strong> <code>/</code> focuses input → type token or free text → <code>Tab</code> accepts autocomplete → <code>Enter</code> applies → <code>Escape</code> closes dropdown.</li>
+        <li><strong>Save as view:</strong> 💾 button saves all active tokens (including negations, operators, free text) as a reusable named view.</li>
+      </ul>
+      <div class="callout">
+        <strong>✓ Unified model complete:</strong> One token input is the single source of truth for all active filters. Sidebar = discovery shortcut. Builder = guided creation. Typing = power users. All three entry points converge on the same token set.
+      </div>
+    </div>
+  </div>
+</body>
+</html>

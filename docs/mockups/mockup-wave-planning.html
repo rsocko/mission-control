@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Wave Planning</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .source-badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+    .source-todo { background: #dbeafe; color: #1e40af; }
+    .source-github { background: #f3e8ff; color: #6b21a8; }
+    .priority-dot-critical { background: #dc2626; }
+    .priority-dot-high { background: #f59e0b; }
+    .priority-dot-medium { background: #3b82f6; }
+    .priority-dot-low { background: #6b7280; }
+    .phase-card { transition: all 0.15s ease; }
+    .phase-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+    .task-item { transition: background-color 0.1s ease; }
+    .task-item:hover { background: #f8fafc; }
+    .task-item-dragging { opacity: 0.5; background: #eff6ff; }
+    .gantt-bar { border-radius: 4px; transition: all 0.15s ease; }
+    .gantt-bar:hover { filter: brightness(1.1); transform: scaleY(1.1); }
+    .view-tab { transition: all 0.15s ease; }
+    .view-tab.active { background: #eff6ff; color: #2563eb; border-color: #93c5fd; }
+    .ai-suggestion { border-left: 3px solid #8b5cf6; background: #faf5ff; }
+    .proposal-new { border-left: 3px solid #10b981; }
+    .proposal-close { border-left: 3px solid #ef4444; }
+    .dep-arrow { stroke: #94a3b8; stroke-width: 1.5; fill: none; marker-end: url(#arrowhead); }
+    .sidebar-item:hover { background: #f1f5f9; }
+    .mode-pill { transition: all 0.15s ease; cursor: pointer; }
+    .mode-pill:hover { background: #dbeafe; color: #1e40af; }
+    .mode-pill.active { background: #2563eb; color: white; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="mockup-dashboard.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="mockup-kanban.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-md">Waves</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Timeline</a>
+        <a href="mockup-goals-view.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Goals</a>
+        <a href="mockup-ai-assistant.html" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <button class="relative p-2 text-gray-500 hover:text-gray-700">
+        <i class="fas fa-bell"></i>
+        <span class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center">3</span>
+      </button>
+      <button class="p-2 text-gray-500 hover:text-gray-700">
+        <i class="fas fa-cog"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex h-[calc(100vh-57px)]">
+    <!-- Left Sidebar: Plans List -->
+    <aside class="w-60 bg-white border-r border-gray-200 p-4 overflow-y-auto flex-shrink-0">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Wave Plans</h3>
+        <button class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded" title="New Plan">
+          <i class="fas fa-plus text-xs"></i>
+        </button>
+      </div>
+
+      <!-- Plan list -->
+      <div class="space-y-1">
+        <div class="sidebar-item flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer bg-blue-50 border border-blue-100">
+          <i class="fas fa-layer-group text-blue-600 text-sm w-4"></i>
+          <div class="flex-1 min-w-0">
+            <span class="text-sm font-medium text-blue-700 block truncate">MC v1 Launch</span>
+            <span class="text-xs text-blue-500">3 phases · 12 tasks</span>
+          </div>
+        </div>
+        <div class="sidebar-item flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer">
+          <i class="fas fa-layer-group text-gray-400 text-sm w-4"></i>
+          <div class="flex-1 min-w-0">
+            <span class="text-sm text-gray-700 block truncate">Kitchen Reno Phase 2</span>
+            <span class="text-xs text-gray-400">2 phases · 8 tasks</span>
+          </div>
+        </div>
+        <div class="sidebar-item flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer">
+          <i class="fas fa-layer-group text-gray-400 text-sm w-4"></i>
+          <div class="flex-1 min-w-0">
+            <span class="text-sm text-gray-700 block truncate">This Week Focus</span>
+            <span class="text-xs text-gray-400">2 phases · 6 tasks</span>
+          </div>
+        </div>
+        <div class="sidebar-item flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer">
+          <i class="fas fa-layer-group text-purple-400 text-sm w-4"></i>
+          <div class="flex-1 min-w-0">
+            <span class="text-sm text-gray-700 block truncate">Home Auto Sprint</span>
+            <span class="text-xs text-gray-400">4 phases · 15 tasks</span>
+          </div>
+          <span class="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full font-medium">AI</span>
+        </div>
+      </div>
+
+      <div class="mt-6 pt-4 border-t border-gray-100">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Scope</h3>
+        <div class="space-y-1">
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer bg-gray-50">
+            <i class="fas fa-globe text-gray-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-700">All Projects</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-satellite-dish text-blue-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">Mission Control</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-home text-amber-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">Home Automation</span>
+          </div>
+          <div class="sidebar-item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer">
+            <i class="fas fa-cube text-emerald-500 text-xs w-4"></i>
+            <span class="text-sm text-gray-600">3D Printing</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-hidden flex flex-col">
+      <!-- Plan Header -->
+      <div class="bg-white border-b border-gray-200 px-6 py-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="flex items-center gap-3">
+              <h2 class="text-xl font-semibold text-gray-900">MC v1 Launch</h2>
+              <span class="text-xs font-medium px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">Active</span>
+              <span class="text-xs text-gray-400">Mission Control</span>
+            </div>
+            <p class="text-sm text-gray-500 mt-1">Ship core infrastructure, polish, and AI features for v1 release</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <!-- Mode selector -->
+            <div class="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+              <span class="mode-pill active text-xs px-3 py-1.5 rounded-md font-medium">Manual</span>
+              <span class="mode-pill text-xs px-3 py-1.5 rounded-md font-medium text-gray-500">AI Suggest</span>
+              <span class="mode-pill text-xs px-3 py-1.5 rounded-md font-medium text-gray-500">AI Plan</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- View Tabs & Actions -->
+        <div class="flex items-center justify-between mt-4">
+          <div class="flex items-center gap-1">
+            <button class="view-tab active text-xs px-3 py-1.5 border border-transparent rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-list text-[10px]"></i> List
+            </button>
+            <button class="view-tab text-xs px-3 py-1.5 border border-transparent rounded-md font-medium flex items-center gap-1.5 text-gray-500">
+              <i class="fas fa-chart-gantt text-[10px]"></i> Timeline
+            </button>
+            <button class="view-tab text-xs px-3 py-1.5 border border-transparent rounded-md font-medium flex items-center gap-1.5 text-gray-500">
+              <i class="fas fa-columns text-[10px]"></i> Lanes
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="text-xs px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-plus text-[10px]"></i> Add Phase
+            </button>
+            <button class="text-xs px-3 py-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-file-export text-[10px]"></i> Export
+            </button>
+            <button class="text-xs px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 rounded-md font-medium flex items-center gap-1.5">
+              <i class="fas fa-wand-magic-sparkles text-[10px]"></i> AI Suggest
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Plan Content: List View -->
+      <div class="flex-1 overflow-y-auto p-6">
+        <!-- Progress Summary -->
+        <div class="flex items-center gap-6 mb-6 text-sm">
+          <div class="flex items-center gap-2">
+            <span class="text-gray-500">Progress:</span>
+            <div class="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+              <div class="h-full bg-blue-500 rounded-full" style="width: 25%"></div>
+            </div>
+            <span class="text-gray-600 font-medium">3/12</span>
+          </div>
+          <div class="flex items-center gap-4 text-xs text-gray-500">
+            <span><i class="fas fa-clock mr-1"></i>~18 effort-days</span>
+            <span><i class="fas fa-calendar mr-1"></i>Est. 4 weeks</span>
+            <span class="text-amber-600"><i class="fas fa-exclamation-triangle mr-1"></i>2 overdue tasks</span>
+          </div>
+        </div>
+
+        <!-- Phase 1 -->
+        <div class="phase-card bg-white border border-gray-200 rounded-lg mb-4 overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+            <div class="flex items-center gap-3">
+              <button class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-chevron-down text-xs"></i>
+              </button>
+              <div class="w-3 h-3 rounded-full bg-blue-500"></div>
+              <h3 class="text-sm font-semibold text-gray-800">Phase 1: Core Infrastructure</h3>
+              <span class="text-xs text-gray-400">4 tasks · ~7 days</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div class="h-full bg-blue-500 rounded-full" style="width: 50%"></div>
+              </div>
+              <span class="text-xs text-gray-500">2/4</span>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="Add task to phase">
+                <i class="fas fa-plus text-xs"></i>
+              </button>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="More options">
+                <i class="fas fa-ellipsis-v text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="divide-y divide-gray-50">
+            <!-- Task items -->
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-green-500 bg-green-500 rounded flex items-center justify-center">
+                <i class="fas fa-check text-white text-[8px]"></i>
+              </div>
+              <span class="text-sm text-gray-500 line-through flex-1">Source list discovery</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-critical" title="Critical"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">2d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-green-500 bg-green-500 rounded flex items-center justify-center">
+                <i class="fas fa-check text-white text-[8px]"></i>
+              </div>
+              <span class="text-sm text-gray-500 line-through flex-1">MS Todo token stability</span>
+              <span class="source-badge source-todo">Todo</span>
+              <div class="w-2 h-2 rounded-full priority-dot-critical" title="Critical"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">1d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">AI agent dispatch UI</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-high" title="High"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">3d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">Recurrence display</span>
+              <span class="source-badge source-todo">Todo</span>
+              <div class="w-2 h-2 rounded-full priority-dot-high" title="High"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">1d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 2 -->
+        <div class="phase-card bg-white border border-gray-200 rounded-lg mb-4 overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+            <div class="flex items-center gap-3">
+              <button class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-chevron-down text-xs"></i>
+              </button>
+              <div class="w-3 h-3 rounded-full bg-emerald-500"></div>
+              <h3 class="text-sm font-semibold text-gray-800">Phase 2: Polish & Completeness</h3>
+              <span class="text-xs text-gray-400">5 tasks · ~6 days</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div class="h-full bg-emerald-500 rounded-full" style="width: 20%"></div>
+              </div>
+              <span class="text-xs text-gray-500">1/5</span>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="Add task to phase">
+                <i class="fas fa-plus text-xs"></i>
+              </button>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="More options">
+                <i class="fas fa-ellipsis-v text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="divide-y divide-gray-50">
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-green-500 bg-green-500 rounded flex items-center justify-center">
+                <i class="fas fa-check text-white text-[8px]"></i>
+              </div>
+              <span class="text-sm text-gray-500 line-through flex-1">Add task: estimated duration field</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-medium" title="Medium"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">0.5d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">Calendar events in My Day timeline</span>
+              <span class="source-badge source-todo">Todo</span>
+              <div class="w-2 h-2 rounded-full priority-dot-high" title="High"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">2d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">WIP limits for Kanban</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-medium" title="Medium"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">1.5d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">Motion audit — purposeful transitions only</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-low" title="Low"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">1d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">Demo mode seed data</span>
+              <span class="source-badge source-todo">Todo</span>
+              <div class="w-2 h-2 rounded-full priority-dot-low" title="Low"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">0.5d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 3 -->
+        <div class="phase-card bg-white border border-gray-200 rounded-lg mb-4 overflow-hidden">
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-100">
+            <div class="flex items-center gap-3">
+              <button class="text-gray-400 hover:text-gray-600">
+                <i class="fas fa-chevron-down text-xs"></i>
+              </button>
+              <div class="w-3 h-3 rounded-full bg-purple-500"></div>
+              <h3 class="text-sm font-semibold text-gray-800">Phase 3: AI & Intelligence</h3>
+              <span class="text-xs text-gray-400">3 tasks · ~7 days</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <div class="w-20 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div class="h-full bg-purple-500 rounded-full" style="width: 0%"></div>
+              </div>
+              <span class="text-xs text-gray-500">0/3</span>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="Add task to phase">
+                <i class="fas fa-plus text-xs"></i>
+              </button>
+              <button class="p-1 text-gray-400 hover:text-gray-600" title="More options">
+                <i class="fas fa-ellipsis-v text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="divide-y divide-gray-50">
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">AI Plan My Day — full planner implementation</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-high" title="High"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">3d</span>
+            </div>
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-gray-300 rounded"></div>
+              <span class="text-sm text-gray-800 flex-1">Smart priority v2 — behavioral weighting</span>
+              <span class="source-badge source-github">GitHub</span>
+              <div class="w-2 h-2 rounded-full priority-dot-medium" title="Medium"></div>
+              <span class="text-xs text-gray-400 w-12 text-right">2d</span>
+            </div>
+            <!-- AI-suggested new task -->
+            <div class="task-item flex items-center gap-3 px-4 py-2.5 cursor-grab proposal-new bg-emerald-50/50">
+              <i class="fas fa-grip-vertical text-gray-300 text-xs"></i>
+              <div class="w-4 h-4 border-2 border-dashed border-emerald-400 rounded flex items-center justify-center">
+                <i class="fas fa-sparkles text-emerald-500 text-[8px]"></i>
+              </div>
+              <span class="text-sm text-emerald-700 flex-1">
+                E2E test pass for AI features
+                <span class="ml-2 text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded-full font-medium">AI SUGGESTED</span>
+              </span>
+              <div class="flex items-center gap-1">
+                <button class="text-xs px-2 py-1 text-emerald-600 hover:bg-emerald-100 rounded" title="Accept">
+                  <i class="fas fa-check"></i>
+                </button>
+                <button class="text-xs px-2 py-1 text-gray-400 hover:bg-gray-100 rounded" title="Dismiss">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+              <span class="text-xs text-gray-400 w-12 text-right">2d</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Suggestions Panel -->
+        <div class="bg-white border border-purple-200 rounded-lg p-4 mb-4">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-6 h-6 bg-purple-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-wand-magic-sparkles text-purple-600 text-xs"></i>
+            </div>
+            <h4 class="text-sm font-semibold text-purple-800">AI Insights</h4>
+            <span class="text-xs text-purple-500">Based on analysis of 12 tasks</span>
+          </div>
+          <div class="space-y-2">
+            <div class="ai-suggestion rounded-md px-3 py-2 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <i class="fas fa-lightbulb text-amber-500 text-xs"></i>
+                <span class="text-xs text-gray-700"><strong>Gap detected:</strong> No testing phase between "Polish" and "AI" — consider adding E2E test coverage</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button class="text-xs px-2 py-1 text-purple-600 hover:bg-purple-100 rounded font-medium">Add</button>
+                <button class="text-xs px-2 py-1 text-gray-400 hover:bg-gray-100 rounded">Dismiss</button>
+              </div>
+            </div>
+            <div class="ai-suggestion rounded-md px-3 py-2 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <i class="fas fa-archive text-red-400 text-xs"></i>
+                <span class="text-xs text-gray-700"><strong>Stale:</strong> "Emoji → icon sweep" hasn't moved in 14 days and is 90% complete — close it?</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button class="text-xs px-2 py-1 text-red-600 hover:bg-red-50 rounded font-medium">Close</button>
+                <button class="text-xs px-2 py-1 text-gray-400 hover:bg-gray-100 rounded">Keep</button>
+              </div>
+            </div>
+            <div class="ai-suggestion rounded-md px-3 py-2 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <i class="fas fa-arrows-alt text-blue-400 text-xs"></i>
+                <span class="text-xs text-gray-700"><strong>Reorder:</strong> "Calendar events in My Day" depends on connector data — move after "Source list discovery"</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button class="text-xs px-2 py-1 text-blue-600 hover:bg-blue-50 rounded font-medium">Apply</button>
+                <button class="text-xs px-2 py-1 text-gray-400 hover:bg-gray-100 rounded">Ignore</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Dependency visualization hint -->
+        <div class="text-xs text-gray-400 flex items-center gap-2 mb-4">
+          <i class="fas fa-project-diagram"></i>
+          <span>Phase 3 depends on Phase 1 completion (Source list discovery → Calendar events → AI features)</span>
+        </div>
+      </div>
+
+      <!-- Bottom Action Bar -->
+      <div class="bg-white border-t border-gray-200 px-6 py-3 flex items-center justify-between">
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+          <span><i class="fas fa-info-circle mr-1"></i>Drag tasks between phases to reassign · Click phase header to rename</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-md font-medium">Discard Changes</button>
+          <button class="px-4 py-1.5 text-sm bg-blue-600 text-white hover:bg-blue-700 rounded-md font-medium">
+            <i class="fas fa-save mr-1.5"></i>Save Plan
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Sidebar: Unassigned Tasks -->
+    <aside class="w-72 bg-white border-l border-gray-200 overflow-y-auto flex-shrink-0 flex flex-col">
+      <div class="p-4 border-b border-gray-100">
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">Unassigned Tasks</h3>
+          <span class="text-xs text-gray-400">14 available</span>
+        </div>
+        <input type="text" placeholder="Filter tasks..." class="w-full px-3 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+      </div>
+      <div class="flex-1 overflow-y-auto p-2">
+        <!-- Unassigned task cards -->
+        <div class="space-y-1">
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-high"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Board-level search/filter</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Kanban</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-high"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Keyboard shortcuts system</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Mission Control</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-medium"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Swimlanes for Kanban</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Kanban</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-medium"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Activity log / history</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Mission Control</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-medium"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Card detail editing</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Kanban</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-low"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Custom drag overlay</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Kanban</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-low"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Card aging effect</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-github" style="font-size: 9px; padding: 1px 4px;">GitHub</span>
+              <span>Kanban</span>
+            </div>
+          </div>
+          <div class="task-item p-2.5 rounded-md cursor-grab border border-transparent hover:border-blue-200 hover:bg-blue-50/50">
+            <div class="flex items-center gap-2 mb-1">
+              <div class="w-2 h-2 rounded-full priority-dot-high"></div>
+              <span class="text-xs text-gray-800 font-medium flex-1 truncate">Install Z-Wave outlet for printer</span>
+            </div>
+            <div class="flex items-center gap-2 text-[10px] text-gray-400">
+              <span class="source-badge source-todo" style="font-size: 9px; padding: 1px 4px;">Todo</span>
+              <span>Home Auto</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="p-3 border-t border-gray-100 bg-gray-50">
+        <button class="w-full text-xs px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-md font-medium flex items-center justify-center gap-1.5 border border-purple-200">
+          <i class="fas fa-wand-magic-sparkles text-[10px]"></i>
+          AI: Auto-assign remaining
+        </button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 
+    ═══════════════════════════════════════════════════════════════
+    TIMELINE VIEW (alternate view - shown when "Timeline" tab active)
+    Below is the Gantt-style visualization that would replace the 
+    list view content area when the Timeline tab is selected.
+    ═══════════════════════════════════════════════════════════════
+  -->
+  <div class="hidden" id="timeline-view-reference">
+    <div class="p-6">
+      <!-- Timeline header -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-4">
+          <button class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded"><i class="fas fa-chevron-left"></i></button>
+          <span class="text-sm font-medium text-gray-700">Jul 7 — Aug 1, 2026</span>
+          <button class="text-xs text-gray-500 hover:text-gray-700 px-2 py-1 rounded"><i class="fas fa-chevron-right"></i></button>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <button class="px-2 py-1 bg-blue-50 text-blue-600 rounded font-medium">Week</button>
+          <button class="px-2 py-1 text-gray-500 hover:bg-gray-100 rounded">Day</button>
+          <button class="px-2 py-1 text-gray-500 hover:bg-gray-100 rounded">Month</button>
+        </div>
+      </div>
+
+      <!-- Gantt chart -->
+      <div class="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <!-- Week headers -->
+        <div class="flex border-b border-gray-100">
+          <div class="w-48 flex-shrink-0 px-3 py-2 text-xs text-gray-500 font-medium border-r border-gray-100">Phase / Task</div>
+          <div class="flex-1 grid grid-cols-4">
+            <div class="px-2 py-2 text-xs text-gray-400 text-center border-r border-gray-50">Week 1 (Jul 7)</div>
+            <div class="px-2 py-2 text-xs text-gray-400 text-center border-r border-gray-50">Week 2 (Jul 14)</div>
+            <div class="px-2 py-2 text-xs text-gray-400 text-center border-r border-gray-50">Week 3 (Jul 21)</div>
+            <div class="px-2 py-2 text-xs text-gray-400 text-center">Week 4 (Jul 28)</div>
+          </div>
+        </div>
+
+        <!-- Phase 1 row -->
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50">
+          <div class="w-48 flex-shrink-0 px-3 py-2.5 border-r border-gray-100">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-blue-500"></div>
+              <span class="text-xs font-semibold text-gray-800">Phase 1: Infrastructure</span>
+            </div>
+          </div>
+          <div class="flex-1 relative py-2.5 px-1">
+            <div class="gantt-bar absolute top-2.5 h-5 bg-blue-500/20 border border-blue-400" style="left: 0%; width: 50%;">
+              <div class="h-full bg-blue-500 rounded-l" style="width: 50%"></div>
+            </div>
+          </div>
+        </div>
+        <!-- Phase 1 tasks -->
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50">
+          <div class="w-48 flex-shrink-0 px-3 py-1.5 border-r border-gray-100 pl-8">
+            <span class="text-[11px] text-gray-500 line-through">Source list discovery</span>
+          </div>
+          <div class="flex-1 relative py-1.5 px-1">
+            <div class="gantt-bar absolute top-1.5 h-3.5 bg-blue-400 opacity-50" style="left: 0%; width: 15%;"></div>
+          </div>
+        </div>
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50">
+          <div class="w-48 flex-shrink-0 px-3 py-1.5 border-r border-gray-100 pl-8">
+            <span class="text-[11px] text-gray-500 line-through">MS Todo token stability</span>
+          </div>
+          <div class="flex-1 relative py-1.5 px-1">
+            <div class="gantt-bar absolute top-1.5 h-3.5 bg-blue-400 opacity-50" style="left: 5%; width: 8%;"></div>
+          </div>
+        </div>
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50">
+          <div class="w-48 flex-shrink-0 px-3 py-1.5 border-r border-gray-100 pl-8">
+            <span class="text-[11px] text-gray-700">AI agent dispatch UI</span>
+          </div>
+          <div class="flex-1 relative py-1.5 px-1">
+            <div class="gantt-bar absolute top-1.5 h-3.5 bg-blue-500" style="left: 12%; width: 22%;"></div>
+          </div>
+        </div>
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50">
+          <div class="w-48 flex-shrink-0 px-3 py-1.5 border-r border-gray-100 pl-8">
+            <span class="text-[11px] text-gray-700">Recurrence display</span>
+          </div>
+          <div class="flex-1 relative py-1.5 px-1">
+            <div class="gantt-bar absolute top-1.5 h-3.5 bg-blue-500" style="left: 30%; width: 8%;"></div>
+          </div>
+        </div>
+
+        <!-- Phase 2 row -->
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50 mt-1">
+          <div class="w-48 flex-shrink-0 px-3 py-2.5 border-r border-gray-100">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+              <span class="text-xs font-semibold text-gray-800">Phase 2: Polish</span>
+            </div>
+          </div>
+          <div class="flex-1 relative py-2.5 px-1">
+            <div class="gantt-bar absolute top-2.5 h-5 bg-emerald-500/20 border border-emerald-400" style="left: 35%; width: 35%;">
+              <div class="h-full bg-emerald-500 rounded-l" style="width: 20%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 3 row -->
+        <div class="flex border-b border-gray-50 hover:bg-gray-50/50 mt-1">
+          <div class="w-48 flex-shrink-0 px-3 py-2.5 border-r border-gray-100">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-purple-500"></div>
+              <span class="text-xs font-semibold text-gray-800">Phase 3: AI</span>
+            </div>
+          </div>
+          <div class="flex-1 relative py-2.5 px-1">
+            <div class="gantt-bar absolute top-2.5 h-5 bg-purple-500/20 border border-purple-400" style="left: 65%; width: 35%;"></div>
+          </div>
+        </div>
+
+        <!-- Dependency arrow hint -->
+        <div class="px-3 py-2 bg-gray-50 border-t border-gray-100 text-[10px] text-gray-400 flex items-center gap-2">
+          <i class="fas fa-long-arrow-alt-right text-gray-300"></i>
+          <span>Phase 1 → Phase 3 (dependency: Source list required for AI features)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

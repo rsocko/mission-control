@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Snooze + Score Animation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+      min-height: 100vh;
+    }
+
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .app-header {
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--surface-2);
+    }
+
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background-color 0.16s ease, color 0.16s ease;
+      cursor: pointer;
+    }
+
+    .nav-link:hover { background: var(--surface-2); color: #fff; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .sidebar {
+      width: 220px;
+      background: var(--surface-1);
+      border-right: 1px solid var(--surface-2);
+    }
+
+    .sidebar-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 8px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--gray-400);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.16s ease, color 0.16s ease;
+    }
+
+    .sidebar-item:hover { background: var(--surface-2); color: #fff; }
+    .sidebar-item.active { background: rgba(30, 58, 138, 0.48); color: var(--accent-400); }
+
+    .panel {
+      background: var(--surface-1);
+      border: 1px solid var(--surface-2);
+      border-radius: 18px;
+      box-shadow: 0 20px 46px rgba(2, 6, 23, 0.36);
+      overflow: hidden;
+    }
+
+    .search-input {
+      background: var(--surface-0);
+      border: 1px solid var(--surface-3);
+      color: #e2e8f0;
+    }
+
+    .search-input::placeholder { color: var(--gray-500); }
+
+    .toolbar-chip,
+    .stat-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-0);
+      color: var(--gray-400);
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .task-list { position: relative; }
+
+    .task-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 14px 18px minmax(0, 1fr) 106px 34px 48px;
+      gap: 12px;
+      align-items: center;
+      padding: 15px 18px;
+      border-bottom: 1px solid rgba(51, 65, 85, 0.55);
+      transition:
+        background-color 0.18s ease,
+        border-color 0.18s ease,
+        transform 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.35s ease,
+        box-shadow 0.3s ease;
+      will-change: transform;
+      outline: none;
+    }
+
+    .task-row:hover,
+    .task-row:focus-within,
+    .task-row.is-active {
+      background: rgba(30, 41, 59, 0.62);
+      box-shadow: inset 0 0 0 1px rgba(96, 165, 250, 0.08);
+    }
+
+    .task-row:last-child { border-bottom: none; }
+    .task-row.snoozed { opacity: 0.68; }
+
+    .task-row.reordering-down { animation: slideDown 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+    .task-row.reordering-up { animation: slideUp 0.7s cubic-bezier(0.22, 1, 0.36, 1); }
+
+    .grab-handle {
+      width: 14px;
+      height: 24px;
+      color: var(--gray-600);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+
+    .task-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-0);
+      box-shadow: inset 0 1px 1px rgba(255,255,255,0.03);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      position: relative;
+    }
+
+    .task-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: #f8fafc;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .keyboard-hint {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid rgba(96,165,250,0.22);
+      background: rgba(15,23,42,0.94);
+      color: #bfdbfe;
+      font-size: 0.66rem;
+      font-weight: 600;
+      margin-left: auto;
+      white-space: nowrap;
+      box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+    }
+
+    .keyboard-hint kbd {
+      font: inherit;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(59,130,246,0.18);
+      border: 1px solid rgba(96,165,250,0.24);
+      color: #dbeafe;
+    }
+
+    .snooze-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--gray-400);
+      font-size: 0.72rem;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+
+    .source-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .source-todo { background: rgba(59,130,246,0.16); color: #93c5fd; border-color: rgba(96,165,250,0.24); }
+    .source-github { background: rgba(168,85,247,0.16); color: #d8b4fe; border-color: rgba(216,180,254,0.24); }
+    .source-calendar { background: rgba(245,158,11,0.16); color: #fcd34d; border-color: rgba(252,211,77,0.24); }
+    .source-email { background: rgba(16,185,129,0.16); color: #6ee7b7; border-color: rgba(110,231,183,0.24); }
+
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 9px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+
+    .entity-person { background: rgba(59,130,246,0.14); color: #93c5fd; border-color: rgba(96,165,250,0.22); }
+    .entity-project { background: rgba(168,85,247,0.14); color: #d8b4fe; border-color: rgba(216,180,254,0.22); }
+    .entity-domain { background: rgba(16,185,129,0.14); color: #6ee7b7; border-color: rgba(110,231,183,0.22); }
+    .entity-team { background: rgba(245,158,11,0.14); color: #fcd34d; border-color: rgba(252,211,77,0.22); }
+
+    .due-date {
+      font-size: 0.78rem;
+      text-align: right;
+      color: var(--gray-400);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .due-date.none { color: var(--gray-500); }
+
+    .snooze-trigger {
+      width: 34px;
+      height: 34px;
+      border-radius: 11px;
+      border: 1px solid rgba(96,165,250,0.16);
+      background: rgba(11,17,32,0.88);
+      color: var(--gray-500);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transform: translateX(8px) scale(0.96);
+      transition:
+        opacity 0.2s ease,
+        transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+        background-color 0.18s ease,
+        color 0.18s ease,
+        border-color 0.18s ease;
+      cursor: pointer;
+      pointer-events: none;
+    }
+
+    .task-row:hover .snooze-trigger,
+    .task-row:focus-within .snooze-trigger,
+    .task-row.is-active .snooze-trigger,
+    .snooze-trigger:focus-visible {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .snooze-trigger:hover,
+    .snooze-trigger:focus-visible {
+      background: rgba(30,58,138,0.44);
+      color: #dbeafe;
+      border-color: rgba(96,165,250,0.28);
+      outline: none;
+    }
+
+    .score-badge {
+      width: 48px;
+      height: 36px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.88rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+      transition:
+        background 0.3s ease,
+        color 0.3s ease,
+        box-shadow 0.3s ease,
+        transform 0.3s ease;
+      overflow: hidden;
+    }
+
+    .score-badge .score-value { display: inline-block; min-width: 2ch; text-align: center; }
+    .score-badge.is-counting { box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 0 1px rgba(255,255,255,0.03), 0 10px 24px rgba(15,23,42,0.4); }
+    .score-badge.is-counting .score-value { animation: scoreCountDown 0.16s ease-in-out infinite alternate; }
+    .score-high { background: var(--accent-500); color: #fff; }
+    .score-mid { background: rgba(245,158,11,0.13); color: #fbbf24; }
+    .score-low { background: var(--surface-3); color: var(--gray-500); }
+
+    .toast-stack {
+      position: fixed;
+      left: 50%;
+      bottom: 26px;
+      transform: translateX(-50%);
+      z-index: 60;
+      pointer-events: none;
+    }
+
+    .toast {
+      min-width: 360px;
+      max-width: 460px;
+      background: rgba(11,17,32,0.98);
+      border: 1px solid rgba(51,65,85,0.9);
+      border-radius: 16px;
+      box-shadow: 0 22px 48px rgba(2,6,23,0.48);
+      overflow: hidden;
+      opacity: 0;
+      transform: translateY(22px);
+      pointer-events: auto;
+    }
+
+    .toast.show { animation: toastIn 0.42s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+    .toast.hide {
+      opacity: 0;
+      transform: translateY(18px);
+      transition: opacity 0.22s ease, transform 0.22s ease;
+    }
+
+    .toast-progress {
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent-400), var(--accent-500));
+      transform-origin: left center;
+    }
+
+    .toast-progress.animate { animation: undoProgress 5s linear forwards; }
+
+    .demo-controls {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      width: 330px;
+      background: rgba(11,17,32,0.98);
+      border: 1px solid rgba(51,65,85,0.9);
+      border-radius: 18px;
+      box-shadow: 0 24px 54px rgba(2,6,23,0.52);
+      z-index: 55;
+    }
+
+    .demo-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 9px 13px;
+      border-radius: 11px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-2);
+      color: #e2e8f0;
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: transform 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+      cursor: pointer;
+    }
+
+    .demo-btn:hover { background: #243244; border-color: rgba(96,165,250,0.2); }
+    .demo-btn:active { transform: translateY(1px); }
+    .demo-btn.primary { background: var(--accent-600); border-color: var(--accent-500); color: #fff; }
+    .demo-btn.primary:hover { background: var(--accent-500); }
+
+    @keyframes scoreCountDown {
+      from { transform: translateY(-3px) scaleY(1.02); opacity: 0.95; }
+      to { transform: translateY(3px) scaleY(0.98); opacity: 1; }
+    }
+
+    @keyframes slideDown {
+      from { filter: brightness(1.08); }
+      to { filter: brightness(1); }
+    }
+
+    @keyframes slideUp {
+      from { filter: brightness(1.06); }
+      to { filter: brightness(1); }
+    }
+
+    @keyframes toastIn {
+      from { opacity: 0; transform: translateY(22px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes undoProgress {
+      from { transform: scaleX(1); }
+      to { transform: scaleX(0); }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link active">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="text" placeholder="Search scored tasks..." class="search-input w-56 px-3 py-1.5 text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500">
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sync-alt text-sm"></i></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md relative"><i class="fas fa-bell text-sm"></i><span class="absolute -top-0 -right-0 w-3.5 h-3.5 bg-red-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold">3</span></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-cog text-sm"></i></button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <aside class="sidebar p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-5">
+      <div>
+        <div class="sidebar-label">Sources</div>
+        <div class="space-y-1">
+          <div class="sidebar-item active"><i class="fas fa-layer-group text-xs w-4"></i><span>All Sources</span><span class="ml-auto text-xs">8</span></div>
+          <div class="sidebar-item"><i class="fas fa-check-square text-blue-400 text-xs w-4"></i><span>Microsoft Todo</span><span class="ml-auto text-xs">3</span></div>
+          <div class="sidebar-item"><i class="fab fa-github text-purple-300 text-xs w-4"></i><span>GitHub Issues</span><span class="ml-auto text-xs">2</span></div>
+          <div class="sidebar-item"><i class="fas fa-calendar text-amber-300 text-xs w-4"></i><span>Calendar</span><span class="ml-auto text-xs">1</span></div>
+          <div class="sidebar-item"><i class="fas fa-envelope text-emerald-300 text-xs w-4"></i><span>Email</span><span class="ml-auto text-xs">2</span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sidebar-label">Lists</div>
+        <div class="space-y-1">
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-purple-400"></span><span>Mission Control</span><span class="ml-auto text-xs">3</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span>Work Sprint</span><span class="ml-auto text-xs">2</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Home Projects</span><span class="ml-auto text-xs">2</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span>People Ops</span><span class="ml-auto text-xs">1</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-slate-500"></span><span>Someday</span><span class="ml-auto text-xs">1</span></div>
+        </div>
+      </div>
+
+      <div>
+        <div class="sidebar-label">Snooze behavior</div>
+        <div class="space-y-2 text-xs text-slate-400">
+          <div class="flex items-center justify-between"><span>Score penalty</span><span class="text-amber-300">-20</span></div>
+          <div class="flex items-center justify-between"><span>Counter settle</span><span>800ms</span></div>
+          <div class="flex items-center justify-between"><span>Undo window</span><span>5 sec</span></div>
+        </div>
+      </div>
+
+      <div class="mt-auto pt-4 border-t border-slate-800">
+        <div class="sidebar-label">Scoring model</div>
+        <div class="space-y-2 text-xs text-slate-400">
+          <div class="flex items-center justify-between"><span>Active tasks</span><span id="sidebarActiveCount" class="text-blue-300">8</span></div>
+          <div class="flex items-center justify-between"><span>Snoozed tasks</span><span id="sidebarSnoozedCount">0</span></div>
+          <div class="flex items-center justify-between"><span>Last resort</span><span>Smart Score</span></div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto p-5">
+      <div class="panel">
+        <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between gap-4">
+          <div>
+            <h2 class="text-base font-semibold">Unified Task List</h2>
+            <p class="text-sm text-slate-400 mt-1">Hover to snooze a task, watch its score animate down, then follow the row as Smart Score reorders the list.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap justify-end">
+            <span class="toolbar-chip" style="background: rgba(59,130,246,0.12); border-color: rgba(96,165,250,0.3); color: #93c5fd;"><i class="fas fa-arrow-down-wide-short text-[11px]"></i>Sort by: <strong>Smart Score</strong></span>
+            <span class="toolbar-chip"><i class="fas fa-clock text-[11px]"></i>Snooze-aware</span>
+            <span class="toolbar-chip"><i class="fas fa-wand-magic-sparkles text-[11px]"></i>Animated reorder</span>
+          </div>
+        </div>
+
+        <div class="px-5 py-3 border-b border-slate-800 flex items-center justify-between text-xs text-slate-400">
+          <div class="flex items-center gap-2">
+            <span class="stat-pill"><i class="fas fa-bolt text-blue-400"></i><span id="statSurfaced">8 surfaced now</span></span>
+            <span class="stat-pill"><i class="fas fa-clock text-amber-300"></i><span id="statSnoozed">0 snoozed</span></span>
+          </div>
+          <span>Showing 8 of 8 tasks</span>
+        </div>
+
+        <div id="taskList" class="task-list"></div>
+      </div>
+    </main>
+  </div>
+
+  <div class="demo-controls p-4">
+    <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500 font-bold mb-2">Demo controls</div>
+    <p class="text-xs text-slate-400 leading-5 mb-4">Hover over any task and click the clock icon to snooze, or use the demo button below.</p>
+    <div class="flex items-center gap-2">
+      <button class="demo-btn primary flex-1" id="demoSnoozeBtn"><i class="fas fa-clock"></i>Snooze Task #2</button>
+      <button class="demo-btn" id="resetBtn"><i class="fas fa-rotate-left"></i>Reset Demo</button>
+    </div>
+  </div>
+
+  <div class="toast-stack">
+    <div id="undoToast" class="toast hidden">
+      <div class="px-4 py-3.5 flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <div id="toastMessage" class="text-sm font-medium text-slate-100">Task snoozed — score 88 → 68</div>
+          <div class="text-[11px] text-slate-500 mt-1">Smart Score resorted the list.</div>
+        </div>
+        <button id="undoBtn" class="text-sm font-semibold text-blue-400 hover:text-blue-300 transition-colors">[Undo]</button>
+      </div>
+      <div class="h-[1px] bg-slate-800"></div>
+      <div id="toastProgress" class="toast-progress"></div>
+    </div>
+  </div>
+
+  <script>
+    const initialTasks = [
+      {
+        id: 'task-1',
+        originalIndex: 0,
+        title: 'Follow up with Sarah on Q3 report draft',
+        source: 'TODO',
+        sourceClass: 'source-todo',
+        score: 92,
+        due: 'Due today',
+        chips: [
+          { icon: 'fa-user', label: 'Sarah C.', className: 'entity-person' },
+          { icon: 'fa-diagram-project', label: 'Q3 Planning', className: 'entity-project' },
+          { icon: 'fa-users', label: 'Leadership', className: 'entity-team' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-2',
+        originalIndex: 1,
+        title: 'Fix Mission Control quick-add regression',
+        source: 'GH',
+        sourceClass: 'source-github',
+        score: 88,
+        due: 'Tomorrow',
+        chips: [
+          { icon: 'fa-diagram-project', label: 'Mission Control', className: 'entity-project' },
+          { icon: 'fa-globe', label: 'Capture Flow', className: 'entity-domain' },
+          { icon: 'fa-user', label: 'Ry', className: 'entity-person' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-3',
+        originalIndex: 2,
+        title: 'Reply to GitHub issue about capture attachments',
+        source: 'GH',
+        sourceClass: 'source-github',
+        score: 84,
+        due: 'Thu 2:00 PM',
+        chips: [
+          { icon: 'fa-diagram-project', label: 'Capture UX', className: 'entity-project' },
+          { icon: 'fa-user', label: 'Sarah C.', className: 'entity-person' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-4',
+        originalIndex: 3,
+        title: 'Review kitchen cabinet designs from contractor',
+        source: 'EMAIL',
+        sourceClass: 'source-email',
+        score: 76,
+        due: 'Wed',
+        chips: [
+          { icon: 'fa-diagram-project', label: 'Kitchen Renovation', className: 'entity-project' },
+          { icon: 'fa-user', label: 'Contractor', className: 'entity-person' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-5',
+        originalIndex: 4,
+        title: 'Schedule next week\'s team retro',
+        source: 'CAL',
+        sourceClass: 'source-calendar',
+        score: 71,
+        due: 'Fri',
+        chips: [
+          { icon: 'fa-users', label: 'Platform Team', className: 'entity-team' },
+          { icon: 'fa-diagram-project', label: 'Sprint 29', className: 'entity-project' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-6',
+        originalIndex: 5,
+        title: 'Print revised camera mount prototype',
+        source: 'TODO',
+        sourceClass: 'source-todo',
+        score: 67,
+        due: 'No date',
+        chips: [
+          { icon: 'fa-globe', label: '3D Printing', className: 'entity-domain' },
+          { icon: 'fa-diagram-project', label: 'Garage Lab', className: 'entity-project' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-7',
+        originalIndex: 6,
+        title: 'Update Home Assistant motion config',
+        source: 'TODO',
+        sourceClass: 'source-todo',
+        score: 54,
+        due: 'No date',
+        chips: [
+          { icon: 'fa-globe', label: 'Home Assistant', className: 'entity-domain' },
+          { icon: 'fa-diagram-project', label: 'Entryway Sensors', className: 'entity-project' }
+        ],
+        snoozed: false
+      },
+      {
+        id: 'task-8',
+        originalIndex: 7,
+        title: 'Research replacement dryer vent cover',
+        source: 'EMAIL',
+        sourceClass: 'source-email',
+        score: 41,
+        due: 'No date',
+        chips: [
+          { icon: 'fa-diagram-project', label: 'Home Repairs', className: 'entity-project' },
+          { icon: 'fa-user', label: 'Vendor Options', className: 'entity-person' }
+        ],
+        snoozed: false
+      }
+    ];
+
+    const taskList = document.getElementById('taskList');
+    const toast = document.getElementById('undoToast');
+    const toastMessage = document.getElementById('toastMessage');
+    const toastProgress = document.getElementById('toastProgress');
+    const sidebarActiveCount = document.getElementById('sidebarActiveCount');
+    const sidebarSnoozedCount = document.getElementById('sidebarSnoozedCount');
+    const statSnoozed = document.getElementById('statSnoozed');
+    const statSurfaced = document.getElementById('statSurfaced');
+
+    let tasks = cloneTasks(initialTasks);
+    let activeTaskId = null;
+    let isAnimating = false;
+    let lastAction = null;
+    let toastTimeout = null;
+    let animationToken = 0;
+
+    function cloneTasks(data) {
+      return data.map((task) => ({
+        ...task,
+        chips: task.chips.map((chip) => ({ ...chip }))
+      }));
+    }
+
+    function getScoreClass(score) {
+      if (score >= 80) return 'score-high';
+      if (score >= 50) return 'score-mid';
+      return 'score-low';
+    }
+
+    function sortedTasks() {
+      return [...tasks].sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.originalIndex - b.originalIndex;
+      });
+    }
+
+    function renderTasks() {
+      const ordered = sortedTasks();
+      taskList.innerHTML = ordered.map((task) => {
+        const isNoDate = task.due === 'No date';
+        const hint = task.originalIndex === 0 ? '<span class="keyboard-hint">Press <kbd>S</kbd> to snooze</span>' : '';
+        const snoozeMeta = task.snoozed
+          ? '<span class="snooze-inline"><i class="fas fa-clock text-[11px]"></i>Snoozed until tomorrow</span>'
+          : '';
+
+        return `
+          <div
+            class="task-row ${task.snoozed ? 'snoozed' : ''}"
+            data-task-id="${task.id}"
+            tabindex="0"
+          >
+            <div class="grab-handle"><i class="fas fa-grip-vertical"></i></div>
+            <div class="task-checkbox"></div>
+            <div>
+              <div class="title-row">
+                <div class="task-title">${task.title}</div>
+                ${task.snoozed ? snoozeMeta : ''}
+                ${hint}
+              </div>
+              <div class="meta-line">
+                <span class="source-badge ${task.sourceClass}">${task.source}</span>
+                ${task.chips.map((chip) => `<span class="entity-chip ${chip.className}"><i class="fas ${chip.icon} text-[10px]"></i>${chip.label}</span>`).join('')}
+              </div>
+            </div>
+            <div class="due-date ${isNoDate ? 'none' : ''}">${task.due}</div>
+            <button class="snooze-trigger" type="button" data-snooze-id="${task.id}" aria-label="Snooze ${task.title}">
+              <i class="fas fa-clock text-[12px]"></i>
+            </button>
+            <div class="score-badge ${getScoreClass(task.score)}">
+              <span class="score-value">${task.score}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      attachRowHandlers();
+      updateStats();
+    }
+
+    function attachRowHandlers() {
+      taskList.querySelectorAll('.task-row').forEach((row) => {
+        const id = row.dataset.taskId;
+        row.addEventListener('mouseenter', () => setActiveTask(id));
+        row.addEventListener('mouseleave', () => clearActiveTask(id));
+        row.addEventListener('focusin', () => setActiveTask(id));
+        row.addEventListener('focusout', (event) => {
+          if (!row.contains(event.relatedTarget)) clearActiveTask(id);
+        });
+      });
+
+      taskList.querySelectorAll('.snooze-trigger').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const taskId = button.dataset.snoozeId;
+          const targetTask = tasks.find((task) => task.id === taskId);
+          if (!targetTask) return;
+          snoozeTask(targetTask.originalIndex + 1);
+        });
+      });
+    }
+
+    function setActiveTask(id) {
+      activeTaskId = id;
+      taskList.querySelectorAll('.task-row').forEach((row) => {
+        row.classList.toggle('is-active', row.dataset.taskId === id);
+      });
+    }
+
+    function clearActiveTask(id) {
+      if (activeTaskId !== id) return;
+      activeTaskId = null;
+      taskList.querySelectorAll('.task-row').forEach((row) => row.classList.remove('is-active'));
+    }
+
+    function updateStats() {
+      const snoozedCount = tasks.filter((task) => task.snoozed).length;
+      const activeCount = tasks.length - snoozedCount;
+      sidebarActiveCount.textContent = String(activeCount);
+      sidebarSnoozedCount.textContent = String(snoozedCount);
+      statSurfaced.textContent = `${tasks.length} surfaced now`;
+      statSnoozed.textContent = `${snoozedCount} snoozed`;
+    }
+
+    function calculateSnoozedScore(score) {
+      return Math.max(score - 20, 21);
+    }
+
+    function animateScore(taskId, fromScore, toScore) {
+      return new Promise((resolve) => {
+        const row = taskList.querySelector(`[data-task-id="${taskId}"]`);
+        if (!row) {
+          resolve();
+          return;
+        }
+
+        const badge = row.querySelector('.score-badge');
+        const valueNode = row.querySelector('.score-value');
+        const direction = fromScore >= toScore ? -1 : 1;
+        const distance = Math.max(Math.abs(fromScore - toScore), 1);
+        const stepDuration = Math.max(22, Math.floor(800 / distance));
+
+        badge.classList.add('is-counting');
+
+        let current = fromScore;
+        const timer = setInterval(() => {
+          current += direction;
+          valueNode.textContent = current;
+          badge.classList.remove('score-high', 'score-mid', 'score-low');
+          badge.classList.add(getScoreClass(current));
+
+          if (current === toScore) {
+            clearInterval(timer);
+            badge.classList.remove('is-counting');
+            resolve();
+          }
+        }, stepDuration);
+      });
+    }
+
+    function animateReorder() {
+      const firstRects = new Map();
+      taskList.querySelectorAll('.task-row').forEach((row) => {
+        firstRects.set(row.dataset.taskId, row.getBoundingClientRect());
+      });
+
+      renderTasks();
+
+      taskList.querySelectorAll('.task-row').forEach((row) => {
+        const first = firstRects.get(row.dataset.taskId);
+        if (!first) return;
+        const last = row.getBoundingClientRect();
+        const deltaY = first.top - last.top;
+
+        if (!deltaY) return;
+
+        row.style.transform = `translateY(${deltaY}px)`;
+        row.classList.add(deltaY < 0 ? 'reordering-down' : 'reordering-up');
+        row.getBoundingClientRect();
+
+        requestAnimationFrame(() => {
+          row.style.transform = 'translateY(0)';
+        });
+
+        const cleanup = () => {
+          row.classList.remove('reordering-down', 'reordering-up');
+          row.style.transform = '';
+          row.removeEventListener('transitionend', cleanup);
+        };
+
+        row.addEventListener('transitionend', cleanup, { once: true });
+      });
+    }
+
+    function showUndoToast(message) {
+      clearTimeout(toastTimeout);
+      toast.classList.remove('hidden', 'hide');
+      toast.classList.add('show');
+      toastMessage.textContent = message;
+      toastProgress.classList.remove('animate');
+      void toastProgress.offsetWidth;
+      toastProgress.classList.add('animate');
+
+      toastTimeout = setTimeout(() => {
+        dismissToast();
+      }, 5000);
+    }
+
+    function dismissToast() {
+      toast.classList.remove('show');
+      toast.classList.add('hide');
+      toastProgress.classList.remove('animate');
+      clearTimeout(toastTimeout);
+      toastTimeout = null;
+
+      setTimeout(() => {
+        toast.classList.add('hidden');
+        toast.classList.remove('hide');
+      }, 220);
+    }
+
+    async function snoozeTask(taskIndex) {
+      if (isAnimating) return;
+
+      const task = tasks.find((item) => item.originalIndex === taskIndex - 1);
+      if (!task || task.snoozed) return;
+
+      isAnimating = true;
+      const token = ++animationToken;
+      lastAction = {
+        tasks: cloneTasks(tasks),
+        activeTaskId
+      };
+
+      const fromScore = task.score;
+      const toScore = calculateSnoozedScore(task.score);
+
+      await animateScore(task.id, fromScore, toScore);
+      if (token !== animationToken) return;
+
+      task.score = toScore;
+      task.snoozed = true;
+      task.due = 'Tomorrow';
+
+      animateReorder();
+      showUndoToast(`Task snoozed — score ${fromScore} → ${toScore}`);
+
+      setTimeout(() => {
+        isAnimating = false;
+      }, 720);
+    }
+
+    function resetDemo() {
+      animationToken += 1;
+      tasks = cloneTasks(initialTasks);
+      activeTaskId = null;
+      isAnimating = false;
+      lastAction = null;
+      dismissToast();
+      renderTasks();
+    }
+
+    function undoLastAction() {
+      if (!lastAction) return;
+      animationToken += 1;
+      tasks = cloneTasks(lastAction.tasks);
+      activeTaskId = lastAction.activeTaskId;
+      isAnimating = false;
+      dismissToast();
+      animateReorder();
+      if (activeTaskId) setActiveTask(activeTaskId);
+      lastAction = null;
+    }
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key.toLowerCase() !== 's') return;
+      if (!activeTaskId || isAnimating) return;
+      const task = tasks.find((item) => item.id === activeTaskId);
+      if (!task || task.snoozed) return;
+      event.preventDefault();
+      snoozeTask(task.originalIndex + 1);
+    });
+
+    document.getElementById('demoSnoozeBtn').addEventListener('click', () => snoozeTask(2));
+    document.getElementById('resetBtn').addEventListener('click', resetDemo);
+    document.getElementById('undoBtn').addEventListener('click', undoLastAction);
+
+    renderTasks();
+  </script>
+</body>
+</html>

@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — AI Assistant</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .chat-bubble-user { background: #eff6ff; border: 1px solid #dbeafe; }
+    .chat-bubble-ai { background: #ffffff; border: 1px solid #e5e7eb; }
+    .typing-dot { animation: blink 1.4s infinite both; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+    .suggestion-chip:hover { background: #dbeafe; border-color: #93c5fd; }
+    .agent-card { transition: all 0.15s ease; }
+    .agent-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Timeline</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="flex h-[calc(100vh-57px)]">
+    <!-- Main Chat Area -->
+    <main class="flex-1 flex flex-col">
+      <!-- Chat Messages -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-4">
+
+        <!-- AI Welcome -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-robot text-white text-sm"></i>
+          </div>
+          <div class="chat-bubble-ai rounded-lg p-4 max-w-2xl">
+            <p class="text-sm text-gray-700">Hi! I'm your Mission Control AI assistant. I can help you:</p>
+            <ul class="text-sm text-gray-600 mt-2 space-y-1 ml-4 list-disc">
+              <li>Query and analyze your tasks across all sources</li>
+              <li>Identify priorities, overdue items, and blockers</li>
+              <li>Generate daily/weekly summaries and digests</li>
+              <li>Dispatch agents to take actions on your behalf</li>
+              <li>Help organize and plan your work</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- User Message -->
+        <div class="flex gap-3 justify-end">
+          <div class="chat-bubble-user rounded-lg p-4 max-w-2xl">
+            <p class="text-sm text-gray-800">What are my most critical items right now? Include anything overdue or blocking other work.</p>
+          </div>
+          <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-user text-gray-600 text-sm"></i>
+          </div>
+        </div>
+
+        <!-- AI Response with structured data -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-robot text-white text-sm"></i>
+          </div>
+          <div class="chat-bubble-ai rounded-lg p-4 max-w-2xl">
+            <p class="text-sm text-gray-700 mb-3">Here's your critical items analysis based on current data across all 5 sources:</p>
+
+            <!-- Critical Items Table -->
+            <div class="bg-red-50 border border-red-200 rounded-md p-3 mb-3">
+              <h4 class="text-xs font-semibold text-red-700 uppercase mb-2">🔴 Requires Immediate Action</h4>
+              <div class="space-y-2">
+                <div class="flex items-start gap-2">
+                  <span class="text-xs text-red-600 font-mono w-5 mt-0.5">1.</span>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Fix authentication timeout in production</p>
+                    <p class="text-xs text-gray-500">GitHub · acme/webapp #142 · <span class="text-red-500">4 days overdue</span> · Blocking: PR #87, deploy pipeline</p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <span class="text-xs text-red-600 font-mono w-5 mt-0.5">2.</span>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Review Q2 budget proposal</p>
+                    <p class="text-xs text-gray-500">MS Todo · Work/Finance · <span class="text-red-500">2 days overdue</span> · Blocking: team budget allocation</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-md p-3 mb-3">
+              <h4 class="text-xs font-semibold text-amber-700 uppercase mb-2">🟡 Due Today / Urgent</h4>
+              <div class="space-y-2">
+                <div class="flex items-start gap-2">
+                  <span class="text-xs text-amber-600 font-mono w-5 mt-0.5">3.</span>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Respond to vendor contract renewal</p>
+                    <p class="text-xs text-gray-500">Email · From procurement@acme.com · <span class="text-amber-600">1 day overdue</span></p>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2">
+                  <span class="text-xs text-amber-600 font-mono w-5 mt-0.5">4.</span>
+                  <div>
+                    <p class="text-sm font-medium text-gray-900">Prepare slides for team standup</p>
+                    <p class="text-xs text-gray-500">MS Todo · Work/Meetings · Due today at 2:00 PM</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-blue-50 border border-blue-200 rounded-md p-3 mb-3">
+              <h4 class="text-xs font-semibold text-blue-700 uppercase mb-2">📊 Impact Analysis</h4>
+              <p class="text-xs text-gray-600">The <strong>auth timeout bug (#142)</strong> is your highest-impact item — it's blocking PR #87 (refactor auth middleware) and the production deploy pipeline has been failing for 4 days because of it. Fixing this unblocks 2 other tasks and resolves the "Production deploy failed" alert.</p>
+            </div>
+
+            <p class="text-sm text-gray-700">
+              <strong>Recommended order:</strong> Auth bug → Budget review → Vendor email → Slides (if time permits before standup)
+            </p>
+          </div>
+        </div>
+
+        <!-- User Follow-up -->
+        <div class="flex gap-3 justify-end">
+          <div class="chat-bubble-user rounded-lg p-4 max-w-2xl">
+            <p class="text-sm text-gray-800">Can you dispatch an agent to close all the completed GitHub issues that have been done for more than 7 days?</p>
+          </div>
+          <div class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-user text-gray-600 text-sm"></i>
+          </div>
+        </div>
+
+        <!-- AI Agent Dispatch Response -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-robot text-white text-sm"></i>
+          </div>
+          <div class="chat-bubble-ai rounded-lg p-4 max-w-2xl">
+            <p class="text-sm text-gray-700 mb-3">I found <strong>6 completed GitHub issues</strong> older than 7 days across your repos. Here's what I'll close:</p>
+
+            <div class="bg-gray-50 border border-gray-200 rounded-md p-3 mb-3">
+              <div class="space-y-1.5 text-xs text-gray-600">
+                <div class="flex items-center justify-between">
+                  <span>acme/project-alpha #12 — "Set up CI pipeline"</span>
+                  <span class="text-gray-400">Done 14d ago</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>acme/project-alpha #10 — "Create project board"</span>
+                  <span class="text-gray-400">Done 12d ago</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>acme/webapp #138 — "Add error logging"</span>
+                  <span class="text-gray-400">Done 10d ago</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>acme/webapp #135 — "Update dependencies"</span>
+                  <span class="text-gray-400">Done 9d ago</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>acme/api #82 — "Fix CORS headers"</span>
+                  <span class="text-gray-400">Done 8d ago</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <span>acme/api #80 — "Add rate limiting"</span>
+                  <span class="text-gray-400">Done 7d ago</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Confirmation buttons -->
+            <div class="flex items-center gap-2">
+              <button class="px-3 py-1.5 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 font-medium">
+                <i class="fas fa-check mr-1"></i>Close all 6
+              </button>
+              <button class="px-3 py-1.5 bg-white text-gray-700 text-sm rounded-md border border-gray-200 hover:bg-gray-50 font-medium">
+                <i class="fas fa-list mr-1"></i>Let me pick
+              </button>
+              <button class="px-3 py-1.5 bg-white text-gray-700 text-sm rounded-md border border-gray-200 hover:bg-gray-50 font-medium">
+                Cancel
+              </button>
+            </div>
+
+            <p class="text-xs text-gray-400 mt-2"><i class="fas fa-shield-alt mr-1"></i>Agent actions require your confirmation before execution</p>
+          </div>
+        </div>
+
+        <!-- Agent execution status -->
+        <div class="flex gap-3">
+          <div class="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center flex-shrink-0">
+            <i class="fas fa-robot text-white text-sm"></i>
+          </div>
+          <div class="chat-bubble-ai rounded-lg p-4 max-w-2xl">
+            <div class="flex items-center gap-2 mb-2">
+              <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+                <i class="fas fa-check text-green-600 text-[10px]"></i>
+              </div>
+              <span class="text-sm font-medium text-green-700">Agent completed successfully</span>
+            </div>
+            <p class="text-xs text-gray-500">Closed 6 issues across 3 repositories. Added comment "Closed by Mission Control — completed >7 days" to each.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suggestion Chips -->
+      <div class="px-6 py-2 border-t border-gray-100 bg-white">
+        <div class="flex items-center gap-2 overflow-x-auto">
+          <span class="text-xs text-gray-400 flex-shrink-0">Suggestions:</span>
+          <button class="suggestion-chip text-xs px-3 py-1 border border-gray-200 rounded-full text-gray-600 flex-shrink-0 whitespace-nowrap">
+            What's my workload this week?
+          </button>
+          <button class="suggestion-chip text-xs px-3 py-1 border border-gray-200 rounded-full text-gray-600 flex-shrink-0 whitespace-nowrap">
+            Summarize my GitHub activity
+          </button>
+          <button class="suggestion-chip text-xs px-3 py-1 border border-gray-200 rounded-full text-gray-600 flex-shrink-0 whitespace-nowrap">
+            Find tasks related to "mission-control"
+          </button>
+          <button class="suggestion-chip text-xs px-3 py-1 border border-gray-200 rounded-full text-gray-600 flex-shrink-0 whitespace-nowrap">
+            Generate daily digest
+          </button>
+        </div>
+      </div>
+
+      <!-- Input Area -->
+      <div class="p-4 border-t border-gray-200 bg-white">
+        <div class="flex items-end gap-3">
+          <div class="flex-1 relative">
+            <textarea rows="1" placeholder="Ask about your tasks, request analysis, or dispatch an agent..." class="w-full px-4 py-3 border border-gray-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"></textarea>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="p-2 text-gray-400 hover:text-gray-600" title="Attach context">
+              <i class="fas fa-paperclip"></i>
+            </button>
+            <button class="px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+              <i class="fas fa-paper-plane mr-1"></i>Send
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 mt-2 text-xs text-gray-400">
+          <span><i class="fas fa-database mr-1"></i>Context: 47 tasks, 7 alerts across 5 sources</span>
+          <span>•</span>
+          <span><i class="fas fa-brain mr-1"></i>Provider: OpenAI GPT-4</span>
+          <span>•</span>
+          <span><i class="fas fa-clock mr-1"></i>Data freshness: 2 min</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Panel: Agent History & Quick Actions -->
+    <aside class="w-72 bg-white border-l border-gray-200 p-4 overflow-y-auto flex-shrink-0">
+      <h3 class="font-semibold text-gray-900 mb-3">Agent Actions</h3>
+
+      <div class="space-y-2 mb-6">
+        <div class="agent-card border border-gray-200 rounded-lg p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-check text-green-600 text-[10px]"></i>
+            </div>
+            <span class="text-xs font-medium text-gray-900">Close stale issues</span>
+          </div>
+          <p class="text-[11px] text-gray-500">Closed 6 issues across 3 repos</p>
+          <p class="text-[10px] text-gray-400 mt-1">2 minutes ago</p>
+        </div>
+
+        <div class="agent-card border border-gray-200 rounded-lg p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-check text-green-600 text-[10px]"></i>
+            </div>
+            <span class="text-xs font-medium text-gray-900">Daily digest</span>
+          </div>
+          <p class="text-[11px] text-gray-500">Generated morning summary</p>
+          <p class="text-[10px] text-gray-400 mt-1">8 hours ago</p>
+        </div>
+
+        <div class="agent-card border border-gray-200 rounded-lg p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-5 h-5 bg-green-100 rounded-full flex items-center justify-center">
+              <i class="fas fa-check text-green-600 text-[10px]"></i>
+            </div>
+            <span class="text-xs font-medium text-gray-900">Sync all sources</span>
+          </div>
+          <p class="text-[11px] text-gray-500">Refreshed 5 connectors, 3 new items</p>
+          <p class="text-[10px] text-gray-400 mt-1">1 day ago</p>
+        </div>
+      </div>
+
+      <h3 class="font-semibold text-gray-900 mb-3">Quick Agents</h3>
+      <div class="space-y-2">
+        <button class="w-full text-left agent-card border border-gray-200 rounded-lg p-3 hover:border-blue-300">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-broom text-blue-500 text-sm"></i>
+            <span class="text-xs font-medium text-gray-700">Clean up completed items</span>
+          </div>
+        </button>
+        <button class="w-full text-left agent-card border border-gray-200 rounded-lg p-3 hover:border-blue-300">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-sort-amount-down text-blue-500 text-sm"></i>
+            <span class="text-xs font-medium text-gray-700">Re-prioritize my week</span>
+          </div>
+        </button>
+        <button class="w-full text-left agent-card border border-gray-200 rounded-lg p-3 hover:border-blue-300">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-file-alt text-blue-500 text-sm"></i>
+            <span class="text-xs font-medium text-gray-700">Generate weekly report</span>
+          </div>
+        </button>
+        <button class="w-full text-left agent-card border border-gray-200 rounded-lg p-3 hover:border-blue-300">
+          <div class="flex items-center gap-2">
+            <i class="fas fa-exchange-alt text-blue-500 text-sm"></i>
+            <span class="text-xs font-medium text-gray-700">Sync Todo → GitHub</span>
+          </div>
+        </button>
+      </div>
+
+      <h3 class="font-semibold text-gray-900 mt-6 mb-3">AI Settings</h3>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="text-gray-500 block mb-1">Provider</label>
+          <select class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-gray-700">
+            <option>OpenAI (GPT-4)</option>
+            <option>Azure OpenAI</option>
+            <option>Ollama (local)</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-gray-500 block mb-1">Agent Confirmation</label>
+          <select class="w-full border border-gray-200 rounded-md px-2 py-1.5 text-gray-700">
+            <option>Always ask before acting</option>
+            <option>Auto for safe actions</option>
+            <option>Auto for all (dangerous)</option>
+          </select>
+        </div>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>

@@ -1,0 +1,802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — iOS All Tasks (by Source)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['SF Pro Display', 'SF Pro Text', '-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif']
+          },
+          colors: {
+            ios: {
+              blue: '#0a84ff'
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .phone-shell {
+      width: 375px;
+      height: 812px;
+      padding: 12px;
+      border-radius: 46px;
+      background: linear-gradient(180deg, #1f2937 0%, #020617 100%);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 28px 60px rgba(2, 6, 23, 0.55);
+      position: relative;
+    }
+
+    .phone-shell::before {
+      content: '';
+      position: absolute;
+      inset: 10px;
+      border-radius: 38px;
+      border: 1px solid rgba(255,255,255,0.05);
+      pointer-events: none;
+    }
+
+    .phone-screen {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 34px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top, rgba(59,130,246,0.20), transparent 34%),
+        linear-gradient(180deg, #020617 0%, #0f172a 55%, #020617 100%);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .dynamic-island {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 126px;
+      height: 34px;
+      border-radius: 999px;
+      background: #000;
+      box-shadow: inset 0 -1px 0 rgba(255,255,255,0.06);
+      z-index: 30;
+    }
+
+    .safe-top { padding-top: 48px; }
+
+    .glass {
+      background: rgba(15, 23, 42, 0.68);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      box-shadow: 0 18px 40px rgba(2, 6, 23, 0.3);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .tab-blur {
+      background: rgba(2, 6, 23, 0.86);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+    }
+
+    .scroll-fade::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 82px;
+      height: 38px;
+      background: linear-gradient(180deg, rgba(2,6,23,0), rgba(2,6,23,0.92));
+      pointer-events: none;
+    }
+
+    .priority-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .chip {
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(30, 41, 59, 0.58);
+    }
+
+    .tab-active { color: #0a84ff; }
+    .tab-inactive { color: #94a3b8; }
+    .tab-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+
+    .source-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-900">
+  <main class="px-6 py-10 md:px-8 xl:px-10">
+    <header class="mb-8 text-center">
+      <p class="text-xs uppercase tracking-[0.35em] text-slate-500">Native iOS Mockup</p>
+      <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-50">All Tasks — Grouped by Source</h1>
+      <p class="mt-2 text-sm text-slate-400">Issue #1578 · Full task view with filtering, grouping, and source-based organization. Draws from Today view patterns.</p>
+    </header>
+
+    <section class="flex flex-wrap justify-center gap-10">
+
+      <!-- Screen 1: All Tasks — Default (Grouped by Source) -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">All Sources</p>
+                  <h2 class="mt-1 text-[30px] font-semibold leading-none text-white">All Tasks</h2>
+                  <p class="mt-2 text-[14px] text-slate-400">23 tasks across 4 sources</p>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200">
+                  <i class="fas fa-search text-[13px]"></i>
+                </button>
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-sky-400 ring-1 ring-inset ring-sky-400/30">
+                  <i class="fas fa-arrow-down-short-wide text-[13px]"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Group By / Sort Bar -->
+            <section class="glass mt-4 rounded-[18px] px-3.5 py-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-medium text-slate-500">Group by:</span>
+                  <span class="rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/25">Source</span>
+                  <span class="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-slate-400 hover:text-slate-200">Priority</span>
+                  <span class="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-slate-400 hover:text-slate-200">Project</span>
+                </div>
+                <button class="text-[11px] text-slate-500"><i class="fas fa-ellipsis"></i></button>
+              </div>
+            </section>
+
+            <!-- Source filter chips (horizontal scroll) -->
+            <div class="mt-3 flex gap-2 overflow-x-auto pb-1" style="-webkit-overflow-scrolling: touch;">
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">All · 23</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-blue-300"><i class="fab fa-microsoft mr-1 text-[10px]"></i>MS To Do · 11</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-violet-300"><i class="fab fa-github mr-1 text-[10px]"></i>GitHub · 6</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-emerald-300"><i class="fas fa-satellite-dish mr-1 text-[10px]"></i>Local · 4</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-amber-300"><i class="fas fa-calendar mr-1 text-[10px]"></i>Calendar · 2</span>
+            </div>
+
+            <!-- Source Group: MS To Do -->
+            <section class="mt-4">
+              <div class="flex items-center justify-between px-1 mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="source-icon bg-blue-500/15"><i class="fab fa-microsoft text-[11px] text-blue-400"></i></span>
+                  <span class="text-[13px] font-semibold text-slate-200">MS To Do</span>
+                  <span class="text-[11px] text-slate-500">11</span>
+                </div>
+                <i class="fas fa-chevron-up text-[10px] text-slate-500"></i>
+              </div>
+              <!-- List picker: shows active list filter + opens grouped picker -->
+              <div class="flex items-center gap-2 px-1 mb-2">
+                <button class="flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-300 ring-1 ring-inset ring-white/10">
+                  <i class="fas fa-filter text-[8px] text-slate-500"></i>All Lists
+                  <i class="fas fa-chevron-down text-[8px] text-slate-500 ml-0.5"></i>
+                </button>
+                <span class="text-[10px] text-slate-600">3 groups · 12 lists</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[22px]">
+                <!-- Task row -->
+                <div class="flex items-center gap-3 border-b border-white/5 bg-red-500/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border-2 border-red-400/60"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-red-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Reply to CFO budget email</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P0 · Work · 2d overdue</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-amber-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Finalize Q3 vendor contracts</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P1 · Work · Due tomorrow</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Check Todoist backlog labels</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · Work · Effort S</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-slate-500"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Book haircut appointment</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P3 · Personal</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <!-- Expand indicator -->
+                <div class="border-t border-white/5 px-4 py-2 text-center">
+                  <span class="text-[11px] text-slate-500">+ 7 more</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Source Group: GitHub -->
+            <section class="mt-4">
+              <div class="flex items-center justify-between px-1 mb-2">
+                <div class="flex items-center gap-2">
+                  <span class="source-icon bg-violet-500/15"><i class="fab fa-github text-[11px] text-violet-400"></i></span>
+                  <span class="text-[13px] font-semibold text-slate-200">GitHub</span>
+                  <span class="text-[11px] text-slate-500">6</span>
+                </div>
+                <i class="fas fa-chevron-up text-[10px] text-slate-500"></i>
+              </div>
+              <!-- Repo picker -->
+              <div class="flex items-center gap-2 px-1 mb-2">
+                <button class="flex items-center gap-1.5 rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-medium text-slate-300 ring-1 ring-inset ring-white/10">
+                  <i class="fas fa-filter text-[8px] text-slate-500"></i>All Repos
+                  <i class="fas fa-chevron-down text-[8px] text-slate-500 ml-0.5"></i>
+                </button>
+                <span class="text-[10px] text-slate-600">2 repos</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[22px]">
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-amber-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Review PR #342 — sync edge cases</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P1 · mission-control · Effort M</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Fix triage queue sort order bug</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · mission-control · Issue #287</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[14px] font-medium text-slate-100 truncate">Add offline mode to iOS capture</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · mission-control · Issue #301</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="border-t border-white/5 px-4 py-2 text-center">
+                  <span class="text-[11px] text-slate-500">+ 3 more</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Source Group: Local (collapsed) -->
+            <section class="mt-4">
+              <div class="glass flex items-center justify-between rounded-[18px] px-4 py-3">
+                <div class="flex items-center gap-2">
+                  <span class="source-icon bg-emerald-500/15"><i class="fas fa-satellite-dish text-[11px] text-emerald-400"></i></span>
+                  <span class="text-[13px] font-semibold text-slate-200">Local</span>
+                  <span class="text-[11px] text-slate-500">4 tasks</span>
+                </div>
+                <i class="fas fa-chevron-down text-[10px] text-slate-500"></i>
+              </div>
+            </section>
+
+            <!-- Source Group: Calendar (collapsed) -->
+            <section class="mt-3">
+              <div class="glass flex items-center justify-between rounded-[18px] px-4 py-3">
+                <div class="flex items-center gap-2">
+                  <span class="source-icon bg-amber-500/15"><i class="fas fa-calendar text-[11px] text-amber-400"></i></span>
+                  <span class="text-[13px] font-semibold text-slate-200">Calendar</span>
+                  <span class="text-[11px] text-slate-500">2 tasks</span>
+                </div>
+                <i class="fas fa-chevron-down text-[10px] text-slate-500"></i>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 2: All Tasks — Filter Sheet (open) -->
+      <article class="phone-shell">
+        <div class="phone-screen" style="position: relative;">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dimmed list behind -->
+          <div class="px-5 pt-4 opacity-20">
+            <div class="flex items-start gap-3">
+              <button class="glass relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i></button>
+              <div>
+                <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">All Sources</p>
+                <h2 class="mt-1 text-[26px] font-semibold leading-none text-white">All Tasks</h2>
+              </div>
+            </div>
+            <div class="glass mt-3 rounded-[22px] p-4">
+              <div class="h-4 w-40 rounded bg-slate-700/50"></div>
+            </div>
+          </div>
+
+          <!-- Bottom Sheet: Filter / Sort / Group Options -->
+          <div class="absolute inset-x-0 bottom-0 z-20" style="top: 180px;">
+            <div class="absolute inset-0 bg-black/40 rounded-t-[32px]" style="top: -180px; bottom: auto; height: 180px;"></div>
+            <div class="relative h-full rounded-t-[32px] border-t border-white/10 bg-[#0f172a] shadow-[0_-20px_60px_rgba(0,0,0,0.6)]" style="background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);">
+              <!-- Drag handle -->
+              <div class="flex justify-center pt-3 pb-1">
+                <div class="h-1 w-10 rounded-full bg-slate-500/60"></div>
+              </div>
+
+              <div class="px-5 pt-3 pb-24 overflow-hidden">
+                <h3 class="text-[18px] font-semibold text-white">Filter & Sort</h3>
+                <p class="mt-1 text-[12px] text-slate-500">Customize your task view</p>
+
+                <!-- Group By -->
+                <div class="mt-5">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">Group by</p>
+                  <div class="flex flex-wrap gap-2">
+                    <span class="rounded-full bg-sky-500/15 px-3 py-1.5 text-[12px] font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/30">
+                      <i class="fas fa-plug mr-1.5 text-[10px]"></i>Source
+                    </span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                      <i class="fas fa-flag mr-1.5 text-[10px]"></i>Priority
+                    </span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                      <i class="fas fa-folder mr-1.5 text-[10px]"></i>Project
+                    </span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                      <i class="fas fa-calendar mr-1.5 text-[10px]"></i>Due Date
+                    </span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                      <i class="fas fa-tag mr-1.5 text-[10px]"></i>Tag
+                    </span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                      <i class="fas fa-ban mr-1.5 text-[10px]"></i>None (flat)
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Sort Within Groups -->
+                <div class="mt-5">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">Sort within groups</p>
+                  <div class="flex flex-wrap gap-2">
+                    <span class="rounded-full bg-sky-500/15 px-3 py-1.5 text-[12px] font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/30">Priority</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Due date</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Created</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Alphabetical</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Smart Score</span>
+                  </div>
+                </div>
+
+                <!-- Filter Sources -->
+                <div class="mt-5">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">Show sources</p>
+                  <div class="space-y-2">
+                    <div class="flex items-center justify-between px-1">
+                      <div class="flex items-center gap-2.5">
+                        <span class="source-icon bg-blue-500/15"><i class="fab fa-microsoft text-[10px] text-blue-400"></i></span>
+                        <span class="text-[13px] text-slate-200">MS To Do</span>
+                      </div>
+                      <div class="h-5 w-9 rounded-full bg-sky-500 relative"><div class="absolute right-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between px-1">
+                      <div class="flex items-center gap-2.5">
+                        <span class="source-icon bg-violet-500/15"><i class="fab fa-github text-[10px] text-violet-400"></i></span>
+                        <span class="text-[13px] text-slate-200">GitHub</span>
+                      </div>
+                      <div class="h-5 w-9 rounded-full bg-sky-500 relative"><div class="absolute right-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between px-1">
+                      <div class="flex items-center gap-2.5">
+                        <span class="source-icon bg-emerald-500/15"><i class="fas fa-satellite-dish text-[10px] text-emerald-400"></i></span>
+                        <span class="text-[13px] text-slate-200">Local</span>
+                      </div>
+                      <div class="h-5 w-9 rounded-full bg-sky-500 relative"><div class="absolute right-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow"></div></div>
+                    </div>
+                    <div class="flex items-center justify-between px-1">
+                      <div class="flex items-center gap-2.5">
+                        <span class="source-icon bg-amber-500/15"><i class="fas fa-calendar text-[10px] text-amber-400"></i></span>
+                        <span class="text-[13px] text-slate-200">Calendar</span>
+                      </div>
+                      <div class="h-5 w-9 rounded-full bg-sky-500 relative"><div class="absolute right-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow"></div></div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Filter by List (within source) -->
+                <div class="mt-5">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-1">Filter by list / repo</p>
+                  <p class="text-[11px] text-slate-500 mb-3">Drill into specific lists within a source</p>
+
+                  <!-- MS To Do: Grouped list picker -->
+                  <div class="glass rounded-[16px] p-3.5 mb-2.5">
+                    <div class="flex items-center justify-between mb-2.5">
+                      <div class="flex items-center gap-2">
+                        <span class="source-icon bg-blue-500/15" style="width:22px;height:22px;border-radius:6px;"><i class="fab fa-microsoft text-[9px] text-blue-400"></i></span>
+                        <span class="text-[12px] font-medium text-slate-200">MS To Do</span>
+                      </div>
+                      <span class="text-[10px] text-slate-500">3 groups · 12 lists</span>
+                    </div>
+                    <!-- Search within lists -->
+                    <div class="flex items-center gap-2 rounded-[10px] bg-white/5 px-2.5 py-1.5 ring-1 ring-inset ring-white/8 mb-2.5">
+                      <i class="fas fa-search text-[9px] text-slate-500"></i>
+                      <span class="text-[11px] text-slate-500">Search lists...</span>
+                    </div>
+                    <!-- Grouped list hierarchy -->
+                    <div class="space-y-1">
+                      <!-- Group: Work -->
+                      <div>
+                        <div class="flex items-center gap-2 py-1 px-1">
+                          <i class="fas fa-folder text-[9px] text-blue-400/60"></i>
+                          <span class="text-[11px] font-semibold text-slate-300">Work</span>
+                          <span class="text-[10px] text-slate-600">5 lists</span>
+                          <span class="ml-auto rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-300">All selected</span>
+                        </div>
+                        <div class="ml-5 space-y-0.5">
+                          <div class="flex items-center gap-2 py-0.5 px-1">
+                            <div class="h-3.5 w-3.5 rounded border border-sky-400 bg-sky-500/30 flex items-center justify-center"><i class="fas fa-check text-[7px] text-sky-200"></i></div>
+                            <span class="text-[11px] text-slate-300">Projects</span>
+                            <span class="text-[10px] text-slate-600 ml-auto">4</span>
+                          </div>
+                          <div class="flex items-center gap-2 py-0.5 px-1">
+                            <div class="h-3.5 w-3.5 rounded border border-sky-400 bg-sky-500/30 flex items-center justify-center"><i class="fas fa-check text-[7px] text-sky-200"></i></div>
+                            <span class="text-[11px] text-slate-300">Admin</span>
+                            <span class="text-[10px] text-slate-600 ml-auto">2</span>
+                          </div>
+                          <div class="flex items-center gap-2 py-0.5 px-1">
+                            <div class="h-3.5 w-3.5 rounded border border-sky-400 bg-sky-500/30 flex items-center justify-center"><i class="fas fa-check text-[7px] text-sky-200"></i></div>
+                            <span class="text-[11px] text-slate-300">Meetings</span>
+                            <span class="text-[10px] text-slate-600 ml-auto">1</span>
+                          </div>
+                          <div class="flex items-center gap-2 py-0.5 px-1 opacity-50">
+                            <span class="text-[10px] text-slate-500">+ 2 more</span>
+                          </div>
+                        </div>
+                      </div>
+                      <!-- Group: Personal -->
+                      <div>
+                        <div class="flex items-center gap-2 py-1 px-1">
+                          <i class="fas fa-folder text-[9px] text-emerald-400/60"></i>
+                          <span class="text-[11px] font-semibold text-slate-300">Personal</span>
+                          <span class="text-[10px] text-slate-600">4 lists</span>
+                          <span class="ml-auto rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-300">All selected</span>
+                        </div>
+                      </div>
+                      <!-- Group: Ungrouped -->
+                      <div>
+                        <div class="flex items-center gap-2 py-1 px-1">
+                          <i class="fas fa-list text-[9px] text-slate-400/60"></i>
+                          <span class="text-[11px] font-semibold text-slate-300">Ungrouped</span>
+                          <span class="text-[10px] text-slate-600">3 lists</span>
+                          <span class="ml-auto rounded bg-sky-500/20 px-1.5 py-0.5 text-[9px] text-sky-300">All selected</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- GitHub: Repo picker -->
+                  <div class="glass rounded-[16px] p-3.5">
+                    <div class="flex items-center justify-between mb-2.5">
+                      <div class="flex items-center gap-2">
+                        <span class="source-icon bg-violet-500/15" style="width:22px;height:22px;border-radius:6px;"><i class="fab fa-github text-[9px] text-violet-400"></i></span>
+                        <span class="text-[12px] font-medium text-slate-200">GitHub</span>
+                      </div>
+                      <span class="text-[10px] text-slate-500">2 repos</span>
+                    </div>
+                    <div class="space-y-1">
+                      <div class="flex items-center gap-2 py-1 px-1">
+                        <div class="h-3.5 w-3.5 rounded border border-sky-400 bg-sky-500/30 flex items-center justify-center"><i class="fas fa-check text-[7px] text-sky-200"></i></div>
+                        <span class="text-[11px] text-slate-300">mission-control</span>
+                        <span class="text-[10px] text-slate-600 ml-auto">5</span>
+                      </div>
+                      <div class="flex items-center gap-2 py-1 px-1">
+                        <div class="h-3.5 w-3.5 rounded border border-sky-400 bg-sky-500/30 flex items-center justify-center"><i class="fas fa-check text-[7px] text-sky-200"></i></div>
+                        <span class="text-[11px] text-slate-300">dotfiles</span>
+                        <span class="text-[10px] text-slate-600 ml-auto">1</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Status Filter -->
+                <div class="mt-5">
+                  <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 mb-2">Status</p>
+                  <div class="flex flex-wrap gap-2">
+                    <span class="rounded-full bg-sky-500/15 px-3 py-1.5 text-[12px] font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/30">Active</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Completed</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Deferred</span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">All</span>
+                  </div>
+                </div>
+
+                <!-- Apply button -->
+                <button class="mt-6 w-full rounded-[20px] bg-sky-500 px-4 py-3.5 text-[15px] font-semibold text-white shadow-lg shadow-sky-500/25">
+                  Apply Filters
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 z-30 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 3: All Tasks — Filtered to single source (GitHub only) -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-violet-400/90">Filtered</p>
+                  <h2 class="mt-1 text-[30px] font-semibold leading-none text-white">All Tasks</h2>
+                  <p class="mt-2 text-[14px] text-slate-400">6 tasks · GitHub only</p>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200">
+                  <i class="fas fa-search text-[13px]"></i>
+                </button>
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200">
+                  <i class="fas fa-arrow-down-short-wide text-[13px]"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Active filter banner -->
+            <section class="mt-4 flex items-center gap-2 rounded-[16px] bg-violet-500/10 px-3.5 py-2.5 ring-1 ring-inset ring-violet-400/15">
+              <i class="fab fa-github text-[12px] text-violet-300"></i>
+              <p class="flex-1 text-[12px] text-violet-100/80">Showing only <span class="font-semibold text-violet-200">GitHub</span> tasks</p>
+              <button class="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-slate-300">Clear</button>
+            </section>
+
+            <!-- Group by: Priority (within GitHub filter) -->
+            <section class="glass mt-4 rounded-[18px] px-3.5 py-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-[11px] font-medium text-slate-500">Group by:</span>
+                  <span class="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-slate-400">Source</span>
+                  <span class="rounded-full bg-sky-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-sky-200 ring-1 ring-inset ring-sky-400/25">Priority</span>
+                  <span class="rounded-full px-2.5 py-0.5 text-[11px] font-medium text-slate-400">Project</span>
+                </div>
+                <button class="text-[11px] text-slate-500"><i class="fas fa-ellipsis"></i></button>
+              </div>
+            </section>
+
+            <!-- Priority Group: P1 High -->
+            <section class="mt-4">
+              <div class="flex items-center gap-2 px-1 mb-2">
+                <span class="priority-dot bg-amber-400"></span>
+                <span class="text-[13px] font-semibold text-amber-200">High (P1)</span>
+                <span class="text-[11px] text-slate-500">2</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[22px]">
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Review PR #342 — sync edge cases</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Effort M</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Ship iOS widget update to TestFlight</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Issue #315</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+              </div>
+            </section>
+
+            <!-- Priority Group: P2 Medium -->
+            <section class="mt-4">
+              <div class="flex items-center gap-2 px-1 mb-2">
+                <span class="priority-dot bg-blue-400"></span>
+                <span class="text-[13px] font-semibold text-blue-200">Medium (P2)</span>
+                <span class="text-[11px] text-slate-500">3</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[22px]">
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Fix triage queue sort order bug</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Issue #287</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Add offline mode to iOS capture</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Issue #301</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Refactor task model for multi-source</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Issue #298</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+              </div>
+            </section>
+
+            <!-- Priority Group: P3 Low -->
+            <section class="mt-4">
+              <div class="flex items-center gap-2 px-1 mb-2">
+                <span class="priority-dot bg-slate-500"></span>
+                <span class="text-[13px] font-semibold text-slate-300">Low (P3)</span>
+                <span class="text-[11px] text-slate-500">1</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[22px]">
+                <div class="flex items-center gap-3 px-4 py-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[14px] font-medium text-slate-100 truncate">Update README with new sync docs</p>
+                    <p class="mt-0.5 text-[11px] text-slate-500">mission-control · Effort S</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[10px] text-slate-600"></i>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+    </section>
+
+    <!-- Design Notes -->
+    <section class="mx-auto mt-16 max-w-3xl">
+      <h2 class="text-xl font-semibold text-slate-50 mb-4">Design Notes</h2>
+      <div class="glass rounded-[20px] p-6 space-y-4 text-[14px] leading-6 text-slate-300">
+        <div>
+          <h3 class="font-semibold text-slate-100 mb-1">Relationship to Today View</h3>
+          <p>All Tasks uses the same task row pattern (priority dot, truncated title, metadata subtitle) as Today, but adds source-section headers with collapsible groups. Today remains the curated "what's on my plate now" view; All Tasks is the complete inventory.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-100 mb-1">Grouping</h3>
+          <p>Default grouping is <strong>by Source</strong> (per #1578). Users can pivot to Priority, Project, Due Date, or Tag via the inline group-by bar or the full filter sheet. The "None (flat)" option gives a single sorted list.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-100 mb-1">Filtering</h3>
+          <p>Source filter chips provide one-tap access. The bottom-sheet filter panel allows toggling sources on/off, filtering by status (active/completed/deferred), and choosing sort order within groups. Active filters show a dismissible banner.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-100 mb-1">Collapsed Groups</h3>
+          <p>Groups beyond the first two are collapsed by default to keep the initial view scannable. Collapsed groups show source icon + count. Tap to expand. Expand/collapse state is persisted per session.</p>
+        </div>
+        <div>
+          <h3 class="font-semibold text-slate-100 mb-1">Navigation</h3>
+          <p>Accessible from the hamburger menu drawer under "Views" section. Not in the tab bar (that stays focused on daily workflow: Today, Triage, Capture, Sort, Houston).</p>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

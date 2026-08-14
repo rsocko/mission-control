@@ -1,0 +1,2824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — iPhone Core Screens</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['SF Pro Display', 'SF Pro Text', '-apple-system', 'BlinkMacSystemFont', 'Inter', 'sans-serif']
+          },
+          colors: {
+            ios: {
+              blue: '#0a84ff'
+            }
+          },
+          boxShadow: {
+            iphone: '0 28px 60px rgba(2, 6, 23, 0.55), inset 0 1px 0 rgba(255,255,255,0.05)'
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    body {
+      font-family: 'SF Pro Display', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
+    .phone-shell {
+      width: 375px;
+      height: 812px;
+      padding: 12px;
+      border-radius: 46px;
+      background: linear-gradient(180deg, #1f2937 0%, #020617 100%);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.06), 0 28px 60px rgba(2, 6, 23, 0.55);
+      position: relative;
+    }
+
+    .phone-shell::before {
+      content: '';
+      position: absolute;
+      inset: 10px;
+      border-radius: 38px;
+      border: 1px solid rgba(255,255,255,0.05);
+      pointer-events: none;
+    }
+
+    .phone-screen {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      border-radius: 34px;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at top, rgba(59,130,246,0.20), transparent 34%),
+        linear-gradient(180deg, #020617 0%, #0f172a 55%, #020617 100%);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .dynamic-island {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 126px;
+      height: 34px;
+      border-radius: 999px;
+      background: #000;
+      box-shadow: inset 0 -1px 0 rgba(255,255,255,0.06);
+      z-index: 30;
+    }
+
+    .safe-top { padding-top: 48px; }
+
+    .glass {
+      background: rgba(15, 23, 42, 0.68);
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      box-shadow: 0 18px 40px rgba(2, 6, 23, 0.3);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .tab-blur {
+      background: rgba(2, 6, 23, 0.86);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+    }
+
+    .scroll-fade::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 82px;
+      height: 38px;
+      background: linear-gradient(180deg, rgba(2,6,23,0), rgba(2,6,23,0.92));
+      pointer-events: none;
+    }
+
+    .priority-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .chip {
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(30, 41, 59, 0.58);
+    }
+
+    .tab-active { color: #0a84ff; }
+    .tab-inactive { color: #94a3b8; }
+    .tab-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 999px;
+      background: #ef4444;
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-slate-900">
+  <main class="px-6 py-10 md:px-8 xl:px-10">
+    <header class="mb-8 text-center">
+      <p class="text-xs uppercase tracking-[0.35em] text-slate-500">Native iOS Mockup</p>
+      <h1 class="mt-3 text-3xl font-semibold tracking-tight text-slate-50">Mission Control — iPhone Core Screens</h1>
+      <p class="mt-2 text-sm text-slate-400">Premium dark-mode concepts for Today, Triage, Capture, Quick Sort, Houston, and supporting screens.</p>
+    </header>
+
+    <section class="flex flex-wrap justify-center gap-10">
+      <!-- Screen 1a: Today — Compact List View (default) -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span>
+                </button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Today</p>
+                  <h2 class="mt-1 text-[31px] font-semibold leading-none text-white">My Day</h2>
+                  <p class="mt-2 text-[15px] text-slate-400">Monday, Jul 28 · 8 tasks</p>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200">
+                  <i class="fas fa-search text-[13px]"></i>
+                </button>
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200">
+                  <i class="fas fa-sliders"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Collapsible Calendar (compact, only when blocks exist) -->
+            <section class="glass mt-4 rounded-[22px] px-4 py-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-calendar-day text-[12px] text-amber-300"></i>
+                  <span class="text-[12px] font-medium text-slate-300">2 calendar blocks</span>
+                  <span class="chip rounded-full px-2 py-0.5 text-[10px] text-amber-200">9:00 Standup</span>
+                  <span class="chip rounded-full px-2 py-0.5 text-[10px] text-violet-200">1:00 1:1</span>
+                </div>
+                <i class="fas fa-chevron-down text-[10px] text-slate-500"></i>
+              </div>
+            </section>
+
+            <!-- Houston micro-suggestion -->
+            <section class="mt-3 flex items-center gap-2 rounded-[18px] bg-sky-500/8 px-3.5 py-2.5 ring-1 ring-inset ring-sky-400/15">
+              <i class="fas fa-rocket text-[11px] text-sky-300"></i>
+              <p class="text-[12px] text-sky-100/80"><span class="font-medium text-sky-200">Houston:</span> "Start with the CFO email — it unblocks 2 others"</p>
+            </section>
+
+            <!-- Full Task List (compact rows, priority-sorted) -->
+            <section class="mt-4">
+              <div class="glass overflow-hidden rounded-[28px]">
+                <!-- Task 1: Critical — highlighted row -->
+                <div class="flex items-center gap-3 border-b border-white/5 bg-red-500/5 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border-2 border-red-400/60"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-red-400"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Reply to CFO budget email</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P0 · MS To Do · 2d old</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+                <!-- Task 2: Showing RIGHT SWIPE revealed state (scheduling tray) -->
+                <div class="relative border-b border-white/5 overflow-hidden">
+                  <!-- Revealed tray behind the row -->
+                  <div class="absolute inset-y-0 right-0 flex items-stretch">
+                    <div class="flex items-center justify-center bg-sky-600 px-3 text-center">
+                      <div><i class="fas fa-forward text-[12px] text-white"></i><p class="text-[9px] text-sky-100 mt-0.5">Tomorrow</p></div>
+                    </div>
+                    <div class="flex items-center justify-center bg-violet-600 px-3 text-center">
+                      <div><i class="fas fa-calendar text-[12px] text-white"></i><p class="text-[9px] text-violet-100 mt-0.5">Pick Day</p></div>
+                    </div>
+                    <div class="flex items-center justify-center bg-amber-600 px-3 text-center">
+                      <div><i class="fas fa-clock text-[12px] text-white"></i><p class="text-[9px] text-amber-100 mt-0.5">Snooze</p></div>
+                    </div>
+                  </div>
+                  <!-- Row shifted left to reveal tray -->
+                  <div class="relative flex items-center gap-3 px-4 py-3.5 bg-[#0f172a]" style="transform: translateX(-140px);">
+                    <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="priority-dot bg-amber-400"></span>
+                        <p class="text-[15px] font-medium text-slate-100 truncate">Ship triage swipe prototype</p>
+                      </div>
+                      <p class="mt-0.5 text-[11px] text-slate-500">P1 · Local · Effort M</p>
+                    </div>
+                  </div>
+                </div>
+                <!-- Task 3: Showing LEFT SWIPE revealed state (Not Today) -->
+                <div class="relative border-b border-white/5 overflow-hidden">
+                  <!-- Revealed action behind (left side) -->
+                  <div class="absolute inset-y-0 left-0 flex items-center justify-center bg-rose-600 px-5">
+                    <div class="text-center"><i class="fas fa-xmark text-[14px] text-white"></i><p class="text-[9px] text-rose-100 mt-0.5">Not Today</p></div>
+                  </div>
+                  <!-- Row shifted right to reveal left action -->
+                  <div class="relative flex items-center gap-3 px-4 py-3.5 bg-[#0f172a]" style="transform: translateX(80px);">
+                    <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2">
+                        <span class="priority-dot bg-amber-400"></span>
+                        <p class="text-[15px] font-medium text-slate-100 truncate">Finalize Q3 vendor contracts</p>
+                      </div>
+                      <p class="mt-0.5 text-[11px] text-slate-500">P1 · MS To Do · Due tomorrow</p>
+                    </div>
+                  </div>
+                </div>
+                <!-- Task 4 -->
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Review GitHub sync edge cases</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · GitHub · Effort M</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+                <!-- Task 5 -->
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Draft roadmap talking points</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · Local · High energy</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+                <!-- Task 6 -->
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-blue-400"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Check Todoist backlog labels</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P2 · MS To Do · Effort S</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+                <!-- Task 7 -->
+                <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-slate-500"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Book haircut appointment</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P3 · Personal</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+                <!-- Task 8 -->
+                <div class="flex items-center gap-3 px-4 py-3.5">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="priority-dot bg-slate-500"></span>
+                      <p class="text-[15px] font-medium text-slate-100 truncate">Organize Downloads folder</p>
+                    </div>
+                    <p class="mt-0.5 text-[11px] text-slate-500">P3 · Personal · Effort XS</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600"></i>
+                </div>
+              </div>
+            </section>
+
+            <!-- Completed today (collapsed) -->
+            <section class="glass mt-4 rounded-[22px] px-4 py-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-check-circle text-[12px] text-emerald-400"></i>
+                  <span class="text-[13px] font-medium text-slate-300">2 completed today</span>
+                </div>
+                <i class="fas fa-chevron-down text-[10px] text-slate-500"></i>
+              </div>
+            </section>
+
+            <!-- Swipe gesture hint -->
+            <section class="mt-3 flex items-center justify-center gap-4 py-2 text-[11px] text-slate-500">
+              <span><i class="fas fa-arrow-left mr-1 text-rose-400"></i>Not Today</span>
+              <span class="text-slate-700">·</span>
+              <span><i class="fas fa-arrow-right mr-1 text-sky-400"></i>Tomorrow / Pick Day / Snooze</span>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 1b: Today — Task Detail (bottom sheet drawer) -->
+      <article class="phone-shell">
+        <div class="phone-screen" style="position: relative;">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dimmed list behind the sheet -->
+          <div class="px-5 pt-4 opacity-30">
+            <div class="flex items-start gap-3">
+              <button class="glass relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+              <div>
+                <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Today</p>
+                <h2 class="mt-1 text-[26px] font-semibold leading-none text-white">My Day</h2>
+              </div>
+            </div>
+            <div class="glass mt-3 overflow-hidden rounded-[22px]">
+              <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                <span class="h-4 w-4 rounded-full border border-slate-600"></span>
+                <span class="priority-dot bg-red-400"></span>
+                <p class="text-[13px] text-slate-300 truncate">Reply to CFO budget email</p>
+              </div>
+              <div class="flex items-center gap-3 border-b border-white/5 px-4 py-3">
+                <span class="h-4 w-4 rounded-full border border-slate-600"></span>
+                <span class="priority-dot bg-amber-400"></span>
+                <p class="text-[13px] text-slate-300 truncate">Ship triage swipe prototype</p>
+              </div>
+              <div class="flex items-center gap-3 px-4 py-3">
+                <span class="h-4 w-4 rounded-full border border-slate-600"></span>
+                <span class="priority-dot bg-amber-400"></span>
+                <p class="text-[13px] text-slate-300 truncate">Finalize Q3 vendor contracts</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Bottom Sheet Drawer (overlay) -->
+          <div class="absolute inset-x-0 bottom-0 z-20" style="top: 200px;">
+            <!-- Scrim above sheet -->
+            <div class="absolute inset-0 bg-black/40 rounded-t-[32px]" style="top: -200px; bottom: auto; height: 200px;"></div>
+            <!-- Sheet — entire body is draggable to dismiss (iOS standard pattern) -->
+            <div class="relative h-full rounded-t-[32px] border-t border-white/10 bg-[#0f172a] shadow-[0_-20px_60px_rgba(0,0,0,0.6)] flex flex-col" style="background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);">
+              <!-- Drag handle -->
+              <div class="flex justify-center pt-3 pb-2">
+                <div class="h-1 w-10 rounded-full bg-slate-500/60"></div>
+              </div>
+              <p class="px-5 text-center text-[11px] text-slate-500">Drag down anywhere to close</p>
+
+              <!-- Scrollable content area -->
+              <div class="flex-1 overflow-hidden px-5 pt-3">
+                <!-- Task header with color-coded priority -->
+                <div class="flex items-start gap-3">
+                  <span class="priority-dot bg-red-400 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></span>
+                  <h3 class="text-[20px] font-semibold leading-7 text-white flex-1">Reply to CFO budget email</h3>
+                </div>
+                <!-- Priority badge (color-coded) -->
+                <div class="mt-2 ml-5">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold rounded-full text-rose-400 bg-rose-900/40 border border-rose-700/50">P0</span>
+                </div>
+
+                <p class="mt-2 text-[13px] leading-5 text-slate-400">Thread started 2 days ago. CFO waiting on revised numbers before board meeting Friday.</p>
+
+                <!-- Metadata grid -->
+                <div class="mt-3 grid grid-cols-2 gap-2">
+                  <!-- Due -->
+                  <div class="flex items-center gap-2 p-2.5 rounded-xl bg-white/5 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-calendar text-[11px] text-red-400"></i>
+                    <div>
+                      <p class="text-[9px] uppercase text-slate-500 font-medium">Due</p>
+                      <p class="text-[12px] font-medium text-red-400">Overdue · Jul 25</p>
+                    </div>
+                  </div>
+                  <!-- Status (color-coded) -->
+                  <div class="flex items-center gap-2 p-2.5 rounded-xl bg-white/5 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-circle text-[8px] text-slate-400"></i>
+                    <div>
+                      <p class="text-[9px] uppercase text-slate-500 font-medium">Status</p>
+                      <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded text-slate-300 bg-slate-900/40 border border-slate-700/40">To Do</span>
+                    </div>
+                  </div>
+                  <!-- Source (connector icon + list name merged) -->
+                  <div class="col-span-2 flex items-center gap-2 p-2.5 rounded-xl bg-white/5 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-check-square text-[12px] text-blue-400"></i>
+                    <div>
+                      <p class="text-[9px] uppercase text-slate-500 font-medium">Source</p>
+                      <p class="text-[12px] font-medium text-slate-200">Work Tasks</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Project > Phase (separate row with project icon) -->
+                <div class="mt-2 flex items-center gap-2 p-2.5 rounded-xl bg-white/5 ring-1 ring-inset ring-white/5">
+                  <i class="fas fa-diagram-project text-[12px] text-purple-400"></i>
+                  <div class="flex items-center gap-1 text-[12px] font-medium text-slate-200">
+                    <span>Q3 Finance</span>
+                    <i class="fas fa-chevron-right text-[8px] text-slate-500"></i>
+                    <span class="text-slate-400">Budget Review</span>
+                  </div>
+                </div>
+
+                <!-- Tags -->
+                <div class="mt-2.5 flex flex-wrap gap-1.5">
+                  <span class="chip rounded-full px-2.5 py-0.5 text-[11px] text-slate-300"><i class="fas fa-tag mr-1"></i>Finance</span>
+                  <span class="chip rounded-full px-2.5 py-0.5 text-[11px] text-slate-300"><i class="fas fa-weight-hanging mr-1"></i>S</span>
+                  <span class="chip rounded-full px-2.5 py-0.5 text-[11px] text-slate-300"><i class="fas fa-link mr-1"></i>Blocks 2</span>
+                </div>
+
+                <!-- Houston insight -->
+                <div class="mt-2.5 rounded-[18px] bg-sky-500/10 px-3.5 py-2.5 ring-1 ring-inset ring-sky-400/15">
+                  <div class="flex items-center gap-1.5">
+                    <i class="fas fa-rocket text-[10px] text-sky-300"></i>
+                    <span class="text-[11px] font-medium text-sky-200">Houston</span>
+                  </div>
+                  <p class="mt-1 text-[12px] leading-4 text-sky-100/80">Blocks "Q3 contracts" + "Budget prep." Clear it to free your afternoon.</p>
+                </div>
+              </div>
+
+              <!-- Sticky actions at bottom -->
+              <div class="flex-shrink-0 px-5 pb-24 pt-3 border-t border-white/5 space-y-2">
+                <!-- Primary actions -->
+                <div class="grid grid-cols-2 gap-2.5">
+                  <button class="flex items-center justify-center gap-2 rounded-[20px] bg-emerald-500/14 px-3 py-3 text-[13px] font-semibold text-emerald-200 ring-1 ring-inset ring-emerald-400/20">
+                    <i class="fas fa-check text-[12px]"></i> Complete
+                  </button>
+                  <button class="flex items-center justify-center gap-2 rounded-[20px] bg-amber-500/14 px-3 py-3 text-[13px] font-semibold text-amber-200 ring-1 ring-inset ring-amber-400/20">
+                    <i class="fas fa-sun text-[12px]"></i> Not Today
+                  </button>
+                </div>
+                <!-- More button (contains Delete and other deprioritized actions) -->
+                <button class="w-full flex items-center justify-center gap-1.5 rounded-[18px] bg-white/5 px-2 py-2.5 text-[12px] font-medium text-slate-400 ring-1 ring-inset ring-white/5">
+                  <i class="fas fa-ellipsis text-[10px]"></i> More
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 z-30 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 2a: Triage — Stream View (default mobile list) -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <button class="glass relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Content Inbox</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Triage</h2>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="glass flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-th text-[13px]"></i></button>
+                <button class="glass flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-sliders text-[13px]"></i></button>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <section class="glass mt-4 rounded-[20px] px-4 py-3">
+              <div class="flex items-center justify-between text-[12px] text-slate-400">
+                <span><span class="font-semibold text-white">7</span> pending</span>
+                <span class="text-emerald-400">5 actioned today</span>
+              </div>
+              <div class="mt-2 h-2 rounded-full bg-slate-800">
+                <div class="h-2 rounded-full bg-gradient-to-r from-emerald-400 to-sky-400" style="width: 42%"></div>
+              </div>
+            </section>
+
+            <!-- Source filter chips (horizontal scroll) -->
+            <div class="mt-3 flex gap-2 overflow-x-auto pb-1" style="-webkit-overflow-scrolling: touch;">
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">All · 12</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-orange-300"><i class="fab fa-reddit-alien mr-1"></i>Reddit · 4</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-violet-300"><i class="fab fa-github mr-1"></i>GitHub · 3</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-red-300"><i class="fab fa-youtube mr-1"></i>YouTube · 2</span>
+              <span class="chip flex-shrink-0 rounded-full px-3 py-1.5 text-[12px] font-medium text-pink-300"><i class="fab fa-instagram mr-1"></i>IG · 3</span>
+            </div>
+
+            <!-- Stream list items -->
+            <!-- Item 1: Reddit saved post with thumbnail -->
+            <div class="glass mt-4 rounded-[20px] p-4">
+              <div class="flex gap-3">
+                <div class="h-16 w-16 flex-shrink-0 rounded-[12px] bg-gradient-to-br from-orange-500/20 to-orange-900/30 flex items-center justify-center ring-1 ring-inset ring-orange-500/20">
+                  <i class="fab fa-reddit-alien text-orange-400 text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="rounded-full bg-orange-500/12 px-2 py-0.5 text-[10px] font-semibold text-orange-300 ring-1 ring-inset ring-orange-400/25">Reddit</span>
+                    <span class="text-[10px] text-slate-500">r/homelab · 3h ago</span>
+                  </div>
+                  <p class="mt-1 text-[14px] font-medium leading-tight text-slate-100 line-clamp-2">Complete ZFS NAS build guide with 10GbE networking and Docker compose stack</p>
+                  <div class="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span class="text-sky-400 font-medium">AI: 94</span>
+                    <span>·</span>
+                    <span>Link</span>
+                    <span>·</span>
+                    <span>↑ 847</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Quick actions (thumb-reachable) -->
+              <div class="mt-3 flex gap-2">
+                <button class="flex-1 rounded-[14px] bg-blue-500/12 px-3 py-2 text-[11px] font-semibold text-blue-300 ring-1 ring-inset ring-blue-500/20"><i class="fas fa-bookmark mr-1"></i>Save</button>
+                <button class="flex-1 rounded-[14px] bg-emerald-500/12 px-3 py-2 text-[11px] font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-500/20"><i class="fas fa-list-check mr-1"></i>Task</button>
+                <button class="flex-1 rounded-[14px] bg-sky-500/12 px-3 py-2 text-[11px] font-semibold text-sky-300 ring-1 ring-inset ring-sky-500/20"><i class="fas fa-clock mr-1"></i>Snooze</button>
+                <button class="flex-1 rounded-[14px] bg-slate-500/10 px-3 py-2 text-[11px] font-semibold text-slate-400 ring-1 ring-inset ring-slate-500/20"><i class="fas fa-times mr-1"></i>Skip</button>
+              </div>
+            </div>
+
+            <!-- Item 2: GitHub star -->
+            <div class="glass mt-3 rounded-[20px] p-4">
+              <div class="flex gap-3">
+                <div class="h-16 w-16 flex-shrink-0 rounded-[12px] bg-gradient-to-br from-violet-500/20 to-violet-900/30 flex items-center justify-center ring-1 ring-inset ring-violet-500/20">
+                  <i class="fab fa-github text-violet-300 text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="rounded-full bg-violet-500/12 px-2 py-0.5 text-[10px] font-semibold text-violet-300 ring-1 ring-inset ring-violet-400/25">GitHub</span>
+                    <span class="text-[10px] text-slate-500">starred · 1d ago</span>
+                  </div>
+                  <p class="mt-1 text-[14px] font-medium leading-tight text-slate-100 line-clamp-2">anthropics/claude-code — CLI tool for agentic coding with Claude</p>
+                  <div class="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span class="text-sky-400 font-medium">AI: 88</span>
+                    <span>·</span>
+                    <span>Repo</span>
+                    <span>·</span>
+                    <span>★ 12.4k</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Item 3: YouTube video with thumbnail -->
+            <div class="glass mt-3 rounded-[20px] p-4">
+              <div class="flex gap-3">
+                <div class="h-16 w-16 flex-shrink-0 rounded-[12px] bg-gradient-to-br from-red-500/20 to-red-900/30 flex items-center justify-center ring-1 ring-inset ring-red-500/20 relative">
+                  <i class="fab fa-youtube text-red-400 text-[22px]"></i>
+                  <span class="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[9px] text-white">14:32</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="rounded-full bg-red-500/12 px-2 py-0.5 text-[10px] font-semibold text-red-300 ring-1 ring-inset ring-red-400/25">YouTube</span>
+                    <span class="text-[10px] text-slate-500">5h ago</span>
+                  </div>
+                  <p class="mt-1 text-[14px] font-medium leading-tight text-slate-100 line-clamp-2">Why I switched from Proxmox to TrueNAS Scale for my homelab</p>
+                  <div class="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span class="text-sky-400 font-medium">AI: 76</span>
+                    <span>·</span>
+                    <span>Video</span>
+                    <span>·</span>
+                    <span>@TechnoTim</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Item 4: Instagram share -->
+            <div class="glass mt-3 rounded-[20px] p-4">
+              <div class="flex gap-3">
+                <div class="h-16 w-16 flex-shrink-0 rounded-[12px] bg-gradient-to-br from-pink-500/20 to-purple-900/30 flex items-center justify-center ring-1 ring-inset ring-pink-500/20">
+                  <i class="fab fa-instagram text-pink-400 text-[22px]"></i>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="rounded-full bg-pink-500/12 px-2 py-0.5 text-[10px] font-semibold text-pink-300 ring-1 ring-inset ring-pink-400/25">Instagram</span>
+                    <span class="text-[10px] text-slate-500">saved · 2d ago</span>
+                  </div>
+                  <p class="mt-1 text-[14px] font-medium leading-tight text-slate-100 line-clamp-2">Minimal desk setup with walnut monitor arm and cable management</p>
+                  <div class="mt-1.5 flex items-center gap-2 text-[11px] text-slate-500">
+                    <span class="text-sky-400 font-medium">AI: 71</span>
+                    <span>·</span>
+                    <span>Image</span>
+                    <span>·</span>
+                    <span>@minimalsetups</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Swipe hint -->
+            <p class="mt-3 text-center text-[11px] text-slate-600">Swipe right → Done · Swipe left → Dismiss · Tap to expand</p>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-active relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 2b: Triage — Focus Card (swipe mode) -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header with view toggle -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <button class="glass relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Focus Mode</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Triage</h2>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="glass flex h-10 w-10 items-center justify-center rounded-full text-sky-400 ring-1 ring-inset ring-sky-400/30"><i class="fas fa-cards-blank text-[13px]"></i></button>
+              </div>
+            </div>
+
+            <!-- Card position indicator -->
+            <div class="mt-3 flex items-center justify-center gap-2">
+              <span class="text-[12px] text-slate-500">3 of 12</span>
+              <div class="flex gap-1">
+                <div class="h-1.5 w-1.5 rounded-full bg-emerald-400"></div>
+                <div class="h-1.5 w-1.5 rounded-full bg-emerald-400"></div>
+                <div class="h-1.5 w-6 rounded-full bg-sky-400"></div>
+                <div class="h-1.5 w-1.5 rounded-full bg-slate-600"></div>
+                <div class="h-1.5 w-1.5 rounded-full bg-slate-600"></div>
+                <div class="h-1.5 w-1.5 rounded-full bg-slate-600"></div>
+              </div>
+            </div>
+
+            <!-- Large focus card (swipeable) -->
+            <section class="glass mt-4 rounded-[28px] p-5" style="transform: rotate(1.5deg); box-shadow: 0 20px 50px rgba(2,6,23,0.5);">
+              <!-- Source badge & relevance -->
+              <div class="flex items-start justify-between gap-3">
+                <span class="rounded-full bg-orange-500/15 px-3 py-1 text-[11px] font-semibold text-orange-200 ring-1 ring-inset ring-orange-400/25">
+                  <i class="fab fa-reddit-alien mr-1.5"></i>Reddit
+                </span>
+                <div class="text-right">
+                  <p class="text-[12px] font-semibold text-sky-300">AI: 94</p>
+                  <p class="mt-0.5 text-[10px] text-slate-500">r/homelab · 3h ago</p>
+                </div>
+              </div>
+
+              <!-- Content preview -->
+              <h3 class="mt-4 text-[20px] font-semibold leading-7 text-white">Complete ZFS NAS build guide with 10GbE networking</h3>
+              <p class="mt-3 text-[13px] leading-5 text-slate-300 line-clamp-3">Step-by-step guide covering hardware selection, ZFS pool config, Docker Compose for *arr stack, and Tailscale mesh networking for remote access.</p>
+
+              <!-- Metadata chips -->
+              <div class="mt-4 flex flex-wrap gap-1.5">
+                <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-link text-[9px] mr-1 text-slate-500"></i>Link</span>
+                <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-arrow-up text-[9px] mr-1 text-orange-400"></i>847</span>
+                <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-comment text-[9px] mr-1 text-slate-500"></i>124</span>
+              </div>
+
+              <!-- AI suggestion -->
+              <div class="mt-4 rounded-[16px] bg-sky-500/8 p-3 ring-1 ring-inset ring-sky-400/15">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-sparkles text-[11px] text-sky-300"></i>
+                  <span class="text-[11px] font-semibold text-sky-200">Houston suggests</span>
+                </div>
+                <p class="mt-1 text-[12px] text-slate-300">Save to Karakeep → tag "homelab, networking" — matches your NAS research project</p>
+              </div>
+
+              <!-- Swipe direction indicators (visible during gesture) -->
+              <div class="mt-5 flex items-center justify-between px-2 text-[11px]">
+                <span class="text-slate-500"><i class="fas fa-chevron-left mr-1"></i>Dismiss</span>
+                <span class="text-slate-500">Snooze <i class="fas fa-chevron-up ml-1"></i></span>
+                <span class="text-slate-500">Done <i class="fas fa-chevron-right ml-1"></i></span>
+              </div>
+            </section>
+
+            <!-- Routing actions (thumb zone, below card) -->
+            <section class="mt-4 grid grid-cols-4 gap-2 text-center">
+              <button class="glass rounded-[18px] px-2 py-3 flex flex-col items-center gap-1.5">
+                <i class="fas fa-bookmark text-blue-400 text-[16px]"></i>
+                <span class="text-[10px] font-medium text-blue-300">Karakeep</span>
+              </button>
+              <button class="glass rounded-[18px] px-2 py-3 flex flex-col items-center gap-1.5">
+                <i class="fas fa-book text-emerald-400 text-[16px]"></i>
+                <span class="text-[10px] font-medium text-emerald-300">KB</span>
+              </button>
+              <button class="glass rounded-[18px] px-2 py-3 flex flex-col items-center gap-1.5">
+                <i class="fas fa-list-check text-amber-400 text-[16px]"></i>
+                <span class="text-[10px] font-medium text-amber-300">Task</span>
+              </button>
+              <button class="glass rounded-[18px] px-2 py-3 flex flex-col items-center gap-1.5">
+                <i class="fas fa-ellipsis text-slate-400 text-[16px]"></i>
+                <span class="text-[10px] font-medium text-slate-400">More</span>
+              </button>
+            </section>
+
+            <!-- Card behind (peek at next item) -->
+            <div class="mt-2 opacity-40 rounded-[20px] border border-white/5 bg-slate-800/30 p-3 mx-4" style="transform: scale(0.95);">
+              <div class="flex items-center gap-2">
+                <span class="rounded-full bg-violet-500/15 px-2 py-0.5 text-[10px] text-violet-300 ring-1 ring-inset ring-violet-400/25"><i class="fab fa-github mr-1"></i>GitHub</span>
+                <span class="text-[11px] text-slate-500 truncate">anthropics/claude-code — CLI tool for agentic coding</span>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-active relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Capture</p>
+                  <h2 class="mt-1 text-[30px] font-semibold text-white">Quick Capture</h2>
+                  <p class="mt-2 text-[14px] text-slate-400">Fast enough to trust in the moment.</p>
+                </div>
+              </div>
+            </div>
+
+            <section class="glass mt-5 rounded-[32px] p-5">
+              <div class="rounded-[28px] bg-white/5 p-5 ring-1 ring-inset ring-white/5">
+                <p class="text-[12px] uppercase tracking-[0.2em] text-slate-500">New item</p>
+                <div class="mt-5 min-h-[130px] text-[28px] font-medium leading-9 text-slate-500">What's on your mind?</div>
+              </div>
+
+              <div class="mt-4 grid grid-cols-3 gap-3 text-center text-[13px] font-medium">
+                <div class="rounded-[22px] bg-sky-500/14 px-3 py-3 text-sky-100 ring-1 ring-inset ring-sky-400/20"><i class="fas fa-microphone mb-2 block text-[18px]"></i>Voice</div>
+                <div class="rounded-[22px] bg-white/5 px-3 py-3 text-slate-100 ring-1 ring-inset ring-white/5"><i class="fas fa-camera mb-2 block text-[18px]"></i>Camera</div>
+                <div class="rounded-[22px] bg-white/5 px-3 py-3 text-slate-100 ring-1 ring-inset ring-white/5"><i class="fas fa-link mb-2 block text-[18px]"></i>Link</div>
+              </div>
+            </section>
+
+            <section class="mt-5 flex flex-wrap gap-2">
+              <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200"><i class="fas fa-briefcase mr-1.5"></i>Project: iOS Beta</span>
+              <span class="chip rounded-full px-3 py-2 text-[12px] text-yellow-200">⚡ Energy</span>
+              <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200"><i class="fas fa-calendar-day mr-1.5"></i>Due date</span>
+              <span class="rounded-full bg-sky-500/18 px-3 py-2 text-[12px] font-medium text-sky-100 ring-1 ring-inset ring-sky-400/25">Needs Triage</span>
+            </section>
+
+            <section class="mt-5">
+              <div class="mb-3 flex items-center justify-between">
+                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500">Recent captures</h3>
+                <span class="text-[12px] text-slate-500">Last 5</span>
+              </div>
+              <div class="glass overflow-hidden rounded-[28px]">
+                <div class="flex items-center justify-between border-b border-white/5 px-4 py-3.5">
+                  <div>
+                    <p class="text-[15px] font-medium text-slate-100">Follow up with design on swipe haptics</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">Voice memo</p>
+                  </div>
+                  <span class="text-[12px] text-slate-400">2m</span>
+                </div>
+                <div class="flex items-center justify-between border-b border-white/5 px-4 py-3.5">
+                  <div>
+                    <p class="text-[15px] font-medium text-slate-100">OCR receipt for app store budget</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">Camera</p>
+                  </div>
+                  <span class="text-[12px] text-slate-400">14m</span>
+                </div>
+                <div class="flex items-center justify-between border-b border-white/5 px-4 py-3.5">
+                  <div>
+                    <p class="text-[15px] font-medium text-slate-100">https://developer.apple.com/design/human-interface-guidelines/</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">Shared link</p>
+                  </div>
+                  <span class="text-[12px] text-slate-400">27m</span>
+                </div>
+                <div class="flex items-center justify-between border-b border-white/5 px-4 py-3.5">
+                  <div>
+                    <p class="text-[15px] font-medium text-slate-100">Refine plan/defer wording in triage card</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">Typed</p>
+                  </div>
+                  <span class="text-[12px] text-slate-400">1h</span>
+                </div>
+                <div class="flex items-center justify-between px-4 py-3.5">
+                  <div>
+                    <p class="text-[15px] font-medium text-slate-100">Send TestFlight summary to pilot group</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">Voice memo</p>
+                  </div>
+                  <span class="text-[12px] text-slate-400">2h</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-active -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i><span class="mt-0.5 text-[10px]">Capture</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 4: Quick Sort (replaces Inbox) -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Sorting</p>
+                  <h2 class="mt-1 text-[30px] font-semibold text-white">Quick Sort</h2>
+                  <p class="mt-2 text-[14px] text-slate-400">Swipe to classify · 14 remaining</p>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-filter"></i></button>
+            </div>
+
+            <!-- Mode Selector Pills -->
+            <section class="mt-4 flex gap-2 overflow-hidden">
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-amber-400/30" style="background: rgba(245,158,11,0.20);">
+                <i class="fas fa-circle-exclamation mr-1 text-[10px]"></i>Priority · 8
+              </span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                <i class="fas fa-weight-hanging mr-1 text-[10px]"></i>Effort · 4
+              </span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">
+                <i class="fas fa-tag mr-1 text-[10px]"></i>Tags · 2
+              </span>
+            </section>
+
+            <!-- Activity Banner -->
+            <section class="glass mt-4 rounded-[24px] p-3.5">
+              <div class="flex items-center justify-between text-[12px]">
+                <span class="text-slate-400">Session progress</span>
+                <span class="font-medium text-emerald-300">6 sorted today</span>
+              </div>
+              <div class="mt-2.5 h-2 rounded-full bg-slate-800">
+                <div class="h-2 rounded-full bg-gradient-to-r from-amber-400 to-amber-500" style="width: 43%"></div>
+              </div>
+            </section>
+
+            <!-- Card Stack (top card expanded) -->
+            <section class="relative mt-5">
+              <!-- Background card 2 (peeking) -->
+              <div class="absolute left-3 right-3 top-3 h-[260px] rounded-[30px] bg-white/3 ring-1 ring-inset ring-white/5"></div>
+              <!-- Background card 1 (peeking) -->
+              <div class="absolute left-1.5 right-1.5 top-1.5 h-[268px] rounded-[31px] bg-white/4 ring-1 ring-inset ring-white/6"></div>
+              <!-- Top card -->
+              <div class="glass relative rounded-[32px] p-5">
+                <!-- Source & metadata -->
+                <div class="flex items-start justify-between gap-3">
+                  <span class="rounded-full bg-blue-500/15 px-3 py-1 text-[11px] font-semibold text-blue-200 ring-1 ring-inset ring-blue-400/25">
+                    <i class="fas fa-check-square mr-1.5"></i>MS To Do
+                  </span>
+                  <div class="text-right">
+                    <p class="text-[12px] text-slate-500">3 days old</p>
+                  </div>
+                </div>
+                <!-- Task title -->
+                <h3 class="mt-4 text-[20px] font-semibold leading-7 text-white">Finalize Q3 vendor contracts and send for legal review</h3>
+                <p class="mt-2 text-[13px] leading-5 text-slate-400">From "Work" list · no priority set</p>
+
+                <!-- AI Suggestion -->
+                <div class="mt-4 rounded-[22px] bg-violet-500/10 px-4 py-3 ring-1 ring-inset ring-violet-400/20">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-sparkles text-[12px] text-violet-300"></i>
+                    <span class="text-[12px] font-semibold text-violet-200">Houston suggests</span>
+                  </div>
+                  <p class="mt-1.5 text-[13px] text-violet-100/80">Priority: <span class="font-semibold text-amber-300">High (P1)</span> — deadline-sensitive, external dependency</p>
+                </div>
+
+                <!-- Priority Action Buttons -->
+                <div class="mt-5 grid grid-cols-4 gap-2 text-center text-[12px] font-semibold">
+                  <div class="rounded-[18px] bg-red-500/14 px-2 py-3 text-red-200 ring-1 ring-inset ring-red-400/20">
+                    <div class="text-[14px]">P0</div>
+                    <div class="mt-0.5 text-[10px] font-normal text-red-300/70">Critical</div>
+                  </div>
+                  <div class="rounded-[18px] bg-amber-500/14 px-2 py-3 text-amber-200 ring-1 ring-inset ring-amber-400/25 shadow-lg shadow-amber-500/10">
+                    <div class="text-[14px]">P1</div>
+                    <div class="mt-0.5 text-[10px] font-normal text-amber-300/70">High</div>
+                  </div>
+                  <div class="rounded-[18px] bg-blue-500/14 px-2 py-3 text-blue-200 ring-1 ring-inset ring-blue-400/20">
+                    <div class="text-[14px]">P2</div>
+                    <div class="mt-0.5 text-[10px] font-normal text-blue-300/70">Medium</div>
+                  </div>
+                  <div class="rounded-[18px] bg-slate-500/12 px-2 py-3 text-slate-300 ring-1 ring-inset ring-slate-400/20">
+                    <div class="text-[14px]">P3</div>
+                    <div class="mt-0.5 text-[10px] font-normal text-slate-400/70">Low</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Swipe Gesture Hints -->
+            <section class="glass mt-4 rounded-[24px] px-4 py-3">
+              <div class="flex items-center justify-between text-[12px]">
+                <div class="flex items-center gap-2 text-slate-400">
+                  <span class="text-violet-300">← Accept AI</span>
+                  <span class="text-slate-600">·</span>
+                  <span class="text-sky-300">→ Accept P1</span>
+                  <span class="text-slate-600">·</span>
+                  <span class="text-slate-400">↑ Skip</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-active relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 5: Houston AI Assistant -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">AI Assistant</p>
+                  <h2 class="mt-1 text-[30px] font-semibold text-white">Houston</h2>
+                </div>
+              </div>
+              <button class="glass flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-clock-rotate-left text-[14px]"></i></button>
+            </div>
+
+            <!-- Greeting / Status -->
+            <section class="glass mt-5 rounded-[28px] p-5">
+              <div class="flex items-center gap-3">
+                <div class="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500 shadow-lg shadow-sky-500/20">
+                  <i class="fas fa-rocket text-[18px] text-white"></i>
+                </div>
+                <div>
+                  <p class="text-[16px] font-semibold text-white">Good evening, Ryan</p>
+                  <p class="text-[13px] text-slate-400">3 insights since your last check-in</p>
+                </div>
+              </div>
+            </section>
+
+            <!-- Proactive Insights -->
+            <section class="mt-4 space-y-3">
+              <div class="glass rounded-[24px] px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-amber-500/15 text-[12px] text-amber-300"><i class="fas fa-triangle-exclamation"></i></span>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-slate-100">2 tasks at risk of slipping</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">"Vendor contracts" due tomorrow, no subtasks started</p>
+                  </div>
+                  <i class="fas fa-chevron-right mt-1 text-[12px] text-slate-500"></i>
+                </div>
+              </div>
+              <div class="glass rounded-[24px] px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-emerald-500/15 text-[12px] text-emerald-300"><i class="fas fa-chart-line"></i></span>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-slate-100">Completion rate up 18%</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">You cleared 12 tasks this week vs 9 avg</p>
+                  </div>
+                  <i class="fas fa-chevron-right mt-1 text-[12px] text-slate-500"></i>
+                </div>
+              </div>
+              <div class="glass rounded-[24px] px-4 py-3.5">
+                <div class="flex items-start gap-3">
+                  <span class="mt-0.5 flex h-7 w-7 items-center justify-center rounded-full bg-sky-500/15 text-[12px] text-sky-300"><i class="fas fa-lightbulb"></i></span>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-slate-100">Suggested: batch email tasks</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">4 email tasks could be a 30-min block</p>
+                  </div>
+                  <i class="fas fa-chevron-right mt-1 text-[12px] text-slate-500"></i>
+                </div>
+              </div>
+            </section>
+
+            <!-- Quick Actions -->
+            <section class="mt-5">
+              <p class="mb-3 px-1 text-[12px] font-semibold uppercase tracking-[0.2em] text-slate-500">Quick prompts</p>
+              <div class="flex flex-wrap gap-2">
+                <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200">Plan my tomorrow</span>
+                <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200">What's at risk?</span>
+                <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200">Weekly summary</span>
+                <span class="chip rounded-full px-3 py-2 text-[12px] text-slate-200">Reschedule overdue</span>
+              </div>
+            </section>
+
+            <!-- Chat Input -->
+            <section class="glass mt-5 rounded-[28px] p-3">
+              <div class="flex items-center gap-3 rounded-[22px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/5">
+                <i class="fas fa-microphone text-sky-300"></i>
+                <span class="flex-1 text-[15px] text-slate-500">Ask Houston anything…</span>
+                <i class="fas fa-paper-plane text-slate-500"></i>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+    </section>
+
+    <!-- Additional Screens: Navigation, Features & States -->
+    <header class="mb-8 mt-16 text-center">
+      <p class="text-xs uppercase tracking-[0.35em] text-slate-500">Additional Screens</p>
+      <h2 class="mt-3 text-2xl font-semibold tracking-tight text-slate-50">Navigation, States & Features</h2>
+      <p class="mt-2 text-sm text-slate-400">Hamburger menu, notifications, search, editing, Houston chat, empty states, and onboarding.</p>
+    </header>
+
+    <section class="flex flex-wrap justify-center gap-10">
+      <!-- Screen 6: Hamburger Menu (slide-out drawer) -->
+      <article class="phone-shell">
+        <div class="phone-screen" style="position: relative;">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dimmed content behind -->
+          <div class="px-5 pt-4 opacity-15">
+            <div class="glass mt-1 rounded-[22px] p-4">
+              <div class="h-4 w-32 rounded bg-slate-700/50"></div>
+              <div class="mt-3 h-3 w-48 rounded bg-slate-700/30"></div>
+            </div>
+            <div class="glass mt-3 rounded-[22px] p-4">
+              <div class="h-4 w-40 rounded bg-slate-700/50"></div>
+            </div>
+          </div>
+
+          <!-- Slide-out drawer panel -->
+          <div class="absolute inset-y-0 left-0 z-20 w-[280px]" style="background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%); border-right: 1px solid rgba(255,255,255,0.06);">
+            <div class="safe-top px-5">
+              <div class="flex items-center justify-between pt-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500">
+                    <span class="text-[14px] font-bold text-white">RS</span>
+                  </div>
+                  <div>
+                    <p class="text-[14px] font-semibold text-white">Ryan Socko</p>
+                    <p class="text-[11px] text-slate-500">Pro plan</p>
+                  </div>
+                </div>
+                <button class="text-slate-400"><i class="fas fa-xmark text-[16px]"></i></button>
+              </div>
+            </div>
+
+            <div class="mt-6 px-5 overflow-y-auto" style="max-height: 620px;">
+              <!-- Search bar -->
+              <div class="flex items-center gap-2.5 rounded-[14px] bg-white/5 px-3.5 py-2.5 ring-1 ring-inset ring-white/10 mb-5">
+                <i class="fas fa-search text-[12px] text-slate-400"></i>
+                <span class="text-[13px] text-slate-500">Search tasks, triage, notes...</span>
+              </div>
+
+              <!-- Views section -->
+              <p class="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Views</p>
+              <div class="mt-2 space-y-0.5">
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-blue-400/15"><i class="fas fa-grid-2 text-[11px] text-blue-400"></i></span>Dashboard
+                </a>
+                <a class="flex items-center justify-between gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <div class="flex items-center gap-3">
+                    <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-cyan-400/15"><i class="fas fa-list-check text-[11px] text-cyan-400"></i></span>All Tasks
+                  </div>
+                  <span class="text-[10px] text-slate-500">23</span>
+                </a>
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-violet-400/15"><i class="fas fa-diagram-project text-[11px] text-violet-400"></i></span>Projects
+                </a>
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-rose-400/15"><i class="fas fa-bullseye text-[11px] text-rose-400"></i></span>Goals
+                </a>
+              </div>
+
+              <!-- Workflow section -->
+              <p class="mt-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">Workflow</p>
+              <div class="mt-2 space-y-0.5">
+                <a class="flex items-center justify-between gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <div class="flex items-center gap-3">
+                    <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-yellow-400/15"><i class="fas fa-bell text-[11px] text-yellow-400"></i></span>Notifications
+                  </div>
+                  <span class="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">3</span>
+                </a>
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-emerald-400/15"><i class="fas fa-repeat text-[11px] text-emerald-400"></i></span>Routines
+                </a>
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-pink-400/15"><i class="fas fa-chart-line text-[11px] text-pink-400"></i></span>Insights
+                </a>
+              </div>
+
+              <!-- System section -->
+              <p class="mt-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">System</p>
+              <div class="mt-2 space-y-0.5">
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-slate-400/15"><i class="fas fa-gear text-[11px] text-slate-400"></i></span>Settings
+                </a>
+                <a class="flex items-center gap-3 rounded-[12px] px-3 py-2.5 text-[14px] font-medium text-slate-200 hover:bg-white/5">
+                  <span class="flex h-7 w-7 items-center justify-center rounded-[8px] bg-blue-400/15"><i class="fas fa-arrows-rotate text-[11px] text-blue-400"></i></span>Sync Status
+                  <span class="ml-auto text-[10px] text-emerald-400"><i class="fas fa-circle text-[6px] mr-1"></i>Synced</span>
+                </a>
+              </div>
+
+              <!-- Version -->
+              <p class="mt-6 text-center text-[11px] text-slate-600">Mission Control v2.4.0</p>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 7: Notifications -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Activity</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Notifications</h2>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-check-double text-[13px]"></i></button>
+            </div>
+
+            <!-- Filter tabs -->
+            <div class="mt-4 flex gap-2">
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">All</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Unread · 3</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Mentions</span>
+            </div>
+
+            <!-- Notification items -->
+            <div class="mt-4 space-y-2">
+              <!-- Unread: Sync complete -->
+              <div class="glass rounded-[18px] p-4 ring-1 ring-inset ring-sky-400/15 bg-sky-500/5">
+                <div class="flex gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/15"><i class="fas fa-arrows-rotate text-[12px] text-emerald-400"></i></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium text-slate-100">Reddit sync completed</p>
+                    <p class="mt-0.5 text-[12px] text-slate-400">4 new items imported from r/homelab, r/selfhosted</p>
+                    <p class="mt-1 text-[11px] text-slate-500">2 min ago</p>
+                  </div>
+                  <div class="h-2 w-2 mt-1.5 rounded-full bg-sky-400 flex-shrink-0"></div>
+                </div>
+              </div>
+
+              <!-- Unread: Houston insight -->
+              <div class="glass rounded-[18px] p-4 ring-1 ring-inset ring-sky-400/15 bg-sky-500/5">
+                <div class="flex gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-violet-500/15"><i class="fas fa-rocket text-[12px] text-violet-400"></i></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium text-slate-100">Houston: Task at risk</p>
+                    <p class="mt-0.5 text-[12px] text-slate-400">"Vendor contracts" is due tomorrow with 0 subtasks started</p>
+                    <p class="mt-1 text-[11px] text-slate-500">14 min ago</p>
+                  </div>
+                  <div class="h-2 w-2 mt-1.5 rounded-full bg-sky-400 flex-shrink-0"></div>
+                </div>
+              </div>
+
+              <!-- Unread: Task overdue -->
+              <div class="glass rounded-[18px] p-4 ring-1 ring-inset ring-sky-400/15 bg-sky-500/5">
+                <div class="flex gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-red-500/15"><i class="fas fa-clock text-[12px] text-red-400"></i></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium text-slate-100">Overdue: CFO budget email</p>
+                    <p class="mt-0.5 text-[12px] text-slate-400">This task was due yesterday and is still open</p>
+                    <p class="mt-1 text-[11px] text-slate-500">1 hour ago</p>
+                  </div>
+                  <div class="h-2 w-2 mt-1.5 rounded-full bg-sky-400 flex-shrink-0"></div>
+                </div>
+              </div>
+
+              <!-- Read: Routine completed -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500/15"><i class="fas fa-check-circle text-[12px] text-emerald-400"></i></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium text-slate-300">Morning routine completed</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">3 of 3 items checked off</p>
+                    <p class="mt-1 text-[11px] text-slate-600">Yesterday, 8:42 AM</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Read: Weekly digest -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex gap-3">
+                  <span class="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-sky-500/15"><i class="fas fa-chart-pie text-[12px] text-sky-400"></i></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-[13px] font-medium text-slate-300">Weekly productivity report ready</p>
+                    <p class="mt-0.5 text-[12px] text-slate-500">12 tasks completed, 3 deferred, 1 deleted</p>
+                    <p class="mt-1 text-[11px] text-slate-600">Yesterday, 6:00 PM</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 8: Global Search -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Search bar -->
+            <div class="glass flex items-center gap-3 rounded-[20px] px-4 py-3">
+              <i class="fas fa-search text-[14px] text-slate-400"></i>
+              <span class="flex-1 text-[15px] text-white">budget<span class="animate-pulse text-sky-400">|</span></span>
+              <button class="text-slate-400"><i class="fas fa-xmark text-[14px]"></i></button>
+            </div>
+
+            <!-- Scope filter -->
+            <div class="mt-3 flex gap-2">
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">All</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Tasks</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Triage</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Notes</span>
+            </div>
+
+            <!-- Results -->
+            <p class="mt-4 text-[12px] text-slate-500">4 results for "budget"</p>
+
+            <div class="mt-3 space-y-2">
+              <!-- Task result -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                  <span class="rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] text-amber-300">Task</span>
+                  <span>MS To Do · P0</span>
+                </div>
+                <p class="mt-1.5 text-[14px] font-medium text-slate-100">Reply to CFO <mark class="rounded bg-sky-500/25 px-0.5 text-sky-200">budget</mark> email</p>
+                <p class="mt-1 text-[12px] text-slate-400">Due: yesterday · Critical priority</p>
+              </div>
+
+              <!-- Task result -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                  <span class="rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] text-amber-300">Task</span>
+                  <span>MS To Do · P2</span>
+                </div>
+                <p class="mt-1.5 text-[14px] font-medium text-slate-100">Prepare Q4 <mark class="rounded bg-sky-500/25 px-0.5 text-sky-200">budget</mark> forecast spreadsheet</p>
+                <p class="mt-1 text-[12px] text-slate-400">Due: Aug 5 · Medium priority</p>
+              </div>
+
+              <!-- Triage result -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                  <span class="rounded-full bg-orange-400/15 px-2 py-0.5 text-[10px] text-orange-300">Triage</span>
+                  <span>Reddit · r/startups</span>
+                </div>
+                <p class="mt-1.5 text-[14px] font-medium text-slate-100">How we cut our SaaS <mark class="rounded bg-sky-500/25 px-0.5 text-sky-200">budget</mark> by 40% with self-hosting</p>
+                <p class="mt-1 text-[12px] text-slate-400">Saved 2 days ago · AI: 82</p>
+              </div>
+
+              <!-- Note/capture result -->
+              <div class="glass rounded-[18px] p-4">
+                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                  <span class="rounded-full bg-sky-400/15 px-2 py-0.5 text-[10px] text-sky-300">Capture</span>
+                  <span>Voice memo</span>
+                </div>
+                <p class="mt-1.5 text-[14px] font-medium text-slate-100">OCR receipt for app store <mark class="rounded bg-sky-500/25 px-0.5 text-sky-200">budget</mark></p>
+                <p class="mt-1 text-[12px] text-slate-400">Captured 14 min ago</p>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 9: Task Edit (bottom sheet) -->
+      <article class="phone-shell">
+        <div class="phone-screen" style="position: relative;">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dimmed list behind -->
+          <div class="px-5 pt-4 opacity-20">
+            <div class="glass rounded-[22px] p-4">
+              <div class="h-4 w-32 rounded bg-slate-700/50"></div>
+              <div class="mt-3 space-y-2">
+                <div class="h-3 w-full rounded bg-slate-700/30"></div>
+                <div class="h-3 w-3/4 rounded bg-slate-700/30"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Edit bottom sheet -->
+          <div class="absolute inset-x-0 bottom-0 z-20" style="top: 140px;">
+            <div class="relative h-full rounded-t-[32px] border-t border-white/10 bg-[#0f172a] shadow-[0_-20px_60px_rgba(0,0,0,0.6)]" style="background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);">
+              <div class="flex justify-center pt-3 pb-1">
+                <div class="h-1 w-10 rounded-full bg-slate-500/60"></div>
+              </div>
+
+              <!-- Header with Save/Cancel -->
+              <div class="flex items-center justify-between px-5 py-2">
+                <button class="text-[14px] text-slate-400">Cancel</button>
+                <span class="text-[14px] font-semibold text-white">Edit Task</span>
+                <button class="text-[14px] font-semibold text-sky-400">Save</button>
+              </div>
+
+              <div class="px-5 pt-2 pb-24 overflow-y-auto" style="max-height: 520px;">
+                <!-- Title field -->
+                <div class="mt-2">
+                  <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Title</label>
+                  <div class="mt-1.5 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10">
+                    <p class="text-[15px] text-white">Reply to CFO budget email</p>
+                  </div>
+                </div>
+
+                <!-- Description field -->
+                <div class="mt-4">
+                  <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Description</label>
+                  <div class="mt-1.5 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10 min-h-[80px]">
+                    <p class="text-[14px] text-slate-300 leading-5">Thread started 2 days ago. CFO waiting on revised numbers before board meeting Friday.</p>
+                  </div>
+                </div>
+
+                <!-- Metadata grid -->
+                <div class="mt-4 grid grid-cols-2 gap-3">
+                  <!-- Priority -->
+                  <div>
+                    <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Priority</label>
+                    <div class="mt-1.5 flex items-center gap-2 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10">
+                      <span class="priority-dot bg-red-400"></span>
+                      <span class="text-[14px] text-red-300">Critical</span>
+                      <i class="fas fa-chevron-down ml-auto text-[10px] text-slate-500"></i>
+                    </div>
+                  </div>
+
+                  <!-- Effort -->
+                  <div>
+                    <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Effort</label>
+                    <div class="mt-1.5 flex items-center gap-2 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10">
+                      <i class="fas fa-weight-hanging text-[11px] text-slate-400"></i>
+                      <span class="text-[14px] text-slate-200">Small</span>
+                      <i class="fas fa-chevron-down ml-auto text-[10px] text-slate-500"></i>
+                    </div>
+                  </div>
+
+                  <!-- Due date -->
+                  <div>
+                    <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Due Date</label>
+                    <div class="mt-1.5 flex items-center gap-2 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10">
+                      <i class="fas fa-calendar text-[11px] text-amber-400"></i>
+                      <span class="text-[14px] text-amber-300">Yesterday</span>
+                      <i class="fas fa-chevron-down ml-auto text-[10px] text-slate-500"></i>
+                    </div>
+                  </div>
+
+                  <!-- Source -->
+                  <div>
+                    <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Source</label>
+                    <div class="mt-1.5 flex items-center gap-2 rounded-[14px] bg-white/5 px-4 py-3 ring-1 ring-inset ring-white/10">
+                      <i class="fas fa-check-square text-[11px] text-blue-400"></i>
+                      <span class="text-[14px] text-slate-200">MS To Do</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Tags -->
+                <div class="mt-4">
+                  <label class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500">Tags</label>
+                  <div class="mt-1.5 flex flex-wrap gap-2">
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] text-slate-200">Finance <i class="fas fa-xmark ml-1.5 text-[9px] text-slate-500"></i></span>
+                    <span class="chip rounded-full px-3 py-1.5 text-[12px] text-slate-200">Board <i class="fas fa-xmark ml-1.5 text-[9px] text-slate-500"></i></span>
+                    <button class="chip rounded-full px-3 py-1.5 text-[12px] text-sky-400">+ Add tag</button>
+                  </div>
+                </div>
+
+                <!-- Delete button -->
+                <button class="mt-6 w-full rounded-[14px] bg-red-500/10 py-3 text-center text-[14px] font-medium text-red-400 ring-1 ring-inset ring-red-500/20">
+                  <i class="fas fa-trash mr-2"></i>Delete Task
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 z-30 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 10: Houston Conversation Thread -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <!-- Header -->
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Conversation</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Houston</h2>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-rotate-right text-[13px]"></i></button>
+            </div>
+
+            <!-- Chat messages -->
+            <div class="mt-5 space-y-4">
+              <!-- User message -->
+              <div class="flex justify-end">
+                <div class="max-w-[75%] rounded-[20px] rounded-tr-[6px] bg-sky-600 px-4 py-3">
+                  <p class="text-[14px] leading-5 text-white">What's at risk for this week?</p>
+                </div>
+              </div>
+
+              <!-- Houston response -->
+              <div class="flex gap-2.5">
+                <div class="flex-shrink-0 mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500">
+                  <i class="fas fa-rocket text-[10px] text-white"></i>
+                </div>
+                <div class="max-w-[80%] rounded-[20px] rounded-tl-[6px] glass px-4 py-3">
+                  <p class="text-[14px] leading-5 text-slate-100">I see <span class="font-semibold text-amber-300">2 tasks at risk</span> this week:</p>
+                  <div class="mt-3 space-y-2">
+                    <div class="rounded-[12px] bg-red-500/10 px-3 py-2 ring-1 ring-inset ring-red-500/15">
+                      <p class="text-[13px] font-medium text-red-200">Vendor contracts</p>
+                      <p class="text-[11px] text-slate-400">Due tomorrow · 0 subtasks done</p>
+                    </div>
+                    <div class="rounded-[12px] bg-amber-500/10 px-3 py-2 ring-1 ring-inset ring-amber-500/15">
+                      <p class="text-[13px] font-medium text-amber-200">CFO budget email</p>
+                      <p class="text-[11px] text-slate-400">Overdue by 1 day · Blocks 2 tasks</p>
+                    </div>
+                  </div>
+                  <p class="mt-3 text-[13px] leading-5 text-slate-300">Would you like me to suggest a plan to tackle these first thing tomorrow?</p>
+                </div>
+              </div>
+
+              <!-- User message -->
+              <div class="flex justify-end">
+                <div class="max-w-[75%] rounded-[20px] rounded-tr-[6px] bg-sky-600 px-4 py-3">
+                  <p class="text-[14px] leading-5 text-white">Yes, plan my tomorrow morning</p>
+                </div>
+              </div>
+
+              <!-- Houston response with actions -->
+              <div class="flex gap-2.5">
+                <div class="flex-shrink-0 mt-1 flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500">
+                  <i class="fas fa-rocket text-[10px] text-white"></i>
+                </div>
+                <div class="max-w-[80%] rounded-[20px] rounded-tl-[6px] glass px-4 py-3">
+                  <p class="text-[13px] leading-5 text-slate-100">Here's your suggested morning block:</p>
+                  <div class="mt-2 space-y-1.5 text-[12px]">
+                    <div class="flex items-center gap-2 text-slate-200"><span class="text-slate-500">9:00</span> Reply to CFO budget email (15m)</div>
+                    <div class="flex items-center gap-2 text-slate-200"><span class="text-slate-500">9:15</span> Standup (30m)</div>
+                    <div class="flex items-center gap-2 text-slate-200"><span class="text-slate-500">9:45</span> Finalize vendor contracts (45m)</div>
+                    <div class="flex items-center gap-2 text-slate-200"><span class="text-slate-500">10:30</span> Review GitHub sync issues (30m)</div>
+                  </div>
+                  <!-- Action buttons -->
+                  <div class="mt-3 flex gap-2">
+                    <button class="flex-1 rounded-[12px] bg-emerald-500/14 px-3 py-2 text-[12px] font-semibold text-emerald-300 ring-1 ring-inset ring-emerald-400/20">Apply Plan</button>
+                    <button class="flex-1 rounded-[12px] bg-white/5 px-3 py-2 text-[12px] font-semibold text-slate-300 ring-1 ring-inset ring-white/10">Adjust</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Chat input (pinned to bottom) -->
+          <div class="absolute inset-x-0 bottom-[82px] z-10 px-5 pb-3 pt-2" style="background: linear-gradient(180deg, transparent 0%, rgba(2,6,23,0.95) 30%);">
+            <div class="glass flex items-center gap-3 rounded-[22px] px-4 py-3">
+              <i class="fas fa-microphone text-sky-300"></i>
+              <span class="flex-1 text-[14px] text-slate-500">Ask Houston...</span>
+              <i class="fas fa-paper-plane text-slate-500"></i>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 11: Triage Item Detail (expanded) -->
+      <article class="phone-shell">
+        <div class="phone-screen" style="position: relative;">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dimmed list behind -->
+          <div class="px-5 pt-4 opacity-20">
+            <div class="glass rounded-[18px] p-3"><div class="h-3 w-40 rounded bg-slate-700/50"></div></div>
+            <div class="glass mt-2 rounded-[18px] p-3"><div class="h-3 w-36 rounded bg-slate-700/50"></div></div>
+          </div>
+
+          <!-- Detail bottom sheet -->
+          <div class="absolute inset-x-0 bottom-0 z-20" style="top: 160px;">
+            <div class="relative h-full rounded-t-[32px] border-t border-white/10 bg-[#0f172a] shadow-[0_-20px_60px_rgba(0,0,0,0.6)]" style="background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);">
+              <div class="flex justify-center pt-3 pb-2">
+                <div class="h-1 w-10 rounded-full bg-slate-500/60"></div>
+              </div>
+              <p class="px-5 text-center text-[11px] text-slate-500">Swipe down to close</p>
+
+              <div class="px-5 pt-3 pb-24 overflow-y-auto" style="max-height: 500px;">
+                <!-- Source & metadata -->
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <div class="flex h-8 w-8 items-center justify-center rounded-[8px] bg-orange-500/15 ring-1 ring-inset ring-orange-400/25">
+                      <i class="fab fa-reddit-alien text-orange-400 text-[14px]"></i>
+                    </div>
+                    <div>
+                      <span class="text-[12px] font-semibold text-orange-300">Reddit</span>
+                      <span class="text-[11px] text-slate-500 ml-2">r/homelab · 3h ago</span>
+                    </div>
+                  </div>
+                  <span class="rounded-full bg-sky-500/12 px-2.5 py-1 text-[11px] font-semibold text-sky-300">AI: 94</span>
+                </div>
+
+                <!-- Title -->
+                <h3 class="mt-4 text-[20px] font-semibold leading-7 text-white">Complete ZFS NAS build guide with 10GbE networking and Docker compose stack</h3>
+
+                <!-- Rich preview / embed area -->
+                <div class="mt-4 rounded-[16px] bg-white/5 p-4 ring-1 ring-inset ring-white/5">
+                  <div class="flex items-center gap-3">
+                    <div class="h-14 w-14 rounded-[10px] bg-gradient-to-br from-orange-500/30 to-orange-900/30 flex items-center justify-center">
+                      <i class="fas fa-external-link text-orange-300 text-[16px]"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-[13px] font-medium text-slate-200 truncate">reddit.com/r/homelab/comments/...</p>
+                      <p class="mt-0.5 text-[11px] text-slate-500">↑ 847 · 124 comments · Posted by u/ZFSenthusiast</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Full description -->
+                <p class="mt-4 text-[14px] leading-6 text-slate-300">Step-by-step guide covering hardware selection (TrueNAS-compatible), ZFS pool configuration with optimal sector sizes, Docker Compose for the full *arr stack, and Tailscale mesh networking for secure remote access without port forwarding.</p>
+
+                <!-- Tags detected -->
+                <div class="mt-4 flex flex-wrap gap-1.5">
+                  <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-link text-[9px] mr-1 text-slate-500"></i>Link</span>
+                  <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-tag text-[9px] mr-1 text-slate-500"></i>homelab</span>
+                  <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-tag text-[9px] mr-1 text-slate-500"></i>networking</span>
+                  <span class="chip rounded-full px-2.5 py-1 text-[11px] text-slate-300"><i class="fas fa-tag text-[9px] mr-1 text-slate-500"></i>docker</span>
+                </div>
+
+                <!-- Houston AI insight -->
+                <div class="mt-4 rounded-[16px] bg-sky-500/8 p-3.5 ring-1 ring-inset ring-sky-400/15">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-rocket text-[11px] text-sky-300"></i>
+                    <span class="text-[11px] font-semibold text-sky-200">Houston suggests</span>
+                  </div>
+                  <p class="mt-1.5 text-[12px] text-slate-300 leading-4">Save to Karakeep with tags "homelab, networking, NAS" -- matches your active NAS research project and 3 other saved items from r/homelab.</p>
+                </div>
+
+                <!-- Action buttons -->
+                <div class="mt-5 grid grid-cols-2 gap-2.5">
+                  <button class="flex items-center justify-center gap-2 rounded-[18px] bg-blue-500/14 px-3 py-3 text-[13px] font-semibold text-blue-200 ring-1 ring-inset ring-blue-400/20">
+                    <i class="fas fa-bookmark text-[12px]"></i> Save to Karakeep
+                  </button>
+                  <button class="flex items-center justify-center gap-2 rounded-[18px] bg-emerald-500/14 px-3 py-3 text-[13px] font-semibold text-emerald-200 ring-1 ring-inset ring-emerald-400/20">
+                    <i class="fas fa-book text-[12px]"></i> Knowledge Base
+                  </button>
+                </div>
+                <div class="mt-2.5 grid grid-cols-3 gap-2">
+                  <button class="flex items-center justify-center gap-1.5 rounded-[14px] bg-white/5 px-2 py-2.5 text-[12px] font-medium text-slate-300 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-list-check text-[10px]"></i> Task
+                  </button>
+                  <button class="flex items-center justify-center gap-1.5 rounded-[14px] bg-white/5 px-2 py-2.5 text-[12px] font-medium text-slate-300 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-clock text-[10px]"></i> Snooze
+                  </button>
+                  <button class="flex items-center justify-center gap-1.5 rounded-[14px] bg-white/5 px-2 py-2.5 text-[12px] font-medium text-slate-300 ring-1 ring-inset ring-white/5">
+                    <i class="fas fa-xmark text-[10px]"></i> Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 z-30 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-active relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 12: Empty State — Today (0 tasks) -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Today</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">My Day</h2>
+                  <p class="mt-2 text-[14px] text-slate-400">Monday, Jul 28</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Empty state illustration -->
+            <div class="mt-16 flex flex-col items-center text-center">
+              <div class="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-500/10 ring-1 ring-inset ring-emerald-400/15">
+                <i class="fas fa-check-double text-[32px] text-emerald-400"></i>
+              </div>
+              <h3 class="mt-5 text-[20px] font-semibold text-white">All clear!</h3>
+              <p class="mt-2 max-w-[240px] text-[14px] leading-5 text-slate-400">No tasks scheduled for today. Enjoy the free time or pull something from your backlog.</p>
+
+              <!-- Suggested actions -->
+              <div class="mt-6 flex flex-col gap-2.5 w-full max-w-[260px]">
+                <button class="flex items-center justify-center gap-2 rounded-[18px] bg-sky-500/12 px-4 py-3 text-[14px] font-medium text-sky-300 ring-1 ring-inset ring-sky-400/20">
+                  <i class="fas fa-bolt text-[12px]"></i> Quick Sort backlog
+                </button>
+                <button class="flex items-center justify-center gap-2 rounded-[18px] bg-white/5 px-4 py-3 text-[14px] font-medium text-slate-300 ring-1 ring-inset ring-white/5">
+                  <i class="fas fa-plus text-[12px]"></i> Add a task
+                </button>
+              </div>
+            </div>
+
+            <!-- Houston micro tip -->
+            <section class="mt-8 flex items-center gap-2 rounded-[18px] bg-sky-500/8 px-3.5 py-2.5 ring-1 ring-inset ring-sky-400/15">
+              <i class="fas fa-rocket text-[11px] text-sky-300"></i>
+              <p class="text-[12px] text-sky-100/80"><span class="font-medium text-sky-200">Houston:</span> "You have 14 unsorted items -- a quick sort session could fill today."</p>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-active flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 13: Empty State — Triage (0 items) -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-bars text-[14px]"></i><span class="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-[#0f172a]"></span></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Content Inbox</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Triage</h2>
+                </div>
+              </div>
+            </div>
+
+            <!-- Empty state -->
+            <div class="mt-16 flex flex-col items-center text-center">
+              <div class="flex h-20 w-20 items-center justify-center rounded-full bg-sky-500/10 ring-1 ring-inset ring-sky-400/15">
+                <i class="fas fa-inbox text-[32px] text-sky-400"></i>
+              </div>
+              <h3 class="mt-5 text-[20px] font-semibold text-white">Inbox zero!</h3>
+              <p class="mt-2 max-w-[240px] text-[14px] leading-5 text-slate-400">All triage items have been processed. New items will appear as your sources sync.</p>
+
+              <!-- Connected sources summary -->
+              <div class="mt-6 glass rounded-[20px] px-5 py-4 w-full max-w-[280px]">
+                <p class="text-[11px] font-semibold uppercase tracking-[0.15em] text-slate-500 mb-3">Connected Sources</p>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <i class="fab fa-reddit-alien text-[12px] text-orange-400"></i>
+                      <span class="text-[12px] text-slate-300">Reddit Saved</span>
+                    </div>
+                    <span class="text-[10px] text-emerald-400">Synced 1h ago</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <i class="fab fa-github text-[12px] text-violet-300"></i>
+                      <span class="text-[12px] text-slate-300">GitHub Stars</span>
+                    </div>
+                    <span class="text-[10px] text-emerald-400">Synced 2h ago</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <i class="fab fa-youtube text-[12px] text-red-400"></i>
+                      <span class="text-[12px] text-slate-300">YouTube</span>
+                    </div>
+                    <span class="text-[10px] text-slate-500">Not connected</span>
+                  </div>
+                </div>
+                <button class="mt-3 w-full rounded-[12px] bg-white/5 py-2 text-center text-[12px] font-medium text-sky-400 ring-1 ring-inset ring-white/5">
+                  <i class="fas fa-plus mr-1.5"></i>Connect source
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-active relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 14: Onboarding / First Run -->
+      <article class="phone-shell">
+        <div class="phone-screen">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-8">
+            <!-- Welcome hero -->
+            <div class="flex flex-col items-center text-center">
+              <div class="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500 shadow-lg shadow-sky-500/30">
+                <i class="fas fa-rocket text-[32px] text-white"></i>
+              </div>
+              <h2 class="mt-5 text-[26px] font-semibold text-white">Welcome to<br>Mission Control</h2>
+              <p class="mt-3 max-w-[260px] text-[14px] leading-5 text-slate-400">Your AI-powered command center for tasks, content, and focus.</p>
+            </div>
+
+            <!-- Setup steps -->
+            <div class="mt-8 space-y-3">
+              <!-- Step 1: Done -->
+              <div class="glass rounded-[18px] p-4 ring-1 ring-inset ring-emerald-400/20">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500/20">
+                    <i class="fas fa-check text-[12px] text-emerald-400"></i>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-emerald-200">Account created</p>
+                    <p class="text-[12px] text-slate-500">Signed in with GitHub</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 2: Active -->
+              <div class="glass rounded-[18px] p-4 ring-2 ring-inset ring-sky-400/30">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20">
+                    <span class="text-[12px] font-bold text-sky-400">2</span>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-white">Connect your task sources</p>
+                    <p class="text-[12px] text-slate-400">MS To Do, GitHub Issues, or start fresh</p>
+                  </div>
+                  <i class="fas fa-chevron-right text-[12px] text-sky-400"></i>
+                </div>
+              </div>
+
+              <!-- Step 3: Pending -->
+              <div class="glass rounded-[18px] p-4 opacity-60">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white/5">
+                    <span class="text-[12px] font-bold text-slate-400">3</span>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-slate-300">Connect content sources</p>
+                    <p class="text-[12px] text-slate-500">Reddit, GitHub Stars, YouTube, etc.</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Step 4: Pending -->
+              <div class="glass rounded-[18px] p-4 opacity-60">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white/5">
+                    <span class="text-[12px] font-bold text-slate-400">4</span>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[14px] font-medium text-slate-300">Meet Houston</p>
+                    <p class="text-[12px] text-slate-500">Your AI assistant learns your workflow</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Skip option -->
+            <button class="mt-6 w-full text-center text-[13px] text-slate-500">Skip setup — I'll explore on my own</button>
+          </div>
+
+          <!-- No tab bar during onboarding — just a progress indicator -->
+          <div class="absolute inset-x-0 bottom-0 px-5 pb-10 pt-4">
+            <div class="flex items-center justify-center gap-2">
+              <div class="h-2 w-2 rounded-full bg-emerald-400"></div>
+              <div class="h-2 w-6 rounded-full bg-sky-400"></div>
+              <div class="h-2 w-2 rounded-full bg-slate-600"></div>
+              <div class="h-2 w-2 rounded-full bg-slate-600"></div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <!-- Hamburger Menu Sub-Screens -->
+    <header class="mb-8 mt-16 text-center">
+      <p class="text-xs uppercase tracking-[0.35em] text-slate-500">Hamburger Sub-Screens</p>
+      <h2 class="mt-3 text-2xl font-semibold tracking-tight text-slate-50">Dashboard, Projects, Goals, Routines, Insights & Settings</h2>
+      <p class="mt-2 text-sm text-slate-400">Mobile-optimized versions of views accessible from the slide-out menu.</p>
+    </header>
+
+    <section class="flex flex-wrap justify-center gap-10">
+      <!-- Screen 15: Dashboard (mobile) -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Overview</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Dashboard</h2>
+                </div>
+              </div>
+            </div>
+
+            <!-- Today summary widget -->
+            <section class="glass mt-4 rounded-[22px] p-4">
+              <div class="flex items-center justify-between">
+                <span class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500">Today</span>
+                <span class="text-[12px] text-emerald-400">75% complete</span>
+              </div>
+              <div class="mt-2 grid grid-cols-4 gap-2 text-center">
+                <div>
+                  <p class="text-[20px] font-bold text-white">8</p>
+                  <p class="text-[10px] text-slate-500">Total</p>
+                </div>
+                <div>
+                  <p class="text-[20px] font-bold text-emerald-400">6</p>
+                  <p class="text-[10px] text-slate-500">Done</p>
+                </div>
+                <div>
+                  <p class="text-[20px] font-bold text-amber-400">1</p>
+                  <p class="text-[10px] text-slate-500">In Progress</p>
+                </div>
+                <div>
+                  <p class="text-[20px] font-bold text-red-400">1</p>
+                  <p class="text-[10px] text-slate-500">Overdue</p>
+                </div>
+              </div>
+            </section>
+
+            <!-- Weekly streak -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <div class="flex items-center justify-between">
+                <span class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500">This Week</span>
+                <span class="text-[12px] text-sky-400">🔥 5-day streak</span>
+              </div>
+              <div class="mt-3 flex items-end justify-between gap-1 px-2">
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-emerald-500/60" style="height: 32px;"></div>
+                  <span class="text-[9px] text-slate-500">Mon</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-emerald-500/60" style="height: 44px;"></div>
+                  <span class="text-[9px] text-slate-500">Tue</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-emerald-500/60" style="height: 28px;"></div>
+                  <span class="text-[9px] text-slate-500">Wed</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-emerald-500/60" style="height: 52px;"></div>
+                  <span class="text-[9px] text-slate-500">Thu</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-sky-500/60" style="height: 38px;"></div>
+                  <span class="text-[9px] text-white font-medium">Fri</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-slate-700/40" style="height: 8px;"></div>
+                  <span class="text-[9px] text-slate-600">Sat</span>
+                </div>
+                <div class="flex flex-col items-center gap-1">
+                  <div class="w-6 rounded-[4px] bg-slate-700/40" style="height: 8px;"></div>
+                  <span class="text-[9px] text-slate-600">Sun</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Queues summary -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <span class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500">Queues</span>
+              <div class="mt-3 space-y-2.5">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-layer-group text-[12px] text-sky-400"></i>
+                    <span class="text-[13px] text-slate-200">Triage inbox</span>
+                  </div>
+                  <span class="rounded-full bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-300">7 pending</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-bolt text-[12px] text-amber-400"></i>
+                    <span class="text-[13px] text-slate-200">Quick Sort</span>
+                  </div>
+                  <span class="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-semibold text-amber-300">14 unsorted</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <i class="fas fa-clock text-[12px] text-rose-400"></i>
+                    <span class="text-[13px] text-slate-200">Overdue</span>
+                  </div>
+                  <span class="rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] font-semibold text-red-300">2 tasks</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Recent activity -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <span class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500">Recent Activity</span>
+              <div class="mt-3 space-y-2">
+                <div class="flex items-center gap-2 text-[12px]">
+                  <i class="fas fa-check-circle text-emerald-400 text-[10px]"></i>
+                  <span class="text-slate-300">Completed "Draft roadmap talking points"</span>
+                  <span class="ml-auto text-slate-600">2h</span>
+                </div>
+                <div class="flex items-center gap-2 text-[12px]">
+                  <i class="fas fa-plus-circle text-sky-400 text-[10px]"></i>
+                  <span class="text-slate-300">Added 4 items from Reddit sync</span>
+                  <span class="ml-auto text-slate-600">3h</span>
+                </div>
+                <div class="flex items-center gap-2 text-[12px]">
+                  <i class="fas fa-bolt text-amber-400 text-[10px]"></i>
+                  <span class="text-slate-300">Sorted 6 tasks in Quick Sort</span>
+                  <span class="ml-auto text-slate-600">5h</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 16: Projects -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Active</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Projects</h2>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-plus text-[13px]"></i></button>
+            </div>
+
+            <!-- Project cards -->
+            <div class="mt-5 space-y-3">
+              <!-- Project 1 -->
+              <div class="glass rounded-[20px] p-4">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-[10px] bg-violet-500/15 ring-1 ring-inset ring-violet-400/20">
+                      <i class="fas fa-mobile-screen text-[14px] text-violet-400"></i>
+                    </div>
+                    <div>
+                      <p class="text-[15px] font-semibold text-white">Mission Control iOS</p>
+                      <p class="text-[11px] text-slate-500">12 tasks · 3 overdue</p>
+                    </div>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-500 mt-2"></i>
+                </div>
+                <div class="mt-3 h-1.5 rounded-full bg-slate-800">
+                  <div class="h-1.5 rounded-full bg-gradient-to-r from-violet-400 to-violet-500" style="width: 65%"></div>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>65% complete</span>
+                  <span>Due Aug 15</span>
+                </div>
+              </div>
+
+              <!-- Project 2 -->
+              <div class="glass rounded-[20px] p-4">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-[10px] bg-sky-500/15 ring-1 ring-inset ring-sky-400/20">
+                      <i class="fas fa-server text-[14px] text-sky-400"></i>
+                    </div>
+                    <div>
+                      <p class="text-[15px] font-semibold text-white">Homelab NAS Build</p>
+                      <p class="text-[11px] text-slate-500">8 tasks · on track</p>
+                    </div>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-500 mt-2"></i>
+                </div>
+                <div class="mt-3 h-1.5 rounded-full bg-slate-800">
+                  <div class="h-1.5 rounded-full bg-gradient-to-r from-sky-400 to-sky-500" style="width: 30%"></div>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>30% complete</span>
+                  <span>Due Sep 1</span>
+                </div>
+              </div>
+
+              <!-- Project 3 -->
+              <div class="glass rounded-[20px] p-4">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-[10px] bg-emerald-500/15 ring-1 ring-inset ring-emerald-400/20">
+                      <i class="fas fa-chart-line text-[14px] text-emerald-400"></i>
+                    </div>
+                    <div>
+                      <p class="text-[15px] font-semibold text-white">Q3 Business Planning</p>
+                      <p class="text-[11px] text-slate-500">5 tasks · 1 blocked</p>
+                    </div>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-500 mt-2"></i>
+                </div>
+                <div class="mt-3 h-1.5 rounded-full bg-slate-800">
+                  <div class="h-1.5 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500" style="width: 80%"></div>
+                </div>
+                <div class="mt-2 flex items-center justify-between text-[11px] text-slate-500">
+                  <span>80% complete</span>
+                  <span>Due Jul 31</span>
+                </div>
+              </div>
+
+              <!-- Project 4 -->
+              <div class="glass rounded-[20px] p-4 opacity-60">
+                <div class="flex items-start justify-between">
+                  <div class="flex items-center gap-2.5">
+                    <div class="flex h-9 w-9 items-center justify-center rounded-[10px] bg-slate-500/15 ring-1 ring-inset ring-slate-400/20">
+                      <i class="fas fa-couch text-[14px] text-slate-400"></i>
+                    </div>
+                    <div>
+                      <p class="text-[15px] font-semibold text-slate-300">Home Office Upgrade</p>
+                      <p class="text-[11px] text-slate-500">3 tasks · paused</p>
+                    </div>
+                  </div>
+                  <i class="fas fa-chevron-right text-[11px] text-slate-600 mt-2"></i>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 17: Goals -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Objectives</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Goals</h2>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-plus text-[13px]"></i></button>
+            </div>
+
+            <!-- Time filter -->
+            <div class="mt-4 flex gap-2">
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">Q3 2026</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">Annual</span>
+              <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-300">All</span>
+            </div>
+
+            <!-- Goals list -->
+            <div class="mt-5 space-y-3">
+              <!-- Goal 1 -->
+              <div class="glass rounded-[22px] p-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/15">
+                    <i class="fas fa-rocket text-[14px] text-emerald-400"></i>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[15px] font-semibold text-white">Ship iOS MVP</p>
+                    <p class="text-[11px] text-slate-500">3 key results · Due Aug 31</p>
+                  </div>
+                  <span class="text-[14px] font-bold text-emerald-400">72%</span>
+                </div>
+                <div class="mt-3 h-2 rounded-full bg-slate-800">
+                  <div class="h-2 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500" style="width: 72%"></div>
+                </div>
+                <div class="mt-3 space-y-1.5 pl-13">
+                  <div class="flex items-center gap-2 text-[12px]">
+                    <i class="fas fa-check-circle text-emerald-400 text-[10px]"></i>
+                    <span class="text-slate-400 line-through">Core navigation complete</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[12px]">
+                    <i class="fas fa-circle text-sky-400 text-[10px]"></i>
+                    <span class="text-slate-200">Quick Sort + Triage functional</span>
+                    <span class="ml-auto text-[10px] text-sky-400">80%</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[12px]">
+                    <i class="fas fa-circle text-slate-600 text-[10px]"></i>
+                    <span class="text-slate-300">TestFlight beta with 10 users</span>
+                    <span class="ml-auto text-[10px] text-slate-500">0%</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Goal 2 -->
+              <div class="glass rounded-[22px] p-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/15">
+                    <i class="fas fa-brain text-[14px] text-amber-400"></i>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[15px] font-semibold text-white">Reduce task backlog by 50%</p>
+                    <p class="text-[11px] text-slate-500">2 key results · Due Sep 30</p>
+                  </div>
+                  <span class="text-[14px] font-bold text-amber-400">45%</span>
+                </div>
+                <div class="mt-3 h-2 rounded-full bg-slate-800">
+                  <div class="h-2 rounded-full bg-gradient-to-r from-amber-400 to-amber-500" style="width: 45%"></div>
+                </div>
+              </div>
+
+              <!-- Goal 3 -->
+              <div class="glass rounded-[22px] p-4">
+                <div class="flex items-center gap-3">
+                  <div class="flex h-10 w-10 items-center justify-center rounded-full bg-sky-500/15">
+                    <i class="fas fa-server text-[14px] text-sky-400"></i>
+                  </div>
+                  <div class="flex-1">
+                    <p class="text-[15px] font-semibold text-white">Homelab fully self-hosted</p>
+                    <p class="text-[11px] text-slate-500">4 key results · Due Dec 31</p>
+                  </div>
+                  <span class="text-[14px] font-bold text-sky-400">20%</span>
+                </div>
+                <div class="mt-3 h-2 rounded-full bg-slate-800">
+                  <div class="h-2 rounded-full bg-gradient-to-r from-sky-400 to-sky-500" style="width: 20%"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 18: Routines -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Daily Habits</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Routines</h2>
+                </div>
+              </div>
+              <button class="glass mt-1 flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-plus text-[13px]"></i></button>
+            </div>
+
+            <!-- Morning routine -->
+            <section class="glass mt-5 rounded-[22px] p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-sun text-[12px] text-amber-400"></i>
+                  <span class="text-[14px] font-semibold text-white">Morning Startup</span>
+                </div>
+                <span class="text-[11px] text-emerald-400">2 of 4 done</span>
+              </div>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20"><i class="fas fa-check text-[9px] text-emerald-400"></i></span>
+                  <span class="text-[14px] text-slate-400 line-through">Review today's calendar</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500/20"><i class="fas fa-check text-[9px] text-emerald-400"></i></span>
+                  <span class="text-[14px] text-slate-400 line-through">Process overnight notifications</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Quick Sort 5 items</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Set top 3 priorities for the day</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Evening routine -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-moon text-[12px] text-violet-400"></i>
+                  <span class="text-[14px] font-semibold text-white">Evening Shutdown</span>
+                </div>
+                <span class="text-[11px] text-slate-500">Not started</span>
+              </div>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Review what got done today</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Defer anything undone to tomorrow</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Plan tomorrow's top 3</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Weekly routine -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                  <i class="fas fa-calendar-week text-[12px] text-sky-400"></i>
+                  <span class="text-[14px] font-semibold text-white">Weekly Review</span>
+                </div>
+                <span class="text-[11px] text-slate-500">Sundays</span>
+              </div>
+              <div class="space-y-2">
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Review goals progress</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Clear triage inbox to zero</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <span class="h-5 w-5 rounded-full border border-slate-600"></span>
+                  <span class="text-[14px] text-slate-200">Plan next week's focus areas</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 19: Insights -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start justify-between">
+              <div class="flex items-start gap-3">
+                <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+                <div>
+                  <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Analytics</p>
+                  <h2 class="mt-1 text-[28px] font-semibold text-white">Insights</h2>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-white ring-1 ring-inset ring-sky-400/30" style="background: rgba(10,132,255,0.20);">Week</span>
+                <span class="chip rounded-full px-3 py-1.5 text-[12px] font-medium text-slate-400">Month</span>
+              </div>
+            </div>
+
+            <!-- Headline stat -->
+            <section class="glass mt-5 rounded-[22px] p-5 text-center">
+              <p class="text-[40px] font-bold text-white">47</p>
+              <p class="text-[13px] text-slate-400">tasks completed this week</p>
+              <p class="mt-1 text-[12px] text-emerald-400"><i class="fas fa-arrow-up mr-1"></i>18% vs last week</p>
+            </section>
+
+            <!-- Stats grid -->
+            <div class="mt-3 grid grid-cols-2 gap-3">
+              <div class="glass rounded-[18px] p-4 text-center">
+                <p class="text-[24px] font-bold text-sky-400">3.2h</p>
+                <p class="text-[11px] text-slate-500">Avg. focus time/day</p>
+              </div>
+              <div class="glass rounded-[18px] p-4 text-center">
+                <p class="text-[24px] font-bold text-amber-400">89%</p>
+                <p class="text-[11px] text-slate-500">On-time completion</p>
+              </div>
+              <div class="glass rounded-[18px] p-4 text-center">
+                <p class="text-[24px] font-bold text-violet-400">12</p>
+                <p class="text-[11px] text-slate-500">Items triaged</p>
+              </div>
+              <div class="glass rounded-[18px] p-4 text-center">
+                <p class="text-[24px] font-bold text-emerald-400">5</p>
+                <p class="text-[11px] text-slate-500">Day streak</p>
+              </div>
+            </div>
+
+            <!-- Productivity by day -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <p class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500 mb-3">Productivity by Day</p>
+              <div class="flex items-end justify-between gap-1.5 px-1" style="height: 80px;">
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-emerald-500/60" style="height: 48px;"></div>
+                  <span class="text-[9px] text-slate-500">M</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-emerald-500/60" style="height: 64px;"></div>
+                  <span class="text-[9px] text-slate-500">T</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-emerald-500/60" style="height: 40px;"></div>
+                  <span class="text-[9px] text-slate-500">W</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-emerald-500/60" style="height: 72px;"></div>
+                  <span class="text-[9px] text-slate-500">T</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-sky-500/60" style="height: 56px;"></div>
+                  <span class="text-[9px] text-white font-medium">F</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-slate-700/40" style="height: 16px;"></div>
+                  <span class="text-[9px] text-slate-600">S</span>
+                </div>
+                <div class="flex flex-1 flex-col items-center gap-1">
+                  <div class="w-full rounded-[4px] bg-slate-700/40" style="height: 12px;"></div>
+                  <span class="text-[9px] text-slate-600">S</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Top categories -->
+            <section class="glass mt-3 rounded-[22px] p-4">
+              <p class="text-[12px] font-semibold uppercase tracking-[0.15em] text-slate-500 mb-3">Top Categories</p>
+              <div class="space-y-2.5">
+                <div class="flex items-center gap-3">
+                  <div class="h-2 w-2 rounded-full bg-violet-400"></div>
+                  <span class="flex-1 text-[13px] text-slate-200">Development</span>
+                  <span class="text-[12px] text-slate-400">18 tasks</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="h-2 w-2 rounded-full bg-amber-400"></div>
+                  <span class="flex-1 text-[13px] text-slate-200">Planning</span>
+                  <span class="text-[12px] text-slate-400">12 tasks</span>
+                </div>
+                <div class="flex items-center gap-3">
+                  <div class="h-2 w-2 rounded-full bg-emerald-400"></div>
+                  <span class="flex-1 text-[13px] text-slate-200">Communication</span>
+                  <span class="text-[12px] text-slate-400">9 tasks</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+
+      <!-- Screen 20: Settings -->
+      <article class="phone-shell">
+        <div class="phone-screen scroll-fade">
+          <div class="dynamic-island"></div>
+          <div class="safe-top px-5">
+            <div class="flex items-center justify-between text-[13px] font-semibold text-slate-100">
+              <span>9:41</span>
+              <div class="flex items-center gap-1.5 text-[11px] text-slate-200">
+                <i class="fas fa-signal"></i><i class="fas fa-wifi"></i><i class="fas fa-battery-three-quarters text-[12px]"></i>
+              </div>
+            </div>
+          </div>
+
+          <div class="px-5 pb-28 pt-4">
+            <div class="flex items-start gap-3">
+              <button class="glass mt-1 relative flex h-10 w-10 items-center justify-center rounded-full text-slate-200"><i class="fas fa-arrow-left text-[14px]"></i></button>
+              <div>
+                <p class="text-[12px] font-medium uppercase tracking-[0.24em] text-sky-400/90">Preferences</p>
+                <h2 class="mt-1 text-[28px] font-semibold text-white">Settings</h2>
+              </div>
+            </div>
+
+            <!-- Account section -->
+            <section class="glass mt-5 rounded-[22px] overflow-hidden">
+              <div class="flex items-center gap-3 px-4 py-4 border-b border-white/5">
+                <div class="flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-violet-500">
+                  <span class="text-[14px] font-bold text-white">RS</span>
+                </div>
+                <div class="flex-1">
+                  <p class="text-[15px] font-semibold text-white">Ryan Socko</p>
+                  <p class="text-[12px] text-slate-500">Pro plan · rsocko@github</p>
+                </div>
+                <i class="fas fa-chevron-right text-[11px] text-slate-500"></i>
+              </div>
+            </section>
+
+            <!-- General section -->
+            <p class="mt-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 px-1">General</p>
+            <section class="glass mt-2 rounded-[22px] overflow-hidden">
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-palette text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Appearance</span>
+                </div>
+                <span class="text-[12px] text-slate-500">Dark <i class="fas fa-chevron-right ml-2 text-[10px]"></i></span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-bell text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Notifications</span>
+                </div>
+                <i class="fas fa-chevron-right text-[10px] text-slate-500"></i>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-hand-pointer text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Swipe Gestures</span>
+                </div>
+                <i class="fas fa-chevron-right text-[10px] text-slate-500"></i>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-language text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Language</span>
+                </div>
+                <span class="text-[12px] text-slate-500">English <i class="fas fa-chevron-right ml-2 text-[10px]"></i></span>
+              </div>
+            </section>
+
+            <!-- Integrations section -->
+            <p class="mt-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 px-1">Integrations</p>
+            <section class="glass mt-2 rounded-[22px] overflow-hidden">
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-check-square text-[13px] text-blue-400"></i>
+                  <span class="text-[14px] text-slate-200">Microsoft To Do</span>
+                </div>
+                <span class="text-[11px] text-emerald-400">Connected</span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fab fa-github text-[13px] text-violet-300"></i>
+                  <span class="text-[14px] text-slate-200">GitHub</span>
+                </div>
+                <span class="text-[11px] text-emerald-400">Connected</span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fab fa-reddit-alien text-[13px] text-orange-400"></i>
+                  <span class="text-[14px] text-slate-200">Reddit</span>
+                </div>
+                <span class="text-[11px] text-emerald-400">Connected</span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-plus-circle text-[13px] text-sky-400"></i>
+                  <span class="text-[14px] text-sky-400">Add integration...</span>
+                </div>
+              </div>
+            </section>
+
+            <!-- Data section -->
+            <p class="mt-5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500 px-1">Data</p>
+            <section class="glass mt-2 rounded-[22px] overflow-hidden">
+              <div class="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-arrows-rotate text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Sync Status</span>
+                </div>
+                <span class="text-[11px] text-emerald-400"><i class="fas fa-circle text-[6px] mr-1"></i>All synced</span>
+              </div>
+              <div class="flex items-center justify-between px-4 py-3.5">
+                <div class="flex items-center gap-3">
+                  <i class="fas fa-download text-[13px] text-slate-400"></i>
+                  <span class="text-[14px] text-slate-200">Export Data</span>
+                </div>
+                <i class="fas fa-chevron-right text-[10px] text-slate-500"></i>
+              </div>
+            </section>
+
+            <!-- Version -->
+            <p class="mt-5 text-center text-[12px] text-slate-600">Mission Control v2.4.0 · Build 847</p>
+          </div>
+
+          <nav class="tab-blur absolute inset-x-0 bottom-0 border-t border-white/5 px-4 pb-7 pt-3">
+            <div class="flex items-end justify-between text-[11px] font-medium">
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-sun text-[18px]"></i><span>Today</span></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-layer-group text-[18px]"></i><span class="tab-badge">7</span><span>Triage</span></div>
+              <div class="tab-inactive -mt-5 flex h-14 w-14 flex-col items-center justify-center rounded-full bg-sky-500 text-white shadow-lg shadow-sky-500/30"><i class="fas fa-plus text-[20px]"></i></div>
+              <div class="tab-inactive relative flex w-14 flex-col items-center gap-1"><i class="fas fa-bolt text-[18px]"></i><span class="tab-badge" style="background:#f59e0b;">14</span><span>Sort</span></div>
+              <div class="tab-inactive flex w-14 flex-col items-center gap-1"><i class="fas fa-rocket text-[18px]"></i><span>Houston</span></div>
+            </div>
+          </nav>
+        </div>
+      </article>
+    </section>
+
+  </main>
+</body>
+</html>

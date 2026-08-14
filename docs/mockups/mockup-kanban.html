@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Kanban Board</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .source-badge { font-size: 0.6rem; padding: 1px 5px; border-radius: 3px; font-weight: 500; }
+    .source-todo { background: #dbeafe; color: #1e40af; }
+    .source-github { background: #f3e8ff; color: #6b21a8; }
+    .source-calendar { background: #fef3c7; color: #92400e; }
+    .source-email { background: #dcfce7; color: #166534; }
+    .source-custom { background: #f1f5f9; color: #475569; }
+    .kanban-column { min-height: calc(100vh - 200px); }
+    .kanban-card { transition: all 0.15s ease; }
+    .kanban-card:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .kanban-card.dragging { opacity: 0.5; transform: rotate(2deg); }
+    .drop-zone { border: 2px dashed #93c5fd; background: #eff6ff; border-radius: 8px; min-height: 60px; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Timeline</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">AI Assistant</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <select class="text-sm border border-gray-200 rounded-md px-3 py-1.5 text-gray-600">
+        <option>All Sources</option>
+        <option>Microsoft Todo</option>
+        <option>GitHub Issues</option>
+        <option>Calendar</option>
+        <option>Email</option>
+      </select>
+      <select class="text-sm border border-gray-200 rounded-md px-3 py-1.5 text-gray-600">
+        <option>All Projects</option>
+        <option>Ideation</option>
+        <option>Home Automation</option>
+        <option>Personal</option>
+      </select>
+      <button class="p-2 text-gray-500 hover:text-gray-700"><i class="fas fa-cog"></i></button>
+    </div>
+  </header>
+
+  <!-- Board Controls -->
+  <div class="px-6 py-3 bg-white border-b border-gray-100 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <span class="text-sm text-gray-500">Columns:</span>
+      <div class="flex items-center gap-1">
+        <span class="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">Default (Status)</span>
+        <button class="text-xs text-blue-600 hover:text-blue-800 ml-1"><i class="fas fa-pencil-alt"></i></button>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="text-xs text-gray-500 flex items-center gap-1.5">
+        <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" checked>
+        Show source badges
+      </label>
+      <label class="text-xs text-gray-500 flex items-center gap-1.5">
+        <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" checked>
+        Show due dates
+      </label>
+      <button class="text-xs text-blue-600 hover:text-blue-800 font-medium ml-2">
+        <i class="fas fa-plus mr-1"></i>Add Column
+      </button>
+    </div>
+  </div>
+
+  <!-- Kanban Board -->
+  <div class="p-6 overflow-x-auto">
+    <div class="flex gap-4 min-w-max">
+
+      <!-- Column: Backlog -->
+      <div class="w-72 flex-shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-gray-400 rounded-full"></span>
+            <h3 class="text-sm font-semibold text-gray-700">Backlog</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">14</span>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-plus text-sm"></i></button>
+        </div>
+        <div class="kanban-column space-y-2">
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+              <span class="source-badge source-custom">Custom DB</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Research Ollama models for local AI reasoning</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1">
+                <span class="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">Low</span>
+              </div>
+              <span class="text-xs text-gray-400">Jun 25</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">AI/ML</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">research</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Add webhook support to connector manager</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1">
+                <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              </div>
+              <span class="text-xs text-gray-400">Jun 28</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">mission-control</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">feature</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Set up automated home backup system</p>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1">
+                <span class="text-xs px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">Low</span>
+              </div>
+              <span class="text-xs text-gray-400">No date</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-orange-50 text-orange-600 rounded">home-automation</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab opacity-70">
+            <p class="text-xs text-gray-400 text-center">+ 11 more items</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Column: To Do -->
+      <div class="w-72 flex-shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-blue-400 rounded-full"></span>
+            <h3 class="text-sm font-semibold text-gray-700">To Do</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">8</span>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-plus text-sm"></i></button>
+        </div>
+        <div class="kanban-column space-y-2">
+          <div class="kanban-card bg-white rounded-lg border border-red-200 border-l-4 border-l-red-500 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+              <span class="text-[10px] text-red-500 font-medium">⚠ OVERDUE</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Fix authentication timeout in production</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-red-100 text-red-700 rounded font-medium">Critical</span>
+              <span class="text-xs text-red-500">Jun 16</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-red-50 text-red-600 rounded">bug</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-red-50 text-red-600 rounded">production</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-amber-200 border-l-4 border-l-amber-500 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+              <span class="text-[10px] text-red-500 font-medium">⚠ OVERDUE</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Review Q2 budget proposal</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">High</span>
+              <span class="text-xs text-red-500">Jun 18</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Prepare slides for team standup</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">High</span>
+              <span class="text-xs text-blue-500 font-medium">Today</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Implement connector interface for custom DBs</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              <span class="text-xs text-gray-400">Jun 22</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">mission-control</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-email">Email</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Respond to vendor contract renewal</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">High</span>
+              <span class="text-xs text-red-500">Jun 19</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Column: In Progress -->
+      <div class="w-72 flex-shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-amber-400 rounded-full"></span>
+            <h3 class="text-sm font-semibold text-gray-700">In Progress</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">4</span>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-plus text-sm"></i></button>
+        </div>
+        <div class="kanban-column space-y-2">
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Deploy mission-control prototype to home server</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              <span class="text-xs text-blue-500 font-medium">Today</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">mission-control</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-blue-50 text-blue-600 rounded">devops</span>
+            </div>
+            <!-- Progress indicator -->
+            <div class="mt-2">
+              <div class="w-full bg-gray-100 rounded-full h-1">
+                <div class="bg-blue-500 h-1 rounded-full" style="width: 60%"></div>
+              </div>
+              <span class="text-[10px] text-gray-400 mt-0.5">3 of 5 subtasks</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Design connector plugin architecture</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">High</span>
+              <span class="text-xs text-gray-400">Jun 21</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">mission-control</span>
+              <span class="text-[10px] px-1.5 py-0.5 bg-purple-50 text-purple-600 rounded">architecture</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Update home automation dashboard widgets</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              <span class="text-xs text-gray-400">Jun 24</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-custom">Custom DB</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">Migrate sensor data to new schema</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              <span class="text-xs text-gray-400">Jun 23</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Column: In Review -->
+      <div class="w-72 flex-shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-purple-400 rounded-full"></span>
+            <h3 class="text-sm font-semibold text-gray-700">In Review</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">2</span>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-plus text-sm"></i></button>
+        </div>
+        <div class="kanban-column space-y-2">
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">PR #91 — Add dark mode support</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-blue-100 text-blue-600 rounded">Medium</span>
+              <span class="text-xs text-green-500 font-medium">✓ Approved</span>
+            </div>
+            <div class="flex items-center gap-1 mt-2">
+              <span class="text-[10px] px-1.5 py-0.5 bg-green-50 text-green-600 rounded">ready-to-merge</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-900 mb-1.5">PR #87 — Refactor auth middleware</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded font-medium">High</span>
+              <span class="text-xs text-amber-500 font-medium">Changes requested</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Column: Done -->
+      <div class="w-72 flex-shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 bg-green-400 rounded-full"></span>
+            <h3 class="text-sm font-semibold text-gray-700">Done</h3>
+            <span class="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">19</span>
+          </div>
+          <button class="text-gray-400 hover:text-gray-600 text-xs">Clear old</button>
+        </div>
+        <div class="kanban-column space-y-2">
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab opacity-75">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-todo">MS Todo</span>
+            </div>
+            <p class="text-sm font-medium text-gray-500 line-through mb-1.5">Set up n8n workflow for todo sync</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-green-500"><i class="fas fa-check-circle mr-1"></i>Completed</span>
+              <span class="text-xs text-gray-400">Jun 19</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab opacity-75">
+            <div class="flex items-center gap-1.5 mb-1.5">
+              <span class="source-badge source-github">GitHub</span>
+            </div>
+            <p class="text-sm font-medium text-gray-500 line-through mb-1.5">Configure GitHub Actions for CI/CD</p>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-green-500"><i class="fas fa-check-circle mr-1"></i>Completed</span>
+              <span class="text-xs text-gray-400">Jun 18</span>
+            </div>
+          </div>
+
+          <div class="kanban-card bg-white rounded-lg border border-gray-200 p-3 cursor-grab opacity-60">
+            <p class="text-xs text-gray-400 text-center">+ 17 more completed items</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Floating action: Cross-source move indicator -->
+  <div class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-4 py-2 rounded-full shadow-lg text-sm hidden" id="move-hint">
+    <i class="fas fa-arrows-alt mr-2"></i>Drag cards between columns to change status across sources
+  </div>
+</body>
+</html>

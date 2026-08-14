@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Multi-Modal Capture</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .background-shell {
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, rgba(59,130,246,0.12), transparent 28%), #020617;
+      display: flex;
+      flex-direction: column;
+    }
+    .ghost-header {
+      background: rgba(17,24,39,0.82);
+      border-bottom: 1px solid rgba(30,41,59,0.9);
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .ghost-main {
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 20px;
+      padding: 22px;
+      flex: 1;
+      filter: blur(1px);
+      opacity: 0.35;
+    }
+    .ghost-sidebar, .ghost-panel {
+      background: rgba(17,24,39,0.9);
+      border: 1px solid rgba(30,41,59,0.9);
+      border-radius: 18px;
+    }
+    .ghost-row { height: 42px; border-bottom: 1px solid rgba(30,41,59,0.72); }
+
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2,6,23,0.72);
+      backdrop-filter: blur(10px);
+      padding: 28px 20px;
+      overflow-y: auto;
+    }
+    .capture-modal {
+      width: min(600px, 100%);
+      margin: 0 auto;
+      background: linear-gradient(180deg, rgba(17,24,39,0.98), rgba(11,17,32,0.98));
+      border: 1px solid rgba(51,65,85,0.78);
+      border-radius: 24px;
+      box-shadow: 0 28px 70px rgba(2,6,23,0.52);
+      overflow: hidden;
+    }
+    .modal-section { padding: 22px 24px; }
+    .input-shell {
+      background: rgba(15,23,42,0.96);
+      border: 1px solid rgba(51,65,85,0.78);
+      border-radius: 18px;
+      padding: 16px;
+    }
+    .prompt-input {
+      width: 100%;
+      min-height: 92px;
+      background: transparent;
+      border: none;
+      outline: none;
+      resize: none;
+      color: #f8fafc;
+      font-size: 1.08rem;
+      line-height: 1.55;
+    }
+    .prompt-input::placeholder { color: var(--gray-500); }
+    .mode-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(51,65,85,0.76);
+      background: rgba(17,24,39,0.82);
+      color: var(--gray-400);
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+    }
+    .mode-btn:hover { background: rgba(30,41,59,0.9); color: #fff; }
+    .mode-btn.active {
+      color: #fff;
+      border-color: rgba(96,165,250,0.4);
+      background: rgba(30,58,138,0.4);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.14);
+    }
+    .shortcut-hint { font-size: 0.74rem; color: var(--gray-500); }
+
+    .wave {
+      display: flex;
+      align-items: flex-end;
+      gap: 5px;
+      height: 44px;
+      margin-top: 14px;
+    }
+    .wave span {
+      width: 7px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, var(--accent-400), var(--accent-500));
+      animation: pulse 1s ease-in-out infinite;
+    }
+    .wave span:nth-child(2) { animation-delay: 0.12s; }
+    .wave span:nth-child(3) { animation-delay: 0.24s; }
+    .wave span:nth-child(4) { animation-delay: 0.36s; }
+    .wave span:nth-child(5) { animation-delay: 0.48s; }
+    .wave span:nth-child(6) { animation-delay: 0.6s; }
+    .wave span:nth-child(7) { animation-delay: 0.72s; }
+    @keyframes pulse {
+      0%, 100% { height: 14px; opacity: 0.7; }
+      50% { height: 42px; opacity: 1; }
+    }
+
+    .transcript {
+      margin-top: 12px;
+      padding: 12px 14px;
+      border-radius: 14px;
+      background: rgba(17,24,39,0.86);
+      border: 1px solid rgba(51,65,85,0.72);
+      color: #dbeafe;
+      font-size: 0.92rem;
+      line-height: 1.6;
+    }
+    .section-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      background: rgba(59,130,246,0.14);
+      color: #93c5fd;
+    }
+    .detected-list {
+      margin-top: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .detected-card {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      background: rgba(15,23,42,0.92);
+      border: 1px solid rgba(51,65,85,0.72);
+      border-radius: 16px;
+    }
+    .checkbox {
+      width: 18px;
+      height: 18px;
+      margin-top: 3px;
+      border-radius: 6px;
+      border: 1px solid rgba(96,165,250,0.42);
+      background: rgba(59,130,246,0.22);
+      position: relative;
+    }
+    .checkbox::after {
+      content: '✓';
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #dbeafe;
+      font-size: 0.72rem;
+    }
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      border: 1px solid transparent;
+    }
+    .entity-person { background: rgba(59,130,246,0.14); color: #93c5fd; border-color: rgba(96,165,250,0.22); }
+    .entity-project { background: rgba(168,85,247,0.14); color: #d8b4fe; border-color: rgba(216,180,254,0.22); }
+    .entity-team { background: rgba(245,158,11,0.14); color: #fcd34d; border-color: rgba(252,211,77,0.22); }
+    .score-preview {
+      width: 44px;
+      height: 36px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+    .score-mid { background: rgba(245,158,11,0.13); color: #fbbf24; }
+    .score-high { background: var(--accent-500); color: #fff; }
+    .drop-zone {
+      margin-top: 16px;
+      border: 1px dashed rgba(96,165,250,0.34);
+      border-radius: 18px;
+      background: rgba(15,23,42,0.5);
+      padding: 18px;
+    }
+    .format-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(17,24,39,0.92);
+      border: 1px solid rgba(51,65,85,0.72);
+      color: var(--gray-400);
+      font-size: 0.74rem;
+    }
+    .footer-bar {
+      border-top: 1px solid rgba(51,65,85,0.78);
+      background: rgba(15,23,42,0.74);
+      padding: 16px 24px;
+    }
+    .btn-ghost, .btn-primary {
+      border-radius: 12px;
+      padding: 10px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    }
+    .btn-ghost { border: 1px solid rgba(71,85,105,0.72); color: var(--gray-400); }
+    .btn-ghost:hover { background: rgba(51,65,85,0.58); color: #fff; }
+    .btn-primary { background: var(--accent-500); color: #fff; }
+    .btn-primary:hover { background: var(--accent-600); }
+  </style>
+</head>
+<body>
+  <div class="background-shell">
+    <div class="ghost-header">
+      <div class="flex items-center gap-2 text-sm font-semibold"><i class="fas fa-satellite-dish text-blue-400"></i>Mission Control</div>
+      <div class="text-xs text-slate-500">Quick Add overlay</div>
+    </div>
+    <div class="ghost-main">
+      <div class="ghost-sidebar p-4 space-y-3">
+        <div class="h-3 w-20 rounded bg-slate-700/70"></div>
+        <div class="h-8 rounded bg-slate-800"></div>
+        <div class="h-8 rounded bg-slate-800"></div>
+        <div class="h-8 rounded bg-slate-800"></div>
+        <div class="h-8 rounded bg-slate-800"></div>
+      </div>
+      <div class="ghost-panel overflow-hidden">
+        <div class="ghost-row"></div>
+        <div class="ghost-row"></div>
+        <div class="ghost-row"></div>
+        <div class="ghost-row"></div>
+        <div class="ghost-row"></div>
+        <div class="ghost-row"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="overlay">
+    <div class="capture-modal">
+      <div class="modal-section">
+        <div class="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h1 class="text-xl font-semibold">Mission Control — Multi-Modal Capture</h1>
+            <p class="text-sm text-slate-400 mt-2">Capture from voice, attachments, screenshots, email forwards, or paste — then confirm what AI extracted.</p>
+          </div>
+          <button class="w-10 h-10 rounded-full border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"><i class="fas fa-times"></i></button>
+        </div>
+
+        <div class="input-shell">
+          <textarea class="prompt-input" readonly placeholder="What needs to get done?">What needs to get done?</textarea>
+
+          <div class="flex items-center gap-2 flex-wrap mt-3">
+            <button class="mode-btn active"><i class="fas fa-microphone"></i>Voice</button>
+            <button class="mode-btn"><i class="fas fa-paperclip"></i>Attach</button>
+            <button class="mode-btn"><i class="fas fa-camera"></i>Screenshot</button>
+            <button class="mode-btn" title="Forward an email into Mission Control"><i class="fas fa-envelope"></i>Email</button>
+            <button class="mode-btn"><i class="fas fa-clipboard"></i>Paste</button>
+            <span class="shortcut-hint ml-auto">Ctrl+K to open • Ctrl+Enter to save</span>
+          </div>
+
+          <div class="wave" aria-hidden="true">
+            <span style="height:18px"></span><span style="height:32px"></span><span style="height:22px"></span><span style="height:40px"></span><span style="height:28px"></span><span style="height:36px"></span><span style="height:20px"></span>
+          </div>
+          <div class="text-sm text-blue-300 mt-2 font-medium">Listening... tap to stop</div>
+          <div class="transcript">Need to follow up with Sarah about the Q3 report and also schedule the team retro for next week</div>
+        </div>
+
+        <div class="mt-6">
+          <span class="section-chip"><i class="fas fa-wand-magic-sparkles"></i>Detected tasks (2)</span>
+          <div class="detected-list">
+            <article class="detected-card">
+              <div class="checkbox"></div>
+              <div>
+                <div class="text-sm font-semibold">Follow up with Sarah about Q3 report</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                  <span class="entity-chip entity-person"><i class="fas fa-user text-[10px]"></i>Sarah</span>
+                  <span class="entity-chip entity-project"><i class="fas fa-diagram-project text-[10px]"></i>Q3</span>
+                </div>
+                <div class="text-xs text-slate-400 mt-3">Due: none detected</div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="score-preview score-mid">71</div>
+                <button class="text-slate-400 hover:text-white transition-colors mt-1"><i class="fas fa-pen"></i></button>
+              </div>
+            </article>
+
+            <article class="detected-card">
+              <div class="checkbox"></div>
+              <div>
+                <div class="text-sm font-semibold">Schedule team retro for next week</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                  <span class="entity-chip entity-team"><i class="fas fa-users text-[10px]"></i>Team</span>
+                </div>
+                <div class="text-xs text-slate-400 mt-3">Due: Next week (parsed)</div>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="score-preview" style="background: var(--surface-3); color: var(--gray-400);">36</div>
+                <button class="text-slate-400 hover:text-white transition-colors mt-1"><i class="fas fa-pen"></i></button>
+              </div>
+            </article>
+          </div>
+        </div>
+
+        <div class="drop-zone">
+          <div class="text-sm font-semibold">Paste or attach anything</div>
+          <p class="text-sm text-slate-400 mt-2">Works with every format — drop files here, paste screenshots, or forward an email to your capture address.</p>
+          <div class="flex items-center gap-2 flex-wrap mt-4">
+            <span class="format-pill"><i class="fas fa-camera text-blue-300"></i>Screenshot</span>
+            <span class="format-pill"><i class="fas fa-file-pdf text-rose-300"></i>PDF</span>
+            <span class="format-pill"><i class="fab fa-slack text-purple-300"></i>Slack</span>
+            <span class="format-pill"><i class="fas fa-image text-emerald-300"></i>Photo</span>
+            <span class="format-pill"><i class="fas fa-font text-amber-300"></i>Plain Text</span>
+            <span class="format-pill"><i class="fas fa-envelope text-sky-300"></i>Email</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-bar flex items-center justify-between gap-3">
+        <button class="btn-ghost">Cancel</button>
+        <button class="btn-primary">Create 2 tasks</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Triage Queue (Gallery View)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    .source-badge {
+      font-size: 0.55rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .source-reddit { background: #7c2d1220; color: #ff6b35; border: 1px solid #ff6b3530; }
+    .source-github { background: #a855f720; color: #c084fc; border: 1px solid #c084fc30; }
+    .source-instagram { background: #e040fb20; color: #f06292; border: 1px solid #f0629230; }
+    .source-youtube { background: #ff000020; color: #ff6b6b; border: 1px solid #ff000030; }
+    .source-twitter { background: #1da1f220; color: #4fc3f7; border: 1px solid #4fc3f730; }
+    .source-share { background: #10b98120; color: #6ee7b7; border: 1px solid #6ee7b730; }
+
+    .gallery-card {
+      background: var(--surface-1);
+      border: 1px solid transparent;
+      border-radius: 12px;
+      overflow: hidden;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+      position: relative;
+    }
+    .gallery-card:hover {
+      border-color: var(--surface-3);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 2px 8px rgba(0,0,0,0.3);
+      transform: translateY(-2px);
+    }
+    .gallery-card:hover .gallery-actions {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .gallery-card:hover .gallery-overlay {
+      opacity: 1;
+    }
+    .gallery-card.focused {
+      border-color: var(--accent-500);
+      box-shadow: 0 0 0 1px var(--accent-500), 0 8px 24px rgba(59,130,246,0.2);
+    }
+
+    .gallery-thumbnail {
+      aspect-ratio: 16/9;
+      background: var(--surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .gallery-thumbnail.square {
+      aspect-ratio: 1/1;
+    }
+
+    .gallery-overlay {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 50%);
+      opacity: 0;
+      transition: opacity 0.15s ease;
+    }
+
+    .gallery-actions {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 8px;
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+      opacity: 0;
+      transform: translateY(4px);
+      transition: opacity 0.15s ease, transform 0.15s ease;
+    }
+
+    .gallery-action-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(17,24,39,0.9);
+      color: var(--gray-400);
+      backdrop-filter: blur(8px);
+      transition: background 0.1s, color 0.1s, transform 0.1s;
+    }
+    .gallery-action-btn:hover {
+      background: var(--accent-600);
+      border-color: var(--accent-500);
+      color: white;
+    }
+    .gallery-action-btn:active {
+      transform: scale(0.96);
+    }
+    .gallery-action-btn.primary {
+      background: var(--accent-600);
+      border-color: var(--accent-500);
+      color: white;
+    }
+
+    .score-badge {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      font-size: 0.6rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(0,0,0,0.7);
+      backdrop-filter: blur(4px);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .platform-badge {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+    }
+
+    .duration-badge {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      font-size: 0.55rem;
+      font-weight: 600;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(0,0,0,0.8);
+      color: white;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .play-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .play-overlay i {
+      font-size: 2rem;
+      color: white;
+      opacity: 0.85;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5));
+      transition: opacity 0.1s, transform 0.2s;
+    }
+    .gallery-card:hover .play-overlay i {
+      opacity: 1;
+      transform: scale(1.1);
+    }
+
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background 0.1s, color 0.1s;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #f8fafc; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .queue-counter {
+      font-variant-numeric: tabular-nums;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: var(--accent-900);
+      color: var(--accent-400);
+      font-weight: 600;
+    }
+
+    .view-toggle {
+      display: inline-flex;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--surface-3);
+    }
+    .view-toggle button {
+      padding: 6px 12px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      color: var(--gray-500);
+      background: var(--surface-2);
+      border: none;
+      cursor: pointer;
+      transition: background 0.1s, color 0.1s;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .view-toggle button:hover { color: var(--gray-400); }
+    .view-toggle button.active {
+      background: var(--accent-900);
+      color: var(--accent-400);
+    }
+    .view-toggle button:not(:last-child) {
+      border-right: 1px solid var(--surface-3);
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+      font-size: 0.8rem;
+    }
+    .sidebar-item:hover { background: var(--surface-2); }
+    .sidebar-item.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .collection-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+      font-size: 0.8rem;
+      color: var(--gray-400);
+    }
+    .collection-item:hover { background: var(--surface-2); }
+
+    .kbd {
+      font-size: 0.55rem;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: var(--surface-0);
+      border: 1px solid var(--surface-3);
+      color: var(--gray-500);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-weight: 600;
+    }
+
+    .focus-mode-hint {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface-1);
+      border: 1px solid var(--surface-3);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.7rem;
+      color: var(--gray-400);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+
+    .suggestion-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+  </style>
+</head>
+<body>
+  <!-- Top Header -->
+  <header style="background: var(--surface-1); border-bottom: 1px solid var(--surface-2);" class="px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link active">
+          <i class="fas fa-inbox mr-1.5 text-xs"></i>Triage
+          <span class="queue-counter ml-1.5">12</span>
+        </span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="relative">
+        <input type="text" placeholder="Search triage queue..." 
+          style="background: var(--surface-0); border: 1px solid var(--surface-3);"
+          class="w-56 px-3 py-1.5 text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-300 placeholder-gray-500">
+        <kbd class="kbd absolute right-2 top-1.5">/</kbd>
+      </div>
+      <button style="color: var(--gray-500);" class="p-2 hover:text-white rounded-md transition-colors">
+        <i class="fas fa-sync-alt text-sm"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <!-- Left Sidebar -->
+    <aside style="background: var(--surface-1); border-right: 1px solid var(--surface-2); width: 200px;" class="p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-4">
+      <!-- Sources -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Sources</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item active">
+            <i class="fas fa-layer-group text-xs w-4"></i>
+            <span>All Sources</span>
+            <span class="ml-auto text-xs font-medium" style="color: var(--accent-400);">12</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-reddit text-xs w-4" style="color: #ff6b35;"></i>
+            <span>Reddit</span>
+            <span class="ml-auto text-xs">4</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-github text-xs w-4" style="color: #c084fc;"></i>
+            <span>GitHub Stars</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-youtube text-xs w-4" style="color: #ff0000;"></i>
+            <span>YouTube</span>
+            <span class="ml-auto text-xs">2</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-instagram text-xs w-4" style="color: #f06292;"></i>
+            <span>Instagram</span>
+            <span class="ml-auto text-xs">2</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-x-twitter text-xs w-4" style="color: #4fc3f7;"></i>
+            <span>X / Twitter</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Collections (NEW) -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Collections</h3>
+        <div class="space-y-0.5">
+          <div class="collection-item">
+            <span class="text-xs">🧊</span>
+            <span>3D Print Ideas</span>
+            <span class="ml-auto text-xs" style="color: var(--gray-500);">5</span>
+          </div>
+          <div class="collection-item">
+            <span class="text-xs">🏠</span>
+            <span>Home Lab Research</span>
+            <span class="ml-auto text-xs" style="color: var(--gray-500);">3</span>
+          </div>
+          <div class="collection-item">
+            <span class="text-xs">🛒</span>
+            <span>Deals to Review</span>
+            <span class="ml-auto text-xs" style="color: var(--gray-500);">2</span>
+          </div>
+          <div class="collection-item" style="color: var(--gray-500);">
+            <i class="fas fa-plus text-[10px] w-4"></i>
+            <span>New Collection</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Filters -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Status</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item active" style="color: var(--accent-400);">
+            <i class="fas fa-circle text-[6px] w-4"></i>
+            <span>Pending</span>
+            <span class="ml-auto text-xs">12</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-folder text-xs w-4"></i>
+            <span>Collected</span>
+            <span class="ml-auto text-xs">10</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-clock text-xs w-4"></i>
+            <span>Snoozed</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-check text-xs w-4"></i>
+            <span>Actioned</span>
+            <span class="ml-auto text-xs">28</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Density -->
+      <div class="mt-auto pt-3" style="border-top: 1px solid var(--surface-2);">
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Grid Density</h3>
+        <select style="background: var(--surface-2); border: 1px solid var(--surface-3); color: var(--gray-400);" class="w-full text-xs rounded-md px-2 py-1.5">
+          <option>Default (4 columns)</option>
+          <option>Compact (5 columns)</option>
+          <option>Spacious (3 columns)</option>
+        </select>
+      </div>
+    </aside>
+
+    <!-- Main Content: Gallery View -->
+    <main class="flex-1 overflow-y-auto p-4">
+      <!-- Queue Header -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <h2 class="text-base font-semibold">Triage Queue</h2>
+          <span class="text-xs" style="color: var(--gray-500);">12 items pending · sorted by relevance</span>
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- View Mode Toggle -->
+          <div class="view-toggle">
+            <button>
+              <i class="fas fa-list text-[10px]"></i>
+              Stream
+            </button>
+            <button class="active">
+              <i class="fas fa-th-large text-[10px]"></i>
+              Gallery
+              <kbd class="kbd" style="background: transparent; border-color: rgba(96,165,250,0.3); color: var(--accent-400);">G</kbd>
+            </button>
+            <button>
+              <i class="fas fa-expand text-[10px]"></i>
+              Focus
+            </button>
+          </div>
+          <button style="padding: 6px 12px; border-radius: 6px; font-size: 0.7rem; font-weight: 500; background: var(--accent-600); border: 1px solid var(--accent-500); color: white; cursor: pointer;">
+            <i class="fas fa-magic text-[10px] mr-1"></i>
+            Auto-Triage
+          </button>
+        </div>
+      </div>
+
+      <!-- Gallery Grid -->
+      <div class="gallery-grid">
+
+        <!-- Card 1: 3D Model (Reddit) — high relevance -->
+        <div class="gallery-card focused">
+          <div class="gallery-thumbnail">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #1a2332, #0f1922); display: flex; align-items: center; justify-content: center;">
+              <i class="fas fa-cube text-4xl" style="color: #10b98140;"></i>
+            </div>
+            <span class="platform-badge source-badge source-reddit">
+              <i class="fab fa-reddit mr-0.5"></i>Reddit
+            </span>
+            <span class="score-badge" style="color: var(--success);">92</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Save to Model Catalog (M)">
+                <i class="fas fa-cube text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">"This magnetic snap-fit case design is insane — no supports needed"</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">r/3Dprinting · 2h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--success);" title="AI: Save to Model Catalog (95%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: YouTube Video — with duration -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; align-items: center; justify-content: center;">
+              <i class="fab fa-youtube text-4xl" style="color: #ff000040;"></i>
+            </div>
+            <div class="play-overlay">
+              <i class="fas fa-play-circle"></i>
+            </div>
+            <span class="platform-badge source-badge source-youtube">
+              <i class="fab fa-youtube mr-0.5"></i>YouTube
+            </span>
+            <span class="score-badge" style="color: var(--success);">85</span>
+            <span class="duration-badge">23:14</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Save to Model Catalog (M)">
+                <i class="fas fa-cube text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">"Building a Smart Home Dashboard with ESPHome + E-Ink Display"</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">@TechWithTim · 5h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--success);" title="AI: Model Catalog (90%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: GitHub Repo -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail" style="aspect-ratio: auto; height: auto; min-height: 120px; padding: 16px; flex-direction: column; align-items: flex-start; justify-content: flex-start;">
+            <!-- Repo-style card with language bar -->
+            <div style="width: 100%; height: 4px; border-radius: 2px; background: linear-gradient(90deg, #00add8 70%, var(--surface-3) 70%); margin-bottom: 12px;"></div>
+            <div class="flex items-center gap-2 mb-2">
+              <i class="fab fa-github text-lg" style="color: var(--gray-400);"></i>
+              <span class="text-xs font-semibold" style="color: #f8fafc;">valkey-io/valkey</span>
+            </div>
+            <p class="text-[0.65rem] mb-2" style="color: var(--gray-500);">Open source high-performance key/value datastore</p>
+            <div class="flex items-center gap-3 mt-auto">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);"><i class="fas fa-star text-yellow-400 mr-0.5"></i>18.2k</span>
+              <span class="text-[0.6rem]" style="color: var(--gray-500);"><i class="fas fa-code-branch mr-0.5"></i>Go</span>
+            </div>
+            <span class="score-badge" style="color: var(--accent-400); top: 8px; right: 8px;">78</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">Starred · 4h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--success);" title="AI: Karakeep → DevOps Tools (90%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Instagram Reel (square aspect) -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail square">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045); display: flex; align-items: center; justify-content: center;">
+              <i class="fas fa-play text-2xl text-white" style="opacity: 0.6;"></i>
+            </div>
+            <div class="play-overlay">
+              <i class="fas fa-play-circle"></i>
+            </div>
+            <span class="platform-badge source-badge source-instagram">
+              <i class="fab fa-instagram mr-0.5"></i>IG
+            </span>
+            <span class="score-badge" style="color: var(--warning);">65</span>
+            <span class="duration-badge">0:45</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">"LED underglow desk setup — full tutorial with parts list"</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">@techdiy_studio · 6h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--warning);" title="AI: Todo → Home Office (70%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: Reddit Home Automation -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #0d1b2a, #1b2838); display: flex; align-items: center; justify-content: center;">
+              <i class="fas fa-home text-4xl" style="color: #60a5fa30;"></i>
+            </div>
+            <span class="platform-badge source-badge source-reddit">
+              <i class="fab fa-reddit mr-0.5"></i>Reddit
+            </span>
+            <span class="score-badge" style="color: var(--accent-400);">72</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">"Complete guide: Zigbee2MQTT with motion-activated lighting per room"</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">r/homeassistant · 8h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--accent-400);" title="AI: Todo → Home Automation (75%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6: Product / Sale (time-sensitive) -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #1a1a2a, #2a1a2a); display: flex; align-items: center; justify-content: center;">
+              <i class="fas fa-shopping-cart text-3xl" style="color: #f59e0b30;"></i>
+            </div>
+            <span class="platform-badge source-badge source-share">
+              <i class="fas fa-share-alt mr-0.5"></i>iOS
+            </span>
+            <span class="score-badge" style="color: var(--gray-400);">55</span>
+            <!-- Time-sensitive badge -->
+            <div style="position: absolute; bottom: 8px; left: 8px; font-size: 0.55rem; padding: 2px 6px; border-radius: 4px; background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3);">
+              <i class="fas fa-clock mr-1"></i>4d left
+            </div>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="n8n: Price Watch">
+                <i class="fas fa-bolt text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">Bambu Lab AMS Lite — $69 Summer Sale</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">bambulab.com · 1d ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--danger);" title="Time-sensitive"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 7: Another YouTube (TikTok style) -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail square">
+            <div style="width: 100%; height: 100%; background: linear-gradient(135deg, #000, #1a1a2e); display: flex; align-items: center; justify-content: center;">
+              <i class="fab fa-tiktok text-3xl" style="color: #ffffff30;"></i>
+            </div>
+            <div class="play-overlay">
+              <i class="fas fa-play-circle"></i>
+            </div>
+            <span class="platform-badge source-badge" style="background: #00000050; color: white; border: 1px solid rgba(255,255,255,0.2);">
+              <i class="fab fa-tiktok mr-0.5"></i>TikTok
+            </span>
+            <span class="score-badge" style="color: var(--warning);">58</span>
+            <span class="duration-badge">0:32</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <h3 class="text-xs font-medium mb-1 line-clamp-2">"Cable management hack that actually works"</h3>
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">@desksetups · 12h ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--gray-500);" title="AI: Karakeep (60%)"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 8: X/Twitter -->
+        <div class="gallery-card">
+          <div class="gallery-thumbnail">
+            <div style="width: 100%; height: 100%; background: var(--surface-0); padding: 16px; display: flex; flex-direction: column; justify-content: center;">
+              <!-- Embedded tweet style -->
+              <div class="flex items-center gap-2 mb-2">
+                <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--surface-3);"></div>
+                <div>
+                  <div class="text-[0.6rem] font-semibold" style="color: #f8fafc;">@hw_deals</div>
+                </div>
+              </div>
+              <p class="text-[0.65rem] line-clamp-3" style="color: var(--gray-400);">"Just released: ESP32-S3 with onboard camera for $8. Perfect for Frigate NVR setups..."</p>
+            </div>
+            <span class="platform-badge source-badge source-twitter">
+              <i class="fab fa-x-twitter mr-0.5"></i>X
+            </span>
+            <span class="score-badge" style="color: var(--warning);">60</span>
+            <div class="gallery-overlay"></div>
+            <div class="gallery-actions">
+              <button class="gallery-action-btn primary" title="Save to Karakeep (K)">
+                <i class="fas fa-bookmark text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Create Task (T)">
+                <i class="fas fa-plus-circle text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Collect (C)">
+                <i class="fas fa-folder-plus text-xs"></i>
+              </button>
+              <button class="gallery-action-btn" title="Dismiss (D)">
+                <i class="fas fa-times text-xs"></i>
+              </button>
+            </div>
+          </div>
+          <div class="p-3">
+            <div class="flex items-center gap-2">
+              <span class="text-[0.6rem]" style="color: var(--gray-500);">Bookmarked · 1d ago</span>
+              <span class="suggestion-dot ml-auto" style="background: var(--accent-400);" title="AI: Karakeep → Hardware Deals (72%)"></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Keyboard Hint Bar -->
+  <div class="focus-mode-hint">
+    <span><kbd class="kbd">←</kbd><kbd class="kbd">→</kbd><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> Navigate</span>
+    <span><kbd class="kbd">Enter</kbd> Open detail</span>
+    <span><kbd class="kbd">K</kbd> Karakeep</span>
+    <span><kbd class="kbd">M</kbd> Catalog</span>
+    <span><kbd class="kbd">T</kbd> Task</span>
+    <span><kbd class="kbd">C</kbd> Collect</span>
+    <span><kbd class="kbd">D</kbd> Dismiss</span>
+    <span><kbd class="kbd">G</kbd> Toggle gallery</span>
+    <span><kbd class="kbd">?</kbd> Help</span>
+  </div>
+</body>
+</html>

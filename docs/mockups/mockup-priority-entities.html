@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Priority Entities</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .app-header { background: var(--surface-1); border-bottom: 1px solid var(--surface-2); }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background-color 0.15s ease, color 0.15s ease;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #fff; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .sidebar {
+      width: 220px;
+      background: var(--surface-1);
+      border-right: 1px solid var(--surface-2);
+    }
+    .sidebar-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 8px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--gray-400);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .sidebar-item:hover { background: var(--surface-2); color: #fff; }
+    .sidebar-item.active { background: rgba(30,58,138,0.48); color: var(--accent-400); }
+
+    .shell-panel {
+      background: linear-gradient(180deg, rgba(17,24,39,0.98), rgba(11,17,32,0.98));
+      border: 1px solid var(--surface-2);
+      border-radius: 18px;
+      box-shadow: 0 18px 44px rgba(2,6,23,0.38);
+    }
+    .tier-block {
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px solid rgba(51,65,85,0.7);
+      border-radius: 16px;
+      padding: 18px;
+    }
+    .tier-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .tier-critical { background: rgba(239,68,68,0.14); color: #fca5a5; }
+    .tier-high { background: rgba(245,158,11,0.14); color: #fcd34d; }
+    .tier-medium { background: rgba(59,130,246,0.14); color: #93c5fd; }
+    .tier-standard { background: rgba(100,116,139,0.16); color: #cbd5e1; }
+    .count-badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.9);
+      border: 1px solid rgba(51,65,85,0.72);
+      color: var(--gray-400);
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+    .entity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      margin-top: 16px;
+    }
+    .entity-card {
+      background: var(--surface-1);
+      border: 1px solid rgba(51,65,85,0.76);
+      border-left: 3px solid var(--surface-3);
+      border-radius: 14px;
+      padding: 14px;
+      min-height: 112px;
+      transition: transform 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+      position: relative;
+    }
+    .entity-card:hover {
+      transform: translateY(-1px);
+      border-color: rgba(96,165,250,0.24);
+      box-shadow: 0 12px 30px rgba(2,6,23,0.28);
+    }
+    .entity-card.selected {
+      background: linear-gradient(180deg, rgba(30,41,59,0.86), rgba(17,24,39,1));
+      border-color: rgba(96,165,250,0.32);
+      box-shadow: 0 0 0 1px rgba(59,130,246,0.22), 0 18px 36px rgba(2,6,23,0.42);
+    }
+    .entity-card.add-card {
+      border-style: dashed;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gray-500);
+      background: rgba(15,23,42,0.5);
+    }
+    .entity-card.add-card:hover { color: var(--accent-400); }
+    .drag-handle {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      color: var(--gray-600);
+      font-size: 0.8rem;
+    }
+    .type-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.9);
+      color: var(--gray-400);
+      font-size: 0.68rem;
+      border: 1px solid rgba(51,65,85,0.72);
+    }
+    .rank-chip {
+      width: 28px;
+      height: 28px;
+      border-radius: 10px;
+      background: rgba(59,130,246,0.16);
+      color: var(--accent-400);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.76rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .color-dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.1);
+      box-shadow: 0 0 0 1px rgba(2,6,23,0.55);
+    }
+    .color-dot.active {
+      transform: scale(1.1);
+      box-shadow: 0 0 0 2px rgba(96,165,250,0.26);
+    }
+    .mini-stat {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 999px;
+      background: rgba(15,23,42,0.88);
+      border: 1px solid rgba(51,65,85,0.72);
+      color: var(--gray-400);
+      padding: 4px 9px;
+      font-size: 0.7rem;
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+        <span class="nav-link active"><i class="fas fa-cog mr-1.5 text-xs"></i>Settings</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sync-alt text-sm"></i></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sliders text-sm"></i></button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <aside class="sidebar p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-5">
+      <div>
+        <div class="sidebar-label">Settings</div>
+        <div class="space-y-1">
+          <div class="sidebar-item"><i class="fas fa-plug text-xs w-4"></i><span>Connectors</span></div>
+          <div class="sidebar-item"><i class="fas fa-sync text-xs w-4"></i><span>Sync Schedule</span></div>
+          <div class="sidebar-item active"><i class="fas fa-ranking-star text-blue-400 text-xs w-4"></i><span>Priority Entities</span></div>
+          <div class="sidebar-item"><i class="fas fa-brain text-xs w-4"></i><span>AI & Scoring</span></div>
+          <div class="sidebar-item"><i class="fas fa-tags text-xs w-4"></i><span>Tags</span></div>
+          <div class="sidebar-item"><i class="fas fa-bell text-xs w-4"></i><span>Notifications</span></div>
+          <div class="sidebar-item"><i class="fas fa-palette text-xs w-4"></i><span>Appearance</span></div>
+        </div>
+      </div>
+      <div class="mt-auto pt-4 border-t border-slate-800 text-xs text-slate-400 space-y-2">
+        <div class="flex items-center justify-between"><span>Ranked entities</span><span>18</span></div>
+        <div class="flex items-center justify-between"><span>Active score model</span><span class="text-blue-300">v2</span></div>
+      </div>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto p-5">
+      <div class="shell-panel p-6">
+        <div class="flex items-start justify-between gap-5 pb-5 border-b border-slate-800">
+          <div>
+            <h2 class="text-2xl font-semibold">Priority Entities</h2>
+            <p class="text-sm text-slate-400 mt-2">Rank who and what matters. This powers your AI scores.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="mini-stat"><i class="fas fa-brain text-blue-400"></i>Scoring uses entity tiers</span>
+            <span class="mini-stat"><i class="fas fa-wand-magic-sparkles text-emerald-300"></i>Live across all sources</span>
+          </div>
+        </div>
+
+        <div class="space-y-5 mt-6">
+          <section class="tier-block">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <span class="tier-label tier-critical"><i class="fas fa-bolt"></i>Critical</span>
+                <p class="text-sm text-slate-400 mt-2">Mission-critical priorities</p>
+              </div>
+              <span class="count-badge">4 entities</span>
+            </div>
+            <div class="entity-grid">
+              <article class="entity-card selected" style="border-left-color:#60a5fa;">
+                <i class="fas fa-grip-vertical drag-handle"></i>
+                <div class="flex items-center justify-between mb-3">
+                  <span class="type-pill"><i class="fas fa-user"></i>Person</span>
+                  <span class="rank-chip">#1</span>
+                </div>
+                <div class="text-lg font-semibold">Sarah C.</div>
+                <div class="text-xs text-slate-400 mt-1">Head of Engineering</div>
+                <p class="text-sm text-slate-300 mt-3 leading-6">My manager — Head of Engineering. Owns sprint priorities I report into.</p>
+                <div class="mt-4">
+                  <div class="text-[11px] uppercase tracking-[0.16em] text-slate-500 mb-2">Color</div>
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="color-dot active" style="background:#60a5fa;"></span>
+                    <span class="color-dot" style="background:#818cf8;"></span>
+                    <span class="color-dot" style="background:#f472b6;"></span>
+                    <span class="color-dot" style="background:#f59e0b;"></span>
+                    <span class="color-dot" style="background:#10b981;"></span>
+                    <span class="color-dot" style="background:#22d3ee;"></span>
+                    <span class="color-dot" style="background:#e879f9;"></span>
+                    <span class="color-dot" style="background:#cbd5e1;"></span>
+                  </div>
+                </div>
+                <div class="mt-4 flex items-center justify-between text-xs">
+                  <span class="mini-stat"><i class="fas fa-link text-blue-300"></i>12 active tasks</span>
+                  <span class="text-slate-500">Last touched 2h ago</span>
+                </div>
+              </article>
+
+              <article class="entity-card" style="border-left-color:#f87171;">
+                <i class="fas fa-grip-vertical drag-handle"></i>
+                <div class="flex items-center justify-between mb-4">
+                  <span class="type-pill"><i class="fas fa-users"></i>Team</span>
+                  <span class="rank-chip">#2</span>
+                </div>
+                <div class="text-base font-semibold">Platform Team</div>
+                <div class="text-sm text-slate-400 mt-2">Sprint execution, incident response</div>
+              </article>
+
+              <article class="entity-card" style="border-left-color:#a78bfa;">
+                <i class="fas fa-grip-vertical drag-handle"></i>
+                <div class="flex items-center justify-between mb-4">
+                  <span class="type-pill"><i class="fas fa-diagram-project"></i>Project</span>
+                  <span class="rank-chip">#3</span>
+                </div>
+                <div class="text-base font-semibold">Mission Control</div>
+                <div class="text-sm text-slate-400 mt-2">Current product prototype and launch narrative</div>
+              </article>
+
+              <article class="entity-card add-card">
+                <div class="text-center">
+                  <i class="fas fa-plus text-xl mb-2"></i>
+                  <div class="text-sm font-medium">Add entity</div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="tier-block">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <span class="tier-label tier-high"><i class="fas fa-arrow-trend-up"></i>High</span>
+                <p class="text-sm text-slate-400 mt-2">High-impact priorities</p>
+              </div>
+              <span class="count-badge">5 entities</span>
+            </div>
+            <div class="entity-grid">
+              <article class="entity-card" style="border-left-color:#f59e0b;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-user"></i>Person</span><span class="rank-chip">#4</span></div><div class="text-base font-semibold">Nate K.</div><div class="text-sm text-slate-400 mt-2">Design reviews, product polish</div></article>
+              <article class="entity-card" style="border-left-color:#38bdf8;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-globe"></i>Domain</span><span class="rank-chip">#5</span></div><div class="text-base font-semibold">Home Automation</div><div class="text-sm text-slate-400 mt-2">Energy, garage, camera integrations</div></article>
+              <article class="entity-card" style="border-left-color:#c084fc;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-diagram-project"></i>Project</span><span class="rank-chip">#6</span></div><div class="text-base font-semibold">RyMessage</div><div class="text-sm text-slate-400 mt-2">Competitive analysis and design system source</div></article>
+              <article class="entity-card" style="border-left-color:#22c55e;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-users"></i>Team</span><span class="rank-chip">#7</span></div><div class="text-base font-semibold">Leadership</div><div class="text-sm text-slate-400 mt-2">Quarterly planning and check-ins</div></article>
+              <article class="entity-card add-card"><div class="text-center"><i class="fas fa-plus text-xl mb-2"></i><div class="text-sm font-medium">Add entity</div></div></article>
+            </div>
+          </section>
+
+          <section class="tier-block">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <span class="tier-label tier-medium"><i class="fas fa-circle-dot"></i>Medium</span>
+                <p class="text-sm text-slate-400 mt-2">Important, but not urgent by default</p>
+              </div>
+              <span class="count-badge">4 entities</span>
+            </div>
+            <div class="entity-grid">
+              <article class="entity-card" style="border-left-color:#60a5fa;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-diagram-project"></i>Project</span><span class="rank-chip">#8</span></div><div class="text-base font-semibold">Kitchen Renovation</div><div class="text-sm text-slate-400 mt-2">Orders, cabinetry, scheduling</div></article>
+              <article class="entity-card" style="border-left-color:#34d399;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-globe"></i>Domain</span><span class="rank-chip">#9</span></div><div class="text-base font-semibold">3D Printing</div><div class="text-sm text-slate-400 mt-2">Prototypes and enclosure parts</div></article>
+              <article class="entity-card" style="border-left-color:#fb7185;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-user"></i>Person</span><span class="rank-chip">#10</span></div><div class="text-base font-semibold">Alex P.</div><div class="text-sm text-slate-400 mt-2">3D printer filament supplier contact</div></article>
+              <article class="entity-card add-card"><div class="text-center"><i class="fas fa-plus text-xl mb-2"></i><div class="text-sm font-medium">Add entity</div></div></article>
+            </div>
+          </section>
+
+          <section class="tier-block">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <span class="tier-label tier-standard"><i class="fas fa-minus"></i>Standard</span>
+                <p class="text-sm text-slate-400 mt-2">Default priorities with no boost</p>
+              </div>
+              <span class="count-badge">5 entities</span>
+            </div>
+            <div class="entity-grid">
+              <article class="entity-card" style="border-left-color:#64748b;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-globe"></i>Domain</span><span class="rank-chip">#11</span></div><div class="text-base font-semibold">Errands</div><div class="text-sm text-slate-400 mt-2">Routine pickups and small home tasks</div></article>
+              <article class="entity-card" style="border-left-color:#64748b;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-user"></i>Person</span><span class="rank-chip">#12</span></div><div class="text-base font-semibold">Contractor Inbox</div><div class="text-sm text-slate-400 mt-2">Replies can wait until batches</div></article>
+              <article class="entity-card" style="border-left-color:#64748b;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-diagram-project"></i>Project</span><span class="rank-chip">#13</span></div><div class="text-base font-semibold">Someday Ideas</div><div class="text-sm text-slate-400 mt-2">Backlog concepts and experiments</div></article>
+              <article class="entity-card" style="border-left-color:#64748b;"><i class="fas fa-grip-vertical drag-handle"></i><div class="flex items-center justify-between mb-4"><span class="type-pill"><i class="fas fa-users"></i>Team</span><span class="rank-chip">#14</span></div><div class="text-base font-semibold">Neighborhood Group</div><div class="text-sm text-slate-400 mt-2">Community events and reminders</div></article>
+              <article class="entity-card add-card"><div class="text-center"><i class="fas fa-plus text-xl mb-2"></i><div class="text-sm font-medium">Add entity</div></div></article>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

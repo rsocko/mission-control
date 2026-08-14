@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Tag Review</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+    .tag-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+    .tag-row { transition: background 0.1s; }
+    .tag-row:hover { background: #f8fafc; }
+    .tag-row.selected { background: #eff6ff; }
+    .merge-suggestion { border-left: 3px solid #eab308; background: #fefce8; }
+    .system-tag { opacity: 0.7; }
+    .system-badge { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #f1f5f9; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+
+  <!-- Top Navigation -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-600 text-lg"></i>
+        <h1 class="text-lg font-semibold text-gray-900">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-6">
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-md">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-sm font-medium bg-blue-50 text-blue-700 rounded-md">Settings</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-3">
+      <kbd class="text-xs text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">⌘K</kbd>
+    </div>
+  </header>
+
+  <!-- Tag Review Modal (shown as full-page for mockup) -->
+  <div class="fixed inset-0 top-[57px] bg-black/20 z-40 flex items-start justify-center pt-8">
+    <div class="bg-white rounded-xl shadow-2xl w-[960px] max-h-[calc(100vh-120px)] flex flex-col overflow-hidden border border-gray-200">
+
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+            <i class="fas fa-tags text-blue-600 text-sm"></i>
+          </div>
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900">Tag Review</h2>
+            <p class="text-xs text-gray-500">Audit, merge, and clean up tags across your sources</p>
+          </div>
+        </div>
+        <button class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-400">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+
+      <div class="flex flex-1 min-h-0">
+        <!-- Left Sidebar: Scope -->
+        <div class="w-56 border-r border-gray-100 p-4 overflow-y-auto flex-shrink-0">
+          <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Scope</p>
+          <div class="space-y-0.5">
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium bg-blue-50 text-blue-700 rounded-md">
+              <i class="fas fa-globe w-4 text-center"></i>All Sources
+              <span class="ml-auto text-xs bg-blue-100 text-blue-600 px-1.5 rounded">47</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md">
+              <i class="fab fa-github w-4 text-center"></i>GitHub Issues
+              <span class="ml-auto text-xs text-gray-400">32</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-md pl-8">
+              rsocko/mission-control
+              <span class="ml-auto text-xs text-gray-400">28</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-md pl-8">
+              rsocko/other-repo
+              <span class="ml-auto text-xs text-gray-400">4</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md">
+              <i class="fab fa-microsoft w-4 text-center"></i>Microsoft Todo
+              <span class="ml-auto text-xs text-gray-400">9</span>
+            </button>
+            <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-md">
+              <i class="fas fa-home w-4 text-center"></i>Local Only
+              <span class="ml-auto text-xs text-gray-400">6</span>
+            </button>
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-gray-100">
+            <p class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">System Tags</p>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><i class="fas fa-lock text-gray-300 w-3"></i>mc:blocked</span>
+                <span class="text-gray-400">3</span>
+              </div>
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><i class="fas fa-lock text-gray-300 w-3"></i>mc:waiting</span>
+                <span class="text-gray-400">2</span>
+              </div>
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><i class="fas fa-lock text-gray-300 w-3"></i>priority:high</span>
+                <span class="text-gray-400">12</span>
+              </div>
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><i class="fas fa-lock text-gray-300 w-3"></i>priority:medium</span>
+                <span class="text-gray-400">8</span>
+              </div>
+              <div class="flex items-center justify-between text-xs text-gray-500">
+                <span class="flex items-center gap-1.5"><i class="fas fa-lock text-gray-300 w-3"></i>effort:3</span>
+                <span class="text-gray-400">5</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="flex-1 flex flex-col min-h-0">
+          <!-- Toolbar -->
+          <div class="flex items-center gap-3 px-5 py-3 border-b border-gray-100 bg-gray-50/50">
+            <div class="flex-1 relative">
+              <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+              <input type="text" placeholder="Filter tags..." class="w-full pl-9 pr-3 py-1.5 text-sm bg-white border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400">
+            </div>
+            <select class="text-xs bg-white border border-gray-200 rounded-md px-2 py-1.5 text-gray-600">
+              <option>Sort: Usage (high→low)</option>
+              <option>Sort: Usage (low→high)</option>
+              <option>Sort: Name A→Z</option>
+              <option>Sort: Name Z→A</option>
+            </select>
+            <label class="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer">
+              <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              Show suggestions
+            </label>
+          </div>
+
+          <!-- Tag List -->
+          <div class="flex-1 overflow-y-auto px-5 py-3">
+            <!-- Suggestion banner -->
+            <div class="merge-suggestion rounded-lg px-4 py-3 mb-4 flex items-center gap-3">
+              <div class="w-7 h-7 rounded-full bg-yellow-100 flex items-center justify-center flex-shrink-0">
+                <i class="fas fa-lightbulb text-yellow-600 text-xs"></i>
+              </div>
+              <div class="flex-1">
+                <p class="text-sm font-medium text-gray-800">2 potential duplicates found</p>
+                <p class="text-xs text-gray-500">"wontfix" and "won't fix" may be the same tag — consider merging</p>
+              </div>
+              <button class="text-xs font-medium text-yellow-700 hover:text-yellow-800 px-2 py-1 rounded hover:bg-yellow-100">Review</button>
+              <button class="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+            </div>
+
+            <!-- Table Header -->
+            <div class="flex items-center gap-3 px-3 py-2 text-xs font-medium text-gray-400 uppercase tracking-wider border-b border-gray-100">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1">Tag</div>
+              <div class="w-20 text-right">Tasks</div>
+              <div class="w-24 text-center">Source</div>
+              <div class="w-16 text-center">Color</div>
+              <div class="w-8"></div>
+            </div>
+
+            <!-- Tag Rows -->
+            <div class="tag-row selected flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" checked class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #fee2e2; color: #991b1b;">bug</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">24</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #d73a4a;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #dcfce7; color: #166534;">enhancement</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">18</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #a2eeef;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #dbeafe; color: #1e40af;">frontend</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">9</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #1d76db;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #f3f4f6; color: #374151;">documentation</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">7</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #0075ca;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row selected flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" checked class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #f3f4f6; color: #374151;">wontfix</span>
+                <span class="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded font-medium">
+                  <i class="fas fa-code-merge mr-0.5"></i>merge?
+                </span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">3</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #6b7280;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row selected flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" checked class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #f3f4f6; color: #374151;">won't fix</span>
+                <span class="text-xs text-yellow-600 bg-yellow-50 px-1.5 py-0.5 rounded font-medium">
+                  <i class="fas fa-code-merge mr-0.5"></i>merge?
+                </span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">1</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #6b7280;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #fef3c7; color: #92400e;">needs-triage</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">5</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fab fa-github mr-1"></i>GitHub</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #e4e669;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5">
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #ede9fe; color: #5b21b6;">quick-win</span>
+                <span class="system-badge">local</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-600 font-medium">4</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-500"><i class="fas fa-home mr-1"></i>Local</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #7c3aed;"></div>
+              </div>
+              <div class="w-8 flex justify-center">
+                <button class="text-gray-400 hover:text-gray-600"><i class="fas fa-ellipsis-h text-xs"></i></button>
+              </div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md opacity-50">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" disabled>
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #fef2f2; color: #991b1b;">
+                  <i class="fas fa-lock text-gray-400 text-[10px] mr-0.5"></i>priority:high
+                </span>
+                <span class="system-badge">system</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-500">12</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-400">Auto-managed</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #d93f0b;"></div>
+              </div>
+              <div class="w-8"></div>
+            </div>
+
+            <div class="tag-row flex items-center gap-3 px-3 py-2.5 rounded-md opacity-50">
+              <div class="w-5 flex items-center justify-center">
+                <input type="checkbox" class="rounded border-gray-300 text-blue-600 w-3.5 h-3.5" disabled>
+              </div>
+              <div class="flex-1 flex items-center gap-2">
+                <span class="tag-pill" style="background: #fef9c3; color: #854d0e;">
+                  <i class="fas fa-lock text-gray-400 text-[10px] mr-0.5"></i>mc:blocked
+                </span>
+                <span class="system-badge">system</span>
+              </div>
+              <div class="w-20 text-right text-sm text-gray-500">3</div>
+              <div class="w-24 text-center">
+                <span class="text-xs text-gray-400">Auto-managed</span>
+              </div>
+              <div class="w-16 flex justify-center">
+                <div class="w-5 h-5 rounded-full border-2 border-white shadow-sm" style="background: #eab308;"></div>
+              </div>
+              <div class="w-8"></div>
+            </div>
+          </div>
+
+          <!-- Action Bar -->
+          <div class="flex items-center gap-3 px-5 py-3 border-t border-gray-100 bg-gray-50/80">
+            <span class="text-xs text-gray-500">3 selected</span>
+            <div class="flex items-center gap-2 ml-3">
+              <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 shadow-sm">
+                <i class="fas fa-code-merge"></i>Merge Selected
+              </button>
+              <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-md hover:bg-red-100">
+                <i class="fas fa-trash"></i>Remove
+              </button>
+              <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50">
+                <i class="fas fa-pencil"></i>Rename
+              </button>
+              <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50">
+                <i class="fas fa-palette"></i>Recolor
+              </button>
+            </div>
+            <div class="ml-auto flex items-center gap-2">
+              <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-md hover:bg-gray-50">
+                <i class="fas fa-file-export"></i>Export
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Merge Dialog (overlaid) -->
+  <div class="fixed inset-0 z-50 flex items-center justify-center" style="display: none;" id="merge-dialog">
+    <div class="absolute inset-0 bg-black/40"></div>
+    <div class="relative bg-white rounded-xl shadow-2xl w-[480px] p-6">
+      <h3 class="text-base font-semibold text-gray-900 mb-1">Merge Tags</h3>
+      <p class="text-sm text-gray-500 mb-5">Combine "wontfix" and "won't fix" into a single tag. All 4 affected tasks will be re-assigned.</p>
+
+      <div class="mb-4">
+        <label class="text-xs font-medium text-gray-600 block mb-1.5">Merge into:</label>
+        <select class="w-full border border-gray-200 rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400">
+          <option>wontfix (3 tasks)</option>
+          <option>won't fix (1 task)</option>
+          <option value="custom">— Enter new name —</option>
+        </select>
+      </div>
+
+      <div class="bg-gray-50 rounded-lg p-3 mb-5">
+        <p class="text-xs font-medium text-gray-600 mb-2">Impact Summary:</p>
+        <ul class="text-xs text-gray-500 space-y-1">
+          <li class="flex items-center gap-1.5"><i class="fas fa-check-circle text-green-500"></i>4 tasks will have the merged tag</li>
+          <li class="flex items-center gap-1.5"><i class="fas fa-trash-alt text-red-400"></i>1 tag will be deleted</li>
+        </ul>
+      </div>
+
+      <label class="flex items-center gap-2 text-sm text-gray-600 mb-5 cursor-pointer">
+        <input type="checkbox" checked class="rounded border-gray-300 text-blue-600 w-4 h-4">
+        Also remove old label from GitHub
+      </label>
+
+      <div class="flex items-center justify-end gap-2">
+        <button class="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-md">Cancel</button>
+        <button class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md shadow-sm">Merge Tags</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Context menu (shown conceptually) -->
+  <div class="fixed top-[380px] right-[280px] z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 w-44" style="display: none;" id="context-menu">
+    <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+      <i class="fas fa-code-merge w-4 text-center text-gray-400"></i>Merge with…
+    </button>
+    <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+      <i class="fas fa-pencil w-4 text-center text-gray-400"></i>Rename
+    </button>
+    <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+      <i class="fas fa-palette w-4 text-center text-gray-400"></i>Change Color
+    </button>
+    <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">
+      <i class="fas fa-list w-4 text-center text-gray-400"></i>View Tasks
+    </button>
+    <div class="border-t border-gray-100 my-1"></div>
+    <button class="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 hover:bg-red-50">
+      <i class="fas fa-trash w-4 text-center"></i>Remove Tag
+    </button>
+  </div>
+
+  <script>
+    // Toggle merge dialog for demo purposes
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'm') {
+        const dialog = document.getElementById('merge-dialog');
+        dialog.style.display = dialog.style.display === 'none' ? 'flex' : 'none';
+      }
+      if (e.key === 'c') {
+        const menu = document.getElementById('context-menu');
+        menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+      }
+    });
+  </script>
+</body>
+</html>

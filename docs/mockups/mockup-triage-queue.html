@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Triage Queue</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+
+    /* Design tokens */
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    .source-badge {
+      font-size: 0.6rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .source-reddit { background: #7c2d1220; color: #ff6b35; border: 1px solid #ff6b3530; }
+    .source-github { background: #a855f720; color: #c084fc; border: 1px solid #c084fc30; }
+    .source-instagram { background: #e040fb20; color: #f06292; border: 1px solid #f0629230; }
+    .source-facebook { background: #1877f220; color: #64b5f6; border: 1px solid #64b5f630; }
+    .source-twitter { background: #1da1f220; color: #4fc3f7; border: 1px solid #4fc3f730; }
+    .source-share { background: #10b98120; color: #6ee7b7; border: 1px solid #6ee7b730; }
+    .source-browser { background: #f59e0b20; color: #fbbf24; border: 1px solid #fbbf2430; }
+
+    .triage-card {
+      background: var(--surface-1);
+      border: 1px solid transparent;
+      border-radius: 12px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    }
+    .triage-card:hover {
+      border-color: var(--surface-3);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .triage-card.active {
+      border-color: var(--accent-500);
+      box-shadow: 0 0 0 1px var(--accent-500), 0 4px 12px rgba(59,130,246,0.15);
+    }
+
+    .action-btn {
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: background 0.1s, transform 0.1s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-2);
+      color: var(--gray-400);
+    }
+    .action-btn:hover {
+      background: var(--surface-3);
+      color: #f8fafc;
+    }
+    .action-btn:active {
+      transform: scale(0.96);
+    }
+    .action-btn.primary {
+      background: var(--accent-600);
+      border-color: var(--accent-500);
+      color: white;
+    }
+    .action-btn.primary:hover {
+      background: var(--accent-500);
+    }
+    .action-btn.danger {
+      border-color: #ef444440;
+    }
+    .action-btn.danger:hover {
+      background: #ef444420;
+      color: #fca5a5;
+      border-color: #ef444460;
+    }
+
+    .kbd {
+      font-size: 0.6rem;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: var(--surface-0);
+      border: 1px solid var(--surface-3);
+      color: var(--gray-500);
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-weight: 600;
+    }
+
+    .suggestion-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 500;
+      background: var(--accent-900);
+      color: var(--accent-400);
+      border: 1px solid rgba(96, 165, 250, 0.2);
+    }
+    .suggestion-pill.high {
+      background: #065f4620;
+      color: #6ee7b7;
+      border-color: #10b98130;
+    }
+    .suggestion-pill.medium {
+      background: var(--accent-900);
+      color: var(--accent-400);
+      border-color: rgba(96, 165, 250, 0.2);
+    }
+    .suggestion-pill.low {
+      background: var(--surface-2);
+      color: var(--gray-400);
+      border-color: var(--surface-3);
+    }
+
+    .relevance-bar {
+      width: 32px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--surface-3);
+      overflow: hidden;
+      position: relative;
+    }
+    .relevance-bar-fill {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      border-radius: 2px;
+    }
+
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.1s;
+      font-size: 0.8rem;
+    }
+    .sidebar-item:hover { background: var(--surface-2); }
+    .sidebar-item.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background 0.1s, color 0.1s;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #f8fafc; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .thumbnail {
+      width: 72px;
+      height: 72px;
+      border-radius: 8px;
+      background: var(--surface-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      overflow: hidden;
+      border: 1px solid var(--surface-3);
+    }
+
+    .stats-badge {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--surface-2);
+      color: var(--gray-400);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .queue-counter {
+      font-variant-numeric: tabular-nums;
+      font-size: 0.75rem;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      background: var(--accent-900);
+      color: var(--accent-400);
+      font-weight: 600;
+    }
+
+    .focus-mode-hint {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--surface-1);
+      border: 1px solid var(--surface-3);
+      border-radius: 8px;
+      padding: 8px 16px;
+      font-size: 0.7rem;
+      color: var(--gray-400);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+  </style>
+</head>
+<body>
+  <!-- Top Header -->
+  <header style="background: var(--surface-1); border-bottom: 1px solid var(--surface-2);" class="px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link active">
+          <i class="fas fa-inbox mr-1.5 text-xs"></i>Triage
+          <span class="queue-counter ml-1.5">12</span>
+        </span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="relative">
+        <input type="text" placeholder="Search triage queue..." 
+          style="background: var(--surface-0); border: 1px solid var(--surface-3);"
+          class="w-56 px-3 py-1.5 text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 text-gray-300 placeholder-gray-500">
+        <kbd class="kbd absolute right-2 top-1.5">/</kbd>
+      </div>
+      <button style="color: var(--gray-500);" class="p-2 hover:text-white rounded-md transition-colors">
+        <i class="fas fa-sync-alt text-sm"></i>
+      </button>
+      <button style="color: var(--gray-500);" class="p-2 hover:text-white rounded-md transition-colors relative">
+        <i class="fas fa-bell text-sm"></i>
+        <span class="absolute -top-0 -right-0 w-3.5 h-3.5 bg-red-500 text-white text-[8px] rounded-full flex items-center justify-center font-bold">3</span>
+      </button>
+      <button style="color: var(--gray-500);" class="p-2 hover:text-white rounded-md transition-colors">
+        <i class="fas fa-cog text-sm"></i>
+      </button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <!-- Left Sidebar -->
+    <aside style="background: var(--surface-1); border-right: 1px solid var(--surface-2); width: 200px;" class="p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-4">
+      <!-- Sources -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Sources</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item active">
+            <i class="fas fa-layer-group text-xs w-4"></i>
+            <span>All Sources</span>
+            <span class="ml-auto text-xs font-medium" style="color: var(--accent-400);">12</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-reddit text-xs w-4" style="color: #ff6b35;"></i>
+            <span>Reddit</span>
+            <span class="ml-auto text-xs">4</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-github text-xs w-4" style="color: #c084fc;"></i>
+            <span>GitHub Stars</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-youtube text-xs w-4" style="color: #ff0000;"></i>
+            <span>YouTube</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-instagram text-xs w-4" style="color: #f06292;"></i>
+            <span>Instagram</span>
+            <span class="ml-auto text-xs">2</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-x-twitter text-xs w-4" style="color: #4fc3f7;"></i>
+            <span>X / Twitter</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fab fa-facebook text-xs w-4" style="color: #64b5f6;"></i>
+            <span>Facebook</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-share-alt text-xs w-4" style="color: #6ee7b7;"></i>
+            <span>Shared (iOS)</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filters -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Status</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item active" style="color: var(--accent-400);">
+            <i class="fas fa-circle text-[6px] w-4"></i>
+            <span>Pending</span>
+            <span class="ml-auto text-xs">12</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-clock text-xs w-4"></i>
+            <span>Snoozed</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-check text-xs w-4"></i>
+            <span>Actioned</span>
+            <span class="ml-auto text-xs">28</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-times text-xs w-4"></i>
+            <span>Dismissed</span>
+            <span class="ml-auto text-xs">15</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Type -->
+      <div>
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Content Type</h3>
+        <div class="space-y-0.5">
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-link text-xs w-4"></i>
+            <span>Links</span>
+            <span class="ml-auto text-xs">5</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-cube text-xs w-4"></i>
+            <span>3D Models</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-code-branch text-xs w-4"></i>
+            <span>Repos</span>
+            <span class="ml-auto text-xs">3</span>
+          </div>
+          <div class="sidebar-item" style="color: var(--gray-400);">
+            <i class="fas fa-image text-xs w-4"></i>
+            <span>Media</span>
+            <span class="ml-auto text-xs">1</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sort -->
+      <div class="mt-auto pt-3" style="border-top: 1px solid var(--surface-2);">
+        <h3 class="text-[0.6rem] font-semibold uppercase tracking-widest mb-2" style="color: var(--gray-500);">Sort By</h3>
+        <select style="background: var(--surface-2); border: 1px solid var(--surface-3); color: var(--gray-400);" class="w-full text-xs rounded-md px-2 py-1.5">
+          <option>Relevance Score</option>
+          <option>Newest First</option>
+          <option>Oldest First</option>
+          <option>Source Platform</option>
+        </select>
+      </div>
+    </aside>
+
+    <!-- Main Content: Triage Queue -->
+    <main class="flex-1 overflow-y-auto p-4">
+      <!-- Queue Header -->
+      <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center gap-3">
+          <h2 class="text-base font-semibold">Triage Queue</h2>
+          <span class="text-xs" style="color: var(--gray-500);">12 items pending · sorted by relevance</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="action-btn">
+            <i class="fas fa-compress-alt text-[10px]"></i>
+            Focus Mode
+            <kbd class="kbd">F</kbd>
+          </button>
+          <button class="action-btn">
+            <i class="fas fa-check-double text-[10px]"></i>
+            Batch
+          </button>
+          <button class="action-btn primary">
+            <i class="fas fa-magic text-[10px]"></i>
+            Auto-Triage
+          </button>
+        </div>
+      </div>
+
+      <!-- Triage Cards -->
+      <div class="space-y-3 max-w-4xl">
+
+        <!-- Card 1: Reddit 3D printing (high relevance, active) -->
+        <div class="triage-card active p-4">
+          <div class="flex gap-4">
+            <!-- Thumbnail -->
+            <div class="thumbnail">
+              <i class="fas fa-cube text-2xl" style="color: var(--gray-500);"></i>
+            </div>
+            <!-- Content -->
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-reddit">
+                  <i class="fab fa-reddit mr-1"></i>Reddit
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">r/3Dprinting · 2h ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 92%; background: var(--success);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--success); font-variant-numeric: tabular-nums;">92</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1 truncate">"This magnetic snap-fit case design is insane — no supports needed"</h3>
+              <p class="text-xs mb-2 line-clamp-2" style="color: var(--gray-400);">
+                Thingiverse link in comments. Parametric design in OpenSCAD, works with any board size. 
+                Multiple users confirming clean prints on Ender 3 and Bambu.
+              </p>
+              <!-- AI Suggestions -->
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill high">
+                  <i class="fas fa-cube text-[9px]"></i>
+                  Save to Model Catalog
+                  <span style="opacity: 0.7;">95%</span>
+                </span>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep
+                  <span style="opacity: 0.7;">60%</span>
+                </span>
+              </div>
+              <!-- Actions -->
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-cube text-[10px]"></i>
+                  Catalog
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">M</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Task
+                  <kbd class="kbd">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-clock text-[10px]"></i>
+                  Snooze
+                  <kbd class="kbd">S</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+                <!-- More overflow -->
+                <div class="relative ml-auto" style="position: relative;">
+                  <button class="action-btn" title="More actions (Tab)">
+                    <i class="fas fa-ellipsis-h text-[10px]"></i>
+                    <kbd class="kbd">Tab</kbd>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 2: GitHub Star -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail">
+              <i class="fab fa-github text-2xl" style="color: var(--gray-500);"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-github">
+                  <i class="fab fa-github mr-1"></i>GitHub
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">Starred · 4h ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 78%; background: var(--accent-400);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--accent-400); font-variant-numeric: tabular-nums;">78</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1">valkey-io/valkey</h3>
+              <p class="text-xs mb-1.5" style="color: var(--gray-400);">
+                An open source, high-performance key/value datastore. Redis fork with active community governance.
+              </p>
+              <div class="flex items-center gap-3 mb-2.5">
+                <span class="stats-badge"><i class="fas fa-star text-yellow-400 mr-1"></i>18.2k</span>
+                <span class="stats-badge"><i class="fas fa-circle text-[6px] mr-1" style="color: #00add8;"></i>Go</span>
+                <span class="stats-badge"><i class="fas fa-code-branch mr-1"></i>Last push: 2d</span>
+                <span class="stats-badge"><i class="fas fa-users mr-1"></i>342 contributors</span>
+              </div>
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill high">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep → "DevOps Tools"
+                  <span style="opacity: 0.7;">90%</span>
+                </span>
+                <span class="suggestion-pill low">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Task: "Evaluate Valkey for caching"
+                  <span style="opacity: 0.7;">45%</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Task
+                  <kbd class="kbd">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-clock text-[10px]"></i>
+                  Snooze
+                  <kbd class="kbd">S</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+                <!-- More overflow — shown OPEN as demo on this card -->
+                <div class="relative ml-auto">
+                  <button class="action-btn" style="background: var(--surface-3); color: #f8fafc;">
+                    <i class="fas fa-ellipsis-h text-[10px]"></i>
+                    <kbd class="kbd">Tab</kbd>
+                  </button>
+                  <!-- Overflow dropdown (visible for mockup demo) -->
+                  <div style="position: absolute; bottom: 100%; right: 0; margin-bottom: 4px; background: var(--surface-1); border: 1px solid var(--surface-3); border-radius: 8px; padding: 6px; width: 220px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); z-index: 100;">
+                    <div class="text-[0.55rem] uppercase tracking-widest font-semibold px-2 py-1" style="color: var(--gray-500);">More Actions</div>
+                    <div class="space-y-0.5">
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-cube text-[10px] w-4" style="color: #10b981;"></i>
+                        <span>Save to Model Catalog</span>
+                        <kbd class="kbd ml-auto">M</kbd>
+                      </button>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-exchange-alt text-[10px] w-4" style="color: var(--accent-400);"></i>
+                        <span>Refile in GitHub</span>
+                        <kbd class="kbd ml-auto">R</kbd>
+                      </button>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-bolt text-[10px] w-4" style="color: #fbbf24;"></i>
+                        <span>n8n: Archive Media</span>
+                      </button>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-bolt text-[10px] w-4" style="color: #fbbf24;"></i>
+                        <span>n8n: Share with Partner</span>
+                      </button>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-external-link-alt text-[10px] w-4" style="color: var(--gray-500);"></i>
+                        <span>Open in Browser</span>
+                        <kbd class="kbd ml-auto">O</kbd>
+                      </button>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-400);">
+                        <i class="fas fa-expand text-[10px] w-4" style="color: var(--gray-500);"></i>
+                        <span>Expand Preview</span>
+                        <kbd class="kbd ml-auto">Space</kbd>
+                      </button>
+                    </div>
+                    <div style="border-top: 1px solid var(--surface-3); margin-top: 4px; padding-top: 4px;">
+                      <div class="text-[0.55rem] uppercase tracking-widest font-semibold px-2 py-1" style="color: var(--gray-500);">Custom Workflows</div>
+                      <button class="w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left" style="color: var(--gray-500);">
+                        <i class="fas fa-plus text-[10px] w-4"></i>
+                        <span>Add workflow target...</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: Instagram Saved -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail" style="background: linear-gradient(135deg, #833ab4, #fd1d1d, #fcb045);">
+              <i class="fas fa-play text-white text-sm"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-instagram">
+                  <i class="fab fa-instagram mr-1"></i>Instagram
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">Saved reel · 6h ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 65%; background: var(--warning);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--warning); font-variant-numeric: tabular-nums;">65</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1">"LED underglow desk setup — full tutorial with parts list"</h3>
+              <p class="text-xs mb-2" style="color: var(--gray-400);">
+                WLED + ESP32 controller, diffused channel strips under desk edge. Parts ~$35. @techdiy_studio
+              </p>
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Todo → "Home Office" list
+                  <span style="opacity: 0.7;">70%</span>
+                </span>
+                <span class="suggestion-pill low">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep → "Home Improvement"
+                  <span style="opacity: 0.7;">55%</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Todo
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-clock text-[10px]"></i>
+                  Snooze
+                  <kbd class="kbd">S</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: Reddit homeautomation -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail">
+              <i class="fas fa-home text-xl" style="color: var(--gray-500);"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-reddit">
+                  <i class="fab fa-reddit mr-1"></i>Reddit
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">r/homeassistant · 8h ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 72%; background: var(--accent-400);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--accent-400); font-variant-numeric: tabular-nums;">72</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1">"Complete guide: Zigbee2MQTT with motion-activated lighting per room"</h3>
+              <p class="text-xs mb-2" style="color: var(--gray-400);">
+                Blueprint + YAML for adaptive brightness based on time of day. Uses Aqara P1 sensors.
+              </p>
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Todo → "Home Automation"
+                  <span style="opacity: 0.7;">75%</span>
+                </span>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep → "Home Assistant"
+                  <span style="opacity: 0.7;">70%</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Todo
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-cube text-[10px]"></i>
+                  Catalog
+                  <kbd class="kbd">M</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-clock text-[10px]"></i>
+                  Snooze
+                  <kbd class="kbd">S</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 5: iOS Share Sheet capture -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail">
+              <i class="fas fa-shopping-cart text-xl" style="color: var(--gray-500);"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-share">
+                  <i class="fas fa-share-alt mr-1"></i>iOS Share
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">Shared from Safari · 1d ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 55%; background: var(--gray-400);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--gray-400); font-variant-numeric: tabular-nums;">55</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1">Bambu Lab AMS Lite — $69 Summer Sale</h3>
+              <p class="text-xs mb-2" style="color: var(--gray-400);">
+                bambulab.com — Multi-color printing accessory. Sale ends July 10.
+              </p>
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Todo → "3D Printing" list
+                  <span style="opacity: 0.7;">65%</span>
+                </span>
+                <span class="text-[0.6rem] px-2 py-0.5 rounded" style="background: #ef444420; color: #fca5a5;">
+                  <i class="fas fa-clock mr-1"></i>Time-sensitive: sale ends in 4d
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Todo
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bolt text-[10px]"></i>
+                  n8n: Price Watch
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 6: YouTube — with description link parsing -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail" style="width: 128px; height: 72px; border-radius: 8px; position: relative;">
+              <div style="background: linear-gradient(135deg, #1a1a2e, #16213e); width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; border-radius: 8px;">
+                <i class="fab fa-youtube text-2xl" style="color: #ff0000;"></i>
+              </div>
+              <span style="position: absolute; bottom: 3px; right: 3px; background: rgba(0,0,0,0.8); color: white; font-size: 0.55rem; padding: 1px 4px; border-radius: 3px; font-variant-numeric: tabular-nums;">23:14</span>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge" style="background: #ff000020; color: #ff6b6b; border: 1px solid #ff000030;">
+                  <i class="fab fa-youtube mr-1"></i>YouTube
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">Watch Later · 5h ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 85%; background: var(--success);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--success); font-variant-numeric: tabular-nums;">85</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-0.5">"Building a Smart Home Dashboard with ESPHome + E-Ink Display"</h3>
+              <p class="text-[0.65rem] mb-2" style="color: var(--gray-500);">@TechWithTim · 45k views · Published 3d ago</p>
+              
+              <!-- Extracted Description Links -->
+              <div style="background: var(--surface-0); border: 1px solid var(--surface-3); border-radius: 8px;" class="p-2.5 mb-2.5">
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <i class="fas fa-link text-[9px]" style="color: var(--accent-400);"></i>
+                  <span class="text-[0.6rem] font-semibold uppercase tracking-wider" style="color: var(--gray-500);">Description Links (4)</span>
+                </div>
+                <div class="space-y-1">
+                  <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+                    <i class="fas fa-cube text-[9px]" style="color: #10b981;"></i>
+                    <span class="truncate flex-1">printables.com/model/892341 — E-ink case STL</span>
+                    <button class="text-[0.55rem] px-1.5 py-0.5 rounded" style="background: var(--surface-2); color: var(--gray-500);">→ Catalog</button>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+                    <i class="fab fa-github text-[9px]" style="color: #c084fc;"></i>
+                    <span class="truncate flex-1">github.com/techwt/esphome-eink — Source code</span>
+                    <button class="text-[0.55rem] px-1.5 py-0.5 rounded" style="background: var(--surface-2); color: var(--gray-500);">→ Karakeep</button>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+                    <i class="fas fa-shopping-cart text-[9px]" style="color: #fbbf24;"></i>
+                    <span class="truncate flex-1">amazon.com/dp/B09X... — Waveshare 7.5" display</span>
+                    <button class="text-[0.55rem] px-1.5 py-0.5 rounded" style="background: var(--surface-2); color: var(--gray-500);">→ Todo</button>
+                  </div>
+                  <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+                    <i class="fas fa-book text-[9px]" style="color: var(--gray-500);"></i>
+                    <span class="truncate flex-1">esphome.io/components/display — Docs reference</span>
+                    <span class="text-[0.55rem]" style="color: var(--gray-600);">low priority</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill high">
+                  <i class="fas fa-cube text-[9px]"></i>
+                  Model Catalog (STL)
+                  <span style="opacity: 0.7;">90%</span>
+                </span>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep → "Home Automation"
+                  <span style="opacity: 0.7;">75%</span>
+                </span>
+                <span class="suggestion-pill low">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Todo: "Build e-ink dashboard"
+                  <span style="opacity: 0.7;">60%</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-cube text-[10px]"></i>
+                  Catalog
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">M</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Task
+                  <kbd class="kbd">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-expand text-[10px]"></i>
+                  Expand
+                  <kbd class="kbd">Space</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-external-link-alt text-[10px]"></i>
+                  Open
+                  <kbd class="kbd">O</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  <kbd class="kbd">D</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 7: Multi-action completed example -->
+        <div class="triage-card p-4" style="border-color: var(--success); opacity: 0.7;">
+          <div class="flex gap-4">
+            <div class="thumbnail">
+              <i class="fas fa-cube text-xl" style="color: var(--success);"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-reddit">
+                  <i class="fab fa-reddit mr-1"></i>Reddit
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">r/functionalprint · 1d ago</span>
+                <span class="ml-auto text-[0.6rem] font-medium" style="color: var(--success);">
+                  <i class="fas fa-check-circle mr-1"></i>Actioned
+                </span>
+              </div>
+              <h3 class="text-sm font-medium mb-1" style="color: var(--gray-400);">"Gridfinity drawer organizer — parametric, any size"</h3>
+              <!-- Completed actions shown -->
+              <div class="flex items-center gap-3 mb-2">
+                <span class="text-[0.6rem] flex items-center gap-1" style="color: var(--success);">
+                  <i class="fas fa-check text-[8px]"></i> Saved to Model Catalog
+                </span>
+                <span class="text-[0.6rem] flex items-center gap-1" style="color: var(--success);">
+                  <i class="fas fa-check text-[8px]"></i> Saved to Karakeep → "3D Printing"
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn" style="font-size: 0.65rem; padding: 4px 8px; border-color: var(--success); color: var(--success);">
+                  <i class="fas fa-check text-[9px]"></i> Done
+                </button>
+                <button class="action-btn" style="font-size: 0.65rem; padding: 4px 8px;">
+                  <i class="fas fa-undo text-[9px]"></i> Undo last
+                </button>
+                <button class="action-btn" style="font-size: 0.65rem; padding: 4px 8px;">
+                  <i class="fas fa-plus text-[9px]"></i> + More actions
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 8: X/Twitter bookmark -->
+        <div class="triage-card p-4">
+          <div class="flex gap-4">
+            <div class="thumbnail">
+              <i class="fas fa-microchip text-xl" style="color: var(--gray-500);"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <span class="source-badge source-twitter">
+                  <i class="fab fa-x-twitter mr-1"></i>X
+                </span>
+                <span class="text-xs" style="color: var(--gray-500);">Bookmarked · 1d ago</span>
+                <div class="ml-auto flex items-center gap-2">
+                  <div class="relevance-bar">
+                    <div class="relevance-bar-fill" style="width: 60%; background: var(--warning);"></div>
+                  </div>
+                  <span class="text-[0.65rem] font-medium" style="color: var(--warning); font-variant-numeric: tabular-nums;">60</span>
+                </div>
+              </div>
+              <h3 class="text-sm font-medium mb-1">"Just released: ESP32-S3 with onboard camera for $8. Perfect for Frigate..."</h3>
+              <p class="text-xs mb-2" style="color: var(--gray-400);">
+                @hw_deals — Link to AliExpress. Multiple replies confirming Frigate compatibility.
+              </p>
+              <div class="flex items-center gap-2 mb-3">
+                <i class="fas fa-lightbulb text-[10px]" style="color: var(--warning);"></i>
+                <span class="suggestion-pill medium">
+                  <i class="fas fa-bookmark text-[9px]"></i>
+                  Karakeep → "Hardware Deals"
+                  <span style="opacity: 0.7;">72%</span>
+                </span>
+                <span class="suggestion-pill low">
+                  <i class="fas fa-plus-circle text-[9px]"></i>
+                  Todo → "Home Automation"
+                  <span style="opacity: 0.7;">50%</span>
+                </span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button class="action-btn primary">
+                  <i class="fas fa-bookmark text-[10px]"></i>
+                  Karakeep
+                  <kbd class="kbd" style="background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);">K</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-plus-circle text-[10px]"></i>
+                  Task
+                  <kbd class="kbd">T</kbd>
+                </button>
+                <button class="action-btn">
+                  <i class="fas fa-clock text-[10px]"></i>
+                  Snooze
+                  <kbd class="kbd">S</kbd>
+                </button>
+                <button class="action-btn danger">
+                  <i class="fas fa-times text-[10px]"></i>
+                  Dismiss
+                  <kbd class="kbd">D</kbd>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- Right Panel: Insights & Stats (collapsible) -->
+    <aside id="insights-panel" style="background: var(--surface-1); border-left: 1px solid var(--surface-2); width: 320px; transition: width 0.2s ease, padding 0.2s ease, opacity 0.15s ease;" class="p-4 overflow-y-auto flex-shrink-0 hidden lg:block relative">
+      <!-- Collapse toggle button -->
+      <button onclick="togglePanel()" 
+        style="position: absolute; top: 12px; left: -12px; width: 24px; height: 24px; background: var(--surface-1); border: 1px solid var(--surface-3); border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10; color: var(--gray-500); transition: color 0.1s, background 0.1s;"
+        onmouseover="this.style.background='var(--surface-2)'; this.style.color='#f8fafc';"
+        onmouseout="this.style.background='var(--surface-1)'; this.style.color='var(--gray-500)';"
+        title="Toggle insights panel">
+        <i id="panel-toggle-icon" class="fas fa-chevron-right text-[9px]"></i>
+      </button>
+
+      <div id="panel-content">
+      <div class="mb-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest mb-3" style="color: var(--gray-500);">Quick Stats</h3>
+        <div class="grid grid-cols-2 gap-2">
+          <div style="background: var(--surface-2);" class="p-3 rounded-lg">
+            <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">12</div>
+            <div class="text-[0.6rem]" style="color: var(--gray-500);">Pending</div>
+          </div>
+          <div style="background: var(--surface-2);" class="p-3 rounded-lg">
+            <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums; color: var(--success);">28</div>
+            <div class="text-[0.6rem]" style="color: var(--gray-500);">Actioned Today</div>
+          </div>
+          <div style="background: var(--surface-2);" class="p-3 rounded-lg">
+            <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums; color: var(--warning);">2</div>
+            <div class="text-[0.6rem]" style="color: var(--gray-500);">Time-Sensitive</div>
+          </div>
+          <div style="background: var(--surface-2);" class="p-3 rounded-lg">
+            <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">73</div>
+            <div class="text-[0.6rem]" style="color: var(--gray-500);">Avg Relevance</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest mb-3" style="color: var(--gray-500);">AI Insights</h3>
+        <div style="background: var(--surface-2); border: 1px solid var(--surface-3);" class="rounded-lg p-3">
+          <div class="flex items-start gap-2">
+            <i class="fas fa-robot text-xs mt-0.5" style="color: var(--accent-400);"></i>
+            <div>
+              <p class="text-xs" style="color: var(--gray-400);">
+                <strong style="color: #f8fafc;">3 items are 3D-printing related</strong> — batch-send to Model Catalog?
+              </p>
+              <button class="action-btn mt-2" style="font-size: 0.65rem; padding: 4px 8px;">
+                <i class="fas fa-cube text-[9px]"></i>
+                Send all 3 to Catalog
+              </button>
+            </div>
+          </div>
+        </div>
+        <div style="background: var(--surface-2); border: 1px solid var(--surface-3);" class="rounded-lg p-3 mt-2">
+          <div class="flex items-start gap-2">
+            <i class="fas fa-fire text-xs mt-0.5" style="color: var(--danger);"></i>
+            <div>
+              <p class="text-xs" style="color: var(--gray-400);">
+                <strong style="color: #f8fafc;">1 sale expiring soon</strong> — AMS Lite deal ends in 4 days.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <h3 class="text-xs font-semibold uppercase tracking-widest mb-3" style="color: var(--gray-500);">Source Sync Status</h3>
+        <div class="space-y-2">
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-reddit mr-2" style="color: #ff6b35;"></i>Reddit</span>
+            <span style="color: var(--success);">● 3m ago</span>
+          </div>
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-github mr-2" style="color: #c084fc;"></i>GitHub</span>
+            <span style="color: var(--success);">● 12m ago</span>
+          </div>
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-youtube mr-2" style="color: #ff0000;"></i>YouTube</span>
+            <span style="color: var(--success);">● 25m ago</span>
+          </div>
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-instagram mr-2" style="color: #f06292;"></i>Instagram</span>
+            <span style="color: var(--warning);">● 18h ago</span>
+          </div>
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-x-twitter mr-2" style="color: #4fc3f7;"></i>X / Twitter</span>
+            <span style="color: var(--warning);">● 1d ago</span>
+          </div>
+          <div class="flex items-center justify-between text-xs" style="color: var(--gray-400);">
+            <span><i class="fab fa-facebook mr-2" style="color: #64b5f6;"></i>Facebook</span>
+            <span style="color: var(--gray-500);">● 2d ago</span>
+          </div>
+        </div>
+        <button class="action-btn w-full justify-center mt-3" style="font-size: 0.65rem;">
+          <i class="fas fa-sync-alt text-[9px]"></i>
+          Sync All Sources
+        </button>
+      </div>
+
+      <div>
+        <h3 class="text-xs font-semibold uppercase tracking-widest mb-3" style="color: var(--gray-500);">Recent Actions</h3>
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+            <i class="fas fa-bookmark text-[9px]" style="color: var(--accent-400);"></i>
+            <span class="truncate">Sent "rust-analyzer tips" → Karakeep</span>
+            <span class="ml-auto text-[0.6rem]" style="color: var(--gray-500);">2m</span>
+          </div>
+          <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+            <i class="fas fa-cube text-[9px]" style="color: var(--success);"></i>
+            <span class="truncate">Sent "gridfinity drawer" → Catalog</span>
+            <span class="ml-auto text-[0.6rem]" style="color: var(--gray-500);">5m</span>
+          </div>
+          <div class="flex items-center gap-2 text-xs" style="color: var(--gray-400);">
+            <i class="fas fa-times text-[9px]" style="color: var(--gray-500);"></i>
+            <span class="truncate">Dismissed 4 low-relevance items</span>
+            <span class="ml-auto text-[0.6rem]" style="color: var(--gray-500);">8m</span>
+          </div>
+        </div>
+      </div>
+      </div><!-- end panel-content -->
+    </aside>
+  </div>
+
+  <!-- Focus Mode Keyboard Hint Bar -->
+  <div class="focus-mode-hint">
+    <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> Navigate</span>
+    <span><kbd class="kbd">Enter</kbd> Accept suggestion</span>
+    <span><kbd class="kbd">K</kbd> Karakeep</span>
+    <span><kbd class="kbd">M</kbd> Catalog</span>
+    <span><kbd class="kbd">T</kbd> Task</span>
+    <span><kbd class="kbd">D</kbd> Dismiss</span>
+    <span><kbd class="kbd">S</kbd> Snooze</span>
+    <span><kbd class="kbd">Tab</kbd> More</span>
+    <span><kbd class="kbd">F</kbd> Focus mode</span>
+    <span><kbd class="kbd">]</kbd> Toggle panel</span>
+    <span><kbd class="kbd">?</kbd> Help</span>
+  </div>
+
+  <script>
+    function togglePanel() {
+      const panel = document.getElementById('insights-panel');
+      const content = document.getElementById('panel-content');
+      const icon = document.getElementById('panel-toggle-icon');
+      
+      if (panel.dataset.collapsed === 'true') {
+        // Expand
+        panel.style.width = '320px';
+        panel.style.padding = '16px';
+        content.style.display = 'block';
+        content.style.opacity = '1';
+        icon.classList.remove('fa-chevron-left');
+        icon.classList.add('fa-chevron-right');
+        panel.dataset.collapsed = 'false';
+      } else {
+        // Collapse
+        panel.style.width = '24px';
+        panel.style.padding = '16px 4px';
+        content.style.display = 'none';
+        content.style.opacity = '0';
+        icon.classList.remove('fa-chevron-right');
+        icon.classList.add('fa-chevron-left');
+        panel.dataset.collapsed = 'true';
+      }
+    }
+  </script>
+</body>
+</html>

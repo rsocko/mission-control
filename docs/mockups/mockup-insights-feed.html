@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Insights Feed</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    :root {
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --gray-400: #94a3b8;
+      --gray-500: #64748b;
+      --gray-600: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #020617;
+      color: #f8fafc;
+    }
+    h1, h2, h3 { text-wrap: balance; }
+    p { text-wrap: pretty; }
+
+    .app-header { background: var(--surface-1); border-bottom: 1px solid var(--surface-2); }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      color: var(--gray-400);
+      transition: background-color 0.15s ease, color 0.15s ease;
+      cursor: pointer;
+    }
+    .nav-link:hover { background: var(--surface-2); color: #fff; }
+    .nav-link.active { background: var(--accent-900); color: var(--accent-400); }
+
+    .sidebar {
+      width: 220px;
+      background: var(--surface-1);
+      border-right: 1px solid var(--surface-2);
+    }
+    .sidebar-label {
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--gray-500);
+      margin-bottom: 8px;
+    }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      color: var(--gray-400);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: background-color 0.15s ease, color 0.15s ease;
+    }
+    .sidebar-item:hover { background: var(--surface-2); color: #fff; }
+    .sidebar-item.active { background: rgba(30,58,138,0.48); color: var(--accent-400); }
+
+    .content-panel, .insights-panel {
+      background: var(--surface-1);
+      border: 1px solid var(--surface-2);
+      border-radius: 18px;
+      box-shadow: 0 16px 40px rgba(2,6,23,0.36);
+    }
+    .task-row {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) 86px 48px;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(51,65,85,0.55);
+      transition: background-color 0.15s ease;
+    }
+    .task-row:hover { background: rgba(30,41,59,0.58); }
+    .task-row:last-child { border-bottom: none; }
+    .task-checkbox {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid var(--surface-3);
+      background: var(--surface-0);
+    }
+    .task-title { font-size: 14px; font-weight: 500; }
+    .source-badge {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+    .source-todo { background: rgba(59,130,246,0.16); color: #93c5fd; border-color: rgba(96,165,250,0.24); }
+    .source-github { background: rgba(168,85,247,0.16); color: #d8b4fe; border-color: rgba(216,180,254,0.24); }
+    .source-calendar { background: rgba(245,158,11,0.16); color: #fcd34d; border-color: rgba(252,211,77,0.24); }
+    .source-email { background: rgba(16,185,129,0.16); color: #6ee7b7; border-color: rgba(110,231,183,0.24); }
+    .entity-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      border: 1px solid rgba(51,65,85,0.7);
+      color: var(--gray-400);
+      background: rgba(15,23,42,0.8);
+    }
+    .due-date { font-size: 0.78rem; color: var(--gray-400); text-align: right; }
+    .score-badge {
+      width: 44px;
+      height: 36px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.88rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    .score-high { background: var(--accent-500); color: #fff; }
+    .score-mid { background: rgba(245,158,11,0.13); color: #fbbf24; }
+    .score-low { background: var(--surface-3); color: var(--gray-500); }
+
+    .insight-card {
+      background: var(--surface-2);
+      border: 1px solid rgba(71,85,105,0.72);
+      border-radius: 14px;
+      padding: 14px;
+      transition: transform 0.14s ease, border-color 0.14s ease;
+    }
+    .insight-card:hover { transform: translateY(-1px); border-color: rgba(96,165,250,0.24); }
+    .insight-label {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .btn-ghost, .btn-fill, .btn-dark, .btn-danger {
+      border-radius: 10px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+    }
+    .btn-ghost { border: 1px solid rgba(71,85,105,0.72); color: var(--gray-400); }
+    .btn-ghost:hover { background: rgba(51,65,85,0.6); color: #fff; }
+    .btn-fill { background: var(--accent-500); color: #fff; }
+    .btn-fill:hover { background: var(--accent-600); }
+    .btn-dark { background: rgba(15,23,42,0.92); border: 1px solid rgba(71,85,105,0.72); color: #e2e8f0; }
+    .btn-dark:hover { background: rgba(30,41,59,0.95); }
+    .btn-danger { background: rgba(239,68,68,0.14); color: #fca5a5; border: 1px solid rgba(239,68,68,0.22); }
+    .btn-danger:hover { background: rgba(239,68,68,0.2); }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--surface-3);
+    }
+    .dot.active { background: var(--accent-400); box-shadow: 0 0 0 3px rgba(59,130,246,0.14); }
+  </style>
+</head>
+<body>
+  <header class="app-header px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <i class="fas fa-satellite-dish text-blue-400 text-base"></i>
+        <h1 class="text-sm font-semibold">Mission Control</h1>
+      </div>
+      <nav class="flex items-center gap-1 ml-4">
+        <span class="nav-link active">Dashboard</span>
+        <span class="nav-link">Kanban</span>
+        <span class="nav-link">AI Assistant</span>
+        <span class="nav-link">Timeline</span>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-sliders text-sm"></i></button>
+      <button class="relative p-2 text-amber-300 hover:text-amber-200 transition-colors rounded-md" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2);" title="Insights panel (4 pending)"><i class="fas fa-lightbulb text-sm"></i><span class="absolute -top-1 -right-1 w-4 h-4 bg-amber-500 text-[10px] font-bold text-black rounded-full flex items-center justify-center">4</span></button>
+      <button class="p-2 text-slate-400 hover:text-white transition-colors rounded-md"><i class="fas fa-cog text-sm"></i></button>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <aside class="sidebar p-3 overflow-y-auto flex-shrink-0 flex flex-col gap-5">
+      <div>
+        <div class="sidebar-label">Sources</div>
+        <div class="space-y-1">
+          <div class="sidebar-item active"><i class="fas fa-layer-group text-xs w-4"></i><span>All Sources</span><span class="ml-auto text-xs">26</span></div>
+          <div class="sidebar-item"><i class="fas fa-check-square text-blue-400 text-xs w-4"></i><span>Microsoft Todo</span><span class="ml-auto text-xs">11</span></div>
+          <div class="sidebar-item"><i class="fab fa-github text-purple-300 text-xs w-4"></i><span>GitHub Issues</span><span class="ml-auto text-xs">7</span></div>
+          <div class="sidebar-item"><i class="fas fa-calendar text-amber-300 text-xs w-4"></i><span>Calendar</span><span class="ml-auto text-xs">4</span></div>
+          <div class="sidebar-item"><i class="fas fa-envelope text-emerald-300 text-xs w-4"></i><span>Email</span><span class="ml-auto text-xs">4</span></div>
+        </div>
+      </div>
+      <div>
+        <div class="sidebar-label">Lists</div>
+        <div class="space-y-1">
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-purple-400"></span><span>Mission Control</span><span class="ml-auto text-xs">8</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-blue-400"></span><span>Work Sprint</span><span class="ml-auto text-xs">6</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-emerald-400"></span><span>Home Automation</span><span class="ml-auto text-xs">5</span></div>
+          <div class="sidebar-item"><span class="w-2 h-2 rounded-full bg-amber-400"></span><span>3D Printing</span><span class="ml-auto text-xs">4</span></div>
+        </div>
+      </div>
+      <div class="mt-auto pt-4 border-t border-slate-800 text-xs text-slate-400 space-y-2">
+        <div class="flex items-center justify-between"><span>Pending nudges</span><span class="text-emerald-300">4</span></div>
+        <div class="flex items-center justify-between"><span>Dismissed today</span><span>2</span></div>
+      </div>
+    </aside>
+
+    <main class="flex-1 p-5 overflow-hidden">
+      <div class="h-full flex gap-5">
+        <section class="content-panel flex-1 overflow-hidden flex flex-col">
+          <div class="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+            <div>
+              <h2 class="text-base font-semibold">Unified Task List</h2>
+              <p class="text-sm text-slate-400 mt-1">Normal task flow with AI scores still visible.</p>
+            </div>
+            <div class="text-xs text-slate-400">Sorted by Smart Score</div>
+          </div>
+          <div class="overflow-y-auto">
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Follow up with Sarah on Q3 report draft</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-todo">TODO</span><span class="entity-chip">Sarah C.</span><span class="entity-chip">Q3 Planning</span></div>
+              </div>
+              <div class="due-date">Today</div>
+              <div class="score-badge score-high">92</div>
+            </div>
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Fix Mission Control quick-add parsing regression</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-github">GH</span><span class="entity-chip">Mission Control</span><span class="entity-chip">Ry</span></div>
+              </div>
+              <div class="due-date">Tomorrow</div>
+              <div class="score-badge score-high">88</div>
+            </div>
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Schedule team retro for next week</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-calendar">CAL</span><span class="entity-chip">Platform Team</span></div>
+              </div>
+              <div class="due-date">Fri</div>
+              <div class="score-badge score-mid">71</div>
+            </div>
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Review Home Assistant energy dashboard alerts</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-email">EMAIL</span><span class="entity-chip">Home Automation</span></div>
+              </div>
+              <div class="due-date">No date</div>
+              <div class="score-badge score-mid">58</div>
+            </div>
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Print revised camera mount prototype</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-todo">TODO</span><span class="entity-chip">Garage Lab</span></div>
+              </div>
+              <div class="due-date">No date</div>
+              <div class="score-badge score-mid">67</div>
+            </div>
+            <div class="task-row">
+              <div class="task-checkbox"></div>
+              <div>
+                <div class="task-title">Fix garage door sensor false positive</div>
+                <div class="flex items-center gap-2 flex-wrap mt-2"><span class="source-badge source-todo">TODO</span><span class="entity-chip">Garage</span></div>
+              </div>
+              <div class="due-date">Snoozed</div>
+              <div class="score-badge score-low">44</div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="insights-panel w-[320px] p-4 flex flex-col" style="border-left: 1px solid var(--surface-3);">
+          <div class="flex items-center justify-between mb-1">
+            <div class="flex items-center gap-2">
+              <i class="fas fa-lightbulb text-amber-300 text-xs"></i>
+              <h3 class="font-semibold text-sm">Insights</h3>
+              <span class="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-400/20">4</span>
+            </div>
+            <button class="text-slate-500 hover:text-white transition-colors text-sm" title="Close panel"><i class="fas fa-xmark"></i></button>
+          </div>
+          <p class="text-[11px] text-slate-500 mb-4">AI suggestions based on your behavior. Nothing auto-applies.</p>
+          <a href="#" class="text-[11px] text-slate-500 hover:text-white transition-colors mb-3 self-end">Dismiss all</a>
+
+          <div class="space-y-3 flex-1">
+            <article class="insight-card">
+              <div class="insight-label text-emerald-300">New Priority Suggestion</div>
+              <h4 class="text-base font-semibold mt-2">Add 'RyMessage' as a priority</h4>
+              <p class="text-sm text-slate-400 mt-2">You've captured 9 tasks mentioning RyMessage in the last 2 weeks.</p>
+              <div class="flex items-center gap-2 mt-4">
+                <button class="btn-ghost">Dismiss</button>
+                <button class="btn-fill">Add</button>
+              </div>
+            </article>
+
+            <article class="insight-card">
+              <div class="insight-label text-emerald-300">Reorder Suggestion</div>
+              <div class="flex items-start gap-3 mt-2">
+                <div class="w-9 h-9 rounded-xl bg-blue-500/15 text-blue-300 flex items-center justify-center flex-shrink-0"><i class="fas fa-arrow-up"></i></div>
+                <div>
+                  <h4 class="text-base font-semibold">Rank GitHub above Microsoft Todo</h4>
+                  <p class="text-sm text-slate-400 mt-2">You finish GitHub tasks first, almost every time.</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 mt-4">
+                <button class="btn-ghost">Dismiss</button>
+                <button class="btn-fill">Apply</button>
+              </div>
+            </article>
+
+            <article class="insight-card">
+              <div class="insight-label text-amber-300">Sitting a While</div>
+              <h4 class="text-base font-semibold mt-2">Fix garage door sensor</h4>
+              <p class="text-sm text-slate-400 mt-2">Sitting without a date for 3 weeks — do it, date it, or drop it?</p>
+              <div class="flex items-center gap-2 mt-4 flex-wrap">
+                <button class="btn-ghost">Keep</button>
+                <button class="btn-dark">Drop it</button>
+                <button class="btn-dark">Date it</button>
+                <button class="btn-fill">Do it today</button>
+              </div>
+            </article>
+
+            <article class="insight-card">
+              <div class="insight-label text-rose-300">Remove Priority</div>
+              <h4 class="text-base font-semibold mt-2">Remove 'Kitchen Renovation'?</h4>
+              <p class="text-sm text-slate-400 mt-2">Nothing has touched this priority in over 6 weeks.</p>
+              <div class="flex items-center gap-2 mt-4">
+                <button class="btn-ghost">Dismiss</button>
+                <button class="btn-danger">Remove</button>
+              </div>
+            </article>
+          </div>
+
+          <div class="flex items-center justify-center gap-2 pt-4 mt-3 border-t border-slate-800">
+            <span class="dot active"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+            <span class="dot"></span>
+          </div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

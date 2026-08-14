@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control - Notifications V2</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b0e14;
+      --surface: #121722;
+      --surface-raised: #181e2b;
+      --surface-hover: #202838;
+      --border: #2a3344;
+      --border-soft: #202838;
+      --text: #f1f5f9;
+      --text-2: #a8b3c4;
+      --text-3: #728097;
+      --blue: #5b8def;
+      --blue-soft: rgba(91, 141, 239, 0.14);
+      --amber: #f6b94b;
+      --amber-soft: rgba(246, 185, 75, 0.13);
+      --red: #f06b6b;
+      --red-soft: rgba(240, 107, 107, 0.13);
+      --green: #4fcf8c;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    button, input { font: inherit; }
+    button { color: inherit; }
+    .page { max-width: 1400px; margin: 0 auto; padding: 44px 28px 80px; }
+    .eyebrow {
+      margin: 0 0 9px;
+      color: var(--blue);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: 32px; letter-spacing: -0.03em; }
+    .intro { max-width: 760px; margin: 12px 0 0; color: var(--text-2); line-height: 1.6; }
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 28px 0 42px;
+    }
+    .decision {
+      min-height: 122px;
+      padding: 17px;
+      border: 1px solid var(--border-soft);
+      border-radius: 13px;
+      background: var(--surface);
+    }
+    .decision strong { display: block; margin-bottom: 8px; font-size: 14px; }
+    .decision p { margin: 0; color: var(--text-2); font-size: 13px; line-height: 1.55; }
+    .section { margin-top: 44px; }
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 14px;
+    }
+    .section h2 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+    .section-note { max-width: 650px; margin: 6px 0 0; color: var(--text-2); font-size: 13px; }
+    .tag {
+      flex: none;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text-2);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .stage {
+      min-height: 820px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background:
+        radial-gradient(circle at 75% 12%, rgba(91, 141, 239, 0.09), transparent 28%),
+        #0e121a;
+      box-shadow: var(--shadow);
+    }
+    .app-placeholder {
+      position: absolute;
+      inset: 0 368px 0 0;
+      padding: 34px;
+      color: var(--text-3);
+    }
+    .placeholder-title { width: 220px; height: 22px; border-radius: 6px; background: #151b27; }
+    .placeholder-line { width: 74%; height: 12px; margin-top: 13px; border-radius: 4px; background: #141a25; }
+    .placeholder-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 38px; }
+    .placeholder-card { height: 180px; border: 1px solid #19202d; border-radius: 12px; background: #111722; }
+
+    .panel {
+      position: absolute;
+      inset: 0 0 0 auto;
+      width: 368px;
+      display: flex;
+      flex-direction: column;
+      border-left: 1px solid var(--border);
+      background: var(--surface);
+    }
+    .panel-header {
+      padding: 18px 18px 0;
+      border-bottom: 1px solid var(--border-soft);
+      background: rgba(18, 23, 34, 0.96);
+    }
+    .title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .title-group { display: flex; align-items: center; gap: 9px; }
+    .bell {
+      display: grid;
+      width: 28px;
+      height: 28px;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--blue-soft);
+      color: #8cb1ff;
+      font-size: 14px;
+    }
+    .title-group h3 { margin: 0; font-size: 16px; }
+    .count { color: var(--text-3); font-size: 12px; }
+    .icon-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      place-items: center;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-3);
+      cursor: pointer;
+    }
+    .icon-button:hover { border-color: var(--border); background: var(--surface-hover); color: var(--text); }
+    .header-actions { display: flex; align-items: center; gap: 4px; }
+    .mark-read {
+      border: 0;
+      background: transparent;
+      color: #8cb1ff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .panel-tools { display: grid; gap: 8px; margin-top: 15px; }
+    .segments {
+      display: flex;
+      flex: 1;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--border-soft);
+      border-radius: 9px;
+      background: #0d121b;
+    }
+    .segment {
+      flex: 1;
+      padding: 7px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .segment.active { background: var(--surface-hover); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+    .segment-count {
+      display: inline-grid;
+      min-width: 16px;
+      height: 16px;
+      margin-left: 3px;
+      place-items: center;
+      border-radius: 999px;
+      background: #334155;
+      color: white;
+      font-size: 9px;
+    }
+    .attribute-toggles { display: flex; gap: 6px; }
+    .attribute-toggle {
+      padding: 5px 9px;
+      border: 1px solid var(--border-soft);
+      border-radius: 999px;
+      background: transparent;
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .attribute-toggle.active { border-color: var(--blue); background: var(--blue-soft); color: #8cb1ff; }
+    .group-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 17px 18px 8px;
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .notification-list { flex: 1; overflow: auto; padding-bottom: 16px; }
+    .notification {
+      position: relative;
+      margin: 4px 10px;
+      padding: 12px 12px 11px;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease;
+    }
+    .notification:hover { background: var(--surface-hover); }
+    .notification.selected { border-color: rgba(91,141,239,.55); background: var(--blue-soft); }
+    .notification.read { opacity: .62; }
+    .notification.hidden { display: none; }
+    .notification-main { display: grid; grid-template-columns: 34px 1fr; gap: 10px; }
+    .source {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      place-items: center;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      background: #0e141e;
+      color: var(--text-2);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .source.github { color: #eef2f7; }
+    .source.monarch { color: #f6cf77; }
+    .source.home { color: #75c7ff; }
+    .notification-top { display: flex; align-items: flex-start; gap: 8px; }
+    .notification-title { flex: 1; margin: 0; font-size: 13px; font-weight: 700; line-height: 1.35; }
+    .unread-dot { width: 7px; height: 7px; margin-top: 5px; flex: none; border-radius: 50%; background: var(--blue); }
+    .notification-summary {
+      display: -webkit-box;
+      overflow: hidden;
+      margin: 4px 0 0;
+      color: var(--text-2);
+      font-size: 11px;
+      line-height: 1.45;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .meta { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--text-3); font-size: 10px; }
+    .level { padding: 2px 5px; border-radius: 4px; font-weight: 700; }
+    .level.action { background: var(--amber-soft); color: var(--amber); }
+    .level.urgent { background: var(--red-soft); color: var(--red); }
+    .level.heads { background: var(--blue-soft); color: #8cb1ff; }
+    .inline-cta {
+      margin: 10px 0 0 44px;
+      padding: 7px 11px;
+      border: 0;
+      border-radius: 7px;
+      background: var(--blue);
+      color: white;
+      font-size: 11px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .inline-cta.danger { background: #d65353; }
+    .panel-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 13px 16px;
+      border-top: 1px solid var(--border);
+      background: #101620;
+    }
+    .panel-footer a { color: #9bb9ff; font-size: 12px; font-weight: 750; text-decoration: none; }
+    .panel-footer span { color: var(--text-3); font-size: 10px; }
+
+    .preview {
+      position: absolute;
+      z-index: 4;
+      top: 86px;
+      right: 388px;
+      width: min(480px, calc(100% - 430px));
+      padding: 20px;
+      border: 1px solid rgba(91,141,239,.45);
+      border-radius: 14px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow);
+    }
+    .preview::after {
+      content: "";
+      position: absolute;
+      top: 54px;
+      right: -7px;
+      width: 12px;
+      height: 12px;
+      border-top: 1px solid rgba(91,141,239,.45);
+      border-right: 1px solid rgba(91,141,239,.45);
+      background: var(--surface-raised);
+      transform: rotate(45deg);
+    }
+    .preview-head { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+    .preview-source { color: var(--text-3); font-size: 11px; font-weight: 700; }
+    .preview h3 { margin: 7px 0 0; font-size: 20px; line-height: 1.25; letter-spacing: -.02em; }
+    .preview p { margin: 12px 0 0; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+    .preview-data { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+    .data-chip { padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-2); font-size: 11px; }
+    .preview-actions { display: flex; align-items: center; gap: 8px; margin-top: 20px; }
+    .primary-button, .secondary-button {
+      padding: 9px 13px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .primary-button { border: 0; background: var(--blue); color: white; }
+    .secondary-button { border: 1px solid var(--border); background: transparent; color: var(--text-2); }
+    .preview-foot { margin-top: 16px; padding-top: 13px; border-top: 1px solid var(--border-soft); color: var(--text-3); font-size: 10px; }
+
+    .full-page {
+      min-height: 740px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .full-header { padding: 20px 22px; border-bottom: 1px solid var(--border); }
+    .full-title { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+    .full-title h3 { margin: 0; font-size: 18px; }
+    .full-title p { margin: 4px 0 0; color: var(--text-3); font-size: 11px; }
+    .full-tools { display: flex; gap: 8px; margin-top: 15px; }
+    .search {
+      flex: 1;
+      min-width: 220px;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+      background: #0e141e;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .search:focus { border-color: var(--blue); }
+    .tool-chip {
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-2);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .tool-chip.active { border-color: rgba(91,141,239,.5); background: var(--blue-soft); color: #acc5ff; }
+    .split { display: grid; grid-template-columns: 220px 360px 1fr; min-height: 650px; }
+    .filter-nav {
+      padding: 16px 12px;
+      border-right: 1px solid var(--border);
+      background: #0d131d;
+    }
+    .filter-nav-section + .filter-nav-section { margin-top: 20px; }
+    .filter-nav-title {
+      margin: 0 8px 7px;
+      color: var(--text-3);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .filter-nav-item {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text-2);
+      font-size: 11px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .filter-nav-item:hover { background: var(--surface-hover); color: var(--text); }
+    .filter-nav-item.active { background: var(--blue-soft); color: #acc5ff; }
+    .filter-nav-icon { width: 16px; color: var(--text-3); text-align: center; }
+    .filter-nav-item.active .filter-nav-icon { color: #8cb1ff; }
+    .filter-nav-count { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .source-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
+    .full-list { border-right: 1px solid var(--border); background: #101620; }
+    .full-list-label { padding: 15px 16px 7px; color: var(--text-3); font-size: 10px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .full-row {
+      display: grid;
+      grid-template-columns: 32px 1fr auto;
+      gap: 9px;
+      margin: 3px 8px;
+      padding: 11px;
+      border: 1px solid transparent;
+      border-radius: 9px;
+    }
+    .full-row.selected { border-color: rgba(91,141,239,.5); background: var(--blue-soft); }
+    .full-row h4 { margin: 0; font-size: 12px; }
+    .full-row p { margin: 4px 0 0; color: var(--text-3); font-size: 10px; }
+    .full-row time { color: var(--text-3); font-size: 10px; }
+    .full-detail { padding: 36px; }
+    .detail-breadcrumb { color: var(--text-3); font-size: 11px; }
+    .full-detail h3 { max-width: 650px; margin: 13px 0 0; font-size: 25px; letter-spacing: -.025em; }
+    .detail-copy { max-width: 690px; margin-top: 14px; color: var(--text-2); font-size: 13px; line-height: 1.7; }
+    .detail-box { max-width: 690px; margin-top: 20px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: #101620; }
+    .detail-box strong { display: block; font-size: 11px; }
+    .detail-box p { margin: 8px 0 0; color: var(--text-2); font-size: 12px; }
+    .detail-actions { display: flex; gap: 8px; margin-top: 22px; }
+
+    .rationale {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .rationale article { padding: 16px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
+    .rationale h3 { margin: 0 0 7px; font-size: 13px; }
+    .rationale p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.55; }
+    .good { color: var(--green); }
+
+    @media (max-width: 900px) {
+      .decision-grid, .rationale { grid-template-columns: 1fr; }
+      .stage { min-height: 900px; }
+      .app-placeholder, .preview { display: none; }
+      .panel { width: 100%; }
+      .split { grid-template-columns: 1fr; }
+      .filter-nav, .full-list { display: none; }
+      .full-tools { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <p class="eyebrow">Revised interaction mockup</p>
+    <h1>Notifications that lead somewhere</h1>
+    <p class="intro">
+      The side panel is a quick attention queue, not a compressed version of the full inbox.
+      It keeps choices small, makes the next action visible, and uses a real preview when an item is selected.
+    </p>
+
+    <div class="decision-grid">
+      <article class="decision">
+        <strong>1. Make the CTA unmistakable</strong>
+        <p>Actionable items always expose one verb-specific button: Review PR, Reconnect, Track package. Read, snooze, and dismiss stay secondary.</p>
+      </article>
+      <article class="decision">
+        <strong>2. Selection opens a preview</strong>
+        <p>Clicking a row marks it selected and opens a larger anchored preview with full context and actions. It never merely loosens text spacing.</p>
+      </article>
+      <article class="decision">
+        <strong>3. Show priority before state</strong>
+        <p>The panel restores level counts for at-a-glance triage. Unread and actionable become independent refinements; source filtering, search, and deeper compound filters remain on the full page.</p>
+      </article>
+    </div>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Mockup A: dashboard quick panel</h2>
+          <p class="section-note">Click a notification to see the selected state and anchored preview. Combine a level with the unread and actionable refinements.</p>
+        </div>
+        <span class="tag">Fast triage</span>
+      </div>
+
+      <div class="stage">
+        <div class="app-placeholder" aria-hidden="true">
+          <div class="placeholder-title"></div>
+          <div class="placeholder-line"></div>
+          <div class="placeholder-line" style="width: 52%"></div>
+          <div class="placeholder-grid">
+            <div class="placeholder-card"></div>
+            <div class="placeholder-card"></div>
+            <div class="placeholder-card"></div>
+            <div class="placeholder-card"></div>
+          </div>
+        </div>
+
+        <aside class="panel" aria-label="Notification panel mockup">
+          <header class="panel-header">
+            <div class="title-row">
+              <div class="title-group">
+                <span class="bell">N</span>
+                <div>
+                  <h3>Notifications</h3>
+                  <span class="count"><span id="attention-count">4</span> need attention</span>
+                </div>
+              </div>
+              <div class="header-actions">
+                <button class="mark-read" id="mark-all">Mark all read</button>
+                <button class="icon-button" aria-label="Close panel">x</button>
+              </div>
+            </div>
+
+            <div class="panel-tools">
+              <div class="segments" aria-label="Level filter">
+                <button class="segment active" data-level="all">All <span class="segment-count" id="count-all">5</span></button>
+                <button class="segment" data-level="urgent">Urgent <span class="segment-count" id="count-urgent">2</span></button>
+                <button class="segment" data-level="action_needed">Action <span class="segment-count" id="count-action_needed">1</span></button>
+                <button class="segment" data-level="heads_up">Heads <span class="segment-count" id="count-heads_up">1</span></button>
+                <button class="segment" data-level="fyi">FYI <span class="segment-count" id="count-fyi">0</span></button>
+              </div>
+              <div class="attribute-toggles" aria-label="Notification attributes">
+                <button class="attribute-toggle" data-attribute="unread">Unread only <span id="unread-filter-count">5</span></button>
+                <button class="attribute-toggle" data-attribute="actionable">Actionable only <span>3</span></button>
+              </div>
+            </div>
+          </header>
+
+          <div class="notification-list">
+            <div class="group-title"><span>Today</span><span>4</span></div>
+
+            <article class="notification selected" tabindex="0" data-id="pr" data-source="github" data-level="action_needed" data-action="true" data-unread="true">
+              <div class="notification-main">
+                <div class="source github">GH</div>
+                <div>
+                  <div class="notification-top">
+                    <h4 class="notification-title">Review requested on auth middleware</h4>
+                    <span class="unread-dot"></span>
+                  </div>
+                  <p class="notification-summary">mission-control #482 needs your review before the release can proceed.</p>
+                  <div class="meta"><span class="level action">Action needed</span><span>18m</span></div>
+                </div>
+              </div>
+              <button class="inline-cta" data-demo-action="Review PR">Review PR</button>
+            </article>
+
+            <article class="notification" tabindex="0" data-id="budget" data-source="monarch" data-level="urgent" data-action="true" data-unread="true">
+              <div class="notification-main">
+                <div class="source monarch">M</div>
+                <div>
+                  <div class="notification-top">
+                    <h4 class="notification-title">Dining budget is $84 over</h4>
+                    <span class="unread-dot"></span>
+                  </div>
+                  <p class="notification-summary">You have used 112% of this month's dining budget.</p>
+                  <div class="meta"><span class="level urgent">Urgent</span><span>2h</span></div>
+                </div>
+              </div>
+              <button class="inline-cta" data-demo-action="Review spending">Review spending</button>
+            </article>
+
+            <article class="notification" tabindex="0" data-id="garage" data-source="home" data-level="urgent" data-action="true" data-unread="true">
+              <div class="notification-main">
+                <div class="source home">HA</div>
+                <div>
+                  <div class="notification-top">
+                    <h4 class="notification-title">Garage door has been open for 30m</h4>
+                    <span class="unread-dot"></span>
+                  </div>
+                  <p class="notification-summary">No motion has been detected nearby in the last 12 minutes.</p>
+                  <div class="meta"><span class="level urgent">Urgent</span><span>31m</span></div>
+                </div>
+              </div>
+              <button class="inline-cta danger" data-demo-action="Close garage">Close garage</button>
+            </article>
+
+            <article class="notification" tabindex="0" data-id="release" data-source="github" data-level="heads_up" data-action="false" data-unread="true">
+              <div class="notification-main">
+                <div class="source github">GH</div>
+                <div>
+                  <div class="notification-top">
+                    <h4 class="notification-title">Release workflow completed</h4>
+                    <span class="unread-dot"></span>
+                  </div>
+                  <p class="notification-summary">Version 2.8.0 deployed successfully. All checks passed.</p>
+                  <div class="meta"><span class="level heads">Heads up</span><span>3h</span></div>
+                </div>
+              </div>
+            </article>
+
+            <div class="group-title"><span>Yesterday</span><span>1</span></div>
+            <article class="notification" tabindex="0" data-id="summary" data-source="monarch" data-level="digest" data-action="false" data-unread="true">
+              <div class="notification-main">
+                <div class="source monarch">M</div>
+                <div>
+                  <div class="notification-top"><h4 class="notification-title">Weekly finance summary</h4><span class="unread-dot"></span></div>
+                  <p class="notification-summary">Spending finished 8% below forecast across tracked budgets.</p>
+                  <div class="meta"><span>Digest</span><span>Yesterday</span></div>
+                </div>
+              </div>
+            </article>
+          </div>
+
+          <footer class="panel-footer">
+            <a href="#full-page">Open notification center -></a>
+            <span>Search, history, bulk actions</span>
+          </footer>
+        </aside>
+
+        <section class="preview" id="preview" aria-live="polite">
+          <div class="preview-head">
+            <div>
+              <div class="preview-source" id="preview-source">GitHub / mission-control</div>
+              <h3 id="preview-title">Review requested on auth middleware</h3>
+            </div>
+            <button class="icon-button" id="preview-close" aria-label="Close preview">x</button>
+          </div>
+          <p id="preview-copy">This pull request updates edge authentication and blocks the release until a required reviewer approves it.</p>
+          <div class="preview-data" id="preview-data">
+            <span class="data-chip">PR #482</span>
+            <span class="data-chip">3 files changed</span>
+            <span class="data-chip">Release blocker</span>
+          </div>
+          <div class="preview-actions">
+            <button class="primary-button" id="preview-primary">Review PR</button>
+            <button class="secondary-button">Create task</button>
+            <button class="secondary-button">Snooze</button>
+          </div>
+          <div class="preview-foot">Selection provides new information and actions; it does not resize the original row.</div>
+        </section>
+      </div>
+    </section>
+
+    <section class="section" id="full-page">
+      <div class="section-head">
+        <div>
+          <h2>Mockup B: full notification center</h2>
+          <p class="section-note">The full page earns the heavier controls: text search, source/category filters, history, multi-select, and a persistent detail pane.</p>
+        </div>
+        <span class="tag">Deep triage</span>
+      </div>
+
+      <div class="full-page">
+        <header class="full-header">
+          <div class="full-title">
+            <div>
+              <h3>Notifications</h3>
+              <p>4 unread / 3 need action</p>
+            </div>
+            <button class="secondary-button">Mark all read</button>
+          </div>
+          <div class="full-tools">
+            <input class="search" id="notification-search" type="search" placeholder="Search title, source, project, or content...">
+            <button class="tool-chip">Newest first</button>
+          </div>
+        </header>
+        <div class="split">
+          <nav class="filter-nav" aria-label="Notification filters">
+            <section class="filter-nav-section">
+              <p class="filter-nav-title">Level</p>
+              <button class="filter-nav-item active"><span class="filter-nav-icon">A</span><span>All</span><span class="filter-nav-count">12</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">!</span><span>Urgent</span><span class="filter-nav-count">2</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">+</span><span>Action needed</span><span class="filter-nav-count">3</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">i</span><span>Heads up</span><span class="filter-nav-count">4</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">-</span><span>FYI</span><span class="filter-nav-count">3</span></button>
+            </section>
+            <section class="filter-nav-section">
+              <p class="filter-nav-title">Category</p>
+              <button class="filter-nav-item"><span class="filter-nav-icon">#</span><span>Tasks</span><span class="filter-nav-count">3</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">$</span><span>Finance</span><span class="filter-nav-count">4</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">H</span><span>Home</span><span class="filter-nav-count">2</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">*</span><span>Automation</span><span class="filter-nav-count">3</span></button>
+            </section>
+            <section class="filter-nav-section">
+              <p class="filter-nav-title">Source</p>
+              <button class="filter-nav-item"><span class="source-dot" style="background:#eef2f7"></span><span>GitHub</span><span class="filter-nav-count">5</span></button>
+              <button class="filter-nav-item"><span class="source-dot" style="background:#f6cf77"></span><span>Monarch</span><span class="filter-nav-count">4</span></button>
+              <button class="filter-nav-item"><span class="source-dot" style="background:#75c7ff"></span><span>Home Assistant</span><span class="filter-nav-count">2</span></button>
+            </section>
+            <section class="filter-nav-section">
+              <p class="filter-nav-title">State</p>
+              <button class="filter-nav-item"><span class="filter-nav-icon">o</span><span>Unread</span><span class="filter-nav-count">4</span></button>
+              <button class="filter-nav-item"><span class="filter-nav-icon">x</span><span>Dismissed</span></button>
+            </section>
+          </nav>
+          <div class="full-list">
+            <div class="full-list-label">Today</div>
+            <article class="full-row selected" data-search="github mission-control review auth middleware pull request">
+              <div class="source github" style="width:32px;height:32px">GH</div>
+              <div><h4>Review requested on auth middleware</h4><p>mission-control / Action needed</p></div>
+              <time>18m</time>
+            </article>
+            <article class="full-row" data-search="monarch dining budget spending finance">
+              <div class="source monarch" style="width:32px;height:32px">M</div>
+              <div><h4>Dining budget is $84 over</h4><p>Monarch / Urgent</p></div>
+              <time>2h</time>
+            </article>
+            <article class="full-row" data-search="home assistant garage door open">
+              <div class="source home" style="width:32px;height:32px">HA</div>
+              <div><h4>Garage door has been open for 30m</h4><p>Home Assistant / Urgent</p></div>
+              <time>31m</time>
+            </article>
+            <div class="full-list-label">Yesterday</div>
+            <article class="full-row" data-search="finance weekly summary monarch">
+              <div class="source monarch" style="width:32px;height:32px">M</div>
+              <div><h4>Weekly finance summary</h4><p>Monarch / FYI</p></div>
+              <time>1d</time>
+            </article>
+          </div>
+          <section class="full-detail">
+            <div class="detail-breadcrumb">GitHub / mission-control / Pull request #482</div>
+            <h3>Review requested on auth middleware</h3>
+            <p class="detail-copy">
+              This pull request updates edge authentication and blocks the 2.8.1 release until a required reviewer approves it.
+              The full page keeps the item selected while you inspect context, related work, and previous events.
+            </p>
+            <div class="preview-data">
+              <span class="data-chip">Action needed</span>
+              <span class="data-chip">3 files changed</span>
+              <span class="data-chip">Release blocker</span>
+            </div>
+            <div class="detail-box">
+              <strong>Why you received this</strong>
+              <p>You were requested as a reviewer by Alex. This pull request is attached to the active release milestone.</p>
+            </div>
+            <div class="detail-actions">
+              <button class="primary-button">Review PR</button>
+              <button class="secondary-button">Create task</button>
+              <button class="secondary-button">Snooze</button>
+              <button class="secondary-button">Dismiss</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <h2>Pattern rationale</h2>
+          <p class="section-note">The recommendation combines familiar inbox behavior without copying any one product wholesale.</p>
+        </div>
+      </div>
+      <div class="rationale">
+        <article><h3 class="good">Borrow from GitHub</h3><p>Notifications are a work queue with clear unread state, reasons, grouping, and a path to a fuller inbox for advanced filtering.</p></article>
+        <article><h3 class="good">Borrow from Linear</h3><p>Selection opens a meaningful detail view; quick search and display controls belong in the dedicated inbox rather than crowding every surface.</p></article>
+        <article><h3 class="good">Preserve Mission Control familiarity</h3><p>The full notification center keeps its existing left navigation for level, category, source, and state. Search and sorting remain in the header.</p></article>
+        <article><h3 class="good">Borrow from commerce/community apps</h3><p>Use concrete verbs tied to the event: Track package, View order, Reply, Review, Reconnect. Avoid generic Open CTAs.</p></article>
+        <article><h3>Do not borrow</h3><p>Do not turn the dashboard panel into a filter-heavy management console, hide the intended action in an overflow menu, or expand a row without revealing new information.</p></article>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const notificationData = {
+      pr: {
+        source: "GitHub / mission-control",
+        title: "Review requested on auth middleware",
+        copy: "This pull request updates edge authentication and blocks the release until a required reviewer approves it.",
+        chips: ["PR #482", "3 files changed", "Release blocker"],
+        action: "Review PR"
+      },
+      budget: {
+        source: "Monarch / Finance",
+        title: "Dining budget is $84 over",
+        copy: "Dining has reached 112% of the monthly target. Three recent restaurant transactions account for most of the overage.",
+        chips: ["$84 over", "112% used", "3 recent charges"],
+        action: "Review spending"
+      },
+      garage: {
+        source: "Home Assistant / Home",
+        title: "Garage door has been open for 30m",
+        copy: "The garage door remains open and no nearby motion has been detected in the last 12 minutes.",
+        chips: ["Open 30 minutes", "No recent motion", "Home"],
+        action: "Close garage"
+      },
+      release: {
+        source: "GitHub / Automation",
+        title: "Release workflow completed",
+        copy: "Version 2.8.0 deployed successfully. All build, smoke test, and health checks passed.",
+        chips: ["v2.8.0", "All checks passed"],
+        action: "View release"
+      },
+      summary: {
+        source: "Monarch / Finance",
+        title: "Weekly finance summary",
+        copy: "Spending finished 8% below forecast across tracked budgets, with no new recurring charges detected.",
+        chips: ["8% below forecast", "No new subscriptions"],
+        action: "View summary"
+      }
+    };
+
+    const notifications = [...document.querySelectorAll(".notification")];
+    const preview = document.getElementById("preview");
+    const previewSource = document.getElementById("preview-source");
+    const previewTitle = document.getElementById("preview-title");
+    const previewCopy = document.getElementById("preview-copy");
+    const previewData = document.getElementById("preview-data");
+    const previewPrimary = document.getElementById("preview-primary");
+    let currentLevel = "all";
+    let unreadOnly = false;
+    let actionableOnly = false;
+
+    function selectNotification(item) {
+      notifications.forEach((candidate) => candidate.classList.toggle("selected", candidate === item));
+      const data = notificationData[item.dataset.id];
+      previewSource.textContent = data.source;
+      previewTitle.textContent = data.title;
+      previewCopy.textContent = data.copy;
+      previewData.innerHTML = data.chips.map((chip) => `<span class="data-chip">${chip}</span>`).join("");
+      previewPrimary.textContent = data.action;
+      preview.hidden = false;
+      if (item.dataset.unread === "true") {
+        item.dataset.unread = "false";
+        item.querySelector(".unread-dot")?.remove();
+        updateAttentionCount();
+      }
+    }
+
+    function applyFilters() {
+      notifications.forEach((item) => {
+        const levelMatches = currentLevel === "all" || item.dataset.level === currentLevel;
+        const unreadMatches = !unreadOnly || item.dataset.unread === "true";
+        const actionableMatches = !actionableOnly || item.dataset.action === "true";
+        item.classList.toggle("hidden", !(levelMatches && unreadMatches && actionableMatches));
+      });
+    }
+
+    function updateAttentionCount() {
+      const unread = notifications.filter((item) => item.dataset.unread === "true");
+      document.getElementById("attention-count").textContent =
+        unread.filter((item) => item.dataset.level !== "digest").length;
+      document.getElementById("count-all").textContent = unread.length;
+      document.getElementById("unread-filter-count").textContent = unread.length;
+      ["urgent", "action_needed", "heads_up", "fyi"].forEach((level) => {
+        document.getElementById(`count-${level}`).textContent =
+          unread.filter((item) => item.dataset.level === level).length;
+      });
+    }
+
+    notifications.forEach((item) => {
+      item.addEventListener("click", (event) => {
+        if (event.target.closest("[data-demo-action]")) return;
+        selectNotification(item);
+      });
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") selectNotification(item);
+      });
+    });
+
+    document.querySelectorAll(".segment").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".segment").forEach((candidate) => candidate.classList.remove("active"));
+        button.classList.add("active");
+        currentLevel = button.dataset.level;
+        applyFilters();
+      });
+    });
+
+    document.querySelectorAll(".attribute-toggle").forEach((button) => {
+      button.addEventListener("click", () => {
+        button.classList.toggle("active");
+        if (button.dataset.attribute === "unread") unreadOnly = button.classList.contains("active");
+        if (button.dataset.attribute === "actionable") actionableOnly = button.classList.contains("active");
+        applyFilters();
+      });
+    });
+
+    document.getElementById("mark-all").addEventListener("click", () => {
+      notifications.forEach((item) => {
+        item.dataset.unread = "false";
+        item.querySelector(".unread-dot")?.remove();
+      });
+      updateAttentionCount();
+      applyFilters();
+    });
+
+    document.getElementById("preview-close").addEventListener("click", () => {
+      preview.hidden = true;
+      notifications.forEach((item) => item.classList.remove("selected"));
+    });
+
+    document.querySelectorAll("[data-demo-action], #preview-primary").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const original = button.textContent;
+        button.textContent = "Action ready";
+        setTimeout(() => { button.textContent = original; }, 900);
+      });
+    });
+
+    document.getElementById("notification-search").addEventListener("input", (event) => {
+      const query = event.target.value.trim().toLowerCase();
+      document.querySelectorAll(".full-row").forEach((row) => {
+        row.style.display = !query || row.dataset.search.includes(query) ? "grid" : "none";
+      });
+    });
+  </script>
+</body>
+</html>

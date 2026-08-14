@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — Add Task (Two-Tier Design)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e4e4e7; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 32px 20px 60px; }
+
+    /* Section labels */
+    .tier-label { text-align: center; padding: 20px 0 6px; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #fbbf24; }
+    .tier-sublabel { text-align: center; font-size: 12px; color: #71717a; margin-bottom: 20px; line-height: 1.6; }
+    .tier-divider { display: flex; align-items: center; gap: 16px; margin: 44px 0 8px; }
+    .tier-divider::before, .tier-divider::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, transparent, #2a2b35, transparent); }
+    .tier-divider span { font-size: 11px; color: #52525b; white-space: nowrap; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* ═══════════════════════════════════════════════
+       TIER 1: QUICK ADD BAR
+       ═══════════════════════════════════════════════ */
+    .quick-add-bar { display: flex; align-items: center; background: #1a1b23; border: 1px solid #2a2b35; border-radius: 12px; padding: 4px; transition: all 0.2s; }
+    .quick-add-bar.focused { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.12), 0 8px 24px rgba(0,0,0,0.2); }
+
+    .qa-icon { padding: 8px 10px; font-size: 18px; color: #6366f1; flex-shrink: 0; }
+    .qa-input { flex: 1; background: none; border: none; font-size: 15px; color: #f4f4f5; outline: none; padding: 10px 4px; }
+    .qa-input::placeholder { color: #52525b; }
+
+    .qa-actions { display: flex; align-items: center; gap: 2px; padding-right: 4px; flex-shrink: 0; }
+    .qa-btn { background: none; border: none; color: #52525b; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 4px; transition: all 0.15s; }
+    .qa-btn:hover { background: #2a2b35; color: #e4e4e7; }
+    .qa-btn .shortcut { font-size: 10px; color: #3a3b45; font-family: monospace; }
+    .qa-divider { width: 1px; height: 20px; background: #2a2b35; margin: 0 2px; flex-shrink: 0; }
+    .qa-submit { background: #6366f1; border: none; color: white; padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 4px; transition: all 0.15s; flex-shrink: 0; }
+    .qa-submit:hover { background: #5558e6; }
+
+    /* Destination pill inline */
+    .dest-pill { display: inline-flex; align-items: center; gap: 4px; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); padding: 3px 8px; border-radius: 6px; font-size: 11px; color: #a5b4fc; cursor: pointer; white-space: nowrap; }
+    .dest-pill .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dest-pill:hover { background: rgba(99,102,241,0.15); }
+
+    /* Parse preview row */
+    .parse-preview { min-height: 28px; padding: 6px 4px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #52525b; }
+    .parse-preview .icon { color: #6366f1; font-size: 14px; }
+    .parse-chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 4px; font-size: 11px; }
+    .parse-chip.date { color: #34d399; background: rgba(52,211,153,0.1); }
+    .parse-chip.priority { color: #f97316; background: rgba(249,115,22,0.1); }
+    .parse-chip.tag { color: #8b5cf6; background: rgba(139,92,246,0.1); }
+    .parse-chip.dest { color: #3b82f6; background: rgba(59,130,246,0.1); }
+
+    /* ═══════════════════════════════════════════════
+       STATES DEMO (showing variants of the quick bar)
+       ═══════════════════════════════════════════════ */
+    .state-label { font-size: 11px; color: #3a3b45; text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 8px 4px; font-weight: 600; }
+
+    /* Destination dropdown popover */
+    .dest-dropdown { background: #1a1b23; border: 1px solid #2a2b35; border-radius: 10px; width: 280px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); overflow: hidden; margin-top: 6px; margin-left: auto; }
+    .dd-header { padding: 10px 12px 6px; font-size: 11px; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; }
+    .dd-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
+    .dd-item:hover { background: #2a2b35; }
+    .dd-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dd-item .acct { font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 600; margin-left: auto; }
+    .acct-personal { background: rgba(34,197,94,0.15); color: #22c55e; }
+    .acct-work { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .dd-item.active { background: rgba(99,102,241,0.1); }
+    .dd-item .check { margin-left: auto; color: #6366f1; font-size: 14px; }
+    .dd-divider { height: 1px; background: #2a2b35; margin: 4px 0; }
+    .dd-footer { padding: 8px 12px; font-size: 12px; color: #52525b; display: flex; align-items: center; gap: 6px; border-top: 1px solid #2a2b35; }
+
+    /* ═══════════════════════════════════════════════
+       SMART PARSING REFERENCE
+       ═══════════════════════════════════════════════ */
+    .examples-box { background: #1a1b23; border: 1px solid #2a2b35; border-radius: 12px; padding: 16px 20px; margin-top: 8px; }
+    .examples-title { font-size: 12px; font-weight: 600; color: #71717a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+    .ex-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; border-bottom: 1px solid #1e1f2a; }
+    .ex-row:last-child { border: none; }
+    .ex-input { font-family: 'JetBrains Mono', 'Fira Code', monospace; font-size: 13px; color: #e4e4e7; flex: 1; }
+    .ex-input .hl-date { color: #34d399; font-weight: 600; }
+    .ex-input .hl-priority { color: #f97316; font-weight: 600; }
+    .ex-input .hl-tag { color: #8b5cf6; font-weight: 600; }
+    .ex-input .hl-dest { color: #3b82f6; font-weight: 600; }
+    .ex-input .hl-project { color: #ec4899; font-weight: 600; }
+    .ex-arrow { color: #3a3b45; font-size: 14px; }
+    .ex-result { font-size: 11px; color: #52525b; min-width: 180px; text-align: right; }
+
+    /* ═══════════════════════════════════════════════
+       TIER 2: FULL MODAL (expand button opens this)
+       ═══════════════════════════════════════════════ */
+    .modal-demo { background: #1a1b23; border: 1px solid #2a2b35; border-radius: 16px; overflow: hidden; box-shadow: 0 25px 60px rgba(0,0,0,0.3); }
+    .modal-header { padding: 18px 24px 0; display: flex; align-items: center; justify-content: space-between; }
+    .modal-header h2 { font-size: 17px; font-weight: 600; color: #f4f4f5; display: flex; align-items: center; gap: 8px; }
+    .modal-header .badge { font-size: 10px; background: #2a2b35; border: 1px solid #3a3b45; padding: 2px 6px; border-radius: 4px; color: #71717a; font-family: monospace; }
+    .modal-close { background: none; border: none; color: #71717a; font-size: 18px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+    .modal-close:hover { background: #2a2b35; color: #e4e4e7; }
+
+    .modal-body { padding: 18px 24px; }
+
+    .m-input { width: 100%; background: #12131a; border: 1px solid #2a2b35; border-radius: 10px; padding: 12px 14px; font-size: 15px; color: #f4f4f5; outline: none; }
+    .m-input:focus { border-color: #6366f1; }
+    .m-input::placeholder { color: #52525b; }
+
+    .m-section-label { font-size: 11px; font-weight: 500; color: #52525b; text-transform: uppercase; letter-spacing: 0.5px; margin: 14px 0 6px; }
+
+    .source-grid { display: flex; gap: 6px; flex-wrap: wrap; }
+    .source-chip { display: flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: 8px; border: 1px solid #2a2b35; background: #12131a; cursor: pointer; font-size: 12px; transition: all 0.15s; }
+    .source-chip:hover { border-color: #3a3b45; }
+    .source-chip.selected { border-color: #6366f1; background: rgba(99,102,241,0.08); }
+    .source-chip .dot { width: 7px; height: 7px; border-radius: 50%; }
+
+    .source-features { margin-top: 10px; padding: 8px 12px; background: rgba(99,102,241,0.04); border: 1px solid rgba(99,102,241,0.12); border-radius: 8px; font-size: 11px; color: #818cf8; display: flex; align-items: center; gap: 6px; }
+
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+    .detail-field { }
+    .detail-field label { display: block; font-size: 11px; color: #52525b; margin-bottom: 4px; }
+    .detail-field select, .detail-field input[type="text"] { width: 100%; background: #12131a; border: 1px solid #2a2b35; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #e4e4e7; outline: none; }
+    .detail-field.full { grid-column: 1 / -1; }
+
+    /* Description */
+    .md-toolbar { display: flex; gap: 2px; padding: 4px; background: #12131a; border: 1px solid #2a2b35; border-bottom: none; border-radius: 8px 8px 0 0; margin-top: 6px; }
+    .md-btn { background: none; border: none; color: #52525b; padding: 3px 7px; border-radius: 3px; font-size: 11px; cursor: pointer; font-weight: 600; }
+    .md-btn:hover { background: #2a2b35; color: #e4e4e7; }
+    .desc-area { width: 100%; background: #12131a; border: 1px solid #2a2b35; border-radius: 0 0 8px 8px; padding: 10px 12px; font-size: 12px; color: #e4e4e7; min-height: 70px; resize: vertical; outline: none; font-family: 'JetBrains Mono', 'Fira Code', monospace; line-height: 1.5; }
+
+    .tag-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+    .tag-pill { display: inline-flex; align-items: center; gap: 3px; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 500; }
+    .tag-pill .x { cursor: pointer; opacity: 0.6; }
+
+    .modal-footer { padding: 14px 24px; background: #12131a; border-top: 1px solid #2a2b35; display: flex; align-items: center; justify-content: space-between; }
+    .footer-left { display: flex; align-items: center; gap: 10px; font-size: 11px; color: #52525b; }
+    .footer-left input { accent-color: #6366f1; }
+    .footer-right { display: flex; gap: 6px; }
+    .btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; }
+    .btn-ghost { background: transparent; color: #71717a; }
+    .btn-ghost:hover { background: #2a2b35; color: #e4e4e7; }
+    .btn-primary { background: #6366f1; color: white; }
+    .btn-primary:hover { background: #5558e6; }
+
+    /* ═══════════════════════════════════════════════
+       FLOW DIAGRAM
+       ═══════════════════════════════════════════════ */
+    .flow-box { background: #1a1b23; border: 1px solid #2a2b35; border-radius: 12px; padding: 20px; margin-top: 8px; text-align: center; }
+    .flow-steps { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .flow-step { padding: 10px 16px; border-radius: 8px; font-size: 12px; font-weight: 500; }
+    .flow-step.action { background: rgba(99,102,241,0.1); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.2); }
+    .flow-step.result { background: rgba(52,211,153,0.1); color: #34d399; border: 1px solid rgba(52,211,153,0.2); }
+    .flow-step.optional { background: rgba(251,191,36,0.1); color: #fbbf24; border: 1px solid rgba(251,191,36,0.2); }
+    .flow-arrow { color: #3a3b45; font-size: 16px; }
+    .flow-or { font-size: 10px; color: #52525b; text-transform: uppercase; letter-spacing: 0.5px; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ═══════════════════════════════════════════════ -->
+  <div class="tier-label">🎯 Two-Tier Add Task Design</div>
+  <div class="tier-sublabel">
+    <strong>Tier 1</strong> = Quick bar for rapid capture (press N anywhere)<br>
+    <strong>Tier 2</strong> = Full modal with all fields (press Tab or click ⤢ to expand)
+  </div>
+
+  <!-- Flow diagram -->
+  <div class="flow-box">
+    <div class="flow-steps">
+      <div class="flow-step action">Press N</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step action">Type task + Enter</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step result">✓ Saved</div>
+    </div>
+    <div style="margin: 8px 0; font-size: 11px; color: #3a3b45;">— or —</div>
+    <div class="flow-steps">
+      <div class="flow-step action">Press N</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step optional">Tab to expand</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step action">Fill details</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-step result">✓ Saved</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TIER 1: QUICK ADD STATES
+       ═══════════════════════════════════════════════ -->
+  <div class="tier-divider"><span>Tier 1 — Quick Add Bar</span></div>
+  <div class="tier-sublabel">
+    Inline bar sits at the top of every page. Type and press Enter to add instantly.<br>
+    Smart parsing extracts dates, priorities, tags, and destinations automatically.
+  </div>
+
+  <!-- State 1: Empty -->
+  <div class="state-label">Empty state</div>
+  <div class="quick-add-bar">
+    <span class="qa-icon">+</span>
+    <input class="qa-input" type="text" placeholder="Add a task... (press N)" readonly />
+    <div class="qa-actions">
+      <div class="dest-pill">
+        <div class="dot" style="background:#3b82f6;"></div>
+        Todo · Personal
+      </div>
+      <div class="qa-divider"></div>
+      <button class="qa-btn" title="Expand to full form">⤢</button>
+    </div>
+  </div>
+
+  <!-- State 2: Typing with smart parse -->
+  <div class="state-label" style="margin-top:24px;">Typing with smart parsing active</div>
+  <div class="quick-add-bar focused">
+    <span class="qa-icon">+</span>
+    <input class="qa-input" type="text" value="Buy groceries tomorrow !high #errands" readonly />
+    <div class="qa-actions">
+      <div class="dest-pill">
+        <div class="dot" style="background:#3b82f6;"></div>
+        Todo · Personal
+      </div>
+      <div class="qa-divider"></div>
+      <button class="qa-btn" title="Expand">⤢</button>
+      <button class="qa-submit">↵ Add</button>
+    </div>
+  </div>
+  <div class="parse-preview">
+    <span class="icon">🧠</span>
+    <span>Parsed:</span>
+    <span class="parse-chip date">📅 Tomorrow · Jun 21</span>
+    <span class="parse-chip priority">🔴 High</span>
+    <span class="parse-chip tag">#errands</span>
+  </div>
+
+  <!-- State 3: With @work destination override -->
+  <div class="state-label" style="margin-top:24px;">Destination override with <code style="color:#3b82f6;">@work</code></div>
+  <div class="quick-add-bar focused">
+    <span class="qa-icon">+</span>
+    <input class="qa-input" type="text" value="Prepare Q3 planning deck @work /sprint" readonly />
+    <div class="qa-actions">
+      <div class="dest-pill" style="background:rgba(59,130,246,0.1);border-color:rgba(59,130,246,0.2);">
+        <div class="dot" style="background:#8b5cf6;"></div>
+        Todo · Work
+      </div>
+      <div class="qa-divider"></div>
+      <button class="qa-btn" title="Expand">⤢</button>
+      <button class="qa-submit">↵ Add</button>
+    </div>
+  </div>
+  <div class="parse-preview">
+    <span class="icon">🧠</span>
+    <span>Parsed:</span>
+    <span class="parse-chip dest">🔵 @work → Todo Work</span>
+    <span class="parse-chip" style="color:#ec4899;background:rgba(236,72,153,0.1);">/sprint</span>
+  </div>
+
+  <!-- State 4: Destination picker open -->
+  <div class="state-label" style="margin-top:24px;">Destination picker dropdown (click the pill)</div>
+  <div class="quick-add-bar focused">
+    <span class="qa-icon">+</span>
+    <input class="qa-input" type="text" value="Fix login bug on staging" readonly />
+    <div class="qa-actions">
+      <div class="dest-pill" style="background:rgba(99,102,241,0.15);">
+        <div class="dot" style="background:#3b82f6;"></div>
+        Todo · Personal ▾
+      </div>
+      <div class="qa-divider"></div>
+      <button class="qa-btn">⤢</button>
+      <button class="qa-submit">↵ Add</button>
+    </div>
+  </div>
+  <div class="dest-dropdown">
+    <div class="dd-header">Microsoft Todo</div>
+    <div class="dd-item active">
+      <div class="dot" style="background:#3b82f6;"></div>
+      <span>Tasks</span>
+      <span class="check">✓</span>
+    </div>
+    <div class="dd-item">
+      <div class="dot" style="background:#3b82f6;"></div>
+      <span>Shopping List</span>
+      <span class="acct acct-personal">Personal</span>
+    </div>
+    <div class="dd-item">
+      <div class="dot" style="background:#8b5cf6;"></div>
+      <span>Work Tasks</span>
+      <span class="acct acct-work">Work</span>
+    </div>
+    <div class="dd-item">
+      <div class="dot" style="background:#8b5cf6;"></div>
+      <span>Sprint Backlog</span>
+      <span class="acct acct-work">Work</span>
+    </div>
+    <div class="dd-divider"></div>
+    <div class="dd-header">GitHub Issues</div>
+    <div class="dd-item">
+      <div class="dot" style="background:#f97316;"></div>
+      <span>acme/project-alpha</span>
+      <span class="acct acct-personal">Personal</span>
+    </div>
+    <div class="dd-item">
+      <div class="dot" style="background:#f97316;"></div>
+      <span>acme/mission-control</span>
+      <span class="acct acct-personal">Personal</span>
+    </div>
+    <div class="dd-divider"></div>
+    <div class="dd-header">Other</div>
+    <div class="dd-item">
+      <div class="dot" style="background:#10b981;"></div>
+      <span>Custom DB</span>
+    </div>
+    <div class="dd-footer">💡 Type <code style="color:#3b82f6;">@work</code> or <code style="color:#22c55e;">@personal</code> in the task to auto-select</div>
+  </div>
+
+  <!-- Smart Parsing Reference -->
+  <div class="state-label" style="margin-top:32px;">Smart parsing cheat sheet</div>
+  <div class="examples-box">
+    <div class="examples-title">Natural Language → Structured Data</div>
+    <div class="ex-row">
+      <div class="ex-input">Buy milk <span class="hl-date">tomorrow</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">due: Jun 21</div>
+    </div>
+    <div class="ex-row">
+      <div class="ex-input">Ship feature <span class="hl-date">next friday</span> <span class="hl-priority">!critical</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">due: Jun 27, priority: critical</div>
+    </div>
+    <div class="ex-row">
+      <div class="ex-input">Call dentist <span class="hl-tag">#health</span> <span class="hl-date">monday</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">tag: health, due: Jun 23</div>
+    </div>
+    <div class="ex-row">
+      <div class="ex-input">Review PR <span class="hl-dest">@work</span> <span class="hl-project">/auth-sprint</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">dest: Work Todo, project: auth-sprint</div>
+    </div>
+    <div class="ex-row">
+      <div class="ex-input">Fix bug in parser <span class="hl-dest">@github</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">dest: GitHub Issues</div>
+    </div>
+    <div class="ex-row">
+      <div class="ex-input">Prep slides <span class="hl-date">in 3 days</span> <span class="hl-priority">!high</span> <span class="hl-tag">#meeting</span></div>
+      <span class="ex-arrow">→</span>
+      <div class="ex-result">due: Jun 23, high, tag: meeting</div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════
+       TIER 2: FULL MODAL
+       ═══════════════════════════════════════════════ -->
+  <div class="tier-divider"><span>Tier 2 — Expanded Full Modal</span></div>
+  <div class="tier-sublabel">
+    Press Tab or click ⤢ from the quick bar to expand. Pre-fills any parsed values.<br>
+    Source-aware: shows markdown toolbar for GitHub, smart dates for Todo, etc.
+  </div>
+
+  <div class="modal-demo">
+    <div class="modal-header">
+      <h2>✨ Add Task <span class="badge">Tab</span></h2>
+      <button class="modal-close">✕</button>
+    </div>
+    <div class="modal-body">
+      <input class="m-input" type="text" value="Review PR #847 for auth refactor" readonly />
+
+      <div class="m-section-label">Add to</div>
+      <div class="source-grid">
+        <div class="source-chip selected">
+          <div class="dot" style="background:#f97316;"></div>
+          GitHub Issues
+          <span style="font-size:10px;padding:1px 5px;border-radius:3px;font-weight:600;background:rgba(59,130,246,0.15);color:#3b82f6;">Work</span>
+        </div>
+        <div class="source-chip">
+          <div class="dot" style="background:#3b82f6;"></div>
+          Todo
+          <span style="font-size:10px;padding:1px 5px;border-radius:3px;font-weight:600;background:rgba(34,197,94,0.15);color:#22c55e;">Personal</span>
+        </div>
+        <div class="source-chip">
+          <div class="dot" style="background:#8b5cf6;"></div>
+          Todo
+          <span style="font-size:10px;padding:1px 5px;border-radius:3px;font-weight:600;background:rgba(59,130,246,0.15);color:#3b82f6;">Work</span>
+        </div>
+      </div>
+
+      <div class="source-features">
+        📝 <strong>GitHub:</strong>&nbsp; Markdown description • Assignees • Labels • Milestones
+      </div>
+
+      <div class="m-section-label">Details</div>
+      <div class="detail-grid">
+        <div class="detail-field">
+          <label>Repository</label>
+          <select><option>acme/project-alpha</option></select>
+        </div>
+        <div class="detail-field">
+          <label>Due date</label>
+          <input type="text" value="tomorrow" placeholder="Date or natural language..." />
+        </div>
+        <div class="detail-field">
+          <label>Priority</label>
+          <select><option>🟡 Low</option><option>🟠 Medium</option><option selected>🔴 High</option><option>🔥 Critical</option></select>
+        </div>
+        <div class="detail-field">
+          <label>Hub Project</label>
+          <select><option>🚀 Auth Refactor Sprint</option></select>
+        </div>
+      </div>
+
+      <!-- Description with markdown toolbar -->
+      <div class="m-section-label">Description</div>
+      <div class="md-toolbar">
+        <button class="md-btn">B</button>
+        <button class="md-btn">I</button>
+        <button class="md-btn">🔗</button>
+        <button class="md-btn">`</button>
+        <button class="md-btn">```</button>
+        <button class="md-btn">☑</button>
+      </div>
+      <textarea class="desc-area" readonly>The auth refactor in PR #847 needs review.
+
+## Checklist
+- [ ] Check token refresh logic
+- [ ] Verify middleware integration</textarea>
+
+      <div class="m-section-label">Tags</div>
+      <div class="tag-row">
+        <span class="tag-pill" style="background:rgba(249,115,22,0.15);color:#f97316;">auth <span class="x">✕</span></span>
+        <span class="tag-pill" style="background:rgba(139,92,246,0.15);color:#8b5cf6;">review <span class="x">✕</span></span>
+      </div>
+
+      <!-- My Day toggle -->
+      <div style="margin-top:14px;display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" checked style="accent-color:#6366f1;width:15px;height:15px;" />
+        <span style="font-size:12px;color:#71717a;">Add to My Day</span>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <div class="footer-left">
+        <label style="display:flex;align-items:center;gap:5px;">
+          <input type="checkbox" style="accent-color:#6366f1;" />
+          <span>Add another</span>
+        </label>
+        <span style="color:#3a3b45;">⌘+Enter</span>
+      </div>
+      <div class="footer-right">
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="btn btn-primary">Add Task</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Design notes -->
+  <div style="margin-top:40px;padding:20px;background:#1a1b23;border:1px solid #2a2b35;border-radius:12px;">
+    <div style="font-size:13px;font-weight:600;color:#fbbf24;margin-bottom:12px;">📐 Design Notes</div>
+    <div style="font-size:12px;color:#a1a1aa;line-height:1.8;">
+      <strong>Quick bar is always visible</strong> at the top of Dashboard, My Day, and Kanban pages.<br>
+      <strong>Default destination</strong> is configurable in Settings (e.g., "always default to Personal Todo").<br>
+      <strong>Last used destination</strong> is remembered and pre-selected next time.<br>
+      <strong>Keyboard-first:</strong> N opens, type + Enter saves, Tab expands to full, Esc cancels.<br>
+      <strong>Smart parse runs live</strong> as you type — shows chips below the bar in real-time.<br>
+      <strong>Post-save toast</strong> confirms "✓ Added to Todo · Personal" with an Undo link.<br>
+      <strong>Source-adaptive form:</strong> GitHub gets markdown + labels. Todo gets reminders + steps. Custom DB gets custom fields.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

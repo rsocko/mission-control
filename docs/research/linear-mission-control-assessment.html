@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Linear inspiration review for Mission Control</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b10;
+      --panel: #11141b;
+      --panel-2: #171b24;
+      --line: #282e3b;
+      --text: #edf0f7;
+      --muted: #9099aa;
+      --violet: #8b7cf6;
+      --blue: #5ba8ff;
+      --green: #47d7a1;
+      --amber: #f5b95f;
+      --red: #f1747f;
+      --cyan: #59d7df;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% -10%, rgba(91, 168, 255, .12), transparent 28rem),
+        radial-gradient(circle at 92% 0%, rgba(139, 124, 246, .14), transparent 30rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+    button, a { font: inherit; }
+    a { color: #9bc9ff; }
+    .shell { max-width: 1380px; margin: 0 auto; padding: 34px 28px 80px; }
+    .eyebrow { color: var(--violet); text-transform: uppercase; letter-spacing: .14em; font-size: 11px; font-weight: 800; }
+    h1 { margin: 7px 0 8px; font-size: clamp(30px, 5vw, 54px); letter-spacing: -.045em; line-height: 1.04; }
+    h2 { margin: 0 0 8px; font-size: 22px; letter-spacing: -.02em; }
+    h3 { margin: 0 0 7px; font-size: 15px; }
+    p { margin: 0; }
+    .lede { max-width: 880px; color: #b9c0ce; font-size: 16px; }
+    .meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+    .pill, .tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      border: 1px solid var(--line); border-radius: 999px;
+      padding: 5px 9px; color: #c7cddd; background: rgba(17,20,27,.75); font-size: 11px;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 15%, transparent); }
+    .tabs {
+      position: sticky; top: 0; z-index: 20; display: flex; gap: 7px; overflow-x: auto;
+      margin: 28px -8px 22px; padding: 10px 8px;
+      background: color-mix(in srgb, var(--bg) 84%, transparent); backdrop-filter: blur(18px);
+      border-bottom: 1px solid rgba(40,46,59,.65);
+    }
+    .tab {
+      border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px;
+      background: var(--panel); color: var(--muted); cursor: pointer; white-space: nowrap;
+    }
+    .tab[aria-selected="true"] { color: white; background: #23283a; border-color: #4b5370; }
+    .view { display: none; }
+    .view.active { display: block; animation: reveal .18s ease-out; }
+    @keyframes reveal { from { opacity: 0; transform: translateY(4px); } }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
+    .card {
+      border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(145deg, rgba(23,27,36,.92), rgba(14,17,24,.95));
+      padding: 17px; box-shadow: 0 16px 50px rgba(0,0,0,.18);
+    }
+    .span-4 { grid-column: span 4; } .span-5 { grid-column: span 5; } .span-6 { grid-column: span 6; }
+    .span-7 { grid-column: span 7; } .span-8 { grid-column: span 8; } .span-12 { grid-column: span 12; }
+    .kpi { font-size: 30px; font-weight: 760; letter-spacing: -.04em; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .priority { display: grid; grid-template-columns: 44px 1fr auto; gap: 12px; align-items: start; padding: 13px 0; border-top: 1px solid var(--line); }
+    .priority:first-of-type { border-top: 0; }
+    .rank { color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: .08em; }
+    .impact { font-size: 11px; color: var(--green); white-space: nowrap; }
+    .impact.medium { color: var(--amber); }
+    .impact.low { color: var(--muted); }
+    .callout { border-left: 3px solid var(--violet); padding: 12px 14px; background: rgba(139,124,246,.08); border-radius: 0 10px 10px 0; }
+    .avoid { border-left-color: var(--red); background: rgba(241,116,127,.07); }
+    .evidence { color: #b6bdcb; font-size: 12px; }
+    .mock-toolbar { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 14px; }
+    .segmented { display: flex; padding: 3px; border: 1px solid var(--line); background: #0c0f15; border-radius: 9px; }
+    .segmented span { padding: 5px 9px; color: var(--muted); font-size: 11px; border-radius: 6px; }
+    .segmented .active { color: white; background: #262c3a; }
+    .roadmap { overflow-x: auto; }
+    .roadmap-grid { min-width: 960px; display: grid; grid-template-columns: 200px repeat(12, 1fr); position: relative; }
+    .month, .project-name { padding: 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+    .month { text-align: center; border-left: 1px solid rgba(40,46,59,.55); }
+    .project-name { color: #dce1eb; display: flex; align-items: center; gap: 8px; }
+    .timeline-row { grid-column: 2 / -1; height: 52px; position: relative; border-bottom: 1px solid var(--line); background: repeating-linear-gradient(90deg, transparent 0, transparent calc(8.333% - 1px), rgba(40,46,59,.5) calc(8.333% - 1px), rgba(40,46,59,.5) 8.333%); }
+    .bar { position: absolute; top: 13px; height: 26px; border-radius: 7px; padding: 5px 9px; font-size: 10px; color: white; white-space: nowrap; overflow: visible; box-shadow: inset 0 0 0 1px rgba(255,255,255,.12); }
+    .milestone { position: absolute; top: 8px; width: 11px; height: 11px; background: #fff; border: 2px solid #171b24; transform: rotate(45deg); border-radius: 2px; }
+    .today-line { position: absolute; left: 48%; top: 34px; bottom: 0; width: 1px; background: var(--red); z-index: 3; }
+    .today-line::before { content: "Today"; position: absolute; top: -18px; left: -17px; color: var(--red); font-size: 9px; }
+    .pulse-head { display: flex; align-items: center; gap: 12px; }
+    .pulse-orb { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: var(--amber); background: rgba(245,185,95,.1); border: 1px solid rgba(245,185,95,.35); }
+    .pulse-orb::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: currentColor; box-shadow: 0 0 18px currentColor; }
+    .signals { display: grid; gap: 8px; margin-top: 16px; }
+    .signal { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; padding: 9px; background: rgba(10,12,17,.65); border-radius: 8px; font-size: 12px; }
+    .trend { color: var(--green); font-size: 11px; }
+    .trend.bad { color: var(--red); }
+    .scatter-wrap { overflow-x: auto; }
+    .scatter { width: 100%; min-width: 700px; height: 390px; border-radius: 10px; background: #0c0f15; border: 1px solid var(--line); }
+    .scatter text { fill: #8791a4; font-size: 11px; }
+    .scatter .gridline { stroke: #232a37; stroke-width: 1; }
+    .scatter .band { stroke: #f5b95f; stroke-width: 1; stroke-dasharray: 5 5; }
+    .scatter .point { cursor: pointer; opacity: .83; transition: opacity .15s, r .15s; }
+    .scatter .point:hover { opacity: 1; r: 7; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 11px; }
+    .integration-grid { display: grid; grid-template-columns: 1fr 140px 1fr; gap: 14px; align-items: stretch; }
+    .stack { display: grid; gap: 9px; }
+    .node { border: 1px solid var(--line); padding: 11px; border-radius: 9px; background: #11151d; }
+    .core { display: grid; place-items: center; text-align: center; border: 1px solid rgba(139,124,246,.45); border-radius: 14px; background: rgba(139,124,246,.1); padding: 12px; }
+    .source-note { margin-top: 24px; font-size: 11px; color: var(--muted); }
+    .source-note li { margin: 5px 0; }
+    .decision-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .decision-table th, .decision-table td { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .decision-table th { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    .yes { color: var(--green); } .no { color: var(--red); } .conditional { color: var(--amber); }
+    @media (max-width: 900px) {
+      .span-4, .span-5, .span-6, .span-7, .span-8 { grid-column: span 12; }
+      .integration-grid { grid-template-columns: 1fr; }
+      .core { min-height: 110px; }
+      .shell { padding: 24px 16px 60px; }
+      .priority { grid-template-columns: 38px 1fr; }
+      .impact { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">Product research · 5 August 2026</div>
+      <h1>Linear inspiration,<br>Mission Control fit</h1>
+      <p class="lede">A prioritized review of what to refine, add, defer, and avoid. The central conclusion: Mission Control already owns much of the right substrate. The opportunity is to make its project intelligence more visual, explainable, connected, and fast—not to import Linear's team-management ceremony.</p>
+      <div class="meta">
+        <span class="pill"><span class="dot" style="color:var(--green)"></span> 7 adopt/refine recommendations</span>
+        <span class="pill"><span class="dot" style="color:var(--amber)"></span> 5 conditional ideas</span>
+        <span class="pill"><span class="dot" style="color:var(--red)"></span> 6 avoid/copy cautiously</span>
+        <span class="pill">MC API unavailable during project creation</span>
+      </div>
+    </header>
+
+    <nav class="tabs" aria-label="Research views">
+      <button class="tab" aria-selected="true" data-view="assessment">Priorities</button>
+      <button class="tab" aria-selected="false" data-view="timeline">Timeline mockup</button>
+      <button class="tab" aria-selected="false" data-view="pulse">Pulse mockup</button>
+      <button class="tab" aria-selected="false" data-view="insights">Insights mockup</button>
+      <button class="tab" aria-selected="false" data-view="information">Initiatives & tags</button>
+      <button class="tab" aria-selected="false" data-view="integrations">Integrations</button>
+    </nav>
+
+    <section id="assessment" class="view active">
+      <div class="grid">
+        <article class="card span-4"><div class="eyebrow">Finding 01</div><div class="kpi">Refine</div><p class="muted small">Computed health, project tags, phases, dependencies, percentile metrics, triage, and command UX already exist in partial form.</p></article>
+        <article class="card span-4"><div class="eyebrow">Finding 02</div><div class="kpi">Separate</div><p class="muted small">Keep the task due-date calendar. Add a distinct projects-only portfolio roadmap rather than forcing one timeline to serve two jobs.</p></article>
+        <article class="card span-4"><div class="eyebrow">Finding 03</div><div class="kpi">Infer</div><p class="muted small">Use Linear's visual language for health, but preserve MC's principle of deriving state instead of requiring weekly written updates.</p></article>
+
+        <article class="card span-8">
+          <h2>Prioritized assessment</h2>
+          <div class="priority"><div class="rank">P0.1</div><div><h3>Explainable Project Pulse</h3><p class="evidence">MC already separates inferred lifecycle status from computed health. Upgrade the display and model with reason codes, freshness, trend, confidence, and one suggested intervention. “Pulse” should be MC's name for an inferred state, not represented as a verified Linear feature.</p></div><div class="impact">High value · low/medium lift</div></div>
+          <div class="priority"><div class="rank">P0.2</div><div><h3>Wire project tags end to end</h3><p class="evidence">The <code>project_tags</code> table and overview read path already exist, but project create/edit and APIs do not expose tag assignment. Keep category as the primary portfolio grouping; add tags for themes, goals, contexts, and integration provenance.</p></div><div class="impact">High value · low lift</div></div>
+          <div class="priority"><div class="rank">P0.3</div><div><h3>Portfolio roadmap timeline</h3><p class="evidence">MC's current Timeline is a monthly task due-date calendar. Build a separate projects-only roadmap using existing project target dates, phases, milestones, dependencies, category, tags, and health. Add day/week/month/quarter zoom and milestone-to-project promotion later.</p></div><div class="impact">High value · medium lift</div></div>
+          <div class="priority"><div class="rank">P1.1</div><div><h3>Drillable scatter insights</h3><p class="evidence">MC already has lead-time median/P85/P95, distributions, trends, outlier links, and age-bucket drilldowns. Add per-task scatter as another rendering of the same data and filters—not a new analytics subsystem.</p></div><div class="impact">Medium/high value · medium lift</div></div>
+          <div class="priority"><div class="rank">P1.2</div><div><h3>Command palette scopes + actions</h3><p class="evidence">Build on Ctrl+K hybrid search, quick-create parsing, slash search, and existing G-chords. Add visible scopes for tasks, projects, tags, sources, and commands; make every shortcut discoverable in the palette.</p></div><div class="impact medium">Medium value · medium lift</div></div>
+          <div class="priority"><div class="rank">P1.3</div><div><h3>Unify inbound triage semantics</h3><p class="evidence">MC already has a rich content triage system, connector-created tasks, notifications, and Scout ingestion. Standardize accept, dismiss, snooze, merge/duplicate, and route actions across them instead of creating a second Linear-like inbox.</p></div><div class="impact medium">Medium value · medium lift</div></div>
+          <div class="priority"><div class="rank">P1.4</div><div><h3>Integration platform before catalog</h3><p class="evidence">MC already exposes MCP, inbound/outbound webhooks, n8n, custom REST, and connector capabilities. Invest in observability, provenance, conflict handling, and a few deeper workflows rather than chasing Linear's logo count.</p></div><div class="impact medium">High leverage · ongoing</div></div>
+        </article>
+
+        <aside class="card span-4">
+          <h2>Copy cautiously / avoid</h2>
+          <div class="callout avoid"><strong>Manual project updates</strong><br><span class="small muted">A weekly narrative ritual makes sense for stakeholder reporting, not a solo command center. Generate the narrative from signals and let the user annotate only exceptions.</span></div>
+          <div class="callout avoid" style="margin-top:10px"><strong>Initiatives as a default entity</strong><br><span class="small muted">Category + project tags + smart views cover the current need with less ceremony. Add an objective entity only after real multi-project rollup pain appears.</span></div>
+          <div class="callout avoid" style="margin-top:10px"><strong>Cycles, SLAs, and team rituals</strong><br><span class="small muted">These optimize shared accountability. MC's personal countdowns, due dates, energy, and focus signals are the better-sized analogs.</span></div>
+          <div class="callout avoid" style="margin-top:10px"><strong>Full collaboration suite</strong><br><span class="small muted">Co-editing, reactions, update reminders, and subscriber systems are disproportionate unless MC becomes multi-user.</span></div>
+          <div class="callout avoid" style="margin-top:10px"><strong>Fragmented filter models</strong><br><span class="small muted">Do not create separate filter semantics for pages, quick filters, and insights. One filter state should drive lists and visuals.</span></div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="timeline" class="view">
+      <div class="card">
+        <div class="mock-toolbar">
+          <div><div class="eyebrow">Mockup A</div><h2>Portfolio roadmap</h2><p class="small muted">Projects only. Milestones live inside bars; task detail stays out of this altitude.</p></div>
+          <div class="segmented"><span>Week</span><span class="active">Month</span><span>Quarter</span><span>Year</span></div>
+        </div>
+        <div class="roadmap">
+          <div class="roadmap-grid">
+            <div class="project-name">Grouped by category</div>
+            <div class="month">Aug</div><div class="month">Sep</div><div class="month">Oct</div><div class="month">Nov</div><div class="month">Dec</div><div class="month">Jan</div>
+            <div class="month">Feb</div><div class="month">Mar</div><div class="month">Apr</div><div class="month">May</div><div class="month">Jun</div><div class="month">Jul</div>
+            <div class="today-line"></div>
+
+            <div class="project-name"><span class="dot" style="color:var(--amber)"></span> Mission Control UX</div>
+            <div class="timeline-row"><div class="bar" style="left:5%;width:50%;background:linear-gradient(90deg,#6d5ce8,#8b7cf6)">Portfolio intelligence <i class="milestone" style="left:38%"></i><i class="milestone" style="left:76%"></i></div></div>
+            <div class="project-name"><span class="dot" style="color:var(--green)"></span> Connector platform</div>
+            <div class="timeline-row"><div class="bar" style="left:20%;width:61%;background:linear-gradient(90deg,#168f70,#47d7a1)">Capability contracts + observability <i class="milestone" style="left:56%"></i></div></div>
+            <div class="project-name"><span class="dot" style="color:var(--red)"></span> Native client</div>
+            <div class="timeline-row"><div class="bar" style="left:47%;width:45%;background:linear-gradient(90deg,#ca5662,#f1747f)">Companion workflows <i class="milestone" style="left:25%"></i><i class="milestone" style="left:68%"></i></div></div>
+            <div class="project-name"><span class="dot" style="color:var(--green)"></span> Personal analytics</div>
+            <div class="timeline-row"><div class="bar" style="left:3%;width:29%;background:linear-gradient(90deg,#287dbe,#5ba8ff)">Scatter + cohorts <i class="milestone" style="left:70%"></i></div></div>
+          </div>
+        </div>
+        <div class="legend"><span><span class="dot" style="color:var(--green)"></span> On track</span><span><span class="dot" style="color:var(--amber)"></span> Watch</span><span><span class="dot" style="color:var(--red)"></span> Off track</span><span>◆ Milestone</span></div>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <article class="card span-6"><h3>Why it fits</h3><p class="small muted">The data primitives already exist. A roadmap gives phases and project dependencies a portfolio-level home while preserving the current calendar for due-date execution.</p></article>
+        <article class="card span-6"><h3>Guardrails</h3><p class="small muted">No issue-level Gantt bars by default. No mandatory dates. Surface stale plans and confidence rather than pretending speculative dates are commitments.</p></article>
+      </div>
+    </section>
+
+    <section id="pulse" class="view">
+      <div class="grid">
+        <article class="card span-7">
+          <div class="pulse-head"><div class="pulse-orb"></div><div><div class="eyebrow">Project Pulse · Watch</div><h2>Mission Control UX</h2><p class="small muted">Updated from task and project signals 14 minutes ago</p></div></div>
+          <div class="signals">
+            <div class="signal"><span style="color:var(--green)">●</span><span>Completion velocity</span><span class="trend">+18% vs prior 30d</span></div>
+            <div class="signal"><span style="color:var(--red)">●</span><span>Overdue concentration</span><span class="trend bad">4 of 13 open tasks</span></div>
+            <div class="signal"><span style="color:var(--amber)">●</span><span>Plan freshness</span><span>Last meaningful activity 9d ago</span></div>
+            <div class="signal"><span style="color:var(--green)">●</span><span>Dependency risk</span><span>No blocked critical path</span></div>
+          </div>
+          <div class="callout" style="margin-top:15px"><strong>Suggested intervention:</strong> Reschedule or close the four overdue tasks; two have not changed in 30+ days.</div>
+        </article>
+        <article class="card span-5">
+          <h2>Model recommendation</h2>
+          <table class="decision-table">
+            <tr><th>Axis</th><th>Meaning</th><th>Source</th></tr>
+            <tr><td>Status</td><td>Not started / active / completed / cancelled</td><td>Derived + override</td></tr>
+            <tr><td>Pulse</td><td>On track / watch / off track / unknown</td><td>Computed</td></tr>
+            <tr><td>Reason</td><td>Overdue, stale, dependency, scope, velocity</td><td>Computed evidence</td></tr>
+            <tr><td>Trend</td><td>Improving / stable / worsening</td><td>Recent windows</td></tr>
+            <tr><td>Annotation</td><td>Optional exception/context</td><td>User</td></tr>
+          </table>
+        </article>
+        <article class="card span-12">
+          <h3>Important correction to the premise</h3>
+          <p class="small muted">No current public Linear feature named “Pulse” was verified. Linear does verify separate project status and health attached to manually authored project/initiative updates. The useful inspiration is the visual and conceptual separation; the MC-specific innovation is to infer it and explain why.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="insights" class="view">
+      <div class="card">
+        <div class="mock-toolbar">
+          <div><div class="eyebrow">Mockup C</div><h2>Lead time by completed task</h2><p class="small muted">Same filters and data as existing Insights. New rendering, not a second analytics product.</p></div>
+          <div class="segmented"><span>Distribution</span><span>Trend</span><span class="active">Scatter</span></div>
+        </div>
+        <div class="scatter-wrap">
+          <svg class="scatter" viewBox="0 0 920 390" role="img" aria-label="Scatter plot of task lead time">
+            <line class="gridline" x1="58" x2="890" y1="330" y2="330"/><line class="gridline" x1="58" x2="890" y1="260" y2="260"/>
+            <line class="gridline" x1="58" x2="890" y1="190" y2="190"/><line class="gridline" x1="58" x2="890" y1="120" y2="120"/><line class="gridline" x1="58" x2="890" y1="50" y2="50"/>
+            <line class="band" x1="58" x2="890" y1="273" y2="273"/><text x="820" y="266">P50 · 4.2d</text>
+            <line class="band" x1="58" x2="890" y1="182" y2="182"/><text x="820" y="175">P85 · 11.1d</text>
+            <line class="band" x1="58" x2="890" y1="92" y2="92"/><text x="820" y="85">P95 · 18.8d</text>
+            <text x="18" y="334">0d</text><text x="16" y="264">5d</text><text x="10" y="194">10d</text><text x="10" y="124">15d</text><text x="10" y="54">20d</text>
+            <text x="60" y="365">May</text><text x="260" y="365">Jun</text><text x="470" y="365">Jul</text><text x="680" y="365">Aug</text>
+            <g fill="#5ba8ff">
+              <circle class="point" cx="82" cy="290" r="5"><title>Fix sync badge · 2.9 days</title></circle><circle class="point" cx="125" cy="310" r="5"><title>Update task filter · 1.4 days</title></circle>
+              <circle class="point" cx="180" cy="242" r="5"><title>Project import flow · 6.3 days</title></circle><circle class="point" cx="242" cy="282" r="5"><title>Connector icon polish · 3.5 days</title></circle>
+              <circle class="point" cx="325" cy="155" r="5"><title>Outlook reconciliation · 12.5 days</title></circle><circle class="point" cx="382" cy="302" r="5"><title>Add quick action · 2.1 days</title></circle>
+              <circle class="point" cx="452" cy="250" r="5"><title>Project activity card · 5.7 days</title></circle><circle class="point" cx="515" cy="214" r="5"><title>Tag matrix drilldown · 8.3 days</title></circle>
+              <circle class="point" cx="578" cy="276" r="5"><title>Mobile date picker · 3.9 days</title></circle><circle class="point" cx="648" cy="128" r="5"><title>Dependency migration · 14.4 days</title></circle>
+              <circle class="point" cx="720" cy="297" r="5"><title>Pulse card copy · 2.4 days</title></circle><circle class="point" cx="780" cy="236" r="5"><title>Roadmap zoom state · 6.8 days</title></circle>
+            </g>
+            <g fill="#8b7cf6"><circle class="point" cx="210" cy="65" r="6"><title>Project hierarchy commands · 20.1 days</title></circle><circle class="point" cx="605" cy="80" r="6"><title>Document intelligence intake · 19.0 days</title></circle></g>
+          </svg>
+        </div>
+        <div class="legend"><span><span class="dot" style="color:var(--blue)"></span> Normal task</span><span><span class="dot" style="color:var(--violet)"></span> Outlier</span><span>Hover for task · click opens detail</span></div>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <article class="card span-6"><h3>Useful measures</h3><p class="small muted">Lead time, age before first action, snooze count, time in “waiting,” and completion after recommendation. Segment by project, source, priority, or tag.</p></article>
+        <article class="card span-6"><h3>Avoid vanity analytics</h3><p class="small muted">Do not add charts unless a point can open its task, a segment can filter work, or the visual suggests a concrete behavior change.</p></article>
+      </div>
+    </section>
+
+    <section id="information" class="view">
+      <div class="grid">
+        <article class="card span-7">
+          <h2>Recommended information architecture</h2>
+          <table class="decision-table">
+            <tr><th>Concept</th><th>Use in MC</th><th>Recommendation</th></tr>
+            <tr><td>Category</td><td>One primary portfolio grouping: Product, Home, Research</td><td class="yes">Keep; make controlled/selectable</td></tr>
+            <tr><td>Project tags</td><td>Cross-cutting themes: AI, mobile, goal:health, source:github</td><td class="yes">Wire existing schema now</td></tr>
+            <tr><td>Tag groups</td><td>Optional mutually exclusive dimensions: horizon, type, domain</td><td class="conditional">Later if tag ambiguity grows</td></tr>
+            <tr><td>Smart views</td><td>Automatic collections based on filters</td><td class="yes">Use for Goals & Ideas</td></tr>
+            <tr><td>Initiative/objective</td><td>Curated set of projects with owner, target, resources, rollup</td><td class="conditional">Only after proven need</td></tr>
+          </table>
+        </article>
+        <article class="card span-5">
+          <h2>Answer: “Is Initiative our category or tags?”</h2>
+          <p class="small muted">Neither maps perfectly. In Linear, an Initiative is a first-class strategic objective containing a curated set of projects. MC's <strong>category</strong> is a primary grouping; <strong>tags</strong> are flexible cross-cutting metadata. For MC today, category + project tags + saved/smart views recreate most initiative value with less ceremony.</p>
+          <div class="callout" style="margin-top:14px"><strong>Decision rule:</strong> Add an Initiative entity only when the user needs objective-specific ownership, narrative/resources, a target date, and historical rollup across projects—not merely another way to group them.</div>
+        </article>
+        <article class="card span-12">
+          <h3>Current implementation gap</h3>
+          <p class="small muted">Project tags are not hypothetical: storage and overview reads already exist. The missing surfaces are write APIs, the project editor picker, display/filter affordances, and tests. This is a high-confidence, low-risk improvement.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="integrations" class="view">
+      <div class="card">
+        <div class="eyebrow">Strategy</div><h2>Small core, deep edges</h2><p class="small muted" style="margin-bottom:15px">Treat integrations as capability families, not a logo gallery.</p>
+        <div class="integration-grid">
+          <div class="stack">
+            <div class="node"><strong>Source ingestion</strong><br><span class="small muted">M365/Scout, GitHub, browser capture, docs, Home Assistant, actionable monitoring</span></div>
+            <div class="node"><strong>Bidirectional sync</strong><br><span class="small muted">Status, comments, labels, completion, conflict provenance</span></div>
+            <div class="node"><strong>Workflow triggers</strong><br><span class="small muted">Inbound webhooks, n8n, custom REST, scheduled automation</span></div>
+          </div>
+          <div class="core"><div><strong>Mission Control</strong><br><span class="small muted">Canonical task graph<br>provenance<br>capabilities<br>health</span></div></div>
+          <div class="stack">
+            <div class="node"><strong>Agent interface</strong><br><span class="small muted">MCP read/write scopes, stable tools, audit trail</span></div>
+            <div class="node"><strong>Outbound actions</strong><br><span class="small muted">Webhooks, notification actions, source write-back</span></div>
+            <div class="node"><strong>Observability</strong><br><span class="small muted">Sync health, retries, dead letters, conflict handling, rate limits</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid" style="margin-top:14px">
+        <article class="card span-6"><h3>Worth considering next</h3><p class="small muted"><strong>Deepen:</strong> GitHub PR/issue/project lifecycle; M365 Planner through Scout or a direct connector; browser/mobile capture; Sentry or equivalent only for actionable incidents; MCP permissioning and project tools; webhook templates for common sources.</p></article>
+        <article class="card span-6"><h3>Lower priority / avoid</h3><p class="small muted">Slack-style broadcast updates, Salesforce/customer-request machinery, Figma issue creation, release orchestration, and dozens of thin point connectors unless a concrete personal workflow demands them.</p></article>
+        <article class="card span-12">
+          <h3>Linear lesson worth copying</h3>
+          <p class="small muted">Preserve structured provenance when an external item becomes work: source object, source conversation, sync direction, connector capability, and last reconciliation state. Do not flatten every integration into title + URL.</p>
+        </article>
+      </div>
+    </section>
+
+    <footer class="source-note">
+      <strong>Sources and evidence</strong>
+      <ul>
+        <li>Linear: <a href="https://linear.app/docs/timeline">Timeline</a>, <a href="https://linear.app/docs/project-milestones">Project milestones</a>, <a href="https://linear.app/docs/project-status">Project status</a>, <a href="https://linear.app/docs/initiative-and-project-updates">Initiative and project updates</a>.</li>
+        <li>Linear: <a href="https://linear.app/docs/insights">Insights</a>, <a href="https://linear.app/docs/initiatives">Initiatives</a>, <a href="https://linear.app/docs/projects">Projects</a>, <a href="https://linear.app/docs/labels">Labels</a>.</li>
+        <li>Linear: <a href="https://linear.app/docs/triage">Triage</a>, <a href="https://linear.app/docs/triage-intelligence">Triage Intelligence</a>, <a href="https://linear.app/docs/github">GitHub</a>, <a href="https://linear.app/docs/api-and-webhooks">API and webhooks</a>, <a href="https://linear.app/docs/mcp">MCP</a>.</li>
+        <li>Mission Control repository audit: project schema/overview, project modal and APIs, timeline page, insights components, triage, command search, keyboard shortcuts, connector and integration settings, and PRODUCT.md.</li>
+      </ul>
+    </footer>
+  </main>
+  <script>
+    const tabs = [...document.querySelectorAll(".tab")];
+    const views = [...document.querySelectorAll(".view")];
+    tabs.forEach((tab) => tab.addEventListener("click", () => {
+      tabs.forEach((item) => item.setAttribute("aria-selected", String(item === tab)));
+      views.forEach((view) => view.classList.toggle("active", view.id === tab.dataset.view));
+      history.replaceState(null, "", `#${tab.dataset.view}`);
+    }));
+    const initial = location.hash.slice(1);
+    if (initial) document.querySelector(`[data-view="${initial}"]`)?.click();
+  </script>
+</body>
+</html>

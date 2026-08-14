@@ -1,0 +1,822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mission Control — AI Assistant v2 (Agent Dispatch + Tool Results + Confirmation)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gray-950: #020617;
+      --surface-0: #0b1120;
+      --surface-1: #111827;
+      --surface-2: #1e293b;
+      --surface-3: #334155;
+      --border: #1e293b;
+      --border-hover: #334155;
+      --text-primary: #f8fafc;
+      --text-secondary: #94a3b8;
+      --text-tertiary: #64748b;
+      --text-muted: #475569;
+      --accent-400: #60a5fa;
+      --accent-500: #3b82f6;
+      --accent-600: #2563eb;
+      --accent-900: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --info: #06b6d4;
+      --source-todo: #3b82f6;
+      --source-github: #a855f7;
+      --source-calendar: #f59e0b;
+      --source-email: #10b981;
+    }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--gray-950);
+      color: var(--text-primary);
+      -webkit-font-smoothing: antialiased;
+    }
+    .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+    .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+    .scrollbar-thin::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+
+    /* Animations */
+    @keyframes fadeSlideUp {
+      from { opacity: 0; transform: translateY(8px); filter: blur(2px); }
+      to { opacity: 1; transform: translateY(0); filter: blur(0); }
+    }
+    @keyframes pulse-dot { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+    @keyframes progress-fill { from { width: 0; } }
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    .animate-fade-up { animation: fadeSlideUp 0.3s ease-out both; }
+    .stagger-1 { animation-delay: 0.05s; }
+    .stagger-2 { animation-delay: 0.1s; }
+    .stagger-3 { animation-delay: 0.15s; }
+    .stagger-4 { animation-delay: 0.2s; }
+    .stagger-5 { animation-delay: 0.25s; }
+    .stagger-6 { animation-delay: 0.3s; }
+    .pulse-dot { animation: pulse-dot 1.4s infinite both; }
+    .pulse-dot-2 { animation-delay: 0.2s; }
+    .pulse-dot-3 { animation-delay: 0.4s; }
+
+    /* Interactive states */
+    .card-interactive {
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .card-interactive:hover {
+      border-color: var(--border-hover);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    button { cursor: pointer; }
+    .btn-press:active { transform: scale(0.96); }
+
+    /* Tool result cards */
+    .tool-card {
+      background: var(--surface-0);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .tool-card-header {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    /* Mini bar chart */
+    .bar { height: 6px; border-radius: 3px; display: inline-block; }
+
+    /* Checkbox custom */
+    .custom-check {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border: 1.5px solid var(--surface-3);
+      border-radius: 4px;
+      background: var(--surface-0);
+      cursor: pointer;
+      flex-shrink: 0;
+      position: relative;
+      transition: border-color 0.15s, background-color 0.15s;
+    }
+    .custom-check:checked {
+      background: var(--accent-500);
+      border-color: var(--accent-500);
+    }
+    .custom-check:checked::after {
+      content: '✓';
+      position: absolute;
+      top: -1px;
+      left: 2px;
+      font-size: 11px;
+      color: white;
+      font-weight: 700;
+    }
+
+    /* Tab underline */
+    .tab-active {
+      color: var(--text-primary);
+      border-bottom: 2px solid var(--accent-500);
+    }
+    .tab-inactive {
+      color: var(--text-tertiary);
+      border-bottom: 2px solid transparent;
+    }
+    .tab-inactive:hover { color: var(--text-secondary); }
+
+    /* n8n flow diagram */
+    .flow-step {
+      position: relative;
+      padding-left: 28px;
+    }
+    .flow-step::before {
+      content: '';
+      position: absolute;
+      left: 9px;
+      top: 24px;
+      bottom: -8px;
+      width: 2px;
+      background: var(--surface-3);
+    }
+    .flow-step:last-child::before { display: none; }
+    .flow-step-dot {
+      position: absolute;
+      left: 4px;
+      top: 6px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 2px solid var(--accent-400);
+      background: var(--surface-0);
+    }
+  </style>
+</head>
+<body>
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- TOP NAVIGATION                                                        -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <header style="background: var(--surface-1); border-bottom: 1px solid var(--border);" class="px-5 py-2.5 flex items-center justify-between sticky top-0 z-50">
+    <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
+        <div class="w-7 h-7 rounded-lg flex items-center justify-center" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+          <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <span class="text-sm font-semibold" style="color: var(--text-primary);">Mission Control</span>
+      </div>
+      <nav class="flex items-center gap-0.5 ml-4">
+        <a href="#" class="px-3 py-1.5 text-xs font-medium rounded-md hover:bg-[var(--surface-2)]" style="color: var(--text-tertiary);">Dashboard</a>
+        <a href="#" class="px-3 py-1.5 text-xs font-medium rounded-md hover:bg-[var(--surface-2)]" style="color: var(--text-tertiary);">My Day</a>
+        <a href="#" class="px-3 py-1.5 text-xs font-medium rounded-md hover:bg-[var(--surface-2)]" style="color: var(--text-tertiary);">Kanban</a>
+        <a href="#" class="px-3 py-1.5 text-xs font-medium rounded-md" style="color: var(--accent-400); background: rgba(59,130,246,0.1);">AI Assistant</a>
+        <a href="#" class="px-3 py-1.5 text-xs font-medium rounded-md hover:bg-[var(--surface-2)]" style="color: var(--text-tertiary);">Triage</a>
+      </nav>
+    </div>
+    <div class="flex items-center gap-2">
+      <div class="w-7 h-7 rounded-full" style="background: var(--surface-3);"></div>
+    </div>
+  </header>
+
+  <div class="flex" style="height: calc(100vh - 45px);">
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- MAIN CHAT AREA                                                     -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <main class="flex-1 flex flex-col">
+      <!-- Sub-tabs: Chat / Agents / Insights -->
+      <div class="flex items-center gap-4 px-5 pt-3" style="border-bottom: 1px solid var(--border);">
+        <button class="tab-active text-xs font-medium pb-2.5 px-1">Chat</button>
+        <button class="tab-inactive text-xs font-medium pb-2.5 px-1">Agents</button>
+        <button class="tab-inactive text-xs font-medium pb-2.5 px-1">Insights</button>
+      </div>
+
+      <!-- Chat Messages -->
+      <div class="flex-1 overflow-y-auto px-5 py-5 space-y-5 scrollbar-thin">
+
+        <!-- ─── AI Welcome ──────────────────────────────────────────── -->
+        <div class="flex gap-3 animate-fade-up">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div style="background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;" class="p-3.5 max-w-2xl">
+            <p class="text-sm" style="color: var(--text-secondary);">I can query your tasks, dispatch agents, trigger n8n workflows, or have OpenClaw analyze complex problems. What do you need?</p>
+          </div>
+        </div>
+
+        <!-- ─── User Message ────────────────────────────────────────── -->
+        <div class="flex gap-3 justify-end animate-fade-up stagger-1">
+          <div style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); border-radius: 12px;" class="p-3.5 max-w-2xl">
+            <p class="text-sm" style="color: var(--text-primary);">What are my most critical items right now?</p>
+          </div>
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: var(--surface-2);">
+            <svg class="w-3.5 h-3.5" style="color: var(--text-tertiary);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          </div>
+        </div>
+
+        <!-- ─── AI Response with TOOL CALL INDICATOR + STRUCTURED CARDS ── -->
+        <div class="flex gap-3 animate-fade-up stagger-2">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div class="max-w-2xl space-y-3">
+            <!-- Tool Call Indicator (collapsible) -->
+            <div style="background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;" class="px-3 py-2">
+              <details>
+                <summary class="text-xs font-medium cursor-pointer flex items-center gap-2" style="color: var(--text-tertiary);">
+                  <svg class="w-3.5 h-3.5" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  Used 2 tools
+                  <span class="ml-auto text-[10px]" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">0.5s total</span>
+                </summary>
+                <div class="mt-2 space-y-1.5 pl-5">
+                  <div class="flex items-center gap-2 text-[11px]">
+                    <span style="color: var(--success);">✓</span>
+                    <code style="color: var(--text-secondary); font-size: 11px;">getTaskSummary()</code>
+                    <span class="ml-auto" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">0.3s</span>
+                  </div>
+                  <div class="flex items-center gap-2 text-[11px]">
+                    <span style="color: var(--success);">✓</span>
+                    <code style="color: var(--text-secondary); font-size: 11px;">searchTasks({ status: "todo", priority: "critical" })</code>
+                    <span class="ml-auto" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">0.2s</span>
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <!-- Task Summary Card -->
+            <div class="tool-card">
+              <div class="tool-card-header">
+                <svg class="w-3.5 h-3.5" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                Task Summary
+              </div>
+              <div class="p-3.5 space-y-3">
+                <!-- Stats row -->
+                <div class="grid grid-cols-4 gap-3">
+                  <div>
+                    <div class="text-lg font-semibold" style="font-variant-numeric: tabular-nums;">47</div>
+                    <div class="text-[10px] font-medium" style="color: var(--text-tertiary);">Open</div>
+                  </div>
+                  <div>
+                    <div class="text-lg font-semibold" style="color: var(--danger); font-variant-numeric: tabular-nums;">12</div>
+                    <div class="text-[10px] font-medium" style="color: var(--text-tertiary);">Overdue</div>
+                  </div>
+                  <div>
+                    <div class="text-lg font-semibold" style="color: var(--warning); font-variant-numeric: tabular-nums;">5</div>
+                    <div class="text-[10px] font-medium" style="color: var(--text-tertiary);">Critical</div>
+                  </div>
+                  <div>
+                    <div class="text-lg font-semibold" style="color: var(--success); font-variant-numeric: tabular-nums;">38</div>
+                    <div class="text-[10px] font-medium" style="color: var(--text-tertiary);">Done</div>
+                  </div>
+                </div>
+                <!-- Source breakdown -->
+                <div class="space-y-1.5">
+                  <div class="text-[10px] font-medium uppercase tracking-wider" style="color: var(--text-tertiary);">By Source</div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] w-16" style="color: var(--text-secondary);">MS Todo</span>
+                    <div class="flex-1 h-1.5 rounded-full" style="background: var(--surface-2);">
+                      <div class="h-1.5 rounded-full" style="background: var(--source-todo); width: 60%; animation: progress-fill 0.6s ease-out;"></div>
+                    </div>
+                    <span class="text-[11px] w-5 text-right" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">28</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] w-16" style="color: var(--text-secondary);">GitHub</span>
+                    <div class="flex-1 h-1.5 rounded-full" style="background: var(--surface-2);">
+                      <div class="h-1.5 rounded-full" style="background: var(--source-github); width: 26%; animation: progress-fill 0.6s ease-out 0.1s both;"></div>
+                    </div>
+                    <span class="text-[11px] w-5 text-right" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">12</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <span class="text-[11px] w-16" style="color: var(--text-secondary);">Outlook</span>
+                    <div class="flex-1 h-1.5 rounded-full" style="background: var(--surface-2);">
+                      <div class="h-1.5 rounded-full" style="background: var(--source-calendar); width: 11%; animation: progress-fill 0.6s ease-out 0.2s both;"></div>
+                    </div>
+                    <span class="text-[11px] w-5 text-right" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">5</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Prose response -->
+            <div style="background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;" class="p-3.5">
+              <p class="text-sm leading-relaxed" style="color: var(--text-secondary); text-wrap: pretty;">Here's your critical analysis. You have <strong style="color: var(--danger);">12 overdue</strong> items, with these needing immediate attention:</p>
+
+              <!-- Critical items (inline search result card) -->
+              <div class="mt-3 space-y-2">
+                <div class="flex items-start gap-2.5 p-2 rounded-lg" style="background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15);">
+                  <div class="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5" style="background: rgba(239,68,68,0.15);">
+                    <span class="text-[10px] font-bold" style="color: var(--danger);">1</span>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium" style="color: var(--text-primary);">Fix authentication timeout in production</p>
+                    <div class="flex items-center gap-2 mt-0.5 text-[11px]" style="color: var(--text-tertiary);">
+                      <span style="color: var(--source-github);">● GitHub</span>
+                      <span>acme/webapp #142</span>
+                      <span>·</span>
+                      <span style="color: var(--danger);">4 days overdue</span>
+                      <span>·</span>
+                      <span>Blocking: PR #87</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2.5 p-2 rounded-lg" style="background: rgba(239,68,68,0.06); border: 1px solid rgba(239,68,68,0.15);">
+                  <div class="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5" style="background: rgba(239,68,68,0.15);">
+                    <span class="text-[10px] font-bold" style="color: var(--danger);">2</span>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium" style="color: var(--text-primary);">Review Q2 budget proposal</p>
+                    <div class="flex items-center gap-2 mt-0.5 text-[11px]" style="color: var(--text-tertiary);">
+                      <span style="color: var(--source-todo);">● MS Todo</span>
+                      <span>Work / Finance</span>
+                      <span>·</span>
+                      <span style="color: var(--danger);">2 days overdue</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-start gap-2.5 p-2 rounded-lg" style="background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.12);">
+                  <div class="w-5 h-5 rounded flex items-center justify-center flex-shrink-0 mt-0.5" style="background: rgba(245,158,11,0.12);">
+                    <span class="text-[10px] font-bold" style="color: var(--warning);">3</span>
+                  </div>
+                  <div class="min-w-0">
+                    <p class="text-sm font-medium" style="color: var(--text-primary);">Respond to vendor contract renewal</p>
+                    <div class="flex items-center gap-2 mt-0.5 text-[11px]" style="color: var(--text-tertiary);">
+                      <span style="color: var(--source-email);">● Email</span>
+                      <span>procurement@acme.com</span>
+                      <span>·</span>
+                      <span style="color: var(--warning);">Due today</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p class="text-sm mt-3" style="color: var(--text-secondary); text-wrap: pretty;">
+                <strong style="color: var(--text-primary);">Recommended order:</strong> Auth bug → Budget review → Vendor email. The auth bug is blocking 2 downstream tasks.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── User: Dispatch agent request ────────────────────────── -->
+        <div class="flex gap-3 justify-end animate-fade-up stagger-3">
+          <div style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.2); border-radius: 12px;" class="p-3.5 max-w-2xl">
+            <p class="text-sm" style="color: var(--text-primary);">Archive all my completed tasks older than 30 days.</p>
+          </div>
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: var(--surface-2);">
+            <svg class="w-3.5 h-3.5" style="color: var(--text-tertiary);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          </div>
+        </div>
+
+        <!-- ─── AI: DESTRUCTIVE CONFIRMATION with partial approval ──── -->
+        <div class="flex gap-3 animate-fade-up stagger-4">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div class="max-w-2xl space-y-3">
+            <div style="background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;" class="p-3.5">
+              <p class="text-sm" style="color: var(--text-secondary);">
+                I found <strong style="color: var(--text-primary);">5 completed tasks</strong> older than 30 days. This is a <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold" style="background: rgba(239,68,68,0.12); color: var(--danger);">⚠ Destructive</span> action — review and uncheck any you want to keep:
+              </p>
+            </div>
+
+            <!-- Partial approval checklist card -->
+            <div class="tool-card">
+              <div class="tool-card-header">
+                <svg class="w-3.5 h-3.5" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                Items to archive
+                <span class="ml-auto text-[10px] font-normal" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">4 of 5 selected</span>
+              </div>
+              <div class="p-2 space-y-0.5">
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-[var(--surface-2)] transition-colors">
+                  <input type="checkbox" checked class="custom-check">
+                  <div class="min-w-0 flex-1">
+                    <span class="text-sm" style="color: var(--text-primary);">Fix CORS headers</span>
+                    <span class="text-[11px] ml-2" style="color: var(--text-muted);">acme/api #82</span>
+                  </div>
+                  <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Done 45d ago</span>
+                </label>
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-[var(--surface-2)] transition-colors">
+                  <input type="checkbox" checked class="custom-check">
+                  <div class="min-w-0 flex-1">
+                    <span class="text-sm" style="color: var(--text-primary);">Add rate limiting</span>
+                    <span class="text-[11px] ml-2" style="color: var(--text-muted);">acme/api #80</span>
+                  </div>
+                  <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Done 38d ago</span>
+                </label>
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-[var(--surface-2)] transition-colors">
+                  <input type="checkbox" checked class="custom-check">
+                  <div class="min-w-0 flex-1">
+                    <span class="text-sm" style="color: var(--text-primary);">Update dependencies</span>
+                    <span class="text-[11px] ml-2" style="color: var(--text-muted);">acme/webapp #135</span>
+                  </div>
+                  <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Done 35d ago</span>
+                </label>
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-[var(--surface-2)] transition-colors" style="opacity: 0.6;">
+                  <input type="checkbox" class="custom-check">
+                  <div class="min-w-0 flex-1">
+                    <span class="text-sm" style="color: var(--text-primary);">Set up CI pipeline</span>
+                    <span class="text-[11px] ml-2" style="color: var(--text-muted);">acme/project-alpha #12</span>
+                  </div>
+                  <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Done 32d ago</span>
+                </label>
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover:bg-[var(--surface-2)] transition-colors">
+                  <input type="checkbox" checked class="custom-check">
+                  <div class="min-w-0 flex-1">
+                    <span class="text-sm" style="color: var(--text-primary);">Create project board</span>
+                    <span class="text-[11px] ml-2" style="color: var(--text-muted);">acme/project-alpha #10</span>
+                  </div>
+                  <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Done 31d ago</span>
+                </label>
+              </div>
+              <!-- Confirmation gate -->
+              <div class="px-3.5 pb-3 pt-1" style="border-top: 1px solid var(--border);">
+                <label class="flex items-center gap-2 cursor-pointer py-2">
+                  <input type="checkbox" class="custom-check" id="understand-check">
+                  <span class="text-[11px]" style="color: var(--text-tertiary);">I understand this will sync changes to external sources</span>
+                </label>
+                <div class="flex items-center gap-2 mt-1">
+                  <button class="btn-press px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" style="background: var(--surface-2); color: var(--text-secondary);">
+                    Cancel
+                  </button>
+                  <button class="btn-press px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5" style="background: var(--surface-2); color: var(--text-secondary);">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                    Dry Run
+                  </button>
+                  <button class="btn-press px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5" style="background: rgba(239,68,68,0.15); color: var(--danger);">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+                    Archive 4 items
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Agent Execution: STREAMING PROGRESS ──────────────────── -->
+        <div class="flex gap-3 animate-fade-up stagger-5">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div class="max-w-2xl">
+            <div class="tool-card">
+              <div class="tool-card-header">
+                <svg class="w-3.5 h-3.5 animate-spin" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                Running: Cleanup done
+                <span class="ml-auto flex items-center gap-1 text-[10px] font-normal" style="color: var(--text-muted);">
+                  <span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--accent-400);"></span>
+                  Live
+                </span>
+              </div>
+              <div class="p-3.5 space-y-2.5">
+                <!-- Step 1: Done -->
+                <div class="flex items-center gap-2.5">
+                  <div class="w-5 h-5 rounded-md flex items-center justify-center" style="background: rgba(16,185,129,0.15);">
+                    <svg class="w-3 h-3" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <span class="text-xs" style="color: var(--text-secondary);">Scanning completed tasks...</span>
+                  <span class="ml-auto text-[10px]" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">38 found</span>
+                </div>
+                <!-- Step 2: Done -->
+                <div class="flex items-center gap-2.5">
+                  <div class="w-5 h-5 rounded-md flex items-center justify-center" style="background: rgba(16,185,129,0.15);">
+                    <svg class="w-3 h-3" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                  </div>
+                  <span class="text-xs" style="color: var(--text-secondary);">Filtering older than 30 days...</span>
+                  <span class="ml-auto text-[10px]" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">4 matched</span>
+                </div>
+                <!-- Step 3: In progress -->
+                <div class="flex items-start gap-2.5">
+                  <div class="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0" style="background: rgba(59,130,246,0.15);">
+                    <svg class="w-3 h-3 animate-spin" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+                  </div>
+                  <div class="space-y-1">
+                    <span class="text-xs" style="color: var(--text-primary);">Archiving tasks...</span>
+                    <div class="space-y-0.5 pl-2" style="border-left: 2px solid var(--surface-3);">
+                      <div class="flex items-center gap-1.5 text-[11px]">
+                        <span style="color: var(--success);">✓</span>
+                        <span style="color: var(--text-tertiary);">Fix CORS headers</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-[11px]">
+                        <span style="color: var(--success);">✓</span>
+                        <span style="color: var(--text-tertiary);">Add rate limiting</span>
+                      </div>
+                      <div class="flex items-center gap-1.5 text-[11px]">
+                        <span class="w-1.5 h-1.5 rounded-full pulse-dot" style="background: var(--accent-400); display: inline-block;"></span>
+                        <span style="color: var(--text-secondary);">Update dependencies</span>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="ml-auto text-[10px] flex-shrink-0" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">2 of 4</span>
+                </div>
+
+                <!-- Progress bar -->
+                <div class="pt-1">
+                  <div class="h-1 rounded-full" style="background: var(--surface-2);">
+                    <div class="h-1 rounded-full transition-all" style="background: var(--accent-500); width: 65%;"></div>
+                  </div>
+                  <div class="flex items-center justify-between mt-1.5">
+                    <span class="text-[10px]" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">Step 3 of 4</span>
+                    <button class="btn-press flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors" style="background: var(--surface-2); color: var(--text-tertiary);">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z"/></svg>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── Mutation result with undo ─────────────────────────────── -->
+        <div class="flex gap-3 animate-fade-up stagger-6">
+          <div class="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style="background: linear-gradient(135deg, var(--accent-500), #a855f7);">
+            <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          </div>
+          <div class="max-w-2xl">
+            <div class="tool-card">
+              <div class="tool-card-header" style="background: rgba(16,185,129,0.04);">
+                <svg class="w-3.5 h-3.5" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                <span style="color: var(--success);">Agent completed</span>
+                <span class="ml-auto text-[10px] font-normal" style="color: var(--text-muted); font-variant-numeric: tabular-nums;">1.2s</span>
+              </div>
+              <div class="p-3.5">
+                <p class="text-sm" style="color: var(--text-secondary);">
+                  Archived <strong style="color: var(--text-primary);">4 tasks</strong> completed 30+ days ago. Changes will sync to MS Todo and GitHub on next push.
+                </p>
+                <div class="flex items-center gap-2 mt-3">
+                  <button class="btn-press px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors" style="background: rgba(245,158,11,0.12); color: var(--warning);">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+                    Undo (28s)
+                  </button>
+                  <button class="btn-press px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors" style="background: var(--surface-2); color: var(--text-tertiary);">
+                    View details
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="h-4"></div>
+      </div>
+
+      <!-- Suggestion Chips -->
+      <div class="px-5 py-2" style="border-top: 1px solid var(--border); background: var(--surface-1);">
+        <div class="flex items-center gap-2 overflow-x-auto">
+          <span class="text-[10px] flex-shrink-0" style="color: var(--text-muted);">Try:</span>
+          <button class="btn-press text-[11px] px-2.5 py-1 rounded-full flex-shrink-0 whitespace-nowrap transition-colors" style="border: 1px solid var(--border); color: var(--text-tertiary);">
+            Plan my day
+          </button>
+          <button class="btn-press text-[11px] px-2.5 py-1 rounded-full flex-shrink-0 whitespace-nowrap transition-colors" style="border: 1px solid var(--border); color: var(--text-tertiary);">
+            Trigger sync workflow
+          </button>
+          <button class="btn-press text-[11px] px-2.5 py-1 rounded-full flex-shrink-0 whitespace-nowrap transition-colors" style="border: 1px solid var(--border); color: var(--text-tertiary);">
+            Review overdue tasks with AI
+          </button>
+          <button class="btn-press text-[11px] px-2.5 py-1 rounded-full flex-shrink-0 whitespace-nowrap transition-colors" style="border: 1px solid var(--border); color: var(--text-tertiary);">
+            Generate weekly report
+          </button>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="px-4 py-3" style="border-top: 1px solid var(--border); background: var(--surface-1);">
+        <div class="flex items-end gap-2.5">
+          <div class="flex-1">
+            <textarea rows="1" placeholder="Ask about your tasks, dispatch an agent, or trigger an n8n workflow..." class="w-full px-3.5 py-2.5 rounded-xl text-sm resize-none outline-none transition-all" style="background: var(--surface-0); border: 1px solid var(--border); color: var(--text-primary);"></textarea>
+          </div>
+          <button class="btn-press px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors" style="background: var(--accent-600); color: white;">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+          </button>
+        </div>
+        <div class="flex items-center gap-3 mt-1.5 text-[10px] px-1" style="color: var(--text-muted);">
+          <span style="font-variant-numeric: tabular-nums;">47 tasks · 7 alerts</span>
+          <span>·</span>
+          <span>GPT-4o-mini</span>
+          <span>·</span>
+          <span>OpenClaw ● n8n ●</span>
+        </div>
+      </div>
+    </main>
+
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <!-- RIGHT PANEL: Agent + n8n Workflows                                 -->
+    <!-- ═══════════════════════════════════════════════════════════════════ -->
+    <aside class="w-72 flex-shrink-0 overflow-y-auto scrollbar-thin" style="background: var(--surface-1); border-left: 1px solid var(--border);">
+      <div class="p-4 space-y-5">
+
+        <!-- ─── Recent Agent Runs ──────────────────────────────────── -->
+        <div>
+          <h3 class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: var(--text-tertiary);">Recent Runs</h3>
+          <div class="space-y-2">
+            <div class="p-2.5 rounded-xl card-interactive" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-4 h-4 rounded-md flex items-center justify-center" style="background: rgba(16,185,129,0.15);">
+                  <svg class="w-2.5 h-2.5" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <span class="text-xs font-medium" style="color: var(--text-primary);">Cleanup done</span>
+                <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style="background: rgba(59,130,246,0.1); color: var(--accent-400);">Built-in</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">Archived 4 tasks · 2 min ago</p>
+            </div>
+
+            <div class="p-2.5 rounded-xl card-interactive" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-4 h-4 rounded-md flex items-center justify-center" style="background: rgba(16,185,129,0.15);">
+                  <svg class="w-2.5 h-2.5" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <span class="text-xs font-medium" style="color: var(--text-primary);">Todo → GitHub sync</span>
+                <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style="background: rgba(245,158,11,0.1); color: var(--warning);">n8n</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">Synced 3 items · 1h ago</p>
+            </div>
+
+            <div class="p-2.5 rounded-xl card-interactive" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2 mb-1">
+                <div class="w-4 h-4 rounded-md flex items-center justify-center" style="background: rgba(16,185,129,0.15);">
+                  <svg class="w-2.5 h-2.5" style="color: var(--success);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <span class="text-xs font-medium" style="color: var(--text-primary);">Triage analysis</span>
+                <span class="ml-auto text-[10px] px-1.5 py-0.5 rounded-full" style="background: rgba(168,85,247,0.1); color: #a855f7;">OpenClaw</span>
+              </div>
+              <p class="text-[11px]" style="color: var(--text-muted);">Analyzed 20 alerts · 3h ago</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ─── n8n Workflows ──────────────────────────────────────── -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-semibold uppercase tracking-wider" style="color: var(--text-tertiary);">n8n Workflows</h3>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: rgba(16,185,129,0.1); color: var(--success);">● Connected</span>
+          </div>
+          <div class="space-y-2">
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive group" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 flex-shrink-0" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <div class="min-w-0 flex-1">
+                  <span class="text-xs font-medium block" style="color: var(--text-primary);">Sync Todo → GitHub</span>
+                  <span class="text-[10px]" style="color: var(--text-muted);">Manual trigger · Last: 1h ago</span>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-600); color: white;">▶ Run</span>
+              </div>
+            </button>
+
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive group" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 flex-shrink-0" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <div class="min-w-0 flex-1">
+                  <span class="text-xs font-medium block" style="color: var(--text-primary);">Weekly digest email</span>
+                  <span class="text-[10px]" style="color: var(--text-muted);">Every Monday 8am · Last: 3d ago</span>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-600); color: white;">▶ Run</span>
+              </div>
+            </button>
+
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive group" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 flex-shrink-0" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <div class="min-w-0 flex-1">
+                  <span class="text-xs font-medium block" style="color: var(--text-primary);">Critical alert → push notify</span>
+                  <span class="text-[10px]" style="color: var(--text-muted);">Webhook trigger · Always on</span>
+                </div>
+                <span class="text-[10px] px-2 py-0.5 rounded-md opacity-0 group-hover:opacity-100 transition-opacity" style="background: var(--accent-600); color: white;">▶ Run</span>
+              </div>
+            </button>
+
+            <button class="btn-press w-full text-center py-2 rounded-xl text-[11px] font-medium transition-colors" style="border: 1px dashed var(--surface-3); color: var(--text-muted);">
+              + Add n8n workflow
+            </button>
+          </div>
+        </div>
+
+        <!-- ─── Quick Agents ───────────────────────────────────────── -->
+        <div>
+          <h3 class="text-xs font-semibold uppercase tracking-wider mb-3" style="color: var(--text-tertiary);">Quick Agents</h3>
+          <div class="space-y-1.5">
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive flex items-center gap-2.5" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <svg class="w-4 h-4" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/></svg>
+              <span class="text-xs font-medium" style="color: var(--text-secondary);">Cleanup done tasks</span>
+            </button>
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive flex items-center gap-2.5" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <svg class="w-4 h-4" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+              <span class="text-xs font-medium" style="color: var(--text-secondary);">Re-prioritize my week</span>
+            </button>
+            <button class="btn-press w-full text-left p-2.5 rounded-xl card-interactive flex items-center gap-2.5" style="background: var(--surface-0); border: 1px solid var(--border);">
+              <svg class="w-4 h-4" style="color: var(--accent-400);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+              <span class="text-xs font-medium" style="color: var(--text-secondary);">Dismiss old alerts</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ─── AI Agent (OpenClaw) ────────────────────────────────── -->
+        <div>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-semibold uppercase tracking-wider" style="color: var(--text-tertiary);">AI Agent</h3>
+            <span class="text-[10px] px-1.5 py-0.5 rounded-full" style="background: rgba(168,85,247,0.1); color: #a855f7;">OpenClaw</span>
+          </div>
+          <div class="space-y-2">
+            <textarea rows="2" placeholder="Describe a complex task for the AI to analyze and execute..." class="w-full px-3 py-2 rounded-xl text-xs resize-none outline-none" style="background: var(--surface-0); border: 1px solid var(--border); color: var(--text-primary);"></textarea>
+            <div class="flex gap-1.5">
+              <button class="btn-press flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors" style="background: var(--surface-2); color: var(--text-secondary);">
+                Plan first
+              </button>
+              <button class="btn-press flex-1 px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-colors" style="background: rgba(168,85,247,0.15); color: #a855f7;">
+                ▶ Execute
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </aside>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <!-- FLOATING: n8n Workflow Confirmation Modal (shown on trigger)          -->
+  <!-- ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="n8n-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4">
+    <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"></div>
+    <div class="relative w-full max-w-md rounded-2xl overflow-hidden" style="background: var(--surface-1); border: 1px solid var(--border);">
+      <!-- Header -->
+      <div class="flex items-center gap-3 px-5 py-4" style="border-bottom: 1px solid var(--border);">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2);">
+          <svg class="w-5 h-5" style="color: var(--warning);" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        </div>
+        <div>
+          <h3 class="text-sm font-semibold" style="color: var(--text-primary);">Sync Todo → GitHub</h3>
+          <p class="text-xs" style="color: var(--text-tertiary);">n8n workflow · Manual trigger</p>
+        </div>
+      </div>
+      <!-- Flow steps -->
+      <div class="px-5 py-4">
+        <p class="text-xs font-medium uppercase tracking-wider mb-3" style="color: var(--text-tertiary);">Workflow Steps</p>
+        <div class="space-y-4">
+          <div class="flow-step">
+            <div class="flow-step-dot"></div>
+            <p class="text-sm" style="color: var(--text-primary);">Fetch completed MS Todo items</p>
+            <p class="text-[11px]" style="color: var(--text-muted);">Last 24 hours</p>
+          </div>
+          <div class="flow-step">
+            <div class="flow-step-dot"></div>
+            <p class="text-sm" style="color: var(--text-primary);">Filter items with "github" tag</p>
+            <p class="text-[11px]" style="color: var(--text-muted);">Tag-based routing</p>
+          </div>
+          <div class="flow-step">
+            <div class="flow-step-dot"></div>
+            <p class="text-sm" style="color: var(--text-primary);">Create/close GitHub issues</p>
+            <p class="text-[11px]" style="color: var(--text-muted);">Maps to acme/* repos</p>
+          </div>
+          <div class="flow-step">
+            <div class="flow-step-dot"></div>
+            <p class="text-sm" style="color: var(--text-primary);">Post summary to MC webhook</p>
+            <p class="text-[11px]" style="color: var(--text-muted);">Updates agent run history</p>
+          </div>
+        </div>
+        <div class="mt-4 p-2.5 rounded-lg text-[11px]" style="background: var(--surface-0); border: 1px solid var(--border); color: var(--text-muted);">
+          Last run: 1h ago · 3 items synced · Took 4.2s
+        </div>
+      </div>
+      <!-- Actions -->
+      <div class="flex items-center gap-2 px-5 py-3" style="border-top: 1px solid var(--border);">
+        <button class="btn-press px-3.5 py-2 rounded-lg text-xs font-medium" style="background: var(--surface-2); color: var(--text-secondary);">Cancel</button>
+        <button class="btn-press px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5" style="background: var(--surface-2); color: var(--text-tertiary);">
+          Edit in n8n
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+        </button>
+        <button class="btn-press ml-auto px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5" style="background: var(--accent-600); color: white;">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+          Trigger now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toggle n8n modal for demo -->
+  <script>
+    // Click "Sync Todo → GitHub" sidebar button to show/hide modal
+    document.querySelectorAll('aside button').forEach(btn => {
+      if (btn.textContent.includes('Sync Todo')) {
+        btn.addEventListener('click', () => {
+          const modal = document.getElementById('n8n-modal');
+          modal.classList.toggle('hidden');
+          modal.classList.toggle('flex');
+        });
+      }
+    });
+    // Dismiss modal on backdrop click
+    document.querySelector('#n8n-modal .absolute')?.addEventListener('click', () => {
+      const modal = document.getElementById('n8n-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    });
+  </script>
+</body>
+</html>

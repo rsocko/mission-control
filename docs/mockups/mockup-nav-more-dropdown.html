@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Nav "More" Dropdown — Design Spec · Mission Control</title>
+<style>
+/* ════════════════════════════════════════════════════════════════════════════
+   EXACT DESIGN TOKENS from globals.css
+   ════════════════════════════════════════════════════════════════════════════ */
+:root {
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-400: #94a3b8;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-800: #1e293b;
+  --gray-900: #0f172a;
+  --gray-950: #020617;
+
+  --accent-400: #60a5fa;
+  --accent-500: #3b82f6;
+  --accent-900: #1e3a8a;
+
+  --background: var(--gray-950);
+  --surface-0: #0b1120;
+  --surface-1: #111827;
+  --surface-2: #1e293b;
+  --surface-3: #334155;
+
+  --border: #1e293b;
+  --border-subtle: #162032;
+  --border-strong: #334155;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #8b9ab5;
+  --text-muted: #6b7a8d;
+
+  --success: #10b981;
+  --danger: #ef4444;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,.5), 0 4px 6px -4px rgba(0,0,0,.4);
+
+  --transition-fast: 100ms ease;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--background);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   PAGE LAYOUT
+   ════════════════════════════════════════════════════════════════════════════ */
+.page { max-width: 1200px; margin: 0 auto; padding: 32px 24px 100px; }
+.page-title { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+.page-sub { color: var(--text-secondary); font-size: 14px; margin-bottom: 36px; }
+
+.section-title {
+  font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.8px;
+  color: var(--accent-400); margin: 44px 0 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+.section-title::before {
+  content: ''; display: block; width: 3px; height: 14px;
+  background: var(--accent-400); border-radius: 2px;
+}
+.section-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.6; }
+
+.mockup-label {
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+  margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+}
+.mockup-label .badge {
+  font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 99px;
+}
+.badge-rec { background: rgba(16,185,129,.15); color: #34d399; }
+.badge-alt { background: rgba(245,158,11,.12); color: #fbbf24; }
+
+.mockup-wrapper {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 24px;
+  background: var(--surface-0);
+}
+.mockup-notes {
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--text-tertiary);
+  background: var(--surface-1);
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   EXACT HEADER BAR (matches AppShell.tsx)
+   bg-[var(--surface-1)] border-b border-[var(--border)] px-4 sm:px-6 py-2.5
+   ════════════════════════════════════════════════════════════════════════════ */
+.mc-header {
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--border);
+  padding: 10px 24px;          /* py-2.5 px-6 */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Logo: Satellite icon + "Mission Control" */
+.mc-brand { display: flex; align-items: center; gap: 10px; }
+.mc-brand svg { color: var(--accent-400); flex-shrink: 0; }
+.mc-brand-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+
+/* Nav links container: hidden sm:flex items-center gap-0.5 ml-4 */
+.mc-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;          /* gap-0.5 = 2px */
+  margin-left: 16px; /* ml-4 */
+}
+
+/* Nav item: matches exact AppShell classes
+   px-3 py-1.5 text-sm font-medium rounded-[var(--radius-md)] */
+.mc-nav-item {
+  display: flex; align-items: center; gap: 6px; /* gap-1.5 */
+  padding: 6px 12px; /* py-1.5 px-3 */
+  font-size: 14px; font-weight: 500; /* text-sm font-medium */
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  cursor: default;
+  position: relative;
+}
+.mc-nav-item:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+/* Active: text-[var(--accent-400)] bg-[var(--accent-900)]/40 */
+.mc-nav-item.active {
+  color: var(--accent-400);
+  background: rgba(30, 58, 138, 0.4);
+}
+.mc-nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+/* ─── More button (styled to match nav items) ─── */
+.mc-more-btn {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  font-size: 14px; font-weight: 500;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  border: none; background: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  position: relative;
+}
+.mc-more-btn:hover {
+  color: var(--text-primary);
+  background: var(--surface-2);
+}
+.mc-more-btn svg { flex-shrink: 0; }
+
+/* More button when the current page lives inside it */
+.mc-more-btn.has-active-child {
+  color: var(--accent-400);
+  background: rgba(30, 58, 138, 0.25);
+}
+.mc-more-btn.has-active-child::after {
+  content: '';
+  position: absolute;
+  bottom: 2px; left: 50%; transform: translateX(-50%);
+  width: 14px; height: 2px;
+  border-radius: 1px;
+  background: var(--accent-400);
+}
+
+/* Count badge on "More" */
+.more-count {
+  font-size: 10px; font-weight: 600;
+  background: var(--surface-3); color: var(--text-tertiary);
+  padding: 1px 6px; border-radius: 99px; min-width: 18px; text-align: center;
+}
+
+/* ─── Right side of header ─── */
+.mc-header-right {
+  display: flex; align-items: center; gap: 10px;
+  flex-shrink: 0;
+}
+.mc-mode-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  font-size: 12px; font-weight: 500;
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  border: none; background: none;
+  cursor: default;
+}
+.mc-counter {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px; font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-radius: var(--radius-md);
+}
+.mc-health-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 0 2px var(--surface-1);
+}
+.mc-sync-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 8px;
+  font-size: 12px; font-weight: 500;
+  border-radius: var(--radius-md);
+  color: var(--text-tertiary);
+  border: none; background: none;
+  cursor: default;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DROPDOWN PANEL (matches SortDropdown / health tooltip patterns)
+   bg-[var(--surface-2)] border border-[var(--border)] rounded-[var(--radius-md)]
+   shadow-[var(--shadow-lg)]
+   ════════════════════════════════════════════════════════════════════════════ */
+.mc-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 50;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: 4px;
+  min-width: 192px;
+}
+
+/* Group label inside dropdown */
+.mc-dropdown-group {
+  font-size: 11px; font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 8px 12px 4px;
+  user-select: none;
+}
+
+/* Dropdown item (matches SortDropdown option styling) */
+.mc-dropdown-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; /* matches SortDropdown px-3 py-1.5 */
+  font-size: 13px; font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  cursor: default;
+  transition: color 75ms, background 75ms;
+  text-decoration: none;
+  width: 100%;
+}
+.mc-dropdown-item:hover {
+  color: var(--text-primary);
+  background: var(--surface-3);
+}
+.mc-dropdown-item.active {
+  color: var(--accent-400);
+  background: rgba(30, 58, 138, 0.3);
+}
+.mc-dropdown-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.mc-dropdown-item .item-desc {
+  font-size: 11px; color: var(--text-tertiary); font-weight: 400;
+}
+
+.mc-dropdown-divider {
+  height: 1px; background: var(--border); margin: 4px 8px;
+}
+
+/* Two-column dropdown */
+.mc-dropdown-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 8px;
+  padding: 4px;
+  min-width: 340px;
+}
+
+/* ─── AI pulse dot ─── */
+.ai-pulse {
+  position: absolute; top: -2px; right: -2px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #60a5fa;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ─── Side-by-side layout ─── */
+.side-by-side {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+}
+@media (max-width: 900px) { .side-by-side { grid-template-columns: 1fr; } }
+
+/* ─── Info callout ─── */
+.callout {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin: 16px 0;
+}
+.callout-title { font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px; }
+.callout p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+/* Decision table */
+.dtable { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.dtable th {
+  text-align: left; font-size: 11px; font-weight: 600;
+  color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+}
+.dtable td {
+  font-size: 13px; padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary); vertical-align: top;
+}
+.dtable td:first-child { font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.dtable tr:last-child td { border-bottom: none; }
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1 class="page-title">Nav "More" Dropdown — Design Spec</h1>
+<p class="page-sub">Issue #101 · Interactive mockups using exact Mission Control design tokens</p>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Current State (for reference)</div>
+<p class="section-desc">All 10 items rendered inline. At narrower viewports, items overflow or text labels hide.</p>
+
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <!-- Satellite icon (Lucide) -->
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          Dashboard
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+          My Day
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg>
+          Projects
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg>
+          Kanban
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+          Goals
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+          Routines
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg>
+          Triage
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+          Timeline
+        </a>
+        <a class="mc-nav-item" style="position:relative;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          AI
+          <span class="ai-pulse"></span>
+        </a>
+        <a class="mc-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          Settings
+        </a>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Zen
+      </button>
+      <button class="mc-mode-btn">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>
+        Calm
+      </button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+        Sync
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">"More" Trigger Variations</div>
+<p class="section-desc">The button that opens the overflow menu. Each variation shows the header exactly as it would look at ~1024px, with the first 5 items visible and the rest collapsed.</p>
+
+<!-- ─── Variation A: Ellipsis only ─── -->
+<div class="mockup-label">Trigger A — Ellipsis icon only</div>
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg> Projects</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg> Kanban</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> Goals</a>
+        <button class="mc-more-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes">Minimal. Icon-only ⋯ universally recognized. Saves the most horizontal space.</div>
+</div>
+
+<!-- ─── Variation B: "More" text + chevron ─── -->
+<div class="mockup-label">Trigger B — "More" text + chevron <span class="badge badge-rec">Recommended</span></div>
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg> Projects</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg> Kanban</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> Goals</a>
+        <button class="mc-more-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes">Best discoverability. "More" label + chevron matches nav item style. Clearly indicates a dropdown.</div>
+</div>
+
+<!-- ─── Variation C: Count badge ─── -->
+<div class="mockup-label">Trigger C — With count badge</div>
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg> Projects</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg> Kanban</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> Goals</a>
+        <button class="mc-more-btn">
+          More
+          <span class="more-count">+5</span>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes">Count badge dynamically shows how many items are hidden. Updates per breakpoint. Can feel slightly busy.</div>
+</div>
+
+<!-- ─── Variation D: Active page inside More ─── -->
+<div class="mockup-label">Trigger D — Active page is inside "More" <span class="badge badge-alt">UX behavior (combine with any trigger)</span></div>
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg> Projects</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg> Kanban</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> Goals</a>
+        <button class="mc-more-btn has-active-child">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes">When user is on Settings (hidden in "More"), the trigger gets the accent tint + underline — same treatment as an active nav item. No visible item is active.</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Dropdown Layout Variations</div>
+<p class="section-desc">What appears when "More" is clicked. Each shows the dropdown open, positioned as it would be in the real header.</p>
+
+<div class="side-by-side">
+  <!-- Layout A: Single column grouped -->
+  <div>
+    <div class="mockup-label">Layout A — Single column, grouped <span class="badge badge-rec">Recommended</span></div>
+    <div class="mockup-wrapper">
+      <div style="padding:16px; position:relative; min-height:310px;">
+        <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="mc-dropdown" style="position:relative; top:4px; right:auto; left:0; display:block;">
+          <div class="mc-dropdown-group">⚡ Workflow</div>
+          <a class="mc-dropdown-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+            Routines
+          </a>
+          <a class="mc-dropdown-item active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg>
+            Triage
+          </a>
+          <a class="mc-dropdown-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+            Timeline
+          </a>
+          <div class="mc-dropdown-divider"></div>
+          <div class="mc-dropdown-group">🔧 System</div>
+          <a class="mc-dropdown-item" style="position:relative;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+            AI Assistant
+            <span class="ai-pulse" style="position:static; width:8px; height:8px; margin-left:auto;"></span>
+          </a>
+          <a class="mc-dropdown-item">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            Settings
+          </a>
+        </div>
+      </div>
+      <div class="mockup-notes">Simple, scannable. Group labels + divider. Active item gets accent highlight. AI pulse dot preserved.</div>
+    </div>
+  </div>
+
+  <!-- Layout B: Two-column -->
+  <div>
+    <div class="mockup-label">Layout B — Two-column grouped</div>
+    <div class="mockup-wrapper">
+      <div style="padding:16px; position:relative; min-height:310px;">
+        <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="mc-dropdown" style="position:relative; top:4px; right:auto; left:0; display:block; padding:0;">
+          <div class="mc-dropdown-cols">
+            <div>
+              <div class="mc-dropdown-group">⚡ Workflow</div>
+              <a class="mc-dropdown-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+                Routines
+              </a>
+              <a class="mc-dropdown-item active">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg>
+                Triage
+              </a>
+              <a class="mc-dropdown-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+                Timeline
+              </a>
+            </div>
+            <div>
+              <div class="mc-dropdown-group">🔧 System</div>
+              <a class="mc-dropdown-item" style="position:relative;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+                AI Assistant
+              </a>
+              <a class="mc-dropdown-item">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                Settings
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="mockup-notes">Better if item count grows significantly. Each category is its own column. Wider footprint.</div>
+    </div>
+  </div>
+</div>
+
+<div class="side-by-side">
+  <!-- Layout C: Flat list -->
+  <div>
+    <div class="mockup-label">Layout C — Flat list (no categories)</div>
+    <div class="mockup-wrapper">
+      <div style="padding:16px; position:relative; min-height:290px;">
+        <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="mc-dropdown" style="position:relative; top:4px; right:auto; left:0; display:block;">
+          <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg> Routines</a>
+          <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg> Triage</a>
+          <a class="mc-dropdown-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg> Timeline</a>
+          <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg> AI Assistant</a>
+          <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> Settings</a>
+        </div>
+      </div>
+      <div class="mockup-notes">Simplest implementation. Fine for ≤6 overflow items. No category structure to maintain.</div>
+    </div>
+  </div>
+
+  <!-- Layout D: With descriptions -->
+  <div>
+    <div class="mockup-label">Layout D — With descriptions</div>
+    <div class="mockup-wrapper">
+      <div style="padding:16px; position:relative; min-height:290px;">
+        <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+          More
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="mc-dropdown" style="position:relative; top:4px; right:auto; left:0; display:block; min-width:240px;">
+          <div class="mc-dropdown-group">⚡ Workflow</div>
+          <a class="mc-dropdown-item" style="flex-wrap:wrap;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="align-self:flex-start; margin-top:1px;"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+            <span>Routines</span>
+            <span class="item-desc" style="width:100%; padding-left:23px;">Daily & recurring habits</span>
+          </a>
+          <a class="mc-dropdown-item" style="flex-wrap:wrap;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="align-self:flex-start; margin-top:1px;"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg>
+            <span>Triage</span>
+            <span class="item-desc" style="width:100%; padding-left:23px;">Incoming items inbox</span>
+          </a>
+          <a class="mc-dropdown-item" style="flex-wrap:wrap;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="align-self:flex-start; margin-top:1px;"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+            <span>Timeline</span>
+            <span class="item-desc" style="width:100%; padding-left:23px;">Calendar & schedule view</span>
+          </a>
+          <div class="mc-dropdown-divider"></div>
+          <div class="mc-dropdown-group">🔧 System</div>
+          <a class="mc-dropdown-item" style="flex-wrap:wrap;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="align-self:flex-start; margin-top:1px;"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+            <span>AI Assistant</span>
+            <span class="item-desc" style="width:100%; padding-left:23px;">Chat, insights & automation</span>
+          </a>
+          <a class="mc-dropdown-item" style="flex-wrap:wrap;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="align-self:flex-start; margin-top:1px;"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Settings</span>
+            <span class="item-desc" style="width:100%; padding-left:23px;">App configuration</span>
+          </a>
+        </div>
+      </div>
+      <div class="mockup-notes">Descriptions help infrequent users understand each page. Taller dropdown — best if overflow stays small.</div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Alternative: Category Menus Instead of "More"</div>
+<p class="section-desc">Instead of one "More" catch-all, each category becomes its own top-level dropdown menu. This surfaces the grouping directly in the nav bar and gives each category equal weight.</p>
+
+<!-- Category menus variation -->
+<div class="mockup-label">Option E — Category dropdowns replacing "More" <span class="badge badge-alt">Alternative architecture</span></div>
+<div class="mockup-wrapper">
+  <div class="mc-header">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+
+        <!-- Category: Planning -->
+        <button class="mc-more-btn" style="border-left: 1px solid var(--border); margin-left: 6px; padding-left: 14px;">
+          📋 Planning
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+
+        <!-- Category: Workflow -->
+        <button class="mc-more-btn">
+          ⚡ Workflow
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+
+        <!-- Category: System -->
+        <button class="mc-more-btn">
+          🔧 System
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+</div>
+
+<!-- Show what the "Planning" dropdown looks like open -->
+<div class="mockup-label">Option E — "Planning" dropdown open</div>
+<div class="mockup-wrapper">
+  <div class="mc-header" style="position:relative;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+
+        <!-- Planning is open & has active child -->
+        <div style="position:relative; border-left: 1px solid var(--border); margin-left: 6px; padding-left: 2px;">
+          <button class="mc-more-btn has-active-child" style="background:var(--surface-2);">
+            📋 Planning
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="mc-dropdown" style="left:0; right:auto;">
+            <a class="mc-dropdown-item active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg>
+              Projects
+            </a>
+            <a class="mc-dropdown-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg>
+              Kanban
+            </a>
+            <a class="mc-dropdown-item">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              Goals
+            </a>
+          </div>
+        </div>
+
+        <button class="mc-more-btn">
+          ⚡ Workflow
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <button class="mc-more-btn">
+          🔧 System
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes" style="line-height:1.7;">
+    <strong>Tradeoffs vs. single "More":</strong><br/>
+    ✅ Categories are visible and discoverable — users see the app's structure at a glance<br/>
+    ✅ Each group has equal weight — nothing is "demoted" to overflow<br/>
+    ❌ More horizontal space — 3 category labels vs. 1 "More" button<br/>
+    ❌ Every item requires a click to reach — even frequent ones like Projects/Kanban<br/>
+    ❌ Adds cognitive load — user must decide which category first, then which item<br/>
+    <strong>Verdict:</strong> Best if item count grows to 15+ pages. For current 10 items, the "More" approach is simpler.
+  </div>
+</div>
+
+<!-- ─── Hybrid: Core visible + category More ─── -->
+<div class="mockup-label">Option F — Hybrid: pinned items + category "More" <span class="badge badge-rec">Best of both</span></div>
+<div class="mockup-wrapper">
+  <div class="mc-header" style="position:relative;">
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div class="mc-brand">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 7 9 3 5 7l4 4"/><path d="m17 11 4 4-4 4-4-4"/><path d="m8 12 4 4 6-6-4-4Z"/><path d="m16 8 3-3"/><path d="M9 21a6 6 0 0 0-6-6"/></svg>
+        <span class="mc-brand-name">Mission Control</span>
+      </div>
+      <nav class="mc-nav">
+        <a class="mc-nav-item active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg> Dashboard</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg> My Day</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z"/><path d="M2 8v11a2 2 0 0 0 2 2h14"/></svg> Projects</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16"/><path d="M12 4v16"/><path d="M17 4v16"/></svg> Kanban</a>
+        <a class="mc-nav-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg> Goals</a>
+
+        <!-- The "More" uses categories INSIDE the dropdown -->
+        <div style="position:relative;">
+          <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+            More
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <div class="mc-dropdown" style="left:0; right:auto;">
+            <div class="mc-dropdown-group">⚡ Workflow</div>
+            <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg> Routines</a>
+            <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg> Triage</a>
+            <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg> Timeline</a>
+            <div class="mc-dropdown-divider"></div>
+            <div class="mc-dropdown-group">🔧 System</div>
+            <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg> AI Assistant</a>
+            <a class="mc-dropdown-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg> Settings</a>
+          </div>
+        </div>
+      </nav>
+    </div>
+    <div class="mc-header-right">
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> Zen</button>
+      <button class="mc-mode-btn"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg> Calm</button>
+      <span class="mc-counter">✓ 3</span>
+      <span class="mc-health-dot" style="background:var(--success);"></span>
+      <button class="mc-sync-btn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg> Sync</button>
+    </div>
+  </div>
+  <div class="mockup-notes">This is what Layouts A–D already show — the categories are <em>inside</em> the "More" dropdown as group labels. This combines the best of both: top items stay 1-click, categories organize the overflow.</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">User Customization: Pin & Reorder</div>
+<p class="section-desc">Should users be able to rearrange nav items or should the app auto-adapt based on usage?</p>
+
+<div class="callout">
+  <div class="callout-title">🔬 Industry Research</div>
+  <p style="margin-bottom: 12px;">
+    <strong>Auto-rearranging is widely discouraged.</strong> Microsoft tried adaptive menus in Office 2003 (hiding infrequent items) — it was so disliked they reverted it entirely. Studies consistently show that <strong>unexpected nav changes destroy muscle memory</strong> and hurt returning/power users the most.
+  </p>
+  <p style="margin-bottom: 12px;">
+    <strong>User-initiated customization is the safe middle ground.</strong> Apps like Slack (sidebar sections), iOS (tab bar customization), and Figma (starred projects) let users <em>choose</em> what to surface — but the default layout stays stable.
+  </p>
+  <p>
+    <strong>Suggested approach for Mission Control:</strong> Don't auto-rearrange. Instead, consider a future "pin to nav bar" gesture where a user can drag an overflow item (e.g. Triage) up to the visible nav. This is opt-in and preserves muscle memory.
+  </p>
+</div>
+
+<!-- Mockup of pin/reorder in dropdown -->
+<div class="mockup-label">Future enhancement — "Pin to nav" inside dropdown</div>
+<div class="mockup-wrapper">
+  <div style="padding:16px; position:relative; min-height:310px;">
+    <button class="mc-more-btn" style="background:var(--surface-2); border-radius:var(--radius-md);">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+      More
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="mc-dropdown" style="position:relative; top:4px; right:auto; left:0; display:block; min-width:220px;">
+      <div class="mc-dropdown-group">⚡ Workflow</div>
+      <div class="mc-dropdown-item" style="justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>
+          Routines
+        </span>
+        <span style="font-size:11px; color:var(--text-muted); opacity:0.7; cursor:pointer;" title="Pin to nav bar">📌</span>
+      </div>
+      <div class="mc-dropdown-item" style="justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/></svg>
+          Triage
+        </span>
+        <span style="font-size:11px; color:var(--text-muted); opacity:0.7; cursor:pointer;" title="Pin to nav bar">📌</span>
+      </div>
+      <div class="mc-dropdown-item" style="justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v4"/><path d="M16 2v4"/><rect width="18" height="18" x="3" y="4" rx="2"/><path d="M3 10h18"/></svg>
+          Timeline
+        </span>
+        <span style="font-size:11px; color:var(--text-muted); opacity:0.7; cursor:pointer;" title="Pin to nav bar">📌</span>
+      </div>
+      <div class="mc-dropdown-divider"></div>
+      <div class="mc-dropdown-group">🔧 System</div>
+      <div class="mc-dropdown-item" style="justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          AI Assistant
+        </span>
+        <span style="font-size:11px; color:var(--text-muted); opacity:0.7; cursor:pointer;" title="Pin to nav bar">📌</span>
+      </div>
+      <div class="mc-dropdown-item" style="justify-content:space-between;">
+        <span style="display:flex; align-items:center; gap:8px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          Settings
+        </span>
+        <span style="font-size:11px; color:var(--text-muted); opacity:0.7; cursor:pointer;" title="Pin to nav bar">📌</span>
+      </div>
+      <div class="mc-dropdown-divider"></div>
+      <div style="padding:6px 12px; font-size:11px; color:var(--text-tertiary);">
+        📌 Pin items to move them to the nav bar
+      </div>
+    </div>
+  </div>
+  <div class="mockup-notes">Pin icons appear on hover. Clicking pins an item to the visible nav bar (persisted in localStorage). This is opt-in — default layout is always stable. Could be a v2 enhancement.</div>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Active State Research (Trigger D)</div>
+<p class="section-desc">How do major apps handle the "current page is inside the overflow menu" problem?</p>
+
+<div class="callout">
+  <div class="callout-title">📊 Industry Patterns</div>
+  <table class="dtable">
+    <thead><tr><th>App</th><th>"More" shows active?</th><th>Item inside highlighted?</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td>GitHub</td><td>✅ Yes</td><td>✅ Yes</td><td>Repo nav collapses tabs at narrow viewport. "More" gets underline + bold when active page is inside. Dropdown item also highlighted.</td></tr>
+      <tr><td>Linear</td><td>✅ Yes</td><td>✅ Yes</td><td>Sidebar "More" section highlights both the parent and the active project inside.</td></tr>
+      <tr><td>Slack</td><td>✅ Yes</td><td>✅ Yes</td><td>Section headers show subtle focus state. Active channel gets indicator dot + highlight.</td></tr>
+      <tr><td>Notion</td><td>Partial</td><td>✅ Yes</td><td>Nested sidebar pages: parent auto-expands, active child is bolded.</td></tr>
+      <tr><td>Google Workspace</td><td>✅ Yes</td><td>✅ Yes</td><td>"More" dot menu gets filled state when active app is inside.</td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:12px;">
+    <strong>Verdict: Trigger D (dual active state) is standard practice.</strong> Every major app with nav overflow highlights <em>both</em> the "More" button and the item inside the dropdown. This is not optional — it's expected UX. Our proposed accent tint + underline on "More" matches GitHub's exact approach.
+  </p>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Breakpoint Strategy</div>
+
+<div class="callout">
+  <table class="dtable">
+    <thead><tr><th>Viewport</th><th>Visible Items</th><th>"More" Contains</th></tr></thead>
+    <tbody>
+      <tr><td>≥ 1280px (xl)</td><td>All 10 — no "More" button</td><td>—</td></tr>
+      <tr><td>1024–1279px (lg)</td><td>Dashboard, My Day, Projects, Kanban, Goals</td><td>Routines, Triage, Timeline, AI, Settings</td></tr>
+      <tr><td>768–1023px (md)</td><td>Dashboard, My Day, Projects (icons only)</td><td>Everything else</td></tr>
+      <tr><td>&lt; 768px (sm)</td><td>Hamburger menu (full list)</td><td>—</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Category Grouping</div>
+
+<div class="callout">
+  <table class="dtable">
+    <thead><tr><th>Category</th><th>Items</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td>🏠 Core</td><td>Dashboard, My Day</td><td>Daily starting points — always visible, never overflow</td></tr>
+      <tr><td>📋 Planning</td><td>Projects, Kanban, Goals</td><td>Organize & track work</td></tr>
+      <tr><td>⚡ Workflow</td><td>Routines, Triage, Timeline</td><td>Process & time-based views</td></tr>
+      <tr><td>🔧 System</td><td>AI Assistant, Settings</td><td>Tools & configuration</td></tr>
+    </tbody>
+  </table>
+</div>
+
+
+<!-- ══════════════════════════════════════════════════════════════════════════ -->
+<div class="section-title">Recommendation Summary</div>
+
+<div class="callout">
+  <table class="dtable">
+    <thead><tr><th>Decision</th><th>Recommended</th><th>Rationale</th></tr></thead>
+    <tbody>
+      <tr><td>Trigger</td><td>B — "More" text + chevron</td><td>Best discoverability, consistent with nav items</td></tr>
+      <tr><td>Active state</td><td>D — Accent tint + underline</td><td>Essential UX — combine with chosen trigger</td></tr>
+      <tr><td>Dropdown</td><td>A — Single column, grouped</td><td>Scannable, minimal, scales to ~10 overflow items</td></tr>
+      <tr><td>Mobile</td><td>Add category labels to hamburger</td><td>Consistency with desktop, future-proofs growth</td></tr>
+    </tbody>
+  </table>
+</div>
+
+</div>
+</body>
+</html>

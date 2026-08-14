@@ -137,6 +137,20 @@ afterEach(() => {
 });
 
 describe('TaskDetailPanel redesigned presentations', () => {
+  it('renders dialog select menus above the task popout', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'dialog', onClose: vi.fn() });
+    const dialog = await screen.findByRole('dialog', { name: `Task details: ${task.title}` });
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Task status' }));
+
+    expect(screen.getByRole('listbox')).toHaveClass('z-[100]');
+    expect(dialog.parentElement).toHaveClass('z-[90]');
+  });
+
   it('resizes the panel and persists the final dragged width', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/api/tasks/task-1') return json({ task });

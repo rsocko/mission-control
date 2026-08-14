@@ -34,6 +34,33 @@ describe('Houston tool safety', () => {
     expect(activeTools).not.toContain('updateTaskPriority');
     expect(activeTools).not.toContain('updateTaskEffort');
     expect(activeTools).not.toContain('intakeDocument');
+    expect(activeTools).not.toContain('getHouseholdFinanceSummary');
+    expect(activeTools).not.toContain('searchFinanceTransactions');
+    expect(activeTools).not.toContain('getPendingFinanceExceptions');
+    expect(activeTools).not.toContain('getKidSpending');
+    expect(activeTools).not.toContain('getFinanceObligations');
+    expect(activeTools).not.toContain('getFinanceConnectorHealth');
+    expect(activeTools).not.toContain('assignFinanceTransaction');
+    expect(activeTools).not.toContain('updateFinanceCategory');
+  });
+
+  it('keeps only the six finance reads available after finance intent preceded triage', () => {
+    const { activeTools } = restrictToolsAfterTriage({
+      steps: [
+        { toolResults: [{ toolName: 'getFinanceConnectorHealth' }] },
+        { toolResults: [{ toolName: 'searchTriage' }] },
+      ],
+    })!;
+    expect(activeTools).toEqual(expect.arrayContaining([
+      'getHouseholdFinanceSummary',
+      'searchFinanceTransactions',
+      'getPendingFinanceExceptions',
+      'getKidSpending',
+      'getFinanceObligations',
+      'getFinanceConnectorHealth',
+    ]));
+    expect(activeTools).not.toContain('assignFinanceTransaction');
+    expect(activeTools).not.toContain('updateFinanceCategory');
   });
 
   it('leaves tools available when no triage content was consumed', () => {
@@ -44,5 +71,23 @@ describe('Houston tool safety', () => {
         }],
       }],
     })).toBeUndefined();
+  });
+
+  it('allows only reads after persisted finance content enters model context', () => {
+    const { activeTools } = restrictToolsAfterTriage({
+      steps: [{
+        toolResults: [{ toolName: 'searchFinanceTransactions' }],
+      }],
+    })!;
+    expect(activeTools).toEqual(expect.arrayContaining([
+      'searchTasks',
+      'searchTriage',
+      'searchFinanceTransactions',
+      'getFinanceConnectorHealth',
+    ]));
+    expect(activeTools).not.toContain('completeTask');
+    expect(activeTools).not.toContain('updateTaskPriority');
+    expect(activeTools).not.toContain('intakeDocument');
+    expect(activeTools).not.toContain('updateFinanceCategory');
   });
 });

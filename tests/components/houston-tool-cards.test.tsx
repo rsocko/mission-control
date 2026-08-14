@@ -299,4 +299,43 @@ describe('ToolCard native task results', () => {
     expect(screen.getByLabelText('Task search')).toBeDefined();
     expect(mobile.container.querySelector('.flex-1')).not.toBeNull();
   });
+
+  it('renders the same bounded finance result through desktop and mobile ToolCard paths', () => {
+    const part = toolPart('getHouseholdFinanceSummary', {
+      output: {
+        kind: 'household-finance-summary',
+        period: { startDate: '2026-08-01', endDate: '2026-08-13' },
+        missionControlCalculated: {
+          totalSpending: 42.75,
+          transactionCount: 1,
+          byCategory: [{ category: 'Groceries', amount: 42.75, transactionCount: 1 }],
+          byKid: [{ kidName: 'Avery', amount: 42.75, transactionCount: 1 }],
+        },
+        meta: {
+          sourceAsOf: '2026-08-13T12:00:00.000Z',
+          coverage: { start: '2026-08-01', end: '2026-08-13' },
+          freshness: 'partial',
+          truncated: true,
+          deepLink: '/finance',
+          provenance: [
+            { kind: 'monarch-fact', label: 'Monarch facts via Tyrion Bridge', included: true },
+            { kind: 'tyrion-derived', label: 'Tyrion-derived attribution/conclusions', included: true },
+            { kind: 'mission-control-calculated', label: 'Mission Control-calculated aggregates', included: true },
+          ],
+        },
+      },
+    });
+    const message = assistantMessage(part);
+    const desktop = render(<ChatMessageRow message={message} loading={false} />);
+    expect(screen.getByLabelText('Household finance summary')).toBeDefined();
+    expect(screen.getByText('partial')).toBeDefined();
+    expect(screen.getByText(/Monarch facts via Tyrion Bridge/)).toBeDefined();
+    expect(screen.getByText(/result truncated/)).toBeDefined();
+    expect(screen.getByRole('link', { name: 'Open Finance' })).toHaveAttribute('href', '/finance');
+    expect(screen.queryByRole('button', { name: /approve/i })).toBeNull();
+    desktop.unmount();
+
+    render(<MobileChatBubble message={message} loading={false} />);
+    expect(screen.getByLabelText('Household finance summary')).toBeDefined();
+  });
 });

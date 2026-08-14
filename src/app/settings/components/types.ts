@@ -205,8 +205,10 @@ export function normalizeSyncedLists(syncedLists: unknown): string[] {
 }
 
 export function isSourceListSelected(connector: ConnectorConfig, sourceList: SourceList): boolean {
-  const syncedLists = normalizeSyncedLists(connector.syncedLists);
-  return syncedLists.length === 0
+  const syncedLists = connector.type === 'github-issues'
+    ? normalizeSyncedLists(connector.settings.repos)
+    : normalizeSyncedLists(connector.syncedLists);
+  return (connector.type !== 'github-issues' && syncedLists.length === 0)
     || syncedLists.includes(sourceList.sourceId)
     || syncedLists.includes(sourceList.id);
 }

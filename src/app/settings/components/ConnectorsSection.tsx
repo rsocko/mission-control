@@ -869,6 +869,12 @@ function DefaultConnectorEditPanel({
     setAddingRepo(false);
   }
 
+  function handleRemoveRepo(repo: string) {
+    setEditRepos(prev => prev.filter(candidate => candidate !== repo));
+    setRepoError('');
+    markDirty();
+  }
+
   return (
     <div className="border-t border-[var(--border-subtle)] px-4 py-4 bg-[var(--surface-0)]">
       <div className="grid grid-cols-2 gap-6">
@@ -982,7 +988,16 @@ function DefaultConnectorEditPanel({
                 {editRepos.map(repo => (
                   <div key={repo} className="flex items-center gap-2 text-xs text-[var(--text-secondary)]">
                     <FolderOpen size={11} className="text-[var(--text-muted)] shrink-0" />
-                    <span className="font-mono truncate">{repo}</span>
+                    <span className="min-w-0 flex-1 font-mono truncate">{repo}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveRepo(repo)}
+                      aria-label={`Remove ${repo} from sync`}
+                      title={`Remove ${repo} from sync`}
+                      className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-[var(--text-muted)] transition-colors hover:bg-red-500/10 hover:text-red-400"
+                    >
+                      <X size={12} />
+                    </button>
                   </div>
                 ))}
                 {editRepos.length === 0 && (
@@ -1014,6 +1029,9 @@ function DefaultConnectorEditPanel({
                   <AlertTriangle size={10} /> {repoError}
                 </p>
               )}
+              <p className="mt-1.5 text-xs text-[var(--text-muted)]">
+                Removing a repository stops future sync. Existing imported items are retained.
+              </p>
             </div>
           )}
 

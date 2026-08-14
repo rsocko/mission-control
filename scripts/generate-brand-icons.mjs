@@ -10,6 +10,8 @@ const gradientStart = '#60a5fa';
 const gradientEnd = '#c084fc';
 const iconBackground = '#020617';
 const iconBorder = '#1e293b';
+// Chromium and Windows cache installed-app icons by URL; bump this when the artwork changes.
+const iconVersion = 'v2';
 
 function satelliteSvg(size, maskable = false) {
   const transform = maskable ? 'translate(124 124) scale(11)' : 'translate(76 76) scale(15)';
@@ -77,8 +79,8 @@ const page = await browser.newPage();
 
 try {
   for (const size of [192, 512]) {
-    await renderIcon(page, size, path.join(publicDir, `icon-${size}.png`));
-    await renderIcon(page, size, path.join(publicDir, `icon-maskable-${size}.png`), true);
+    await renderIcon(page, size, path.join(publicDir, `icon-${iconVersion}-${size}.png`));
+    await renderIcon(page, size, path.join(publicDir, `icon-maskable-${iconVersion}-${size}.png`), true);
   }
 
   const faviconImages = [];

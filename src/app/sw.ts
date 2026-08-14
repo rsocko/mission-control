@@ -289,8 +289,8 @@ self.addEventListener("push", (event: PushEvent) => {
   const title = data.title || "Mission Control";
   const options: NotificationOptions = {
     body: data.body || "",
-    icon: "/icon-192.png",
-    badge: "/icon-192.png",
+    icon: "/icon-v2-192.png",
+    badge: "/icon-v2-192.png",
     tag: data.tag || "mc-notification",
     data: { url: data.url || "/" },
   };

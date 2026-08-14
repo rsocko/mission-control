@@ -11,6 +11,6 @@ that they are derived from Mission Control.
 Third-party names and logos belong to their respective owners. Their appearance
 in documentation describes interoperability and does not imply endorsement.
 
-Project naming, logos, and asset rights require legal/IP approval before public
-release. Questions about branded distribution should be raised with the
-repository owner before publication.
+Project naming, logos, and asset rights require legal/IP approval before a
+branded distribution is released. Questions about branded distribution should
+be raised with the repository owner before release.

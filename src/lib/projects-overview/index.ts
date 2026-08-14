@@ -135,6 +135,18 @@ export interface OverviewTask {
 
 export type OverviewProject = HubProject & { progress: ProjectProgress };
 
+const projectNameCollator = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+export function sortProjectsAlphabetically<T extends { name: string }>(projects: T[]): T[] {
+  return [...projects].sort((a, b) => (
+    projectNameCollator.compare(a.name, b.name)
+    || a.name.localeCompare(b.name)
+  ));
+}
+
 export interface RecentProject {
   id: string;
   name: string;
@@ -251,7 +263,7 @@ export function buildPortfolioPulse(
 
 export async function getProjectsOverview(): Promise<ProjectsOverview> {
   // Fetch all visible projects (exclude hidden)
-  const allProjects = (await db.select().from(hubProjects).orderBy(hubProjects.sortOrder, hubProjects.name))
+  const allProjects = (await db.select().from(hubProjects).orderBy(hubProjects.name))
     .filter(p => !p.hidden);
 
   if (allProjects.length === 0) {
@@ -368,7 +380,10 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
 
   const categories: CategoryGroup[] = [...categoryMap.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([category, projects]) => ({ category, projects }));
+    .map(([category, projects]) => ({
+      category,
+      projects: sortProjectsAlphabetically(projects),
+    }));
 
   // Summary stats
   const activeProjects = enrichedProjects.filter(p => p.status === 'active').length;
@@ -383,7 +398,7 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
 
   return {
     categories,
-    uncategorized,
+    uncategorized: sortProjectsAlphabetically(uncategorized),
     recentProjects: pulse.recentProjects,
     recentCompletedItems: pulse.recentCompletedItems,
     summary: {

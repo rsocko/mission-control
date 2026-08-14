@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildPortfolioPulse,
+  sortProjectsAlphabetically,
   topLevelProjectTasks,
   type OverviewProject,
   type OverviewTask,
@@ -44,6 +45,26 @@ function makeTask(overrides: Partial<OverviewTask>): OverviewTask {
     ...overrides,
   };
 }
+
+describe('sortProjectsAlphabetically', () => {
+  it('sorts projects alphabetically without using persisted manual order', () => {
+    const projects = [
+      makeProject({ id: 'ux', name: 'UX Polish', sortOrder: -10 }),
+      makeProject({ id: 'ios', name: 'iOS Mobile UX', sortOrder: 100 }),
+      makeProject({ id: 'insights', name: 'Insights', sortOrder: 0 }),
+      makeProject({ id: 'project-10', name: 'Project 10', sortOrder: 1 }),
+      makeProject({ id: 'project-2', name: 'Project 2', sortOrder: 2 }),
+    ];
+
+    expect(sortProjectsAlphabetically(projects).map(project => project.id)).toEqual([
+      'insights',
+      'ios',
+      'project-2',
+      'project-10',
+      'ux',
+    ]);
+  });
+});
 
 describe('buildPortfolioPulse', () => {
   it('keeps project totals scoped to top-level tasks', () => {

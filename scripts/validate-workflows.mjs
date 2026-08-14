@@ -205,6 +205,7 @@ for (const file of workflowFiles) {
       'docker buildx imagetools create',
       'verification_refs+=("${sha_ref}")',
       'verification_refs+=("${latest_ref}")',
+      "--format '{{.Manifest.Digest}}'",
       'verify_digest "${reference}"',
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);

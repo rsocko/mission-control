@@ -21,7 +21,7 @@ import {
 } from '@/lib/external-identities';
 import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
 import { GitHubHttpError } from './github-client';
-import { parseSourceId } from './issue-transformer';
+import { parseSourceId, refreshGitHubIssueMetadata } from './issue-transformer';
 import {
   createGitHubRepositoryRemote,
   type GitHubChangedIssueIdentityTransfer,
@@ -526,10 +526,16 @@ export async function reconcileGitHubBulkTransferItem(
         throw new Error('Bulk transfer reconciliation target locator collision');
       }
       const newSourceId = `${run.targetRepository}:${input.targetNumber}`;
+      const currentTask = tx.select({ metadata: tasks.metadata }).from(tasks)
+        .where(eq(tasks.id, item.taskId)).limit(1).get();
+      if (!currentTask) {
+        throw new Error('Bulk transfer reconciliation task disappeared before routing update');
+      }
       tx.update(tasks).set({
         sourceId: newSourceId,
         sourceListId: run.targetRepository,
         sourceListName: run.targetRepository,
+        metadata: refreshGitHubIssueMetadata(currentTask.metadata, newSourceId, evidence),
         syncStatus: 'synced',
         updatedAt: now,
       }).where(eq(tasks.id, item.taskId)).run();
@@ -731,7 +737,10 @@ function recordChangedIssueIdentity(input: {
     ) {
       throw new Error('Bulk transfer successor reconciliation identity mode changed');
     }
-    const currentTask = tx.select({ sourceId: tasks.sourceId }).from(tasks).where(and(
+    const currentTask = tx.select({
+      sourceId: tasks.sourceId,
+      metadata: tasks.metadata,
+    }).from(tasks).where(and(
       eq(tasks.id, input.item.taskId),
       eq(tasks.connectorInstanceId, input.run.connectorInstanceId),
     )).limit(1).get();
@@ -786,6 +795,11 @@ function recordChangedIssueIdentity(input: {
       sourceId: successorSourceId,
       sourceListId: input.run.targetRepository,
       sourceListName: input.run.targetRepository,
+      metadata: refreshGitHubIssueMetadata(
+        currentTask.metadata,
+        successorSourceId,
+        input.evidence,
+      ),
       syncStatus: 'synced',
       updatedAt: input.now,
     }).where(eq(tasks.id, input.item.taskId)).run();
@@ -1175,7 +1189,12 @@ function rateLimitResetDelayMilliseconds(error: GitHubHttpError): number | null 
 
 function taskMetadataDigest(taskId: string): string {
   const task = sqlite.prepare(`
-    SELECT id, title, description, status, priority, due_date, effort, metadata,
+    SELECT id, title, description, status, priority, due_date, effort,
+           CASE
+             WHEN json_valid(metadata)
+               THEN json_remove(metadata, '$.issueNumber', '$.nodeId', '$.url')
+             ELSE metadata
+           END AS metadata,
            local_disposition, completed_at, created_at
     FROM tasks WHERE id = ?
   `).get(taskId);

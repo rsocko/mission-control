@@ -48,7 +48,7 @@ import {
   normalizeGitHubOrigin,
   repositoryEvidenceFromRest,
 } from './identity';
-import { parseSourceId } from './issue-transformer';
+import { parseSourceId, refreshGitHubIssueMetadata } from './issue-transformer';
 import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
 
 const REPOSITORY_PATH = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
@@ -878,10 +878,17 @@ export async function transferGitHubIssueWithLease(
         locatorCollision = true;
         return;
       }
+      const currentTask = tx.select({ metadata: tasks.metadata }).from(tasks)
+        .where(eq(tasks.id, issue.taskId)).limit(1).get();
+      if (!currentTask) {
+        throw new Error('Native GitHub transfer task disappeared before routing update');
+      }
+      const newSourceId = `${input.targetRepository}:${transferredNumber}`;
       tx.update(tasks).set({
-        sourceId: `${input.targetRepository}:${transferredNumber}`,
+        sourceId: newSourceId,
         sourceListId: input.targetRepository,
         sourceListName: input.targetRepository,
+        metadata: refreshGitHubIssueMetadata(currentTask.metadata, newSourceId, after),
         updatedAt: nowIso,
         syncStatus: 'synced',
       }).where(eq(tasks.id, issue.taskId)).run();

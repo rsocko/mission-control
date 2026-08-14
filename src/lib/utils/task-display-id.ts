@@ -11,7 +11,16 @@ export function getTaskDisplayId(
   sourceId?: string | null,
 ): string | null {
   if (connectorType === 'github-issues') {
-    // Prefer metadata.issueNumber if available
+    // sourceId is the authoritative active locator and changes when GitHub
+    // renumbers an issue during a repository transfer.
+    if (sourceId) {
+      const lastColon = sourceId.lastIndexOf(':');
+      if (lastColon !== -1) {
+        const num = sourceId.substring(lastColon + 1);
+        if (/^\d+$/.test(num)) return `#${num}`;
+      }
+    }
+    // Fall back for legacy records that have not yet acquired a source locator.
     if (metadata) {
       try {
         const meta: unknown = typeof metadata === 'string' ? JSON.parse(metadata) : metadata;
@@ -24,15 +33,7 @@ export function getTaskDisplayId(
           return `#${meta.issueNumber}`;
         }
       } catch {
-        // fall through to sourceId parsing
-      }
-    }
-    // Fallback: parse from sourceId format "repo:number"
-    if (sourceId) {
-      const lastColon = sourceId.lastIndexOf(':');
-      if (lastColon !== -1) {
-        const num = sourceId.substring(lastColon + 1);
-        if (/^\d+$/.test(num)) return `#${num}`;
+        return null;
       }
     }
   }

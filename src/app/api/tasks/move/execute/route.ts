@@ -21,7 +21,7 @@ import {
   tags,
 } from '@/db/schema';
 import { eq, and, isNull, inArray } from 'drizzle-orm';
-import { ApiErrors } from '@/lib/api-error';
+import { apiError, ApiErrors } from '@/lib/api-error';
 import { connectorRegistry } from '@/lib/connectors';
 import { dbLogger, connectorLogger } from '@/lib/logger';
 import {
@@ -206,6 +206,19 @@ export async function POST(request: Request) {
     logContext.sourceConnectorType = boundedLogValue(srcTask.connectorType);
     logContext.source_type = boundedLogValue(srcTask.connectorType);
     logContext.sourceConnectorInstanceId = boundedLogValue(srcTask.connectorInstanceId);
+    if (
+      srcTask.connectorInstanceId === targetConnectorInstanceId
+      && srcTask.sourceListId === targetSourceListId
+    ) {
+      return failureResponse(
+        apiError(
+          'This task is already in the selected destination',
+          'SAME_SOURCE_DESTINATION',
+          409,
+        ),
+        'same_source_destination',
+      );
+    }
 
     // ── Fetch target connector ───────────────────────────────────────────────
     const [targetConnectorRow] = await db

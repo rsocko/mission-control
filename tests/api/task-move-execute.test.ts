@@ -217,6 +217,9 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 vi.mock('@/lib/api-error', () => ({
+  apiError: vi.fn((error: string, code: string, status: number) => (
+    NextResponse.json({ error, code }, { status })
+  )),
   ApiErrors: {
     internal: vi.fn((msg: string, error?: unknown, traceId?: string) => {
       return NextResponse.json({
@@ -312,6 +315,42 @@ describe('POST /api/tasks/move/preview', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toContain('write');
+  });
+
+  it('rejects the task current source as the preview destination', async () => {
+    selectResults.push([{
+      id: 'task-1',
+      title: 'Already here',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'rsocko/mission-control',
+      status: 'todo',
+    }]);
+    selectResults.push([]);
+    selectResults.push([{ count: 0 }]);
+    selectResults.push([{
+      id: 'github-1',
+      type: 'github-issues',
+      name: 'GitHub',
+      capabilities: { write: true, taskCreate: true },
+    }]);
+
+    const { POST } = await import('@/app/api/tasks/move/preview/route');
+    const res = await POST(new Request(`${BASE}/api/tasks/move/preview`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'github-1',
+        targetSourceListId: 'rsocko/mission-control',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'This task is already in the selected destination',
+      code: 'SAME_SOURCE_DESTINATION',
+    });
   });
 
   it('returns valid preview with field mappings', async () => {
@@ -426,6 +465,36 @@ describe('POST /api/tasks/move/preview', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('POST /api/tasks/move/execute', () => {
+  it('rejects the task current source before creating a destination task', async () => {
+    selectResults.push([{
+      id: 'task-1',
+      title: 'Already here',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'rsocko/mission-control',
+      sourceId: 'rsocko/mission-control:1',
+    }]);
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const res = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'github-1',
+        targetSourceListId: 'rsocko/mission-control',
+        sourceAction: 'move',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'This task is already in the selected destination',
+      code: 'SAME_SOURCE_DESTINATION',
+    });
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
   it('rejects excessive subtasks before creating a destination task', async () => {
     selectResults.push([{
       id: 'task-1', title: 'Oversized parent', connectorType: 'local',

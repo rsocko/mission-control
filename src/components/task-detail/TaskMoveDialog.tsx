@@ -124,11 +124,13 @@ function TargetListPicker({
   lists,
   search,
   selectedListId,
+  unavailableSourceListId,
   onSelect,
 }: {
   lists: TargetList[];
   search: string;
   selectedListId: string;
+  unavailableSourceListId?: string;
   onSelect: (sourceId: string) => void;
 }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -148,7 +150,13 @@ function TargetListPicker({
           <p className="px-8 py-2 text-xs text-[var(--text-muted)]">No matching lists</p>
         ) : (
           filtered.map((list) => (
-            <ListButton key={list.id} list={list} isSelected={selectedListId === list.sourceId} onSelect={onSelect} />
+            <ListButton
+              key={list.id}
+              list={list}
+              isSelected={selectedListId === list.sourceId}
+              isUnavailable={unavailableSourceListId === list.sourceId}
+              onSelect={onSelect}
+            />
           ))
         )}
       </div>
@@ -196,7 +204,13 @@ function TargetListPicker({
         <>
           {/* Ungrouped lists first */}
           {ungrouped.map((list) => (
-            <ListButton key={list.id} list={list} isSelected={selectedListId === list.sourceId} onSelect={onSelect} />
+            <ListButton
+              key={list.id}
+              list={list}
+              isSelected={selectedListId === list.sourceId}
+              isUnavailable={unavailableSourceListId === list.sourceId}
+              onSelect={onSelect}
+            />
           ))}
           {/* Grouped lists */}
           {groups.map((group) => {
@@ -211,7 +225,14 @@ function TargetListPicker({
                   {group.name ?? 'Other'}
                 </button>
                 {!isCollapsed && group.items.map((list) => (
-                  <ListButton key={list.id} list={list} isSelected={selectedListId === list.sourceId} onSelect={onSelect} grouped />
+                  <ListButton
+                    key={list.id}
+                    list={list}
+                    isSelected={selectedListId === list.sourceId}
+                    isUnavailable={unavailableSourceListId === list.sourceId}
+                    onSelect={onSelect}
+                    grouped
+                  />
                 ))}
               </div>
             );
@@ -222,17 +243,35 @@ function TargetListPicker({
   );
 }
 
-function ListButton({ list, isSelected, onSelect, grouped }: { list: TargetList; isSelected: boolean; onSelect: (sourceId: string) => void; grouped?: boolean }) {
+function ListButton({
+  list,
+  isSelected,
+  isUnavailable,
+  onSelect,
+  grouped,
+}: {
+  list: TargetList;
+  isSelected: boolean;
+  isUnavailable: boolean;
+  onSelect: (sourceId: string) => void;
+  grouped?: boolean;
+}) {
   return (
     <button
       onClick={() => onSelect(list.sourceId)}
+      disabled={isUnavailable}
       className={`w-full text-left flex items-center gap-2 ${grouped ? 'pl-10' : 'pl-8'} pr-3 py-2 text-xs transition-colors ${
-        isSelected
+        isUnavailable
+          ? 'text-[var(--text-muted)] opacity-60 cursor-not-allowed'
+          : isSelected
           ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
           : 'text-[var(--text-secondary)] hover:bg-[var(--surface-3)]'
       }`}
     >
       <span className="truncate">{list.name}</span>
+      {isUnavailable && (
+        <span className="ml-auto shrink-0 text-[11px]">Current source</span>
+      )}
       {isSelected && (
         <CheckCircle2 size={12} className="ml-auto shrink-0" />
       )}
@@ -320,7 +359,9 @@ export function TaskMoveDialog({
       onClose();
     } catch (err) {
       setExecuteError({
-        message: 'Move failed. Please try again.',
+        message: err instanceof ApiRequestError && err.code === 'SAME_SOURCE_DESTINATION'
+          ? 'This task is already in that destination. Choose a different source.'
+          : 'Move failed. Please try again.',
         traceId: err instanceof ApiRequestError ? err.traceId : undefined,
       });
       setExecuting(false);
@@ -463,6 +504,11 @@ export function TaskMoveDialog({
                                 lists={preview.targetLists}
                                 search={listSearch}
                                 selectedListId={selectedListId}
+                                unavailableSourceListId={
+                                  preview.task.connectorInstanceId === selectedConnector.id
+                                    ? preview.task.sourceListId
+                                    : undefined
+                                }
                                 onSelect={handleListSelect}
                               />
                             </div>

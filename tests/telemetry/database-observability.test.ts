@@ -40,6 +40,7 @@ describe('SQLite database observability', () => {
     delete process.env.MC_DB_MAX_SLOW_OPERATIONS;
     delete process.env.MC_DB_MAX_SAMPLES;
     delete process.env.MC_DB_LATENCY_P95_WARNING_MS;
+    delete process.env.MC_DB_LATENCY_P99_CRITICAL_MS;
     delete process.env.MC_DB_WAL_WARNING_BYTES;
     delete process.env.MC_DB_WAL_CRITICAL_BYTES;
     delete process.env.MC_DB_CHECKPOINT_STARVATION_MS;
@@ -49,6 +50,8 @@ describe('SQLite database observability', () => {
   });
 
   it('reports healthy bounded aggregates without retaining SQL values', () => {
+    process.env.MC_DB_LATENCY_P95_WARNING_MS = String(Number.MAX_SAFE_INTEGER);
+    process.env.MC_DB_LATENCY_P99_CRITICAL_MS = String(Number.MAX_SAFE_INTEGER);
     database.prepare('INSERT INTO telemetry_test (value) VALUES (?)').run('private-value');
     database.prepare('SELECT value FROM telemetry_test WHERE id = ?').get(1);
 

@@ -123,4 +123,42 @@ describe('task dependency sync migration', () => {
       rmSync(folder, { recursive: true, force: true });
     }
   });
+
+  it('stops after an unexpected statement failure without marking it applied', async () => {
+    vi.doUnmock('drizzle-orm');
+    vi.doUnmock('crypto');
+    vi.resetModules();
+    const { _runMigrationsIndividually } = await import('@/db');
+    const folder = join(tmpdir(), `mc-failed-migrations-${Date.now()}`);
+    mkdirSync(join(folder, 'meta'), { recursive: true });
+    writeFileSync(join(folder, 'meta', '_journal.json'), JSON.stringify({
+      entries: [
+        { idx: 33, tag: '0033_unexpected_failure', when: 1 },
+        { idx: 34, tag: '0034_must_not_run', when: 2 },
+      ],
+    }));
+    writeFileSync(
+      join(folder, '0033_unexpected_failure.sql'),
+      'CREATE INDEX invalid_index ON existing_table(missing_column);',
+    );
+    writeFileSync(
+      join(folder, '0034_must_not_run.sql'),
+      'CREATE TABLE should_not_exist (id text);',
+    );
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE existing_table (id text);');
+
+    try {
+      expect(() => _runMigrationsIndividually(sqlite, folder)).not.toThrow();
+      expect(sqlite.prepare(
+        'SELECT COUNT(*) AS count FROM __drizzle_migrations',
+      ).get()).toEqual({ count: 0 });
+      expect(sqlite.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'should_not_exist'",
+      ).get()).toBeUndefined();
+    } finally {
+      sqlite.close();
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
 });

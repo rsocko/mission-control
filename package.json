@@ -31,9 +31,6 @@
     "github:bulk-transfer": "node --conditions=react-server --import tsx scripts/github-bulk-issue-transfer.ts",
     "brand:icons": "node scripts/generate-brand-icons.mjs",
     "test:dev-services": "node --test scripts/dev-service.test.mjs",
-    "public:export": "node scripts/public-export.mjs",
-    "public:scan": "node scripts/scan-public-export.mjs",
-    "test:public-export": "node --test scripts/public-export.test.mjs",
     "ci:workflows": "node scripts/validate-workflows.mjs",
     "mcp": "tsx src/mcp/server.ts",
     "worker": "tsx src/sync-worker.ts"

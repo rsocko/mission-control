@@ -1,9 +1,10 @@
 # Licensing Status
 
-No public software license has been approved for Mission Control, so this
+No software license has been approved for Mission Control, so this
 repository intentionally does not contain a `LICENSE` file.
 
-Before public release, the repository owner and legal/IP reviewer must approve:
+Before adding a license or accepting external contributions, the repository
+owner and legal/IP reviewer must approve:
 
 - the project license and contribution terms;
 - ownership of included source and documentation;
@@ -13,4 +14,4 @@ Before public release, the repository owner and legal/IP reviewer must approve:
 
 Until that approval is recorded and the approved license is added, no license
 is granted to copy, redistribute, or create derivative works, and external
-contributions must not be merged. Repository publication remains blocked.
+contributions must not be merged.

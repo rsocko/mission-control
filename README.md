@@ -79,9 +79,10 @@ See [docs/MCP-SERVER.md](docs/MCP-SERVER.md) for setup, available tools, and Cop
 - [Licensing status](docs/governance/licensing.md)
 - [Public architecture and development guides](docs/public/architecture.md)
 
-Mission Control does not yet have an approved public license. Publication and
-external contribution acceptance remain blocked until the legal/IP review
-records an explicit decision and the approved `LICENSE` file is added.
+Mission Control does not yet have an approved software license. No license is
+granted to copy, redistribute, or create derivative works, and external
+contributions cannot be accepted until the legal/IP review records an explicit
+decision and the approved `LICENSE` file is added.
 
 ## Triage Queue Phase 2 (GitHub + Reddit ingestion)
 

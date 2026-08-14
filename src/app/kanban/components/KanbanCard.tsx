@@ -63,7 +63,11 @@ export function KanbanCard({ task, dragHandleProps, onClick, showSources, showDu
             <p className="text-sm text-[var(--text-primary)] font-medium leading-tight">
               {task.title}
               {(() => {
-                const displayId = getTaskDisplayId(task.connectorType, task.metadata);
+                const displayId = getTaskDisplayId(
+                  task.connectorType,
+                  task.metadata,
+                  task.sourceId,
+                );
                 return displayId ? (
                   <span className="text-xs text-[var(--text-muted)] font-mono tabular-nums ml-1.5">{displayId}</span>
                 ) : null;

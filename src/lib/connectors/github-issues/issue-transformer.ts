@@ -213,6 +213,62 @@ export function parseSourceId(sourceId: string): { repo: string; issueNumber: nu
   };
 }
 
+export function refreshGitHubIssueMetadata(
+  metadata: unknown,
+  sourceId: string,
+  evidence?: ExternalIdentityEvidence,
+): Record<string, unknown> {
+  const current = parseMetadataRecord(metadata);
+  const { repo, issueNumber } = parseSourceId(sourceId);
+  if (!repo || !Number.isSafeInteger(issueNumber) || issueNumber <= 0) {
+    throw new Error('GitHub task source ID is invalid');
+  }
+
+  const refreshed: Record<string, unknown> = {
+    ...current,
+    issueNumber,
+  };
+  if (evidence) {
+    refreshed.nodeId = evidence.entity.identity.stableId;
+    if (evidence.entity.locator.webUrl) {
+      refreshed.url = evidence.entity.locator.webUrl;
+    } else {
+      delete refreshed.url;
+    }
+    return refreshed;
+  }
+
+  if (typeof current.url === 'string') {
+    try {
+      const url = new URL(current.url);
+      if (url.protocol === 'https:' || url.protocol === 'http:') {
+        refreshed.url = `${url.origin}/${repo}/issues/${issueNumber}`;
+      }
+    } catch {
+      delete refreshed.url;
+    }
+  }
+  return refreshed;
+}
+
+function parseMetadataRecord(metadata: unknown): Record<string, unknown> {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as Record<string, unknown>;
+  }
+  if (typeof metadata !== 'string') return {};
+  try {
+    const parsed: unknown = JSON.parse(metadata);
+    if (typeof parsed === 'string') {
+      return parseMetadataRecord(parsed);
+    }
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 export function isNativeGitHubIssueSourceId(sourceId: string): boolean {
   return /^[^/:]+\/[^/:]+:\d+$/.test(sourceId);
 }

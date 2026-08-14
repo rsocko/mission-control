@@ -245,9 +245,28 @@ describe('GitHub bulk issue transfer', () => {
     });
     expect(database.default.select().from(schema.tasks).all()
       .filter((task) => seeded.taskIds.includes(task.id))
-      .map((task) => task.sourceId)).toEqual([
-      'owner/target:101',
-      'owner/target:102',
+      .map((task) => ({
+        sourceId: task.sourceId,
+        metadata: task.metadata,
+      }))).toEqual([
+      {
+        sourceId: 'owner/target:101',
+        metadata: {
+          issueNumber: 101,
+          nodeId: `I_${seeded.connectorId}_1`,
+          url: 'https://github.test/owner/target/issues/101',
+          retained: true,
+        },
+      },
+      {
+        sourceId: 'owner/target:102',
+        metadata: {
+          issueNumber: 102,
+          nodeId: `I_${seeded.connectorId}_2`,
+          url: 'https://github.test/owner/target/issues/102',
+          retained: true,
+        },
+      },
     ]);
     expect(database.default.select().from(schema.githubBulkTransferItems)
       .where((await import('drizzle-orm')).eq(
@@ -761,7 +780,12 @@ describe('GitHub bulk issue transfer', () => {
       id: seeded.taskIds[0],
       sourceId: 'owner/target:101',
       sourceListId: 'owner/target',
-      metadata: { issueNumber: 1, retained: true },
+      metadata: {
+        issueNumber: 101,
+        nodeId: successorStableId,
+        url: 'https://github.test/owner/target/issues/101',
+        retained: true,
+      },
     });
     expect(identities.readGitHubTaskTransferBinding(
       database.default,
@@ -1352,7 +1376,12 @@ function issueEvidence(
         entityType: 'issue',
         stableId,
       },
-      locator: { owner: 'owner', repository, issueNumber },
+      locator: {
+        owner: 'owner',
+        repository,
+        issueNumber,
+        webUrl: `https://github.test/owner/${repository}/issues/${issueNumber}`,
+      },
       observationSource: 'rest',
       observedAt: now.toISOString(),
     },

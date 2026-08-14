@@ -119,7 +119,20 @@ vi.mock('drizzle-orm', () => ({
 
 // ─── Connector mock ──────────────────────────────────────────────────────────
 
-const mockCreateTask = vi.fn(async () => ({ sourceId: 'new-source-123', title: 'Test' }));
+const mockCreateTask = vi.fn(async (task: { sourceListId?: string }) => {
+  if (task.sourceListId?.includes('/')) {
+    return {
+      sourceId: `${task.sourceListId}:123`,
+      title: 'Test',
+      metadata: {
+        issueNumber: 123,
+        nodeId: 'I_created',
+        url: `https://github.com/${task.sourceListId}/issues/123`,
+      },
+    };
+  }
+  return { sourceId: 'new-source-123', title: 'Test' };
+});
 const mockDeleteTask = vi.fn(async () => {});
 const mockCompleteTask = vi.fn(async () => {});
 const mockAddComment = vi.fn(async () => {});
@@ -600,7 +613,7 @@ describe('POST /api/tasks/move/execute', () => {
     const data = await res.json();
 
     expect(data.newTaskId).toBeDefined();
-    expect(data.newSourceId).toBe('new-source-123');
+    expect(data.newSourceId).toBe('acme/repo:123');
     expect(data.sourceAction).toBe('move');
     expect(mockCreateTask).toHaveBeenCalled();
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({
@@ -855,11 +868,26 @@ describe('POST /api/tasks/move/execute', () => {
   it('falls back to create-and-close for a fresh GitHub issue without transfer bindings', async () => {
     mockCanTransferTask.mockReturnValueOnce(false);
     mockConnectorDeleteSupported = false;
+    mockCreateTask.mockResolvedValueOnce({
+      sourceId: 'acme/repo-b:42',
+      title: 'Fresh issue',
+      metadata: {
+        issueNumber: 42,
+        nodeId: 'I_destination',
+        url: 'https://github.com/acme/repo-b/issues/42',
+      },
+    });
     selectResults.push([{
       id: 'task-1', title: 'Fresh issue', description: 'body', connectorType: 'github-issues',
       connectorInstanceId: 'inst-1', sourceListId: 'acme/repo-a', sourceListName: 'acme/repo-a',
       status: 'todo', priority: null, dueDate: null, assignee: null,
-      sourceId: 'acme/repo-a:10', metadata: null,
+      sourceId: 'acme/repo-a:10',
+      metadata: {
+        issueNumber: 10,
+        nodeId: 'I_source',
+        url: 'https://github.com/acme/repo-a/issues/10',
+        retained: true,
+      },
     }]);
     selectResults.push([{
       id: 'inst-1', type: 'github-issues', name: 'GitHub',
@@ -891,6 +919,16 @@ describe('POST /api/tasks/move/execute', () => {
       sourceListId: 'acme/repo-b',
     }));
     expect(mockCompleteTask).toHaveBeenCalledWith('acme/repo-a:10');
+    const insertedTask = mockTxValues.mock.calls
+      .map(([value]) => value)
+      .find((value) => value && !Array.isArray(value) && value.sourceId === 'acme/repo-b:42');
+    expect(insertedTask).toBeDefined();
+    expect(JSON.parse(insertedTask.metadata)).toMatchObject({
+      issueNumber: 42,
+      nodeId: 'I_destination',
+      url: 'https://github.com/acme/repo-b/issues/42',
+      retained: true,
+    });
   });
 
   it('does NOT use native transfer when sourceAction is copy (even if same owner)', async () => {
@@ -1190,7 +1228,7 @@ describe('POST /api/tasks/move/execute', () => {
     });
     const res = await POST(request);
     expect(res.status).toBe(500);
-    expect(mockDeleteTask).toHaveBeenCalledWith('new-source-123');
+    expect(mockDeleteTask).toHaveBeenCalledWith('acme/repo:123');
   });
 
   it('emits one terminal failure when tag write-back and compensation fail', async () => {

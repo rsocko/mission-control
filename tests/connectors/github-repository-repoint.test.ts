@@ -510,6 +510,14 @@ describe('GitHub repository repoint service', () => {
   it('transfers an issue only after stable identity checks and writes parser-safe routing', async () => {
     const seeded = seedRepository('native', 'native/repo-a', 'R_native_a', 'I_native');
     seedTargetRepository('native', 'native/repo-b', 'R_native_b');
+    database.default.update(schema.tasks).set({
+      metadata: {
+        issueNumber: 17,
+        nodeId: 'I_native',
+        url: 'https://github.test/native/repo-a/issues/17',
+        retained: true,
+      },
+    }).where(eq(schema.tasks.id, seeded.taskId)).run();
     const transferIssue = vi.fn(async () => 42);
     const remote: GitHubRepositoryRepointRemote = {
       async resolveRepository(repository) {
@@ -554,6 +562,12 @@ describe('GitHub repository repoint service', () => {
       id: seeded.taskId,
       sourceId: 'native/repo-b:42',
       sourceListId: 'native/repo-b',
+      metadata: {
+        issueNumber: 42,
+        nodeId: 'I_native',
+        url: 'https://github.test/native/repo-b/issues/42',
+        retained: true,
+      },
     });
     expect(database.default.select().from(schema.connectorOperationLeases)
       .where(eq(schema.connectorOperationLeases.connectorId, 'native')).all()).toEqual([]);
@@ -818,7 +832,12 @@ function issueObservation(
 ): ExternalIdentityObservation {
   return {
     identity: { provider: 'github', hostKey: 'github.com', entityType: 'issue', stableId },
-    locator: { owner, repository, issueNumber },
+    locator: {
+      owner,
+      repository,
+      issueNumber,
+      webUrl: `https://github.test/${owner}/${repository}/issues/${issueNumber}`,
+    },
     observationSource: 'rest',
     observedAt,
   };

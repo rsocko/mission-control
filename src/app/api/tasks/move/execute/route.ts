@@ -42,6 +42,7 @@ import {
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
+import { refreshGitHubIssueMetadata } from '@/lib/connectors/github-issues/issue-transformer';
 
 type SourceAction = 'move' | 'copy';
 type SubtaskStrategy =
@@ -573,6 +574,7 @@ export async function POST(request: Request) {
     >();
     const createdSubtasks: Array<{ sourceTaskId: string; created: TaskItem }> = [];
     const createdRemoteSourceIds: string[] = [];
+    let destinationMetadata: Record<string, unknown> = {};
     const newMcTaskId = crypto.randomUUID();
 
     // ════════════════════════════════════════════════════════════════════════
@@ -663,36 +665,43 @@ export async function POST(request: Request) {
       };
 
       const createDestination = async () => {
-      const createdTask = await targetConnector.createTask!(taskPayload);
-      newSourceId = createdTask.sourceId;
-      newTaskNativeId = newSourceId;
-      createdRemoteSourceIds.push(newSourceId);
-      if (targetConnectorRow.type === 'github-issues' && createdTask.externalIdentity) {
-        persistCreatedTaskIdentity({
-          taskId: newMcTaskId,
-          connectorInstanceId: targetConnectorInstanceId,
-          sourceId: createdTask.sourceId,
-          sourceListId: targetSourceListId,
-          evidence: createdTask.externalIdentity,
-        });
-      }
-      compensateRemoteCreation = targetConnector.type === 'github-issues' ? null : async () => {
-        const cleanupErrors: unknown[] = [];
-        for (const sourceId of [...createdRemoteSourceIds].reverse()) {
-          try {
-            if (targetConnector.deleteTask) {
-              await targetConnector.deleteTask(sourceId);
-            } else if (targetConnector.completeTask) {
-              await targetConnector.completeTask(sourceId);
+        const createdTask = await targetConnector.createTask!(taskPayload);
+        newSourceId = createdTask.sourceId;
+        newTaskNativeId = newSourceId;
+        destinationMetadata = targetConnectorRow.type === 'github-issues'
+          ? refreshGitHubIssueMetadata(
+              createdTask.metadata,
+              createdTask.sourceId,
+              createdTask.externalIdentity,
+            )
+          : parseMetadata(createdTask.metadata);
+        createdRemoteSourceIds.push(newSourceId);
+        if (targetConnectorRow.type === 'github-issues' && createdTask.externalIdentity) {
+          persistCreatedTaskIdentity({
+            taskId: newMcTaskId,
+            connectorInstanceId: targetConnectorInstanceId,
+            sourceId: createdTask.sourceId,
+            sourceListId: targetSourceListId,
+            evidence: createdTask.externalIdentity,
+          });
+        }
+        compensateRemoteCreation = targetConnector.type === 'github-issues' ? null : async () => {
+          const cleanupErrors: unknown[] = [];
+          for (const sourceId of [...createdRemoteSourceIds].reverse()) {
+            try {
+              if (targetConnector.deleteTask) {
+                await targetConnector.deleteTask(sourceId);
+              } else if (targetConnector.completeTask) {
+                await targetConnector.completeTask(sourceId);
+              }
+            } catch (error) {
+              cleanupErrors.push(error);
             }
-          } catch (error) {
-            cleanupErrors.push(error);
           }
-        }
-        if (cleanupErrors.length > 0) {
-          throw new AggregateError(cleanupErrors, 'One or more destination tasks could not be cleaned up');
-        }
-      };
+          if (cleanupErrors.length > 0) {
+            throw new AggregateError(cleanupErrors, 'One or more destination tasks could not be cleaned up');
+          }
+        };
 
       if (targetConnector.addTagToTask) {
         for (const tag of sourceTags) {
@@ -822,6 +831,7 @@ export async function POST(request: Request) {
 
     const provenanceMetadata = {
       ...parseMetadata(srcTask.metadata),
+      ...destinationMetadata,
       movedFrom: {
         taskId: srcTask.id,
         sourceId: srcTask.sourceId,

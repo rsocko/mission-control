@@ -161,8 +161,9 @@ describe('project hierarchy mutation entry points', () => {
     expect(addExistingResponse.status).toBe(200);
 
     const afterAdds = await loadSnapshot(projectId);
+    expect(afterAdds.revision).toBe(2);
     expect(afterAdds.phaseItemsByPhase[phaseIds[0]].map((item) => item.taskId))
-      .toEqual([taskIds.drag, taskIds.blocked, taskIds.created]);
+      .toEqual([taskIds.drag, taskIds.created, taskIds.blocked]);
     expect(afterAdds.phaseItemsByPhase[phaseIds[1]].map((item) => item.taskId))
       .toEqual([taskIds.existing]);
 
@@ -212,7 +213,7 @@ describe('project hierarchy mutation entry points', () => {
       { taskId: taskIds.existing, sortOrder: 0 },
       { taskId: taskIds.drag, sortOrder: 1 },
     ]);
-    expect(finalSnapshot.revision).toBeGreaterThan(afterAdds.revision);
+    expect(finalSnapshot.revision).toBe(5);
 
     const [dragItem] = await db.select().from(schema.projectPhaseItems)
       .where((await import('drizzle-orm')).eq(schema.projectPhaseItems.taskId, taskIds.drag));
@@ -221,6 +222,19 @@ describe('project hierarchy mutation entry points', () => {
       phaseId: phaseIds[1],
       estimatedEffortHours: 5,
     });
+    const audits = await db.select().from(schema.projectHierarchyCommands)
+      .where((await import('drizzle-orm')).eq(schema.projectHierarchyCommands.projectId, projectId));
+    expect(audits.map((audit) => ({
+      baseRevision: audit.baseRevision,
+      resultRevision: audit.resultRevision,
+      commandType: audit.commandType,
+    }))).toEqual([
+      { baseRevision: 0, resultRevision: 1, commandType: 'move_tasks' },
+      { baseRevision: 1, resultRevision: 2, commandType: 'assign_tasks' },
+      { baseRevision: 2, resultRevision: 3, commandType: 'move_tasks' },
+      { baseRevision: 3, resultRevision: 4, commandType: 'move_tasks' },
+      { baseRevision: 4, resultRevision: 5, commandType: 'move_tasks' },
+    ]);
 
     const staleResponse = await hierarchyRoute.POST(
       new Request(`http://localhost/api/projects/${projectId}/hierarchy`, {
@@ -286,13 +300,147 @@ describe('project hierarchy mutation entry points', () => {
     );
   });
 
+  it('records unchanged legacy assignments without advancing the revision', async () => {
+    const { db, schema, projectId, phaseIds, taskIds } = await seedEntryPointProject('unchanged');
+    const { POST } = await import('@/app/api/hub-projects/[id]/tasks/route');
+
+    const responses = await Promise.all([
+      POST(
+        new Request(`http://localhost/api/hub-projects/${projectId}/tasks`, {
+          method: 'POST',
+          body: JSON.stringify({ taskId: taskIds.drag, phaseId: phaseIds[0] }),
+        }),
+        { params: Promise.resolve({ id: projectId }) },
+      ),
+      POST(
+        new Request(`http://localhost/api/hub-projects/${projectId}/tasks`, {
+          method: 'POST',
+          body: JSON.stringify({ taskId: taskIds.created, phaseId: null }),
+        }),
+        { params: Promise.resolve({ id: projectId }) },
+      ),
+    ]);
+    expect(responses.map((response) => response.status)).toEqual([200, 200]);
+
+    const snapshot = await loadSnapshot(projectId);
+    const audits = await db.select().from(schema.projectHierarchyCommands)
+      .where((await import('drizzle-orm')).eq(schema.projectHierarchyCommands.projectId, projectId));
+    expect(snapshot.revision).toBe(0);
+    expect(snapshot.phaseItemsByPhase[phaseIds[0]].map((item) => item.taskId))
+      .toEqual([taskIds.drag, taskIds.blocked]);
+    expect(audits.map((audit) => ({
+      baseRevision: audit.baseRevision,
+      resultRevision: audit.resultRevision,
+      commandType: audit.commandType,
+    }))).toEqual([
+      { baseRevision: 0, resultRevision: 0, commandType: 'assign_tasks' },
+      { baseRevision: 0, resultRevision: 0, commandType: 'assign_tasks' },
+    ]);
+  });
+
+  it('does not let stale phase-scoped delete or reorder requests pull tasks from another phase', async () => {
+    const { projectId, phaseIds, taskIds } = await seedEntryPointProject('stale-phase');
+    const hierarchyRoute = await import('@/app/api/projects/[id]/hierarchy/route');
+    const phaseItemsRoute = await import('@/app/api/project-phases/[id]/items/route');
+    const reorderRoute = await import('@/app/api/project-phases/[id]/items/reorder/route');
+
+    const moved = await hierarchyRoute.POST(
+      new Request(`http://localhost/api/projects/${projectId}/hierarchy`, {
+        method: 'POST',
+        body: JSON.stringify({
+          commandId: '06060606-0606-4606-8606-060606060606',
+          expectedRevision: 0,
+          command: {
+            type: 'move_tasks',
+            taskIds: [taskIds.drag],
+            toPhaseId: phaseIds[1],
+            toIndex: 0,
+          },
+        }),
+      }),
+      { params: Promise.resolve({ id: projectId }) },
+    );
+    expect(moved.status).toBe(200);
+
+    const [removeResponse, reorderResponse] = await Promise.all([
+      phaseItemsRoute.DELETE(
+        new Request(
+          `http://localhost/api/project-phases/${phaseIds[0]}/items?task_id=${taskIds.drag}`,
+          { method: 'DELETE' },
+        ),
+        { params: Promise.resolve({ id: phaseIds[0] }) },
+      ),
+      reorderRoute.PUT(
+        new Request(`http://localhost/api/project-phases/${phaseIds[0]}/items/reorder`, {
+          method: 'PUT',
+          body: JSON.stringify({ orderedTaskIds: [taskIds.drag] }),
+        }),
+        { params: Promise.resolve({ id: phaseIds[0] }) },
+      ),
+    ]);
+    expect(removeResponse.status).toBe(409);
+    expect(reorderResponse.status).toBe(409);
+    expect(await removeResponse.json()).toMatchObject({ code: 'HIERARCHY_SOURCE_CONFLICT' });
+    expect(await reorderResponse.json()).toMatchObject({ code: 'HIERARCHY_SOURCE_CONFLICT' });
+
+    const snapshot = await loadSnapshot(projectId);
+    expect(snapshot.revision).toBe(1);
+    expect(snapshot.phaseItemsByPhase[phaseIds[1]].map((item) => item.taskId))
+      .toEqual([taskIds.drag]);
+  });
+
+  it('preserves an existing phase item position when duplicate POST omits sortOrder', async () => {
+    const { projectId, phaseIds, taskIds } = await seedEntryPointProject('duplicate-post');
+    const phaseItemsRoute = await import('@/app/api/project-phases/[id]/items/route');
+
+    const response = await phaseItemsRoute.POST(
+      new Request(`http://localhost/api/project-phases/${phaseIds[0]}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ taskId: taskIds.blocked }),
+      }),
+      { params: Promise.resolve({ id: phaseIds[0] }) },
+    );
+    expect(response.status).toBe(403);
+
+    const allowedResponse = await phaseItemsRoute.POST(
+      new Request(`http://localhost/api/project-phases/${phaseIds[0]}/items`, {
+        method: 'POST',
+        body: JSON.stringify({ taskId: taskIds.drag }),
+      }),
+      { params: Promise.resolve({ id: phaseIds[0] }) },
+    );
+    expect(allowedResponse.status).toBe(201);
+
+    const snapshot = await loadSnapshot(projectId);
+    expect(snapshot.revision).toBe(0);
+    expect(snapshot.phaseItemsByPhase[phaseIds[0]].map((item) => item.taskId))
+      .toEqual([taskIds.drag, taskIds.blocked]);
+  });
+
   it('blocks legacy placement and membership entry points without persisted changes', async () => {
     const { db, schema, projectId, phaseIds, taskIds } = await seedEntryPointProject('blocked');
     const phaseItemsRoute = await import('@/app/api/project-phases/[id]/items/route');
     const membershipRoute = await import('@/app/api/hub-projects/[id]/tasks/route');
+    const hierarchyRoute = await import('@/app/api/projects/[id]/hierarchy/route');
     const reorderRoute = await import('@/app/api/project-phases/[id]/items/reorder/route');
 
     const responses = await Promise.all([
+      hierarchyRoute.POST(
+        new Request(`http://localhost/api/projects/${projectId}/hierarchy`, {
+          method: 'POST',
+          body: JSON.stringify({
+            commandId: '05050505-0505-4505-8505-050505050505',
+            expectedRevision: 0,
+            command: {
+              type: 'move_tasks',
+              taskIds: [taskIds.blocked],
+              toPhaseId: phaseIds[1],
+              toIndex: 0,
+            },
+          }),
+        }),
+        { params: Promise.resolve({ id: projectId }) },
+      ),
       phaseItemsRoute.DELETE(
         new Request(
           `http://localhost/api/project-phases/${phaseIds[0]}/items?task_id=${taskIds.blocked}`,
@@ -315,7 +463,7 @@ describe('project hierarchy mutation entry points', () => {
         { params: Promise.resolve({ id: phaseIds[0] }) },
       ),
     ]);
-    expect(responses.map((response) => response.status)).toEqual([403, 403, 403]);
+    expect(responses.map((response) => response.status)).toEqual([403, 403, 403, 403]);
 
     const snapshot = await loadSnapshot(projectId);
     const memberships = await db.select().from(schema.taskProjects)

@@ -1697,33 +1697,18 @@ export default function ProjectDetailPage() {
   async function handleAddExistingTasksToPhase(taskIds: string[], phaseId: string | null) {
     if (!project) return;
     try {
-      // 1. Assign each task to the project
-      await Promise.all(
-        taskIds.map((taskId) =>
-          fetch(`/api/hub-projects/${project.id}/tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId }),
-          }),
-        ),
-      );
-
-      // 2. If a target phase was specified, also add each task to that phase
-      if (phaseId) {
-        const existingItems = phaseItemsByPhase[phaseId] ?? [];
-        const startOrder = existingItems.length > 0 ? Math.max(...existingItems.map((i) => i.sortOrder)) + 1 : 0;
-
-        await Promise.all(
-          taskIds.map((taskId, index) =>
-            fetch(`/api/project-phases/${phaseId}/items`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId, sortOrder: startOrder + index }),
-            }),
-          ),
-        );
-      }
-
+      const targetName = phaseId
+        ? phases.find((phase) => phase.id === phaseId)?.name ?? 'phase'
+        : 'the project';
+      await runHierarchyCommand({
+        type: 'assign_tasks',
+        taskIds,
+        toPhaseId: phaseId ?? undefined,
+        toIndex: phaseId ? (phaseItemsByPhase[phaseId] ?? []).length : undefined,
+      }, {
+        undoLabel: `Added ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}`,
+        announcement: `Added ${taskIds.length} task${taskIds.length > 1 ? 's' : ''} to ${targetName}`,
+      });
       toast.success(`Added ${taskIds.length} task${taskIds.length > 1 ? 's' : ''}`);
       void loadProjectDetail({ background: true });
     } catch (caughtError) {
@@ -1735,19 +1720,39 @@ export default function ProjectDetailPage() {
   async function handleNewTaskCreated(taskId: string, phaseId: string | null) {
     if (!project) return;
     try {
-      // The task was already created with projectIds via AddTaskModal.
-      // If a target phase was specified, also add the task to that phase.
-      if (phaseId) {
-        const existingItems = phaseItemsByPhase[phaseId] ?? [];
-        const nextOrder = existingItems.length > 0 ? Math.max(...existingItems.map((i) => i.sortOrder)) + 1 : 0;
-
-        await fetch(`/api/project-phases/${phaseId}/items`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ taskId, sortOrder: nextOrder }),
-        });
+      const targetName = phaseId
+        ? phases.find((phase) => phase.id === phaseId)?.name ?? 'phase'
+        : 'the project';
+      const command: ProjectHierarchyCommand = {
+        type: 'assign_tasks',
+        taskIds: [taskId],
+        toPhaseId: phaseId ?? undefined,
+        toIndex: phaseId ? (phaseItemsByPhase[phaseId] ?? []).length : undefined,
+      };
+      const options = {
+        undoLabel: 'Added new task',
+        announcement: `Added new task to ${targetName}`,
+      };
+      try {
+        await runHierarchyCommand(command, options);
+      } catch (error) {
+        if (
+          error instanceof ProjectHierarchyClientError
+          && error.code === 'HIERARCHY_REVISION_CONFLICT'
+        ) {
+          await runHierarchyCommand(
+            phaseId && error.current
+              ? {
+                  ...command,
+                  toIndex: error.current.phaseItemsByPhase[phaseId]?.length ?? 0,
+                }
+              : command,
+            options,
+          );
+        } else {
+          throw error;
+        }
       }
-
       void loadProjectDetail({ background: true });
     } catch (caughtError) {
       toast.error(caughtError instanceof Error ? caughtError.message : 'Failed to assign task to phase');
@@ -4028,6 +4033,7 @@ export default function ProjectDetailPage() {
             initialDestination={addTaskDestinations[0]}
             destinations={addTaskDestinations}
             initialProjectId={projectId}
+            deferProjectAssignment
             onTaskCreated={(taskId) => {
               const phaseId = showCreateTaskForPhaseId === '__project__' ? null : showCreateTaskForPhaseId;
               void handleNewTaskCreated(taskId, phaseId);

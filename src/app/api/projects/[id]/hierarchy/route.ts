@@ -34,7 +34,7 @@ export async function POST(
       return ApiErrors.badRequest(parsed.error.issues[0]?.message ?? 'Invalid hierarchy command');
     }
 
-    const result = applyProjectHierarchyCommand({
+    const result = await applyProjectHierarchyCommand({
       projectId,
       request: parsed.data,
       actor: { type: 'user' },

@@ -43,7 +43,7 @@ interface CaptureSourceList {
   name: string;
 }
 
-interface CachedCaptureDestination {
+interface CachedConfiguredCaptureDestination {
   destination: CaptureDestination;
   source: CaptureSource;
 }
@@ -55,14 +55,15 @@ const LOCAL_CAPTURE_SOURCE: CaptureSource = {
   listSelectionMode: 'not-applicable',
 };
 const DEFAULT_LIST_VALUE = '__default__';
-const CAPTURE_DESTINATION_STORAGE_KEY = 'mission-control:capture-destination';
+const LEGACY_CAPTURE_DESTINATION_STORAGE_KEY = 'mission-control:capture-destination';
+const CONFIGURED_CAPTURE_DESTINATION_STORAGE_KEY = 'mission-control:configured-capture-destination:v1';
 
-function readCachedCaptureDestination(): CachedCaptureDestination | null {
+function readCachedConfiguredDestination(): CachedConfiguredCaptureDestination | null {
   if (typeof window === 'undefined') return null;
   try {
-    const raw = window.localStorage.getItem(CAPTURE_DESTINATION_STORAGE_KEY);
+    const raw = window.localStorage.getItem(CONFIGURED_CAPTURE_DESTINATION_STORAGE_KEY);
     if (!raw) return null;
-    const cached = JSON.parse(raw) as Partial<CachedCaptureDestination>;
+    const cached = JSON.parse(raw) as Partial<CachedConfiguredCaptureDestination>;
     if (
       typeof cached.destination?.connectorType !== 'string'
       || typeof cached.source?.id !== 'string'
@@ -73,21 +74,22 @@ function readCachedCaptureDestination(): CachedCaptureDestination | null {
     ) {
       return null;
     }
-    return cached as CachedCaptureDestination;
+    return cached as CachedConfiguredCaptureDestination;
   } catch (error) {
-    console.error('Failed to read cached capture destination:', error);
+    console.error('Failed to read cached configured capture destination:', error);
     return null;
   }
 }
 
-function cacheCaptureDestination(destination: CaptureDestination, source: CaptureSource): void {
+function cacheConfiguredDestination(destination: CaptureDestination, source: CaptureSource): void {
   try {
     window.localStorage.setItem(
-      CAPTURE_DESTINATION_STORAGE_KEY,
-      JSON.stringify({ destination, source } satisfies CachedCaptureDestination),
+      CONFIGURED_CAPTURE_DESTINATION_STORAGE_KEY,
+      JSON.stringify({ destination, source } satisfies CachedConfiguredCaptureDestination),
     );
+    window.localStorage.removeItem(LEGACY_CAPTURE_DESTINATION_STORAGE_KEY);
   } catch (error) {
-    console.error('Failed to cache capture destination:', error);
+    console.error('Failed to cache configured capture destination:', error);
   }
 }
 
@@ -208,17 +210,7 @@ export default function CapturePageInner() {
 
   useEffect(() => {
     const abortController = new AbortController();
-    const cachedDestination = readCachedCaptureDestination();
-    if (cachedDestination) {
-      configuredDestinationRef.current = cachedDestination.destination;
-      void Promise.resolve().then(() => {
-        if (abortController.signal.aborted) return;
-        setDefaultDest(cachedDestination.destination);
-        setCaptureSources(cachedDestination.source.type === 'local'
-          ? [LOCAL_CAPTURE_SOURCE]
-          : [LOCAL_CAPTURE_SOURCE, cachedDestination.source]);
-      });
-    }
+    const cachedConfiguredDestination = readCachedConfiguredDestination();
 
     void Promise.all([
       fetch('/api/settings/capture-destination', { signal: abortController.signal }),
@@ -263,11 +255,11 @@ export default function CapturePageInner() {
           };
         configuredDestinationRef.current = resolvedDestination;
         setDefaultDest(resolvedDestination);
-        cacheCaptureDestination(resolvedDestination, savedSource);
+        cacheConfiguredDestination(resolvedDestination, savedSource);
       } else {
         configuredDestinationRef.current = { connectorType: 'local' };
         setDefaultDest({ connectorType: 'local' });
-        cacheCaptureDestination({ connectorType: 'local' }, LOCAL_CAPTURE_SOURCE);
+        cacheConfiguredDestination({ connectorType: 'local' }, LOCAL_CAPTURE_SOURCE);
       }
 
       const listResults = await Promise.allSettled(remoteSources.map((source) => (
@@ -293,10 +285,16 @@ export default function CapturePageInner() {
     }).catch((error: unknown) => {
       if (abortController.signal.aborted) return;
       console.error('Failed to load capture destinations:', error);
-      setDestinationLoadError(cachedDestination
+      setDestinationLoadError(cachedConfiguredDestination
         ? 'Using your saved destination while destination data is unavailable.'
         : 'Destinations are temporarily unavailable. Captures will save locally.');
-      if (!cachedDestination) {
+      if (cachedConfiguredDestination) {
+        configuredDestinationRef.current = cachedConfiguredDestination.destination;
+        setDefaultDest(cachedConfiguredDestination.destination);
+        setCaptureSources(cachedConfiguredDestination.source.type === 'local'
+          ? [LOCAL_CAPTURE_SOURCE]
+          : [LOCAL_CAPTURE_SOURCE, cachedConfiguredDestination.source]);
+      } else {
         configuredDestinationRef.current = { connectorType: 'local' };
         setDefaultDest({ connectorType: 'local' });
       }

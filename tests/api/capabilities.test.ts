@@ -4,7 +4,7 @@
  * Verifies that API routes respect connector capability flags (write, delete)
  * and block all mutations when a connector is disabled.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import type { ConnectorCapabilities } from '@/types';
 
 // ─── Controllable mocks ────────────────────────────────────────────────────
@@ -25,6 +25,7 @@ const localTaskLifecycleMocks = vi.hoisted(() => ({
 let mockTagLinks: Array<{ tagId: string }> = [];
 let mockTags: Array<{ id: string; name: string }> = [];
 let mockPersistedUpdates: Record<string, unknown>[] = [];
+let patchTask: typeof import('@/app/api/tasks/[id]/route')['PATCH'];
 
 vi.mock('@/lib/connectors/capabilities', () => ({
   getConnectorCapabilities: vi.fn(() => Promise.resolve(mockCapabilities)),
@@ -220,6 +221,10 @@ function deleteRequest(taskId: string) {
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
+beforeAll(async () => {
+  ({ PATCH: patchTask } = await import('@/app/api/tasks/[id]/route'));
+}, 30_000);
+
 beforeEach(() => {
   process.env.MC_API_KEY = 'test-api-key';
   mockTask = { ...REMOTE_TASK };
@@ -239,8 +244,7 @@ beforeEach(() => {
 
 describe('PATCH /api/tasks/[id] — capability enforcement', () => {
   it('allows writes when connector has write capability', async () => {
-    const { PATCH } = await import('@/app/api/tasks/[id]/route');
-    const res = await PATCH(
+    const res = await patchTask(
       patchRequest('task-1', { title: 'Updated' }),
       { params: Promise.resolve({ id: 'task-1' }) },
     );

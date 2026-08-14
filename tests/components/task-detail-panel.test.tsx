@@ -752,9 +752,11 @@ describe('TaskDetailPanel redesigned presentations', () => {
       return input!;
     });
 
-    fireEvent.click(checkbox);
+    await act(async () => {
+      fireEvent.click(checkbox);
+    });
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('Failed to save notes'));
+    expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
     expect(checkbox).not.toBeChecked();
   });
 

@@ -47,7 +47,7 @@ import {
 
 const SWIPE_HANDLE_THRESHOLD = 88;
 
-type BulkAction = 'read' | 'handle' | 'dismiss' | 'mute' | 'unmute';
+type BulkAction = 'read' | 'mark_unread' | 'handle' | 'dismiss' | 'mute' | 'unmute';
 type UnreadLevelStatKey = 'urgent' | 'actionNeeded' | 'headsUp' | 'fyi';
 
 interface MobileNotificationStats {
@@ -399,16 +399,20 @@ function NotificationRow({
   notification,
   onHandle,
   onOpen,
+  onToggleRead,
   prefersReducedMotion,
 }: {
   notification: NotificationItem;
   onHandle: (id: string) => Promise<void>;
   onOpen: (notification: NotificationItem) => Promise<void>;
+  onToggleRead: (notification: NotificationItem) => Promise<void>;
   prefersReducedMotion: boolean;
 }) {
   const x = useMotionValue(0);
-  const actionOpacity = useTransform(x, [-SWIPE_HANDLE_THRESHOLD, -16, 0], [1, 0.6, 0]);
+  const handleActionOpacity = useTransform(x, [-SWIPE_HANDLE_THRESHOLD, -16, 0], [1, 0.6, 0]);
+  const readActionOpacity = useTransform(x, [0, 16, SWIPE_HANDLE_THRESHOLD], [0, 0.6, 1]);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [isUpdatingRead, setIsUpdatingRead] = useState(false);
   const wasDraggedRef = useRef(false);
   const hapticTriggered = useRef(false);
 
@@ -427,6 +431,18 @@ function NotificationRow({
     }
   }, [isRemoving, notification.id, onHandle]);
 
+  const toggleRead = useCallback(async () => {
+    if (isRemoving || isUpdatingRead) return;
+    setIsUpdatingRead(true);
+
+    try {
+      await onToggleRead(notification);
+    } finally {
+      setIsUpdatingRead(false);
+      x.set(0);
+    }
+  }, [isRemoving, isUpdatingRead, notification, onToggleRead, x]);
+
   const handleDragStart = useCallback(() => {
     wasDraggedRef.current = false;
     hapticTriggered.current = false;
@@ -436,10 +452,10 @@ function NotificationRow({
     if (Math.abs(info.offset.x) > 8) {
       wasDraggedRef.current = true;
     }
-    if (info.offset.x <= -SWIPE_HANDLE_THRESHOLD && !hapticTriggered.current) {
+    if (Math.abs(info.offset.x) >= SWIPE_HANDLE_THRESHOLD && !hapticTriggered.current) {
       triggerHaptic('medium');
       hapticTriggered.current = true;
-    } else if (info.offset.x > -SWIPE_HANDLE_THRESHOLD) {
+    } else if (Math.abs(info.offset.x) < SWIPE_HANDLE_THRESHOLD) {
       hapticTriggered.current = false;
     }
   }, []);
@@ -452,19 +468,25 @@ function NotificationRow({
         return;
       }
 
+      if (info.offset.x >= SWIPE_HANDLE_THRESHOLD) {
+        triggerHaptic('medium');
+        await toggleRead();
+        return;
+      }
+
       x.set(0);
     },
-    [handleNotification, x]
+    [handleNotification, toggleRead, x]
   );
 
   const handleActivate = useCallback(async () => {
-    if (wasDraggedRef.current || isRemoving) {
+    if (wasDraggedRef.current || isRemoving || isUpdatingRead) {
       wasDraggedRef.current = false;
       return;
     }
 
     await onOpen(notification);
-  }, [isRemoving, notification, onOpen]);
+  }, [isRemoving, isUpdatingRead, notification, onOpen]);
 
   const handleKeyDown = useCallback(
     async (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -488,11 +510,22 @@ function NotificationRow({
       <motion.div
         aria-hidden="true"
         className="absolute inset-0 flex items-center justify-end rounded-[18px] bg-red-500/12 pr-5"
-        style={{ opacity: actionOpacity }}
+        style={{ opacity: handleActionOpacity }}
       >
         <div className="flex items-center gap-2 text-red-300">
           <Trash2 className="h-4 w-4" />
           <span className="text-xs font-medium">Handle</span>
+        </div>
+      </motion.div>
+
+      <motion.div
+        aria-hidden="true"
+        className="absolute inset-0 flex items-center justify-start rounded-[18px] bg-sky-500/12 pl-5"
+        style={{ opacity: readActionOpacity }}
+      >
+        <div className="flex items-center gap-2 text-sky-300">
+          {unread ? <CheckCircle className="h-4 w-4" /> : <BellRing className="h-4 w-4" />}
+          <span className="text-xs font-medium">{unread ? 'Mark read' : 'Mark unread'}</span>
         </div>
       </motion.div>
 
@@ -510,8 +543,8 @@ function NotificationRow({
         style={{ x }}
         drag="x"
         dragDirectionLock
-        dragConstraints={{ left: -128, right: 0 }}
-        dragElastic={{ left: 0.04, right: 0 }}
+        dragConstraints={{ left: -128, right: 128 }}
+        dragElastic={{ left: 0.04, right: 0.04 }}
         dragMomentum={false}
         onDragStart={handleDragStart}
         onDrag={handleDrag}
@@ -774,6 +807,30 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       throw handleError;
     }
   }, [fetchNotifications, notifications]);
+
+  const handleToggleRead = useCallback(async (notification: NotificationItem) => {
+    const nextState = isNotificationUnread(notification) ? 'read' : 'unread';
+
+    setNotifications(current => current.flatMap(item => {
+      if (item.id !== notification.id) return [item];
+      if ((filters.state === 'unread' || filters.state === 'read') && filters.state !== nextState) {
+        return [];
+      }
+      return [{ ...item, state: nextState, readState: nextState }];
+    }));
+    setStats(current => adjustUnreadStats(
+      current,
+      [notification],
+      nextState === 'unread' ? 1 : -1,
+    ));
+
+    try {
+      await bulkUpdate([notification.id], nextState === 'read' ? 'read' : 'mark_unread');
+    } catch (readError) {
+      await fetchNotifications();
+      throw readError;
+    }
+  }, [fetchNotifications, filters.state]);
 
   const muteNotification = useCallback(async (notification: NotificationItem) => {
     setNotifications(current => current.filter(item => item.id !== notification.id));
@@ -1061,6 +1118,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
                     notification={notification}
                     onHandle={handleNotification}
                     onOpen={handleOpenNotification}
+                    onToggleRead={handleToggleRead}
                     prefersReducedMotion={prefersReducedMotion}
                   />
                 ))}

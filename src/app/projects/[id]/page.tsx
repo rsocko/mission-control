@@ -27,11 +27,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import {
-  addDays,
   differenceInCalendarDays,
-  format,
-  isAfter,
-  isBefore,
   startOfDay,
 } from 'date-fns';
 import {
@@ -85,10 +81,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
-import { TaskContextMenu, type HubProject } from '@/components/task-list/TaskContextMenu';
+import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
-import { dropdownVariants, fadeSlideUp, scaleIn, staggerContainer } from '@/lib/motion';
+import { fadeSlideUp, scaleIn, staggerContainer } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -96,7 +92,6 @@ import type {
   AutoIncludeRule,
   ProjectHealth,
   ProjectStatus,
-  SourceBinding,
   TaskPriority,
   TaskStatus,
 } from '@/types';
@@ -109,21 +104,13 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { projectLogger } from '@/lib/client-logger';
-import { useSyncStream } from '@/lib/hooks/useSyncStream';
-import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
-import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import {
-  executeProjectHierarchyCommand,
-  loadProjectHierarchy,
   ProjectHierarchyClientError,
-  ProjectHierarchyUndoTracker,
 } from '@/lib/projects/hierarchy-client';
 import type {
   ProjectHierarchyCommand,
-  ProjectHierarchySnapshot,
 } from '@/lib/projects/hierarchy-types';
-import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import {
   BulkActionBar,
   BulkDispositionButtons,
@@ -138,14 +125,10 @@ import {
 
 
 import type {
-  GanttPhaseRow,
   GanttZoom,
   PhaseItem,
-  PhaseTaskEntry,
   PhaseViewMode,
-  ProgressSummary,
   ProjectPhase,
-  ProjectRecord,
   ProjectRuleMatch,
   ProjectTab,
   ProjectTask,
@@ -153,8 +136,6 @@ import type {
 } from './types';
 import {
   BUTTON_TRANSITION,
-  GANTT_ROW_HEIGHT,
-  HEALTH_LABELS,
   LEFT_GANTT_COLUMN_WIDTH,
   PHASE_STATUS_LABELS,
   PHASE_STATUS_ORDER,
@@ -174,15 +155,11 @@ import {
   getHealthSummary,
   getPhaseColor,
   getPhaseStatusColor,
-  getPriorityDotColor,
-  getProgressSummary,
   getProjectTabCount,
   getProjectStatus,
   getTaskStatusColor,
   getTimelineRange,
-  parseLocalDate,
   sortTasks,
-  syncTaskPhaseMemberships,
   toRgba,
 } from './utils';
 import {
@@ -220,7 +197,12 @@ import type {
 } from '@/types/dashboard';
 import { resolveProjectIconColor } from '@/lib/projects/normalize-project';
 import { ProjectActionsCard } from './ProjectActionsCard';
-import { useProjectTaskActions } from './useProjectTaskActions';
+import {
+  ProjectPageProvider,
+  useProjectPageData,
+  useProjectPageMutations,
+  useProjectPageTaskInteractions,
+} from './context';
 
 type AddTaskDest = { id: string; label: string; connectorType: string; account: 'personal' | 'work' | null; color: string; listSelectionMode?: 'required' | 'optional' | 'not-applicable' };
 const LOCAL_DESTINATION: AddTaskDest = { id: 'local', label: 'Local', connectorType: 'local', account: null, color: 'var(--text-muted)' };
@@ -234,14 +216,64 @@ const ProjectStructureGraph = dynamic(
 
 export default function ProjectDetailPage() {
   const params = useParams<{ id: string }>();
+  const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
+
+  return (
+    <ProjectPageProvider projectId={projectId}>
+      <ProjectDetailContent projectId={projectId} />
+    </ProjectPageProvider>
+  );
+}
+
+function ProjectDetailContent({ projectId }: { projectId: string }) {
+  const currentProjectIdRef = useRef(projectId);
+  currentProjectIdRef.current = projectId;
   const searchParams = useSearchParams();
   const router = useRouter();
   const prefersReducedMotion = useReducedMotion() ?? false;
-  const projectId = Array.isArray(params.id) ? params.id[0] : params.id;
-  const currentProjectIdRef = useRef(projectId);
-  currentProjectIdRef.current = projectId;
   const initialTab = searchParams.get('tab') as ProjectTab | null;
   const initialAction = searchParams.get('action');
+  const {
+    error,
+    loading,
+    phaseEntries,
+    phaseItemsByPhase,
+    phaseMenuItems,
+    phases,
+    progress,
+    project,
+    reportRefreshKey,
+    tasks,
+    taskToPhase,
+  } = useProjectPageData();
+  const {
+    hierarchyAnnouncement,
+    loadProjectDetail,
+    refreshProjectHierarchy,
+    runHierarchyCommand,
+    setPhaseItemsByPhase,
+    setPhases,
+    setProject,
+    setTasks,
+  } = useProjectPageMutations();
+  const {
+    allProjects,
+    cancelPendingDeselect,
+    completingIds,
+    getTaskContextActions,
+    handleAddToMyDay,
+    handleCompleteTask,
+    handleGraphTaskSelect,
+    handleRemoveFromMyDay,
+    myDayTaskIds,
+    selectedTaskId,
+    setSelectedTaskId,
+    toggleTask,
+  } = useProjectPageTaskInteractions();
+  const taskSelection = useMemo(() => ({
+    cancelPendingDeselect,
+    toggleTask,
+  }), [cancelPendingDeselect, toggleTask]);
 
   // Persist last-selected project for quick return
   useEffect(() => {
@@ -254,25 +286,9 @@ export default function ProjectDetailPage() {
   const [phaseViewMode, setPhaseViewMode] = useState<PhaseViewMode>('list');
   const [reportingPhaseId, setReportingPhaseId] = useState<string | null>(null);
   const [ganttZoom, setGanttZoom] = useState<GanttZoom>('week');
-  const [project, setProject] = useState<ProjectRecord | null>(null);
-  const [phases, setPhases] = useState<ProjectPhase[]>([]);
-  const [tasks, setTasks] = useState<ProjectTask[]>([]);
   const [ruleMatches, setRuleMatches] = useState<ProjectRuleMatch[]>([]);
   const [ruleMatchesLoading, setRuleMatchesLoading] = useState(false);
   const [savingRules, setSavingRules] = useState(false);
-  const [phaseItemsByPhase, setPhaseItemsByPhase] = useState<Record<string, PhaseItem[]>>({});
-  const hierarchyRevisionRef = useRef(0);
-  const hierarchyProjectIdRef = useRef<string | null>(null);
-  const hierarchyUndoTrackerRef = useRef(new ProjectHierarchyUndoTracker());
-  const loadRequestIdRef = useRef(0);
-  const loadedProjectIdRef = useRef<string | null>(null);
-  const [hierarchyAnnouncement, setHierarchyAnnouncement] = useState('');
-  const reportRefreshKey = useMemo(() => [
-    ...tasks.map((task) => `${task.id}:${task.status}:${task.effort ?? ''}:${task.updatedAt}`),
-    ...Object.entries(phaseItemsByPhase)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([phaseId, items]) => `${phaseId}:${items.map((item) => item.taskId).sort().join(',')}`),
-  ].join('|'), [phaseItemsByPhase, tasks]);
   const [collapsedPhaseIds, setCollapsedPhaseIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -292,8 +308,13 @@ export default function ProjectDetailPage() {
   const [taskEffortFilter, setTaskEffortFilter] = useState<TaskEffortFilter>('all');
   const [taskSortBy, setTaskSortBy] = useState<'priority' | 'dueDate' | 'updated' | 'title'>('priority');
   const [taskSortDir, setTaskSortDir] = useState<'asc' | 'desc'>('asc');
-  const [allProjects, setAllProjects] = useState<HubProject[]>([]);
-  const [loading, setLoading] = useState(true);
+  const taskFilterProjectIdRef = useRef(projectId);
+  useEffect(() => {
+    if (taskFilterProjectIdRef.current === projectId) return;
+    taskFilterProjectIdRef.current = projectId;
+    setTaskFilterContext(EMPTY_TASK_FILTER_CONTEXT);
+    setTaskEffortFilter('all');
+  }, [projectId]);
   const [creatingPhase, setCreatingPhase] = useState(false);
   const savingPhaseCountsRef = useRef(new Map<string, number>());
   const [savingPhaseIds, setSavingPhaseIds] = useState<Set<string>>(new Set());
@@ -301,19 +322,7 @@ export default function ProjectDetailPage() {
   const [isProposalOpen, setIsProposalOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
-  const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
-
-  useEffect(() => {
-    if (!project || project.id !== projectId) return;
-
-    setQuickAddFilter({
-      projectFilter: project.id,
-      projectFilterName: project.name,
-    });
-    return () => clearQuickAddFilter();
-  }, [clearQuickAddFilter, project?.id, project?.name, projectId, setQuickAddFilter]);
 
   function startSavingPhase(phaseId: string) {
     if (savingPhaseCountsRef.current.size > 0) return false;
@@ -430,20 +439,11 @@ export default function ProjectDetailPage() {
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
 
   // ── Task detail panel & actions ─────────────────────────────────────────
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const taskSelection = useTaskSelection({
-    selectedTaskId,
-    onSelectionChange: setSelectedTaskId,
-  });
-  const handleGraphTaskSelect = useCallback((taskId: string | null) => {
-    taskSelection.cancelPendingDeselect();
-    setSelectedTaskId(taskId);
-  }, [taskSelection.cancelPendingDeselect]);
   const handlePhaseDependencyRemoved = useCallback((phaseId: string) => {
     setPhases((current) => current.map((phase) => (
       phase.id === phaseId ? { ...phase, startAfterPhaseId: null } : phase
     )));
-  }, []);
+  }, [setPhases]);
   const [phaseTaskSearch, setPhaseTaskSearch] = useState('');
   const bulk = useBulkSelection();
   const selectedBulkTasks = tasks.filter((task) => bulk.bulkSelected.has(task.id));
@@ -466,21 +466,6 @@ export default function ProjectDetailPage() {
     return closestCenter(...args);
   }, []);
 
-  const applyHierarchySnapshot = useCallback((snapshot: ProjectHierarchySnapshot) => {
-    if (snapshot.projectId !== currentProjectIdRef.current) return;
-    if (
-      hierarchyProjectIdRef.current === snapshot.projectId
-      && snapshot.revision < hierarchyRevisionRef.current
-    ) {
-      return;
-    }
-    hierarchyProjectIdRef.current = snapshot.projectId;
-    hierarchyRevisionRef.current = snapshot.revision;
-    setPhases(snapshot.phases);
-    setPhaseItemsByPhase(snapshot.phaseItemsByPhase);
-    setTasks((current) => syncTaskPhaseMemberships(current, snapshot));
-  }, []);
-
   const loadProjectTasks = useCallback(async () => {
     return fetchAllTasks<ProjectTask>(`/api/tasks?projectId=${projectId}&parentOnly=true&sortBy=updated`);
   }, [projectId]);
@@ -494,7 +479,9 @@ export default function ProjectDetailPage() {
         throw new Error(payload?.error || 'Failed to load qualifying tasks');
       }
       const payload = (await response.json()) as { matches?: ProjectRuleMatch[] };
-      if (projectId === currentProjectIdRef.current) setRuleMatches(payload.matches ?? []);
+      if (projectId === currentProjectIdRef.current) {
+        setRuleMatches(payload.matches ?? []);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Failed to load qualifying tasks');
     } finally {
@@ -535,7 +522,7 @@ export default function ProjectDetailPage() {
     } finally {
       if (projectId === currentProjectIdRef.current) setSavingRules(false);
     }
-  }, [loadProjectTasks, loadRuleMatches, projectId]);
+  }, [loadProjectTasks, loadRuleMatches, projectId, setProject, setTasks]);
 
   const restoreAutoIncludedTask = useCallback(async (taskId: string) => {
     setSavingRules(true);
@@ -556,224 +543,11 @@ export default function ProjectDetailPage() {
     } finally {
       if (projectId === currentProjectIdRef.current) setSavingRules(false);
     }
-  }, [loadProjectTasks, loadRuleMatches, projectId]);
-
-  const discardHierarchyUndos = useCallback(() => {
-    const undoEntryIds = hierarchyUndoTrackerRef.current.clear();
-    for (const undoEntryId of undoEntryIds) {
-      useUndoStore.getState().removeEntry(undoEntryId);
-      toast.dismiss(undoEntryId);
-    }
-  }, []);
-
-  const reconcileHierarchyConflict = useCallback(async (snapshot: ProjectHierarchySnapshot) => {
-    if (snapshot.projectId !== currentProjectIdRef.current) return;
-    discardHierarchyUndos();
-    applyHierarchySnapshot(snapshot);
-    try {
-      const currentTasks = await loadProjectTasks();
-      if (projectId === currentProjectIdRef.current) setTasks(currentTasks);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to reconcile project tasks');
-    }
-  }, [applyHierarchySnapshot, discardHierarchyUndos, loadProjectTasks, projectId]);
-
-  const runHierarchyCommand = useCallback(async (
-    command: ProjectHierarchyCommand,
-    options: { undoLabel: string; announcement: string },
-  ) => {
-    const commandId = crypto.randomUUID();
-    try {
-      const result = await executeProjectHierarchyCommand({
-        projectId,
-        expectedRevision: hierarchyRevisionRef.current,
-        command,
-        commandId,
-      });
-      if (projectId !== currentProjectIdRef.current) return result;
-      applyHierarchySnapshot(result.hierarchy);
-      hierarchyUndoTrackerRef.current.push(commandId, result.revision);
-      setHierarchyAnnouncement(options.announcement);
-      const undoEntryId = pushUndoWithToast(options.undoLabel, async () => {
-        try {
-          const undoResult = await executeProjectHierarchyCommand({
-            projectId,
-            expectedRevision: hierarchyUndoTrackerRef.current.expectedRevision(commandId),
-            command: result.inverseCommand,
-          });
-          applyHierarchySnapshot(undoResult.hierarchy);
-          hierarchyUndoTrackerRef.current.complete(commandId, undoResult.revision);
-          setHierarchyAnnouncement(`Undid: ${options.announcement}`);
-        } catch (error) {
-          if (error instanceof ProjectHierarchyClientError && error.current) {
-            await reconcileHierarchyConflict(error.current);
-          }
-          throw error;
-        }
-      }, {
-        validationError: () => hierarchyUndoTrackerRef.current.validationError(commandId),
-      });
-      hierarchyUndoTrackerRef.current.attachUndoEntry(commandId, undoEntryId);
-      return result;
-    } catch (error) {
-      if (error instanceof ProjectHierarchyClientError && error.current) {
-        await reconcileHierarchyConflict(error.current);
-      }
-      throw error;
-    }
-  }, [applyHierarchySnapshot, projectId, reconcileHierarchyConflict]);
-
-  const loadProjectDetail = useCallback(async (
-    { background = false }: { background?: boolean } = {},
-  ) => {
-    if (!projectId) return;
-    const requestId = ++loadRequestIdRef.current;
-    const projectChanged = loadedProjectIdRef.current !== projectId;
-    const refreshInBackground = background && loadedProjectIdRef.current === projectId;
-
-    if (projectChanged) {
-      setTaskFilterContext(EMPTY_TASK_FILTER_CONTEXT);
-      setTaskEffortFilter('all');
-    }
-    if (!refreshInBackground) {
-      setLoading(true);
-      setError(null);
-    }
-
-    try {
-      const [projectResponse, hierarchy, tasksResponse] = await Promise.all([
-        fetch(`/api/hub-projects/${projectId}`),
-        loadProjectHierarchy(projectId),
-        loadProjectTasks(),
-      ]);
-
-      if (!projectResponse.ok) {
-        const payload = (await projectResponse.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error || 'Failed to load project');
-      }
-      const projectPayload = (await projectResponse.json()) as { project: ProjectRecord };
-      if (
-        requestId !== loadRequestIdRef.current
-        || projectId !== currentProjectIdRef.current
-      ) return;
-
-      setProject(projectPayload.project);
-      loadedProjectIdRef.current = projectId;
-      if (
-        hierarchyProjectIdRef.current === hierarchy.projectId
-        && hierarchy.revision !== hierarchyRevisionRef.current
-      ) {
-        discardHierarchyUndos();
-      }
-      applyHierarchySnapshot(hierarchy);
-      setTasks(syncTaskPhaseMemberships(tasksResponse, hierarchy));
-    } catch (caughtError) {
-      if (
-        requestId !== loadRequestIdRef.current
-        || projectId !== currentProjectIdRef.current
-      ) return;
-      const message = caughtError instanceof Error ? caughtError.message : 'Failed to load project detail';
-      if (!refreshInBackground) setError(message);
-      toast.error(message);
-    } finally {
-      if (
-        requestId === loadRequestIdRef.current
-        && projectId === currentProjectIdRef.current
-      ) {
-        setLoading(false);
-      }
-    }
-  }, [applyHierarchySnapshot, discardHierarchyUndos, loadProjectTasks, projectId]);
-
-  const refreshProjectHierarchy = useCallback(async () => {
-    const hierarchy = await loadProjectHierarchy(projectId);
-    if (hierarchy.revision !== hierarchyRevisionRef.current) discardHierarchyUndos();
-    applyHierarchySnapshot(hierarchy);
-  }, [applyHierarchySnapshot, discardHierarchyUndos, projectId]);
-
-  const removeTaskFromView = useCallback((taskId: string) => {
-    setTasks((current) => current.filter((task) => task.id !== taskId));
-    setPhaseItemsByPhase((current) => {
-      const next: Record<string, PhaseItem[]> = {};
-      for (const [phaseId, items] of Object.entries(current)) {
-        next[phaseId] = items.filter((item) => item.taskId !== taskId);
-      }
-      return next;
-    });
-    setSelectedTaskId((current) => current === taskId ? null : current);
-  }, []);
-
-  const stageProjectTaskRemoval = useCallback((taskId: string) => {
-    const previousTasks = tasks;
-    const previousPhaseItems = phaseItemsByPhase;
-    const previousSelectedTaskId = selectedTaskId;
-
-    removeTaskFromView(taskId);
-    return () => {
-      setTasks(previousTasks);
-      setPhaseItemsByPhase(previousPhaseItems);
-      setSelectedTaskId(previousSelectedTaskId);
-    };
-  }, [
-    phaseItemsByPhase,
-    removeTaskFromView,
-    selectedTaskId,
-    tasks,
-  ]);
-
-  const {
-    completingIds,
-    getTaskContextActions,
-    handleAddToMyDay,
-    handleCompleteTask,
-    handleRemoveFromMyDay,
-    myDayTaskIds,
-  } = useProjectTaskActions({
-    projectId,
-    tasks,
-    setTasks,
-    phases,
-    phaseItemsByPhase,
-    projects: allProjects,
-    removeTaskFromView,
-    stageProjectTaskRemoval,
-    refreshProjectHierarchy,
-    runHierarchyCommand,
-  });
-
-  useEffect(() => {
-    discardHierarchyUndos();
-    void loadProjectDetail();
-  }, [discardHierarchyUndos, loadProjectDetail]);
+  }, [loadProjectTasks, loadRuleMatches, projectId, setTasks]);
 
   useEffect(() => {
     if (activeTab === 'settings') void loadRuleMatches();
   }, [activeTab, loadRuleMatches]);
-
-  // Re-fetch project data when a sync completes (refetchKey increments)
-  const { progress: syncProgress } = useSyncStream();
-  const prevRefetchKeyRef = useRef(syncProgress.refetchKey);
-  useEffect(() => {
-    if (syncProgress.refetchKey > prevRefetchKeyRef.current) {
-      prevRefetchKeyRef.current = syncProgress.refetchKey;
-      const timeoutId = window.setTimeout(() => {
-        void loadProjectDetail({ background: true });
-      }, 500);
-      return () => window.clearTimeout(timeoutId);
-    }
-  }, [syncProgress.refetchKey, loadProjectDetail]);
-
-  // Load all projects for "Add to Project" context menu
-  useEffect(() => {
-    fetch('/api/hub-projects?includePhases=true')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.projects) {
-          setAllProjects(data.projects as HubProject[]);
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   // Auto-trigger AI suggest when navigated with ?action=ai-suggest
   useEffect(() => {
@@ -784,7 +558,6 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, project]);
 
-  const progress = useMemo(() => getProgressSummary(tasks), [tasks]);
   const health = useMemo(() => {
     if (!project) {
       return { health: 'on_track' as ProjectHealth, message: 'Loading health…' };
@@ -809,18 +582,6 @@ export default function ProjectDetailPage() {
       ),
     [tasks],
   );
-  const phaseEntries = useMemo(() => {
-    return phases.reduce<Record<string, PhaseTaskEntry[]>>((accumulator, phase) => {
-      const entries = (phaseItemsByPhase[phase.id] ?? [])
-        .map((item) => {
-          const task = taskMap.get(item.taskId);
-          return task ? { item, task } : null;
-        })
-        .filter((entry): entry is PhaseTaskEntry => entry !== null);
-      accumulator[phase.id] = entries;
-      return accumulator;
-    }, {});
-  }, [phaseItemsByPhase, phases, taskMap]);
   const graphRefreshKey = useMemo(() => JSON.stringify({
     phases: phases.map((phase) => [
       phase.id,
@@ -834,20 +595,6 @@ export default function ProjectDetailPage() {
     ]),
     tasks: tasks.map((task) => [task.id, task.status, task.updatedAt]),
   }), [phaseItemsByPhase, phases, tasks]);
-
-  const taskToPhase = useMemo(() => {
-    const mapping = new Map<string, ProjectPhase>();
-    for (const phase of phases) {
-      for (const item of phaseItemsByPhase[phase.id] ?? []) {
-        if (!mapping.has(item.taskId)) {
-          mapping.set(item.taskId, phase);
-        }
-      }
-    }
-    return mapping;
-  }, [phaseItemsByPhase, phases]);
-
-  const phaseMenuItems = useMemo(() => phases.map((p) => ({ id: p.id, name: p.name })), [phases]);
 
   // Tasks in the project that are not assigned to any phase
   const unassignedTasks = useMemo(() => {

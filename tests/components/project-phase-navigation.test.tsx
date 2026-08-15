@@ -30,11 +30,15 @@ const hierarchy: ProjectHierarchySnapshot = {
 };
 
 const syncState = vi.hoisted(() => ({ refetchKey: 0 }));
+const navigation = vi.hoisted(() => ({
+  push: vi.fn(),
+  search: '',
+}));
 
 vi.mock('next/navigation', () => ({
   useParams: () => ({ id: 'project-1' }),
-  useRouter: () => ({ push: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: navigation.push }),
+  useSearchParams: () => new URLSearchParams(navigation.search),
 }));
 
 vi.mock('@/lib/projects/hierarchy-client', async (importOriginal) => {
@@ -116,6 +120,8 @@ class TestResizeObserver {
 describe('project phase navigation', () => {
   beforeEach(() => {
     syncState.refetchKey = 0;
+    navigation.push.mockReset();
+    navigation.search = '';
     localStorage.clear();
     localStorage.setItem('project-phases-collapsed:project-1', JSON.stringify([phase.id]));
     vi.stubGlobal('ResizeObserver', TestResizeObserver);
@@ -199,6 +205,51 @@ describe('project phase navigation', () => {
       '/api/tasks?projectId=project-1&parentOnly=true&sortBy=updated&limit=200&offset=0',
       undefined,
     );
+  });
+
+  it('uses the initial tab query without turning tab switches into navigation', async () => {
+    navigation.search = 'tab=tasks';
+
+    render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Project tasks' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+
+    expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
+
+  it('keeps the unavailable state retryable after a foreground load failure', async () => {
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    let projectAttempts = 0;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/hub-projects/project-1' && projectAttempts++ === 0) {
+        return {
+          ok: false,
+          json: async () => ({ error: 'Temporary project failure' }),
+        } as Response;
+      }
+      if (!defaultFetch) throw new Error('Missing fetch implementation');
+      return defaultFetch(input, init);
+    });
+
+    render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Project unavailable' })).toBeInTheDocument();
+    expect(screen.getByText('Temporary project failure')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByText('Test Project')).toBeInTheDocument();
+    expect(projectAttempts).toBe(2);
   });
 
   it('keeps only the graph toolbar non-sticky and omits its unused search field', async () => {

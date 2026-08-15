@@ -84,6 +84,12 @@ export {
   projectHierarchyMutationContext,
 } from './projects';
 
+// User-authored graph workspace artifacts and immutable checkpoints
+export {
+  graphWorkspaces,
+  graphWorkspaceVersions,
+} from './graph-workspaces';
+
 // Notifications
 export {
   notifications,

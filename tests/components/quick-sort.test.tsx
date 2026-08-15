@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ModeSelector from '@/components/quick-sort/ModeSelector';
 import QuickSortActions from '@/components/quick-sort/QuickSortActions';
-import QuickSortCard from '@/components/quick-sort/QuickSortCard';
+import QuickSortCard, { getQuickSortSwipeAction } from '@/components/quick-sort/QuickSortCard';
 import type { QuickSortQueueTask } from '@/lib/hooks/useQuickSortData';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
@@ -268,6 +268,7 @@ describe('Quick Sort plan/schedule queue', () => {
         stackIndex={0}
         onAcceptSuggestions={vi.fn()}
         onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
@@ -285,6 +286,7 @@ describe('Quick Sort plan/schedule queue', () => {
         stackIndex={0}
         onAcceptSuggestions={vi.fn()}
         onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
       />,
     );
 
@@ -292,5 +294,37 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(content).toHaveClass('min-h-0', 'overflow-y-auto', 'overscroll-contain', 'touch-pan-y');
     expect(content).toHaveAttribute('tabindex', '0');
     expect(content).toHaveAttribute('aria-label', 'Task details');
+  });
+
+  it('treats swipe up as a skip gesture without changing horizontal swipe actions', () => {
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 0,
+      offsetY: -120,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('skip');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'x',
+      offsetX: -120,
+      offsetY: -160,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: true,
+      hasFocusedSuggestion: false,
+    })).toBe('acceptSuggestions');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 0,
+      offsetY: -40,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('snapBack');
   });
 });

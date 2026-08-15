@@ -383,6 +383,7 @@ export function SidebarFilters(props: SidebarFiltersProps) {
               { id: 'week', label: 'Due This Week' },
               { id: 'assigned', label: 'Assigned to Me' },
               { id: 'recentlyCreated', label: 'Recently Created' },
+              { id: 'recentlyClosed', label: 'Recently Closed' },
               { id: 'waiting', label: 'Waiting / On Hold' },
             ].map(f => (
               <label key={f.id} className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
@@ -460,6 +461,15 @@ export function SidebarFilters(props: SidebarFiltersProps) {
             count={taskResponse.stats.recentlyCreated || 0}
             active={quickFilter === 'recentlyCreated'}
             onClick={() => setQuickFilter(quickFilter === 'recentlyCreated' ? null : 'recentlyCreated')}
+          />
+          )}
+          {!hiddenQuickFilters.includes('recentlyClosed') && (
+          <SidebarNavItem
+            icon={<CheckCircle2 size={14} className="text-violet-400" />}
+            label="Recently Closed"
+            count={taskResponse.stats.recentlyClosed || 0}
+            active={quickFilter === 'recentlyClosed'}
+            onClick={() => setQuickFilter(quickFilter === 'recentlyClosed' ? null : 'recentlyClosed')}
           />
           )}
           {!hiddenQuickFilters.includes('waiting') && (

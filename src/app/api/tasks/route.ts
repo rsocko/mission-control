@@ -277,6 +277,8 @@ export async function GET(request: Request) {
         ? dir(tasks.dueDate)
         : sortBy === 'createdAt'
           ? dir(tasks.createdAt)
+          : sortBy === 'completedAt'
+            ? dir(tasks.completedAt)
           : sortBy === 'updated'
             ? dir(tasks.updatedAt)
             : sortBy === 'title'

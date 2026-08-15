@@ -54,6 +54,16 @@ import {
 } from '@/lib/tasks/client-edit-policy';
 import type { TaskField } from '@/types';
 
+function isRecentQuickFilter(quickFilter: string | null): boolean {
+  return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
+}
+
+function getRecentQuickFilterSortBy(quickFilter: string | null, fallback: string): string {
+  if (quickFilter === 'recentlyCreated') return 'createdAt';
+  if (quickFilter === 'recentlyClosed') return 'completedAt';
+  return fallback;
+}
+
 export interface TaskDestination {
   id: string;
   label: string;
@@ -589,9 +599,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [collapsedSections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Quick filter sort/group overrides
-  const effectiveSortBy = quickFilter === 'recentlyCreated' ? 'createdAt' : sortBy;
-  const effectiveSortDirection = quickFilter === 'recentlyCreated' ? 'desc' : sortDirection;
-  const effectiveGroupBy = quickFilter === 'recentlyCreated' ? 'none' : groupBy;
+  const effectiveSortBy = getRecentQuickFilterSortBy(quickFilter, sortBy);
+  const effectiveSortDirection = isRecentQuickFilter(quickFilter) ? 'desc' : sortDirection;
+  const effectiveGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
   const taskFilterContext = useMemo(() => taskFilterContextFromDashboard({
     sourceFilter,
     listFilter,
@@ -720,9 +730,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     if (includeScoreBreakdown) initial.set('includeScoreBreakdown', 'true');
     const params = taskFilterContextToTaskQuery(taskFilterContext, initial);
 
-    const eSortBy = quickFilter === 'recentlyCreated' ? 'createdAt' : currentSortBy;
-    const eSortDir = quickFilter === 'recentlyCreated' ? 'desc' : currentSortDirection;
-    const eGroupBy = quickFilter === 'recentlyCreated' ? 'none' : groupBy;
+    const eSortBy = getRecentQuickFilterSortBy(quickFilter, currentSortBy);
+    const eSortDir = isRecentQuickFilter(quickFilter) ? 'desc' : currentSortDirection;
+    const eGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
     if (eSortBy && eSortBy !== 'priority') params.set('sortBy', eSortBy);
     if (eSortDir && eSortDir !== 'asc') params.set('sortDirection', eSortDir);
     if (eGroupBy && eGroupBy !== 'none') params.set('groupBy', eGroupBy);
@@ -800,7 +810,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         setMyDayItemStatuses(new Map(myDayItemsArr.map(i => [i.taskId, i.status])));
 
         // Fetch group total counts when groupBy is active
-        const activeGroupBy = quickFilter === 'recentlyCreated' ? 'none' : groupBy;
+        const activeGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
         if (activeGroupBy && activeGroupBy !== 'none') {
           const initial = new URLSearchParams({
             groupBy: activeGroupBy,
@@ -863,7 +873,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   // ─── Load More For Group ────────────────────────────────────────────────────
 
   const loadMoreForGroup = useCallback(async (groupLabel: string) => {
-    const activeGroupBy = quickFilter === 'recentlyCreated' ? 'none' : groupBy;
+    const activeGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
     if (!activeGroupBy || activeGroupBy === 'none') return;
 
     setLoadingMoreGroups((prev) => new Set(prev).add(groupLabel));

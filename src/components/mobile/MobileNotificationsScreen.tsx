@@ -469,7 +469,6 @@ function NotificationRow({
       }
 
       if (info.offset.x >= SWIPE_HANDLE_THRESHOLD) {
-        triggerHaptic('medium');
         await toggleRead();
         return;
       }

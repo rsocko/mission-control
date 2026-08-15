@@ -35,6 +35,8 @@ let embeddingsTableReady = false;
 let embeddingsSeedSignature: string | null = null;
 let rebuildPromise: Promise<void> | null = null;
 let rebuildBarrier: Promise<void> | null = null;
+let routeRetryAfter = 0;
+let routeRetryFailures = 0;
 
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
@@ -76,6 +78,14 @@ const CANDIDATE_PAGE_SIZE = Math.min(
   500,
 );
 const embeddingCache = new EmbeddingCache(CACHE_MAX_ENTRIES, CACHE_MAX_BYTES);
+const ROUTE_RETRY_BASE_MS = positiveInteger(
+  process.env.MC_SEMANTIC_ROUTE_RETRY_BASE_MS,
+  30_000,
+);
+const ROUTE_RETRY_MAX_MS = positiveInteger(
+  process.env.MC_SEMANTIC_ROUTE_RETRY_MAX_MS,
+  5 * 60_000,
+);
 
 const searchMetrics = {
   searches: 0,
@@ -430,6 +440,28 @@ function getEmbeddingSeedSignature(
   return `${config.provider}\0${config.model}\0${route.provider}\0${route.model}`;
 }
 
+function isEmbeddingRouteChangeError(error: unknown): boolean {
+  if (error instanceof AggregateError) {
+    return error.errors.some(isEmbeddingRouteChangeError);
+  }
+  return error instanceof Error
+    && error.message === 'Embedding route changed during rebuild';
+}
+
+function deferRouteRetry() {
+  routeRetryFailures += 1;
+  const delay = Math.min(
+    ROUTE_RETRY_BASE_MS * (2 ** (routeRetryFailures - 1)),
+    ROUTE_RETRY_MAX_MS,
+  );
+  routeRetryAfter = Date.now() + delay;
+}
+
+function clearRouteRetry() {
+  routeRetryFailures = 0;
+  routeRetryAfter = 0;
+}
+
 async function requestEmbedding(
   text: string,
   config: EmbeddingConfig,
@@ -591,9 +623,16 @@ async function maybeSeedEmbeddings() {
     .all() as Array<{ count: number }>;
 
   if (compatibleIndexedCount < taskCount + notificationCount) {
+    if (routeRetryAfter > Date.now()) {
+      return;
+    }
     try {
       await rebuildEmbeddingIndex();
+      clearRouteRetry();
     } catch (error) {
+      if (isEmbeddingRouteChangeError(error)) {
+        deferRouteRetry();
+      }
       aiLogger.warn({ err: error }, 'Embedding index seed failed; retaining last-good rows');
       return;
     }

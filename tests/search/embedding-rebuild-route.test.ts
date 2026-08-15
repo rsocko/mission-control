@@ -130,4 +130,24 @@ describe('embedding index rebuild routing', () => {
       WHERE entity_id = 'route-b'
     `).get()).toEqual({ count: 0 });
   });
+
+  it('backs off repeated seed rebuilds after route instability', async () => {
+    await seedTask('retry-a');
+    await seedTask('retry-b');
+    routeOutcomes = [
+      { provider: 'ollama', model: 'nomic-embed-text:latest', fallbackOccurred: false },
+      { provider: 'ollama', model: 'nomic-embed-text:latest', fallbackOccurred: false },
+      { provider: 'ollama', model: 'different-embed-model', fallbackOccurred: true },
+    ];
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ embedding: embedding(3) }] }), { status: 200 }),
+    );
+
+    const { warmUpEmbeddings } = await import('@/lib/search/semantic');
+
+    await warmUpEmbeddings();
+    await warmUpEmbeddings();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
 });

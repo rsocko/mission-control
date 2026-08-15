@@ -874,7 +874,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(boldButton).toHaveClass('min-h-8', 'min-w-8');
     expect(within(notesDialog).getByRole('button', { name: 'Italic' })).toBeInTheDocument();
     expect(within(notesDialog).getByRole('button', { name: 'Insert link' })).toBeInTheDocument();
-    expect(within(notesDialog).getByRole('button', { name: 'Inline code' })).toBeInTheDocument();
+    expect(within(notesDialog).getByRole('button', { name: 'Code' })).toBeInTheDocument();
     expect(within(notesDialog).getByRole('button', { name: 'Bulleted list' })).toBeInTheDocument();
   });
 

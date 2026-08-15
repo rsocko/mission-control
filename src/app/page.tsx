@@ -32,7 +32,6 @@ import {
 } from '@/lib/tasks/client-edit-policy';
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
-import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { useTaskListVirtualization } from '@/lib/hooks/useTaskListVirtualization';
 import { useVirtualFlip } from '@/lib/hooks/useVirtualFlip';
@@ -81,7 +80,6 @@ export default function DashboardPage() {
 function DashboardPageInner() {
   const { state, actions, computed } = useDashboardData();
   const prefersReducedMotion = useReducedMotion() ?? false;
-  const { progress: syncProgress } = useSyncStream();
   const { toggleSection, isCollapsed } = useDashboardSections();
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
@@ -149,7 +147,6 @@ function DashboardPageInner() {
       <DashboardSidebar
         state={state}
         actions={actions}
-        isSyncing={syncProgress.isSyncing || state.isSyncing}
         sourceHasLists={computed.sourceHasLists}
         getSourceListsForType={computed.getSourceListsForType}
         originHref="/"

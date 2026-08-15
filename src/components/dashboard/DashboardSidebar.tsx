@@ -12,7 +12,6 @@ import type {
 interface DashboardSidebarProps {
   state: DashboardState;
   actions: DashboardActions;
-  isSyncing: boolean;
   sourceHasLists: DashboardComputed['sourceHasLists'];
   getSourceListsForType: DashboardComputed['getSourceListsForType'];
   originHref: string;
@@ -23,7 +22,6 @@ interface DashboardSidebarProps {
 export function DashboardSidebar({
   state,
   actions,
-  isSyncing,
   sourceHasLists,
   getSourceListsForType,
   originHref,
@@ -36,7 +34,6 @@ export function DashboardSidebar({
       enabledSources={state.enabledSources}
       sourceLists={state.sourceLists}
       listGroups={state.listGroups}
-      syncStatus={state.syncStatus}
       allTags={state.allTags}
       projects={state.projects}
       savedViews={state.savedViews}
@@ -57,7 +54,6 @@ export function DashboardSidebar({
       listSearch={state.listSearch}
       tagSearch={state.tagSearch}
       tagsExpanded={state.tagsExpanded}
-      isSyncing={isSyncing}
       setSourceFilter={actions.setSourceFilter}
       setListFilter={actions.setListFilter}
       setListGroupFilter={actions.setListGroupFilter}

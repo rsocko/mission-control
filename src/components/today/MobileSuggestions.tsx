@@ -162,12 +162,15 @@ function MobileSuggestionAccordion({
     });
   }, [tasks, sortable, sortDir]);
 
-  // Reset to first page when sort direction changes or tasks list changes
-  useEffect(() => { setPageIndex(0); }, [sortDir, tasks]);
-
   const totalPages = Math.ceil(sortedTasks.length / PAGE_SIZE);
   const clampedPage = Math.min(pageIndex, Math.max(0, totalPages - 1));
   const visibleTasks = sortedTasks.slice(clampedPage * PAGE_SIZE, (clampedPage + 1) * PAGE_SIZE);
+
+  useEffect(() => {
+    if (totalPages > 0 && pageIndex >= totalPages) {
+      setPageIndex(totalPages - 1);
+    }
+  }, [pageIndex, totalPages]);
 
   const handleToggle = useCallback(() => {
     onToggle(groupKey);
@@ -218,7 +221,10 @@ function MobileSuggestionAccordion({
             {sortable && (
               <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center">
                 <button
-                  onClick={() => setSortDir((d) => d === 'asc' ? 'desc' : 'asc')}
+                  onClick={() => {
+                    setSortDir((dir) => dir === 'asc' ? 'desc' : 'asc');
+                    setPageIndex(0);
+                  }}
                   className="text-xs text-[var(--text-muted)] active:text-[var(--text-secondary)] flex items-center gap-1.5 min-h-[36px] transition-colors"
                 >
                   <ArrowUpDown size={12} />

@@ -408,6 +408,28 @@ interface GeneratedEmbedding {
   model: string;
 }
 
+interface EmbeddingRoute {
+  provider: string;
+  model: string;
+}
+
+function getConfiguredEmbeddingRoute(config: EmbeddingConfig): EmbeddingRoute {
+  const outcome = getAIRouteOutcome(config.context, {
+    modelId: config.model,
+  });
+  return {
+    provider: outcome.provider,
+    model: outcome.model,
+  };
+}
+
+function getEmbeddingSeedSignature(
+  config: Pick<EmbeddingConfig, 'provider' | 'model'>,
+  route: EmbeddingRoute,
+) {
+  return `${config.provider}\0${config.model}\0${route.provider}\0${route.model}`;
+}
+
 async function requestEmbedding(
   text: string,
   config: EmbeddingConfig,
@@ -550,7 +572,8 @@ async function maybeSeedEmbeddings() {
   if (!config) {
     return;
   }
-  const signature = `${config.provider}\0${config.model}`;
+  const route = getConfiguredEmbeddingRoute(config);
+  const signature = getEmbeddingSeedSignature(config, route);
   if (embeddingsSeedSignature === signature) return;
 
   const [{ count: compatibleIndexedCount }] = sqlite
@@ -559,7 +582,7 @@ async function maybeSeedEmbeddings() {
       FROM search_embeddings
       WHERE provider = ? AND model = ?
     `)
-    .all(config.provider, config.model) as Array<{ count: number }>;
+    .all(route.provider, route.model) as Array<{ count: number }>;
   const [{ count: taskCount }] = sqlite
     .prepare('SELECT COUNT(*) AS count FROM tasks')
     .all() as Array<{ count: number }>;
@@ -603,6 +626,7 @@ async function stageEntityEmbedding(
   sourceBody: string | null,
   sourceSortAt: string,
   rebuildConfig: Pick<EmbeddingConfig, 'provider' | 'model'>,
+  rebuildRoute: { current: EmbeddingRoute | null },
 ): Promise<boolean> {
   const config = await getEmbeddingConfig(sources);
   if (
@@ -614,9 +638,14 @@ async function stageEntityEmbedding(
   }
   const generated = await requestEmbedding(text, config);
   if (!generated) return false;
-  if (
-    generated.provider !== rebuildConfig.provider
-    || generated.model !== rebuildConfig.model
+  if (!rebuildRoute.current) {
+    rebuildRoute.current = {
+      provider: generated.provider,
+      model: generated.model,
+    };
+  } else if (
+    generated.provider !== rebuildRoute.current.provider
+    || generated.model !== rebuildRoute.current.model
   ) {
     throw new Error('Embedding route changed during rebuild');
   }
@@ -627,13 +656,13 @@ async function stageEntityEmbedding(
       source_title, source_body, source_sort_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    getEntityEmbeddingId(type, id, config.provider, config.model),
+    getEntityEmbeddingId(type, id, generated.provider, generated.model),
     type,
     id,
     JSON.stringify(generated.embedding),
     new Date().toISOString(),
-    config.provider,
-    config.model,
+    generated.provider,
+    generated.model,
     sourceTitle,
     sourceBody ?? '',
     sourceSortAt,
@@ -650,6 +679,8 @@ async function performEmbeddingIndexRebuild() {
   }
   const config = await getEmbeddingConfig();
   if (!config) return;
+  const configuredRoute = getConfiguredEmbeddingRoute(config);
+  const rebuildRoute: { current: EmbeddingRoute | null } = { current: null };
 
   const BATCH_CONCURRENCY = 5;
   const PAGE_SIZE = 100;
@@ -716,6 +747,7 @@ async function performEmbeddingIndexRebuild() {
               task.description,
               task.sortAt,
               config,
+              rebuildRoute,
             );
           }),
         );
@@ -760,6 +792,7 @@ async function performEmbeddingIndexRebuild() {
               notification.body,
               notification.sortAt,
               config,
+              rebuildRoute,
             );
           }),
         );
@@ -771,9 +804,10 @@ async function performEmbeddingIndexRebuild() {
 
     sqlite.exec('BEGIN IMMEDIATE');
     try {
+      const committedRoute = rebuildRoute.current ?? configuredRoute;
       sqlite.prepare(`
         DELETE FROM search_embeddings WHERE provider = ? AND model = ?
-      `).run(config.provider, config.model);
+      `).run(committedRoute.provider, committedRoute.model);
       sqlite.prepare(`
         INSERT INTO search_embeddings (
           id, entity_type, entity_id, embedding, updated_at, provider, model,
@@ -814,7 +848,10 @@ async function performEmbeddingIndexRebuild() {
       sqlite.exec('ROLLBACK');
       throw error;
     }
-    embeddingsSeedSignature = `${config.provider}\0${config.model}`;
+    embeddingsSeedSignature = getEmbeddingSeedSignature(
+      config,
+      rebuildRoute.current ?? configuredRoute,
+    );
   } finally {
     sqlite.exec('DROP TABLE IF EXISTS search_embeddings_rebuild');
   }

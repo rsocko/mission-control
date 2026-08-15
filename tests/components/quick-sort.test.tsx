@@ -309,6 +309,16 @@ describe('Quick Sort plan/schedule queue', () => {
     })).toBe('skip');
 
     expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 0,
+      offsetY: 0,
+      velocityX: 0,
+      velocityY: -600,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('skip');
+
+    expect(getQuickSortSwipeAction({
       axis: 'x',
       offsetX: -120,
       offsetY: -160,

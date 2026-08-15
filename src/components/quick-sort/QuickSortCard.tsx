@@ -255,7 +255,7 @@ export default function QuickSortCard({
           ? 'What tags apply?'
           : 'When is it due?';
 
-  // Cards behind top card are scaled down and shifted up slightly
+  // Cards behind the top card render as passive stack layers.
   const isTop = stackIndex === 0;
 
   if (!isTop) {

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { PhaseAddTaskMenu } from '@/app/projects/[id]/components';
 
 describe('PhaseAddTaskMenu', () => {
@@ -24,19 +25,24 @@ describe('PhaseAddTaskMenu', () => {
     expect(onLinkExisting).toHaveBeenCalledOnce();
   });
 
-  it('supports keyboard navigation and returns focus on Escape', () => {
-    const onClose = vi.fn();
+  it('supports keyboard navigation and returns focus after closing on Escape', async () => {
+    function MenuHarness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <div data-phase-add-menu>
+          <button type="button" aria-haspopup="menu">Add task</button>
+          {open ? (
+            <PhaseAddTaskMenu
+              onCreateNew={vi.fn()}
+              onLinkExisting={vi.fn()}
+              onClose={() => setOpen(false)}
+            />
+          ) : null}
+        </div>
+      );
+    }
 
-    render(
-      <div data-phase-add-menu>
-        <button type="button" aria-haspopup="menu">Add task</button>
-        <PhaseAddTaskMenu
-          onCreateNew={vi.fn()}
-          onLinkExisting={vi.fn()}
-          onClose={onClose}
-        />
-      </div>,
-    );
+    render(<MenuHarness />);
 
     const createItem = screen.getByRole('menuitem', { name: 'Create new task' });
     const linkItem = screen.getByRole('menuitem', { name: 'Link existing task' });
@@ -46,7 +52,9 @@ describe('PhaseAddTaskMenu', () => {
     expect(linkItem).toHaveFocus();
 
     fireEvent.keyDown(linkItem, { key: 'Escape' });
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'Add task' })).toHaveFocus();
+    await waitFor(() => {
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Add task' })).toHaveFocus();
+    });
   });
 });

@@ -351,4 +351,90 @@ describe('project phase navigation', () => {
       });
     });
   });
+
+  it('holds the shell in a loading state until the project resolves', async () => {
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    let resolveProject!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/hub-projects/project-1') {
+        return new Promise<Response>((resolve) => { resolveProject = resolve; });
+      }
+      if (!defaultFetch) throw new Error('Missing fetch implementation');
+      return defaultFetch(input, init);
+    });
+
+    const view = render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => expect(resolveProject).toBeTypeOf('function'));
+    expect(view.container.querySelector('.animate-pulse')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
+
+    resolveProject({
+      ok: true,
+      json: async () => ({
+        project: {
+          id: 'project-1',
+          name: 'Test Project',
+          sourceBindings: [],
+          autoIncludeRules: [],
+          kanbanColumns: [],
+          metadata: {},
+        },
+      }),
+    } as Response);
+
+    expect(await screen.findByText('Test Project')).toBeInTheDocument();
+    expect(view.container.querySelector('.animate-pulse')).not.toBeInTheDocument();
+  });
+
+  it('routes back to the project list when the project is missing', async () => {
+    const defaultFetch = vi.mocked(fetch).getMockImplementation();
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/hub-projects/project-1') {
+        return { ok: true, json: async () => ({}) } as Response;
+      }
+      if (!defaultFetch) throw new Error('Missing fetch implementation');
+      return defaultFetch(input, init);
+    });
+
+    render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Project not found' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Back to Projects' }))
+      .toHaveAttribute('href', '/projects');
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+  });
+
+  it('starts on Overview without a tab query and shows no panel for an unknown one', async () => {
+    const overview = render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+    expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
+    overview.unmount();
+
+    navigation.search = 'tab=not-a-tab';
+    render(
+      <TooltipProvider>
+        <ProjectDetailPage />
+      </TooltipProvider>,
+    );
+
+    expect(await screen.findByText('Test Project')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Description' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Plan' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Overview' }));
+    expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
+    expect(navigation.push).not.toHaveBeenCalled();
+  });
 });

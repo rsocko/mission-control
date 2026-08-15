@@ -135,9 +135,9 @@ function hasInactiveSyncJobOwner(
     status: syncJobs.status,
     leaseExpiresAt: syncJobs.leaseExpiresAt,
   }).from(syncJobs).where(eq(syncJobs.id, run.jobId)).limit(1).get();
-  return !owner
-    || owner.connectorId !== run.connectorInstanceId
-    || owner.status !== 'running'
+  if (!owner) return true;
+  if (owner.connectorId !== run.connectorInstanceId) return false;
+  return owner.status !== 'running'
     || !owner.leaseExpiresAt
     || owner.leaseExpiresAt <= now;
 }

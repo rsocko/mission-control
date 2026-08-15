@@ -340,7 +340,7 @@ export default function QuickSortCard({
       >
         <div
           aria-label="Task details"
-          className="flex min-h-0 flex-1 touch-none flex-col gap-4 overflow-y-auto overscroll-contain p-5"
+          className="flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overscroll-contain p-5"
           role="region"
           tabIndex={0}
         >

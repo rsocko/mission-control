@@ -291,7 +291,8 @@ describe('Quick Sort plan/schedule queue', () => {
     );
 
     const content = screen.getByRole('heading', { level: 2 }).parentElement;
-    expect(content).toHaveClass('min-h-0', 'overflow-y-auto', 'overscroll-contain', 'touch-none');
+    expect(content).toHaveClass('min-h-0', 'overflow-y-auto', 'overscroll-contain', 'touch-pan-y');
+    expect(content?.parentElement).toHaveClass('touch-none');
     expect(content).toHaveAttribute('tabindex', '0');
     expect(content).toHaveAttribute('aria-label', 'Task details');
   });

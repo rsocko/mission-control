@@ -305,11 +305,50 @@ describe('project detail shell', () => {
     expect(request.signal?.aborted).toBe(false);
 
     view.unmount();
-    expect(request.signal?.aborted).toBe(true);
+    await waitFor(() => expect(request.signal?.aborted).toBe(true));
 
     await act(async () => {
       releaseCategories();
     });
+  });
+
+  it('keeps the Settings request lifetime usable through Strict Mode replay', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Strict Project' },
+      categoryResponses: [['Strict category'], ['Next project category']],
+    });
+    const view = await renderProjectTab('Settings', { strictMode: true });
+
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1));
+    const firstRequest = harness.requestsFor('/api/projects-overview')[0];
+    expect(firstRequest.signal?.aborted).toBe(false);
+    expect(await screen.findByDisplayValue('Strict Project')).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector(
+      '#project-category-options option[value="Strict category"]',
+    )).toBeInTheDocument());
+
+    await openProjectTab('Overview');
+    await openProjectTab('Settings');
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1);
+    expect(firstRequest.signal?.aborted).toBe(false);
+
+    navigationState.projectId = 'project-2';
+    const nextProjectPage = await projectPageElement({ strictMode: true });
+    await act(async () => {
+      view.rerender(nextProjectPage);
+    });
+
+    expect(await screen.findByDisplayValue('Project project-2')).toBeInTheDocument();
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(2));
+    await waitFor(() => expect(firstRequest.signal?.aborted).toBe(true));
+    await waitFor(() => expect(document.querySelector(
+      '#project-category-options option[value="Next project category"]',
+    )).toBeInTheDocument());
+
+    const secondRequest = harness.requestsFor('/api/projects-overview')[1];
+    expect(secondRequest.signal?.aborted).toBe(false);
+    view.unmount();
+    await waitFor(() => expect(secondRequest.signal?.aborted).toBe(true));
   });
 
   it('applies an Overview phase reveal once instead of on every return to Plan', async () => {

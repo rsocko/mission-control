@@ -1085,21 +1085,26 @@ export function tabButtonName(tab: ProjectTabName) {
   return new RegExp(`^${tab}( \\(\\d+\\))?$`);
 }
 
-export async function projectPageElement(): Promise<React.ReactElement> {
+export async function projectPageElement(
+  { strictMode = false }: { strictMode?: boolean } = {},
+): Promise<React.ReactElement> {
   const [{ default: ProjectDetailPage }, { TooltipProvider }] = await Promise.all([
     import('@/app/projects/[id]/page'),
     import('@/components/ui/Tooltip'),
   ]);
 
-  return (
+  const page = (
     <TooltipProvider>
       <ProjectDetailPage />
     </TooltipProvider>
   );
+  return strictMode ? <React.StrictMode>{page}</React.StrictMode> : page;
 }
 
-export async function renderProjectPage(): Promise<RenderResult> {
-  return render(await projectPageElement());
+export async function renderProjectPage(
+  options: { strictMode?: boolean } = {},
+): Promise<RenderResult> {
+  return render(await projectPageElement(options));
 }
 
 export async function openProjectTab(tab: ProjectTabName) {
@@ -1111,8 +1116,11 @@ export async function openProjectTab(tab: ProjectTabName) {
 }
 
 /** Renders the project page and waits for the loaded shell before switching tabs. */
-export async function renderProjectTab(tab: ProjectTabName) {
-  const view = await renderProjectPage();
+export async function renderProjectTab(
+  tab: ProjectTabName,
+  options: { strictMode?: boolean } = {},
+) {
+  const view = await renderProjectPage(options);
   await screen.findByRole('button', { name: tabButtonName('Overview') }, { timeout: 5000 });
   if (tab !== 'Overview') await openProjectTab(tab);
   return view;

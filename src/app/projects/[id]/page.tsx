@@ -85,10 +85,18 @@ function ProjectSettingsActivityBoundary({
   requestConfirmation: RequestConfirmation;
 }) {
   const [lifetimeController] = useState(() => new AbortController());
+  const effectOwnersRef = useRef(0);
 
-  useEffect(() => (
-    () => lifetimeController.abort()
-  ), [lifetimeController]);
+  useEffect(() => {
+    effectOwnersRef.current += 1;
+    return () => {
+      effectOwnersRef.current -= 1;
+      // Strict Mode replays effects synchronously, so let its next setup reclaim this lifetime.
+      queueMicrotask(() => {
+        if (effectOwnersRef.current === 0) lifetimeController.abort();
+      });
+    };
+  }, [lifetimeController]);
 
   return (
     <Activity mode={active ? 'visible' : 'hidden'}>

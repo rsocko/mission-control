@@ -232,7 +232,7 @@ export function ProjectSettingsTab({
             return categories;
           })
           .catch((error: unknown) => {
-            if (!lifetimeSignal.aborted && categoriesLoadStateRef.current === load) {
+            if (categoriesLoadStateRef.current === load) {
               // Keep the optional datalist quiet, but retry on the next Activity activation.
               load.status = 'idle';
               load.request = undefined;

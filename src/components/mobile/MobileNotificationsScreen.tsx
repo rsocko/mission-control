@@ -828,6 +828,19 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     try {
       await bulkUpdate([notification.id], action);
     } catch (readError) {
+      setNotifications(current => {
+        const restored = { ...notification };
+        const existing = current.some(item => item.id === notification.id);
+        if (existing) {
+          return current.map(item => (item.id === notification.id ? restored : item));
+        }
+        return [restored, ...current];
+      });
+      setStats(current => adjustUnreadStats(
+        current,
+        [notification],
+        currentlyUnread ? 1 : -1,
+      ));
       await fetchNotifications();
       throw readError;
     }

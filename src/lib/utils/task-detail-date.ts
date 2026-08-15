@@ -21,3 +21,11 @@ export function formatTaskDetailUpdatedAt(
     year: 'numeric',
   })}`;
 }
+
+/** Format a date-only value (YYYY-MM-DD) as a short local day label. */
+export function formatShortDate(value: string): string {
+  return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+}

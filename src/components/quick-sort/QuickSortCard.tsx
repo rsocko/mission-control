@@ -182,8 +182,15 @@ export default function QuickSortCard({
         onAcceptFocused(task.id);
       } else if (action === 'skip') {
         triggerHaptic('medium');
-        void Promise.resolve(onSkip(task.id)).finally(() => {
-          animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+        const skipTarget = -Math.max(window.innerHeight, 600);
+        void animate(y, skipTarget, { duration: 0.18, ease: 'easeIn' }).then(() => {
+          try {
+            void Promise.resolve(onSkip(task.id)).finally(() => {
+              animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+            });
+          } catch {
+            animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+          }
         });
       } else {
         // Snap back with spring animation

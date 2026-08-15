@@ -31,7 +31,7 @@ import { NotificationDetail } from '@/components/notifications/NotificationCard'
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils';
 import { triggerHaptic } from '@/lib/utils/haptics';
-import type { NotificationItem, NotificationLevel } from '@/types';
+import type { NotificationItem, NotificationLevel, NotificationReadState } from '@/types';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
 import {
   NotificationFilterControls,
@@ -808,7 +808,9 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
   }, [fetchNotifications, notifications]);
 
   const handleToggleRead = useCallback(async (notification: NotificationItem) => {
-    const nextState = isNotificationUnread(notification) ? 'read' : 'unread';
+    const currentlyUnread = isNotificationUnread(notification);
+    const nextState: NotificationReadState = currentlyUnread ? 'read' : 'unread';
+    const action: BulkAction = currentlyUnread ? 'read' : 'mark_unread';
 
     setNotifications(current => current.flatMap(item => {
       if (item.id !== notification.id) return [item];
@@ -820,11 +822,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     setStats(current => adjustUnreadStats(
       current,
       [notification],
-      nextState === 'unread' ? 1 : -1,
+      currentlyUnread ? -1 : 1,
     ));
 
     try {
-      await bulkUpdate([notification.id], nextState === 'read' ? 'read' : 'mark_unread');
+      await bulkUpdate([notification.id], action);
     } catch (readError) {
       await fetchNotifications();
       throw readError;

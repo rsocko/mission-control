@@ -261,7 +261,8 @@ describe('MobileDrawer', () => {
     render(<DrawerHarness />);
     const trigger = screen.getByLabelText('Open menu');
     fireEvent.click(trigger);
-    expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    expect(screen.getByLabelText('Drawer navigation')).toBe(document.activeElement);
+    expect(screen.getByPlaceholderText('Search…')).not.toBe(document.activeElement);
 
     closeDrawer();
 
@@ -337,11 +338,19 @@ describe('MobileDrawer', () => {
 
   it('wraps keyboard focus within the open drawer', () => {
     render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
-    const focusable = screen.getByLabelText('Drawer navigation').querySelectorAll<HTMLElement>(
+    const drawer = screen.getByLabelText('Drawer navigation');
+    const focusable = drawer.querySelectorAll<HTMLElement>(
       'a[href], button, input, [tabindex]:not([tabindex="-1"])'
     );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    drawer.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
 
     last.focus();
     fireEvent.keyDown(document, { key: 'Tab' });

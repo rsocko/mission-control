@@ -146,8 +146,10 @@ describe('embedding index rebuild routing', () => {
     const { warmUpEmbeddings } = await import('@/lib/search/semantic');
 
     await warmUpEmbeddings();
+    const callsAfterRouteFailure = fetchSpy.mock.calls.length;
     await warmUpEmbeddings();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(callsAfterRouteFailure).toBe(2);
+    expect(fetchSpy).toHaveBeenCalledTimes(callsAfterRouteFailure);
   });
 });

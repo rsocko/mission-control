@@ -332,7 +332,7 @@ export default function QuickSortCard({
 
       {/* The card itself — fills available height for a larger swipe target */}
       <motion.div
-        className="relative flex h-full min-h-0 touch-pan-y cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
+        className="relative flex h-full min-h-0 touch-none cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
         style={{ x, y }}
         onPanStart={handleDragStart}
         onPan={handleDrag}
@@ -340,7 +340,7 @@ export default function QuickSortCard({
       >
         <div
           aria-label="Task details"
-          className="flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overscroll-contain p-5"
+          className="flex min-h-0 flex-1 touch-none flex-col gap-4 overflow-y-auto overscroll-contain p-5"
           role="region"
           tabIndex={0}
         >

@@ -184,6 +184,15 @@ export function syncQuickAddProjectActive(
   return previousProjectId === nextProjectId ? currentActive : Boolean(nextProjectId);
 }
 
+export function scrollListTypeaheadSelectionIntoView(
+  container: HTMLElement | null,
+  index: number,
+): void {
+  container
+    ?.querySelector<HTMLElement>(`[data-list-typeahead-index="${index}"]`)
+    ?.scrollIntoView({ block: 'nearest' });
+}
+
 interface PendingTask {
   id: string;
   text: string;
@@ -316,6 +325,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [listTypeaheadIndex, setListTypeaheadIndex] = useState(0);
+  const listTypeaheadScrollRef = useRef<HTMLDivElement>(null);
   // Destination picker search & keyboard nav
   const [destSearch, setDestSearch] = useState('');
   const [destNavIndex, setDestNavIndex] = useState(0);
@@ -943,6 +953,10 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   useEffect(() => {
     setListTypeaheadIndex(0);
   }, [listTypeahead?.query]);
+
+  useEffect(() => {
+    scrollListTypeaheadSelectionIntoView(listTypeaheadScrollRef.current, listTypeaheadIndex);
+  }, [listTypeaheadIndex, listTypeahead?.query]);
 
   // Accept a typeahead list selection: set destination pill and strip the /query from input
   const acceptListTypeahead = useCallback((dest: Destination) => {
@@ -2114,7 +2128,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 <span>Select a list</span>
                 <span className="normal-case tracking-normal font-normal">↑↓ navigate · ↵ select</span>
               </div>
-              <div className="max-h-48 overflow-y-auto">
+              <div ref={listTypeaheadScrollRef} className="max-h-48 overflow-y-auto">
                 {listTypeahead.matches.map((dest, i) => {
                   const isActive = i === listTypeaheadIndex;
                   const name = dest.listName || dest.shortLabel;
@@ -2123,6 +2137,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   return (
                     <button
                       key={`${dest.id}-${dest.listId}`}
+                      data-list-typeahead-index={i}
                       onMouseDown={(e) => {
                         e.preventDefault(); // prevent blur
                         acceptListTypeahead(dest);

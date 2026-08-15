@@ -70,6 +70,7 @@ export function ProjectSettingsTab({
   const [savingRules, setSavingRules] = useState(false);
   const [existingCategories, setExistingCategories] = useState<string[]>([]);
   const [categorySaved, setCategorySaved] = useState(false);
+  const categoriesLoadStateRef = useRef<'idle' | 'loading' | 'loaded'>('idle');
 
   const loadProjectTasks = useCallback(async () => {
     return fetchAllTasks<ProjectTask>(`/api/tasks?projectId=${projectId}&parentOnly=true&sortBy=updated`);
@@ -157,14 +158,26 @@ export function ProjectSettingsTab({
   }, [loadRuleMatches]);
 
   useEffect(() => {
-    fetch('/api/projects-overview')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (!data?.categories) return;
-        const cats = (data.categories as { category: string }[]).map(c => c.category).filter(Boolean);
-        setExistingCategories(cats);
+    if (categoriesLoadStateRef.current !== 'idle') return;
+    categoriesLoadStateRef.current = 'loading';
+
+    void fetch('/api/projects-overview')
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to load project categories');
+        return response.json() as Promise<{ categories?: { category: string }[] }>;
       })
-      .catch(() => {});
+      .then(data => {
+        if (!Array.isArray(data.categories)) {
+          throw new Error('Project categories were missing from the portfolio response');
+        }
+        const cats = data.categories.map(c => c.category).filter(Boolean);
+        setExistingCategories(cats);
+        categoriesLoadStateRef.current = 'loaded';
+      })
+      .catch(() => {
+        // Keep the optional datalist quiet, but allow the next Activity activation to retry.
+        categoriesLoadStateRef.current = 'idle';
+      });
   }, []);
 
   const handleHideProject = useCallback(() => {

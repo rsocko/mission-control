@@ -54,6 +54,7 @@ vi.mock('@/components/projects/TaskPickerDialog', async () => (
 function shellScenario() {
   return installProjectPageHarness({
     project: { name: 'Shell Project' },
+    categories: ['Operations'],
     phases: [makePhase('phase-discovery', { name: 'Discovery' })],
     phaseItems: {
       'phase-discovery': [makePhaseItem('phase-discovery', 'task-alpha', 0)],
@@ -206,21 +207,58 @@ describe('project detail shell', () => {
     expect(screen.getByText(/Zoom by month/)).toBeInTheDocument();
   });
 
-  it('leaves a hidden tab idle until it becomes active, then refreshes it', async () => {
+  it('refreshes visible Settings effects without refetching loaded portfolio categories', async () => {
+    const releaseCategories = harness.hold('/api/projects-overview');
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });
     expect(harness.requestsFor('/rule-matches')).toHaveLength(0);
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(0);
 
     await openProjectTab('Settings');
     await screen.findByRole('heading', { name: 'Auto-Include Rules' });
     await waitFor(() => expect(harness.requestsFor('/rule-matches')).toHaveLength(1));
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1));
+
+    await openProjectTab('Overview');
+    await openProjectTab('Settings');
+    await waitFor(() => expect(harness.requestsFor('/rule-matches')).toHaveLength(2));
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1);
+
+    await act(async () => {
+      releaseCategories();
+    });
+    expect(document.querySelector(
+      '#project-category-options option[value="Operations"]',
+    )).toBeInTheDocument();
 
     await openProjectTab('Overview');
     expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
-    expect(harness.requestsFor('/rule-matches')).toHaveLength(1);
+    expect(harness.requestsFor('/rule-matches')).toHaveLength(2);
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1);
 
     await openProjectTab('Settings');
-    await waitFor(() => expect(harness.requestsFor('/rule-matches')).toHaveLength(2));
+    await waitFor(() => expect(harness.requestsFor('/rule-matches')).toHaveLength(3));
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1);
+    expect(document.querySelector(
+      '#project-category-options option[value="Operations"]',
+    )).toBeInTheDocument();
+  });
+
+  it('retries a failed portfolio category load on the next Settings activation', async () => {
+    harness.failOnce('/api/projects-overview', { error: 'Portfolio unavailable' });
+    await renderProjectTab('Settings');
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1));
+
+    await openProjectTab('Overview');
+    await openProjectTab('Settings');
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(2));
+    expect(document.querySelector(
+      '#project-category-options option[value="Operations"]',
+    )).toBeInTheDocument();
+
+    await openProjectTab('Overview');
+    await openProjectTab('Settings');
+    expect(harness.requestsFor('/api/projects-overview')).toHaveLength(2);
   });
 
   it('applies an Overview phase reveal once instead of on every return to Plan', async () => {

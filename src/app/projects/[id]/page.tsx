@@ -85,17 +85,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
-import { TaskContextMenu, type TaskContextMenuActions, type HubProject } from '@/components/task-list/TaskContextMenu';
+import { TaskContextMenu, type HubProject } from '@/components/task-list/TaskContextMenu';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { dropdownVariants, fadeSlideUp, scaleIn, staggerContainer } from '@/lib/motion';
 import { cn } from '@/lib/utils';
-import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip } from '@/components/ui/Tooltip';
 import type {
   AutoIncludeRule,
-  LocalDisposition,
   ProjectHealth,
   ProjectStatus,
   SourceBinding,
@@ -106,15 +104,11 @@ import { COLOR_PRESETS, CONNECTOR_COLORS } from '@/lib/constants/colors';
 import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import {
   canEditTaskField,
-  canRemoveTask,
-  canSetTaskLocalDisposition,
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
-  taskDispositionBlockedReason,
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import { projectLogger } from '@/lib/client-logger';
-import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
@@ -226,6 +220,7 @@ import type {
 } from '@/types/dashboard';
 import { resolveProjectIconColor } from '@/lib/projects/normalize-project';
 import { ProjectActionsCard } from './ProjectActionsCard';
+import { useProjectTaskActions } from './useProjectTaskActions';
 
 type AddTaskDest = { id: string; label: string; connectorType: string; account: 'personal' | 'work' | null; color: string; listSelectionMode?: 'required' | 'optional' | 'not-applicable' };
 const LOCAL_DESTINATION: AddTaskDest = { id: 'local', label: 'Local', connectorType: 'local', account: null, color: 'var(--text-muted)' };
@@ -297,7 +292,6 @@ export default function ProjectDetailPage() {
   const [taskEffortFilter, setTaskEffortFilter] = useState<TaskEffortFilter>('all');
   const [taskSortBy, setTaskSortBy] = useState<'priority' | 'dueDate' | 'updated' | 'title'>('priority');
   const [taskSortDir, setTaskSortDir] = useState<'asc' | 'desc'>('asc');
-  const [myDayTaskIds, setMyDayTaskIds] = useState<Set<string>>(new Set());
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingPhase, setCreatingPhase] = useState(false);
@@ -450,7 +444,6 @@ export default function ProjectDetailPage() {
       phase.id === phaseId ? { ...phase, startAfterPhaseId: null } : phase
     )));
   }, []);
-  const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [phaseTaskSearch, setPhaseTaskSearch] = useState('');
   const bulk = useBulkSelection();
   const selectedBulkTasks = tasks.filter((task) => bulk.bulkSelected.has(task.id));
@@ -698,6 +691,56 @@ export default function ProjectDetailPage() {
     applyHierarchySnapshot(hierarchy);
   }, [applyHierarchySnapshot, discardHierarchyUndos, projectId]);
 
+  const removeTaskFromView = useCallback((taskId: string) => {
+    setTasks((current) => current.filter((task) => task.id !== taskId));
+    setPhaseItemsByPhase((current) => {
+      const next: Record<string, PhaseItem[]> = {};
+      for (const [phaseId, items] of Object.entries(current)) {
+        next[phaseId] = items.filter((item) => item.taskId !== taskId);
+      }
+      return next;
+    });
+    setSelectedTaskId((current) => current === taskId ? null : current);
+  }, []);
+
+  const stageProjectTaskRemoval = useCallback((taskId: string) => {
+    const previousTasks = tasks;
+    const previousPhaseItems = phaseItemsByPhase;
+    const previousSelectedTaskId = selectedTaskId;
+
+    removeTaskFromView(taskId);
+    return () => {
+      setTasks(previousTasks);
+      setPhaseItemsByPhase(previousPhaseItems);
+      setSelectedTaskId(previousSelectedTaskId);
+    };
+  }, [
+    phaseItemsByPhase,
+    removeTaskFromView,
+    selectedTaskId,
+    tasks,
+  ]);
+
+  const {
+    completingIds,
+    getTaskContextActions,
+    handleAddToMyDay,
+    handleCompleteTask,
+    handleRemoveFromMyDay,
+    myDayTaskIds,
+  } = useProjectTaskActions({
+    projectId,
+    tasks,
+    setTasks,
+    phases,
+    phaseItemsByPhase,
+    projects: allProjects,
+    removeTaskFromView,
+    stageProjectTaskRemoval,
+    refreshProjectHierarchy,
+    runHierarchyCommand,
+  });
+
   useEffect(() => {
     discardHierarchyUndos();
     void loadProjectDetail();
@@ -719,18 +762,6 @@ export default function ProjectDetailPage() {
       return () => window.clearTimeout(timeoutId);
     }
   }, [syncProgress.refetchKey, loadProjectDetail]);
-
-  // Load My Day task IDs for context menu integration
-  useEffect(() => {
-    fetch('/api/my-day')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data?.items) {
-          setMyDayTaskIds(new Set((data.items as { taskId: string }[]).map(i => i.taskId)));
-        }
-      })
-      .catch(() => {});
-  }, []);
 
   // Load all projects for "Add to Project" context menu
   useEffect(() => {
@@ -1213,327 +1244,6 @@ export default function ProjectDetailPage() {
 
   function handleDragStart(event: DragStartEvent) {
     setActiveDragId(String(event.active.id));
-  }
-
-  // ── Task actions (complete, priority, status, due date, delete) ────────
-  function requireEditableTask(taskId: string, field: 'status' | 'priority' | 'dueDate'): ProjectTask | null {
-    const task = tasks.find((candidate) => candidate.id === taskId) ?? null;
-    if (task && canEditTaskField(task.editPolicy, field)) return task;
-    toast.error(taskFieldBlockedReason(task?.editPolicy, field));
-    return null;
-  }
-
-  async function handleCompleteTask(taskId: string) {
-    const task = requireEditableTask(taskId, 'status');
-    if (!task) return;
-
-    const previousStatus = task.status;
-    const outcome = await runTaskCompletion(taskId, {
-      optimisticUpdate: () => {
-        setTasks((current) => current.map((candidate) => (
-          candidate.id === taskId ? { ...candidate, status: 'done' as TaskStatus } : candidate
-        )));
-      },
-      request: async () => {
-        const response = await fetch(`/api/tasks/${taskId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'done' }),
-        });
-        if (!response.ok) throw new Error('Failed to complete task');
-      },
-      rollback: () => {
-        setTasks((current) => current.map((candidate) => (
-          candidate.id === taskId && candidate.status === 'done'
-            ? { ...candidate, status: previousStatus }
-            : candidate
-        )));
-      },
-    });
-
-    if (outcome === 'completed') {
-      toast.success('Task completed');
-    } else if (outcome === 'failed') {
-      toast.error('Failed to complete task');
-    }
-  }
-
-  async function handleSetTaskPriority(taskId: string, priority: string) {
-    if (!requireEditableTask(taskId, 'priority')) return;
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priority }),
-      });
-      if (!response.ok) throw new Error('Failed to set priority');
-      setTasks((current) => current.map((t) => (t.id === taskId ? { ...t, priority: priority as TaskPriority } : t)));
-    } catch {
-      toast.error('Failed to set priority');
-    }
-  }
-
-  async function handleSetTaskStatus(taskId: string, status: string) {
-    if (!requireEditableTask(taskId, 'status')) return;
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
-      });
-      if (!response.ok) throw new Error('Failed to set status');
-      setTasks((current) => current.map((t) => (t.id === taskId ? { ...t, status: status as TaskStatus } : t)));
-    } catch {
-      toast.error('Failed to set status');
-    }
-  }
-
-  async function handleSetTaskDueDate(taskId: string, date: string) {
-    if (!requireEditableTask(taskId, 'dueDate')) return;
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dueDate: date || null }),
-      });
-      if (!response.ok) throw new Error('Failed to set due date');
-      setTasks((current) => current.map((t) => (t.id === taskId ? { ...t, dueDate: date || null } : t)));
-    } catch {
-      toast.error('Failed to set due date');
-    }
-  }
-
-  async function handleSetTaskLocalDisposition(taskId: string, disposition: LocalDisposition) {
-      const task = tasks.find((candidate) => candidate.id === taskId);
-      if (!task || !canSetTaskLocalDisposition(task.editPolicy, task.localDisposition, disposition)) {
-        toast.error(task
-          ? taskDispositionBlockedReason(task.editPolicy, task.localDisposition, disposition)
-          : 'Task disposition is unavailable');
-        return;
-      }
-      try {
-        const response = await fetch(`/api/tasks/${taskId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ localDisposition: disposition }),
-        });
-        const data = await response.json() as {
-          fields?: { localDisposition?: { persisted?: boolean } };
-          error?: string;
-        };
-        if (!response.ok || data.fields?.localDisposition?.persisted !== true) {
-          throw new Error(data.error || 'Mission Control state was not saved');
-        }
-        setTasks((current) => disposition === 'active'
-          ? current.map((candidate) => candidate.id === taskId
-            ? { ...candidate, localDisposition: disposition }
-            : candidate)
-          : current.filter((candidate) => candidate.id !== taskId));
-        toast.success(disposition === 'handled'
-          ? 'Marked handled in Mission Control'
-          : disposition === 'dismissed'
-            ? 'Dismissed in Mission Control'
-            : 'Restored in Mission Control');
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Failed to update Mission Control state');
-    }
-  }
-
-  async function handleDeleteTask(taskId: string) {
-    const task = tasks.find((candidate) => candidate.id === taskId);
-    if (!task || !canRemoveTask(task.editPolicy)) {
-      toast.error(task?.editPolicy.removalReason ?? 'This task cannot be removed');
-      return;
-    }
-    try {
-      const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('Failed to delete task');
-      setTasks((current) => current.filter((t) => t.id !== taskId));
-      // Also remove from any phase items
-      setPhaseItemsByPhase((current) => {
-        const next: Record<string, PhaseItem[]> = {};
-        for (const [phaseId, items] of Object.entries(current)) {
-          next[phaseId] = items.filter((item) => item.taskId !== taskId);
-        }
-        return next;
-      });
-      if (selectedTaskId === taskId) setSelectedTaskId(null);
-      await refreshProjectHierarchy();
-      toast.success('Task deleted');
-    } catch {
-      toast.error('Failed to delete task');
-    }
-  }
-
-  function handleRemoveFromProject(taskId: string) {
-    const previousTasks = tasks;
-    const previousPhaseItems = phaseItemsByPhase;
-    const previousSelectedTaskId = selectedTaskId;
-
-    setTasks((current) => current.filter((t) => t.id !== taskId));
-    setPhaseItemsByPhase((current) => {
-      const next: Record<string, PhaseItem[]> = {};
-      for (const [phaseId, items] of Object.entries(current)) {
-        next[phaseId] = items.filter((item) => item.taskId !== taskId);
-      }
-      return next;
-    });
-    if (selectedTaskId === taskId) setSelectedTaskId(null);
-
-    let undone = false;
-    toast.success('Removed from project', {
-      action: {
-        label: 'Undo',
-        onClick: () => {
-          undone = true;
-          setTasks(previousTasks);
-          setPhaseItemsByPhase(previousPhaseItems);
-          setSelectedTaskId(previousSelectedTaskId);
-        },
-      },
-      duration: 5000,
-    });
-
-    setTimeout(async () => {
-      if (!undone) {
-        try {
-          const res = await fetch(`/api/hub-projects/${projectId}/tasks`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ taskId }),
-          });
-          if (!res.ok) {
-            setTasks(previousTasks);
-            setPhaseItemsByPhase(previousPhaseItems);
-            setSelectedTaskId(previousSelectedTaskId);
-            toast.error('Failed to remove task from project');
-          } else {
-            await refreshProjectHierarchy();
-          }
-        } catch {
-          setTasks(previousTasks);
-          setPhaseItemsByPhase(previousPhaseItems);
-          setSelectedTaskId(previousSelectedTaskId);
-          toast.error('Failed to remove task from project');
-        }
-      }
-    }, 5500);
-  }
-
-  async function handleAddToProject(taskId: string, targetProjectId: string, phaseId?: string | null) {
-    const targetProject = allProjects.find((p) => p.id === targetProjectId);
-
-    if (targetProjectId === projectId) {
-      // Same project — treat as a phase move
-      void handleMoveTaskToPhase(taskId, phaseId ?? null);
-      return;
-    }
-
-    // Different project — add task to that project
-    try {
-      const res = await fetch(`/api/hub-projects/${targetProjectId}/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, phaseId: phaseId ?? null }),
-      });
-      if (!res.ok) throw new Error('Failed to add to project');
-
-      const phaseName = phaseId
-        ? targetProject?.phases?.find((p) => p.id === phaseId)?.name ?? null
-        : null;
-      const label = phaseName
-        ? `Moved to ${targetProject?.name || 'project'} → ${phaseName}`
-        : `Moved to ${targetProject?.name || 'project'} → No phase`;
-      toast.success(label);
-
-      // Update local hubProjectIds
-      setTasks((prev) => prev.map((t) =>
-        t.id === taskId
-          ? {
-              ...t,
-              hubProjectIds: [...(t.hubProjectIds || []).filter((id) => id !== targetProjectId), targetProjectId],
-              projectPhaseMemberships: [
-                ...(t.projectPhaseMemberships || []).filter((membership) => membership.projectId !== targetProjectId),
-                {
-                  projectId: targetProjectId,
-                  projectName: targetProject?.name || 'Unknown Project',
-                  phaseId: phaseId ?? null,
-                  phaseName,
-                },
-              ],
-            }
-          : t
-      ));
-    } catch {
-      toast.error('Failed to add task to project');
-    }
-  }
-
-  function getTaskContextActions(task: ProjectTask): TaskContextMenuActions {
-    return {
-      onComplete: () => void handleCompleteTask(task.id),
-      onSetPriority: (priority) => void handleSetTaskPriority(task.id, priority),
-      onSetStatus: (status) => void handleSetTaskStatus(task.id, status),
-      onAddToMyDay: () => void handleAddToMyDay(task.id),
-      onRemoveFromMyDay: () => void handleRemoveFromMyDay(task.id),
-      onMoveToPhase: (phaseId) => void handleMoveTaskToPhase(task.id, phaseId),
-      onAddToProject: (targetProjectId, phaseId) => void handleAddToProject(task.id, targetProjectId, phaseId),
-      onDueToday: () => void handleSetTaskDueDate(task.id, getClientToday()),
-      onDueTomorrow: () => void handleSetTaskDueDate(task.id, getClientTomorrow()),
-      onPickDate: (date) => void handleSetTaskDueDate(task.id, date),
-      onClearDueDate: () => void handleSetTaskDueDate(task.id, ''),
-      onSetLocalDisposition: (disposition) => void handleSetTaskLocalDisposition(task.id, disposition),
-      onRemoveFromProject: () => void handleRemoveFromProject(task.id),
-      onDelete: () => void handleDeleteTask(task.id),
-    };
-  }
-
-  async function handleAddToMyDay(taskId: string) {
-    try {
-      const response = await fetch('/api/my-day', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId }),
-      });
-      if (!response.ok) throw new Error('Failed');
-      setMyDayTaskIds((prev) => new Set(prev).add(taskId));
-      toast.success('Added to My Day');
-    } catch {
-      toast.error('Failed to add to My Day');
-    }
-  }
-
-  async function handleRemoveFromMyDay(taskId: string) {
-    try {
-      const response = await fetch(`/api/my-day?taskId=${taskId}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('Failed');
-      setMyDayTaskIds((prev) => { const next = new Set(prev); next.delete(taskId); return next; });
-      toast.success('Removed from My Day');
-    } catch {
-      toast.error('Failed to remove from My Day');
-    }
-  }
-
-  async function handleMoveTaskToPhase(taskId: string, targetPhaseId: string | null) {
-    const currentPhaseId = taskToPhase.get(taskId)?.id ?? null;
-    if (currentPhaseId === targetPhaseId) return;
-    const taskName = taskMap.get(taskId)?.title ?? 'Task';
-    const phaseName = targetPhaseId
-      ? phases.find((phase) => phase.id === targetPhaseId)?.name ?? 'phase'
-      : 'No phase';
-    try {
-      await runHierarchyCommand({
-        type: 'move_tasks',
-        taskIds: [taskId],
-        toPhaseId: targetPhaseId,
-        toIndex: targetPhaseId ? (phaseItemsByPhase[targetPhaseId] ?? []).length : 0,
-      }, {
-        undoLabel: `Moved ${taskName} to ${phaseName}`,
-        announcement: `Moved ${taskName} to ${phaseName}`,
-      });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to move task');
-    }
   }
 
   async function renamePhase(phase: ProjectPhase, name: string) {

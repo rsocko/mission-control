@@ -177,6 +177,7 @@ describe('NavRail', () => {
           name: 'Local',
           status: 'healthy',
           message: 'Healthy',
+          lastSyncAt: undefined,
         },
       ],
     });

@@ -150,6 +150,7 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
   const expanded = pinned || hovered;
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
   const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
+  const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
 
   const handleMouseEnter = useCallback(() => {
     if (collapseTimer.current) {
@@ -233,10 +234,7 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
         {navGroups.map((group, groupIdx) => (
           <div key={group.label} role="group" aria-label={group.label}>
             {groupIdx > 0 && (
-              <div className={cn(
-                'h-px bg-[var(--text-tertiary)]/20 my-2.5',
-                expanded ? 'mx-3' : 'mx-3'
-              )} />
+              <div className="h-px bg-[var(--text-tertiary)]/20 my-2.5 mx-3" />
             )}
             {group.items.filter(isVisible).map((item) => {
               const active = isActive(item.href);
@@ -282,9 +280,9 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
 
       {/* Bottom section: pin toggle + settings */}
       <div className="flex flex-col gap-0.5 pb-2 mt-auto">
-        <div className={cn('h-px bg-[var(--text-tertiary)]/20 mb-2.5', expanded ? 'mx-3' : 'mx-3')} />
+        <div className="h-px bg-[var(--text-tertiary)]/20 mb-2.5 mx-3" />
 
-        {activeSyncStatus.length > 0 && (
+        {showSyncStatusControl && (
           <div className="relative mx-2">
             <Tooltip content="Sync status" placement="right" disabled={expanded || syncPopoverOpen}>
               <button
@@ -329,7 +327,7 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
                     <div key={status.id} className="flex items-center justify-between text-xs">
                       <div className="flex items-center gap-1.5 min-w-0">
                         {CONNECTOR_ICONS[status.type] && (
-                          <Image src={CONNECTOR_ICONS[status.type]} alt={status.type} width={12} height={12} />
+                          <Image src={CONNECTOR_ICONS[status.type]} alt={status.name} width={12} height={12} />
                         )}
                         <span className="text-[var(--text-secondary)] truncate">{status.name}</span>
                       </div>
@@ -347,6 +345,9 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
                     </div>
                   );
                 })}
+                {activeSyncStatus.length === 0 && (
+                  <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
+                )}
               </div>
             </Popover>
           </div>

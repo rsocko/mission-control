@@ -1,14 +1,10 @@
 import { initializeDatabase } from '@/db';
+import { isDatabaseContentionError } from '@/db/contention';
 import { dbLogger } from '@/lib/logger';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_RETRY_BASE_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 8_000;
-
-interface SqliteErrorLike {
-  code?: string;
-  cause?: unknown;
-}
 
 export interface DatabaseStartupOptions<T> {
   initialize?: () => T;
@@ -23,23 +19,7 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 }
 
 export function isRetryableDatabaseStartupError(error: unknown): boolean {
-  let current = error;
-  const visited = new Set<unknown>();
-
-  while (current && typeof current === 'object' && !visited.has(current)) {
-    visited.add(current);
-    const candidate = current as SqliteErrorLike;
-    if (
-      candidate.code === 'SQLITE_BUSY'
-      || candidate.code === 'SQLITE_BUSY_SNAPSHOT'
-      || candidate.code === 'SQLITE_LOCKED'
-    ) {
-      return true;
-    }
-    current = candidate.cause;
-  }
-
-  return false;
+  return isDatabaseContentionError(error);
 }
 
 export async function initializeDatabaseWithRetry<T = void>(

@@ -664,6 +664,26 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
   });
 
+  it('syntax highlights fenced code blocks using their declared language', async () => {
+    const formattedTask = {
+      ...task,
+      description: '```yaml\nruns-on: [self-hosted, macOS, ARM64, ios]\n```',
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/tasks/task-1') return json({ task: formattedTask });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
+    await waitFor(() => {
+      const code = notes.querySelector('code.language-yaml.hljs');
+      expect(code).toBeInTheDocument();
+      expect(code?.querySelector('.hljs-attr')).toHaveTextContent('runs-on');
+    });
+  });
+
   it('keeps toolbar selection and focus while formatting and persists single newlines', async () => {
     const onUpdate = vi.fn();
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {

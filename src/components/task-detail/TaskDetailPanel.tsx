@@ -112,12 +112,14 @@ const LazyInteractiveMarkdown = dynamic(
   async () => {
     const [
       { default: ReactMarkdown },
+      { default: rehypeHighlight },
       { default: rehypeRaw },
       { default: rehypeSanitize },
       { default: remarkBreaks },
       { default: remarkGfm },
     ] = await Promise.all([
       import('react-markdown'),
+      import('rehype-highlight'),
       import('rehype-raw'),
       import('rehype-sanitize'),
       import('remark-breaks'),
@@ -133,7 +135,7 @@ const LazyInteractiveMarkdown = dynamic(
         <MarkdownSourceUrlContext.Provider value={props.sourceUrl ?? null}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm, remarkBreaks, remarkOnlyEmbeddedImages]}
-            rehypePlugins={[rehypeRaw, rehypeSanitize]}
+            rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
             components={{
               a: ({ node, href, ...anchorProps }) => {
                 void node;

@@ -4,6 +4,7 @@ import { runTransaction } from '@/db';
 import {
   githubIdentityComparisonRecords,
   githubIdentityComparisonRuns,
+  syncJobs,
 } from '@/db/schema';
 import type {
   AppendGitHubIdentityComparisonRecordInput,
@@ -65,7 +66,9 @@ export function startGitHubIdentityComparisonRunInTransaction(
     )).all();
     for (const active of activeRuns) {
       const sameOwner = active.ownerId === input.ownerId;
-      const staleOwner = !active.ownerLeaseExpiresAt || active.ownerLeaseExpiresAt <= startedAt;
+      const staleOwner = !active.ownerLeaseExpiresAt
+        || active.ownerLeaseExpiresAt <= startedAt
+        || hasInactiveSyncJobOwner(database, active, startedAt);
       if (!sameOwner && !staleOwner) {
         throw new Error(
           `GitHub identity comparison run ${active.id} is owned by an active runtime`,
@@ -119,6 +122,24 @@ export function startGitHubIdentityComparisonRunInTransaction(
     predecessorRunId,
     startedAt,
   }).returning().get();
+}
+
+function hasInactiveSyncJobOwner(
+  database: ExternalIdentityTransaction,
+  run: GitHubIdentityComparisonRunRecord,
+  now: string,
+): boolean {
+  if (!run.jobId || run.ownerId !== `job:${run.jobId}`) return false;
+  const owner = database.select({
+    connectorId: syncJobs.connectorId,
+    status: syncJobs.status,
+    leaseExpiresAt: syncJobs.leaseExpiresAt,
+  }).from(syncJobs).where(eq(syncJobs.id, run.jobId)).limit(1).get();
+  return !owner
+    || owner.connectorId !== run.connectorInstanceId
+    || owner.status !== 'running'
+    || !owner.leaseExpiresAt
+    || owner.leaseExpiresAt <= now;
 }
 
 export function appendGitHubIdentityComparisonRecords(

@@ -746,6 +746,7 @@ describe('GitHub comparison runtime', () => {
 
   it('does not let an ad-hoc runtime cancel an active sync job comparison', () => {
     const now = new Date().toISOString();
+    const leaseExpiresAt = new Date(Date.now() + 60_000).toISOString();
     database.default.insert(schema.syncJobs).values({
       id: 'active-sync-job',
       connectorId: 'observe-a',
@@ -754,6 +755,8 @@ describe('GitHub comparison runtime', () => {
       availableAt: now,
       scheduledFor: now,
       startedAt: now,
+      leaseOwner: 'test-worker',
+      leaseExpiresAt,
       createdAt: now,
       updatedAt: now,
       identityMode: 'comparison',
@@ -778,6 +781,64 @@ describe('GitHub comparison runtime', () => {
     });
 
     active.complete('succeeded');
+  });
+
+  it('recovers job-owned comparison evidence after the sync job becomes inactive', () => {
+    const jobTime = new Date().toISOString();
+    const comparisonLeaseExpiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    database.default.insert(schema.syncJobs).values({
+      id: 'stale-sync-job',
+      connectorId: 'observe-a',
+      source: 'schedule',
+      status: 'failed',
+      availableAt: jobTime,
+      scheduledFor: jobTime,
+      startedAt: jobTime,
+      completedAt: jobTime,
+      createdAt: jobTime,
+      updatedAt: jobTime,
+      identityMode: 'comparison',
+      identityModeRevision: 3,
+    }).run();
+    const stale = identity.startGitHubIdentityComparisonRun({
+      connectorInstanceId: 'observe-a',
+      jobId: 'stale-sync-job',
+      identityMode: 'comparison',
+      identityModeRevision: 3,
+      syncKind: 'incremental',
+      ownerId: 'job:stale-sync-job',
+      ownerToken: 'stale-owner-token',
+    });
+    database.default.update(schema.githubIdentityComparisonRuns).set({
+      ownerLeaseExpiresAt: comparisonLeaseExpiresAt,
+    }).where(eq(schema.githubIdentityComparisonRuns.id, stale.id)).run();
+    identity.appendGitHubIdentityComparisonRecords(stale.id, [{
+      surface: 'task',
+      candidateKey: 'blocked-stable-evidence',
+      legacyAction: 'update',
+      stableAction: 'update',
+      outcome: 'stable_legacy_disagree',
+      reason: 'selected_ids_differ',
+    }], 'stale-owner-token');
+
+    const replacement = new identity.GitHubIdentityComparisonRuntime({
+      connectorInstanceId: 'observe-a',
+      jobId: 'replacement-sync-job',
+      modeSnapshot: identity.getGitHubIdentityModeSnapshot('observe-a'),
+      syncKind: 'incremental',
+    });
+
+    expect(database.default.select().from(schema.githubIdentityComparisonRuns)
+      .where(eq(schema.githubIdentityComparisonRuns.id, stale.id)).get()).toMatchObject({
+      state: 'cancelled',
+      evidenceEligible: false,
+      interruptionState: 'unresolved',
+      interruptionReason: 'stale_owner_takeover',
+      errorCode: 'owner_lease_expired',
+    });
+    expect(database.default.select().from(schema.githubIdentityComparisonRecords)
+      .where(eq(schema.githubIdentityComparisonRecords.runId, stale.id)).all()).toHaveLength(1);
+    replacement.complete('cancelled', 'test_complete');
   });
 
   it('keeps successful runs ineligible after a non-fatal observation failure', () => {

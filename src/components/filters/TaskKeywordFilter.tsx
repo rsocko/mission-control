@@ -87,6 +87,7 @@ const QUICK_FILTER_LABELS: Record<string, string> = {
   week: 'Due This Week',
   assigned: 'Assigned to Me',
   recentlyCreated: 'Recently Created',
+  recentlyClosed: 'Recently Closed',
   waiting: 'Waiting / On Hold',
 };
 

@@ -60,6 +60,7 @@ export interface TaskStats {
   assignedToMe: number;
   myDay: number;
   recentlyCreated: number;
+  recentlyClosed: number;
   waiting: number;
   inbox: number;
 }
@@ -151,6 +152,7 @@ export const EMPTY_TASK_RESPONSE: TaskResponse = {
     assignedToMe: 0,
     myDay: 0,
     recentlyCreated: 0,
+    recentlyClosed: 0,
     waiting: 0,
     inbox: 0,
   },

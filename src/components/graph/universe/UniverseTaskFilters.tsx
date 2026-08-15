@@ -282,6 +282,7 @@ export function UniverseFilterPanel({
               { value: 'overdue', label: 'Overdue' },
               { value: 'week', label: 'Due this week' },
               { value: 'recentlyCreated', label: 'Recently created' },
+              { value: 'recentlyClosed', label: 'Recently closed' },
             ]}
           />
           <div className="grid grid-cols-2 gap-2">

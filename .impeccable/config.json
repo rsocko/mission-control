@@ -5,7 +5,20 @@
     },
     "ignoreFiles": [],
     "ignoreRules": [],
-    "ignoreValues": []
+    "ignoreValues": [
+      {
+        "rule": "design-system-color",
+        "value": "#000000",
+        "createdAt": "2026-08-15T03:06:53.720Z",
+        "reason": "Existing database test fixture value, not rendered UI"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#6b7280",
+        "createdAt": "2026-08-15T03:07:46.694Z",
+        "reason": "Existing persisted fallback tag color, not a newly introduced UI color"
+      }
+    ]
   },
   "hook": {
     "enabled": true,

@@ -50,13 +50,24 @@ interface ProjectSettingsTabProps {
   active: boolean;
   /** List-selection capability per connector instance, fetched by the shell. */
   connectorListModes: Record<string, string>;
+  /** Aborted by the shell when this project route is replaced or unmounted. */
+  lifetimeSignal: AbortSignal;
   /** Opens the shared confirmation dialog owned by the shell. */
   requestConfirmation: RequestConfirmation;
+}
+
+interface ProjectCategoriesLoadState {
+  projectId: string;
+  status: 'idle' | 'loading' | 'loaded';
+  categories: string[];
+  request?: Promise<string[]>;
+  lifetimeSignal: AbortSignal;
 }
 
 export function ProjectSettingsTab({
   active,
   connectorListModes,
+  lifetimeSignal,
   requestConfirmation,
 }: ProjectSettingsTabProps) {
   const { project, projectId } = useProjectPageData();
@@ -68,9 +79,20 @@ export function ProjectSettingsTab({
   const [ruleMatches, setRuleMatches] = useState<ProjectRuleMatch[]>([]);
   const [ruleMatchesLoading, setRuleMatchesLoading] = useState(false);
   const [savingRules, setSavingRules] = useState(false);
-  const [existingCategories, setExistingCategories] = useState<string[]>([]);
+  const [categoryOptions, setCategoryOptions] = useState<{
+    projectId: string;
+    categories: string[];
+  }>({ projectId, categories: [] });
   const [categorySaved, setCategorySaved] = useState(false);
-  const categoriesLoadStateRef = useRef<'idle' | 'loading' | 'loaded'>('idle');
+  const categoriesLoadStateRef = useRef<ProjectCategoriesLoadState>({
+    projectId,
+    status: 'idle',
+    categories: [],
+    lifetimeSignal,
+  });
+  const existingCategories = categoryOptions.projectId === projectId
+    ? categoryOptions.categories
+    : [];
 
   const loadProjectTasks = useCallback(async () => {
     return fetchAllTasks<ProjectTask>(`/api/tasks?projectId=${projectId}&parentOnly=true&sortBy=updated`);
@@ -158,27 +180,76 @@ export function ProjectSettingsTab({
   }, [loadRuleMatches]);
 
   useEffect(() => {
-    if (categoriesLoadStateRef.current !== 'idle') return;
-    categoriesLoadStateRef.current = 'loading';
+    const previousLoad = categoriesLoadStateRef.current;
+    const load = (
+      previousLoad.projectId === projectId
+      && previousLoad.lifetimeSignal === lifetimeSignal
+    )
+      ? previousLoad
+      : {
+          projectId,
+          status: 'idle' as const,
+          categories: [],
+          lifetimeSignal,
+        };
 
-    void fetch('/api/projects-overview')
-      .then((response) => {
-        if (!response.ok) throw new Error('Failed to load project categories');
-        return response.json() as Promise<{ categories?: { category: string }[] }>;
-      })
-      .then(data => {
-        if (!Array.isArray(data.categories)) {
-          throw new Error('Project categories were missing from the portfolio response');
-        }
-        const cats = data.categories.map(c => c.category).filter(Boolean);
-        setExistingCategories(cats);
-        categoriesLoadStateRef.current = 'loaded';
-      })
-      .catch(() => {
-        // Keep the optional datalist quiet, but allow the next Activity activation to retry.
-        categoriesLoadStateRef.current = 'idle';
-      });
-  }, []);
+    if (load !== previousLoad) {
+      categoriesLoadStateRef.current = load;
+    }
+
+    let obsolete = false;
+    const publish = (categories: string[]) => {
+      if (
+        obsolete
+        || categoriesLoadStateRef.current !== load
+        || load.projectId !== projectId
+      ) {
+        return;
+      }
+      setCategoryOptions({ projectId, categories });
+    };
+
+    if (load.status === 'loaded') {
+      queueMicrotask(() => publish(load.categories));
+    } else {
+      if (load.status === 'idle') {
+        load.status = 'loading';
+        load.request = fetch('/api/projects-overview', { signal: lifetimeSignal })
+          .then(async (response) => {
+            if (!response.ok) throw new Error('Failed to load project categories');
+            const data = (await response.json()) as {
+              categories?: { category: string }[];
+            };
+            if (!Array.isArray(data.categories)) {
+              throw new Error('Project categories were missing from the portfolio response');
+            }
+            if (lifetimeSignal.aborted) throw new Error('Project category load was aborted');
+
+            const categories = data.categories.map(c => c.category).filter(Boolean);
+            load.status = 'loaded';
+            load.categories = categories;
+            load.request = undefined;
+            return categories;
+          })
+          .catch((error: unknown) => {
+            if (!lifetimeSignal.aborted && categoriesLoadStateRef.current === load) {
+              // Keep the optional datalist quiet, but retry on the next Activity activation.
+              load.status = 'idle';
+              load.request = undefined;
+            }
+            throw error;
+          });
+      }
+
+      if (load.request) {
+        void load.request.then(publish).catch(() => {});
+      }
+    }
+
+    return () => {
+      obsolete = true;
+    };
+  }, [lifetimeSignal, projectId]);
 
   const handleHideProject = useCallback(() => {
     if (!project) return;

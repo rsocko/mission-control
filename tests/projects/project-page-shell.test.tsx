@@ -9,6 +9,7 @@ import {
   navigationState,
   openProjectTab,
   overlayState,
+  projectPageElement,
   renderProjectPage,
   renderProjectTab,
   type ProjectPageHarness,
@@ -227,9 +228,9 @@ describe('project detail shell', () => {
     await act(async () => {
       releaseCategories();
     });
-    expect(document.querySelector(
+    await waitFor(() => expect(document.querySelector(
       '#project-category-options option[value="Operations"]',
-    )).toBeInTheDocument();
+    )).toBeInTheDocument());
 
     await openProjectTab('Overview');
     expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
@@ -259,6 +260,56 @@ describe('project detail shell', () => {
     await openProjectTab('Overview');
     await openProjectTab('Settings');
     expect(harness.requestsFor('/api/projects-overview')).toHaveLength(2);
+  });
+
+  it('discards stale portfolio categories when the project route changes', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'First Project' },
+      categories: ['Current category'],
+      categoryResponses: [['Stale category'], ['Current category']],
+    });
+    const releaseStaleCategories = harness.holdOnce('/api/projects-overview');
+    const view = await renderProjectTab('Settings');
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1));
+
+    navigationState.projectId = 'project-2';
+    const nextProjectPage = await projectPageElement();
+    await act(async () => {
+      view.rerender(nextProjectPage);
+    });
+
+    expect(await screen.findByDisplayValue('Project project-2')).toBeInTheDocument();
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(2));
+    expect(document.querySelector(
+      '#project-category-options option[value="Current category"]',
+    )).toBeInTheDocument();
+
+    await act(async () => {
+      releaseStaleCategories();
+    });
+    expect(document.querySelector(
+      '#project-category-options option[value="Stale category"]',
+    )).not.toBeInTheDocument();
+    expect(document.querySelector(
+      '#project-category-options option[value="Current category"]',
+    )).toBeInTheDocument();
+  });
+
+  it('aborts an active portfolio category request when the page unmounts', async () => {
+    const releaseCategories = harness.holdOnce('/api/projects-overview');
+    const view = await renderProjectTab('Settings');
+    await waitFor(() => expect(harness.requestsFor('/api/projects-overview')).toHaveLength(1));
+
+    const request = harness.requestsFor('/api/projects-overview')[0];
+    expect(request.signal).not.toBeNull();
+    expect(request.signal?.aborted).toBe(false);
+
+    view.unmount();
+    expect(request.signal?.aborted).toBe(true);
+
+    await act(async () => {
+      releaseCategories();
+    });
   });
 
   it('applies an Overview phase reveal once instead of on every return to Plan', async () => {

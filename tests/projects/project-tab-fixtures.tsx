@@ -149,6 +149,7 @@ export interface ProjectPageScenario {
   tasks?: ProjectTask[];
   ruleMatches?: ProjectRuleMatch[];
   categories?: string[];
+  categoryResponses?: string[][];
   taskDestinations?: TaskDestinationFixture[];
   allProjects?: Array<Record<string, unknown>>;
   revision?: number;
@@ -590,6 +591,7 @@ export interface RecordedRequest {
   url: string;
   method: string;
   body: unknown;
+  signal: AbortSignal | null;
 }
 
 interface FailureRule {
@@ -597,6 +599,14 @@ interface FailureRule {
   method?: string;
   status: number;
   error: string;
+  once: boolean;
+  used?: boolean;
+}
+
+interface HoldRule {
+  pattern: RegExp;
+  promise: Promise<void>;
+  release: () => void;
   once: boolean;
   used?: boolean;
 }
@@ -611,6 +621,8 @@ export interface ProjectPageHarness {
   fail(pattern: RegExp | string, options?: { status?: number; error?: string; method?: string }): void;
   /** Holds every matching request until the returned release function runs. */
   hold(pattern: RegExp | string): () => void;
+  /** Holds only the next matching request until the returned release function runs. */
+  holdOnce(pattern: RegExp | string): () => void;
   /** Forces the next hierarchy command to answer with a revision conflict. */
   conflictNextCommand(): void;
 }
@@ -655,9 +667,10 @@ export function installProjectPageHarness(
   let revision = scenario.revision ?? 1;
   let conflictNext = false;
   const failures: FailureRule[] = [];
-  const holds: Array<{ pattern: RegExp; promise: Promise<void>; release: () => void }> = [];
+  const holds: HoldRule[] = [];
   const requests: RecordedRequest[] = [];
   const commands: ProjectHierarchyCommand[] = [];
+  let projectsOverviewRequestCount = 0;
 
   navigationState.projectId = PROJECT_ID;
   navigationState.search = '';
@@ -806,10 +819,18 @@ export function installProjectPageHarness(
     const url = String(input);
     const method = (init?.method ?? 'GET').toUpperCase();
     const body = init?.body ? JSON.parse(String(init.body)) as unknown : undefined;
-    requests.push({ url, method, body });
+    const projectsOverviewRequestIndex = url === '/api/projects-overview'
+      ? projectsOverviewRequestCount++
+      : null;
+    requests.push({ url, method, body, signal: init?.signal ?? null });
 
-    const hold = holds.find((candidate) => candidate.pattern.test(url));
-    if (hold) await hold.promise;
+    const hold = holds.find((candidate) => (
+      candidate.pattern.test(url) && (!candidate.once || !candidate.used)
+    ));
+    if (hold) {
+      hold.used = true;
+      await hold.promise;
+    }
 
     const failure = matchedFailure(url, method);
     if (failure) {
@@ -916,8 +937,13 @@ export function installProjectPageHarness(
     }
 
     if (url === '/api/projects-overview') {
+      const categories = (
+        projectsOverviewRequestIndex === null
+          ? undefined
+          : scenario.categoryResponses?.[projectsOverviewRequestIndex]
+      ) ?? scenario.categories ?? [];
       return jsonResponse({
-        categories: (scenario.categories ?? []).map((category) => ({ category })),
+        categories: categories.map((category) => ({ category })),
       });
     }
 
@@ -1017,7 +1043,30 @@ export function installProjectPageHarness(
       const promise = new Promise<void>((resolve) => {
         release = resolve;
       });
-      const entry = { pattern: toPattern(pattern), promise, release };
+      const entry: HoldRule = {
+        pattern: toPattern(pattern),
+        promise,
+        release,
+        once: false,
+      };
+      holds.push(entry);
+      return () => {
+        const index = holds.indexOf(entry);
+        if (index >= 0) holds.splice(index, 1);
+        entry.release();
+      };
+    },
+    holdOnce(pattern) {
+      let release!: () => void;
+      const promise = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const entry: HoldRule = {
+        pattern: toPattern(pattern),
+        promise,
+        release,
+        once: true,
+      };
       holds.push(entry);
       return () => {
         const index = holds.indexOf(entry);

@@ -48,6 +48,7 @@ import {
   type ConfirmationRequest,
   type ProjectTaskOverlayActions,
   type ProjectTaskTarget,
+  type RequestConfirmation,
 } from './tabs';
 import type { ProjectTab, ProjectTask } from './types';
 import { getProjectStatus, getProjectTabCount } from './utils';
@@ -71,6 +72,33 @@ export default function ProjectDetailPage() {
     <ProjectPageProvider projectId={projectId}>
       <ProjectDetailContent projectId={projectId} />
     </ProjectPageProvider>
+  );
+}
+
+function ProjectSettingsActivityBoundary({
+  active,
+  connectorListModes,
+  requestConfirmation,
+}: {
+  active: boolean;
+  connectorListModes: Record<string, string>;
+  requestConfirmation: RequestConfirmation;
+}) {
+  const [lifetimeController] = useState(() => new AbortController());
+
+  useEffect(() => (
+    () => lifetimeController.abort()
+  ), [lifetimeController]);
+
+  return (
+    <Activity mode={active ? 'visible' : 'hidden'}>
+      <ProjectSettingsTab
+        active={active}
+        connectorListModes={connectorListModes}
+        lifetimeSignal={lifetimeController.signal}
+        requestConfirmation={requestConfirmation}
+      />
+    </Activity>
   );
 }
 
@@ -508,13 +536,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         />
       </Activity>
 
-      <Activity mode={activeTab === 'settings' ? 'visible' : 'hidden'}>
-        <ProjectSettingsTab
-          active={activeTab === 'settings'}
-          connectorListModes={connectorListModes}
-          requestConfirmation={requestConfirmation}
-        />
-      </Activity>
+      <ProjectSettingsActivityBoundary
+        key={projectId}
+        active={activeTab === 'settings'}
+        connectorListModes={connectorListModes}
+        requestConfirmation={requestConfirmation}
+      />
 
       {proposal ? (
         <PhaseProposalReview

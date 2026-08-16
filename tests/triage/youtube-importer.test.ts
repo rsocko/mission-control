@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockIngest = vi.fn();
 const mockUpsertSyncState = vi.fn();
 
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   ingestTriageImport: mockIngest,
 }));
 

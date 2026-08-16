@@ -2,7 +2,7 @@
  * Reddit Saved importer for triage queue.
  */
 import type { TriageSourcePlatform } from '@/types';
-import { ingestTriageImport } from '..';
+import { ingestTriageImport } from '../capture';
 import { fetchWithRateLimit, IMPORT_USER_AGENT, MAX_PAGES } from './base-importer';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';

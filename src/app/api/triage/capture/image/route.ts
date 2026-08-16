@@ -10,7 +10,7 @@ import {
   createTriageImageCapture,
   findTriageImageCaptureByImageUrl,
   findTriageImageCaptureByRequestId,
-} from '@/lib/triage';
+} from '@/lib/triage/capture';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { getCaptureImageStorage } from '@/lib/triage/capture-image-storage';
 import { isSameOriginRequest } from '@/lib/api/trusted-request';

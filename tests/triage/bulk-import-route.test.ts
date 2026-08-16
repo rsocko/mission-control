@@ -12,9 +12,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockIngest = vi.fn();
 const mockSingleIngest = vi.fn();
 
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   ingestTriageImports: mockIngest,
   ingestTriageImport: mockSingleIngest,
+}));
+
+vi.mock('@/lib/triage/query', () => ({
   isValidTriageSource: (value: string | null) =>
     !!value && ['all', 'reddit', 'youtube', 'instagram', 'facebook', 'github', 'ios_share', 'android_share', 'browser_extension', 'web'].includes(value),
 }));

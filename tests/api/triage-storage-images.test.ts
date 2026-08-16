@@ -27,7 +27,7 @@ vi.mock('@/db/schema', () => ({
     thumbnailUrl: 'thumbnailUrl',
   },
 }));
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/lifecycle', () => ({
   purgeDismissedItems: vi.fn(),
 }));
 vi.mock('@/lib/triage/capture-image-lifecycle', () => ({

@@ -28,7 +28,7 @@ import { persistCreatedTaskIdentity } from '@/lib/connectors/transfer-identity';
 import {
   releaseTriageTaskCreation,
   reserveTriageTaskCreation,
-} from '@/lib/triage';
+} from '@/lib/triage/actions';
 import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,

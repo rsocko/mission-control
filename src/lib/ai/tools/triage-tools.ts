@@ -1,6 +1,6 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import { listTriageItems } from '@/lib/triage';
+import { listTriageItems } from '@/lib/triage/query';
 import { buildTriageSummaryData } from '@/lib/triage/summary-contract';
 
 const sourceSchema = z.enum([

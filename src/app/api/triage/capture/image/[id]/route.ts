@@ -1,5 +1,5 @@
 import { getCaptureImageStorage } from '@/lib/triage/capture-image-storage';
-import { findTriageImageCaptureByImageUrl } from '@/lib/triage';
+import { findTriageImageCaptureByImageUrl } from '@/lib/triage/capture';
 
 export const runtime = 'nodejs';
 

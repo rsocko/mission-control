@@ -4,7 +4,7 @@ import {
   reclassifyTriageItems,
   setTriageItemContentType,
   setTriageItemsContentType,
-} from '@/lib/triage';
+} from '@/lib/triage/classification';
 import logger from '@/lib/logger';
 
 /**

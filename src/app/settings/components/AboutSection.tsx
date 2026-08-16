@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   BookOpen,
   ExternalLink,
-  Github,
+  GitBranch,
   LifeBuoy,
   Scale,
 } from 'lucide-react';
@@ -23,7 +23,7 @@ const ABOUT_LINKS = [
     title: 'Source code',
     description: 'View the project and its release history on GitHub.',
     href: APP_REPOSITORY_URL,
-    icon: Github,
+    icon: GitBranch,
   },
   {
     title: 'Documentation',

@@ -114,7 +114,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'App badge count', section: 'general', sectionLabel: 'System', keywords: ['icon', 'unread count'] },
   { title: 'Navigation badges', section: 'general', sectionLabel: 'System', target: 'Navigation tab badges', keywords: ['tabs', 'counts'] },
   { title: 'Dopamine Menu', section: 'general', sectionLabel: 'System', keywords: ['rewards', 'completion'] },
-  { title: 'About Mission Control', section: 'about', sectionLabel: 'System', keywords: ['version', 'release', 'project'] },
+  { title: 'About Mission Control', section: 'about', sectionLabel: 'System', keywords: ['app', 'version', 'release', 'project'] },
   { title: 'Version', section: 'about', sectionLabel: 'System', keywords: ['release', 'build'] },
   { title: 'Build', section: 'about', sectionLabel: 'System', keywords: ['revision', 'commit', 'sha', 'release'] },
   { title: 'Documentation', section: 'about', sectionLabel: 'System', keywords: ['help', 'guides', 'setup'] },

@@ -25,6 +25,9 @@ describe('searchSettings', () => {
     expect(searchSettings('paperless')[0]?.title).toBe('OWL');
     expect(searchSettings('document intelligence')[0]?.title).toBe('OWL');
     expect(searchSettings('sync icon')[0]?.title).toBe('Sync icon animation');
+    expect(searchSettings('app version')[0]?.title).toBe('About Mission Control');
+    expect(searchSettings('license')[0]?.title).toBe('Licensing status');
+    expect(searchSettings('commit sha')[0]?.title).toBe('Build');
   });
 
   it('requires every query term to match', () => {

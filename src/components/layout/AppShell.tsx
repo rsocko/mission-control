@@ -292,6 +292,7 @@ function AppShellInner({
         features={features}
         isAiActive={isAiActive}
         isSyncing={syncProgress.isSyncing}
+        syncStatus={health?.connectors ?? []}
       />
 
       {/* Right area: toolbar + content */}

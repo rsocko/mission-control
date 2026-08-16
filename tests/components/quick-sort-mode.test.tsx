@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QuickSortMode from '@/components/quick-sort/QuickSortMode';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
@@ -133,6 +133,68 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View task' }));
 
     expect(screen.getByTestId('task-detail-panel')).toHaveAttribute('data-mode', 'panel');
+  });
+
+  it('mounts only the queue region appropriate for the responsive layout', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    render(<QuickSortMode />);
+
+    expect(screen.getAllByRole('complementary', { name: 'Quick Sort queues' })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+
+    expect(screen.queryByRole('complementary', { name: 'Quick Sort queues' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+
+    expect(screen.getAllByRole('complementary', { name: 'Quick Sort queues' })).toHaveLength(1);
+  });
+
+  it('keeps exactly one queue region mounted beside the desktop workspace', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+
+    expect(screen.getAllByRole('complementary', { name: 'Quick Sort queues' })).toHaveLength(1);
+  });
+
+  it('updates the mounted queue region when crossing the desktop breakpoint', () => {
+    let isSingleColumn = false;
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(max-width: 1023px)' ? isSingleColumn : false,
+      addEventListener: (_event: string, listener: (event: MediaQueryListEvent) => void) => {
+        if (query === '(max-width: 1023px)') listeners.add(listener);
+      },
+      removeEventListener: (_event: string, listener: (event: MediaQueryListEvent) => void) => {
+        listeners.delete(listener);
+      },
+    })));
+    render(<QuickSortMode />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+
+    expect(screen.getAllByRole('complementary', { name: 'Quick Sort queues' })).toHaveLength(1);
+
+    isSingleColumn = true;
+    act(() => {
+      listeners.forEach((listener) => listener({ matches: true } as MediaQueryListEvent));
+    });
+    expect(screen.queryByRole('complementary', { name: 'Quick Sort queues' })).not.toBeInTheDocument();
+
+    isSingleColumn = false;
+    act(() => {
+      listeners.forEach((listener) => listener({ matches: false } as MediaQueryListEvent));
+    });
+    expect(screen.getAllByRole('complementary', { name: 'Quick Sort queues' })).toHaveLength(1);
   });
 
   it('offers an explicit desktop action for the focused AI suggestion', async () => {

@@ -2,6 +2,8 @@ import { expect, test } from '@playwright/test';
 import type { QuickSortQueueTask } from '@/lib/hooks/useQuickSortData';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
+test.use({ serviceWorkers: 'block' });
+
 const task = {
   id: 'task-desktop',
   title: 'Add Quick Sort UI into desktop',
@@ -26,6 +28,15 @@ const task = {
 test.beforeEach(async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.addInitScript(() => {
+    const trackedWindow = window as typeof window & { __quickSortQueueMaxCount: number };
+    const updateQueueCount = () => {
+      trackedWindow.__quickSortQueueMaxCount = Math.max(
+        trackedWindow.__quickSortQueueMaxCount,
+        document.querySelectorAll('aside[aria-label="Quick Sort queues"]').length,
+      );
+    };
+    trackedWindow.__quickSortQueueMaxCount = 0;
+    new MutationObserver(updateQueueCount).observe(document, { childList: true, subtree: true });
     localStorage.setItem('mc_priority_wizard_dismissed', 'true');
     localStorage.setItem('mission-control:pwa-install-dismissed', Date.now().toString());
   });
@@ -111,6 +122,7 @@ test.beforeEach(async ({ page }) => {
 
 test('keeps queue context visible and exposes desktop AI actions', async ({ page }) => {
   const queuePanel = page.locator('aside[aria-label="Quick Sort queues"]');
+  await expect(queuePanel).toHaveCount(1);
   await expect(queuePanel).toBeVisible();
   await expect(page.getByRole('link', { name: 'Quick Sort' })).toBeVisible();
 
@@ -118,9 +130,13 @@ test('keeps queue context visible and exposes desktop AI actions', async ({ page
 
   await expect(page.getByRole('heading', { name: 'Set Priority' })).toBeVisible();
   await expect(page.getByRole('heading', { name: task.title })).toBeVisible();
+  await expect(queuePanel).toHaveCount(1);
   await expect(queuePanel).toBeVisible();
   await expect(page.getByRole('button', { name: /Apply suggestion/ })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeHidden();
+  expect(await page.evaluate(
+    () => (window as typeof window & { __quickSortQueueMaxCount: number }).__quickSortQueueMaxCount,
+  )).toBe(1);
 
   const queueBox = await queuePanel.boundingBox();
   const workspaceBox = await page.getByTestId('quick-sort-mode').boundingBox();
@@ -140,4 +156,17 @@ test('supports numeric desktop shortcuts for the active queue', async ({ page })
 
   expect((await patchRequest).postDataJSON()).toEqual({ priority: 'high' });
   await expect(page.getByText('All caught up!')).toBeVisible();
+});
+
+test('mounts the queue region when the active workspace crosses into desktop', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(1);
+  await page.getByRole('button', { name: /Set Priority/ }).click();
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(0);
+
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(1);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(0);
 });

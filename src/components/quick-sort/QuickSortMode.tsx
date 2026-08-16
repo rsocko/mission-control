@@ -84,6 +84,7 @@ export default function QuickSortMode() {
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
   const [aiAccepted, setAiAccepted] = useState(0);
   const useCompactTaskDetails = useIsMobile(1279);
+  const isSingleColumnLayout = useIsMobile(1023);
   const globalChordPendingRef = useRef(false);
   const globalChordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -614,27 +615,29 @@ export default function QuickSortMode() {
 
   return (
     <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden bg-[var(--background)] lg:grid-cols-[18rem_minmax(0,1fr)]">
-      <aside
-        className={`${mode ? 'hidden lg:flex' : 'flex'} min-h-0 flex-col overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-1)]`}
-        aria-label="Quick Sort queues"
-      >
-        <div className="px-4 pb-2 pt-4 lg:px-5 lg:pt-5">
-          <h1 className="text-xl font-bold text-[var(--text-primary)]">Quick Sort</h1>
-          <p className="mt-1 text-sm text-[var(--text-tertiary)]">
-            Quickly update tasks that need attention
-          </p>
-        </div>
-        <ScopeFilter filter={scopeFilter} onChange={setScopeFilter} />
-        <div className="mt-1">
-          <ActivityBanner key={statsKey} />
-        </div>
-        <ModeSelector
-          counts={counts}
-          onSelect={handleModeSelect}
-          selectedMode={mode}
-          disabled={busy}
-        />
-      </aside>
+      {(!mode || !isSingleColumnLayout) && (
+        <aside
+          className="flex min-h-0 flex-col overflow-y-auto border-r border-[var(--border)] bg-[var(--surface-1)]"
+          aria-label="Quick Sort queues"
+        >
+          <div className="px-4 pb-2 pt-4 lg:px-5 lg:pt-5">
+            <h1 className="text-xl font-bold text-[var(--text-primary)]">Quick Sort</h1>
+            <p className="mt-1 text-sm text-[var(--text-tertiary)]">
+              Quickly update tasks that need attention
+            </p>
+          </div>
+          <ScopeFilter filter={scopeFilter} onChange={setScopeFilter} />
+          <div className="mt-1">
+            <ActivityBanner key={statsKey} />
+          </div>
+          <ModeSelector
+            counts={counts}
+            onSelect={handleModeSelect}
+            selectedMode={mode}
+            disabled={busy}
+          />
+        </aside>
+      )}
 
       {!mode ? (
         <section className="hidden min-h-0 items-center justify-center p-10 text-center lg:flex">

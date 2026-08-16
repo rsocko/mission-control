@@ -1,12 +1,13 @@
 'use client';
 
 import React from 'react';
-import { Check, Globe, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox } from 'lucide-react';
+import Image from 'next/image';
+import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type { TaskTag, TaskResponse, HubProject, ListGroup, SourceList, EnabledSource, SavedView } from '@/types/dashboard';
-import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
+import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import type { SidebarMode } from '@/lib/hooks/useSidebarExpanded';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
 import type { GraphOrigin } from '@/lib/graph/graph-navigation';

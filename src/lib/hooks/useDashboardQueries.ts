@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { uiLogger } from '@/lib/client-logger';
@@ -13,7 +13,7 @@ import type {
   SyncStatusEntry,
   TaskTag,
 } from '@/types/dashboard';
-import { EMPTY_TASK_RESPONSE } from '@/types/dashboard';
+import { EMPTY_TASK_RESPONSE, PAGE_SIZE } from '@/types/dashboard';
 
 // ─── Fetcher helpers ────────────────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 // ─── Query keys ─────────────────────────────────────────────────────────────
 
 export const dashboardKeys = {
-  tasks: (params: string) => ['dashboard', 'tasks', params] as const,
+  tasks: (params: string) => ['dashboard', 'tasks', normalizeTaskParams(params)] as const,
   notifications: () => ['dashboard', 'notifications'] as const,
   projects: () => ['dashboard', 'projects'] as const,
   myDayIds: (date: string) => ['dashboard', 'myDayIds', date] as const,
@@ -36,6 +36,46 @@ export const dashboardKeys = {
   sourceCounts: () => ['dashboard', 'sourceCounts'] as const,
   tags: (source: string | null, listId: string | null) => ['dashboard', 'tags', source, listId] as const,
 };
+
+// Retain at most 8 x 50-task pages (400 entities) for the active dashboard view.
+// Inactive filter variants are evicted after one minute.
+export const DASHBOARD_TASK_PAGE_LIMIT = 8;
+export const DASHBOARD_TASK_CACHE_GC_MS = 60 * 1000;
+export const DASHBOARD_TASK_ENTITY_LIMIT = PAGE_SIZE * DASHBOARD_TASK_PAGE_LIMIT;
+
+export function normalizeTaskParams(params: string): string {
+  const normalized = new URLSearchParams(params);
+  normalized.delete('offset');
+  normalized.sort();
+  return normalized.toString();
+}
+
+export function flattenTaskPages(data: InfiniteData<TaskResponse, number> | undefined): TaskResponse {
+  if (!data?.pages.length) return EMPTY_TASK_RESPONSE;
+
+  const tasks = [];
+  const seen = new Set<string>();
+  for (const page of data.pages) {
+    for (const task of page.tasks || []) {
+      if (!seen.has(task.id)) {
+        seen.add(task.id);
+        tasks.push(task);
+      }
+    }
+  }
+
+  const latest = data.pages[data.pages.length - 1];
+  return {
+    tasks,
+    total: latest.total || 0,
+    stats: latest.stats || EMPTY_TASK_RESPONSE.stats,
+    hasMore: Boolean(latest.hasMore)
+      && data.pages.length < DASHBOARD_TASK_PAGE_LIMIT
+      && tasks.length < DASHBOARD_TASK_ENTITY_LIMIT,
+    sourceCounts: latest.sourceCounts || {},
+    availableTags: latest.availableTags || [],
+  };
+}
 
 export const myDayKeys = {
   items: (date: string) => ['myDay', 'items', date] as const,
@@ -62,11 +102,33 @@ interface ConnectorsResponse {
 export function useDashboardQueries(taskParams: string) {
   const queryClient = useQueryClient();
   const today = getClientToday();
+  const normalizedTaskParams = normalizeTaskParams(taskParams);
 
-  const tasksQuery = useQuery({
-    queryKey: dashboardKeys.tasks(taskParams),
-    queryFn: () => fetchJson<TaskResponse>(`/api/tasks?${taskParams}`),
+  const tasksQuery = useInfiniteQuery<
+    TaskResponse,
+    Error,
+    InfiniteData<TaskResponse, number>,
+    ReturnType<typeof dashboardKeys.tasks>,
+    number
+  >({
+    queryKey: dashboardKeys.tasks(normalizedTaskParams),
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams(normalizedTaskParams);
+      params.set('offset', String(pageParam));
+      return fetchJson<TaskResponse>(`/api/tasks?${params.toString()}`);
+    },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages, lastPageParam) => {
+      const loadedTaskCount = pages.reduce((count, page) => count + (page.tasks?.length || 0), 0);
+      if (
+        !lastPage.hasMore
+        || pages.length >= DASHBOARD_TASK_PAGE_LIMIT
+        || loadedTaskCount >= DASHBOARD_TASK_ENTITY_LIMIT
+      ) return undefined;
+      return lastPageParam + (lastPage.tasks?.length || 0);
+    },
     placeholderData: (prev) => prev, // Keep previous data while refetching (avoids flash)
+    gcTime: DASHBOARD_TASK_CACHE_GC_MS,
   });
 
   const projectsQuery = useQuery({
@@ -78,8 +140,14 @@ export function useDashboardQueries(taskParams: string) {
   const myDayIdsQuery = useQuery({
     queryKey: dashboardKeys.myDayIds(today),
     queryFn: () =>
-      fetchJson<{ items: Array<{ taskId: string }> }>(`/api/my-day?date=${today}`)
-        .then(d => new Set((d.items || []).map(item => item.taskId))),
+      fetchJson<{ items: Array<{ taskId: string; status: string }> }>(`/api/my-day?date=${today}`)
+        .then((data) => {
+          const items = data.items || [];
+          return {
+            ids: new Set(items.map((item) => item.taskId)),
+            statuses: new Map(items.map((item) => [item.taskId, item.status])),
+          };
+        }),
     staleTime: 60 * 1000,
   });
 

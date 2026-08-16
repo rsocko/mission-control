@@ -12,8 +12,12 @@ import {
 import { eq, inArray } from 'drizzle-orm';
 import { dbLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import {
+  hubProjectRulesChanged,
+  parseHubProjectUpdate,
+} from '@/lib/projects/hub-project-update';
 import { normalizeProjectJsonCollections } from '@/lib/projects/normalize-project';
-import { normalizeAutoIncludeRules, reevaluateProject } from '@/lib/rules';
+import { reevaluateProject } from '@/lib/rules';
 
 /**
  * GET /api/hub-projects/[id] — Get a single hub project
@@ -40,24 +44,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const { id } = await params;
     const body = await request.json();
-    const updates: Record<string, unknown> = {};
-
-    const allowedFields = ['name', 'description', 'color', 'icon', 'iconColor', 'category', 'targetDate', 'sourceBindings', 'autoIncludeRules', 'statusOverride', 'sortOrder', 'hidden'];
-    for (const field of allowedFields) {
-      if (field in body) {
-        updates[field] = field === 'autoIncludeRules'
-          ? normalizeAutoIncludeRules(body[field])
-          : body[field];
-      }
+    const parsedUpdates = parseHubProjectUpdate(body);
+    if (!parsedUpdates.success) {
+      return ApiErrors.badRequest(parsedUpdates.message);
     }
 
-    updates.updatedAt = new Date().toISOString();
+    const updates = {
+      ...parsedUpdates.updates,
+      updatedAt: new Date().toISOString(),
+    };
     await db.update(hubProjects).set(updates).where(eq(hubProjects.id, id));
 
-    const rulesChanged = 'autoIncludeRules' in body || 'sourceBindings' in body;
     let evaluation = null;
     let evaluationFailed = false;
-    if (rulesChanged) {
+    if (hubProjectRulesChanged(parsedUpdates.updates)) {
       try {
         evaluation = await reevaluateProject(id);
       } catch (error) {

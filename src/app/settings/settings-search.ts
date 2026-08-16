@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 export type SettingsSection =
   | 'general'
   | 'connectors'
@@ -164,6 +166,31 @@ export function findSettingsTarget(root: ParentNode, targetText: string, section
   return { target, sectionHeading };
 }
 
+export function focusSettingsTarget(root: ParentNode, targetText: string, sectionName: string) {
+  const { target, sectionHeading } = findSettingsTarget(root, targetText, sectionName);
+  const element = target ?? sectionHeading;
+  if (!element) return false;
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hadTabIndex = element.hasAttribute('tabindex');
+  if (!hadTabIndex) element.tabIndex = -1;
+  element.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+  element.focus({ preventScroll: true });
+  if (!reduceMotion) {
+    element.animate(
+      [
+        { outline: '2px solid rgb(59 130 246 / 0.9)', outlineOffset: '6px', backgroundColor: 'rgb(59 130 246 / 0.12)' },
+        { outline: '2px solid transparent', outlineOffset: '10px', backgroundColor: 'transparent' },
+      ],
+      { duration: 1800, easing: 'ease-out' },
+    );
+  }
+  if (!hadTabIndex) {
+    element.addEventListener('blur', () => element.removeAttribute('tabindex'), { once: true });
+  }
+  return Boolean(target);
+}
+
 function getUrlSettingTarget() {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get('setting');
@@ -180,4 +207,3 @@ export function useSettingsUrlTarget() {
 
   return [target, setTarget] as const;
 }
-import { useEffect, useState } from 'react';

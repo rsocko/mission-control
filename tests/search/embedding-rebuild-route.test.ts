@@ -19,6 +19,9 @@ describe('embedding index rebuild routing', () => {
         configured: true,
         baseUrl: 'https://bifrost.example.test/v1',
         apiKey: undefined,
+        model: 'azure/gpt-4o-mini',
+        embeddingModel: 'ollama/nomic-embed-text:latest',
+        semanticSearchEnabled: true,
       })),
       getAIRequestContext: vi.fn(() => ({
         featureId: 'semantic-embedding',

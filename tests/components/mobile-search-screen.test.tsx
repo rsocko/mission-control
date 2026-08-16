@@ -158,14 +158,22 @@ describe('MobileSearchScreen', () => {
     expect(hasAlphaRequest()).toBe(true);
   });
 
-  it('waits for semantic route detection before searching an initial query', async () => {
+  it('shows keyword results without waiting for semantic route detection', async () => {
     let resolveStatus!: (response: {
       ok: boolean;
-      json: () => Promise<{ semanticAvailable: boolean; results: never[] }>;
+      json: () => Promise<{
+        semanticEnabled: boolean;
+        semanticAvailable: boolean;
+        results: never[];
+      }>;
     }) => void;
     const statusResponse = new Promise<{
       ok: boolean;
-      json: () => Promise<{ semanticAvailable: boolean; results: never[] }>;
+      json: () => Promise<{
+        semanticEnabled: boolean;
+        semanticAvailable: boolean;
+        results: never[];
+      }>;
     }>((resolve) => {
       resolveStatus = resolve;
     });
@@ -183,17 +191,25 @@ describe('MobileSearchScreen', () => {
 
     render(<MobileSearchScreen isOpen={true} onClose={vi.fn()} initialQuery="alpha" />);
 
-    expect(mockFetch.mock.calls.some(([url]) => String(url).includes('q=alpha'))).toBe(false);
+    await screen.findByRole('button', { name: /open task alpha task/i });
+    const keywordCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
+    expect(keywordCalls).toHaveLength(1);
+    expect(String(keywordCalls[0][0])).toContain('mode=keyword');
 
     resolveStatus({
       ok: true,
-      json: () => Promise.resolve({ semanticAvailable: true, results: [] }),
+      json: () => Promise.resolve({
+        semanticEnabled: true,
+        semanticAvailable: true,
+        results: [],
+      }),
     });
 
-    await screen.findByRole('button', { name: /open task alpha task/i });
-    const searchCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
-    expect(searchCalls).toHaveLength(1);
-    expect(String(searchCalls[0][0])).toContain('mode=hybrid');
+    await waitFor(() => {
+      const searchCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
+      expect(searchCalls).toHaveLength(2);
+      expect(String(searchCalls[1][0])).toContain('mode=semantic');
+    });
   });
 
   it('renders filter chips and filters results by type', async () => {

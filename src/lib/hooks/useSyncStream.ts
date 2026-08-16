@@ -74,6 +74,9 @@ export { SyncStreamContext, initialProgress };
 
 /** Minimum interval (ms) between intermediate progress re-renders */
 const PROGRESS_THROTTLE_MS = 300;
+const SYNC_FALLBACK_POLL_MS = 30_000;
+const SYNC_RECONNECT_BASE_MS = 3_000;
+const SYNC_RECONNECT_MAX_MS = 30_000;
 
 /**
  * Hook that manages the actual EventSource connection.
@@ -93,6 +96,15 @@ export function useSyncStreamConnection() {
   const [progress, setProgress] = useState<SyncProgress>(initialProgress);
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const stoppedRef = useRef(false);
+  const fallbackSawSyncRef = useRef(false);
+  const fallbackGenerationRef = useRef(0);
+  const fallbackRefreshedRef = useRef(false);
+  const streamFailedRef = useRef(false);
+  const streamConnectedRef = useRef(false);
+  const knownSyncingRef = useRef(false);
 
   // Track current connector for toast messages (set by sync:start, used by subsequent events)
   const currentConnectorRef = useRef<{ id: string; name: string } | null>(null);
@@ -146,7 +158,60 @@ export function useSyncStreamConnection() {
     await queryClient.invalidateQueries({ refetchType: 'active' });
   }, [queryClient]);
 
+  const pollSyncStatus = useCallback(async (generation: number) => {
+    try {
+      const response = await fetch('/api/sync');
+      if (!response.ok) return;
+      const data = await response.json() as { isSyncing?: boolean };
+      if (stoppedRef.current || generation !== fallbackGenerationRef.current) return;
+      const isSyncing = data.isSyncing === true;
+      const completedWhileDisconnected = fallbackSawSyncRef.current && !isSyncing;
+      fallbackSawSyncRef.current = isSyncing;
+      setProgress((previous) => ({
+        ...previous,
+        isSyncing,
+        ...(completedWhileDisconnected ? { refetchKey: previous.refetchKey + 1 } : {}),
+      }));
+      if (completedWhileDisconnected) {
+        fallbackRefreshedRef.current = true;
+        void refreshActiveQueries();
+        window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
+      }
+      if (streamConnectedRef.current && fallbackPollRef.current) {
+        clearInterval(fallbackPollRef.current);
+        fallbackPollRef.current = null;
+        fallbackSawSyncRef.current = false;
+        fallbackRefreshedRef.current = false;
+      }
+    } catch {
+      // The next low-frequency fallback tick or SSE reconnect will retry.
+    }
+  }, [refreshActiveQueries]);
+
+  const stopFallbackPolling = useCallback(() => {
+    fallbackGenerationRef.current += 1;
+    if (fallbackPollRef.current) {
+      clearInterval(fallbackPollRef.current);
+      fallbackPollRef.current = null;
+    }
+    fallbackSawSyncRef.current = false;
+  }, []);
+
+  const startFallbackPolling = useCallback(() => {
+    if (fallbackPollRef.current || stoppedRef.current) return;
+    const generation = ++fallbackGenerationRef.current;
+    void pollSyncStatus(generation);
+    fallbackPollRef.current = setInterval(() => {
+      void pollSyncStatus(generation);
+    }, SYNC_FALLBACK_POLL_MS);
+  }, [pollSyncStatus]);
+
   const connect = useCallback(() => {
+    if (stoppedRef.current) return;
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
     }
@@ -154,6 +219,24 @@ export function useSyncStreamConnection() {
     const es = new EventSource('/api/sync/stream');
     eventSourceRef.current = es;
     toastSuppressedUntilRef.current = Date.now() + 2000;
+    es.onopen = () => {
+      if (eventSourceRef.current !== es) return;
+      streamConnectedRef.current = true;
+      reconnectAttemptRef.current = 0;
+      const recovering = streamFailedRef.current;
+      stopFallbackPolling();
+      if (streamFailedRef.current && !fallbackRefreshedRef.current) {
+        fallbackRefreshedRef.current = true;
+        setProgress((previous) => ({
+          ...previous,
+          refetchKey: previous.refetchKey + 1,
+        }));
+        void refreshActiveQueries();
+        window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
+      }
+      streamFailedRef.current = false;
+      if (recovering) startFallbackPolling();
+    };
 
     // Critical events — always applied immediately
     const handleStart = (e: MessageEvent) => {
@@ -165,6 +248,7 @@ export function useSyncStreamConnection() {
       }
       pendingProgressRef.current = null;
       currentConnectorRef.current = { id: data.connectorId, name: data.connectorName };
+      knownSyncingRef.current = true;
       setProgress((prev) => ({
         ...prev,
         isSyncing: true,
@@ -230,6 +314,7 @@ export function useSyncStreamConnection() {
       // If more syncs are still queued/running, keep isSyncing=true and defer
       // the refetchKey increment to avoid cascading refetch storms.
       if (data.queueRemaining > 0) {
+        knownSyncingRef.current = true;
         setProgress((prev) => ({
           ...prev,
           // Reset phase-level details but stay in syncing state
@@ -244,6 +329,7 @@ export function useSyncStreamConnection() {
           byStatus: { todo: 0, done: 0 },
         }));
       } else {
+        knownSyncingRef.current = false;
         // All syncs done — reset and trigger refetch
         setProgress((prev) => ({
           ...initialProgress,
@@ -308,6 +394,7 @@ export function useSyncStreamConnection() {
 
       // If more syncs are still queued/running, stay in syncing state
       if (data.queueRemaining > 0) {
+        knownSyncingRef.current = true;
         setProgress((prev) => ({
           ...prev,
           phase: null,
@@ -321,6 +408,7 @@ export function useSyncStreamConnection() {
           byStatus: { todo: 0, done: 0 },
         }));
       } else {
+        knownSyncingRef.current = false;
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
       }
@@ -346,15 +434,28 @@ export function useSyncStreamConnection() {
     es.addEventListener('sync:error', handleError);
 
     es.onerror = () => {
+      if (eventSourceRef.current !== es) return;
       es.close();
       eventSourceRef.current = null;
-      reconnectTimeoutRef.current = setTimeout(connect, 3000);
+      streamConnectedRef.current = false;
+      streamFailedRef.current = true;
+      fallbackSawSyncRef.current = knownSyncingRef.current;
+      startFallbackPolling();
+      if (reconnectTimeoutRef.current || stoppedRef.current) return;
+      const delay = Math.min(
+        SYNC_RECONNECT_BASE_MS * (2 ** reconnectAttemptRef.current),
+        SYNC_RECONNECT_MAX_MS,
+      );
+      reconnectAttemptRef.current += 1;
+      reconnectTimeoutRef.current = setTimeout(connect, delay);
     };
-  }, [refreshActiveQueries, throttledSetProgress]);
+  }, [refreshActiveQueries, startFallbackPolling, stopFallbackPolling, throttledSetProgress]);
 
   useEffect(() => {
+    stoppedRef.current = false;
     connect();
     return () => {
+      stoppedRef.current = true;
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
@@ -365,8 +466,9 @@ export function useSyncStreamConnection() {
       if (throttleTimerRef.current) {
         clearTimeout(throttleTimerRef.current);
       }
+      stopFallbackPolling();
     };
-  }, [connect]);
+  }, [connect, stopFallbackPolling]);
 
   const triggerSync = useCallback(async () => {
     if (progress.isSyncing) return;
@@ -386,6 +488,7 @@ export function useSyncStreamConnection() {
       listsFound: 0,
       byStatus: { todo: 0, done: 0 },
     }));
+    knownSyncingRef.current = true;
     try {
       const res = await fetch('/api/sync', {
         method: 'POST',
@@ -395,6 +498,7 @@ export function useSyncStreamConnection() {
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         toast.error(`Sync failed: ${data.error || res.statusText}`);
+        knownSyncingRef.current = false;
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         return;
       }
@@ -404,6 +508,7 @@ export function useSyncStreamConnection() {
         toast('No sources configured — add a connector in Settings to sync tasks', {
           duration: 4000,
         });
+        knownSyncingRef.current = false;
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         return;
       }
@@ -412,6 +517,7 @@ export function useSyncStreamConnection() {
       window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
     } catch {
       toast.error('Sync request failed — check your connection');
+      knownSyncingRef.current = false;
       setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
     }
     // Note: isSyncing is reset by the SSE sync:complete / sync:error handler,

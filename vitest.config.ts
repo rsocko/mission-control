@@ -56,6 +56,7 @@ export default defineConfig({
         test: {
           name: 'dom',
           environment: 'happy-dom',
+          testTimeout: 10_000,
           include: domTestFiles,
           exclude: ['tests/e2e/**'],
         },

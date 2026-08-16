@@ -17,6 +17,21 @@
         "value": "#6b7280",
         "createdAt": "2026-08-15T03:07:46.694Z",
         "reason": "Existing persisted fallback tag color, not a newly introduced UI color"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#6e40c9",
+        "createdAt": "2026-08-15T04:29:49.400Z",
+        "reason": "Existing GitHub brand color moved unchanged during sync scheduler decomposition"
+      },
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/components/task-detail/TaskDetailMarkdown.tsx"
+        ],
+        "createdAt": "2026-08-16T00:42:35.014Z",
+        "reason": "The image source is a runtime Markdown value and already has a failure fallback."
       }
     ]
   },

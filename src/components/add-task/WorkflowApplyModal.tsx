@@ -8,21 +8,13 @@ import { modalOverlay, modalContent } from '@/lib/motion';
 import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import type { TaskTemplate } from '@/types';
 import { taskLogger } from '@/lib/client-logger';
-interface Destination {
-  id: string;
-  label: string;
-  shortLabel: string;
-  connectorType: string;
-  account: 'personal' | 'work' | null;
-  color: string;
-  listId?: string;
-  listName?: string;
-}
+import { applyQuickAddWorkflowTemplate } from '@/lib/quick-add/submission';
+import type { QuickAddDestination } from './quick-add-types';
 
 interface WorkflowApplyModalProps {
   template: TaskTemplate;
-  destinations: Destination[];
-  initialDestination: Destination;
+  destinations: QuickAddDestination[];
+  initialDestination: QuickAddDestination;
   onClose: () => void;
   onApplied: () => void;
 }
@@ -44,7 +36,7 @@ export function WorkflowApplyModal({
 }: WorkflowApplyModalProps) {
   const workflowTasks = template.workflowTasks || [];
   const [checked, setChecked] = useState<boolean[]>(() => workflowTasks.map(() => true));
-  const [destination, setDestination] = useState<Destination>(initialDestination);
+  const [destination, setDestination] = useState<QuickAddDestination>(initialDestination);
   const [showDestPicker, setShowDestPicker] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -84,29 +76,17 @@ export function WorkflowApplyModal({
     setError(null);
 
     try {
-      const res = await fetch('/api/subtask-templates', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          templateId: template.id,
-          connectorType: destination.connectorType,
-          sourceListId: destination.listId,
-          sourceListName: destination.listName,
-          selectedIndices: checked.map((c, i) => c ? i : -1).filter(i => i >= 0),
-        }),
+      await applyQuickAddWorkflowTemplate({}, {
+        templateId: template.id,
+        destination,
+        selectedIndices: checked.flatMap((isChecked, index) => isChecked ? [index] : []),
       });
-
-      if (res.ok) {
-        onApplied();
-        onClose();
-        window.dispatchEvent(new CustomEvent('mission-control:task-added'));
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error || `Failed to create tasks (${res.status})`);
-      }
+      onApplied();
+      onClose();
+      window.dispatchEvent(new CustomEvent('mission-control:task-added'));
     } catch (err) {
       taskLogger.error('Failed to apply workflow template', { err });
-      setError('Network error — please try again');
+      setError(err instanceof Error ? err.message : 'Network error — please try again');
     } finally {
       setIsSubmitting(false);
     }
@@ -165,7 +145,7 @@ export function WorkflowApplyModal({
                 className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--surface-2)] text-[var(--text-secondary)] border border-[var(--border-strong)] hover:bg-[var(--surface-3)] transition-colors"
               >
                 <ConnectorIcon type={destination.connectorType} size={14} />
-                <span className="max-w-[160px] truncate">{destination.listName || destination.shortLabel}</span>
+                <span className="max-w-[160px] truncate">{destination.listName || destination.shortLabel || destination.label}</span>
                 <ChevronDown size={10} className={`transition-transform ${showDestPicker ? 'rotate-180' : ''}`} />
               </button>
 
@@ -189,7 +169,7 @@ export function WorkflowApplyModal({
                         }`}
                       >
                         <ConnectorIcon type={dest.connectorType} size={12} />
-                        <span className="truncate">{dest.listName || dest.shortLabel}</span>
+                        <span className="truncate">{dest.listName || dest.shortLabel || dest.label}</span>
                         {destination.id === dest.id && destination.listId === dest.listId && (
                           <span className="ml-auto text-blue-400"><Check size={12} /></span>
                         )}

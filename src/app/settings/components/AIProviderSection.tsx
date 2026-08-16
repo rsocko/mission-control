@@ -71,6 +71,13 @@ const STATIC_AI_MODELS: Record<AIProviderValue, AIModelOption[]> = {
   ],
 };
 
+const DEFAULT_EMBEDDING_MODELS: Record<AIProviderValue, string> = {
+  openai: 'text-embedding-3-small',
+  azure: 'text-embedding-3-small',
+  ollama: 'nomic-embed-text',
+  bifrost: 'ollama/nomic-embed-text:latest',
+};
+
 const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
   policies: {
     'local-only': { allowedRoutes: ['ollama'] },
@@ -133,6 +140,8 @@ function AIProviderSection() {
   const [model, setModel] = useState('gpt-4o-mini');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODELS.openai);
+  const [semanticSearchEnabled, setSemanticSearchEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [activeProvider, setActiveProvider] = useState('openai');
   const [activeModel, setActiveModel] = useState('gpt-4o-mini');
@@ -200,6 +209,8 @@ function AIProviderSection() {
     setModel(nextModel);
     setBaseUrl(nextBaseUrl);
     setApiKey(nextApiKey);
+    setEmbeddingModel(savedConfig.embeddingModel || DEFAULT_EMBEDDING_MODELS[nextProvider]);
+    setSemanticSearchEnabled(Boolean(savedConfig.semanticSearchEnabled));
     setRoutingPolicy(data.routingPolicy || DEFAULT_ROUTING_POLICY);
     setProviderHealth(Array.isArray(data.providerHealth) ? data.providerHealth : []);
     setEntitlement(data.entitlement || null);
@@ -222,7 +233,15 @@ function AIProviderSection() {
       const response = await fetch('/api/ai/provider', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, model, baseUrl, apiKey, routingPolicy }),
+        body: JSON.stringify({
+          provider,
+          model,
+          embeddingModel,
+          semanticSearchEnabled,
+          baseUrl,
+          apiKey,
+          routingPolicy,
+        }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -383,6 +402,7 @@ function AIProviderSection() {
                   if (p.value !== provider) {
                     setApiKey('');
                     setModel(STATIC_AI_MODELS[p.value][0].value);
+                    setEmbeddingModel(DEFAULT_EMBEDDING_MODELS[p.value]);
                     nextBaseUrl = '';
                     setBaseUrl(nextBaseUrl);
                   }
@@ -486,6 +506,51 @@ function AIProviderSection() {
             </p>
           </div>
         )}
+
+        <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-4">
+          <label className="flex cursor-pointer items-start justify-between gap-4">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-[var(--text-secondary)]">
+                Semantic search enrichment
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
+                Add meaning-based matches after keyword results. Off by default; queries are not stored.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={semanticSearchEnabled}
+              onChange={(event) => setSemanticSearchEnabled(event.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--border-strong)]"
+            />
+          </label>
+
+          {semanticSearchEnabled && (
+            <div>
+              <label
+                htmlFor="ai-embedding-model"
+                className="mb-1.5 block text-xs font-semibold uppercase text-[var(--text-tertiary)]"
+              >
+                Embedding model
+              </label>
+              <input
+                id="ai-embedding-model"
+                type="text"
+                value={embeddingModel}
+                onChange={(event) => setEmbeddingModel(event.target.value)}
+                required
+                maxLength={200}
+                placeholder={DEFAULT_EMBEDDING_MODELS[provider]}
+                className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none font-mono"
+              />
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+                {provider === 'bifrost'
+                  ? 'Use a provider-qualified Bifrost ID, such as ollama/nomic-embed-text:latest.'
+                  : 'Separate from the completion model. Existing entity embeddings remain stored when this is off.'}
+              </p>
+            </div>
+          )}
+        </div>
       </motion.div>
 
       <motion.div variants={fadeSlideUp} className="space-y-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-5">

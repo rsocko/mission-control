@@ -666,11 +666,20 @@ function snapshotProgress(
   };
 }
 
-export async function getDependencyReconciliationHealth(): Promise<
+export async function getDependencyReconciliationHealth(
+  connectorInstanceIds?: string[],
+  shouldDefer?: () => boolean,
+): Promise<
   Map<string, DependencyReconciliationProgress>
 > {
-  const [latestRows, completedRows, edgeCountRows, terminalRows] = await Promise.all([
-    db.select().from(dependencyReconciliationSnapshots).where(
+  if (connectorInstanceIds?.length === 0) return new Map();
+  if (shouldDefer?.()) return new Map();
+  const connectorFilter = connectorInstanceIds
+    ? inArray(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceIds)
+    : undefined;
+  const [latestRows, completedRows] = await Promise.all([
+    db.select().from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
       eq(
         dependencyReconciliationSnapshots.id,
         sql`(
@@ -682,8 +691,9 @@ export async function getDependencyReconciliationHealth(): Promise<
           LIMIT 1
         )`,
       ),
-    ),
-    db.select().from(dependencyReconciliationSnapshots).where(
+    )),
+    db.select().from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
       eq(
         dependencyReconciliationSnapshots.id,
         sql`(
@@ -696,24 +706,38 @@ export async function getDependencyReconciliationHealth(): Promise<
           LIMIT 1
         )`,
       ),
-    ),
-    db.select({
-      snapshotId: dependencyReconciliationEdges.snapshotId,
-      count: sql<number>`COUNT(*)`,
-    }).from(dependencyReconciliationEdges)
-      .groupBy(dependencyReconciliationEdges.snapshotId),
+    )),
+  ]);
+  if (shouldDefer?.()) return new Map();
+  const relevantSnapshotIds = Array.from(new Set([
+    ...latestRows.map((row) => row.id),
+    ...completedRows.map((row) => row.id),
+  ]));
+  const [edgeCountRows, terminalRows] = await Promise.all([
+    relevantSnapshotIds.length === 0
+      ? Promise.resolve([])
+      : db.select({
+          snapshotId: dependencyReconciliationEdges.snapshotId,
+          count: sql<number>`COUNT(*)`,
+        }).from(dependencyReconciliationEdges)
+          .where(inArray(dependencyReconciliationEdges.snapshotId, relevantSnapshotIds))
+          .groupBy(dependencyReconciliationEdges.snapshotId),
     db.select({
       connectorInstanceId: dependencyReconciliationSnapshots.connectorInstanceId,
       status: dependencyReconciliationSnapshots.status,
       startedAt: dependencyReconciliationSnapshots.startedAt,
-    }).from(dependencyReconciliationSnapshots).where(inArray(
-      dependencyReconciliationSnapshots.status,
-      ['completed', 'partial', 'failed'],
+    }).from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
+      inArray(
+        dependencyReconciliationSnapshots.status,
+        ['completed', 'partial', 'failed'],
+      ),
     )).orderBy(
       dependencyReconciliationSnapshots.connectorInstanceId,
       desc(dependencyReconciliationSnapshots.startedAt),
     ),
   ]);
+  if (shouldDefer?.()) return new Map();
   const lastCompleted = new Map(
     completedRows.map((row) => [row.connectorInstanceId, row]),
   );

@@ -756,13 +756,14 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
   it('does not show a checklist update as saved when persistence fails', async () => {
     const checklistTask = { ...task, description: '- [ ] Verify persistence' };
-    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') {
         return Promise.resolve({ ok: false, json: async () => ({ error: 'Save failed' }) });
       }
       if (String(input) === '/api/tasks/task-1') return json({ task: checklistTask });
       return json({});
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
@@ -777,8 +778,14 @@ describe('TaskDetailPanel redesigned presentations', () => {
     });
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
       expect(checkbox).not.toBeChecked();
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/tasks/task-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ description: '- [x] Verify persistence' }),
+        }),
+      );
     });
   });
 

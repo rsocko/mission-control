@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TagReviewPanel } from '@/app/settings/components/TagReviewPanel';
 import { TooltipProvider } from '@/components/ui/Tooltip';
@@ -95,6 +95,15 @@ function stubTagRequests(responseTags: unknown[]) {
     }
     if (url === '/api/tags/merge') {
       return new Response(JSON.stringify({ success: true, merged: 1, reassigned: 2 }), { status: 200 });
+    }
+    if (url === '/api/tags') {
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+    if (url.startsWith('/api/tags?id=')) {
+      return new Response(JSON.stringify({ success: true }), { status: 200 });
+    }
+    if (url === '/api/tags/remove-from-source') {
+      return new Response(JSON.stringify({ removed: 3, errors: [] }), { status: 200 });
     }
     throw new Error(`Unexpected request: ${url}`);
   }));
@@ -243,6 +252,89 @@ describe('TagReviewPanel', () => {
     expect(screen.getByRole('button', { name: 'Recolor Area: Triage' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove Area: Triage' })).toBeInTheDocument();
     expect(screen.getByText(/select tags to merge, rename, recolor, remove, or view their tasks/i)).toBeInTheDocument();
+  });
+
+  it('runs rename and recolor as isolated dialog workflows', async () => {
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Area: Triage' }));
+    expect(screen.getByRole('dialog', { name: 'Rename Tag' })).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText('New name...'), {
+      target: { value: 'Area: Operations' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/tags', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ id: 'github-area-triage', name: 'Area: Operations' }),
+      }));
+    });
+    expect(screen.queryByRole('dialog', { name: 'Rename Tag' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Recolor Area: Operations' }));
+    expect(screen.getByRole('dialog', { name: 'Change Color' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Use color #ef4444' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/tags', expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ id: 'github-area-triage', color: '#ef4444' }),
+      }));
+    });
+  });
+
+  it('prevents a second dialog from launching a mutation while one is active', async () => {
+    const defaultFetch = vi.mocked(fetch);
+    let resolveRename!: (response: Response) => void;
+    const pendingRename = new Promise<Response>(resolve => {
+      resolveRename = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === '/api/tags' && init?.method === 'PATCH') return pendingRename;
+      return defaultFetch(input, init);
+    }));
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Rename Area: Triage' }));
+    fireEvent.change(screen.getByPlaceholderText('New name...'), {
+      target: { value: 'Area: Operations' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Rename' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Recolor Area: Triage' }));
+
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    expect(fetch).toHaveBeenCalledTimes(3);
+
+    await act(async () => {
+      resolveRename(new Response(JSON.stringify({ success: true }), { status: 200 }));
+      await pendingRename;
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: 'Change Color' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+    });
+  });
+
+  it('keeps source write-back inside the delete workflow', async () => {
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove Area: Triage' }));
+    expect(screen.getByRole('dialog', { name: 'Remove tag?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /also remove from source/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/tags/remove-from-source', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ tagId: 'github-area-triage' }),
+      }));
+      expect(fetch).toHaveBeenCalledWith('/api/tags?id=github-area-triage', { method: 'DELETE' });
+    });
   });
 
   it('opens the same review dialog from a row and names the duplicate counterpart', async () => {

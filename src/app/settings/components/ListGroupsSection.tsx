@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'sonner';
 import {
@@ -33,6 +33,7 @@ import {
   type ListGroup,
 } from './types';
 import { getConnectorDisplayName } from '@/lib/connectors/display-name';
+import { useInlineRename } from '@/lib/hooks/useInlineRename';
 import { runSourceListRenameRequest } from '../source-list-renames';
 
 import { IconPickerButton as EmojiPickerButton, IconRenderer } from '@/components/ui/icon-picker';
@@ -444,69 +445,27 @@ function AllSourceListItem({
   onToggleHidden: () => void;
   onRename: (newName: string, icon?: string, iconColor?: string) => Promise<void>;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(sourceList.name);
-  const [editIcon, setEditIcon] = useState(sourceList.icon || '');
-  const [editIconColor, setEditIconColor] = useState(sourceList.iconColor || '');
-  const [saving, setSaving] = useState(false);
-  const editNameRef = useRef(editName);
-  editNameRef.current = editName;
-  const editIconRef = useRef(editIcon);
-  editIconRef.current = editIcon;
-  const editIconColorRef = useRef(editIconColor);
-  editIconColorRef.current = editIconColor;
-  const sourceListNameRef = useRef(sourceList.name);
-  sourceListNameRef.current = sourceList.name;
-  const sourceListIconRef = useRef(sourceList.icon || '');
-  sourceListIconRef.current = sourceList.icon || '';
-  const onRenameRef = useRef(onRename);
-  onRenameRef.current = onRename;
-  const blurTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const cancelledRef = useRef(false);
-  const pickerOpenRef = useRef(false);
-
-  useEffect(() => {
-    return () => {
-      if (blurTimeout.current) clearTimeout(blurTimeout.current);
-      const currentName = editNameRef.current.trim();
-      const currentIcon = editIconRef.current;
-      if ((currentName && currentName !== sourceListNameRef.current) || currentIcon !== sourceListIconRef.current) {
-        void onRenameRef.current(currentName || sourceListNameRef.current, currentIcon || undefined, editIconColorRef.current || undefined);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  async function handleSaveRename(nameOverride?: string) {
-    if (blurTimeout.current) clearTimeout(blurTimeout.current);
-    const finalName = (nameOverride ?? editNameRef.current).trim();
-    const nameChanged = finalName && finalName !== sourceList.name;
-    const iconChanged = editIcon !== (sourceList.icon || '');
-    if (!nameChanged && !iconChanged) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onRename(finalName || sourceList.name, editIcon || undefined, editIconColor || undefined);
-      setEditing(false);
-    } catch { /* stays in edit mode */ }
-    setSaving(false);
-  }
-
-  function handleBlur() {
-    cancelledRef.current = false;
-    blurTimeout.current = setTimeout(() => {
-      if (cancelledRef.current || pickerOpenRef.current) return;
-      const currentName = editNameRef.current.trim();
-      const nameChanged = currentName && currentName !== sourceList.name;
-      const iconChanged = editIconRef.current !== (sourceList.icon || '');
-      if (nameChanged || iconChanged) {
-        void onRename(currentName || sourceList.name, editIconRef.current || undefined, editIconColorRef.current || undefined).then(() => setEditing(false)).catch((err) => { settingsLogger.error('Failed to rename source list', { err }); });
-      } else {
-        setEditing(false);
-      }
-    }, 200);
-  }
+  const {
+    editing,
+    name: editName,
+    setName: setEditName,
+    icon: editIcon,
+    setIcon: setEditIcon,
+    iconColor: editIconColor,
+    setIconColor: setEditIconColor,
+    saving,
+    startEditing,
+    cancel,
+    save: handleSaveRename,
+    scheduleBlur: handleBlur,
+    setPickerOpen,
+  } = useInlineRename({
+    name: sourceList.name,
+    icon: sourceList.icon,
+    iconColor: sourceList.iconColor,
+    onSave: onRename,
+    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
+  });
 
   return (
     <div className={`group/allitem rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-3 ${sourceList.hidden ? 'opacity-50' : ''}`}>
@@ -520,14 +479,14 @@ function AllSourceListItem({
                   onChange={(icon) => { setEditIcon(icon); }}
                   color={editIconColor || undefined}
                   onColorChange={setEditIconColor}
-                  onOpenChange={(o) => { pickerOpenRef.current = o; }}
+                  onOpenChange={setPickerOpen}
                 />
               </span>
               <input
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') { cancelledRef.current = true; setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
                 onBlur={handleBlur}
                 autoFocus
                 className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
@@ -535,7 +494,7 @@ function AllSourceListItem({
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-8 w-8 items-center justify-center rounded-lg text-green-400 hover:bg-green-500/10" title="Save">
                 {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
               </button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { cancelledRef.current = true; if (blurTimeout.current) clearTimeout(blurTimeout.current); setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); }} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
                 <X size={13} />
               </button>
             </div>
@@ -549,7 +508,7 @@ function AllSourceListItem({
                 <SourceSyncBadge sourceList={sourceList} />
                 <button
                   type="button"
-                  onClick={() => { setEditName(sourceList.name); setEditing(true); }}
+                  onClick={startEditing}
                   className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/allitem:opacity-100 hover:text-[var(--text-secondary)]"
                   title="Rename"
                 >
@@ -630,75 +589,33 @@ function SortableUngroupedItem({
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
   } = useSortable({ id: sourceList.id });
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(sourceList.name);
-  const [editIcon, setEditIcon] = useState(sourceList.icon || '');
-  const [editIconColor, setEditIconColor] = useState(sourceList.iconColor || '');
-  const [saving, setSaving] = useState(false);
-  const editNameRef = useRef(editName);
-  editNameRef.current = editName;
-  const editIconRef = useRef(editIcon);
-  editIconRef.current = editIcon;
-  const editIconColorRef = useRef(editIconColor);
-  editIconColorRef.current = editIconColor;
-  const sourceListNameRef = useRef(sourceList.name);
-  sourceListNameRef.current = sourceList.name;
-  const sourceListIconRef = useRef(sourceList.icon || '');
-  sourceListIconRef.current = sourceList.icon || '';
-  const onRenameRef = useRef(onRename);
-  onRenameRef.current = onRename;
-  const blurTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const cancelledRef = useRef(false);
-  const pickerOpenRef = useRef(false);
-
-  useEffect(() => {
-    return () => {
-      if (blurTimeout.current) clearTimeout(blurTimeout.current);
-      const currentName = editNameRef.current.trim();
-      const currentIcon = editIconRef.current;
-      if ((currentName && currentName !== sourceListNameRef.current) || currentIcon !== sourceListIconRef.current) {
-        void onRenameRef.current(currentName || sourceListNameRef.current, currentIcon || undefined, editIconColorRef.current || undefined);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const {
+    editing,
+    name: editName,
+    setName: setEditName,
+    icon: editIcon,
+    setIcon: setEditIcon,
+    iconColor: editIconColor,
+    setIconColor: setEditIconColor,
+    saving,
+    startEditing,
+    cancel,
+    save: handleSaveRename,
+    scheduleBlur: handleBlur,
+    setPickerOpen,
+  } = useInlineRename({
+    name: sourceList.name,
+    icon: sourceList.icon,
+    iconColor: sourceList.iconColor,
+    onSave: onRename,
+    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
-
-  async function handleSaveRename(nameOverride?: string) {
-    if (blurTimeout.current) clearTimeout(blurTimeout.current);
-    const finalName = (nameOverride ?? editNameRef.current).trim();
-    const nameChanged = finalName && finalName !== sourceList.name;
-    const iconChanged = editIcon !== (sourceList.icon || '');
-    if (!nameChanged && !iconChanged) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onRename(finalName || sourceList.name, editIcon || undefined, editIconColor || undefined);
-      setEditing(false);
-    } catch { /* stays in edit mode on error */ }
-    setSaving(false);
-  }
-
-  function handleBlur() {
-    cancelledRef.current = false;
-    blurTimeout.current = setTimeout(() => {
-      if (cancelledRef.current || pickerOpenRef.current) return;
-      const currentName = editNameRef.current.trim();
-      const nameChanged = currentName && currentName !== sourceList.name;
-      const iconChanged = editIconRef.current !== (sourceList.icon || '');
-      if (nameChanged || iconChanged) {
-        void onRename(currentName || sourceList.name, editIconRef.current || undefined, editIconColorRef.current || undefined).then(() => setEditing(false)).catch((err) => { settingsLogger.error('Failed to rename source list', { err }); });
-      } else {
-        setEditing(false);
-      }
-    }, 200);
-  }
 
   return (
     <div
@@ -725,14 +642,14 @@ function SortableUngroupedItem({
                   onChange={(icon) => { setEditIcon(icon); }}
                   color={editIconColor || undefined}
                   onColorChange={setEditIconColor}
-                  onOpenChange={(o) => { pickerOpenRef.current = o; }}
+                  onOpenChange={setPickerOpen}
                 />
               </span>
               <input
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') { cancelledRef.current = true; setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); } }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
                 onBlur={handleBlur}
                 autoFocus
                 className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
@@ -740,7 +657,7 @@ function SortableUngroupedItem({
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-7 w-7 items-center justify-center rounded-md text-green-400 transition-[background-color] hover:bg-green-500/10" title="Save">
                 {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
               </button>
-              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { cancelledRef.current = true; if (blurTimeout.current) clearTimeout(blurTimeout.current); setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); }} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)]" title="Cancel">
+              <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-[background-color] hover:bg-[var(--surface-2)]" title="Cancel">
                 <X size={13} />
               </button>
             </div>
@@ -753,7 +670,7 @@ function SortableUngroupedItem({
               <SourceSyncBadge sourceList={sourceList} />
               <button
                 type="button"
-                onClick={() => { setEditName(sourceList.name); setEditing(true); }}
+                onClick={startEditing}
                 className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/ungrouped:opacity-100 hover:text-[var(--text-secondary)]"
                 title="Rename"
               >
@@ -1036,76 +953,33 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
   const {
     attributes, listeners, setNodeRef, transform, transition, isDragging,
   } = useSortable({ id: sourceList.id });
-  const [editing, setEditing] = useState(false);
-  const [editName, setEditName] = useState(sourceList.name);
-  const [editIcon, setEditIcon] = useState(sourceList.icon || '');
-  const [editIconColor, setEditIconColor] = useState(sourceList.iconColor || '');
-  const [saving, setSaving] = useState(false);
-  const editNameRef = useRef(editName);
-  editNameRef.current = editName;
-  const editIconRef = useRef(editIcon);
-  editIconRef.current = editIcon;
-  const editIconColorRef = useRef(editIconColor);
-  editIconColorRef.current = editIconColor;
-  const sourceListNameRef = useRef(sourceList.name);
-  sourceListNameRef.current = sourceList.name;
-  const sourceListIconRef = useRef(sourceList.icon || '');
-  sourceListIconRef.current = sourceList.icon || '';
-  const onRenameRef = useRef(onRename);
-  onRenameRef.current = onRename;
-  const blurTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const cancelledRef = useRef(false);
-  const pickerOpenRef = useRef(false);
-
-  // Auto-save on unmount if there are unsaved changes
-  useEffect(() => {
-    return () => {
-      if (blurTimeout.current) clearTimeout(blurTimeout.current);
-      const currentName = editNameRef.current.trim();
-      const currentIcon = editIconRef.current;
-      if ((currentName && currentName !== sourceListNameRef.current) || currentIcon !== sourceListIconRef.current) {
-        void onRenameRef.current(currentName || sourceListNameRef.current, currentIcon || undefined, editIconColorRef.current || undefined);
-      }
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const {
+    editing,
+    name: editName,
+    setName: setEditName,
+    icon: editIcon,
+    setIcon: setEditIcon,
+    iconColor: editIconColor,
+    setIconColor: setEditIconColor,
+    saving,
+    startEditing,
+    cancel,
+    save: handleSaveRename,
+    scheduleBlur: handleBlur,
+    setPickerOpen,
+  } = useInlineRename({
+    name: sourceList.name,
+    icon: sourceList.icon,
+    iconColor: sourceList.iconColor,
+    onSave: onRename,
+    onError: (error) => settingsLogger.error('Failed to rename source list', { err: error }),
+  });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
   };
-
-  async function handleSaveRename(nameOverride?: string) {
-    if (blurTimeout.current) clearTimeout(blurTimeout.current);
-    const finalName = (nameOverride ?? editNameRef.current).trim();
-    const nameChanged = finalName && finalName !== sourceList.name;
-    const iconChanged = editIcon !== (sourceList.icon || '');
-    if (!nameChanged && !iconChanged) {
-      setEditing(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onRename(finalName || sourceList.name, editIcon || undefined, editIconColor || undefined);
-      setEditing(false);
-    } catch { /* stays in edit mode on error */ }
-    setSaving(false);
-  }
-
-  function handleBlur() {
-    cancelledRef.current = false;
-    blurTimeout.current = setTimeout(() => {
-      if (cancelledRef.current || pickerOpenRef.current) return;
-      const currentName = editNameRef.current.trim();
-      const nameChanged = currentName && currentName !== sourceList.name;
-      const iconChanged = editIconRef.current !== (sourceList.icon || '');
-      if (nameChanged || iconChanged) {
-        void onRename(currentName || sourceList.name, editIconRef.current || undefined, editIconColorRef.current || undefined).then(() => setEditing(false)).catch((err) => { settingsLogger.error('Failed to rename source list', { err }); });
-      } else {
-        setEditing(false);
-      }
-    }, 200);
-  }
 
   return (
     <div
@@ -1131,14 +1005,14 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
                 onChange={(icon) => { setEditIcon(icon); }}
                 color={editIconColor || undefined}
                 onColorChange={setEditIconColor}
-                onOpenChange={(o) => { pickerOpenRef.current = o; }}
+                onOpenChange={setPickerOpen}
               />
             </span>
             <input
               type="text"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') { cancelledRef.current = true; setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); } }}
+              onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
               onBlur={handleBlur}
               autoFocus
               className="h-7 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
@@ -1146,7 +1020,7 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
             <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-6 w-6 items-center justify-center rounded text-green-400 hover:bg-green-500/10" title="Save">
               {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={11} /></motion.span> : <Check size={11} />}
             </button>
-            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { cancelledRef.current = true; if (blurTimeout.current) clearTimeout(blurTimeout.current); setEditing(false); setEditName(sourceList.name); setEditIcon(sourceList.icon || ''); setEditIconColor(sourceList.iconColor || ''); }} className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
+            <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={cancel} className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)]" title="Cancel">
               <X size={11} />
             </button>
           </div>
@@ -1159,7 +1033,7 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
             <SourceSyncBadge sourceList={sourceList} />
             <button
               type="button"
-              onClick={() => { setEditName(sourceList.name); setEditing(true); }}
+              onClick={startEditing}
               className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] opacity-0 transition-opacity group-hover/listitem:opacity-100 hover:text-[var(--text-secondary)]"
               title="Rename"
             >

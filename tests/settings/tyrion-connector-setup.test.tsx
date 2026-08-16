@@ -65,6 +65,7 @@ it('edits the persisted Tyrion Bridge API URL without round-tripping credentials
     connector={connector}
     sourceLists={[]}
     onUpdate={onUpdate}
+    onPurgeSourceList={vi.fn().mockResolvedValue(undefined)}
     onDelete={() => undefined}
     confirmDelete={null}
     setConfirmDelete={() => undefined}

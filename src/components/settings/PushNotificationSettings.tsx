@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SectionCard, SectionLabel, Toggle } from '@/components/settings/SettingsPrimitives';
 import {
   addMCNativeBridgeEventListener,
   getMCNativeBridge,
@@ -67,29 +68,6 @@ const DEFAULT_PREFS: PushPreferences = {
 };
 
 /* ─────── Sub-components ─────── */
-
-function Toggle({ enabled, onChange, label }: { enabled: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      onClick={() => onChange(!enabled)}
-      className={cn(
-        'relative inline-flex h-[28px] w-[50px] flex-shrink-0 items-center rounded-full transition-colors duration-200',
-        enabled ? 'bg-[var(--accent-500)]' : 'bg-[var(--surface-3)]'
-      )}
-    >
-      <span
-        className={cn(
-          'inline-block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200',
-          enabled ? 'translate-x-[25px]' : 'translate-x-[3px]'
-        )}
-      />
-    </button>
-  );
-}
 
 function HourPicker({ value, onChange, label }: { value: number; onChange: (h: number) => void; label: string }) {
   const formatHour = (h: number) => {
@@ -143,22 +121,6 @@ function SettingRow({
       </div>
       <div className="flex-shrink-0">{trailing}</div>
     </div>
-  );
-}
-
-function SectionCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-2xl bg-[var(--surface-1)] border border-[var(--border-subtle)] overflow-hidden">
-      {children}
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-tertiary)] px-1 mt-5 mb-2">
-      {children}
-    </p>
   );
 }
 

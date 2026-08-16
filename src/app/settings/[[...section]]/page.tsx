@@ -1,8 +1,7 @@
 ﻿'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plug, RefreshCw, Tag, FlaskConical, Inbox, Layers,
@@ -44,17 +43,9 @@ import { NotificationEnrichmentSection } from '../components/NotificationEnrichm
 import { RuntimeTelemetrySection } from '../components/RuntimeTelemetrySection';
 import { PushNotificationSettings } from '@/components/settings/PushNotificationSettings';
 import { PriorityEntitiesPanel } from '@/components/smart-score';
-import type { ConnectorConfig, SourceList, ListGroup } from '../components/types';
-import { settingsLogger } from '@/lib/client-logger';
-import {
-  SETTINGS_SECTION_NAMES,
-  findSettingsTarget,
-  searchSettings,
-  type SettingsSearchItem,
-  type SettingsSection,
-  useSettingsUrlTarget,
-} from '../settings-search';
-import { resolveSourceListRefresh } from '../source-list-renames';
+import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
+import { useSettingsAdministration } from '../useSettingsAdministration';
+import { useSettingsSearchFocus } from '../useSettingsSearchFocus';
 
 type ActiveSection = SettingsSection;
 
@@ -127,7 +118,6 @@ const NAV_GROUPS: NavGroup[] = [
 export default function SettingsPage() {
   const params = useParams();
   const router = useRouter();
-  const queryClient = useQueryClient();
 
   // Derive active section from URL path
   const sectionSlug = Array.isArray(params.section) ? params.section[0] : undefined;
@@ -136,317 +126,26 @@ export default function SettingsPage() {
   const navigateToSection = useCallback((id: ActiveSection) => {
     router.push(`/settings/${SECTION_TO_SLUG[id]}`);
   }, [router]);
+  const {
+    connectors, sourceLists, listGroups, loading,
+    showAddModal, setShowAddModal,
+    selectedConnector, setSelectedConnector, syncing,
+    fetchData, toggleConnector, deleteConnector, restoreConnector,
+    permanentlyDeleteConnector, updateConnector, purgeRetainedSourceList,
+    handleRenameList, triggerSync, createListGroup, updateListGroup,
+    deleteListGroup, assignSourceListToGroup,
+  } = useSettingsAdministration();
 
-  const [connectors, setConnectors] = useState<ConnectorConfig[]>([]);
-  const [sourceLists, setSourceLists] = useState<SourceList[]>([]);
-  const [listGroups, setListGroups] = useState<ListGroup[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedConnector, setSelectedConnector] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return new URLSearchParams(window.location.search).get('connector');
-  });
-  const [syncing, setSyncing] = useState<string | null>(null);
-  const [settingsQuery, setSettingsQuery] = useState('');
-  const [pendingSearchItem, setPendingSearchItem] = useState<SettingsSearchItem | null>(null);
-
-  const [urlSearchTarget, setUrlSearchTarget] = useSettingsUrlTarget();
-  const mainContentRef = useRef<HTMLElement | null>(null);
-  const settingsResults = searchSettings(settingsQuery);
-
-  const selectSearchResult = useCallback((item: SettingsSearchItem) => {
-    setPendingSearchItem(item);
-    setSettingsQuery('');
-    const target = item.target ?? item.title;
-    setUrlSearchTarget(target);
-    router.push(`/settings/${SECTION_TO_SLUG[item.section]}?setting=${encodeURIComponent(target)}`);
-  }, [router, setUrlSearchTarget]);
-
-  useEffect(() => {
-    const selectedSection = pendingSearchItem?.section ?? activeSection;
-    const selectedTarget = pendingSearchItem?.target ?? pendingSearchItem?.title ?? urlSearchTarget;
-    if (!selectedTarget || selectedSection !== activeSection) return;
-
-    let stopTimeoutId: number | undefined;
-    let observer: MutationObserver | undefined;
-    let fallbackFocused = false;
-
-    const focusElement = (element: HTMLElement) => {
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const hadTabIndex = element.hasAttribute('tabindex');
-      if (!hadTabIndex) element.tabIndex = -1;
-      element.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
-      element.focus({ preventScroll: true });
-      if (!reduceMotion) {
-        element.animate(
-          [
-            { outline: '2px solid rgb(59 130 246 / 0.9)', outlineOffset: '6px', backgroundColor: 'rgb(59 130 246 / 0.12)' },
-            { outline: '2px solid transparent', outlineOffset: '10px', backgroundColor: 'transparent' },
-          ],
-          { duration: 1800, easing: 'ease-out' },
-        );
-      }
-      if (!hadTabIndex) {
-        element.addEventListener('blur', () => element.removeAttribute('tabindex'), { once: true });
-      }
-    };
-
-    const locateTarget = () => {
-      const root = mainContentRef.current;
-      if (!root) return false;
-
-      const { target, sectionHeading } = findSettingsTarget(
-        root,
-        selectedTarget,
-        SETTINGS_SECTION_NAMES[selectedSection],
-      );
-
-      if (target) {
-        focusElement(target);
-        observer?.disconnect();
-        if (stopTimeoutId !== undefined) window.clearTimeout(stopTimeoutId);
-        setPendingSearchItem(null);
-        return true;
-      }
-
-      if (sectionHeading && !fallbackFocused) {
-        focusElement(sectionHeading);
-        fallbackFocused = true;
-      }
-
-      return false;
-    };
-
-    const startTimeoutId = window.setTimeout(() => {
-      if (locateTarget()) return;
-
-      const root = mainContentRef.current;
-      if (!root) return;
-
-      observer = new MutationObserver(() => {
-        locateTarget();
-      });
-      observer.observe(root, { childList: true, subtree: true });
-      stopTimeoutId = window.setTimeout(() => {
-        observer?.disconnect();
-        setPendingSearchItem(null);
-      }, 10_000);
-    }, 220);
-
-    return () => {
-      window.clearTimeout(startTimeoutId);
-      if (stopTimeoutId !== undefined) window.clearTimeout(stopTimeoutId);
-      observer?.disconnect();
-    };
-  }, [activeSection, pendingSearchItem, urlSearchTarget]);
-
-  // Track in-flight renames so fetchData() never overwrites optimistic names
-  const pendingRenamesRef = useRef<Map<string, string>>(new Map());
-  const sourceListVersionRef = useRef(0);
-
-  const refreshConnectorLists = useCallback(async (connectorId: string) => {
-    const startedVersion = sourceListVersionRef.current;
-    try {
-      const response = await fetch(`/api/connectors/${connectorId}/lists`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const data = await response.json();
-      const nextLists = Array.isArray(data.sourceLists) ? data.sourceLists as SourceList[] : [];
-      setSourceLists((previousLists) => (
-        resolveSourceListRefresh(
-          [
-            ...previousLists.filter(sourceList => sourceList.connectorInstanceId !== connectorId),
-            ...nextLists,
-          ],
-          pendingRenamesRef.current,
-          startedVersion,
-          sourceListVersionRef.current,
-        ) ?? previousLists
-      ));
-    } catch (error) {
-      settingsLogger.error(`Failed to refresh source lists for connector ${connectorId}`, { err: error });
-    }
-  }, []);
-
-  const fetchData = useCallback(async () => {
-    const startedVersion = sourceListVersionRef.current;
-    try {
-      const [connRes, groupsRes] = await Promise.all([
-        fetch('/api/connectors?includeDeleted=true'),
-        fetch('/api/list-groups'),
-      ]);
-      const connData = await connRes.json();
-      const groupsData = await groupsRes.json();
-      setConnectors(connData.connectors || []);
-      // Merge any pending renames on top of fetched data so optimistic updates
-      // are never reverted by a concurrent fetch (including worker sync completion).
-      const fetchedLists: SourceList[] = connData.sourceLists || [];
-      const resolvedLists = resolveSourceListRefresh(
-        fetchedLists,
-        pendingRenamesRef.current,
-        startedVersion,
-        sourceListVersionRef.current,
-      );
-      if (resolvedLists) setSourceLists(resolvedLists);
-      setListGroups(groupsData.groups || []);
-    } catch (err) {
-      settingsLogger.error('Failed to fetch settings', { err });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
-
-  async function toggleConnector(id: string, enabled: boolean) {
-    setConnectors(prev => prev.map(c => c.id === id ? { ...c, enabled } : c));
-    await fetch('/api/connectors', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, enabled }),
-    });
-  }
-
-  async function deleteConnector(id: string) {
-    const connector = connectors.find(c => c.id === id);
-    const now = new Date().toISOString();
-    setConnectors(prev => prev.map(c => c.id === id ? { ...c, deletedAt: now, enabled: false } : c));
-    setSelectedConnector(null);
-    await fetch(`/api/connectors?id=${id}`, { method: 'DELETE' });
-    const { toast } = await import('sonner');
-    toast.success(`"${connector?.name || 'Connector'}" removed. Tasks will be kept for 7 days.`);
-  }
-
-  async function restoreConnector(id: string) {
-    setConnectors(prev => prev.map(c => c.id === id ? { ...c, deletedAt: null, enabled: true } : c));
-    await fetch('/api/connectors', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, deletedAt: null, enabled: true }),
-    });
-  }
-
-  async function permanentlyDeleteConnector(id: string) {
-    setConnectors(prev => prev.filter(c => c.id !== id));
-    await fetch(`/api/connectors?id=${id}&permanent=true`, { method: 'DELETE' });
-  }
-
-  async function updateConnector(id: string, updates: Partial<ConnectorConfig>) {
-    const previous = connectors.find(connector => connector.id === id);
-    setConnectors(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
-    try {
-      const response = await fetch('/api/connectors', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, ...updates }),
-      });
-      if (response.ok) return;
-      const data = await response.json().catch(() => null) as { error?: string } | null;
-      throw new Error(data?.error || 'Failed to update connector');
-    } catch (error) {
-      if (previous) {
-        setConnectors(prev => prev.map(connector => connector.id === id ? previous : connector));
-      }
-      throw error;
-    }
-  }
-
-  async function purgeRetainedSourceList(connectorId: string, sourceListId: string) {
-    const response = await fetch(
-      `/api/connectors/${encodeURIComponent(connectorId)}/retained-lists/${encodeURIComponent(sourceListId)}`,
-      { method: 'DELETE' },
-    );
-    const data = await response.json().catch(() => null) as { error?: string; deletedTasks?: number } | null;
-    if (!response.ok) {
-      throw new Error(data?.error || 'Failed to delete retained repository items');
-    }
-
-    await fetchData();
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['dashboard'] }),
-      queryClient.invalidateQueries({ queryKey: ['myDay'] }),
-    ]);
-    const { toast } = await import('sonner');
-    toast.success(`${data?.deletedTasks ?? 0} retained item${data?.deletedTasks === 1 ? '' : 's'} deleted from Mission Control`);
-  }
-
-  // Optimistically update a source list's name in local state (called by ListGroupsSection after rename)
-  // Returns a cleanup function to clear the pending rename guard once the API has committed.
-  const handleRenameList = useCallback((sourceListId: string, newName: string) => {
-    sourceListVersionRef.current += 1;
-    pendingRenamesRef.current.set(sourceListId, newName);
-    setSourceLists(prev => prev.map(sl => sl.id === sourceListId ? { ...sl, name: newName } : sl));
-    // Invalidate dashboard React Query cache so navigating to Dashboard shows fresh data
-    queryClient.invalidateQueries({ queryKey: ['dashboard', 'connectors'] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard', 'listGroups'] });
-    queryClient.invalidateQueries({ queryKey: ['dashboard', 'tasks'] });
-    queryClient.invalidateQueries({ queryKey: ['myDay', 'connectors'] });
-    queryClient.invalidateQueries({ queryKey: ['myDay', 'items'] });
-    return () => {
-      sourceListVersionRef.current += 1;
-      pendingRenamesRef.current.delete(sourceListId);
-    };
-  }, [queryClient]);
-
-  async function triggerSync(connectorId?: string, options?: { full?: boolean }) {
-    const syncTarget = connectorId || 'all';
-    setSyncing(syncTarget);
-    try {
-      const response = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...(connectorId ? { connectorId } : {}),
-          ...(options?.full ? { full: true } : {}),
-        }),
-      });
-      if (!response.ok) throw new Error(`Sync failed with HTTP ${response.status}`);
-      await fetchData();
-      if (connectorId) await refreshConnectorLists(connectorId);
-    } catch (error) {
-      settingsLogger.error('Failed to trigger sync', { err: error });
-    } finally {
-      setSyncing(null);
-    }
-  }
-
-  async function createListGroup(name: string, icon?: string, iconColor?: string) {
-    const response = await fetch('/api/list-groups', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, icon, iconColor }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || `Failed to create group (${response.status})`);
-    }
-    await fetchData();
-  }
-
-  async function updateListGroup(id: string, updates: Partial<ListGroup>) {
-    const response = await fetch(`/api/list-groups/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    });
-    if (!response.ok) throw new Error(`Failed to update group (${response.status})`);
-    await fetchData();
-  }
-
-  async function deleteListGroup(id: string) {
-    const response = await fetch(`/api/list-groups/${id}`, { method: 'DELETE' });
-    if (!response.ok) throw new Error(`Failed to delete group (${response.status})`);
-    await fetchData();
-  }
-
-  async function assignSourceListToGroup(id: string, groupId: string | null) {
-    const response = await fetch(`/api/source-lists/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ groupId }),
-    });
-    if (!response.ok) throw new Error(`Failed to update source list (${response.status})`);
-    await fetchData();
-  }
+  const navigateToSearchResult = useCallback((section: SettingsSection, target: string) => {
+    router.push(`/settings/${SECTION_TO_SLUG[section]}?setting=${encodeURIComponent(target)}`);
+  }, [router]);
+  const {
+    mainContentRef,
+    query: settingsQuery,
+    setQuery: setSettingsQuery,
+    results: settingsResults,
+    selectResult: selectSearchResult,
+  } = useSettingsSearchFocus({ activeSection, navigate: navigateToSearchResult });
 
   return (
     <>

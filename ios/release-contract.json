@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "project": "ios/MissionControl.xcodeproj",
+  "scheme": "MissionControl",
+  "simulatorDestination": "platform=iOS Simulator,name=iPhone 16,OS=latest",
+  "signingMode": "unsigned"
+}

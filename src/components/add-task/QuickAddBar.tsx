@@ -132,6 +132,15 @@ export function QuickAddProjectControl({
 
 type PendingTask = QuickAddPendingTask;
 
+export function scrollListTypeaheadSelectionIntoView(
+  container: HTMLElement | null,
+  index: number,
+): void {
+  container
+    ?.querySelector<HTMLElement>(`[data-list-typeahead-index="${index}"]`)
+    ?.scrollIntoView({ block: 'nearest' });
+}
+
 function isPendingSubtask(task: PendingTask): boolean {
   return task.parentIndex !== null || Boolean(task.parentTaskId);
 }
@@ -235,6 +244,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [listTypeaheadIndex, setListTypeaheadIndex] = useState(0);
+  const listTypeaheadScrollRef = useRef<HTMLDivElement>(null);
   // Animation state for the "flying token" when a list is selected
   const [pillFlash, setPillFlash] = useState(false);
   const [flyingToken, setFlyingToken] = useState<{ label: string; from: DOMRect; to: DOMRect } | null>(null);
@@ -532,6 +542,10 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   useEffect(() => {
     setListTypeaheadIndex(0);
   }, [listTypeahead?.query]);
+
+  useEffect(() => {
+    scrollListTypeaheadSelectionIntoView(listTypeaheadScrollRef.current, listTypeaheadIndex);
+  }, [listTypeaheadIndex, listTypeahead?.query]);
 
   // Accept a typeahead list selection: set destination pill and strip the /query from input
   const acceptListTypeahead = useCallback((dest: (typeof destinations)[number]) => {
@@ -1566,7 +1580,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 <span>Select a list</span>
                 <span className="normal-case tracking-normal font-normal">↑↓ navigate · ↵ select</span>
               </div>
-              <div className="max-h-48 overflow-y-auto">
+              <div ref={listTypeaheadScrollRef} className="max-h-48 overflow-y-auto">
                 {listTypeahead.matches.map((dest, i) => {
                   const isActive = i === listTypeaheadIndex;
                   const name = dest.listName || dest.shortLabel || dest.label;
@@ -1575,6 +1589,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   return (
                     <button
                       key={`${dest.id}-${dest.listId}`}
+                      data-list-typeahead-index={i}
                       onMouseDown={(e) => {
                         e.preventDefault(); // prevent blur
                         acceptListTypeahead(dest);

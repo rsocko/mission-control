@@ -19,6 +19,7 @@ export {
   runtimeTelemetry,
   runtimeTelemetryInstances,
   runtimeTelemetrySamples,
+  workerHealthSnapshot,
   syncSchedules,
   syncDeletionCandidates,
   syncDeletionSnapshots,

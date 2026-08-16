@@ -13,7 +13,7 @@ vi.mock('@/db', () => {
   const prepareFn = vi.fn().mockReturnValue({
     run: vi.fn(),
     all: vi.fn().mockReturnValue([]),
-    get: vi.fn(),
+    get: vi.fn().mockReturnValue({ count: 0 }),
   });
   const fakeDb = {
     select: vi.fn().mockReturnValue({ from: vi.fn().mockResolvedValue([]) }),
@@ -36,6 +36,8 @@ vi.mock('@/lib/ai', () => ({
     configured: true,
     baseUrl: 'http://localhost:11434/v1',
     apiKey: undefined,
+    embeddingModel: 'nomic-embed-text',
+    semanticSearchEnabled: true,
   }),
   getAIRequestContext: vi.fn(() => ({
     featureId: 'semantic-embedding',
@@ -94,6 +96,28 @@ describe('Semantic search — unit tests (mocked)', () => {
     expect(result).toEqual([]);
   });
 
+  it('keeps shared embedding infrastructure available when search enrichment is disabled', async () => {
+    const ai = await import('@/lib/ai');
+    vi.mocked(ai.getResolvedAIConfig).mockReturnValueOnce({
+      provider: 'ollama',
+      configured: true,
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: undefined,
+      model: 'llama3.1:8b',
+      embeddingModel: 'nomic-embed-text',
+      semanticSearchEnabled: false,
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(7) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const { generateEmbedding } = await import('@/lib/search/semantic');
+    await expect(generateEmbedding('graph neighbor')).resolves.toHaveLength(768);
+  });
+
   it('propagates entity connector sources into embedding routing', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding() }] }), { status: 200 }),
@@ -146,6 +170,57 @@ describe('Semantic search — unit tests (mocked)', () => {
 
     // With no entities, rebuild should be near-instant
     expect(elapsed).toBeLessThan(500);
+  });
+
+  it('coalesces normalized interactive queries without rebuilding the index', async () => {
+    const mockEmbedding = fakeEmbedding(9);
+    let resolveFetch!: (response: Response) => void;
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(
+      () => new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+    const dbModule = await import('@/db');
+    const { semanticSearch } = await import('@/lib/search/semantic');
+    vi.mocked(dbModule.sqlite.exec).mockClear();
+
+    const first = semanticSearch('  Urgent   BUG ');
+    const second = semanticSearch('urgent bug');
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    resolveFetch(new Response(
+      JSON.stringify({ data: [{ embedding: mockEmbedding }] }),
+      { status: 200 },
+    ));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
+    expect(dbModule.sqlite.exec).not.toHaveBeenCalledWith(
+      expect.stringContaining('search_embeddings_rebuild'),
+    );
+  });
+
+  it('pushes optional filters into semantic candidate selection', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(12) }] }), {
+        status: 200,
+      }),
+    );
+    const dbModule = await import('@/db');
+    const { semanticSearch } = await import('@/lib/search/semantic');
+    vi.mocked(dbModule.sqlite.prepare).mockClear();
+
+    await semanticSearch('filtered query', {
+      source: 'Project Alpha',
+      status: 'in_progress',
+      excludeDone: true,
+    });
+
+    const candidateSql = vi.mocked(dbModule.sqlite.prepare).mock.calls
+      .map(([sql]) => String(sql))
+      .find((sql) => sql.includes('LEFT JOIN tasks t'));
+    expect(candidateSql).toContain('t.source_list_name = ? OR t.connector_type = ?');
+    expect(candidateSql).toContain('n.connector_type = ?');
+    expect(candidateSql).toContain('COALESCE(t.status, n.category) = ?');
+    expect(candidateSql).toContain("<> 'done'");
   });
 });
 

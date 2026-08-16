@@ -6,7 +6,7 @@ const state = vi.hoisted(() => ({
     model: 'azure/gpt-4o-mini',
     baseUrl: 'https://bifrost.test/v1',
     apiKey: 'server-secret',
-  } as Record<string, string>,
+  } as Record<string, string | boolean>,
   writes: [] as Array<{ key: string; value: unknown }>,
 }));
 
@@ -64,10 +64,14 @@ vi.mock('@/lib/ai', async () => {
     model: 'azure/gpt-4o-mini',
     baseUrl: 'https://bifrost.test/v1',
     configured: true,
+    embeddingModel: 'ollama/nomic-embed-text:latest',
+    semanticSearchEnabled: false,
   }),
   getResolvedAIConfig: () => ({
     provider: 'bifrost',
     model: 'azure/gpt-4o-mini',
+    embeddingModel: 'ollama/nomic-embed-text:latest',
+    semanticSearchEnabled: false,
     baseUrl: 'https://bifrost.test/v1',
     apiKey: 'server-secret',
     configured: true,
@@ -103,6 +107,8 @@ describe('AI provider routing settings', () => {
       provider: 'bifrost',
       model: 'azure/gpt-4o-mini',
       baseUrl: 'https://bifrost.test/v1',
+      embeddingModel: 'ollama/nomic-embed-text:latest',
+      semanticSearchEnabled: false,
       hasApiKey: true,
     });
     expect(body.providerHealth).toContainEqual({
@@ -132,6 +138,47 @@ describe('AI provider routing settings', () => {
     expect(response.status).toBe(200);
     expect(state.writes[0]?.value).toMatchObject({ apiKey: 'server-secret' });
     expect(body.config.apiKey).toBe('********');
+  });
+
+  it('persists semantic opt-in and a separate Bifrost embedding model', async () => {
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...state.saved,
+        apiKey: '********',
+        semanticSearchEnabled: true,
+        embeddingModel: 'ollama/nomic-embed-text:latest',
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.writes[0]?.value).toMatchObject({
+      semanticSearchEnabled: true,
+      embeddingModel: 'ollama/nomic-embed-text:latest',
+    });
+  });
+
+  it('rejects an invalid Bifrost embedding model even when search enrichment is off', async () => {
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...state.saved,
+        apiKey: '********',
+        semanticSearchEnabled: false,
+        embeddingModel: 'nomic-embed-text',
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining('provider prefix'),
+    });
   });
 
   it('does not carry a credential to a different provider or endpoint', async () => {

@@ -78,6 +78,7 @@ function resolveProviderApiKey(provider: string, saved: SavedAIProviderConfig) {
   if (saved.apiKey) {
     return saved.apiKey;
   }
+
   if (!mayUseEnvironmentCredential) {
     return '';
   }
@@ -91,6 +92,19 @@ function resolveProviderApiKey(provider: string, saved: SavedAIProviderConfig) {
   }
 
   return process.env.OPENAI_API_KEY || '';
+}
+
+function getDefaultEmbeddingModel(provider: string) {
+  if (provider === 'ollama') return 'nomic-embed-text';
+  if (provider === 'bifrost') return 'ollama/nomic-embed-text:latest';
+  return 'text-embedding-3-small';
+}
+
+function resolveSemanticSearchEnabled(saved: SavedAIProviderConfig) {
+  if (typeof saved.semanticSearchEnabled === 'boolean') {
+    return saved.semanticSearchEnabled;
+  }
+  return /^(1|true|yes|on)$/i.test(process.env.AI_SEMANTIC_SEARCH_ENABLED?.trim() ?? '');
 }
 
 export function invalidateAIConfigCache() {
@@ -108,6 +122,9 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   const saved = loadSavedAIProviderConfigSync();
   const provider = saved.provider || process.env.AI_PROVIDER || DEFAULT_PROVIDER;
   const model = saved.model || process.env.AI_MODEL || DEFAULT_MODEL;
+  const embeddingModel = saved.embeddingModel
+    || process.env.AI_EMBEDDING_MODEL
+    || getDefaultEmbeddingModel(provider);
   const baseUrl = resolveProviderBaseUrl(provider, saved);
   const apiKey = resolveProviderApiKey(provider, saved);
   const configured = provider === 'ollama'
@@ -117,6 +134,8 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   cachedConfig = {
     provider,
     model,
+    embeddingModel,
+    semanticSearchEnabled: resolveSemanticSearchEnabled(saved),
     baseUrl,
     apiKey,
     configured,

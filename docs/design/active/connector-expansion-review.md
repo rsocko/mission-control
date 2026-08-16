@@ -35,7 +35,7 @@ This document reviews all existing connectors, maps them against the planned Con
 | 3 | Outlook Calendar | `outlook-calendar` | ✅ | — | — | — | — | ✅ | **Today timeline: calendar meeting overlay** (amber `CalendarEventBlock`), `/api/calendar-events` |
 | 4 | Outlook Email | `outlook-email` | ✅ | — | — | — | — | ✅ | Flagged/important emails → triage queue alerts |
 | 5 | RyMessage | `rymessage` | ✅ | — | — | — | — | — | AI-extracted iMessage actions → alerts; webhook + REST + SQLite modes |
-| 6 | Finance Manager | `finance-manager` | ✅ | ✅ | — | — | ✅ | — | Budget alerts, transaction triage, kid card rules; talks to `monarch-bridge` |
+| 6 | Tyrion | `finance-manager` | ✅ | ✅ | — | — | ✅ | — | Finance projection, attribution, insights, notifications, and bounded exception escalation |
 | 7 | Home Assistant | `home-assistant` | ✅ | — | — | — | — | — | Device state → triage alerts; rule engine with cooldowns |
 | 8 | Document Intelligence | `document-intelligence` | ✅ | ✅ | — | — | — | — | Bill extraction → tasks; statement tracking → alerts; EOB matching |
 | 9 | Custom REST | `custom-rest` | ✅ | cfg | cfg | — | — | cfg | Generic adapter: user-defined field mapping, status/priority maps, custom headers |
@@ -79,15 +79,52 @@ Fully implemented as `document-intelligence` connector in `src/lib/connectors/do
 - Integrates with Paperless-ngx via sidecar API at `localhost:8200`
 - **Surfaces:** Tasks (actionable items), alerts (overdue/missing statements), triage queue
 
-### 3. ✅ Monarch Money — DONE
+### 3. ✅ Tyrion (Monarch Money) — IMPLEMENTED
 
 Fully implemented as `finance-manager` connector (dual-registered as `monarch-money`) in `src/lib/connectors/monarch-money/index.ts`.
 
-- Budget alerts → review tasks via Finance Management bridge app (`monarch-bridge`)
-- Kid profiles + card rules + merchant rules in DB schema
-- Transaction triage with category management
-- **Surfaces:** Finance alerts panel, transaction review in Settings
-- **Tests:** `tests/monarch-connector.test.ts`
+- Synchronizes bounded transaction history plus account, category-group, category,
+  tag, recurring-obligation, and current-budget projections from the Tyrion Bridge.
+- Submits privacy-safe transaction references to Tyrion attribution and preserves
+  authoritative manual decisions during later synchronization.
+- Ingests durable Finance Insight occurrences for large transactions, recurring
+  amount changes, and category or merchant variance.
+- Routes eligible insights to immediate notifications or a monthly digest.
+  Finance Insight occurrences do not create tasks.
+- Routes unresolved attribution exceptions and exhausted category write-back
+  failures through bounded notifications, local task promotion, and My Day
+  inclusion according to the Finance attention-routing contract.
+- **Surfaces:** `/finance`, `/finance/review`, Notifications, My Day, local tasks,
+  connector health, and Houston finance tools.
+- **Tests:** `tests/connectors/monarch-snapshot-sync.test.ts`,
+  `tests/connectors/finance-insight-ingestion.test.ts`,
+  `tests/connectors/finance-attention-routing.test.ts`, finance API tests, and
+  finance component/E2E coverage.
+
+Production readiness follow-ups remain for
+[configuring the required household currency through Settings](https://github.com/rsocko/mission-control/issues/1399)
+and
+[exposing the reviewed Finance Insight cutover and rollback workflow](https://github.com/rsocko/mission-control/issues/1398).
+
+#### Planned complementary budget alerts
+
+Budget alerts complement rather than replace large-transaction, recurring-change,
+and category or merchant variance insights. They are not yet shipped.
+
+- Monarch remains authoritative for budgeted, spent, remaining, and percent-used
+  facts. Tyrion owns alert evaluation and lifecycle; Mission Control does not
+  derive alerts independently from synchronized budget rows.
+- Tyrion uses a configurable household approaching threshold with an 80% default
+  and supports per-category mute. Category-specific threshold overrides are
+  deferred until usage demonstrates a need.
+- One stable occurrence per category and budget period progresses between
+  `approaching` and `overspent`. Corrections update it immediately: a drop below
+  100% de-escalates to `approaching`, and a drop below the configured threshold
+  resolves it. Period rollover also resolves it.
+- Mission Control presents `approaching` as `heads_up` and `overspent` as
+  `action_needed`. Neither state automatically creates a task or My Day item.
+- Budget push delivery defaults off. Overspent occurrences may be explicitly
+  enabled by the user as sensitive, title-only push notifications.
 
 ### 4. ⚠️ Capabilities Enforcement — PARTIALLY DONE
 

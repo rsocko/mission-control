@@ -17,9 +17,18 @@ import {
   EmbeddingCache,
   type EmbeddingCacheEntry,
 } from './embedding-cache';
+import {
+  QueryEmbeddingCache,
+  type QueryEmbedding,
+} from './query-embedding-cache';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
 type EmbeddingEntityType = 'task' | 'alert';
+interface SearchFilters {
+  source?: string;
+  status?: string;
+  excludeDone?: boolean;
+}
 
 interface EmbeddingConfig {
   provider: string;
@@ -78,6 +87,10 @@ const CANDIDATE_PAGE_SIZE = Math.min(
   500,
 );
 const embeddingCache = new EmbeddingCache(CACHE_MAX_ENTRIES, CACHE_MAX_BYTES);
+const queryEmbeddingCache = new QueryEmbeddingCache(
+  positiveInteger(process.env.MC_QUERY_EMBEDDING_CACHE_MAX_ENTRIES, 128),
+  positiveInteger(process.env.MC_QUERY_EMBEDDING_CACHE_TTL_MS, 5 * 60_000),
+);
 const ROUTE_RETRY_BASE_MS = positiveInteger(
   process.env.MC_SEMANTIC_ROUTE_RETRY_BASE_MS,
   30_000,
@@ -122,16 +135,6 @@ function cosineSimilarityWithNorm(
 
 const SIMILARITY_THRESHOLD = 0.25;
 
-function getDefaultEmbeddingModel(provider: string) {
-  if (process.env.AI_EMBEDDING_MODEL) {
-    return process.env.AI_EMBEDDING_MODEL;
-  }
-
-  if (provider === 'ollama') return 'nomic-embed-text';
-  if (provider === 'bifrost') return 'ollama/nomic-embed-text:latest';
-  return 'text-embedding-3-small';
-}
-
 function getAzureEmbeddingEndpoint(baseUrl: string, deployment: string) {
   const normalizedBaseUrl = baseUrl
     .replace(/\/$/, '')
@@ -145,7 +148,7 @@ function getAzureEmbeddingEndpoint(baseUrl: string, deployment: string) {
 async function getEmbeddingConfig(sources: string[] = []): Promise<EmbeddingConfig | null> {
   const resolved = getResolvedAIConfig();
   const provider = resolved.provider;
-  const model = getDefaultEmbeddingModel(provider);
+  const model = resolved.embeddingModel;
   const context = getAIRequestContext('semantic-embedding', { sources });
   const routingHeaders = getAIRoutingHeaders(
     context,
@@ -197,14 +200,47 @@ async function getEmbeddingConfig(sources: string[] = []): Promise<EmbeddingConf
 }
 
 export async function getSemanticSearchStatus() {
+  const resolved = getResolvedAIConfig();
+  if (!resolved.semanticSearchEnabled) {
+    return {
+      available: false as const,
+      state: 'disabled' as const,
+      note: 'Semantic search enrichment is turned off in AI settings.',
+    };
+  }
   const config = await getEmbeddingConfig();
-  if (config) {
-    return { available: true as const };
+  if (!config) {
+    return {
+      available: false as const,
+      state: 'unconfigured' as const,
+      note: 'Semantic search is unavailable until an AI embedding provider is configured.',
+    };
   }
 
+  await ensureEmbeddingsTable();
+  const route = getConfiguredEmbeddingRoute(config);
+  const compatible = sqlite.prepare(`
+    SELECT COUNT(*) AS count
+    FROM search_embeddings
+    WHERE provider = ? AND model = ? AND source_sort_at IS NOT NULL
+  `).get(route.provider, route.model) as { count: number };
+  const entities = sqlite.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM tasks)
+      + (SELECT COUNT(*) FROM notifications) AS count
+  `).get() as { count: number };
+  if (entities.count > 0 && compatible.count === 0) {
+    return {
+      available: false as const,
+      state: 'not-ready' as const,
+      note: 'Semantic search is enabled, but compatible entity embeddings are not ready yet.',
+      indexedCount: 0,
+    };
+  }
   return {
-    available: false as const,
-    note: 'Semantic search is unavailable until an AI embedding provider is configured.',
+    available: true as const,
+    state: 'ready' as const,
+    indexedCount: compatible.count,
   };
 }
 
@@ -418,6 +454,34 @@ interface GeneratedEmbedding {
   model: string;
 }
 
+function normalizeQueryForCache(query: string) {
+  return query.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function getQueryEmbeddingCacheKey(query: string, config: EmbeddingConfig) {
+  const route = getConfiguredEmbeddingRoute(config);
+  return JSON.stringify([
+    normalizeQueryForCache(query),
+    config.provider,
+    config.model,
+    config.context.sensitivity,
+    config.context.allowedRoutes,
+    route.provider,
+    route.model,
+    config.endpoint,
+  ]);
+}
+
+async function getQueryEmbedding(
+  query: string,
+  config: EmbeddingConfig,
+): Promise<QueryEmbedding | null> {
+  return queryEmbeddingCache.getOrCreate(
+    getQueryEmbeddingCacheKey(query, config),
+    () => requestEmbedding(query, config),
+  );
+}
+
 interface EmbeddingRoute {
   provider: string;
   model: string;
@@ -600,6 +664,9 @@ export async function indexEntityEmbedding(
 async function maybeSeedEmbeddings() {
   await ensureEmbeddingsTable();
 
+  if (!getResolvedAIConfig().semanticSearchEnabled) {
+    return;
+  }
   const config = await getEmbeddingConfig();
   if (!config) {
     return;
@@ -712,10 +779,6 @@ async function stageEntityEmbedding(
 async function performEmbeddingIndexRebuild() {
   await ensureEmbeddingsTable();
 
-  const status = await getSemanticSearchStatus();
-  if (!status.available) {
-    return;
-  }
   const config = await getEmbeddingConfig();
   if (!config) return;
   const configuredRoute = getConfiguredEmbeddingRoute(config);
@@ -956,6 +1019,7 @@ function getCachedEmbedding(row: IndexedEmbeddingRow): EmbeddingCacheEntry | nul
 function getCandidateMetadata(
   config: Pick<EmbeddingConfig, 'provider' | 'model'>,
   type: SearchScope,
+  filters: SearchFilters = {},
 ): IndexedEmbeddingMetadata[] {
   const select = `
     SELECT
@@ -966,18 +1030,42 @@ function getCandidateMetadata(
       e.provider,
       e.model
     FROM search_embeddings e
+    LEFT JOIN tasks t
+      ON e.entity_type = 'task' AND t.id = e.entity_id
+    LEFT JOIN notifications n
+      ON e.entity_type = 'alert' AND n.id = e.entity_id
     WHERE e.provider = ?
       AND e.model = ?
       AND e.source_sort_at IS NOT NULL
   `;
+  const filterClauses: string[] = [];
+  const filterParams: unknown[] = [];
+  if (filters.source) {
+    filterClauses.push(`(
+      t.source_list_name = ? OR t.connector_type = ? OR n.connector_type = ?
+    )`);
+    filterParams.push(filters.source, filters.source, filters.source);
+  }
+  if (filters.status) {
+    filterClauses.push('COALESCE(t.status, n.category) = ?');
+    filterParams.push(filters.status);
+  }
+  if (filters.excludeDone) {
+    filterClauses.push("LOWER(COALESCE(t.status, n.category, '')) <> 'done'");
+  }
+  const filterSql = filterClauses.length > 0
+    ? `AND ${filterClauses.join(' AND ')}`
+    : '';
   if (type === 'all') {
     return sqlite.prepare(`
       ${select}
+      ${filterSql}
       ORDER BY e.source_sort_at DESC, e.entity_type, e.entity_id
       LIMIT ?
     `).all(
       config.provider,
       config.model,
+      ...filterParams,
       SEARCH_MAX_CANDIDATES,
     ) as IndexedEmbeddingMetadata[];
   }
@@ -986,11 +1074,13 @@ function getCandidateMetadata(
   return sqlite.prepare(`
     ${select}
       AND e.entity_type = '${entityType}'
+      ${filterSql}
     ORDER BY e.source_sort_at DESC, e.entity_type, e.entity_id
     LIMIT ?
   `).all(
     config.provider,
     config.model,
+    ...filterParams,
     SEARCH_MAX_CANDIDATES,
   ) as IndexedEmbeddingMetadata[];
 }
@@ -999,8 +1089,9 @@ function scanCandidateEmbeddings(
   config: Pick<EmbeddingConfig, 'provider' | 'model'>,
   type: SearchScope,
   visit: (entry: EmbeddingCacheEntry) => void,
+  filters: SearchFilters = {},
 ): number {
-  const metadata = getCandidateMetadata(config, type);
+  const metadata = getCandidateMetadata(config, type, filters);
 
   for (let offset = 0; offset < metadata.length; offset += CANDIDATE_PAGE_SIZE) {
     const page = metadata.slice(offset, offset + CANDIDATE_PAGE_SIZE);
@@ -1075,6 +1166,7 @@ export function getSemanticSearchMetrics() {
   const p95Index = Math.max(0, Math.ceil(sortedDurations.length * 0.95) - 1);
   return {
     cache: embeddingCache.getMetrics(),
+    queryCache: queryEmbeddingCache.getMetrics(),
     search: {
       searches: searchMetrics.searches,
       totalCandidates: searchMetrics.totalCandidates,
@@ -1232,7 +1324,7 @@ export async function findSimilarTaskEmbeddings(
 
 export async function semanticSearch(
   query: string,
-  options: { type?: SearchScope; limit?: number } = {},
+  options: { type?: SearchScope; limit?: number } & SearchFilters = {},
 ): Promise<SearchResult[]> {
   const startedAt = performance.now();
   const normalizedQuery = query.trim();
@@ -1245,9 +1337,12 @@ export async function semanticSearch(
     return [];
   }
 
-  await maybeSeedEmbeddings();
+  const status = await getSemanticSearchStatus();
+  if (!status.available) {
+    return [];
+  }
 
-  const generatedQuery = await requestEmbedding(normalizedQuery, config);
+  const generatedQuery = await getQueryEmbedding(normalizedQuery, config);
   if (!generatedQuery) {
     return [];
   }
@@ -1266,7 +1361,7 @@ export async function semanticSearch(
     if (insertAt === -1) topCandidates.push({ cached, score });
     else topCandidates.splice(insertAt, 0, { cached, score });
     if (topCandidates.length > limit) topCandidates.pop();
-  });
+  }, options);
   recordSearchMetrics(candidates, performance.now() - startedAt);
 
   if (topCandidates.length === 0) {

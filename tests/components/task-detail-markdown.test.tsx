@@ -138,11 +138,11 @@ describe('TaskDetailMarkdown', () => {
       </TaskDetailMarkdown>,
     );
 
-    const attribute = await screen.findByText('runs-on');
+    const attribute = await screen.findByText('runs-on:');
     const code = attribute.closest('code');
     expect(code).not.toBeNull();
     expect(code!).toHaveClass('language-yaml', 'hljs');
-    expect(code!.querySelector('.hljs-attr')).toHaveTextContent('runs-on');
+    expect(code!.querySelector('.hljs-attr')).toHaveTextContent('runs-on:');
   });
 
   it('renders GitHub flavored markdown and marks external links safe', async () => {

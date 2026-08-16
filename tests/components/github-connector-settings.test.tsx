@@ -1,6 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DefaultConnectorEditPanel } from '@/app/settings/components/ConnectorsSection';
+import {
+  ConnectorEditPanel,
+  DefaultConnectorEditPanel,
+} from '@/app/settings/components/ConnectorsSection';
 import { ListGroupsSection } from '@/app/settings/components/ListGroupsSection';
 import { isSourceListSelected, type ConnectorConfig, type SourceList } from '@/app/settings/components/types';
 
@@ -40,6 +43,24 @@ describe('GitHub connector settings', () => {
       }
       return new Response(JSON.stringify({}), { status: 200 });
     }));
+  });
+
+  it('dispatches GitHub connectors to their type-specific editor', () => {
+    render(
+      <ConnectorEditPanel
+        connector={connector}
+        sourceLists={[]}
+        onUpdate={vi.fn()}
+        onPurgeSourceList={vi.fn()}
+        onDelete={vi.fn()}
+        confirmDelete={null}
+        setConfirmDelete={vi.fn()}
+        onHealthRefresh={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Repositories')).toBeInTheDocument();
+    expect(screen.getByText('octo/existing')).toBeInTheDocument();
   });
 
   it('removes a repository addition from the editor when saving fails', async () => {

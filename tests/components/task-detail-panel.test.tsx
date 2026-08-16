@@ -776,8 +776,10 @@ describe('TaskDetailPanel redesigned presentations', () => {
       fireEvent.click(checkbox);
     });
 
-    expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
-    expect(checkbox).not.toBeChecked();
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
+      expect(checkbox).not.toBeChecked();
+    });
   });
 
   it('cancels an inline notes draft on Escape without closing task detail', async () => {

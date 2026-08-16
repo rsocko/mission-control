@@ -36,12 +36,15 @@ function ConnectorIcon({ type, size = 16 }: { type: string; size?: number }) {
   return <MapPin size={size} className="text-[var(--text-muted)]" />;
 }
 
-export function CaptureDestinationSection() {
+export function CaptureDestinationSection({ mobile = false }: { mobile?: boolean }) {
   const [destination, setDestination] = useState<CaptureDestination>({ connectorType: 'local' });
   const [destinations, setDestinations] = useState<TaskDestination[]>([]);
   const [sourceLists, setSourceLists] = useState<Array<{ sourceId: string; name: string; connectorType: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const cardClassName = mobile
+    ? 'rounded-2xl bg-[var(--surface-1)] border border-[var(--border-subtle)] p-4'
+    : 'bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-5 mt-4';
 
   useEffect(() => {
     Promise.all([
@@ -102,7 +105,7 @@ export function CaptureDestinationSection() {
 
   if (loading) {
     return (
-      <div className="bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-5 mt-4">
+      <div className={cardClassName}>
         <div className="flex items-center gap-2">
           <Loader2 size={14} className="animate-spin text-[var(--text-muted)]" />
           <span className="text-sm text-[var(--text-muted)]">Loading…</span>
@@ -119,7 +122,7 @@ export function CaptureDestinationSection() {
   const listsForConnector = sourceLists.filter(sl => sl.connectorType === destination.connectorType);
 
   return (
-    <div className="bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-5 mt-4">
+    <div className={cardClassName}>
       <div className="flex items-center gap-2 mb-3">
         <MapPin size={18} className="text-[var(--text-muted)]" />
         <h3 className="text-sm font-medium text-[var(--text-primary)]">Default Capture Location</h3>

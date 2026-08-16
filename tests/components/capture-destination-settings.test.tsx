@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
+import { MobileSettings } from '@/components/settings/MobileSettings';
 
 describe('capture destination settings', () => {
   beforeEach(() => {
@@ -28,5 +29,12 @@ describe('capture destination settings', () => {
     const destination = await screen.findByRole('combobox', { name: 'Destination' });
 
     expect(destination.querySelectorAll('img[alt="local"]')).toHaveLength(1);
+  });
+
+  it('is available from the mobile settings page', async () => {
+    render(<MobileSettings />);
+
+    expect(await screen.findByRole('heading', { name: 'Default Capture Location' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Destination' })).toBeInTheDocument();
   });
 });

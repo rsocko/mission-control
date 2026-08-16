@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fadeSlideUp, modalContent, modalOverlay, staggerContainer } from '@/lib/motion';
 import type { SearchResult } from '@/lib/search/fts';
+import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
 import { cn } from '@/lib/utils';
 
 export interface MobileSearchScreenProps {
@@ -25,13 +26,6 @@ export interface MobileSearchScreenProps {
   onClose: () => void;
   /** Optional initial query (e.g., from drawer search bar) */
   initialQuery?: string;
-}
-
-interface SearchResponse {
-  note?: string | null;
-  semanticAvailable?: boolean;
-  durationMs?: number;
-  results: SearchResult[];
 }
 
 type TypeFilter = 'all' | 'tasks' | 'triage' | 'notes';
@@ -373,18 +367,25 @@ export function MobileSearchScreen({
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [mode, setMode] = useState<'keyword' | 'hybrid'>('keyword');
-  const [searchModeReady, setSearchModeReady] = useState(false);
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
-  const [durationMs, setDurationMs] = useState<number | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [dateFilter, setDateFilter] = useState<DateFilter>('all');
   const prefersReducedMotion = useReducedMotion() ?? false;
+  const {
+    results,
+    note,
+    keywordLoading: loading,
+    semanticLoading,
+    keywordDurationMs: durationMs,
+    semanticEnabled,
+    semanticAvailable,
+  } = useProgressiveSearch({
+    query: debouncedQuery,
+    enabled: isOpen,
+    limit: 20,
+  });
 
   useEffect(() => {
     setRecentSearches(readRecentSearches());
@@ -400,10 +401,6 @@ export function MobileSearchScreen({
       const nextQuery = initialQuery?.trim() ?? '';
       setQuery(nextQuery);
       setDebouncedQuery(nextQuery);
-      setResults([]);
-      setLoading(Boolean(nextQuery));
-      setNote(null);
-      setDurationMs(null);
       setTypeFilter('all');
       setProjectFilter('all');
       setStatusFilter('all');
@@ -451,92 +448,17 @@ export function MobileSearchScreen({
   useEffect(() => {
     if (!isOpen) return;
 
-    let active = true;
-    setSearchModeReady(false);
-    fetch('/api/ai/search?q=__status_check__&mode=hybrid&limit=1')
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-
-        return response.json() as Promise<SearchResponse>;
-      })
-      .then((payload) => {
-        if (active) {
-          setMode(payload.semanticAvailable ? 'hybrid' : 'keyword');
-          setSearchModeReady(true);
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setMode('keyword');
-          setSearchModeReady(true);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
     const timeoutId = window.setTimeout(() => {
       const nextValue = query.trim();
       setDebouncedQuery(nextValue);
 
       if (!nextValue) {
-        setLoading(false);
-        setResults([]);
-        setNote(null);
-        setDurationMs(null);
+        setDebouncedQuery('');
       }
     }, SEARCH_DEBOUNCE_MS);
 
     return () => window.clearTimeout(timeoutId);
   }, [isOpen, query]);
-
-  useEffect(() => {
-    if (!isOpen || !debouncedQuery || !searchModeReady) return;
-
-    const controller = new AbortController();
-    const params = new URLSearchParams({
-      q: debouncedQuery,
-      mode,
-      limit: '20',
-    });
-
-    setLoading(true);
-
-    fetch(`/api/ai/search?${params.toString()}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-
-        return response.json() as Promise<SearchResponse>;
-      })
-      .then((payload) => {
-        setResults(payload.results);
-        setNote(payload.note ?? null);
-        setDurationMs(payload.durationMs ?? null);
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-
-        setResults([]);
-        setNote(error instanceof Error ? error.message : 'Search failed.');
-        setDurationMs(null);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [debouncedQuery, isOpen, mode, searchModeReady]);
 
   const projectOptions = useMemo(
     () => uniqueSorted(results.map((result) => getProjectLabel(result))),
@@ -565,7 +487,6 @@ export function MobileSearchScreen({
 
   const applyQuery = useCallback((nextQuery: string) => {
     setQuery(nextQuery);
-    setLoading(Boolean(nextQuery.trim()));
     window.requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.setSelectionRange(nextQuery.length, nextQuery.length);
@@ -584,10 +505,6 @@ export function MobileSearchScreen({
   const handleClearQuery = useCallback(() => {
     setQuery('');
     setDebouncedQuery('');
-    setResults([]);
-    setNote(null);
-    setDurationMs(null);
-    setLoading(false);
     setTypeFilter('all');
     setProjectFilter('all');
     setStatusFilter('all');
@@ -648,9 +565,6 @@ export function MobileSearchScreen({
                   value={query}
                   onChange={(event) => {
                     setQuery(event.target.value);
-                    if (event.target.value.trim()) {
-                      setLoading(true);
-                    }
                   }}
                   placeholder="Search tasks, triage, notes..."
                   className="h-11 w-full bg-transparent text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
@@ -792,11 +706,22 @@ export function MobileSearchScreen({
               {debouncedQuery ? (
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <p className="text-sm text-[var(--text-secondary)]" aria-live="polite">
-                    {loading ? `Searching for “${debouncedQuery}”…` : resultLabel}
+                    {loading
+                      ? results.length === 0
+                        ? `Searching for “${debouncedQuery}”…`
+                        : `Updating results for “${debouncedQuery}”…`
+                      : resultLabel}
                   </p>
-                  {!loading && durationMs !== null ? (
-                    <span className="text-xs text-[var(--text-tertiary)]">{durationMs}ms</span>
-                  ) : null}
+                  <div className="flex items-center gap-2">
+                    {semanticEnabled && semanticAvailable ? (
+                      <span className="text-xs text-[var(--text-tertiary)]">
+                        {semanticLoading ? 'Finding related…' : 'Related on'}
+                      </span>
+                    ) : null}
+                    {!loading && durationMs !== null ? (
+                      <span className="text-xs text-[var(--text-tertiary)]">{durationMs}ms</span>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -843,7 +768,7 @@ export function MobileSearchScreen({
                     </div>
                   </section>
                 </div>
-              ) : loading ? (
+              ) : loading && filteredResults.length === 0 ? (
                 <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 text-center">
                   <Loader2 size={28} className="animate-spin text-[var(--accent)]" />
                   <p className="text-sm text-[var(--text-secondary)]">Searching across Mission Control…</p>
@@ -923,7 +848,7 @@ export function MobileSearchScreen({
                               ) : null}
                               <span className="flex items-center gap-1.5">
                                 <CheckCircle2 size={12} />
-                                {result.source === 'fts' ? 'Keyword' : result.source === 'semantic' ? 'Semantic' : 'Hybrid'}
+                                {result.source === 'fts' ? 'Keyword' : result.source === 'semantic' ? 'Related' : 'Keyword + related'}
                               </span>
                             </div>
                           </div>

@@ -26,6 +26,8 @@ const REDACTED_API_KEY = '********';
 const providerConfigSchema = z.object({
   provider: z.enum(['openai', 'azure', 'ollama', 'bifrost']).default('openai'),
   model: z.string().trim().min(1, 'Model is required').max(200),
+  embeddingModel: z.string().trim().max(200).default(''),
+  semanticSearchEnabled: z.boolean().default(false),
   baseUrl: z.union([z.literal(''), z.url()]).default(''),
   apiKey: z.string().max(10_000).optional(),
   routingPolicy: z.unknown().optional(),
@@ -37,6 +39,17 @@ const providerConfigSchema = z.object({
       message: 'Bifrost model must include a supported provider prefix, such as azure/gpt-4o-mini',
     });
   }
+  if (
+    config.provider === 'bifrost'
+    && config.embeddingModel
+    && !parseBifrostModelId(config.embeddingModel)
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['embeddingModel'],
+      message: 'Bifrost embedding model must include a supported provider prefix, such as ollama/nomic-embed-text:latest',
+    });
+  }
 });
 
 async function loadSavedProviderConfig() {
@@ -46,7 +59,14 @@ async function loadSavedProviderConfig() {
     .where(eq(appSettings.key, PROVIDER_SETTINGS_KEY))
     .limit(1);
   return row?.value && typeof row.value === 'object'
-    ? row.value as Record<string, string>
+    ? row.value as {
+        provider?: string;
+        model?: string;
+        embeddingModel?: string;
+        semanticSearchEnabled?: boolean;
+        baseUrl?: string;
+        apiKey?: string;
+      }
     : {};
 }
 
@@ -96,6 +116,8 @@ export async function GET() {
       savedConfig: {
         provider: savedConfig.provider,
         model: savedConfig.model,
+        embeddingModel: savedConfig.embeddingModel || resolved.embeddingModel,
+        semanticSearchEnabled: savedConfig.semanticSearchEnabled ?? resolved.semanticSearchEnabled,
         baseUrl: savedConfig.baseUrl,
         hasApiKey: Boolean(savedConfig.apiKey || resolved.apiKey),
       },
@@ -130,6 +152,8 @@ export async function POST(request: Request) {
     const config = {
       provider: parsed.data.provider,
       model: parsed.data.model,
+      embeddingModel: parsed.data.embeddingModel,
+      semanticSearchEnabled: parsed.data.semanticSearchEnabled,
       baseUrl: parsed.data.baseUrl,
       apiKey,
     };

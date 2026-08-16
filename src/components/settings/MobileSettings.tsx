@@ -19,6 +19,7 @@ import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useNavBadgesVisible } from '@/components/layout/MobileBottomNav';
 import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/components/ui/CompletionBurst';
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
+import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -322,6 +323,9 @@ export function MobileSettings() {
           />
         </div>
       </SectionCard>
+
+      <SectionLabel>Capture</SectionLabel>
+      <CaptureDestinationSection mobile />
 
       {/* ─── Connected Services (F-99) ─── */}
       <SectionLabel>Connected Services</SectionLabel>

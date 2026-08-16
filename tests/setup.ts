@@ -30,9 +30,3 @@ vi.mock('drizzle-orm', () => ({
   like: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'like', col, val })),
   notLike: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'notLike', col, val })),
 }));
-
-// Mock crypto
-vi.mock('crypto', () => ({
-  default: {},
-  randomUUID: () => 'test-uuid-1234',
-}));

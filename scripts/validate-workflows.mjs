@@ -88,6 +88,31 @@ for (const file of workflowFiles) {
     }
   }
 
+  if (file === 'ci.yml') {
+    const shards = workflow.jobs?.['unit-test-shards'];
+    const aggregate = workflow.jobs?.['unit-tests'];
+    assert.ok(shards && aggregate, 'ci.yml must shard unit tests and expose an aggregate check');
+    assert.deepEqual(
+      shards.strategy?.matrix?.shard,
+      [1, 2, 3, 4],
+      'ci.yml must run four unit-test shards',
+    );
+    assert.equal(shards.strategy?.['fail-fast'], false, 'unit-test shards must all report their result');
+    assert.ok(
+      shards.steps?.some((step) =>
+        step.run === 'npm test -- --shard=${{ matrix.shard }}/4'
+      ),
+      'unit-test shards must partition the Vitest suite',
+    );
+    assert.equal(aggregate.name, 'Unit tests', 'aggregate check must retain its stable name');
+    assert.deepEqual(
+      aggregate.needs,
+      ['unit-test-shards'],
+      'aggregate unit-test check must depend on every shard',
+    );
+    assert.equal(aggregate.if, 'always()', 'aggregate unit-test check must report shard failures');
+  }
+
   if (hasWritePermissions) {
     assert.ok(!('push' in workflow.on), `${file} must not publish directly from a push event`);
     assert.ok(!('pull_request' in workflow.on), `${file} must not publish from pull requests`);

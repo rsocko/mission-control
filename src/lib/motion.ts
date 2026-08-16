@@ -42,6 +42,12 @@ export const tweenBase: Transition = {
   ease: [0.25, 0.1, 0.25, 1],
 };
 
+export const surfaceExitTransition: Transition = {
+  type: 'tween',
+  duration: 0.2,
+  ease: 'easeOut',
+};
+
 export const tweenSlow: Transition = {
   type: 'tween',
   duration: 0.3,
@@ -156,8 +162,8 @@ export const scaleIn: Variants = {
 
 export const modalOverlay: Variants = {
   hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { duration: 0.2 } },
-  exit: { opacity: 0, transition: { duration: 0.15 } },
+  show: { opacity: 1, transition: { duration: 0.2, ease: 'easeOut' } },
+  exit: { opacity: 0, transition: surfaceExitTransition },
 };
 
 export const modalContent: Variants = {
@@ -180,7 +186,7 @@ export const modalContent: Variants = {
     opacity: 0,
     scale: 0.97,
     y: 5,
-    transition: { duration: 0.12 },
+    transition: surfaceExitTransition,
   },
 };
 
@@ -407,19 +413,36 @@ export const drawerSlideIn: Variants = {
   },
   exit: {
     x: '-100%',
-    transition: {
-      type: 'spring',
-      stiffness: 500,
-      damping: 35,
-      mass: 0.8,
-    },
+    transition: surfaceExitTransition,
   },
 };
 
 export const drawerOverlay: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { duration: 0.25, ease: 'easeOut' } },
-  exit: { opacity: 0, transition: { duration: 0.2, ease: 'easeIn' } },
+  exit: { opacity: 0, transition: surfaceExitTransition },
+};
+
+export const panelSlideFromRight: Variants = {
+  hidden: {
+    opacity: 0,
+    x: 16,
+  },
+  show: {
+    opacity: 1,
+    x: 0,
+    transition: {
+      type: 'spring',
+      stiffness: 400,
+      damping: 34,
+      mass: 0.8,
+    },
+  },
+  exit: {
+    opacity: 0,
+    x: 16,
+    transition: surfaceExitTransition,
+  },
 };
 
 // ─── Search Highlight ───────────────────────────────────────────────────────

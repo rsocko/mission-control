@@ -17,6 +17,7 @@ import {
 import { parseFilterQuery, type FilterToken, type FilterTokenType } from '@/lib/utils/parseFilterQuery';
 import type { EnabledSource, HubProject, ListGroup, SourceList, TaskTag } from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 interface TaskKeywordFilterProps {
   filteredCount: number;
@@ -760,6 +761,7 @@ export function TaskKeywordFilter({
   // Keyboard shortcut: "/" to focus when not already in an input
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(e)) return;
       if (e.key === '/' && !isInputFocused()) {
         e.preventDefault();
         inputRef.current?.focus();

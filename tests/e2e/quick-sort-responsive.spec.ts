@@ -75,6 +75,10 @@ test.beforeEach(async ({ page }) => {
   await page.evaluate(() => {
     document.documentElement.style.setProperty('--safe-area-inset-bottom', '34px');
   });
+});
+
+async function openPriorityQueue(page: import('@playwright/test').Page) {
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(1);
   const queueButton = page.getByRole('button', { name: /Set Priority/ });
   const modeHeading = page.getByRole('heading', { name: 'Set Priority' });
   await expect(async () => {
@@ -83,10 +87,12 @@ test.beforeEach(async ({ page }) => {
     }
     await expect(modeHeading).toBeVisible({ timeout: 1_000 });
   }).toPass({ timeout: 15_000 });
-});
+  await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(0);
+}
 
 test('keeps actions visible while long task details scroll', async ({ browserName, page }) => {
   expect(browserName).toBe('webkit');
+  await openPriorityQueue(page);
   const details = page.getByRole('region', { name: 'Task details' });
   const markDone = page.getByRole('button', { name: 'Done', exact: true });
   const mobileNav = page.getByRole('navigation', { name: 'Mobile navigation' });
@@ -108,6 +114,7 @@ test('keeps actions visible while long task details scroll', async ({ browserNam
 
 test('keeps actions reachable on an exceptionally short viewport', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 390 });
+  await openPriorityQueue(page);
 
   const mode = page.getByTestId('quick-sort-mode');
   const markDone = page.getByRole('button', { name: 'Done', exact: true });

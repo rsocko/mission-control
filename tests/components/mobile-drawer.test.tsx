@@ -41,6 +41,7 @@ vi.mock('motion/react', () => {
     initial?: unknown;
     animate?: unknown;
     exit?: unknown;
+    onAnimationComplete?: (definition: unknown) => void;
   };
 
   const MotionDiv = React.forwardRef<HTMLDivElement, MotionProps<HTMLDivElement>>(
@@ -50,8 +51,12 @@ vi.mock('motion/react', () => {
     }
   );
   const MotionNav = React.forwardRef<HTMLElement, MotionProps<HTMLElement>>(
-    function MotionNav({ children, ...props }, ref) {
+    function MotionNav({ children, onAnimationComplete, ...props }, ref) {
       const { variants, initial, animate, exit, ...rest } = props;
+      React.useEffect(() => {
+        if (animate !== 'show') return;
+        queueMicrotask(() => onAnimationComplete?.('show'));
+      }, [animate, onAnimationComplete]);
       return <nav ref={ref} {...rest}>{children}</nav>;
     }
   );
@@ -147,6 +152,14 @@ describe('MobileDrawer', () => {
 
     expect(screen.getByLabelText('Search')).toBeDefined();
     expect(screen.getByPlaceholderText('Search…')).toBeDefined();
+  });
+
+  it('focuses search after the drawer entrance animation completes', async () => {
+    render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
   });
 
   it('includes sync status indicator (F-7)', () => {
@@ -261,8 +274,9 @@ describe('MobileDrawer', () => {
     render(<DrawerHarness />);
     const trigger = screen.getByLabelText('Open menu');
     fireEvent.click(trigger);
-    expect(screen.getByLabelText('Drawer navigation')).toBe(document.activeElement);
-    expect(screen.getByPlaceholderText('Search…')).not.toBe(document.activeElement);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
 
     closeDrawer();
 

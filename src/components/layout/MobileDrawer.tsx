@@ -58,6 +58,7 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
   const { progress } = useSyncStream();
   const [searchQuery, setSearchQuery] = useState('');
   const drawerRef = useRef<HTMLElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const hasOpenedRef = useRef(false);
   const prefersReducedMotion = useReducedMotion();
 
@@ -70,6 +71,10 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
     hasOpenedRef.current = false;
     returnFocusRef.current?.focus();
   }, [isOpen, returnFocusRef]);
+
+  const handleDrawerAnimationComplete = useCallback((definition: unknown) => {
+    if (definition === 'show') searchInputRef.current?.focus({ preventScroll: true });
+  }, []);
 
   // Close on Escape key
   useEffect(() => {
@@ -184,6 +189,7 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
             initial="hidden"
             animate="show"
             exit="exit"
+            onAnimationComplete={handleDrawerAnimationComplete}
             aria-label="Drawer navigation"
           >
             {/* User avatar + name */}
@@ -203,6 +209,7 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
                 <div className="flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                   <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
                   <input
+                    ref={searchInputRef}
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}

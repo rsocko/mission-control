@@ -108,9 +108,9 @@ describe('embedding index rebuild routing', () => {
       { provider: 'ollama', model: 'nomic-embed-text:latest', fallbackOccurred: false },
       { provider: 'ollama', model: 'different-embed-model', fallbackOccurred: true },
     ];
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ data: [{ embedding: embedding(2) }] }), { status: 200 }),
-    );
+    ));
 
     const { rebuildEmbeddingIndex } = await import('@/lib/search/semantic');
 
@@ -139,9 +139,9 @@ describe('embedding index rebuild routing', () => {
       { provider: 'ollama', model: 'nomic-embed-text:latest', fallbackOccurred: false },
       { provider: 'ollama', model: 'different-embed-model', fallbackOccurred: true },
     ];
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(
       new Response(JSON.stringify({ data: [{ embedding: embedding(3) }] }), { status: 200 }),
-    );
+    ));
 
     const { warmUpEmbeddings } = await import('@/lib/search/semantic');
 

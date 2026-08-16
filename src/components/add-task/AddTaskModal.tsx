@@ -21,17 +21,7 @@ import { taskLogger } from '@/lib/client-logger';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import { EffortSelect } from '@/components/EffortBadge';
-
-interface Destination {
-  id: string;
-  label: string;
-  connectorType: string;
-  account: 'personal' | 'work' | null;
-  color: string;
-  listId?: string;
-  listName?: string;
-  listSelectionMode?: 'required' | 'optional' | 'not-applicable';
-}
+import type { QuickAddDestination } from './quick-add-types';
 
 interface Tag {
   id: string;
@@ -85,8 +75,8 @@ export interface TaskPrefill {
 interface AddTaskModalProps {
   initialInput: string;
   initialParsed: ParsedTask | null;
-  initialDestination: Destination;
-  destinations: Destination[];
+  initialDestination: QuickAddDestination;
+  destinations: QuickAddDestination[];
   onClose: () => void;
   onSubmit: () => void;
   /** Pre-select a project by ID when opening from a project detail page */

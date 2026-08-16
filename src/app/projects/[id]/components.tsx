@@ -395,8 +395,8 @@ export function PhaseAddTaskMenu({
         ?.parentElement
         ?.closest('[data-phase-add-menu]')
         ?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]');
-      trigger?.focus();
       onClose();
+      queueMicrotask(() => trigger?.focus());
     }
   }
 

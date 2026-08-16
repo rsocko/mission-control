@@ -533,6 +533,53 @@ describe('MobileNotificationsScreen', () => {
     }));
   });
 
+  it('right swipes an unread notification to mark it read', async () => {
+    mockNotificationsApi([makeNotification({ id: 'read-me', title: 'Read me' })]);
+
+    render(<MobileNotificationsScreen onBack={vi.fn()} />);
+
+    const item = await screen.findByRole('button', { name: /notification: read me/i });
+
+    fireEvent.pointerDown(item, { clientX: 0 });
+    fireEvent.pointerMove(item, { clientX: 120 });
+    fireEvent.pointerUp(item, { clientX: 120 });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/notifications/bulk', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ids: ['read-me'], action: 'read' }),
+      }));
+    });
+    expect(screen.queryByLabelText('Unread')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All: 0 unread' })).toBeInTheDocument();
+  });
+
+  it('right swipes a read notification to mark it unread', async () => {
+    mockNotificationsApi([makeNotification({
+      id: 'unread-me',
+      title: 'Unread me',
+      state: 'read',
+      readState: 'read',
+    })]);
+
+    render(<MobileNotificationsScreen onBack={vi.fn()} />);
+
+    const item = await screen.findByRole('button', { name: /notification: unread me/i });
+
+    fireEvent.pointerDown(item, { clientX: 0 });
+    fireEvent.pointerMove(item, { clientX: 120 });
+    fireEvent.pointerUp(item, { clientX: 120 });
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith('/api/notifications/bulk', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ ids: ['unread-me'], action: 'mark_unread' }),
+      }));
+    });
+    expect(screen.getByLabelText('Unread')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'All: 1 unread' })).toBeInTheDocument();
+  });
+
   it('taps to open the detail sheet and marks a notification as read', async () => {
     mockNotificationsApi([makeNotification({ id: 'open-me', title: 'Open me' })]);
 

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createTriageCapture, isValidTriageSource, isValidTriageStatus, listTriageItems } from '@/lib/triage';
+import { createTriageCapture } from '@/lib/triage/capture';
+import { isValidTriageSource, isValidTriageStatus, listTriageItems } from '@/lib/triage/query';
 import { ApiErrors } from '@/lib/api-error';
 
 export async function GET(request: Request) {

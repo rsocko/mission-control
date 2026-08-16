@@ -2,7 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 const waitForSlot = vi.fn().mockResolvedValue(undefined);
 
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   resolveAndStoreEmbed: vi.fn(),
 }));
 vi.mock('@/lib/triage/domain-rate-limiter', () => ({
@@ -28,7 +28,7 @@ describe('triage embed backfill', () => {
       import('@/db'),
       import('@/db/schema'),
       import('@/app/api/triage/backfill-embeds/route'),
-      import('@/lib/triage'),
+      import('@/lib/triage/capture'),
     ]);
     db = dbModule.default;
     sqlite = dbModule.sqlite;

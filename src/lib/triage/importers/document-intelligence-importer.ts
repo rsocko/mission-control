@@ -4,7 +4,7 @@
  * Fetches pending actions from the DI action-queue API and ingests them
  * into the triage system with deduplication via ingestTriageImport().
  */
-import { ingestTriageImport } from '..';
+import { ingestTriageImport } from '../capture';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 import { fetchWithRateLimit, IMPORT_USER_AGENT } from './base-importer';

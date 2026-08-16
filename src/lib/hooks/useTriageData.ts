@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { EMPTY_STATS, type Stats } from '@/components/triage/types';
 import type { TriageItem, TriageSourcePlatform, TriageStatus } from '@/types';
-import type { TriageSortBy } from '@/lib/triage';
+import type { TriageSortBy } from '@/lib/triage/query';
 
 function getValidSelectedId(items: TriageItem[], current: string | null) {
   if (current && items.some((item) => item.id === current)) return current;

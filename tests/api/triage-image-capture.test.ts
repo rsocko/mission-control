@@ -12,7 +12,7 @@ const findTriageImageCaptureByImageUrl = vi.fn();
 vi.mock('@/lib/triage/capture-image-storage', () => ({
   getCaptureImageStorage: () => storage,
 }));
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   createTriageImageCapture,
   findTriageImageCaptureByImageUrl,
   findTriageImageCaptureByRequestId,

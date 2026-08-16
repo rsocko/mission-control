@@ -110,7 +110,7 @@ vi.mock('@/lib/logger', () => ({
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { SyncScheduler } from '@/lib/sync';
+import { SyncExecutionPipeline, SyncQueue } from '@/lib/sync';
 
 describe('hydrateLastSyncResults write-through filtering', () => {
   beforeEach(() => {
@@ -143,7 +143,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
       durationMs: 4500,
     });
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     // Wait for hydration to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
@@ -175,7 +175,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
       success: true, durationMs: 8200,
     });
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     const result = scheduler.getLastResult('github-1');
@@ -199,7 +199,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
       success: true, durationMs: 5000,
     });
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
     const result = scheduler.getLastResult('github-1');
@@ -208,19 +208,17 @@ describe('hydrateLastSyncResults write-through filtering', () => {
   });
 
   it('deduplicates sync requests already waiting in the queue', async () => {
-    const scheduler = new SyncScheduler();
-    await new Promise(resolve => setTimeout(resolve, 50));
-    Reflect.set(scheduler, 'activeSyncCount', 1);
-    const enqueueSync = Reflect.get(scheduler, 'enqueueSync') as (
-      connectorId: string,
-    ) => Promise<{ errors: string[] }>;
-
-    void enqueueSync.call(scheduler, 'github-1');
-    scheduler.queueFollowUpSync('github-1');
-    const duplicate = await enqueueSync.call(scheduler, 'github-1');
+    const queue = new SyncQueue(
+      () => new Promise(() => undefined),
+      () => false,
+    );
+    void queue.enqueueSync('active-connector');
+    void queue.enqueueSync('github-1');
+    queue.queueFollowUpSync('github-1');
+    const duplicate = await queue.enqueueSync('github-1');
 
     expect(duplicate.errors).toEqual(['Sync already queued']);
-    expect(Reflect.get(scheduler, 'syncQueue')).toHaveLength(1);
-    expect(Reflect.get(scheduler, 'syncQueue')[0].options).toEqual({ full: true });
+    expect(Reflect.get(queue, 'queue')).toHaveLength(1);
+    expect(Reflect.get(queue, 'queue')[0].options).toEqual({ full: true });
   });
 });

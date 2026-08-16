@@ -798,6 +798,7 @@ export default function QuickSortMode() {
                           stackIndex={i + 1}
                           onAcceptSuggestions={handleAcceptSuggestions}
                           onAcceptFocused={handleAcceptFocused}
+                          onSkip={handleSkip}
                         />
                       ))}
 
@@ -819,6 +820,7 @@ export default function QuickSortMode() {
                               stackIndex={0}
                               onAcceptSuggestions={handleAcceptSuggestions}
                               onAcceptFocused={handleAcceptFocused}
+                              onSkip={handleSkip}
                             />
                           </motion.div>
                         )}

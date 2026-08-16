@@ -2269,7 +2269,7 @@ async function finalizeSnapshot(
       dependsOnTaskId: blocker.id,
       type: 'blocks' as const,
       connectorInstanceId,
-      syncStatus: 'synced',
+      syncStatus: 'synced' as const,
       syncAction: null,
       syncError: null,
       lastSyncedAt: completedAt,

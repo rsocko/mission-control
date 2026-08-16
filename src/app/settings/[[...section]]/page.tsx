@@ -164,7 +164,7 @@ export default function SettingsPage() {
             onChange={event => setSettingsQuery(event.target.value)}
             placeholder="Find a setting..."
             aria-label="Search settings"
-            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] pl-9 pr-8 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
+            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] pl-9 pr-8 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           />
           {settingsQuery && (
             <button

@@ -172,7 +172,7 @@ export function IntakeInputStep({
               value={document}
               onChange={(e) => onDocumentChange(e.target.value)}
               placeholder="Paste your audit findings markdown here..."
-              className="w-full h-48 bg-[var(--surface-1)] border border-[var(--border)] rounded-md p-3 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50 resize-y"
+              className="w-full h-48 bg-[var(--surface-1)] border border-[var(--border)] rounded-md p-3 text-sm font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none resize-y"
             />
             {document && (
               <span className="text-xs text-[var(--text-muted)] mt-1 block">
@@ -190,7 +190,7 @@ export function IntakeInputStep({
               value={documentUrl}
               onChange={(e) => onDocumentUrlChange(e.target.value)}
               placeholder="https://raw.githubusercontent.com/owner/repo/main/docs/audit.md"
-              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
             />
             <p className="text-xs text-[var(--text-muted)]">
               Supports public URLs and private GitHub URLs (uses configured GitHub connector for auth)
@@ -309,7 +309,7 @@ export function IntakeInputStep({
               value={projectName}
               onChange={(e) => onProjectNameChange(e.target.value)}
               placeholder="Auto-generated from doc title"
-              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
             />
           ) : (
             <div className="relative" ref={projectDropdownRef}>
@@ -319,7 +319,7 @@ export function IntakeInputStep({
                 onChange={(e) => { setProjectSearch(e.target.value); onSelectedProjectIdChange(''); setProjectDropdownOpen(true); }}
                 onFocus={() => setProjectDropdownOpen(true)}
                 placeholder="Search existing projects…"
-                className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+                className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
               />
               {selectedProjectId && (
                 <button
@@ -366,7 +366,7 @@ export function IntakeInputStep({
               }}
               onFocus={() => setCategoryDropdownOpen(true)}
               placeholder="Uncategorized"
-              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full bg-[var(--surface-1)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none"
             />
             {category && (
               <button

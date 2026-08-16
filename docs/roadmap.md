@@ -101,7 +101,7 @@ Mission Control is a **personal task & alert aggregation hub** — a dense, dark
 | Home Assistant | ✅ | ❌ | ❌ | N/A | New — alerts only |  
 | RyMessage | ✅ | ❌ | ❌ | N/A | Webhook receiver |  
 | Document Intelligence | ✅ | ❌ | ❌ | N/A | Alert provider |  
-| Monarch Money | ✅ | ❌ | ❌ | N/A | Finance alerts |  
+| Tyrion (Monarch Money) | ✅ | ✅ | ❌ | N/A | Finance projection, attribution, insights, and notifications |
 | Custom REST | ✅ | Cfg | Cfg | N/A | Template available |  
   
 ---  
@@ -346,7 +346,7 @@ Per the design spec, Waves are now **Phases within Projects** (2026-07-08 decisi
 | --- | ------------------------ | ------------------------------------------------- | --- |
 | 1   | Home Assistant alerts    | Device state changes → triage queue alerts        |     |
 | 2   | Document Intelligence    | Bill extraction → task creation                   |     |
-| 3   | Monarch Money            | Budget alerts → review tasks                      |     |
+| 3   | Tyrion (Monarch Money)   | Core projection, attribution, insights, notifications, and exception escalation are done; complementary budget alerts are planned | active |
 | 4   | Capabilities enforcement | Respect `read: false` / `write: false` checkboxes |     |
 | 5   | Model Catalog            | Custom - Projects \| Tasks                        |     |
 | 6   | PROJECT import/sync      | GitHub, others - sync projects?                   |     |

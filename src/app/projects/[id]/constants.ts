@@ -1,5 +1,6 @@
-import type { ProjectHealth, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
+import type { ProjectHealth, ProjectStatus, TaskStatus } from '@/types';
 import type { GanttZoom, ProjectPhase, ProjectTab } from './types';
+export { PROJECT_TASK_PRIORITY_LABELS as PRIORITY_LABELS } from '@/lib/projects/task-visuals';
 
 export const TABS: Array<{ id: ProjectTab; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -29,14 +30,6 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   in_progress: 'In progress',
   done: 'Done',
   cancelled: 'Cancelled',
-};
-
-export const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  critical: 'P0',
-  high: 'P1',
-  medium: 'P2',
-  low: 'P3',
-  none: '—',
 };
 
 export const HEALTH_LABELS: Record<ProjectHealth, string> = {

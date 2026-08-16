@@ -374,6 +374,7 @@ export function MobileSearchScreen({
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [mode, setMode] = useState<'keyword' | 'hybrid'>('keyword');
+  const [searchModeReady, setSearchModeReady] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -450,6 +451,8 @@ export function MobileSearchScreen({
   useEffect(() => {
     if (!isOpen) return;
 
+    let active = true;
+    setSearchModeReady(false);
     fetch('/api/ai/search?q=__status_check__&mode=hybrid&limit=1')
       .then(async (response) => {
         if (!response.ok) {
@@ -459,11 +462,21 @@ export function MobileSearchScreen({
         return response.json() as Promise<SearchResponse>;
       })
       .then((payload) => {
-        setMode(payload.semanticAvailable ? 'hybrid' : 'keyword');
+        if (active) {
+          setMode(payload.semanticAvailable ? 'hybrid' : 'keyword');
+          setSearchModeReady(true);
+        }
       })
       .catch(() => {
-        setMode('keyword');
+        if (active) {
+          setMode('keyword');
+          setSearchModeReady(true);
+        }
       });
+
+    return () => {
+      active = false;
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -485,7 +498,7 @@ export function MobileSearchScreen({
   }, [isOpen, query]);
 
   useEffect(() => {
-    if (!isOpen || !debouncedQuery) return;
+    if (!isOpen || !debouncedQuery || !searchModeReady) return;
 
     const controller = new AbortController();
     const params = new URLSearchParams({
@@ -523,7 +536,7 @@ export function MobileSearchScreen({
       });
 
     return () => controller.abort();
-  }, [debouncedQuery, isOpen, mode]);
+  }, [debouncedQuery, isOpen, mode, searchModeReady]);
 
   const projectOptions = useMemo(
     () => uniqueSorted(results.map((result) => getProjectLabel(result))),

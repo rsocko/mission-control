@@ -158,6 +158,44 @@ describe('MobileSearchScreen', () => {
     expect(hasAlphaRequest()).toBe(true);
   });
 
+  it('waits for semantic route detection before searching an initial query', async () => {
+    let resolveStatus!: (response: {
+      ok: boolean;
+      json: () => Promise<{ semanticAvailable: boolean; results: never[] }>;
+    }) => void;
+    const statusResponse = new Promise<{
+      ok: boolean;
+      json: () => Promise<{ semanticAvailable: boolean; results: never[] }>;
+    }>((resolve) => {
+      resolveStatus = resolve;
+    });
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('__status_check__')) return statusResponse;
+      if (url.includes('/api/ai/search?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ results: [makeResult()], durationMs: 42, note: null }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    render(<MobileSearchScreen isOpen={true} onClose={vi.fn()} initialQuery="alpha" />);
+
+    expect(mockFetch.mock.calls.some(([url]) => String(url).includes('q=alpha'))).toBe(false);
+
+    resolveStatus({
+      ok: true,
+      json: () => Promise.resolve({ semanticAvailable: true, results: [] }),
+    });
+
+    await screen.findByRole('button', { name: /open task alpha task/i });
+    const searchCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
+    expect(searchCalls).toHaveLength(1);
+    expect(String(searchCalls[0][0])).toContain('mode=hybrid');
+  });
+
   it('renders filter chips and filters results by type', async () => {
     mockSearchApi([
       makeResult({ id: 'task-1', title: 'Alpha task', href: '/tasks/task-1' }),

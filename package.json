@@ -92,7 +92,7 @@
     "metascraper-url": "^5.54.1",
     "metascraper-video": "^5.54.1",
     "motion": "^12.42.0",
-    "next": "16.2.9",
+    "next": "16.3.1",
     "node-cron": "^4.4.1",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",

@@ -1,42 +1,43 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import React from 'react';
+import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import { IntakeInputStep, type IntakeInputStepProps } from '@/components/projects/document-intake/IntakeInputStep';
 import type { ConnectedRepo, ExistingProject } from '@/components/projects/document-intake/types';
 
 // ─── Mock motion/react ──────────────────────────────────────────────────────
 
-type MockDivProps = React.ComponentPropsWithoutRef<'div'>;
-
-const MockMotionDiv = React.forwardRef<HTMLDivElement, MockDivProps>(
-  ({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>,
-);
-MockMotionDiv.displayName = 'MockMotionDiv';
-
-vi.mock('motion/react', () => ({
-  motion: { div: MockMotionDiv },
-  AnimatePresence: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('motion/react', async () => {
+  const React = await import('react');
+  const MockMotionDiv = React.forwardRef<HTMLDivElement, ComponentPropsWithoutRef<'div'>>(
+    ({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>,
+  );
+  MockMotionDiv.displayName = 'MockMotionDiv';
+  return {
+    motion: { div: MockMotionDiv },
+    AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  };
+});
 
 // ─── Mock lucide-react ──────────────────────────────────────────────────────
 
-const makeIcon = (name: string) => {
-  const Icon = () => <span data-testid={`icon-${name.toLowerCase()}`}>{name}</span>;
-  Icon.displayName = name;
-  return Icon;
-};
-
-vi.mock('lucide-react', () => ({
-  AlertTriangle: makeIcon('AlertTriangle'),
-  ChevronDown: makeIcon('ChevronDown'),
-  Eye: makeIcon('Eye'),
-  GitBranch: makeIcon('GitBranch'),
-  Layers: makeIcon('Layers'),
-  Loader2: makeIcon('Loader2'),
-  Plus: makeIcon('Plus'),
-  Upload: makeIcon('Upload'),
-  X: makeIcon('X'),
-}));
+vi.mock('lucide-react', () => {
+  const makeIcon = (name: string) => {
+    const Icon = () => <span data-testid={`icon-${name.toLowerCase()}`}>{name}</span>;
+    Icon.displayName = name;
+    return Icon;
+  };
+  return {
+    AlertTriangle: makeIcon('AlertTriangle'),
+    ChevronDown: makeIcon('ChevronDown'),
+    Eye: makeIcon('Eye'),
+    GitBranch: makeIcon('GitBranch'),
+    Layers: makeIcon('Layers'),
+    Loader2: makeIcon('Loader2'),
+    Plus: makeIcon('Plus'),
+    Upload: makeIcon('Upload'),
+    X: makeIcon('X'),
+  };
+});
 
 const connectedRepos: ConnectedRepo[] = [
   { connectorId: 'c1', connectorName: 'GitHub', repo: 'org/repo-a', displayName: 'org/repo-a' },

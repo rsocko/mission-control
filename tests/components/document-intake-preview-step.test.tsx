@@ -1,49 +1,50 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import React from 'react';
+import type { ComponentPropsWithoutRef, ReactNode } from 'react';
 import { IntakePreviewStep, type IntakePreviewStepProps } from '@/components/projects/document-intake/IntakePreviewStep';
 import type { PreviewData } from '@/components/projects/document-intake/types';
 
 // ─── Mock motion/react ──────────────────────────────────────────────────────
 
-type MockDivProps = React.ComponentPropsWithoutRef<'div'>;
-
-const MockMotionDiv = React.forwardRef<HTMLDivElement, MockDivProps>(
-  ({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>,
-);
-MockMotionDiv.displayName = 'MockMotionDiv';
-
-vi.mock('motion/react', () => ({
-  motion: { div: MockMotionDiv },
-  AnimatePresence: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-}));
+vi.mock('motion/react', async () => {
+  const React = await import('react');
+  const MockMotionDiv = React.forwardRef<HTMLDivElement, ComponentPropsWithoutRef<'div'>>(
+    ({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>,
+  );
+  MockMotionDiv.displayName = 'MockMotionDiv';
+  return {
+    motion: { div: MockMotionDiv },
+    AnimatePresence: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  };
+});
 
 // ─── Mock lucide-react ──────────────────────────────────────────────────────
 
-const makeIcon = (name: string) => {
-  const Icon = () => <span data-testid={`icon-${name.toLowerCase()}`}>{name}</span>;
-  Icon.displayName = name;
-  return Icon;
-};
-
-vi.mock('lucide-react', () => ({
-  AlertTriangle: makeIcon('AlertTriangle'),
-  ChartNetwork: makeIcon('ChartNetwork'),
-  ChevronDown: makeIcon('ChevronDown'),
-  ChevronRight: makeIcon('ChevronRight'),
-  Code: makeIcon('Code'),
-  Eye: makeIcon('Eye'),
-  FileText: makeIcon('FileText'),
-  GitBranch: makeIcon('GitBranch'),
-  Layers: makeIcon('Layers'),
-  Loader2: makeIcon('Loader2'),
-  Pencil: makeIcon('Pencil'),
-  Play: makeIcon('Play'),
-  Plus: makeIcon('Plus'),
-  RotateCcw: makeIcon('RotateCcw'),
-  Tag: makeIcon('Tag'),
-  X: makeIcon('X'),
-}));
+vi.mock('lucide-react', () => {
+  const makeIcon = (name: string) => {
+    const Icon = () => <span data-testid={`icon-${name.toLowerCase()}`}>{name}</span>;
+    Icon.displayName = name;
+    return Icon;
+  };
+  return {
+    AlertTriangle: makeIcon('AlertTriangle'),
+    ChartNetwork: makeIcon('ChartNetwork'),
+    ChevronDown: makeIcon('ChevronDown'),
+    ChevronRight: makeIcon('ChevronRight'),
+    Code: makeIcon('Code'),
+    Eye: makeIcon('Eye'),
+    FileText: makeIcon('FileText'),
+    GitBranch: makeIcon('GitBranch'),
+    Layers: makeIcon('Layers'),
+    Loader2: makeIcon('Loader2'),
+    Pencil: makeIcon('Pencil'),
+    Play: makeIcon('Play'),
+    Plus: makeIcon('Plus'),
+    RotateCcw: makeIcon('RotateCcw'),
+    Tag: makeIcon('Tag'),
+    X: makeIcon('X'),
+  };
+});
 
 function makePreview(overrides: Partial<PreviewData> = {}): PreviewData {
   return {

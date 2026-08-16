@@ -167,10 +167,7 @@ describe('useDocumentIntake — analyze (preview)', () => {
     });
 
     const { result } = renderHook(() => useDocumentIntake({ isOpen: true, onClose: vi.fn() }));
-    act(() => {
-      result.current.setDocument('doc content');
-      result.current.setInputMode('file');
-    });
+    act(() => result.current.setDocument('doc content'));
     await act(async () => {
       await result.current.analyze();
     });
@@ -190,7 +187,10 @@ describe('useDocumentIntake — back/forward navigation', () => {
     });
 
     const { result } = renderHook(() => useDocumentIntake({ isOpen: true, onClose: vi.fn() }));
-    act(() => result.current.setDocument('doc content'));
+    act(() => {
+      result.current.setDocument('doc content');
+      result.current.setInputMode('file');
+    });
     await act(async () => { await result.current.analyze(); });
     expect(result.current.step).toBe('preview');
 

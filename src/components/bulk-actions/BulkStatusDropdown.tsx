@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 
 interface BulkStatusDropdownProps {
   onSetStatus: (status: string) => Promise<void>;
@@ -9,10 +10,11 @@ interface BulkStatusDropdownProps {
 }
 
 const STATUSES = [
-  { value: 'todo', label: 'To do', color: 'text-slate-400' },
-  { value: 'in_progress', label: 'In progress', color: 'text-blue-400' },
-  { value: 'done', label: 'Done', color: 'text-green-400' },
-  { value: 'cancelled', label: 'Cancelled', color: 'text-amber-400' },
+  ...(['todo', 'in_progress', 'done', 'cancelled'] as const).map((value) => ({
+    value,
+    label: TASK_STATUS_VISUALS[value].label,
+    color: TASK_STATUS_VISUALS[value].textClass,
+  })),
 ];
 
 export function BulkStatusDropdown({ onSetStatus, disabled = false, disabledReason }: BulkStatusDropdownProps) {

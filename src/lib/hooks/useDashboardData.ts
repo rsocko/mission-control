@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
 import { useSidebarExpanded } from '@/lib/hooks/useSidebarExpanded';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
@@ -20,6 +19,7 @@ import {
 } from '@/lib/hooks/useDashboardQueries';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { getNextRecurringDate, extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import {
   removeTaskFromResponse,
@@ -1059,6 +1059,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         next.set(taskId, task?.status || 'todo');
         return next;
       });
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
       } else {
@@ -1074,6 +1075,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       const data = await res.json();
       setMyDayTaskIds((prev) => { const next = new Set(prev); next.delete(taskId); return next; });
       setMyDayItemStatuses((prev) => { const next = new Map(prev); next.delete(taskId); return next; });
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
       } else {
@@ -1402,35 +1404,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }
 
   // ─── Computed Values ───────────────────────────────────────────────────────
-
-  const [badgeMode] = useBadgeMode();
-
-  const badgeCount = useMemo(() => {
-    switch (badgeMode) {
-      case 'unread_notifications':
-        return 0;
-      case 'myday_incomplete': {
-        // Count My Day items that aren't done, using the statuses fetched
-        // from the My Day API (not the paginated task list).
-        let count = 0;
-        for (const [, status] of myDayItemStatuses) {
-          if (status !== 'done') count++;
-        }
-        return count;
-      }
-      case 'overdue': {
-        const today = getClientToday();
-        return taskResponse.tasks.filter(
-          (t) => t.status !== 'done' && t.dueDate != null && t.dueDate < today,
-        ).length;
-      }
-      case 'off':
-      default:
-        return 0;
-    }
-  }, [badgeMode, taskResponse.tasks, myDayItemStatuses]);
-
-  useAppBadge(badgeCount);
 
   const sidebarSourceCounts = allSourceCounts;
 

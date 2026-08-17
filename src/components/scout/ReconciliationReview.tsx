@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Loader2, RefreshCw, ShieldOff, XCircle } from 'lucide-react';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 
 interface EvidenceSummary {
   signalId: string;
@@ -76,6 +77,7 @@ export function ReconciliationReview() {
       });
       if (!response.ok) throw new Error(await responseError(response));
       setSuggestions((current) => current.filter((item) => item.id !== suggestion.id));
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       return true;
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : 'Failed to apply suggestion');

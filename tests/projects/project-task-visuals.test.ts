@@ -14,9 +14,9 @@ describe('shared project task visuals', () => {
       low: 'P3',
       none: '—',
     });
-    expect(getProjectTaskPriorityColor('critical')).toBe('var(--danger)');
-    expect(getProjectTaskPriorityColor('low')).toBe('var(--text-secondary)');
-    expect(getProjectTaskPriorityColor('none')).toBe('var(--border-strong)');
+    expect(getProjectTaskPriorityColor('critical')).toBe('#f43f5e');
+    expect(getProjectTaskPriorityColor('low')).toBe('#38bdf8');
+    expect(getProjectTaskPriorityColor('none')).toBe('#64748b');
   });
 
   it.each([

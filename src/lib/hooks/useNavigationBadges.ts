@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { getLocalToday } from '@/lib/utils/client-date';
 import {
   EMPTY_NAVIGATION_COUNTS,
   NAV_BADGE_KEYS,
@@ -106,7 +107,8 @@ export function useNavigationBadgePreferences() {
 }
 
 async function fetchNavigationCounts(): Promise<NavigationCounts> {
-  const response = await fetch('/api/navigation/counts');
+  const params = new URLSearchParams({ date: getLocalToday() });
+  const response = await fetch(`/api/navigation/counts?${params.toString()}`);
   if (!response.ok) throw new Error(`Navigation counts HTTP ${response.status}`);
   return response.json();
 }

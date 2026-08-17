@@ -1,8 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { addInsightsReturnContext, rememberInsightsDrilldown } from '@/lib/navigation/insights';
+import { addInsightsReturnContext } from '@/lib/navigation/insights';
+import { pushAppHistoryDetail } from '@/lib/navigation/app-history';
 import type { InsightsPeriod, TaskAgeBucket } from '@/lib/stats/insights';
 
 const BUCKET_COLORS = ['text-emerald-400', 'text-blue-400', 'text-amber-400', 'text-orange-400', 'text-rose-400', 'text-red-400'];
@@ -14,7 +14,6 @@ interface Props {
 }
 
 export function TaskAgeChart({ data, period }: Props) {
-  const router = useRouter();
   const maxCount = Math.max(...data.map(d => d.count), 1);
   const total = data.reduce((sum, d) => sum + d.count, 0);
   const staleCount = data.filter(b => b.minDays >= 31).reduce((sum, b) => sum + b.count, 0);
@@ -26,8 +25,11 @@ export function TaskAgeChart({ data, period }: Props) {
     if (bucket.maxDays !== null) params.set('ageMax', String(bucket.maxDays));
     addInsightsReturnContext(params, period);
     const href = `/?${params.toString()}`;
-    rememberInsightsDrilldown(href);
-    router.push(href);
+    pushAppHistoryDetail(href, {
+      kind: 'detail',
+      param: 'origin',
+      parentHref: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    });
   };
 
   return (

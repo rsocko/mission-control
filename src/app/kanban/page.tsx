@@ -13,6 +13,7 @@ import {
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 const INITIAL_CONFIRM_DIALOG: KanbanConfirmDialogState = {
   open: false,
@@ -40,7 +41,7 @@ function KanbanPageInner() {
   const [quickAddColumn, setQuickAddColumn] = useState<string | null>(null);
   const [quickAddTitle, setQuickAddTitle] = useState('');
   const [expandedColumns, setExpandedColumns] = useState<Set<string>>(new Set());
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [searchQuery, setSearchQuery] = useState('');
   const [swimlaneMode, setSwimlaneMode] = useState<SwimlaneMode>('none');
   const [confirmDialog, setConfirmDialog] = useState(INITIAL_CONFIRM_DIALOG);
@@ -65,6 +66,7 @@ function KanbanPageInner() {
 
   resolvedColumns = columnsState.columns;
   resolvedProjectView = columnsState.isProjectView;
+  const selectedTask = tasksState.tasks.find((task) => task.id === selectedTaskId) ?? null;
   const selectedBulkTasks = tasksState.tasks.filter((task) => bulk.bulkSelected.has(task.id));
   const selectedBulkPolicies = selectedBulkTasks.map((task) => task.editPolicy);
   const bulkStatusBlockedReason = selectedTaskFieldBlockedReason(selectedBulkPolicies, 'status');
@@ -98,7 +100,6 @@ function KanbanPageInner() {
 
   function handleTaskUpdate(taskId: string, fields: Partial<Task>) {
     tasksState.setTasks(prev => prev.map(task => task.id === taskId ? { ...task, ...fields } : task));
-    setSelectedTask(prev => prev?.id === taskId ? { ...prev, ...fields } : prev);
   }
 
   function handleToggleSource(sourceId: string) {
@@ -316,7 +317,7 @@ function KanbanPageInner() {
         onFixMappings={() => columnsState.setEditingColumns(true)}
         onDragStart={setDragging}
         onDrop={handleDrop}
-        onTaskClick={(task) => setSelectedTask((current) => current?.id === task.id ? null : task)}
+        onTaskClick={(task) => setSelectedTaskId((current) => current === task.id ? null : task.id)}
         onStartRename={(id, name) => {
           columnsState.setRenamingColumn(id);
           columnsState.setRenameValue(name);
@@ -349,7 +350,7 @@ function KanbanPageInner() {
 
       <TaskDetailPanel
         task={selectedTask}
-        onClose={() => setSelectedTask(null)}
+        onClose={() => setSelectedTaskId(null)}
         onTaskUpdate={handleTaskUpdate}
         onRefresh={tasksState.fetchData}
       />

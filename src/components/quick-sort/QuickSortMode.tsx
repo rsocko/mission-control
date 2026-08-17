@@ -24,6 +24,7 @@ import { TaskDetailPanel, type TaskFieldUpdate } from '@/components/task-detail/
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useQuickSortData } from '@/lib/hooks/useQuickSortData';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -75,7 +76,7 @@ export default function QuickSortMode() {
   const [tagsLoading, setTagsLoading] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<QuickSortScopeFilter>({});
   const [order, setOrder] = useState<QuickSortOrder>('smart');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   // Bump to force ActivityBanner to re-fetch after quick sort actions
   const [statsKey, setStatsKey] = useState(0);
   // Track items sorted in this session (F-52 progress indicator, F-57 session stats)

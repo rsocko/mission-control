@@ -28,6 +28,7 @@ import {
   type TagGalaxyNode,
 } from '@/lib/tag-insights/galaxy';
 import type { TagInsights } from '@/lib/tag-insights/types';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 const TASK_PAGE_SIZE = 50;
 
@@ -74,7 +75,7 @@ export default function TagGalaxy({
   const [lod, setLod] = useState<TagGalaxyLod>('labels');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedLinkKey, setSelectedLinkKey] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [visibleTaskCount, setVisibleTaskCount] = useState(TASK_PAGE_SIZE);
   const hasInitialFitRef = useRef(false);

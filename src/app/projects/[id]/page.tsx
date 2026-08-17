@@ -117,6 +117,7 @@ import { projectLogger } from '@/lib/client-logger';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import {
@@ -436,7 +437,7 @@ export default function ProjectDetailPage() {
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
 
   // ── Task detail panel & actions ─────────────────────────────────────────
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const taskSelection = useTaskSelection({
     selectedTaskId,
     onSelectionChange: setSelectedTaskId,

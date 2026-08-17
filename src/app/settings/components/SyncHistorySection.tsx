@@ -18,6 +18,7 @@ import type {
 import { getConnectorDisplayName } from './types';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import {
   classifyRetainedReason,
   getAvailableRetentionActions,
@@ -854,7 +855,7 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const [scheduleHealth, setScheduleHealth] = useState<SyncScheduleHealth | null>(null);
   const [syncingConnectors, setSyncingConnectors] = useState<Set<string>>(new Set());

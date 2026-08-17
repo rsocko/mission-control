@@ -10,6 +10,7 @@ import {
   type WordInsightsResult,
 } from '@/lib/word-insights/types';
 import { cn } from '@/lib/utils';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 const SOURCE_LABELS: Record<WordInsightSource, string> = {
   title: 'Titles',
@@ -29,7 +30,7 @@ export default function WordInsightsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const requestIdRef = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {

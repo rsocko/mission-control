@@ -10,6 +10,7 @@ import { useSidebarExpanded } from '@/lib/hooks/useSidebarExpanded';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useDashboardQueries, useTagsQuery, dashboardKeys } from '@/lib/hooks/useDashboardQueries';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
@@ -343,7 +344,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(searchParams.get('taskId'));
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const { sidebarExpanded, setSidebarExpanded, sidebarMode, setSidebarMode } = useSidebarExpanded();
   const [listSearch, setListSearch] = useState('');
   const [collapsedListGroups, setCollapsedListGroups] = useState<Set<string>>(new Set(viewStore.collapsedListGroups));
@@ -464,9 +465,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       if (taskId) {
         e.preventDefault();
         setSelectedTaskId(taskId);
-        const url = new URL(window.location.href);
-        url.searchParams.set('taskId', taskId);
-        window.history.replaceState(null, '', url);
       }
     };
     window.addEventListener('mc:select-task', handler);

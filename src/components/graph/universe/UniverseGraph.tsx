@@ -25,6 +25,7 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { cn } from '@/lib/utils';
 import {
@@ -563,7 +564,7 @@ export default function UniverseGraph() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sceneSearch, setSceneSearch] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [detailSuppressed, setDetailSuppressed] = useState(false);
   const [focusActive, setFocusActive] = useState(false);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);

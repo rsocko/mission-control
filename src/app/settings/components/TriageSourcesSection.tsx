@@ -303,7 +303,7 @@ function TriageSourcesSection() {
       <div>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Triage Sources</h2>
         <p className="mt-1 text-sm text-[var(--text-tertiary)]">
-          Configure credentials for automated import from Reddit saved posts and GitHub starred repos.
+          Credentials for Reddit and GitHub Stars auto-import.
         </p>
       </div>
 
@@ -320,10 +320,7 @@ function TriageSourcesSection() {
       {config?.github.configured && (
         <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
           <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Auto-Sync Schedule</h3>
-              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Automatically import new GitHub Stars on a schedule</p>
-            </div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Auto-Sync Schedule</h3>
             <button
               type="button"
               role="switch"
@@ -468,10 +465,7 @@ function TriageSourcesSection() {
       {config?.youtube.configured && (
         <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
           <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Auto-Sync Schedule</h3>
-              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Automatically import new videos from enabled playlists on a schedule</p>
-            </div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Auto-Sync Schedule</h3>
             <button
               type="button"
               role="switch"
@@ -525,10 +519,7 @@ function TriageSourcesSection() {
       {(config?.github.configured || config?.reddit.configured || config?.youtube.configured || diConnectorConfigured) && (
         <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
           <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Manual Sync</h3>
-              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Trigger an on-demand import from configured sources</p>
-            </div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Manual Sync</h3>
             <div className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
               <button
                 type="button"

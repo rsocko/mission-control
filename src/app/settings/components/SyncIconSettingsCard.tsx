@@ -49,17 +49,12 @@ export function SyncIconSettingsCard() {
       className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5"
       aria-labelledby="sync-icon-animation-heading"
     >
-      <div className="mb-4">
-        <h3
-          id="sync-icon-animation-heading"
-          className="text-sm font-medium text-[var(--text-primary)]"
-        >
-          Sync icon animation
-        </h3>
-        <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-          Choose the animated satellite shown in the navigation rail while syncing.
-        </p>
-      </div>
+      <h3
+        id="sync-icon-animation-heading"
+        className="mb-4 text-sm font-medium text-[var(--text-primary)]"
+      >
+        Sync icon animation
+      </h3>
 
       <div className="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Sync icon animation">
         {options.map((option) => {

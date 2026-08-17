@@ -248,7 +248,7 @@ function ListGroupsSection({
         <div>
           <h2 className="text-xl font-semibold text-[var(--text-primary)] [text-wrap:balance]">List Groups</h2>
           <p className="mt-1 text-sm text-[var(--text-tertiary)] [text-wrap:pretty]">
-            Organize synced source lists into named groups across every connector.
+            Group source lists across connectors.
           </p>
         </div>
       </div>

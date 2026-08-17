@@ -354,10 +354,9 @@ export default function AgentPanel() {
           className="bg-[var(--surface-1)] border border-[var(--border)] rounded-xl p-4 shadow-[var(--shadow-sm)]"
         >
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-[var(--text-primary)]">Recent history</h3>
-              <p className="mt-1 text-sm text-[var(--text-tertiary)]">Last 5 runs across all agents.</p>
-            </div>
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">
+              Recent history <span className="text-sm font-normal text-[var(--text-tertiary)]">· all agents</span>
+            </h3>
             <Badge variant="secondary">{history.length}/5 saved</Badge>
           </div>
 

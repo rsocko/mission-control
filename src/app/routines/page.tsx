@@ -140,11 +140,8 @@ function RoutinesPageContent() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
-          <div>
-            <h2 className="flex items-center gap-2 text-xl font-semibold text-[var(--text-primary)]"><Repeat size={20} className="text-[var(--accent-400)]" />Routines & Habits</h2>
-            <p className="mt-1 text-sm text-[var(--text-tertiary)]">Track patterns at your own pace. Missing a day is normal — data helps you adjust, not judge.</p>
-          </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-4">
+          <h2 className="flex items-center gap-2 text-xl font-semibold text-[var(--text-primary)]"><Repeat size={20} className="text-[var(--accent-400)]" />Routines & Habits</h2>
           <div className="flex gap-1 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-1 self-start overflow-x-auto">
             {tabs.map((tab) => (
               <button key={tab.key} onClick={() => setActiveTab(tab.key)} className={cn('rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors duration-[var(--transition-fast)]', activeTab === tab.key ? 'bg-[var(--accent-900)]/40 text-[var(--accent-400)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]')}>
@@ -178,7 +175,7 @@ function RoutinesPageContent() {
                   </div>
                 </motion.div>
               )}
-              {routinesList.length === 0 && <motion.div variants={fadeSlideUp} className="py-16 text-center"><Repeat size={40} className="mx-auto mb-4 text-[var(--text-muted)]" /><p className="text-sm text-[var(--text-secondary)]">No routines yet. Add your first one below.</p></motion.div>}
+              {routinesList.length === 0 && <motion.div variants={fadeSlideUp} className="py-16 text-center"><Repeat size={40} className="mx-auto mb-4 text-[var(--text-muted)]" /><p className="text-sm text-[var(--text-secondary)]">No routines yet. Add your first one below.</p><p className="mt-1 text-xs text-[var(--text-muted)]">Missing a day is normal — it&apos;s not judged.</p></motion.div>}
               <motion.div variants={fadeSlideUp}>
                 {!showAddForm ? <Button variant="outline" onClick={() => setShowAddForm(true)} className="w-full border-dashed"><Plus size={16} /> Add Routine</Button> : <AddRoutineForm onClose={() => setShowAddForm(false)} onCreated={() => { setShowAddForm(false); fetchRoutines(); }} />}
               </motion.div>

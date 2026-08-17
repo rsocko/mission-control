@@ -16,7 +16,8 @@ export type SettingsSection =
   | 'storage'
   | 'shortcuts'
   | 'notifications'
-  | 'runtime';
+  | 'runtime'
+  | 'about';
 
 export interface SettingsSearchItem {
   title: string;
@@ -44,6 +45,7 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   mode: 'App Mode',
   general: 'Other',
   runtime: 'Runtime Telemetry',
+  about: 'About',
 };
 
 export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
@@ -112,6 +114,12 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'App badge count', section: 'general', sectionLabel: 'System', keywords: ['icon', 'unread count'] },
   { title: 'Navigation badges', section: 'general', sectionLabel: 'System', target: 'Navigation tab badges', keywords: ['tabs', 'counts'] },
   { title: 'Dopamine Menu', section: 'general', sectionLabel: 'System', keywords: ['rewards', 'completion'] },
+  { title: 'About Mission Control', section: 'about', sectionLabel: 'System', keywords: ['app', 'version', 'release', 'project'] },
+  { title: 'Version', section: 'about', sectionLabel: 'System', keywords: ['release', 'build'] },
+  { title: 'Build', section: 'about', sectionLabel: 'System', keywords: ['revision', 'commit', 'sha', 'release'] },
+  { title: 'Documentation', section: 'about', sectionLabel: 'System', keywords: ['help', 'guides', 'setup'] },
+  { title: 'Support and feedback', section: 'about', sectionLabel: 'System', keywords: ['github', 'issues', 'bug'] },
+  { title: 'Licensing status', section: 'about', sectionLabel: 'System', keywords: ['license', 'legal'] },
 ];
 
 function normalize(value: string) {

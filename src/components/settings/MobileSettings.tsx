@@ -16,9 +16,12 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
-import { useNavBadgesVisible } from '@/components/layout/MobileBottomNav';
+import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import { NAV_BADGE_OPTIONS } from '@/lib/navigation/badges';
 import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/components/ui/CompletionBurst';
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
+import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
+import { SectionCard, SectionLabel, Toggle } from '@/components/settings/SettingsPrimitives';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -26,24 +29,12 @@ import {
   type QuickAddPreferences,
 } from '@/lib/quick-add-preferences';
 import { toast } from 'sonner';
-
-/* ─────── iOS-style section components ─────── */
-
-function SectionCard({ children, className }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={cn('rounded-2xl bg-[var(--surface-1)] border border-[var(--border-subtle)] overflow-hidden', className)}>
-      {children}
-    </div>
-  );
-}
-
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[0.625rem] font-semibold uppercase tracking-[0.2em] text-[var(--text-tertiary)] px-1 mt-5 mb-2">
-      {children}
-    </p>
-  );
-}
+import {
+  getLatestConnectorSync,
+  loadConnectorData,
+  requestConnectorSync,
+} from '@/lib/connectors/client';
+import { APP_NAME, APP_VERSION } from '@/lib/app-metadata';
 
 function SettingsRow({
   icon,
@@ -82,31 +73,6 @@ function SettingsRow({
   );
 }
 
-/* ─────── Toggle (F-100) ─────── */
-
-function Toggle({ enabled, onChange, label }: { enabled: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={enabled}
-      aria-label={label}
-      onClick={() => onChange(!enabled)}
-      className={cn(
-        'relative inline-flex h-[28px] w-[50px] flex-shrink-0 items-center rounded-full transition-colors duration-200',
-        enabled ? 'bg-[var(--accent-500)]' : 'bg-[var(--surface-3)]'
-      )}
-    >
-      <span
-        className={cn(
-          'inline-block h-[22px] w-[22px] rounded-full bg-white shadow-sm transition-transform duration-200',
-          enabled ? 'translate-x-[25px]' : 'translate-x-[3px]'
-        )}
-      />
-    </button>
-  );
-}
-
 /* ─────── Types ─────── */
 
 interface ConnectedService {
@@ -131,8 +97,8 @@ export function MobileSettings() {
   const router = useRouter();
   const { progress } = useSyncStream();
 
-  // Nav badge visibility (persisted in localStorage)
-  const [navBadgesVisible, setNavBadgesVisible] = useNavBadgesVisible();
+  const { preferences: navBadgePreferences, setEnabled: setNavBadgesEnabled, setItemEnabled } =
+    useNavigationBadgePreferences();
 
   // Completion animation setting (persisted in localStorage)
   const [animationEnabled, setAnimationEnabled] = useState(true);
@@ -170,27 +136,14 @@ export function MobileSettings() {
   useEffect(() => {
     async function fetchServices() {
       try {
-        const res = await fetch('/api/connectors');
-        if (res.ok) {
-          const data = await res.json();
-          const connectors = (data.connectors || []).filter(
-            (c: { deletedAt?: string | null }) => !c.deletedAt
-          );
-          setServices(
-            connectors.map((c: { id: string; name: string; type: string; enabled: boolean }) => ({
-              id: c.id,
-              name: c.name,
-              type: c.type,
-              connected: c.enabled,
-            }))
-          );
-          const lastSync = connectors
-            .map((c: { lastSyncAt?: string | null }) => c.lastSyncAt)
-            .filter(Boolean)
-            .sort()
-            .pop();
-          if (lastSync) setLastSyncTime(lastSync as string);
-        }
+        const { connectors } = await loadConnectorData();
+        setServices(connectors.map(connector => ({
+          id: connector.id,
+          name: connector.name,
+          type: connector.type,
+          connected: connector.enabled,
+        })));
+        setLastSyncTime(getLatestConnectorSync(connectors));
       } catch {
         // Silent fail on mobile
       } finally {
@@ -204,14 +157,8 @@ export function MobileSettings() {
   const triggerSync = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await fetch('/api/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
-      });
-      if (res.ok) {
-        setLastSyncTime(new Date().toISOString());
-      }
+      await requestConnectorSync();
+      setLastSyncTime(new Date().toISOString());
     } catch {
       // Silent fail
     } finally {
@@ -280,14 +227,30 @@ export function MobileSettings() {
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm text-[var(--text-primary)]">Navigation Badges</p>
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Show count badges on bottom nav tabs</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Master control for navigation counts</p>
           </div>
           <Toggle
-            enabled={navBadgesVisible}
-            onChange={setNavBadgesVisible}
+            enabled={navBadgePreferences.enabled}
+            onChange={setNavBadgesEnabled}
             label="Navigation Badges"
           />
         </div>
+        {NAV_BADGE_OPTIONS.map((option) => (
+          <div
+            key={option.key}
+            className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]"
+          >
+            <div className="flex-1 min-w-0 mr-3">
+              <p className="text-sm text-[var(--text-primary)]">{option.label}</p>
+              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{option.description}</p>
+            </div>
+            <Toggle
+              enabled={navBadgePreferences.items[option.key]}
+              onChange={(enabled) => setItemEnabled(option.key, enabled)}
+              label={`Show ${option.label} badge`}
+            />
+          </div>
+        ))}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm text-[var(--text-primary)]">Completion Animations</p>
@@ -322,6 +285,9 @@ export function MobileSettings() {
           />
         </div>
       </SectionCard>
+
+      <SectionLabel>Capture</SectionLabel>
+      <CaptureDestinationSection mobile />
 
       {/* ─── Connected Services (F-99) ─── */}
       <SectionLabel>Connected Services</SectionLabel>
@@ -414,9 +380,9 @@ export function MobileSettings() {
       <SectionLabel>About</SectionLabel>
       <SectionCard>
         <SettingsRow
-          label="Version"
-          value="2.4.0"
-          trailing={<span className="text-xs text-[var(--text-tertiary)]">Build 847</span>}
+          label={`About ${APP_NAME}`}
+          value={`v${APP_VERSION}`}
+          onClick={() => router.push('/settings/about')}
         />
         <SettingsRow
           label="Storage & Cache"
@@ -431,7 +397,7 @@ export function MobileSettings() {
 
       {/* Footer */}
       <p className="mt-5 mb-4 text-center text-xs text-[var(--text-muted)]">
-        Mission Control v2.4.0
+        {APP_NAME} v{APP_VERSION}
       </p>
     </div>
   );

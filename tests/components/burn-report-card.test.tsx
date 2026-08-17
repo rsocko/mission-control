@@ -188,7 +188,8 @@ describe('BurnReportCard', () => {
 
     await screen.findByTestId('responsive-chart');
     const requestUrl = new URL(String(vi.mocked(fetch).mock.calls[0]?.[0]), 'http://localhost');
-    const expectedStart = new Date();
+    const now = new Date();
+    const expectedStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
     expectedStart.setUTCDate(expectedStart.getUTCDate() - 1_829);
     expect(requestUrl.searchParams.get('start')).toBe(expectedStart.toISOString().slice(0, 10));
   });

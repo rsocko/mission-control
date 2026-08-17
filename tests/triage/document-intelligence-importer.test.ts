@@ -51,7 +51,7 @@ vi.mock('@/lib/mode', () => ({
 }));
 
 const mockIngest = vi.fn();
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   ingestTriageImport: mockIngest,
 }));
 
@@ -248,7 +248,7 @@ describe('ALLOWED_SOURCES', () => {
     // Read the source file and check the set contains our source
     const fs = await import('fs');
     const path = await import('path');
-    const filePath = path.resolve(__dirname, '../../src/lib/triage/index.ts');
+    const filePath = path.resolve(__dirname, '../../src/lib/triage/query.ts');
     const content = fs.readFileSync(filePath, 'utf-8');
     expect(content).toContain("'document-intelligence'");
   });

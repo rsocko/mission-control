@@ -1,6 +1,6 @@
 ---
 name: Mission Control
-description: Personal task & alert aggregation command center
+description: Personal task and alert aggregation command center
 colors:
   background: "#020617"
   surface-0: "#0b1120"
@@ -12,31 +12,42 @@ colors:
   border-strong: "#334155"
   text-primary: "#f8fafc"
   text-secondary: "#94a3b8"
-  text-tertiary: "#64748b"
+  text-tertiary: "#8b9ab5"
+  text-muted: "#8190a6"
   accent: "#3b82f6"
-  accent-hover: "#60a5fa"
+  accent-soft: "#60a5fa"
+  accent-action: "#2563eb"
   accent-muted: "#1e3a8a"
   success: "#10b981"
+  success-muted: "#065f46"
   warning: "#f59e0b"
+  warning-muted: "#92400e"
   danger: "#ef4444"
+  danger-muted: "#991b1b"
   info: "#06b6d4"
+  info-muted: "#155e75"
+  priority-critical: "#f43f5e"
+  priority-high: "#fb923c"
+  priority-medium: "#fbbf24"
+  priority-low: "#38bdf8"
   source-todo: "#3b82f6"
   source-github: "#a855f7"
   source-calendar: "#f59e0b"
   source-email: "#10b981"
+  source-custom: "#64748b"
 typography:
-  body:
-    fontFamily: "Geist Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-    fontSize: "14px"
-    fontWeight: 400
-    lineHeight: 1.5
-    letterSpacing: "normal"
   heading:
     fontFamily: "Geist Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "20px"
     fontWeight: 600
     lineHeight: 1.2
     letterSpacing: "-0.02em"
+  body:
+    fontFamily: "Geist Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    fontSize: "14px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   label:
     fontFamily: "Geist Sans, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
     fontSize: "12px"
@@ -55,150 +66,235 @@ rounded:
   xl: "16px"
   full: "9999px"
 spacing:
-  sm: "8px"
-  md: "16px"
-  lg: "24px"
-  xl: "32px"
+  1: "4px"
+  2: "8px"
+  3: "12px"
+  4: "16px"
+  5: "20px"
+  6: "24px"
+  8: "32px"
+  10: "40px"
+  12: "48px"
 components:
   button-primary:
-    backgroundColor: "{colors.accent}"
-    textColor: "{colors.text-primary}"
+    backgroundColor: "{colors.accent-action}"
+    textColor: "#ffffff"
     rounded: "{rounded.md}"
     padding: "8px 16px"
+    height: "36px"
   button-primary-hover:
-    backgroundColor: "{colors.accent-hover}"
+    backgroundColor: "{colors.accent}"
+  button-secondary:
+    backgroundColor: "{colors.surface-2}"
+    textColor: "{colors.text-secondary}"
+    rounded: "{rounded.md}"
+    padding: "8px 16px"
+    height: "36px"
   card:
     backgroundColor: "{colors.surface-1}"
     textColor: "{colors.text-primary}"
     rounded: "{rounded.lg}"
-    padding: "16px"
-  tag-pill:
+    padding: "20px"
+  input:
+    backgroundColor: "{colors.surface-0}"
+    textColor: "{colors.text-primary}"
+    rounded: "{rounded.md}"
+    padding: "8px 12px"
+  badge:
     backgroundColor: "{colors.surface-2}"
     textColor: "{colors.text-secondary}"
     rounded: "{rounded.full}"
-    padding: "4px 10px"
+    padding: "2px 8px"
 ---
+
+# Design System: Mission Control
 
 ## Overview
 
-Mission Control is a dark-first personal command center that aggregates tasks, alerts, and projects from multiple source systems (Microsoft Todo, GitHub, future connectors). The visual language is dense and information-rich — inspired by Linear and Raycast — with minimal chrome and maximum signal.
+**Creative North Star: "The Operational Command Center"**
 
-The interface uses a single font family (Geist Sans) at tight size ratios, blue accent for primary actions, and layered dark surfaces for depth hierarchy. Motion is fast (100–300ms) and purposeful: state changes and reveals only.
+Mission Control is a dark-first hybrid workspace: a dense desktop operational command center and a guided mobile action surface. Its visual hierarchy comes from disciplined slate surfaces, quiet borders, compact type, and small semantic signals rather than decorative effects. Desktop preserves broad scanability; mobile deliberately sequences the most urgent work before summary and secondary navigation.
+
+Blue identifies action, selection, focus, and progress. Other hues carry explicit status, priority, source, or project meaning. Compact summaries, empty states, and notices reduce vertical occupation without removing labels or actions. Assessment surfaces favor solid semantic fills and restrained tonal backgrounds; purple-to-indigo decoration is not part of the operational container language.
+
+**Key Characteristics:**
+- Dense desktop command center paired with a guided, action-first mobile sequence
+- Solid tonal surfaces separated by quiet full borders
+- Semantic color expressed through text, badges, progress fills, border tints, and dots
+- Compact shared summaries, notices, and empty states that return space to live work
+- Fast state transitions with stronger motion reserved for direct manipulation
+- Responsive shell that swaps the desktop rail for mobile header and bottom navigation
 
 ## Colors
 
-Dark-first with a blue-undertone neutral scale (Slate family). Three surface layers create depth without borders:
+The palette is a cool slate stack with one blue action voice and a small set of semantic and provenance hues.
 
-- **Surface-0** (`#0b1120`): deepest background, page-level
-- **Surface-1** (`#111827`): card and panel backgrounds
-- **Surface-2** (`#1e293b`): elevated elements, dropdowns, hover states
-- **Surface-3** (`#334155`): active/pressed states
+### Primary
+- **Action Blue** (`accent-action`, `accent`, `accent-soft`): primary buttons step from the deeper action fill to blue on hover; the core accent also marks focus, active navigation, links, and progress.
+- **Deep Blue Tint** (`accent-muted`): low-emphasis selected or focus-related backgrounds, always paired with readable text or an icon.
 
-**Accent** is a standard blue (`#3b82f6`) used sparingly: primary buttons, active nav items, focus rings, and progress indicators. Never decorative.
+### Secondary
+- **Semantic Green, Amber, Red, and Cyan** (`success`, `warning`, `danger`, `info`): outcomes and state categories. Muted companions provide low-chroma background fields while text, labels, or icons preserve meaning.
+- **Connector Hues** (`source-todo`, `source-github`, `source-calendar`, `source-email`, `source-custom`): provenance only. They may color a connector icon or small indicator but do not define whole panels.
 
-**Semantic colors** are fixed and not themed: success (emerald), warning (amber), danger (red), info (cyan). Each has a muted variant for dark backgrounds.
+### Neutral
+- **Canvas** (`background`): application ground.
+- **Chrome** (`surface-0`): deepest panels, toolbars, and input wells.
+- **Panel** (`surface-1`): cards, rail, and primary content containers.
+- **Raised** (`surface-2`): hover, active navigation, dropdown, and nested content surfaces.
+- **Pressed** (`surface-3`): strongest neutral state and progress tracks.
+- **Quiet Stroke** (`border-subtle`, `border`, `border-strong`): separators, standard container outlines, and elevated/focus-adjacent outlines.
+- **Primary, Secondary, Tertiary, and Muted Text** (`text-primary`, `text-secondary`, `text-tertiary`, `text-muted`): descending emphasis; tertiary and muted values are intentionally lifted enough to remain legible on shipped surfaces.
 
-**Source connectors** have assigned brand colors for instant recognition: Todo=blue, GitHub=purple, Calendar=amber, Email=emerald.
+### Named Rules
+
+**The Solid Signal Rule.** Operational cards, recommendations, schedule blocks, insights, and progress bars use a solid neutral or semantic fill. Do not use purple/indigo gradients to manufacture importance.
+
+**The Semantic Evidence Rule.** Color must correspond to an action, state, priority, project, or source and must be reinforced by text, iconography, or position.
+
+### Task Visual Standards
+
+Task priority and task status have one application-wide semantic palette. Badges, dots, menu items, charts, graphs, desktop views, and mobile views must use the definitions exported from `src/lib/constants/task-formatting.ts`; do not recreate these maps in components.
+
+| Task priority | Label | Color | Meaning |
+| --- | --- | --- | --- |
+| `critical` | P0 / Critical | Rose | Immediate intervention |
+| `high` | P1 / High | Orange | Elevated urgency |
+| `medium` | P2 / Medium | Amber | Normal planned priority |
+| `low` | P3 / Low | Sky | De-emphasized priority |
+| `none` | None | Slate | No priority assigned |
+
+| Task status | Color | Meaning |
+| --- | --- | --- |
+| `todo` | Slate | Active but not started |
+| `in_progress` | Action blue | Work is underway |
+| `blocked` | Danger red | Work cannot proceed |
+| `done` | Success green | Work completed |
+| `cancelled` | Slate | Intentionally inactive, not an error |
+
+These mappings apply only to task priority and task status. Project lifecycle, triage state, connector health, notification severity, source identity, effort, energy, and micro-status are separate domains and must not borrow task colors merely because their labels are similar.
 
 ## Typography
 
-Single family: **Geist Sans** (with Geist Mono for code/IDs). No display font. Scale is tight (1.125 ratio) to support dense information layouts:
+**Display Font:** Geist Sans with system sans fallbacks
 
-| Role | Size | Weight | Use |
-|------|------|--------|-----|
-| Page heading | 20px | 600 | Page titles, section headers |
-| Section label | 14px | 600 | Sidebar groups, card titles |
-| Body | 14px | 400 | Task text, descriptions, most content |
-| Label | 12px | 500 | Metadata, badges, secondary info |
-| Caption | 11px | 400 | Timestamps, counts, tertiary info |
+**Body Font:** Geist Sans with system sans fallbacks
 
-Letter-spacing: headings get `-0.02em`, labels get `+0.01em`, body is normal.
+**Label/Mono Font:** Geist Mono for IDs, times, shortcuts, routes, and tabular operational values
 
-Font smoothing: antialiased globally. Tabular numbers (`font-variant-numeric: tabular-nums`) on all dynamic counters and progress values.
+**Character:** One compact sans family keeps the interface neutral and scannable. Mono is a functional contrast, not a decorative voice.
 
-## Elevation
+### Hierarchy
+- **Page heading** (600, 20px, 1.2): page titles and the strongest section headings.
+- **Card title** (600, 16px): card and panel titles.
+- **Section label** (600, 14px): sidebar groups and dense section headings.
+- **Body** (400, 14px, 1.5): task text, descriptions, and controls.
+- **Label** (500, 12px, 1.4): metadata, badges, button labels, and secondary information.
+- **Caption** (400, 9–11px): timestamps, counts, and tertiary operational metadata.
 
-Elevation is expressed through **surface color stepping** rather than shadows. Shadows exist but are subtle and used for floating elements only:
+Headings use slightly tightened tracking; compact labels sometimes use modest positive tracking and uppercase where they denote a state or group. Dynamic counters, durations, times, and progress values use tabular numerals.
 
-| Level | Surface | Shadow | Use |
-|-------|---------|--------|-----|
-| Ground | surface-0 | none | Page background |
-| Card | surface-1 | shadow-sm | Cards, sidebar panels |
-| Elevated | surface-2 | shadow-md | Dropdowns, popovers, modals |
-| Floating | surface-3 | shadow-lg | Tooltips, toasts |
+### Named Rules
 
-A glow shadow (`0 0 20px rgba(59, 130, 246, 0.15)`) is reserved for focus states and active elements.
+**The One-Family Rule.** Build hierarchy with Geist size, weight, color, and spacing; do not introduce a display face.
 
-### Focus Glow
+## Layout
 
-Text-entry inputs receive a subtle accent glow on focus. This is handled globally in `globals.css` — individual inputs should **not** add their own `focus:border-*` or `focus:ring-*` classes.
+The desktop shell uses a collapsible navigation rail: 64px collapsed and 200px expanded. A toolbar divides search, a centered quick-add field capped at 672px, and right-aligned actions. The dashboard's KPI summary is one bordered, collapsible bar: a 40px header above 56px inline metric cells separated by one-pixel dividers, with horizontal overflow rather than a grid of hero cards. Empty task containers stop claiming the remaining viewport, and an empty notifications panel yields to its collapsed rail. Content surfaces use compact 4px-based spacing, most often 8, 12, 16, 20, and 24px.
 
-| Token | Value | Use |
-|-------|-------|-----|
-| `--shadow-focus-glow` | `0 0 12px -2px var(--accent), 0 0 4px -1px var(--accent)` | Box-shadow on focused text inputs |
-| `--border-focus` | `color-mix(in srgb, var(--accent) 40%, transparent)` | Border color on focused text inputs |
+At the 640px boundary, the desktop rail and toolbar give way to mobile chrome. Mobile uses a header and fixed bottom navigation, safe-area insets, full-width content, and touch-sized primary actions. The shipped dashboard orders Needs Attention first, then a compact Today status summary, a horizontally scrolling Go To action strip, and recent completions. Capture remains elevated in the fixed bottom navigation. Wider views add columns progressively; recurring two-column regions appear at the large breakpoint.
 
-**Where glow applies:**
-- `<input>` (text, email, password, search, url, tel, number) — automatic via global CSS
-- `<textarea>` — automatic via global CSS
-- Wrapper divs around a bare input (e.g. `SearchInput`) — add class `input-glow` for `focus-within` glow
-- The QuickAddBar — uses the same tokens via JS-toggled classes
+**The Dense Rhythm Rule.** Whitespace separates groups and establishes scan order; it is not decorative. Prefer the established 4px rhythm and avoid oversized empty bands.
 
-**Where glow does NOT apply:**
-- Navigation active state (NavRail) — uses accent bar + tinted background
-- Selected task rows — use `ring-1 ring-inset` (transient selection, not input focus)
-- Toggle switches, checkboxes, radio buttons — not text-entry surfaces
-- Buttons — use `focus-visible:ring-*` outline instead
+**The Context-Adaptive Density Rule.** Preserve simultaneous scan breadth on desktop; on mobile, spend the first viewport on immediate action and defer status and navigation behind it.
+
+## Elevation & Depth
+
+Depth is hybrid but surface-led. Most hierarchy comes from canvas, chrome, panel, raised, and pressed tonal steps plus one-pixel borders. Shadows are restrained on static cards and become stronger for dropdowns, tooltips, modals, dragged schedule blocks, and other genuinely floating elements. The blue glow belongs to text-entry focus, not content emphasis.
+
+### Shadow Vocabulary
+- **Low** (`--shadow-sm`): subtle separation for cards and standard controls.
+- **Elevated** (`--shadow-md`): dropdowns and temporarily lifted content.
+- **Floating** (`--shadow-lg`): popovers, tooltips, modals, and overlays.
+- **Focus glow** (`--shadow-focus-glow`): globally applied to focused text fields and `.input-glow` wrappers.
+
+### Named Rules
+
+**The Surface-First Rule.** Establish hierarchy with tonal surfaces and quiet borders before adding shadow.
+
+**The Focus-Is-Input Rule.** The accent glow communicates text entry. Buttons use visible focus rings; selected rows use contained rings or surface changes.
+
+## Shapes
+
+Corners are gently rounded and consistent: 6px for compact controls, 8px for standard controls and rows, 12px for cards and panels, 16px for larger sheets, and a full pill for badges, status dots, avatars, and progress tracks.
+
+Containers use a quiet one-pixel full border when tonal separation alone is insufficient. Semantic assessment panels tint the complete border rather than attaching a thick colored side stripe. Small colored dots are preferred when a project or phase hue is provenance rather than container state. The 3px active marker on the navigation rail remains a navigation-specific locator, not a general card treatment.
+
+**The Complete Container Rule.** Status and assessment containers use a full neutral or semantic border. Reserve unilateral bars for native navigation location or quoted content.
 
 ## Components
 
 ### Buttons
-- **Primary**: blue accent fill, white text, `8px` radius, `8px 16px` padding
-- **Secondary/Ghost**: transparent, text-secondary color, border on hover
-- **Destructive**: danger fill, white text
-- All: 150ms transition on background-color only. Scale `0.96` on press.
+- **Shape:** standard controls use the medium radius (8px) and 36px height; small and large variants use 6px and 12px corners.
+- **Primary:** solid action-blue fill, white text, 8px × 16px padding, and a low shadow.
+- **Secondary / Outline / Ghost:** neutral raised fill, a quiet full border, or no resting container; hover steps toward the next neutral surface.
+- **Hover / Focus / Press:** color changes in 150ms, a two-pixel blue focus ring, and a subtle `0.96` press scale.
+- **Destructive:** solid danger fill with white text.
 
-### Cards
-- Surface-1 background, `12px` radius, `1px` border (border-subtle)
-- `16px` padding, `shadow-sm`
-- Hover: border transitions to border-strong (150ms)
+### Badges
+- **Style:** full pills with a one-pixel border, 2px × 8px padding, and 12px medium text.
+- **State:** neutral badges use raised slate; semantic variants combine a muted solid field, semantic text, and a faint border. Labels, not color alone, name the state.
 
-### Tag pills
-- Surface-2 background, full radius, `4px 10px` padding
-- 12px font, 500 weight, text-secondary
-- Active/selected: accent background, white text
+### Cards / Containers
+- **Corner Style:** panel radius (12px).
+- **Background:** panel surface by default; raised surface for nested or interactive regions.
+- **Shadow Strategy:** low at rest, stronger only when floating or being directly manipulated.
+- **Border:** one-pixel quiet full border. Semantic containers may tint the full border at low opacity.
+- **Internal Padding:** 16–20px for most cards; 12px for dense nested blocks.
+- **Empty state:** compact in-place states use 20–24px vertical padding, a 24px Lucide status icon when an icon adds meaning, one short title, and at most one explanatory line or recovery action. Empty containers shrink instead of filling available height.
 
-### Task rows
-- No card wrapper — flat list items with `12px` vertical padding
-- Hover: surface-2 background (100ms)
-- Checkbox: 18×18, rounded-sm, accent fill on complete with checkmark animation
+### Inputs / Fields
+- **Style:** chrome background, one-pixel border, 8px radius, and 8px × 12px padding.
+- **Focus:** the global border shift and focus glow apply to text inputs and textareas. Wrappers around a bare input use `.input-glow`.
+- **Embedded controls:** icons and clear actions stay tertiary until hover; the input itself remains borderless inside a focused wrapper.
 
 ### Navigation
-- Sidebar: surface-0 background, 240px width
-- Active item: surface-2 background + accent-colored left indicator (2px)
-- Icons: 16px Lucide, text-tertiary default, text-primary when active
+- **Desktop:** a 64px rail expands to 200px. Items are 40px high with 8px corners; hover and active states use the raised surface. Active items retain a narrow blue locator and brighter icon/text.
+- **Mobile:** a fixed five-item bottom bar replaces the rail below 640px; Capture is elevated as the primary mobile action. Live counts use labeled red or amber badges.
+- **Mobile action strip:** secondary destinations use a horizontal overflow row with 44px minimum-height links, 8px corners, 15px Lucide icons, and 12px labels.
+- **Icons:** Lucide is the default interface family; custom product/source marks are allowed where they carry product or provenance meaning.
 
-### Forms
-- Input: surface-1 background, border, `8px` radius, `8px 12px` padding
-- Focus: accent border + glow shadow (applied automatically via global CSS — do not add `focus:border-*` or `focus:ring-*` to text inputs)
-- Wrapper inputs (input inside a styled div): add class `input-glow` to the wrapper for `focus-within` glow
-- Labels: 12px, 500 weight, text-secondary, `4px` gap above input
+### Compact KPI Bar
+- A 40px collapsible header and 56px inline metrics share one 12px-radius bordered container; individual metrics do not become separate cards.
+- Each metric pairs a 28px semantic icon well with a 12px label and 16px semibold tabular value. Dividers, not gutters, establish the desktop scan rhythm.
+- The metric row maintains a 560px minimum width and scrolls horizontally when space is constrained. Interactive metrics use the raised surface on hover.
+
+### Demo and Empty-State Feedback
+- Demo mode is a minimum-40px amber notice row with a 14px Lucide flask, truncated explanatory copy, and a compact 32px action. It stays informative without becoming a second toolbar.
+- Empty notification results use the same compact in-place pattern as task and queue empties. When the notification source itself has no items, the desktop panel automatically returns to the collapsed rail rather than displaying an empty 360px column.
+
+### Progress and Semantic Panels
+- Progress tracks use a solid pressed-surface track and one solid fill selected from project, accent, or semantic data.
+- Phase/project color appears as a compact dot or solid progress fill.
+- Recommendations, day-plan blocks, routine insights, and timeline blocks use neutral or lightly tinted solid surfaces with complete borders; their labels and icons explain the semantic hue.
 
 ## Do's and Don'ts
 
-### Do
-- Use surface stepping for hierarchy (surface-0 → 1 → 2 → 3)
-- Keep transitions to 100–150ms for interactive states
-- Use accent blue only for actionable/active elements
-- Show source connector icons (16px) as subtle provenance indicators
-- Use skeleton loading states for async content
-- Maintain 40×40px minimum tap targets (extend with pseudo-elements if needed)
+### Do:
+- **Do** use solid surface steps and quiet complete borders for operational hierarchy.
+- **Do** use dots, text, icons, and solid progress fills for project, phase, source, priority, and health signals.
+- **Do** keep common state transitions at 100–150ms and reserve 300–500ms movement for shell expansion, progress interpolation, and direct manipulation.
+- **Do** use skeletons for content loading and visible focus treatment for keyboard interaction.
+- **Do** preserve compact spacing and at least 40px touch targets in mobile navigation and high-frequency actions.
+- **Do** collapse or shrink empty operational regions so the remaining live work keeps viewport priority.
+- **Do** put urgent mobile actions before status summaries and secondary destinations.
 
-### Don't
-- Don't use accent color decoratively (no blue stripes, no gradient fills)
-- Don't add motion on page load (content should render immediately)
-- Don't mix icon libraries (Lucide only, via Iconify when available)
-- Don't use borders where a surface-step would suffice
-- Don't show loading spinners in content areas (use skeletons)
-- Don't use shadows as the primary depth mechanism (surfaces first)
-- Don't exceed 300ms on any transition (users are in flow)
+### Don't:
+- **Don't** use purple/indigo or multicolor gradients as generic emphasis on cards, assessment panels, schedule blocks, or data bars.
+- **Don't** use thick left borders or inset side stripes on ordinary content containers; use a full border or a small semantic dot.
+- **Don't** use the blue accent decoratively or let connector hues take over a panel.
+- **Don't** add shadows where a surface step and border already establish hierarchy.
+- **Don't** add a second icon library or a decorative display typeface.
+- **Don't** exceed 300ms for ordinary state feedback.
+- **Don't** turn desktop KPI summaries into oversized standalone metric cards.
+- **Don't** let a mobile status summary or destination menu outrank Needs Attention.

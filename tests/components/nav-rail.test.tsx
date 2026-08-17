@@ -1,15 +1,21 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
+import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
+import type { NavigationCounts } from '@/lib/navigation/badges';
 
 function renderNavRail({
   isAiActive = false,
   isSyncing = false,
+  syncStatus = [],
+  counts,
 }: {
   isAiActive?: boolean;
   isSyncing?: boolean;
+  syncStatus?: ConnectorHealthInfo[];
+  counts?: NavigationCounts;
 } = {}) {
   return render(
     <TooltipProvider>
@@ -17,6 +23,8 @@ function renderNavRail({
         features={{ aiEnabled: true, financeEnabled: true }}
         isAiActive={isAiActive}
         isSyncing={isSyncing}
+        syncStatus={syncStatus}
+        counts={counts}
       />
     </TooltipProvider>
   );
@@ -75,11 +83,13 @@ describe('NavRail', () => {
     renderNavRail();
     const brandName = screen.getByText('Mission Control');
     const brandIcon = brandName.parentElement?.previousElementSibling?.querySelector('svg');
+    const gradientId = brandIcon?.querySelector('linearGradient')?.getAttribute('id');
 
     expect(screen.queryByRole('link', { name: 'Mission Control' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mission Control' })).not.toBeInTheDocument();
     expect(brandIcon).toHaveClass('lucide-satellite');
-    expect(brandIcon?.getAttribute('stroke')).toBe('url(#mission-control-brand-gradient)');
+    expect(gradientId).toMatch(/^mission-control-brand-gradient-/);
+    expect(brandIcon?.getAttribute('stroke')).toBe(`url(#${gradientId})`);
     expect(brandName.parentElement).toHaveClass('-ml-1.5', 'opacity-0', 'max-w-0');
     expect(brandName).toHaveClass('text-[14px]', 'font-bold', 'tracking-[-0.015em]');
     expect(screen.getByText('Houston: standing by')).toHaveClass(
@@ -163,6 +173,44 @@ describe('NavRail', () => {
     random.mockRestore();
   });
 
+  it('opens sync status from the nav and shows active syncing state', () => {
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'local',
+          name: 'Local',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: undefined,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    const heading = screen.getByRole('heading', { name: 'Sync Status' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(heading);
+    expect(screen.getAllByText('Syncing…').length).toBeGreaterThan(0);
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Never')).toBeInTheDocument();
+  });
+
+  it('only shows inline sync details when the navigation is pinned', () => {
+    renderNavRail({ isSyncing: true });
+    const getInlineStatus = () =>
+      screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
+
+    expect(getInlineStatus()).toHaveClass('opacity-0', 'max-w-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    expect(getInlineStatus()).toHaveClass('opacity-100', 'max-w-[150px]');
+    expect(getInlineStatus()).toHaveTextContent('Syncing…');
+  });
+
   it('groups navigation by purpose', () => {
     renderNavRail();
 
@@ -181,6 +229,62 @@ describe('NavRail', () => {
     expect(screen.getByRole('group', { name: 'Assistant' })).toHaveTextContent(
       'Houston'
     );
+  });
+
+  it('shows pressure bars when collapsed and numeric badges when expanded', () => {
+    renderNavRail({
+      counts: {
+        myDay: 12,
+        notifications: 0,
+        triage: 0,
+        quickSort: 0,
+        reconciliation: 0,
+        overdue: 0,
+        unreadNotifications: 0,
+        notificationTone: 'blue',
+      },
+    });
+
+    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
+      'data-pressure-level',
+      'medium',
+    );
+    expect(screen.queryByText('12')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    expect(screen.getByText('12')).toHaveAttribute('aria-label', '12 items need attention');
+    expect(screen.queryByTestId('navigation-pressure-bar')).not.toBeInTheDocument();
+  });
+
+  it('pulses only urgent notification indicators', () => {
+    renderNavRail({
+      counts: {
+        myDay: 0,
+        notifications: 4,
+        triage: 4,
+        quickSort: 0,
+        reconciliation: 0,
+        overdue: 0,
+        unreadNotifications: 4,
+        notificationTone: 'red',
+      },
+    });
+
+    const urgentNotification = screen.getAllByLabelText('4 items need attention')[0];
+    const triage = screen.getAllByLabelText('4 items need attention')[1];
+    expect(urgentNotification).toHaveClass('bg-red-500', 'motion-safe:animate-pulse');
+    expect(triage).toHaveClass('bg-red-500');
+    expect(triage).not.toHaveClass('motion-safe:animate-pulse');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    const notificationLink = screen.getByRole('link', { name: /^Notifications/ });
+    expect(within(notificationLink).getByText('4')).toHaveClass(
+      'bg-red-500',
+      'motion-safe:animate-pulse',
+    );
+    expect(screen.queryAllByTestId('navigation-pressure-bar')).toHaveLength(0);
   });
 
   it('uses distinct colors for adjacent Routines and Triage icons', () => {

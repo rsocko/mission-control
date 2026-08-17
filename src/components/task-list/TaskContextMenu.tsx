@@ -19,6 +19,7 @@ import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useLongPress } from '@/lib/hooks/useLongPress';
 import type { ListGroup } from '@/types/dashboard';
 import type { LocalDisposition, TaskEditPolicy, TaskField, TaskSourceModel } from '@/types';
+import { TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 import {
   canEditTaskField,
   canRemoveTask,
@@ -199,18 +200,15 @@ export function TaskContextMenu({
     : null;
 
   const PRIORITY_OPTIONS = [
-    { value: 'critical', label: 'Critical', color: 'text-rose-400' },
-    { value: 'high', label: 'High', color: 'text-orange-400' },
-    { value: 'medium', label: 'Medium', color: 'text-amber-300' },
-    { value: 'low', label: 'Low', color: 'text-sky-400' },
-    { value: 'none', label: 'None', color: 'text-[var(--text-muted)]' },
+    ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({ value, label: visual.label, color: visual.textClass })),
   ];
 
   const STATUS_OPTIONS = [
-    { value: 'todo', label: 'To Do', color: 'text-[var(--text-muted)]' },
-    { value: 'in_progress', label: 'In Progress', color: 'text-purple-400' },
-    { value: 'done', label: 'Done', color: 'text-green-400' },
-    { value: 'cancelled', label: 'Cancelled', color: 'text-rose-400' },
+    ...(['todo', 'in_progress', 'done', 'cancelled'] as const).map((value) => ({
+      value,
+      label: TASK_STATUS_VISUALS[value].label,
+      color: TASK_STATUS_VISUALS[value].textClass,
+    })),
   ];
 
   return (
@@ -283,7 +281,7 @@ export function TaskContextMenu({
                 disabled={!canEdit('status')}
                 title={!canEdit('status') ? blockedReason('status') : undefined}
               >
-                <CircleDot size={15} className="text-purple-400" />
+                <CircleDot size={15} className={TASK_STATUS_VISUALS.in_progress.textClass} />
                 Status
                 <span className="ml-auto flex items-center gap-1">
                   <span className={`text-xs ${STATUS_OPTIONS.find(s => s.value === task.status)?.color || 'text-[var(--text-muted)]'}`}>
@@ -728,7 +726,7 @@ function MoveToListSearch({ sourceLists, listGroups = [], onSelect, onMoveToSour
   return (
     <>
       <div className="px-2 pb-1.5">
-        <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
+        <div className="input-glow flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
           <Search size={12} className="shrink-0 text-[var(--text-muted)]" />
           <input
             ref={inputRef}

@@ -1,6 +1,9 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  installAppHistory,
+} from '@/lib/navigation/app-history';
 
 const { backSpy, pushSpy, replaceSpy, getSearchParams, setSearchParams } = vi.hoisted(() => {
   let searchParams = '';
@@ -26,13 +29,22 @@ vi.mock('next/navigation', () => ({
 }));
 
 describe('Insights drill-down navigation', () => {
+  let uninstallHistory: (() => void) | null = null;
+
   beforeEach(() => {
+    uninstallHistory?.();
     backSpy.mockReset();
     pushSpy.mockReset();
     replaceSpy.mockReset();
     setSearchParams('');
     sessionStorage.clear();
     window.history.replaceState({}, '', '/');
+    uninstallHistory = installAppHistory();
+  });
+
+  afterEach(() => {
+    uninstallHistory?.();
+    uninstallHistory = null;
   });
 
   it('adds Insights return context to source drill-downs', async () => {
@@ -46,8 +58,8 @@ describe('Insights drill-down navigation', () => {
     );
     fireEvent.click(screen.getByTitle(/GitHub: 3/));
 
-    expect(pushSpy).toHaveBeenCalledWith(
-      '/?source=github&origin=insights&insightsPeriod=30',
+    expect(window.location.search).toBe(
+      '?source=github&origin=insights&insightsPeriod=30',
     );
   });
 
@@ -62,8 +74,8 @@ describe('Insights drill-down navigation', () => {
     );
     fireEvent.click(screen.getByTitle(/31–60 days: 2/));
 
-    expect(pushSpy).toHaveBeenCalledWith(
-      '/?ageMin=31&ageMax=60&origin=insights&insightsPeriod=90',
+    expect(window.location.search).toBe(
+      '?ageMin=31&ageMax=60&origin=insights&insightsPeriod=90',
     );
   });
 
@@ -80,7 +92,6 @@ describe('Insights drill-down navigation', () => {
     fireEvent.click(screen.getByTitle(/GitHub: 3/));
 
     const destination = '/?source=github&origin=insights&insightsPeriod=30';
-    window.history.pushState({}, '', destination);
     setSearchParams(destination.slice(destination.indexOf('?') + 1));
     cleanup();
     render(<InsightsBackLink />);
@@ -107,7 +118,6 @@ describe('Insights drill-down navigation', () => {
     fireEvent.click(screen.getByTitle(/31–60 days: 2/));
 
     const destination = '/?ageMin=31&ageMax=60&origin=insights&insightsPeriod=90';
-    window.history.pushState({}, '', destination);
     setSearchParams(destination.slice(destination.indexOf('?') + 1));
     cleanup();
     render(<InsightsBackLink />);

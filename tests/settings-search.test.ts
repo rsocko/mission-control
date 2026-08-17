@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react';
 import {
   SETTINGS_SEARCH_ITEMS,
   findSettingsTarget,
+  focusSettingsTarget,
   searchSettings,
   useSettingsUrlTarget,
 } from '@/app/settings/settings-search';
@@ -24,6 +25,9 @@ describe('searchSettings', () => {
     expect(searchSettings('paperless')[0]?.title).toBe('OWL');
     expect(searchSettings('document intelligence')[0]?.title).toBe('OWL');
     expect(searchSettings('sync icon')[0]?.title).toBe('Sync icon animation');
+    expect(searchSettings('app version')[0]?.title).toBe('About Mission Control');
+    expect(searchSettings('license')[0]?.title).toBe('Licensing status');
+    expect(searchSettings('commit sha')[0]?.title).toBe('Build');
   });
 
   it('requires every query term to match', () => {
@@ -51,6 +55,21 @@ describe('searchSettings', () => {
     expect(findSettingsTarget(root, 'Base URL', 'AI Provider').target?.tagName).toBe('LABEL');
     expect(findSettingsTarget(root, 'Test connection', 'AI Provider').target?.tagName).toBe('BUTTON');
     expect(findSettingsTarget(root, 'API Key', 'AI Provider').sectionHeading?.textContent).toBe('AI Provider');
+  });
+
+  it('focuses and makes a non-interactive search result keyboard addressable', () => {
+    const root = document.createElement('main');
+    root.innerHTML = '<h2>AI Provider</h2><label>Base URL</label>';
+    const target = root.querySelector('label') as HTMLElement;
+    target.scrollIntoView = vi.fn();
+    window.matchMedia = vi.fn().mockReturnValue({ matches: true });
+    document.body.append(root);
+
+    expect(focusSettingsTarget(root, 'Base URL', 'AI Provider')).toBe(true);
+    expect(document.activeElement).toBe(target);
+    expect(target.tabIndex).toBe(-1);
+    expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' });
+    root.remove();
   });
 
   it('updates the target for same-section browser history navigation', () => {

@@ -18,7 +18,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import {
   staggerContainer, fadeSlideUp,
 } from '@/lib/motion';
-import { settingsLogger } from '@/lib/client-logger';
 import type { ConnectorConfig, SourceList } from './types';
 import {
   getConnectorDisplayName,
@@ -118,7 +117,7 @@ function ConnectorsSection({
         <div>
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Connectors</h2>
           <p className="text-sm text-[var(--text-tertiary)] mt-1">
-            Manage data source connections. Each connector syncs tasks and/or alerts.
+            Each connector syncs tasks and/or alerts.
           </p>
         </div>
         <motion.button
@@ -647,7 +646,7 @@ function ScoutEditPanel({
   );
 }
 
-function ConnectorEditPanel(props: {
+type ConnectorEditPanelProps = {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
   onUpdate: (id: string, updates: Partial<ConnectorConfig>) => Promise<void>;
@@ -657,7 +656,21 @@ function ConnectorEditPanel(props: {
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
-}) {
+};
+
+function GitHubConnectorEditPanel(props: ConnectorEditPanelProps) {
+  return <DefaultConnectorEditPanel {...props} variant="github" />;
+}
+
+function FinanceConnectorEditPanel(props: ConnectorEditPanelProps) {
+  return <DefaultConnectorEditPanel {...props} variant="finance" />;
+}
+
+function DocumentIntelligenceConnectorEditPanel(props: ConnectorEditPanelProps) {
+  return <DefaultConnectorEditPanel {...props} variant="document-intelligence" />;
+}
+
+function ConnectorEditPanel(props: ConnectorEditPanelProps) {
   if (props.connector.type === 'scout') {
     return (
       <ScoutEditPanel
@@ -680,12 +693,21 @@ function ConnectorEditPanel(props: {
       />
     );
   }
+  if (props.connector.type === 'github-issues') {
+    return <GitHubConnectorEditPanel {...props} />;
+  }
+  if (isFinanceConnectorType(props.connector.type)) {
+    return <FinanceConnectorEditPanel {...props} />;
+  }
+  if (props.connector.type === 'document-intelligence') {
+    return <DocumentIntelligenceConnectorEditPanel {...props} />;
+  }
 
   return <DefaultConnectorEditPanel {...props} />;
 }
 
 function DefaultConnectorEditPanel({
-  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh,
+  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, variant,
 }: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
@@ -696,6 +718,7 @@ function DefaultConnectorEditPanel({
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
+  variant?: 'default' | 'github' | 'finance' | 'document-intelligence';
 }) {
   const [editSyncMode, setEditSyncMode] = useState(connector.syncMode);
   const [confirmPurgeSourceList, setConfirmPurgeSourceList] = useState<string | null>(null);
@@ -707,13 +730,22 @@ function DefaultConnectorEditPanel({
   const connectorSettings = typeof connector.settings === 'string'
     ? JSON.parse(connector.settings)
     : ((connector.settings || {}) as Record<string, unknown>);
-  const isFinanceConnector = isFinanceConnectorType(connector.type);
+  const resolvedVariant = variant ?? (
+    connector.type === 'github-issues'
+      ? 'github'
+      : isFinanceConnectorType(connector.type)
+        ? 'finance'
+        : connector.type === 'document-intelligence'
+          ? 'document-intelligence'
+          : 'default'
+  );
+  const isFinanceConnector = resolvedVariant === 'finance';
   const [editBridgeUrl, setEditBridgeUrl] = useState(
     typeof connectorSettings.bridgeUrl === 'string'
       ? connectorSettings.bridgeUrl
       : defaultTyrionBridgeUrlForEnvironment(process.env.NODE_ENV)
   );
-  const isGitHubConnector = connector.type === 'github-issues';
+  const isGitHubConnector = resolvedVariant === 'github';
   const [editFetchNotifications, setEditFetchNotifications] = useState(
     typeof connectorSettings.fetchNotifications === 'boolean'
       ? connectorSettings.fetchNotifications
@@ -741,7 +773,7 @@ function DefaultConnectorEditPanel({
   const [ghTokenType, setGhTokenType] = useState<'classic' | 'fine-grained' | 'unknown'>('unknown');
 
   // Document Intelligence module health
-  const isDiConnector = connector.type === 'document-intelligence';
+  const isDiConnector = resolvedVariant === 'document-intelligence';
   const diHealth = healthState?.data || null;
   const diHealthLoading = isDiConnector && !healthState;
 
@@ -1437,4 +1469,11 @@ function DefaultConnectorEditPanel({
 }
 
 
-export { ConnectorsSection, DefaultConnectorEditPanel };
+export {
+  ConnectorEditPanel,
+  ConnectorsSection,
+  DefaultConnectorEditPanel,
+  DocumentIntelligenceConnectorEditPanel,
+  FinanceConnectorEditPanel,
+  GitHubConnectorEditPanel,
+};

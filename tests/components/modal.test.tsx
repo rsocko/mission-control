@@ -83,4 +83,42 @@ describe('Modal accessibility', () => {
     );
     expect(screen.getByRole('button', { name: 'Open preview' })).toHaveFocus();
   });
+
+  it('preserves focused controls when the close callback changes', () => {
+    const { rerender } = render(
+      <Modal isOpen onClose={vi.fn()} ariaLabel="Schedule">
+        <input aria-label="Time" />
+      </Modal>,
+    );
+    const input = screen.getByLabelText('Time');
+    input.focus();
+
+    rerender(
+      <Modal isOpen onClose={vi.fn()} ariaLabel="Schedule">
+        <input aria-label="Time" />
+      </Modal>,
+    );
+
+    expect(input).toHaveFocus();
+  });
+
+  it('uses the latest close callback for Escape', () => {
+    const firstClose = vi.fn();
+    const latestClose = vi.fn();
+    const { rerender } = render(
+      <Modal isOpen onClose={firstClose} ariaLabel="Schedule">
+        Content
+      </Modal>,
+    );
+    rerender(
+      <Modal isOpen onClose={latestClose} ariaLabel="Schedule">
+        Content
+      </Modal>,
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(latestClose).toHaveBeenCalledOnce();
+  });
 });

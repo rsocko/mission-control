@@ -1,0 +1,738 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		00ED44CFCFAD98D70AC02FF4 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5277B1E4642D8E73DD288F19 /* SceneDelegate.swift */; };
+		0122E51AD994C9DFE86D75B4 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 635333ED41CAAD4AC4E6485A /* AppConfiguration.swift */; };
+		014DBCC014F60ED3D68CE89E /* NativeBridgeContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 126030203E395A1814B671BE /* NativeBridgeContractTests.swift */; };
+		18123B48A77C166DA85540D2 /* ShareCaptureClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B7C452C509DFF91D58084B0 /* ShareCaptureClient.swift */; };
+		213484C48F6A2C941AC5E490 /* PushNotificationManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFC7BF73EEEAAE5495A97C35 /* PushNotificationManagerTests.swift */; };
+		246828FC24C96D5ED6B5F4A0 /* ShareItemExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6FFA3582312AF8FF188AFF /* ShareItemExtractor.swift */; };
+		247EB61DB4BA4699964D128C /* WebBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 129FEBA02639811B961FCD01 /* WebBridge.swift */; };
+		2E3957D6744707E2D747F621 /* NavigationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 096395DB99872C52D10F08ED /* NavigationPolicyTests.swift */; };
+		40CD8EA27C972D06E3FDC723 /* NativeBridgeActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C9F31583F7828EF98E8E069 /* NativeBridgeActions.swift */; };
+		4589A1BFAA15FBD8C198A698 /* ShareCaptureCoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B32487E3F416DBCDA7BE3A6D /* ShareCaptureCoreTests.swift */; };
+		4A1C691AFB2C753FF419E965 /* DeepLinkRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03D34FB80707C3E6B87CDB91 /* DeepLinkRouter.swift */; };
+		4F9E227CF8D9FFAF86D99A4B /* ShareCaptureEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BFE9ADBB2EC00E164C76C5 /* ShareCaptureEnvironment.swift */; };
+		533DACC9A9F58D1A647CB354 /* ShareItemExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D6FFA3582312AF8FF188AFF /* ShareItemExtractor.swift */; };
+		5373C278771E8D7813FB64E0 /* NativeContextScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = E90145DED0C9732DABBA61F3 /* NativeContextScript.swift */; };
+		73B05AEA8066E0EE69E2C9EF /* WebBridgeScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1841BF26F1345BE70415066 /* WebBridgeScript.swift */; };
+		779B49BC0169284AB0D1DE3C /* ConfigurationErrorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82D4C813EAB93D9C1427ACAB /* ConfigurationErrorViewController.swift */; };
+		7B5607392238910842246C67 /* OfflineURLTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5FF6A7C67C87C3803F6237F /* OfflineURLTests.swift */; };
+		880B2BC85A708D843AA621A1 /* ShareCaptureEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7BFE9ADBB2EC00E164C76C5 /* ShareCaptureEnvironment.swift */; };
+		8918C1B20D979539FAD814A2 /* TrustedOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43FB9851392D5F269583827C /* TrustedOrigin.swift */; };
+		8B1FFF0B89E7158DE3A391E0 /* NativeContextScriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD8C1893DD9A5B620249769D /* NativeContextScriptTests.swift */; };
+		90A06CBF37D65056823BBF3F /* PushNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFC768D60F36D5976A5B7049 /* PushNotificationManager.swift */; };
+		98AA4A4A72B0F090CC787CEA /* DeepLinkRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 75C32F2EF28487B246FAED14 /* DeepLinkRouterTests.swift */; };
+		9C3408995968AE3AAABC2DC8 /* TrustedOriginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73DB71111826D94E863E844C /* TrustedOriginTests.swift */; };
+		9FED74EA6AB109C8E13726E0 /* ShareCaptureClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00379B63551802BAC4A4446C /* ShareCaptureClientTests.swift */; };
+		A410764E32FAB300D0C6F496 /* NavigationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3E174A65723E8046B34868F /* NavigationPolicy.swift */; };
+		A5C4EBAD0E9DD816FD34B8C9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F38092377893257BB610FDA0 /* AppDelegate.swift */; };
+		A60B3B9D0FA41D1767A38E3D /* ShareCaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4EEC605594B09732D2FB1F /* ShareCaptureModels.swift */; };
+		A79DC45C12D446DA6CEFB8CE /* ShareCaptureCompletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6D625C2A0FB8CE587AFD41 /* ShareCaptureCompletionStore.swift */; };
+		AA698C07CA5F92BE82713771 /* WebViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A53B586FB916565CAC1E285 /* WebViewController.swift */; };
+		AC4AE4A0DD56DDD149545038 /* ShareCaptureCompletionRelay.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDEDCE573107CE2188B802E5 /* ShareCaptureCompletionRelay.swift */; };
+		AEC3214ACF46787B210CF1EA /* ShareCaptureCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D339A8E4944E38EB65FF9C /* ShareCaptureCredentialStore.swift */; };
+		B6162C99C7893368E8B1E97E /* ShareCaptureCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85D339A8E4944E38EB65FF9C /* ShareCaptureCredentialStore.swift */; };
+		C2A14A8E9F91EBD0A831BBB5 /* ExternalURLOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62103EF64A1ECA6F6E2D9985 /* ExternalURLOpener.swift */; };
+		C61A414B2A37F97F05413F59 /* NativeBridgeContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = BAEDEB58BAA9017AB04D6FBF /* NativeBridgeContract.swift */; };
+		D571BB92DA7D0CD8C638922F /* ShareCaptureClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B7C452C509DFF91D58084B0 /* ShareCaptureClient.swift */; };
+		D8508D55BDEFC951C4888BB4 /* MissionControlShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = CC49A8DCEFFEFD84A38C98C3 /* MissionControlShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		DECB9DC5E35ECD11AC5911B7 /* ShareCaptureCompletionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6D625C2A0FB8CE587AFD41 /* ShareCaptureCompletionStore.swift */; };
+		DFC30CC0BE9C46D412C61BED /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B67E43A2587D48C19A7E753 /* ShareViewController.swift */; };
+		E25C5E3EE92DAD4A15D9046E /* WebBridgeScriptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7F060676D7630FE0E97698 /* WebBridgeScriptTests.swift */; };
+		E3E6EAB006649DF592EEC977 /* NetworkMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = C61213CB6AAB8290228F036C /* NetworkMonitor.swift */; };
+		F1DDEEF434115B464CFF1513 /* NativeEventDispatching.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8651A197F64FE68F1A616DFE /* NativeEventDispatching.swift */; };
+		F60BE518788D7779641A0BF5 /* ShareCaptureModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C4EEC605594B09732D2FB1F /* ShareCaptureModels.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		01C0788D4CC3FCD539DFCC16 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 208D6E4BAFD27F4031F64A88 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 3391315D1A0AE4464E68A819;
+			remoteInfo = MissionControlShareExtension;
+		};
+		BCCAF14E9DAF5F0E92FB09B3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 208D6E4BAFD27F4031F64A88 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 81E129A51BDC5064CE5423DA;
+			remoteInfo = MissionControl;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7F2CF24B3AB941CD329F76CE /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				D8508D55BDEFC951C4888BB4 /* MissionControlShareExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		00379B63551802BAC4A4446C /* ShareCaptureClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureClientTests.swift; sourceTree = "<group>"; };
+		03D34FB80707C3E6B87CDB91 /* DeepLinkRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouter.swift; sourceTree = "<group>"; };
+		096395DB99872C52D10F08ED /* NavigationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationPolicyTests.swift; sourceTree = "<group>"; };
+		126030203E395A1814B671BE /* NativeBridgeContractTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridgeContractTests.swift; sourceTree = "<group>"; };
+		129FEBA02639811B961FCD01 /* WebBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebBridge.swift; sourceTree = "<group>"; };
+		1D6FFA3582312AF8FF188AFF /* ShareItemExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareItemExtractor.swift; sourceTree = "<group>"; };
+		2B7C452C509DFF91D58084B0 /* ShareCaptureClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureClient.swift; sourceTree = "<group>"; };
+		43FB9851392D5F269583827C /* TrustedOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedOrigin.swift; sourceTree = "<group>"; };
+		4A6D625C2A0FB8CE587AFD41 /* ShareCaptureCompletionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureCompletionStore.swift; sourceTree = "<group>"; };
+		4B7F060676D7630FE0E97698 /* WebBridgeScriptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebBridgeScriptTests.swift; sourceTree = "<group>"; };
+		4BF55F93FA2531E7F621514C /* MissionControl.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MissionControl.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4C9F31583F7828EF98E8E069 /* NativeBridgeActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridgeActions.swift; sourceTree = "<group>"; };
+		4FF5B93E6D3D2FB10C426410 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		5277B1E4642D8E73DD288F19 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		62103EF64A1ECA6F6E2D9985 /* ExternalURLOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalURLOpener.swift; sourceTree = "<group>"; };
+		635333ED41CAAD4AC4E6485A /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfiguration.swift; sourceTree = "<group>"; };
+		73DB71111826D94E863E844C /* TrustedOriginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrustedOriginTests.swift; sourceTree = "<group>"; };
+		75C32F2EF28487B246FAED14 /* DeepLinkRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeepLinkRouterTests.swift; sourceTree = "<group>"; };
+		7A53B586FB916565CAC1E285 /* WebViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebViewController.swift; sourceTree = "<group>"; };
+		7B67E43A2587D48C19A7E753 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		7C4EEC605594B09732D2FB1F /* ShareCaptureModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureModels.swift; sourceTree = "<group>"; };
+		82D4C813EAB93D9C1427ACAB /* ConfigurationErrorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfigurationErrorViewController.swift; sourceTree = "<group>"; };
+		85D339A8E4944E38EB65FF9C /* ShareCaptureCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureCredentialStore.swift; sourceTree = "<group>"; };
+		8651A197F64FE68F1A616DFE /* NativeEventDispatching.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeEventDispatching.swift; sourceTree = "<group>"; };
+		9504DFCCA583B2F4A046E1A8 /* MissionControlTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MissionControlTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A5FF6A7C67C87C3803F6237F /* OfflineURLTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineURLTests.swift; sourceTree = "<group>"; };
+		AD8C1893DD9A5B620249769D /* NativeContextScriptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeContextScriptTests.swift; sourceTree = "<group>"; };
+		B32487E3F416DBCDA7BE3A6D /* ShareCaptureCoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureCoreTests.swift; sourceTree = "<group>"; };
+		B3E174A65723E8046B34868F /* NavigationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationPolicy.swift; sourceTree = "<group>"; };
+		BAEDEB58BAA9017AB04D6FBF /* NativeBridgeContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeBridgeContract.swift; sourceTree = "<group>"; };
+		C1841BF26F1345BE70415066 /* WebBridgeScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebBridgeScript.swift; sourceTree = "<group>"; };
+		C61213CB6AAB8290228F036C /* NetworkMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitor.swift; sourceTree = "<group>"; };
+		C7BFE9ADBB2EC00E164C76C5 /* ShareCaptureEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureEnvironment.swift; sourceTree = "<group>"; };
+		CC49A8DCEFFEFD84A38C98C3 /* MissionControlShareExtension.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = MissionControlShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		DDEDCE573107CE2188B802E5 /* ShareCaptureCompletionRelay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareCaptureCompletionRelay.swift; sourceTree = "<group>"; };
+		DFC768D60F36D5976A5B7049 /* PushNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManager.swift; sourceTree = "<group>"; };
+		E90145DED0C9732DABBA61F3 /* NativeContextScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeContextScript.swift; sourceTree = "<group>"; };
+		EFC7BF73EEEAAE5495A97C35 /* PushNotificationManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationManagerTests.swift; sourceTree = "<group>"; };
+		F38092377893257BB610FDA0 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		FCE790E793CC22C35ACC896E /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		3B25E04B574036BA7A981D8A /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				4BF55F93FA2531E7F621514C /* MissionControl.app */,
+				CC49A8DCEFFEFD84A38C98C3 /* MissionControlShareExtension.appex */,
+				9504DFCCA583B2F4A046E1A8 /* MissionControlTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		4414CDF4C4D3A6D91BEE95EA /* SharedCapture */ = {
+			isa = PBXGroup;
+			children = (
+				2B7C452C509DFF91D58084B0 /* ShareCaptureClient.swift */,
+				4A6D625C2A0FB8CE587AFD41 /* ShareCaptureCompletionStore.swift */,
+				85D339A8E4944E38EB65FF9C /* ShareCaptureCredentialStore.swift */,
+				C7BFE9ADBB2EC00E164C76C5 /* ShareCaptureEnvironment.swift */,
+				7C4EEC605594B09732D2FB1F /* ShareCaptureModels.swift */,
+				1D6FFA3582312AF8FF188AFF /* ShareItemExtractor.swift */,
+			);
+			path = SharedCapture;
+			sourceTree = "<group>";
+		};
+		565A49540F03B6B96B623FB0 /* Web */ = {
+			isa = PBXGroup;
+			children = (
+				62103EF64A1ECA6F6E2D9985 /* ExternalURLOpener.swift */,
+				E90145DED0C9732DABBA61F3 /* NativeContextScript.swift */,
+				C1841BF26F1345BE70415066 /* WebBridgeScript.swift */,
+				7A53B586FB916565CAC1E285 /* WebViewController.swift */,
+			);
+			path = Web;
+			sourceTree = "<group>";
+		};
+		570AC3AB53A5AF8492511631 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				03D34FB80707C3E6B87CDB91 /* DeepLinkRouter.swift */,
+				B3E174A65723E8046B34868F /* NavigationPolicy.swift */,
+				43FB9851392D5F269583827C /* TrustedOrigin.swift */,
+			);
+			path = Security;
+			sourceTree = "<group>";
+		};
+		5C5E27A9A5188A2BC19AFE5B /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				4C9F31583F7828EF98E8E069 /* NativeBridgeActions.swift */,
+				BAEDEB58BAA9017AB04D6FBF /* NativeBridgeContract.swift */,
+				8651A197F64FE68F1A616DFE /* NativeEventDispatching.swift */,
+				129FEBA02639811B961FCD01 /* WebBridge.swift */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
+		679A8DA0AC938BDEA21A997A /* MissionControl */ = {
+			isa = PBXGroup;
+			children = (
+				F3743474E774746ADF10AB6E /* App */,
+				5C5E27A9A5188A2BC19AFE5B /* Bridge */,
+				A737F89E951CEE0576A5BBB5 /* Network */,
+				D996B3925C3CEB521C33014C /* Push */,
+				570AC3AB53A5AF8492511631 /* Security */,
+				565A49540F03B6B96B623FB0 /* Web */,
+			);
+			path = MissionControl;
+			sourceTree = "<group>";
+		};
+		A737F89E951CEE0576A5BBB5 /* Network */ = {
+			isa = PBXGroup;
+			children = (
+				C61213CB6AAB8290228F036C /* NetworkMonitor.swift */,
+			);
+			path = Network;
+			sourceTree = "<group>";
+		};
+		C144FA45C2ECCC9D4873D0B1 /* MissionControlTests */ = {
+			isa = PBXGroup;
+			children = (
+				75C32F2EF28487B246FAED14 /* DeepLinkRouterTests.swift */,
+				126030203E395A1814B671BE /* NativeBridgeContractTests.swift */,
+				AD8C1893DD9A5B620249769D /* NativeContextScriptTests.swift */,
+				096395DB99872C52D10F08ED /* NavigationPolicyTests.swift */,
+				A5FF6A7C67C87C3803F6237F /* OfflineURLTests.swift */,
+				EFC7BF73EEEAAE5495A97C35 /* PushNotificationManagerTests.swift */,
+				00379B63551802BAC4A4446C /* ShareCaptureClientTests.swift */,
+				B32487E3F416DBCDA7BE3A6D /* ShareCaptureCoreTests.swift */,
+				73DB71111826D94E863E844C /* TrustedOriginTests.swift */,
+				4B7F060676D7630FE0E97698 /* WebBridgeScriptTests.swift */,
+			);
+			path = MissionControlTests;
+			sourceTree = "<group>";
+		};
+		C996FAC878F23F6E6A564269 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				FCE790E793CC22C35ACC896E /* Debug.xcconfig */,
+				4FF5B93E6D3D2FB10C426410 /* Release.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		C99A5741BCB25533C82DD075 /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				7B67E43A2587D48C19A7E753 /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
+		D6225A6F52A2317AEC5F4E35 = {
+			isa = PBXGroup;
+			children = (
+				C996FAC878F23F6E6A564269 /* Config */,
+				679A8DA0AC938BDEA21A997A /* MissionControl */,
+				C144FA45C2ECCC9D4873D0B1 /* MissionControlTests */,
+				4414CDF4C4D3A6D91BEE95EA /* SharedCapture */,
+				C99A5741BCB25533C82DD075 /* ShareExtension */,
+				3B25E04B574036BA7A981D8A /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D996B3925C3CEB521C33014C /* Push */ = {
+			isa = PBXGroup;
+			children = (
+				DFC768D60F36D5976A5B7049 /* PushNotificationManager.swift */,
+			);
+			path = Push;
+			sourceTree = "<group>";
+		};
+		F3743474E774746ADF10AB6E /* App */ = {
+			isa = PBXGroup;
+			children = (
+				635333ED41CAAD4AC4E6485A /* AppConfiguration.swift */,
+				F38092377893257BB610FDA0 /* AppDelegate.swift */,
+				82D4C813EAB93D9C1427ACAB /* ConfigurationErrorViewController.swift */,
+				5277B1E4642D8E73DD288F19 /* SceneDelegate.swift */,
+				DDEDCE573107CE2188B802E5 /* ShareCaptureCompletionRelay.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0B7336E1DAF754FADD2C7AA6 /* MissionControlTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E3FFA04AFA4E28149844BB1E /* Build configuration list for PBXNativeTarget "MissionControlTests" */;
+			buildPhases = (
+				4595D6B9697189B47D8900DD /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				72A859732E167735AB0A717D /* PBXTargetDependency */,
+			);
+			name = MissionControlTests;
+			packageProductDependencies = (
+			);
+			productName = MissionControlTests;
+			productReference = 9504DFCCA583B2F4A046E1A8 /* MissionControlTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		3391315D1A0AE4464E68A819 /* MissionControlShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 42006B0654B7EB5C7A03D8A2 /* Build configuration list for PBXNativeTarget "MissionControlShareExtension" */;
+			buildPhases = (
+				C37E1BB319BB1C27E8DDFE4E /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MissionControlShareExtension;
+			packageProductDependencies = (
+			);
+			productName = MissionControlShareExtension;
+			productReference = CC49A8DCEFFEFD84A38C98C3 /* MissionControlShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		81E129A51BDC5064CE5423DA /* MissionControl */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B4F6813337605AD03FB1AF40 /* Build configuration list for PBXNativeTarget "MissionControl" */;
+			buildPhases = (
+				BD78A88B458121846C74AECF /* Sources */,
+				7F2CF24B3AB941CD329F76CE /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				34A2BC2BADFB65D8FBF9570F /* PBXTargetDependency */,
+			);
+			name = MissionControl;
+			packageProductDependencies = (
+			);
+			productName = MissionControl;
+			productReference = 4BF55F93FA2531E7F621514C /* MissionControl.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		208D6E4BAFD27F4031F64A88 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					0B7336E1DAF754FADD2C7AA6 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					3391315D1A0AE4464E68A819 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+					81E129A51BDC5064CE5423DA = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = E702C94A16BB968CFA62C192 /* Build configuration list for PBXProject "MissionControl" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = D6225A6F52A2317AEC5F4E35;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				81E129A51BDC5064CE5423DA /* MissionControl */,
+				3391315D1A0AE4464E68A819 /* MissionControlShareExtension */,
+				0B7336E1DAF754FADD2C7AA6 /* MissionControlTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4595D6B9697189B47D8900DD /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				98AA4A4A72B0F090CC787CEA /* DeepLinkRouterTests.swift in Sources */,
+				014DBCC014F60ED3D68CE89E /* NativeBridgeContractTests.swift in Sources */,
+				8B1FFF0B89E7158DE3A391E0 /* NativeContextScriptTests.swift in Sources */,
+				2E3957D6744707E2D747F621 /* NavigationPolicyTests.swift in Sources */,
+				7B5607392238910842246C67 /* OfflineURLTests.swift in Sources */,
+				213484C48F6A2C941AC5E490 /* PushNotificationManagerTests.swift in Sources */,
+				9FED74EA6AB109C8E13726E0 /* ShareCaptureClientTests.swift in Sources */,
+				4589A1BFAA15FBD8C198A698 /* ShareCaptureCoreTests.swift in Sources */,
+				9C3408995968AE3AAABC2DC8 /* TrustedOriginTests.swift in Sources */,
+				E25C5E3EE92DAD4A15D9046E /* WebBridgeScriptTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BD78A88B458121846C74AECF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0122E51AD994C9DFE86D75B4 /* AppConfiguration.swift in Sources */,
+				A5C4EBAD0E9DD816FD34B8C9 /* AppDelegate.swift in Sources */,
+				779B49BC0169284AB0D1DE3C /* ConfigurationErrorViewController.swift in Sources */,
+				4A1C691AFB2C753FF419E965 /* DeepLinkRouter.swift in Sources */,
+				C2A14A8E9F91EBD0A831BBB5 /* ExternalURLOpener.swift in Sources */,
+				40CD8EA27C972D06E3FDC723 /* NativeBridgeActions.swift in Sources */,
+				C61A414B2A37F97F05413F59 /* NativeBridgeContract.swift in Sources */,
+				5373C278771E8D7813FB64E0 /* NativeContextScript.swift in Sources */,
+				F1DDEEF434115B464CFF1513 /* NativeEventDispatching.swift in Sources */,
+				A410764E32FAB300D0C6F496 /* NavigationPolicy.swift in Sources */,
+				E3E6EAB006649DF592EEC977 /* NetworkMonitor.swift in Sources */,
+				90A06CBF37D65056823BBF3F /* PushNotificationManager.swift in Sources */,
+				00ED44CFCFAD98D70AC02FF4 /* SceneDelegate.swift in Sources */,
+				18123B48A77C166DA85540D2 /* ShareCaptureClient.swift in Sources */,
+				AC4AE4A0DD56DDD149545038 /* ShareCaptureCompletionRelay.swift in Sources */,
+				A79DC45C12D446DA6CEFB8CE /* ShareCaptureCompletionStore.swift in Sources */,
+				B6162C99C7893368E8B1E97E /* ShareCaptureCredentialStore.swift in Sources */,
+				4F9E227CF8D9FFAF86D99A4B /* ShareCaptureEnvironment.swift in Sources */,
+				A60B3B9D0FA41D1767A38E3D /* ShareCaptureModels.swift in Sources */,
+				533DACC9A9F58D1A647CB354 /* ShareItemExtractor.swift in Sources */,
+				8918C1B20D979539FAD814A2 /* TrustedOrigin.swift in Sources */,
+				247EB61DB4BA4699964D128C /* WebBridge.swift in Sources */,
+				73B05AEA8066E0EE69E2C9EF /* WebBridgeScript.swift in Sources */,
+				AA698C07CA5F92BE82713771 /* WebViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C37E1BB319BB1C27E8DDFE4E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D571BB92DA7D0CD8C638922F /* ShareCaptureClient.swift in Sources */,
+				DECB9DC5E35ECD11AC5911B7 /* ShareCaptureCompletionStore.swift in Sources */,
+				AEC3214ACF46787B210CF1EA /* ShareCaptureCredentialStore.swift in Sources */,
+				880B2BC85A708D843AA621A1 /* ShareCaptureEnvironment.swift in Sources */,
+				F60BE518788D7779641A0BF5 /* ShareCaptureModels.swift in Sources */,
+				246828FC24C96D5ED6B5F4A0 /* ShareItemExtractor.swift in Sources */,
+				DFC30CC0BE9C46D412C61BED /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		34A2BC2BADFB65D8FBF9570F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 3391315D1A0AE4464E68A819 /* MissionControlShareExtension */;
+			targetProxy = 01C0788D4CC3FCD539DFCC16 /* PBXContainerItemProxy */;
+		};
+		72A859732E167735AB0A717D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 81E129A51BDC5064CE5423DA /* MissionControl */;
+			targetProxy = BCCAF14E9DAF5F0E92FB09B3 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1B40039A80F41135ACB16C0E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = FCE790E793CC22C35ACC896E /* Debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Config/MissionControl.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MissionControl/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER)";
+				PRODUCT_NAME = MissionControl;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		1B5C4A6A1B7CE9EBE1B91095 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		3989AAADD6B1B796772FB11A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = FCE790E793CC22C35ACC896E /* Debug.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER).tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MissionControl.app/MissionControl";
+			};
+			name = Debug;
+		};
+		919E1A89A5FAEB2907D25511 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4FF5B93E6D3D2FB10C426410 /* Release.xcconfig */;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER).tests";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MissionControl.app/MissionControl";
+			};
+			name = Release;
+		};
+		A0C9CBDC3F5D2E021AA2C810 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		B8E36C4A8B2CFDC412519FF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4FF5B93E6D3D2FB10C426410 /* Release.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/ShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER).share";
+				PRODUCT_NAME = MissionControlShare;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MC_SHARE_PROVISIONING_PROFILE_SPECIFIER)";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D94BCA9615542C24D412E453 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = FCE790E793CC22C35ACC896E /* Debug.xcconfig */;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/ShareExtension.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ShareExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER).share";
+				PRODUCT_NAME = MissionControlShare;
+				PROVISIONING_PROFILE_SPECIFIER = "$(MC_SHARE_PROVISIONING_PROFILE_SPECIFIER)";
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		F6FA3A7FD6D24EB27B2B2C0A /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 4FF5B93E6D3D2FB10C426410 /* Release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Config/MissionControl.entitlements;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = MissionControl/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(MC_APP_BUNDLE_IDENTIFIER)";
+				PRODUCT_NAME = MissionControl;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		42006B0654B7EB5C7A03D8A2 /* Build configuration list for PBXNativeTarget "MissionControlShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D94BCA9615542C24D412E453 /* Debug */,
+				B8E36C4A8B2CFDC412519FF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B4F6813337605AD03FB1AF40 /* Build configuration list for PBXNativeTarget "MissionControl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1B40039A80F41135ACB16C0E /* Debug */,
+				F6FA3A7FD6D24EB27B2B2C0A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E3FFA04AFA4E28149844BB1E /* Build configuration list for PBXNativeTarget "MissionControlTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3989AAADD6B1B796772FB11A /* Debug */,
+				919E1A89A5FAEB2907D25511 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E702C94A16BB968CFA62C192 /* Build configuration list for PBXProject "MissionControl" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0C9CBDC3F5D2E021AA2C810 /* Debug */,
+				1B5C4A6A1B7CE9EBE1B91095 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 208D6E4BAFD27F4031F64A88 /* Project object */;
+}

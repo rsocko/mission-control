@@ -38,12 +38,15 @@ import {
   formatDateInLocalTimezone,
   getLocalDateBoundsISO,
   getLocalToday,
+  parseStoredTimestamp,
 } from '@/lib/utils/date';
+import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 import { computeFlowInsights, type FlowInsightsResult } from '@/lib/stats/flow-query';
 import type { FlowFilters } from '@/lib/stats/flow';
 import { buildTaskAgeDistribution, type TaskAgeBucket } from './task-age';
 import {
   buildRoutineHeatmapDays,
+  getRoutineWeekContext,
   type RoutineCadenceConfig,
 } from './routine-heatmap';
 
@@ -205,69 +208,79 @@ function daysAgo(from: string, n: number): string {
   return fmtDate(d);
 }
 
-function getToday(): string {
-  return fmtDate(new Date());
+function daysBetween(a: string, b: string): number {
+  const da = new Date(a + 'T00:00:00Z');
+  const db = new Date(b + 'T00:00:00Z');
+  return Math.round((db.getTime() - da.getTime()) / (1000 * 60 * 60 * 24));
 }
 
-function daysBetween(a: string, b: string): number {
-  const da = new Date(a + 'T00:00:00');
-  const db = new Date(b + 'T00:00:00');
-  return Math.round((db.getTime() - da.getTime()) / (1000 * 60 * 60 * 24));
+function getRangeBounds(start: string, end: string) {
+  const { dayStart } = getLocalDateBoundsISO(start);
+  const { nextDayStart } = getLocalDateBoundsISO(end);
+  return { dayStart, nextDayStart };
 }
 
 // ─── Query Functions ────────────────────────────────────────────────────────
 
 async function getCompletedInRange(start: string, end: string): Promise<number> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const [row] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, start + 'T00:00:00.000Z'),
-      lt(tasks.completedAt, end + 'T23:59:59.999Z'),
+      timestampGte(tasks.completedAt, dayStart),
+      timestampLt(tasks.completedAt, nextDayStart),
     ));
   return Number(row?.count ?? 0);
 }
 
 async function getCreatedInRange(start: string, end: string): Promise<number> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const [row] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
     .where(and(
       eq(tasks.depth, 0),
       eq(tasks.isChecklistItem, false),
-      gte(tasks.createdAt, start + 'T00:00:00.000Z'),
-      lt(tasks.createdAt, end + 'T23:59:59.999Z'),
+      timestampGte(tasks.createdAt, dayStart),
+      timestampLt(tasks.createdAt, nextDayStart),
     ));
   return Number(row?.count ?? 0);
 }
 
 async function getCompletionTrends(start: string, end: string): Promise<TrendDataPoint[]> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const completedRows = await db.select({
-    date: sql<string>`date(${tasks.completedAt})`,
-    count: sql<number>`count(*)`,
+    timestamp: tasks.completedAt,
   })
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, start + 'T00:00:00.000Z'),
-      lt(tasks.completedAt, end + 'T23:59:59.999Z'),
-    ))
-    .groupBy(sql`date(${tasks.completedAt})`);
+      timestampGte(tasks.completedAt, dayStart),
+      timestampLt(tasks.completedAt, nextDayStart),
+    ));
 
   const createdRows = await db.select({
-    date: sql<string>`date(${tasks.createdAt})`,
-    count: sql<number>`count(*)`,
+    timestamp: tasks.createdAt,
   })
     .from(tasks)
     .where(and(
       eq(tasks.depth, 0),
       eq(tasks.isChecklistItem, false),
-      gte(tasks.createdAt, start + 'T00:00:00.000Z'),
-      lt(tasks.createdAt, end + 'T23:59:59.999Z'),
-    ))
-    .groupBy(sql`date(${tasks.createdAt})`);
+      timestampGte(tasks.createdAt, dayStart),
+      timestampLt(tasks.createdAt, nextDayStart),
+    ));
 
-  const completedMap = new Map(completedRows.map(r => [r.date, Number(r.count)]));
-  const createdMap = new Map(createdRows.map(r => [r.date, Number(r.count)]));
+  const completedMap = new Map<string, number>();
+  for (const row of completedRows) {
+    if (!row.timestamp) continue;
+    const date = formatDateInLocalTimezone(new Date(parseStoredTimestamp(row.timestamp)));
+    completedMap.set(date, (completedMap.get(date) ?? 0) + 1);
+  }
+  const createdMap = new Map<string, number>();
+  for (const row of createdRows) {
+    const date = formatDateInLocalTimezone(new Date(parseStoredTimestamp(row.timestamp)));
+    createdMap.set(date, (createdMap.get(date) ?? 0) + 1);
+  }
 
   const points: TrendDataPoint[] = [];
   const current = new Date(start + 'T12:00:00');
@@ -287,6 +300,7 @@ async function getCompletionTrends(start: string, end: string): Promise<TrendDat
 }
 
 export async function getSourceBreakdown(start: string, end: string): Promise<SourceBreakdownItem[]> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const rows = await db.select({
     source: tasks.connectorType,
     count: sql<number>`count(*)`,
@@ -294,8 +308,8 @@ export async function getSourceBreakdown(start: string, end: string): Promise<So
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, start + 'T00:00:00.000Z'),
-      lt(tasks.completedAt, end + 'T23:59:59.999Z'),
+      timestampGte(tasks.completedAt, dayStart),
+      timestampLt(tasks.completedAt, nextDayStart),
     ))
     .groupBy(tasks.connectorType)
     .orderBy(sql`count(*) DESC`);
@@ -309,7 +323,7 @@ export async function getSourceBreakdown(start: string, end: string): Promise<So
 }
 
 async function getTaskAgeDistribution(): Promise<TaskAgeBucket[]> {
-  const today = getToday();
+  const today = getLocalToday();
   const openTasks = await db.select({
     createdAt: tasks.createdAt,
   })
@@ -317,11 +331,15 @@ async function getTaskAgeDistribution(): Promise<TaskAgeBucket[]> {
     .where(notInArray(tasks.status, ['done', 'cancelled']));
 
   return buildTaskAgeDistribution(
-    openTasks.map(task => daysBetween(task.createdAt.slice(0, 10), today)),
+    openTasks.map(task => daysBetween(
+      formatDateInLocalTimezone(new Date(parseStoredTimestamp(task.createdAt))),
+      today,
+    )),
   );
 }
 
 async function getProjectActivity(start: string, end: string): Promise<ProjectActivityItem[]> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const projects = await db.select().from(hubProjects).where(eq(hubProjects.status, 'active'));
   if (projects.length === 0) return [];
 
@@ -335,8 +353,8 @@ async function getProjectActivity(start: string, end: string): Promise<ProjectAc
       .where(and(
         eq(taskProjects.projectId, project.id),
         eq(tasks.status, 'done'),
-        gte(tasks.completedAt, start + 'T00:00:00.000Z'),
-        lt(tasks.completedAt, end + 'T23:59:59.999Z'),
+        timestampGte(tasks.completedAt, dayStart),
+        timestampLt(tasks.completedAt, nextDayStart),
       ));
 
     // Open tasks in this project
@@ -356,8 +374,8 @@ async function getProjectActivity(start: string, end: string): Promise<ProjectAc
         eq(taskProjects.projectId, project.id),
         eq(tasks.depth, 0),
         eq(tasks.isChecklistItem, false),
-        gte(tasks.createdAt, start + 'T00:00:00.000Z'),
-        lt(tasks.createdAt, end + 'T23:59:59.999Z'),
+        timestampGte(tasks.createdAt, dayStart),
+        timestampLt(tasks.createdAt, nextDayStart),
       ));
 
     const completed = Number(completedRows[0]?.count ?? 0);
@@ -379,7 +397,10 @@ async function getProjectActivity(start: string, end: string): Promise<ProjectAc
   return results.sort((a, b) => b.completed - a.completed).slice(0, 8);
 }
 
-async function getRoutineHeatmap(weekMonday: string): Promise<RoutineHeatmapEntry[]> {
+async function getRoutineHeatmap(
+  weekMonday: string,
+  today: string,
+): Promise<RoutineHeatmapEntry[]> {
   const activeRoutines = await db.select()
     .from(routines)
     .where(and(eq(routines.isActive, true), eq(routines.isArchived, false)));
@@ -416,7 +437,6 @@ async function getRoutineHeatmap(weekMonday: string): Promise<RoutineHeatmapEntr
     }
   }
 
-  const today = getToday();
   return activeRoutines.map(routine => {
     const routineCompletionDates = completionMap.get(routine.id) ?? new Set();
     const days = buildRoutineHeatmapDays({
@@ -447,8 +467,8 @@ async function getActivityHeatmap(start: string, end: string): Promise<ActivityH
       .from(tasks)
       .where(and(
         eq(tasks.status, 'done'),
-        gte(tasks.completedAt, dayStart),
-        lt(tasks.completedAt, nextDayStart),
+        timestampGte(tasks.completedAt, dayStart),
+        timestampLt(tasks.completedAt, nextDayStart),
       )),
     db.select({
       date: routineCompletions.date,
@@ -465,7 +485,7 @@ async function getActivityHeatmap(start: string, end: string): Promise<ActivityH
   const tasksByDate = new Map<string, number>();
   for (const row of taskRows) {
     if (!row.completedAt) continue;
-    const date = formatDateInLocalTimezone(new Date(row.completedAt));
+    const date = formatDateInLocalTimezone(new Date(parseStoredTimestamp(row.completedAt)));
     tasksByDate.set(date, (tasksByDate.get(date) ?? 0) + 1);
   }
   const routinesByDate = new Map(routineRows.map(row => [row.date, Number(row.count)]));
@@ -487,6 +507,7 @@ async function getActivityHeatmap(start: string, end: string): Promise<ActivityH
 }
 
 async function getAvgTaskAge(start: string, end: string): Promise<number> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const rows = await db.select({
     createdAt: tasks.createdAt,
     completedAt: tasks.completedAt,
@@ -494,16 +515,16 @@ async function getAvgTaskAge(start: string, end: string): Promise<number> {
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, start + 'T00:00:00.000Z'),
-      lt(tasks.completedAt, end + 'T23:59:59.999Z'),
+      timestampGte(tasks.completedAt, dayStart),
+      timestampLt(tasks.completedAt, nextDayStart),
     ));
 
   if (rows.length === 0) return 0;
 
   let totalDays = 0;
   for (const row of rows) {
-    const created = new Date(row.createdAt).getTime();
-    const completed = new Date(row.completedAt!).getTime();
+    const created = parseStoredTimestamp(row.createdAt);
+    const completed = parseStoredTimestamp(row.completedAt!);
     totalDays += (completed - created) / (1000 * 60 * 60 * 24);
   }
 
@@ -511,20 +532,24 @@ async function getAvgTaskAge(start: string, end: string): Promise<number> {
 }
 
 async function getStreak(): Promise<number> {
-  const today = getToday();
+  const today = getLocalToday();
   const startDate = daysAgo(today, 90);
+  const { dayStart } = getLocalDateBoundsISO(startDate);
 
   const completions = await db.select({
-    completedDate: sql<string>`date(${tasks.completedAt})`,
+    completedAt: tasks.completedAt,
   })
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, startDate + 'T00:00:00.000Z'),
-    ))
-    .groupBy(sql`date(${tasks.completedAt})`);
+      timestampGte(tasks.completedAt, dayStart),
+    ));
 
-  const completedDates = new Set(completions.map(c => c.completedDate).filter(Boolean));
+  const completedDates = new Set(completions.flatMap(completion => (
+    completion.completedAt
+      ? [formatDateInLocalTimezone(new Date(parseStoredTimestamp(completion.completedAt)))]
+      : []
+  )));
 
   let streak = 0;
   const d = new Date(today + 'T12:00:00');
@@ -599,8 +624,8 @@ async function getDeliveryRecords(
   const conditions = [
     eq(tasks.status, 'done'),
     isNotNull(tasks.completedAt),
-    gte(tasks.completedAt, paddedStart),
-    lt(tasks.completedAt, paddedEnd),
+    timestampGte(tasks.completedAt, paddedStart),
+    timestampLt(tasks.completedAt, paddedEnd),
   ];
   if (filters.source) conditions.push(eq(tasks.connectorType, filters.source));
 
@@ -664,7 +689,7 @@ export async function computeInsightsSection(
   options: InsightsQueryOptions = {},
   now = new Date(),
 ): Promise<InsightsSectionSnapshot> {
-  const today = getToday();
+  const today = getLocalToday();
   const { periodStart: defaultPeriodStart } = getInclusivePeriodBoundaries(today, period);
   const periodStart = options.startDate ?? defaultPeriodStart;
   const periodEnd = options.endDate ?? today;
@@ -802,15 +827,11 @@ export async function computeInsightsSection(
     };
   }
 
-  const activityToday = getLocalToday();
+  const { today: activityToday, weekMonday } = getRoutineWeekContext(now, timeZone);
   const activityStart = fmtDate(addDays(subYears(new Date(activityToday + 'T12:00:00'), 1), 1));
-  const todayDate = new Date(today + 'T12:00:00');
-  const dayOfWeek = todayDate.getDay();
-  const monday = new Date(todayDate);
-  monday.setDate(monday.getDate() + (dayOfWeek === 0 ? -6 : 1 - dayOfWeek));
   const [projectActivity, routineHeatmap, activityHeatmap] = await Promise.all([
     getProjectActivity(periodStart, periodEnd),
-    getRoutineHeatmap(fmtDate(monday)),
+    getRoutineHeatmap(weekMonday, activityToday),
     getActivityHeatmap(activityStart, activityToday),
   ]);
 

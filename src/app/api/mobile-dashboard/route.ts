@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, triageItems } from '@/db/schema';
-import { and, eq, gte, lt, sql, notInArray } from 'drizzle-orm';
+import { and, eq, lt, sql, notInArray } from 'drizzle-orm';
 import { getLocalToday, getLocalDayBoundsISO } from '@/lib/utils/date';
 import logger from '@/lib/logger';
+import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 /**
  * GET /api/mobile-dashboard
@@ -54,7 +55,7 @@ async function computeTodayStats(today: string) {
 
   const [completedTodayRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(and(eq(tasks.status, 'done'), gte(tasks.completedAt, todayStart), lt(tasks.completedAt, tomorrowStart)));
+    .where(and(eq(tasks.status, 'done'), timestampGte(tasks.completedAt, todayStart), timestampLt(tasks.completedAt, tomorrowStart)));
 
   const [inProgressRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)

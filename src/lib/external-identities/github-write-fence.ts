@@ -16,9 +16,15 @@ import { GitHubStableIdentityRuntime } from './stable-identity-runtime';
 import type { GitHubIdentityResolutionDecision } from './stable-identity-types';
 
 const LEASE_MS = 60_000;
+
+const GITHUB_WRITE_FENCE_MESSAGES: Readonly<Record<string, string>> = {
+  stable_identity_evidence_blocked:
+    'GitHub sync is paused because this task identity needs reconciliation. Run a full GitHub sync, then retry.',
+};
+
 export class GitHubWriteFenceError extends Error {
   constructor(readonly code: string) {
-    super(`GitHub write fenced: ${code}`);
+    super(GITHUB_WRITE_FENCE_MESSAGES[code] ?? `GitHub write fenced: ${code}`);
     this.name = 'GitHubWriteFenceError';
   }
 }

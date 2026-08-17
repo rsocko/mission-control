@@ -239,11 +239,13 @@ vi.mock('node-cron', () => ({
   },
 }));
 
-import { SyncScheduler } from '@/lib/sync';
+import { SyncExecutionPipeline } from '@/lib/sync';
 import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock';
 
-function createScheduler(): SyncScheduler {
-  const scheduler = Object.create(SyncScheduler.prototype) as SyncScheduler;
+function createScheduler(): SyncExecutionPipeline {
+  const scheduler = Object.create(
+    SyncExecutionPipeline.prototype,
+  ) as SyncExecutionPipeline;
   Reflect.set(scheduler, 'jobs', new Map());
   Reflect.set(scheduler, 'hydratePromise', null);
   Reflect.set(scheduler, 'syncInProgress', new Set<string>());

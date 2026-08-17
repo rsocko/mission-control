@@ -308,7 +308,7 @@ export function TaskPickerDialog({
           {/* Search + Filter bar */}
           <div className="border-b border-[var(--border)] px-5 py-3 space-y-3">
             <div className="flex items-center gap-2">
-              <div className="flex flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
+              <div className="input-glow flex flex-1 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
                 <Search size={14} className="text-[var(--text-tertiary)]" />
                 <input
                   ref={inputRef}

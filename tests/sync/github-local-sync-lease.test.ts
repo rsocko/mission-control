@@ -64,7 +64,7 @@ describe('local GitHub sync operation visibility', () => {
         yield [];
       },
     } as unknown as IConnector;
-    const scheduler = new sync.SyncScheduler();
+    const scheduler = new sync.SyncExecutionPipeline();
     const internal = scheduler as unknown as {
       initializeConnectorFromDb: (connectorId: string) => Promise<IConnector | null>;
     };

@@ -6,6 +6,9 @@ vi.mock('@/lib/ai', () => ({
     configured: true,
     baseUrl: 'http://localhost:11434/v1',
     apiKey: undefined,
+    model: 'llama3.1:8b',
+    embeddingModel: 'nomic-embed-text',
+    semanticSearchEnabled: true,
   }),
   getAIRequestContext: () => ({
     featureId: 'semantic-embedding',

@@ -1,7 +1,7 @@
 /**
  * GitHub Stars importer for triage queue.
  */
-import { ingestTriageImport } from '..';
+import { ingestTriageImport } from '../capture';
 import { fetchWithRateLimit, IMPORT_USER_AGENT, MAX_PAGES } from './base-importer';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';

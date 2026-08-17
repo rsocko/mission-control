@@ -423,6 +423,8 @@ vi.mock('sonner', () => ({
     warning: vi.fn(),
   },
 }));
+const pushUndoWithToast = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/stores/undoStore', () => ({ pushUndoWithToast }));
 
 import { executeBulkOperation } from '@/components/bulk-actions/executeBulkOperation';
 import { toast } from 'sonner';
@@ -463,5 +465,28 @@ describe('executeBulkOperation', () => {
     const result = await executeBulkOperation(['a'], op, 'Done!');
     expect(result.succeeded).toEqual(['a']);
     expect(result.failed).toEqual([]);
+  });
+
+  it('centralizes failed selection, refresh, and undo registration', async () => {
+    const onSelectionChange = vi.fn();
+    const onRefresh = vi.fn();
+    const undoOperation = vi.fn();
+    const result = await executeBulkOperation(
+      ['a', 'b'],
+      vi.fn()
+        .mockResolvedValueOnce({ ok: true })
+        .mockResolvedValueOnce({ ok: false }),
+      'Updated tasks',
+      {
+        onSelectionChange,
+        onRefresh,
+        undo: { label: 'Updated task', operation: undoOperation },
+      },
+    );
+
+    expect(result).toEqual({ succeeded: ['a'], failed: ['b'] });
+    expect(onSelectionChange).toHaveBeenCalledWith(['b']);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+    expect(pushUndoWithToast).toHaveBeenCalledWith('Updated task', expect.any(Function));
   });
 });

@@ -41,6 +41,9 @@ vi.mock('motion/react', () => {
     initial?: unknown;
     animate?: unknown;
     exit?: unknown;
+    layoutId?: string;
+    transition?: unknown;
+    onAnimationComplete?: (definition: unknown) => void;
   };
 
   const MotionDiv = React.forwardRef<HTMLDivElement, MotionProps<HTMLDivElement>>(
@@ -50,13 +53,22 @@ vi.mock('motion/react', () => {
     }
   );
   const MotionNav = React.forwardRef<HTMLElement, MotionProps<HTMLElement>>(
-    function MotionNav({ children, ...props }, ref) {
+    function MotionNav({ children, onAnimationComplete, ...props }, ref) {
       const { variants, initial, animate, exit, ...rest } = props;
+      React.useEffect(() => {
+        if (animate !== 'show') return;
+        queueMicrotask(() => onAnimationComplete?.('show'));
+      }, [animate, onAnimationComplete]);
       return <nav ref={ref} {...rest}>{children}</nav>;
     }
   );
+  const MotionSpan = React.forwardRef<HTMLSpanElement, MotionProps<HTMLSpanElement>>(
+    function MotionSpan({ children, layoutId, transition, ...props }, ref) {
+      return <span ref={ref} {...props}>{children}</span>;
+    }
+  );
   return {
-    motion: { div: MotionDiv, nav: MotionNav },
+    motion: { div: MotionDiv, nav: MotionNav, span: MotionSpan },
     AnimatePresence: ({
       children,
       onExitComplete,
@@ -94,6 +106,7 @@ vi.mock('@/lib/hooks/useSyncStream', () => ({
 
 import { MobileDrawer } from '@/components/layout/MobileDrawer';
 import { MobileHeader, useNotificationDotColor } from '@/components/layout/MobileHeader';
+import { EMPTY_NAVIGATION_COUNTS } from '@/lib/navigation/badges';
 
 const unusedReturnFocusRef = React.createRef<HTMLElement>();
 
@@ -109,6 +122,25 @@ beforeEach(() => {
 // ─── MobileDrawer Tests ─────────────────────────────────────────────────────
 
 describe('MobileDrawer', () => {
+  it('shows shared notification and reconciliation counts', () => {
+    render(
+      <MobileDrawer
+        isOpen
+        onClose={vi.fn()}
+        returnFocusRef={unusedReturnFocusRef}
+        counts={{
+          ...EMPTY_NAVIGATION_COUNTS,
+          notifications: 12,
+          reconciliation: 3,
+          notificationTone: 'red',
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Notifications/ })).toHaveTextContent('12');
+    expect(screen.getByRole('link', { name: /Reconciliation/ })).toHaveTextContent('3');
+  });
+
   it('renders drawer content when open', () => {
     render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
 
@@ -147,6 +179,14 @@ describe('MobileDrawer', () => {
 
     expect(screen.getByLabelText('Search')).toBeDefined();
     expect(screen.getByPlaceholderText('Search…')).toBeDefined();
+  });
+
+  it('focuses search after the drawer entrance animation completes', async () => {
+    render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
   });
 
   it('includes sync status indicator (F-7)', () => {
@@ -261,7 +301,9 @@ describe('MobileDrawer', () => {
     render(<DrawerHarness />);
     const trigger = screen.getByLabelText('Open menu');
     fireEvent.click(trigger);
-    expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
 
     closeDrawer();
 
@@ -337,11 +379,19 @@ describe('MobileDrawer', () => {
 
   it('wraps keyboard focus within the open drawer', () => {
     render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
-    const focusable = screen.getByLabelText('Drawer navigation').querySelectorAll<HTMLElement>(
+    const drawer = screen.getByLabelText('Drawer navigation');
+    const focusable = drawer.querySelectorAll<HTMLElement>(
       'a[href], button, input, [tabindex]:not([tabindex="-1"])'
     );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    drawer.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
 
     last.focus();
     fireEvent.keyDown(document, { key: 'Tab' });
@@ -365,6 +415,24 @@ describe('MobileDrawer', () => {
 // ─── MobileHeader Tests ─────────────────────────────────────────────────────
 
 describe('MobileHeader', () => {
+  it('shows the shared notification count on the menu button', () => {
+    render(
+      <MobileHeader
+        title="Today"
+        onMenuPress={vi.fn()}
+        navigationCounts={{
+          ...EMPTY_NAVIGATION_COUNTS,
+          notifications: 12,
+          notificationTone: 'amber',
+        }}
+      />,
+    );
+
+    const menu = screen.getByLabelText('Open menu (has notifications)');
+    expect(menu).toHaveTextContent('12');
+    expect(screen.getByText('12')).toHaveClass('bg-amber-400');
+  });
+
   it('renders hamburger icon (F-8)', () => {
     render(<MobileHeader title="Today" onMenuPress={vi.fn()} />);
 

@@ -39,10 +39,10 @@ export function TodaySidebar({
         <h3 className="font-semibold text-[var(--text-primary)] text-sm">Plan & Focus</h3>
       </div>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4">
-        <div className="p-3 bg-gradient-to-br from-purple-900/20 to-blue-900/20 rounded-lg border border-purple-800/30">
-          <h4 className="text-xs font-semibold text-purple-300 uppercase mb-2 flex items-center gap-1"><Target size={11} /> Do Next</h4>
+        <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-2)] p-3">
+          <h4 className="mb-2 flex items-center gap-1 text-xs font-semibold uppercase text-[var(--accent-400)]"><Target size={11} /> Do Next</h4>
           <p className="text-xs text-[var(--text-tertiary)] mb-2">Get AI-powered focus recommendation</p>
-          <button onClick={onGetWhatsNext} disabled={whatsNextLoading} className="w-full px-3 py-1.5 text-xs bg-purple-600 text-white rounded-md hover:bg-purple-700 font-medium disabled:opacity-50 transition-colors">
+          <button onClick={onGetWhatsNext} disabled={whatsNextLoading} className="w-full rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-400)] disabled:opacity-50">
             {whatsNextLoading ? 'Thinking...' : 'Suggest Next Task'}
           </button>
         </div>

@@ -6,6 +6,7 @@ import { Plus, Loader2, Target } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils/cn';
 import { staggerContainer } from '@/lib/motion';
+import { parseLocalDate } from '@/lib/utils/date-format';
 import { MobileGoalCard } from './MobileGoalCard';
 import { EmptyState } from './EmptyState';
 import type { FilterType, GoalItem } from './types';
@@ -20,7 +21,8 @@ function isInCurrentQuarter(item: GoalItem): boolean {
 
   const dateStr = item.dueDate || item.createdAt;
   if (!dateStr) return true;
-  const date = new Date(dateStr);
+  const date = item.dueDate ? parseLocalDate(dateStr) : new Date(dateStr);
+  if (!date || Number.isNaN(date.getTime())) return true;
   return date >= quarterStart && date < nextQuarterStart;
 }
 
@@ -29,7 +31,8 @@ function isInCurrentYear(item: GoalItem): boolean {
   const now = new Date();
   const dateStr = item.dueDate || item.createdAt;
   if (!dateStr) return true;
-  return new Date(dateStr).getFullYear() === now.getFullYear();
+  const date = item.dueDate ? parseLocalDate(dateStr) : new Date(dateStr);
+  return !date || Number.isNaN(date.getTime()) || date.getFullYear() === now.getFullYear();
 }
 
 function getCurrentQuarterLabel(): string {

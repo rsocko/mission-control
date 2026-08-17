@@ -4,7 +4,7 @@ import { triageItems } from '@/db/schema';
 import { like } from 'drizzle-orm';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { getThumbnailCacheStats, removeOrphanedThumbnails } from '@/lib/triage/thumbnail-cache';
-import { purgeDismissedItems } from '@/lib/triage';
+import { purgeDismissedItems } from '@/lib/triage/lifecycle';
 import logger from '@/lib/logger';
 
 /**

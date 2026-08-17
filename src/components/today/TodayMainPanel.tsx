@@ -44,7 +44,6 @@ import {
   useBulkSelection,
 } from '@/components/bulk-actions';
 import { TodayRoutinesSection } from '@/components/routines/TodayRoutinesSection';
-import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { GroupByDropdown } from '@/components/toolbar/GroupByDropdown';
 import { DEFAULT_SORT_OPTIONS, SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
@@ -60,15 +59,16 @@ import { TimerPanel } from '@/components/today/TimerPanel';
 import { uiLogger } from '@/lib/client-logger';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useViewMode } from '@/lib/hooks/useViewMode';
-import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
-import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
+import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { buildGraphUniverseHref } from '@/lib/graph/graph-navigation';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import {
   EMPTY_TASK_FILTER_CONTEXT,
   taskFilterContextForToday,
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import { useTaskContextMenuActionFactory } from '@/lib/hooks/useTaskContextMenuActionFactory';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -110,54 +110,64 @@ const MY_DAY_SORT_OPTIONS: readonly SortOption[] = [
 ];
 
 interface TodayMainPanelProps {
-  items: MyDayItem[];
-  scheduled: ScheduledTask[];
-  calendarEvents: CalendarEvent[];
-  loading: boolean;
-  energyLevel: EnergyLevel | null;
-  setItems: Dispatch<SetStateAction<MyDayItem[]>>;
-  onSetEnergyLevel: Dispatch<SetStateAction<EnergyLevel | null>>;
-  fetchData: (options?: { skipSync?: boolean }) => Promise<void>;
-  todayISO: string;
-  selectedTaskId: string | null;
-  onSelectTask: (taskId: string | null) => void;
-  onDoubleClickTask?: (taskId: string) => void;
-  onCancelPendingTaskSelection?: () => void;
-  showTimer: boolean;
-  onSetShowTimer: Dispatch<SetStateAction<boolean>>;
-  focusTask: MyDayItem | null;
-  onSetFocusTask: Dispatch<SetStateAction<MyDayItem | null>>;
-  onCompleteTask: (taskId: string) => Promise<boolean>;
-  onStartFocus: (item: MyDayItem) => void;
-  onOpenScheduleModal: (taskId: string | null) => void;
-  onRemoveFromDay: (taskId: string) => Promise<void>;
-  onSetTaskPriority: (taskId: string, priority: string) => Promise<void>;
-  onSetTaskStatus: (taskId: string, status: string) => Promise<void>;
-  onSetTaskDueDate: (taskId: string, date: string | null) => Promise<void>;
-  onSetTaskLocalDisposition: (taskId: string, disposition: LocalDisposition) => Promise<boolean>;
-  onOpenTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
-  onMoveTaskToList: (taskId: string, targetListId: string) => Promise<void>;
-  onDeleteTask: (taskId: string) => Promise<void>;
-  onAddTaskToProject: (taskId: string, projectId: string, phaseId?: string | null) => Promise<void>;
-  onSaveTemplateTask: Dispatch<SetStateAction<SaveTemplateTask | null>>;
-  sourceLists: SourceList[];
-  listGroups?: ListGroup[];
-  projects: HubProject[];
-  completingIds: Set<string>;
-  whatsNextResult: string | null;
-  onSetWhatsNextResult: Dispatch<SetStateAction<string | null>>;
-  onGetWhatsNext: () => Promise<void>;
-  dayPlan: DayPlan | null;
-  onSetDayPlan: Dispatch<SetStateAction<DayPlan | null>>;
-  planningDay: boolean;
-  onPlanMyDay: () => Promise<void>;
-  onScheduleAtTime: (taskId: string, time: string, duration: number) => Promise<void>;
-  onUnscheduleTask: (taskId: string) => Promise<void>;
-  onResizeScheduledTask: (taskId: string, newDuration: number) => Promise<void>;
-  onSetConfirmDialog: Dispatch<SetStateAction<ConfirmDialogState>>;
-  suggestions?: SuggestionGroups;
-  onAddToDay?: (taskId: string) => void;
-  onMoveToSource?: (taskId: string) => void;
+  data: {
+    items: MyDayItem[];
+    scheduled: ScheduledTask[];
+    calendarEvents: CalendarEvent[];
+    loading: boolean;
+    energyLevel: EnergyLevel | null;
+    todayISO: string;
+    sourceLists: SourceList[];
+    listGroups?: ListGroup[];
+    projects: HubProject[];
+    completingIds: Set<string>;
+    suggestions?: SuggestionGroups;
+  };
+  taskActions: {
+    setItems: Dispatch<SetStateAction<MyDayItem[]>>;
+    fetchData: (options?: { skipSync?: boolean }) => Promise<void>;
+    completeTask: (taskId: string) => Promise<boolean>;
+    removeFromDay: (taskId: string) => Promise<void>;
+    setPriority: (taskId: string, priority: string) => Promise<void>;
+    setStatus: (taskId: string, status: string) => Promise<void>;
+    setDueDate: (taskId: string, date: string | null) => Promise<void>;
+    setLocalDisposition: (taskId: string, disposition: LocalDisposition) => Promise<boolean>;
+    moveToList: (taskId: string, targetListId: string) => Promise<void>;
+    deleteTask: (taskId: string) => Promise<void>;
+    addToProject: (taskId: string, projectId: string, phaseId?: string | null) => Promise<void>;
+    saveTemplateTask: Dispatch<SetStateAction<SaveTemplateTask | null>>;
+    openNotes: (taskId: string, mode: 'read' | 'edit') => void;
+    addToDay?: (taskId: string) => void;
+    moveToSource?: (taskId: string) => void;
+  };
+  selection: {
+    selectedTaskId: string | null;
+    selectTask: (taskId: string | null) => void;
+    doubleClickTask?: (taskId: string) => void;
+    cancelPendingTaskSelection?: () => void;
+  };
+  focus: {
+    showTimer: boolean;
+    setShowTimer: Dispatch<SetStateAction<boolean>>;
+    focusTask: MyDayItem | null;
+    setFocusTask: Dispatch<SetStateAction<MyDayItem | null>>;
+    startFocus: (item: MyDayItem) => void;
+  };
+  planning: {
+    openScheduleModal: (taskId: string | null) => void;
+    whatsNextResult: string | null;
+    setWhatsNextResult: Dispatch<SetStateAction<string | null>>;
+    getWhatsNext: () => Promise<void>;
+    dayPlan: DayPlan | null;
+    setDayPlan: Dispatch<SetStateAction<DayPlan | null>>;
+    planningDay: boolean;
+    planMyDay: () => Promise<void>;
+    scheduleAtTime: (taskId: string, time: string, duration: number) => Promise<void>;
+    unscheduleTask: (taskId: string) => Promise<void>;
+    resizeScheduledTask: (taskId: string, newDuration: number) => Promise<void>;
+    setConfirmDialog: Dispatch<SetStateAction<ConfirmDialogState>>;
+  };
+  setEnergyLevel: Dispatch<SetStateAction<EnergyLevel | null>>;
 }
 
 export function TodayViewSwitcher({
@@ -188,55 +198,40 @@ export function TodayViewSwitcher({
 }
 
 export function TodayMainPanel({
-  items,
-  scheduled,
-  calendarEvents,
-  loading,
-  energyLevel,
-  setItems,
-  onSetEnergyLevel,
-  fetchData,
-  todayISO,
-  selectedTaskId,
-  onSelectTask,
-  onDoubleClickTask,
-  onCancelPendingTaskSelection,
-  showTimer,
-  onSetShowTimer,
-  focusTask,
-  onSetFocusTask,
-  onCompleteTask,
-  onStartFocus,
-  onOpenScheduleModal,
-  onRemoveFromDay,
-  onSetTaskPriority,
-  onSetTaskStatus,
-  onSetTaskDueDate,
-  onSetTaskLocalDisposition,
-  onMoveTaskToList,
-  onDeleteTask,
-  onAddTaskToProject,
-  onSaveTemplateTask,
-  sourceLists,
-  listGroups,
-  projects,
-  completingIds,
-  whatsNextResult,
-  onSetWhatsNextResult,
-  onGetWhatsNext,
-  dayPlan,
-  onSetDayPlan,
-  planningDay,
-  onPlanMyDay,
-  onScheduleAtTime,
-  onUnscheduleTask,
-  onResizeScheduledTask,
-  onSetConfirmDialog,
-  suggestions,
-  onAddToDay,
-  onMoveToSource,
-  onOpenTaskNotes,
+  data,
+  taskActions,
+  selection,
+  focus,
+  planning,
+  setEnergyLevel: onSetEnergyLevel,
 }: TodayMainPanelProps) {
+  const {
+    items, scheduled, calendarEvents, loading, energyLevel, todayISO, sourceLists,
+    listGroups, projects, completingIds, suggestions,
+  } = data;
+  const {
+    setItems, fetchData, completeTask: onCompleteTask, removeFromDay: onRemoveFromDay,
+    setPriority: onSetTaskPriority, setStatus: onSetTaskStatus,
+    setDueDate: onSetTaskDueDate, setLocalDisposition: onSetTaskLocalDisposition,
+    moveToList: onMoveTaskToList, deleteTask: onDeleteTask,
+    addToProject: onAddTaskToProject, saveTemplateTask: onSaveTemplateTask,
+    openNotes: onOpenTaskNotes, addToDay: onAddToDay, moveToSource: onMoveToSource,
+  } = taskActions;
+  const {
+    selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
+    cancelPendingTaskSelection: onCancelPendingTaskSelection,
+  } = selection;
+  const {
+    showTimer, setShowTimer: onSetShowTimer, focusTask, setFocusTask: onSetFocusTask,
+    startFocus: onStartFocus,
+  } = focus;
+  const {
+    openScheduleModal: onOpenScheduleModal, whatsNextResult,
+    setWhatsNextResult: onSetWhatsNextResult, getWhatsNext: onGetWhatsNext, dayPlan,
+    setDayPlan: onSetDayPlan, planningDay, planMyDay: onPlanMyDay,
+    scheduleAtTime: onScheduleAtTime, unscheduleTask: onUnscheduleTask,
+    resizeScheduledTask: onResizeScheduledTask, setConfirmDialog: onSetConfirmDialog,
+  } = planning;
   const bulk = useBulkSelection();
   const selectedBulkItems = items.filter((item) => bulk.bulkSelected.has(item.taskId));
   const selectedBulkPolicies = selectedBulkItems.map((item) => item.editPolicy);
@@ -275,6 +270,7 @@ export function TodayMainPanel({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'T') {
         event.preventDefault();
         onSetShowTimer((current) => !current);
@@ -458,38 +454,19 @@ export function TodayMainPanel({
     }
   }
 
-  function buildContextMenuActions(item: MyDayItem): TaskContextMenuActions {
-    const recurrence = extractRecurrenceFromMetadata(item.metadata);
-    return {
-      onComplete: () => { void onCompleteTask(item.taskId); },
-      onSetPriority: (priority) => { void onSetTaskPriority(item.taskId, priority); },
-      onSetStatus: (status) => { void onSetTaskStatus(item.taskId, status); },
-      onRemoveFromMyDay: () => { void onRemoveFromDay(item.taskId); },
-      onDueToday: () => { void onSetTaskDueDate(item.taskId, getClientToday()); },
-      onDueTomorrow: () => { void onSetTaskDueDate(item.taskId, getClientTomorrow()); },
-      onPickDate: (date) => { void onSetTaskDueDate(item.taskId, date); },
-      onClearDueDate: () => { void onSetTaskDueDate(item.taskId, ''); },
-      onSetLocalDisposition: (disposition) => { void onSetTaskLocalDisposition(item.taskId, disposition); },
-      onSkipToCurrent: recurrence && item.dueDate
-        ? () => { void onSetTaskDueDate(item.taskId, getNextRecurringDate(item.dueDate!.split('T')[0], recurrence, getClientToday())); }
-        : undefined,
-      onMoveToList: (listId) => { void onMoveTaskToList(item.taskId, listId); },
-      onMoveToSource: onMoveToSource ? () => { onMoveToSource(item.taskId); } : undefined,
-      onAddToProject: (projectId, phaseId) => { void onAddTaskToProject(item.taskId, projectId, phaseId); },
-      onDelete: () => { void onDeleteTask(item.taskId); },
-      onSaveAsTemplate: () => {
-        fetch(`/api/tasks/${item.taskId}/subtasks`)
-          .then((response) => response.ok ? response.json() : { subtasks: [] })
-          .then((data) => {
-            const subtaskTitles = (data.subtasks || []).map((subtask: { title: string }) => subtask.title);
-            onSaveTemplateTask({ id: item.taskId, title: item.title, subtasks: subtaskTitles });
-          })
-          .catch(() => {
-            onSaveTemplateTask({ id: item.taskId, title: item.title });
-          });
-      },
-    };
-  }
+  const getContextMenuActions = useTaskContextMenuActionFactory({
+    complete: onCompleteTask,
+    setPriority: onSetTaskPriority,
+    setStatus: onSetTaskStatus,
+    removeFromMyDay: onRemoveFromDay,
+    setDueDate: onSetTaskDueDate,
+    setLocalDisposition: onSetTaskLocalDisposition,
+    moveToList: onMoveTaskToList,
+    moveToSource: onMoveToSource,
+    addToProject: onAddTaskToProject,
+    deleteTask: onDeleteTask,
+    saveAsTemplate: onSaveTemplateTask,
+  });
 
   const totalMinutes = scheduled
     .filter((task) => task.status !== 'cancelled')
@@ -620,10 +597,10 @@ export function TodayMainPanel({
         <EnergyCheckIn currentLevel={energyLevel} onEnergySet={(level) => onSetEnergyLevel(level)} />
 
         {focusTask && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-purple-900/20 to-blue-900/20 border border-purple-800/40 rounded-lg">
+          <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-medium text-purple-400 uppercase tracking-wide mb-1 flex items-center gap-1"><Target size={11} /> Focusing On</p>
+                <p className="mb-1 flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-[var(--accent-400)]"><Target size={11} /> Focusing On</p>
                 <h3 className="text-base font-semibold text-[var(--text-primary)]">{focusTask.title}</h3>
                 <p className="text-xs text-[var(--text-tertiary)] mt-0.5"><ConnectorIcon type={focusTask.connectorType} size={12} /> {focusTask.sourceListName || focusTask.connectorType}</p>
               </div>
@@ -658,12 +635,12 @@ export function TodayMainPanel({
         )}
 
         {dayPlan && (
-          <div className="mb-6 p-4 bg-gradient-to-r from-blue-900/20 to-purple-900/20 border border-blue-800/40 rounded-lg">
+          <div className="mb-6 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4">
             <div className="flex items-center justify-between mb-3"><p className="text-xs font-medium text-blue-400 uppercase tracking-wide flex items-center gap-1"><Wand2 size={11} /> AI Day Plan</p><button onClick={() => onSetDayPlan(null)} className="text-[var(--text-muted)] hover:text-[var(--text-secondary)] text-xs">?</button></div>
             <p className="text-sm text-[var(--text-secondary)] mb-3">{dayPlan.summary}</p>
             <div className="space-y-1">
               {dayPlan.plan.map((block, index) => (
-                <div key={index} className={`flex items-center gap-3 px-3 py-2 rounded-md text-xs ${block.type === 'calendar' ? 'bg-amber-900/20 border-l-2 border-amber-500' : block.type === 'break' ? 'bg-[var(--surface-0)] border-l-2 border-[var(--border)]' : block.type === 'focus' ? 'bg-purple-900/20 border-l-2 border-purple-500' : 'bg-blue-900/20 border-l-2 border-blue-500'}`}>
+                <div key={index} className={`flex items-center gap-3 rounded-md border px-3 py-2 text-xs ${block.type === 'calendar' ? 'border-amber-500/40 bg-amber-900/20' : block.type === 'break' ? 'border-[var(--border)] bg-[var(--surface-0)]' : block.type === 'focus' ? 'border-[var(--accent)]/40 bg-[var(--accent-muted)]/20' : 'border-cyan-500/40 bg-cyan-900/20'}`}>
                   <span className="text-[var(--text-muted)] font-mono w-12 shrink-0">{block.time}</span>
                   <span className="text-[var(--text-primary)] flex-1 font-medium">{block.title}</span>
                   <span className="text-[var(--text-muted)]">{block.duration}m</span>
@@ -966,7 +943,13 @@ export function TodayMainPanel({
                                         onCancelPendingTaskSelection?.();
                                         bulk.toggleItem(item.taskId);
                                       }}
-                                      contextMenuActions={buildContextMenuActions(item)}
+                                      contextMenuActions={getContextMenuActions({
+                                        id: item.taskId,
+                                        title: item.title,
+                                        dueDate: item.dueDate,
+                                        metadata: item.metadata,
+                                        isInMyDay: true,
+                                      })}
                                       onSetDueDate={(date) => onSetTaskDueDate(item.taskId, date)}
                                       onSetPriority={(priority) => onSetTaskPriority(item.taskId, priority)}
                                       onSetStatus={(status) => onSetTaskStatus(item.taskId, status)}
@@ -1069,7 +1052,7 @@ export function InProgressPanel({
   onStartFocus: (item: MyDayItem) => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-lg border border-blue-500/35 bg-gradient-to-br from-blue-950/25 to-[var(--surface-1)] shadow-[inset_3px_0_0_rgba(59,130,246,0.8)]">
+    <section className="overflow-hidden rounded-[var(--radius-lg)] border border-blue-500/35 bg-[var(--surface-1)]">
       <div className="flex items-center justify-between border-b border-blue-500/15 px-4 py-3">
         <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.15em] text-blue-300">
           <CircleDot size={13} className="text-blue-400" />

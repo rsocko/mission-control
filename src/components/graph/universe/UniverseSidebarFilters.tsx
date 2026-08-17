@@ -73,93 +73,101 @@ export function UniverseSidebarFilters({
   return (
     <div className="relative hidden shrink-0 sm:flex">
       <SidebarFilters
-      taskResponse={taskResponse}
-      enabledSources={options.sources}
-      sourceLists={options.sourceLists}
-      listGroups={options.listGroups}
-      syncStatus={[]}
-      allTags={options.tags}
-      projects={options.projects}
-      savedViews={options.savedViews}
-      allSourceCounts={allSourceCounts}
-      sourceFilter={sourceFilter}
-      listFilter={selectedList?.sourceId ?? null}
-      listGroupFilter={context.listGroupId}
-      tagFilter={context.tagSlugs}
-      quickFilter={context.quickFilter}
-      projectFilter={context.projectId}
-      priorityFilter={context.priorities}
-      statusFilter={context.statuses}
-      sidebarExpanded={sidebarExpanded}
-      sidebarMode={sidebarMode}
-      collapsedSections={collapsedSections}
-      expandedSourceLists={expandedSourceLists}
-      collapsedListGroups={collapsedListGroups}
-      listSearch={listSearch}
-      tagSearch={tagSearch}
-      tagsExpanded={tagsExpanded}
-      isSyncing={false}
-      setSourceFilter={(value) => {
-        const sourceChanged = value !== selectedSourceRef.current;
-        selectedSourceRef.current = value;
-        update({
-          sources: value ? [value] : [],
-          ...(sourceChanged || !value ? { listIds: [], listGroupId: null } : {}),
-        });
-      }}
-      setListFilter={(value) => {
-        const selectedSource = selectedSourceRef.current;
-        const list = value
-          ? options.sourceLists.find((candidate) =>
-              candidate.sourceId === value
-              && (!selectedSource || candidate.connectorType === selectedSource))
-          : null;
-        update({ listIds: list ? [exactListId(list)] : [] });
-      }}
-      setListGroupFilter={(value) => update({ listGroupId: value })}
-      setTagFilter={(action) => update({
-        tagSlugs: resolveArrayUpdate(action, context.tagSlugs),
-      })}
-      setQuickFilter={(value) => update({
-        quickFilter: value,
-        myDayDate: value === 'myDay' ? getLocalToday() : null,
-        ...(value === 'myDay' ? { completion: 'all' as const } : {}),
-      })}
-      setProjectFilter={(value) => update({ projectId: value })}
-      setPriorityFilter={(action) => update({
-        priorities: resolveArrayUpdate(action, context.priorities),
-      })}
-      setStatusFilter={(action) => update({
-        statuses: resolveArrayUpdate(action, context.statuses),
-      })}
-      setSidebarExpanded={setSidebarExpanded}
-      setSidebarMode={setSidebarMode}
-      toggleSection={(section) => setCollapsedSections((current) => {
-        const next = new Set(current);
-        if (next.has(section)) next.delete(section);
-        else next.add(section);
-        return next;
-      })}
-      setExpandedSourceLists={setExpandedSourceLists}
-      setCollapsedListGroups={setCollapsedListGroups}
-      setListSearch={setListSearch}
-      setTagSearch={setTagSearch}
-      setTagsExpanded={setTagsExpanded}
-      applyView={(view) => setContext(
-        view.filterContext ?? taskFilterContextFromSavedView(view.filters),
-        'push',
-      )}
-      hiddenQuickFilters={hiddenQuickFilters}
-      toggleQuickFilterVisibility={(filterId) => setHiddenQuickFilters((current) =>
-        current.includes(filterId)
-          ? current.filter((id) => id !== filterId)
-          : [...current, filterId])}
-      sourceHasLists={(sourceType) => options.sourceLists.some(
-        (list) => list.connectorType === sourceType,
-      )}
-      getSourceListsForType={(sourceType) => options.sourceLists.filter(
-        (list) => list.connectorType === sourceType,
-      )}
+        data={{
+          taskResponse,
+          enabledSources: options.sources,
+          sourceLists: options.sourceLists,
+          listGroups: options.listGroups,
+          allTags: options.tags,
+          projects: options.projects,
+          savedViews: options.savedViews,
+          allSourceCounts,
+        }}
+        filters={{
+          sourceFilter,
+          listFilter: selectedList?.sourceId ?? null,
+          listGroupFilter: context.listGroupId,
+          tagFilter: context.tagSlugs,
+          quickFilter: context.quickFilter,
+          projectFilter: context.projectId,
+          priorityFilter: context.priorities,
+          statusFilter: context.statuses,
+          hiddenQuickFilters,
+        }}
+        sidebar={{
+          sidebarExpanded,
+          sidebarMode,
+          collapsedSections,
+          expandedSourceLists,
+          collapsedListGroups,
+          listSearch,
+          tagSearch,
+          tagsExpanded,
+        }}
+        actions={{
+          setSourceFilter: (value) => {
+            const sourceChanged = value !== selectedSourceRef.current;
+            selectedSourceRef.current = value;
+            update({
+              sources: value ? [value] : [],
+              ...(sourceChanged || !value ? { listIds: [], listGroupId: null } : {}),
+            });
+          },
+          setListFilter: (value) => {
+            const selectedSource = selectedSourceRef.current;
+            const list = value
+              ? options.sourceLists.find((candidate) =>
+                  candidate.sourceId === value
+                  && (!selectedSource || candidate.connectorType === selectedSource))
+              : null;
+            update({ listIds: list ? [exactListId(list)] : [] });
+          },
+          setListGroupFilter: (value) => update({ listGroupId: value }),
+          setTagFilter: (action) => update({
+            tagSlugs: resolveArrayUpdate(action, context.tagSlugs),
+          }),
+          setQuickFilter: (value) => update({
+            quickFilter: value,
+            myDayDate: value === 'myDay' ? getLocalToday() : null,
+            ...(value === 'myDay' ? { completion: 'all' as const } : {}),
+          }),
+          setProjectFilter: (value) => update({ projectId: value }),
+          setPriorityFilter: (action) => update({
+            priorities: resolveArrayUpdate(action, context.priorities),
+          }),
+          setStatusFilter: (action) => update({
+            statuses: resolveArrayUpdate(action, context.statuses),
+          }),
+          setSidebarExpanded,
+          setSidebarMode,
+          toggleSection: (section) => setCollapsedSections((current) => {
+            const next = new Set(current);
+            if (next.has(section)) next.delete(section);
+            else next.add(section);
+            return next;
+          }),
+          setExpandedSourceLists,
+          setCollapsedListGroups,
+          setListSearch,
+          setTagSearch,
+          setTagsExpanded,
+          applyView: (view) => setContext(
+            view.filterContext ?? taskFilterContextFromSavedView(view.filters),
+            'push',
+          ),
+          toggleQuickFilterVisibility: (filterId) => setHiddenQuickFilters((current) =>
+            current.includes(filterId)
+              ? current.filter((id) => id !== filterId)
+              : [...current, filterId]),
+        }}
+        computed={{
+          sourceHasLists: (sourceType) => options.sourceLists.some(
+            (list) => list.connectorType === sourceType,
+          ),
+          getSourceListsForType: (sourceType) => options.sourceLists.filter(
+            (list) => list.connectorType === sourceType,
+          ),
+        }}
       />
       {options.loading ? (
         <div

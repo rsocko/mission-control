@@ -3,10 +3,7 @@ import type {
   ConnectorFactory,
   TransferIdentityRefresh,
 } from '../index';
-import {
-  ConnectorWritebackError,
-  type NotificationWritebackAction,
-} from '../notification-writeback-contract';
+import { type NotificationWritebackAction } from '../notification-writeback-contract';
 import type {
  TaskItem,
  TaskPriority,
@@ -19,19 +16,18 @@ import type {
  SourceTaskDependencySnapshot,
 } from '@/types';
 import type {
-  ExternalIdentityEvidence,
   ExternalIdentityObservation,
 } from '@/lib/external-identities/types';
-import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import db, { sqlite } from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { GITHUB_ISSUES_TASK_AUTHORITY } from '../task-source-profiles';
 import { mergeAsyncStreams } from '../task-page-stream';
+import {
+  mergeConnectorSettings,
+  patchConnectorSettingsState,
+} from '../shared/connector-config-store';
 
 import { createGitHubClient } from './github-client';
-import type { GitHubClient, GitHubRestIssue, GitHubRestRepository, GitHubNotification, GitHubProjectV2, GitHubProjectV2Item } from './github-client';
+import type { GitHubClient, GitHubRestIssue, GitHubRestRepository } from './github-client';
 import {
   isNativeGitHubIssueSourceId,
   mapGraphQLIssueToTask,
@@ -56,10 +52,19 @@ import {
   type GitHubWriteOutcomeReadRequest,
   type GitHubWriteOutcomeReadResult,
 } from '@/lib/external-identities';
-import { assertUniqueGitHubProjectIdentities } from '@/lib/sync/github-project-association-identity';
+import {
+  GitHubProjectsSyncService,
+  type GitHubProjectAssociation,
+} from './projects-sync-service';
+import {
+  GitHubNotificationsAdapter,
+  type GitHubNotificationPollState,
+} from './notifications-adapter';
 
 export type { GitHubClient } from './github-client';
 export type { GraphQLIssue, GitHubRestIssue, GitHubNotification, GitHubProjectV2, GitHubProjectV2Item } from './github-client';
+export type { GitHubProjectAssociation } from './projects-sync-service';
+export type { GitHubNotificationPollState } from './notifications-adapter';
 export {
   executeGitHubRepositoryRepoint,
   getGitHubRepositoryRepointStatus,
@@ -92,18 +97,6 @@ function writeRouteKey(owner: string, repository: string, issueNumber: number): 
   return `${owner.toLowerCase()}/${repository.toLowerCase()}:${issueNumber}`;
 }
 
-/** Data returned from project sync to create hub projects and link tasks */
-export interface GitHubProjectAssociation {
-  project: GitHubProjectV2;
-  membershipState: 'complete' | 'partial' | 'inaccessible';
-  /** Task sourceIds that belong to this project */
-  taskSourceIds: string[];
-  taskIdentityEvidence: Array<{
-    sourceId: string;
-    evidence: ExternalIdentityEvidence;
-  }>;
-}
-
 export interface GitHubRepositoryFetchState {
   sourceId: string;
   state: 'complete' | 'partial' | 'inaccessible';
@@ -129,42 +122,6 @@ interface GitHubConfig {
   authenticatedUser?: string;
   notificationPollState?: GitHubNotificationPollState;
 }
-
-interface GitHubNotificationPollState {
-  checkpointSince?: string;
-  pendingSince?: string;
-  continuationUrl?: string;
-  etag?: string;
-  lastModified?: string;
-  nextPollAt?: string;
-  pollIntervalSeconds?: number;
-}
-
-interface GitHubNotificationPollCompletion {
-  checkpointSince: string;
-  etag?: string;
-  lastModified?: string;
-  pollIntervalSeconds: number;
-  nextPollAt: string;
-}
-
-const GITHUB_NOTIFICATION_PAGE_SIZE = 50;
-const DEFAULT_GITHUB_POLL_INTERVAL_SECONDS = 60;
-const KNOWN_GITHUB_NOTIFICATION_REASONS = new Set([
-  'approval_requested',
-  'assign',
-  'author',
-  'ci_activity',
-  'comment',
-  'invitation',
-  'manual',
-  'mention',
-  'review_requested',
-  'security_alert',
-  'state_change',
-  'subscribed',
-  'team_mention',
-]);
 
 export class GitHubIssuesConnector implements IConnector {
   readonly id: string = '';
@@ -198,17 +155,18 @@ export class GitHubIssuesConnector implements IConnector {
   private config: ConnectorConfig | null = null;
   private client: GitHubClient | null = null;
   private repos: string[] = [];
-  private fetchNotificationsEnabled = true;
-  private notificationReasons: string[] = [];
-  private participatingOnly = false;
-  private authenticatedUser = '';
-  private notificationPollState: GitHubNotificationPollState = {};
-  private pendingNotificationPollCompletion: GitHubNotificationPollCompletion | null = null;
   private repositoryEvidenceBySourceId = new Map<string, ExternalIdentityObservation>();
   private repositoryFetchStateBySourceId = new Map<string, GitHubRepositoryFetchState>();
   private repositoryCanonicalNameBySourceId = new Map<string, string>();
   private repositoryCanonicalNameFetchBySourceId = new Map<string, Promise<string | undefined>>();
   private dependencyReadMode: SourceTaskDependencyReadMode | null = null;
+  private readonly projectsSync = new GitHubProjectsSyncService();
+  private readonly notifications = new GitHubNotificationsAdapter({
+    connectorType: this.type,
+    getConnectorId: () => this.id,
+    getClient: () => this.client!,
+    persistPollState: (patch) => this.persistNotificationPollState(patch),
+  });
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -217,11 +175,13 @@ export class GitHubIssuesConnector implements IConnector {
     const token = config.credentials.token || config.credentials.pat || settings.token || '';
     this.client = createGitHubClient(token, settings.apiOrigin);
     this.repos = settings.repos || [];
-    this.fetchNotificationsEnabled = settings.fetchNotifications ?? true;
-    this.notificationReasons = settings.notificationReasons || [];
-    this.participatingOnly = settings.participatingOnly ?? false;
-    this.authenticatedUser = settings.authenticatedUser || '';
-    this.notificationPollState = settings.notificationPollState || {};
+    this.notifications.configure({
+      fetchNotificationsEnabled: settings.fetchNotifications ?? true,
+      notificationReasons: settings.notificationReasons || [],
+      participatingOnly: settings.participatingOnly ?? false,
+      authenticatedUser: settings.authenticatedUser || '',
+      notificationPollState: settings.notificationPollState || {},
+    });
     this.repositoryCanonicalNameBySourceId.clear();
     this.repositoryCanonicalNameFetchBySourceId.clear();
   }
@@ -233,10 +193,9 @@ export class GitHubIssuesConnector implements IConnector {
         const user = await res.json();
         if (this.config) {
           const currentSettings = (this.config.settings || {}) as Record<string, unknown>;
-          const updatedSettings = { ...currentSettings, authenticatedUser: user.login };
-          await db.update(connectorConfigs)
-            .set({ settings: JSON.stringify(updatedSettings) })
-            .where(eq(connectorConfigs.id, this.config.id));
+          await mergeConnectorSettings(this.config.id, currentSettings, {
+            authenticatedUser: user.login,
+          });
         }
         return { success: true, message: `Connected as @${user.login}` };
       }
@@ -249,15 +208,32 @@ export class GitHubIssuesConnector implements IConnector {
   async dispose(): Promise<void> {
     this.config = null;
     this.client = null;
-    this.fetchNotificationsEnabled = true;
-    this.notificationReasons = [];
-    this.participatingOnly = false;
-    this.notificationPollState = {};
+    this.notifications.resetForDispose();
     this.repositoryEvidenceBySourceId.clear();
     this.repositoryFetchStateBySourceId.clear();
     this.repositoryCanonicalNameBySourceId.clear();
     this.repositoryCanonicalNameFetchBySourceId.clear();
     this.dependencyReadMode = null;
+  }
+
+  /**
+   * Persists a merge-patch of the notification poll checkpoint through the
+   * shared connector config store. Routed through here (rather than the
+   * notifications adapter importing `@/db` directly) so the adapter stays
+   * unit-testable without a real database, while the facade remains the only
+   * GitHub-issues module that owns a live `ConnectorConfig`.
+   */
+  private async persistNotificationPollState(
+    patch: Partial<GitHubNotificationPollState>,
+  ): Promise<GitHubNotificationPollState> {
+    if (!this.config) throw new Error('GitHub connector is not initialized');
+    const { settings, state } = patchConnectorSettingsState<GitHubNotificationPollState>(
+      this.id,
+      'notificationPollState',
+      patch,
+    );
+    this.config = { ...this.config, settings };
+    return state;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -321,8 +297,14 @@ export class GitHubIssuesConnector implements IConnector {
     this.repositoryCanonicalNameBySourceId.clear();
     this.repositoryCanonicalNameFetchBySourceId.clear();
     try {
-      const { metadataBySourceId, draftTasks } = await this.fetchProjectTaskContext();
-      const incompleteProject = this.lastProjectAssociations.find(
+      const { metadataBySourceId, draftTasks } = await this.projectsSync.fetchProjectTaskContext({
+        client: this.client!,
+        repos: this.repos,
+        connectorId: this.id,
+        connectorType: this.type,
+        repositoryEvidenceBySourceId: this.repositoryEvidenceBySourceId,
+      });
+      const incompleteProject = this.projectsSync.getLastAssociations().find(
         (association) => association.membershipState !== 'complete',
       );
 
@@ -397,7 +379,7 @@ export class GitHubIssuesConnector implements IConnector {
    * Call this after fetchTasks() to get the data needed to create hub projects.
    */
   async fetchProjectAssociations(): Promise<GitHubProjectAssociation[]> {
-    return this.lastProjectAssociations;
+    return this.projectsSync.getLastAssociations();
   }
 
   getIdentityObservationState(): GitHubRepositoryFetchState[] {
@@ -417,54 +399,12 @@ export class GitHubIssuesConnector implements IConnector {
     );
   }
 
-  /** Associations discovered by the most recent fetchTasks() iteration */
-  private lastProjectAssociations: GitHubProjectAssociation[] = [];
-
   async fetchNotifications(since?: Date): Promise<InboundNotification[]> {
-    if (!this.fetchNotificationsEnabled) {
-      return [];
-    }
-
-    const cutoff = since || new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const notifications = await this.fetchGitHubNotifications(cutoff);
-
-    return notifications.map((notification) => ({
-      id: `gh-notif-${notification.id}`,
-      sourceId: notification.id,
-      connectorType: this.type,
-      connectorInstanceId: this.id,
-      title: `[${notification.subject.type}] ${notification.subject.title}`,
-      body: `${notification.reason} in ${notification.repository.full_name}`,
-      level: this.mapGitHubLevel(notification.reason),
-      category: this.mapGitHubCategory(notification.reason, notification.subject.type),
-      isRead: !notification.unread,
-      isActionable: ['review_requested', 'assign', 'mention', 'security_alert'].includes(notification.reason),
-      actionUrl: this.buildGitHubWebUrl(notification),
-      receivedAt: notification.updated_at,
-      sourceState: 'active',
-      sourceActivityAt: notification.updated_at,
-      sourceActivityKey: `${notification.id}:${notification.updated_at}`,
-      reopenPolicy: 'handled',
-      hubProjectIds: [],
-      tags: [],
-      metadata: {
-        notificationId: notification.id,
-        reason: notification.reason,
-        reasonKnown: KNOWN_GITHUB_NOTIFICATION_REASONS.has(
-          notification.reason.toLowerCase(),
-        ),
-        subjectType: notification.subject.type,
-        subjectUrl: notification.subject.url,
-        repository: notification.repository.full_name,
-        unread: notification.unread,
-        updatedAt: notification.updated_at,
-        lastReadAt: notification.last_read_at,
-      },
-    }));
+    return this.notifications.fetchNotifications(since);
   }
 
   async markNotificationRead(notificationId: string): Promise<void> {
-    await this.writeNotificationAction(notificationId, 'mark_read');
+    await this.notifications.markNotificationRead(notificationId);
   }
 
   async writeNotificationAction(
@@ -472,60 +412,15 @@ export class GitHubIssuesConnector implements IConnector {
     action: NotificationWritebackAction,
     signal?: AbortSignal,
   ): Promise<void> {
-    const threadId = notificationId.startsWith('gh-notif-')
-      ? notificationId.slice('gh-notif-'.length)
-      : notificationId;
-    if (!/^\d+$/.test(threadId)) {
-      throw new ConnectorWritebackError(
-        `Invalid GitHub notification thread ID: ${notificationId}`,
-        false,
-      );
-    }
-    const path = action === 'mute' || action === 'unmute'
-      ? `/notifications/threads/${threadId}/subscription`
-      : `/notifications/threads/${threadId}`;
-    const request: RequestInit = action === 'mark_read'
-      ? { method: 'PATCH', signal }
-      : action === 'mark_done'
-        ? { method: 'DELETE', signal }
-        : {
-            method: 'PUT',
-            body: JSON.stringify({ ignored: action === 'mute' }),
-            signal,
-          };
-    const res = await this.client!.restFetch(path, request);
-    if (res.ok) return;
-
-    const retryAt = this.getGitHubRetryAt(res);
-    const retryable = res.status === 429
-      || res.status >= 500
-      || (res.status === 403 && retryAt !== undefined);
-    throw new ConnectorWritebackError(
-      `GitHub notification ${action} failed with HTTP ${res.status}`,
-      retryable,
-      retryAt,
-      res.status,
-    );
+    await this.notifications.writeNotificationAction(notificationId, action, signal);
   }
 
   async getActiveAlertSourceIds(): Promise<null> {
-    // GitHub's notifications feed is incremental, not an authoritative source-state snapshot.
-    return null;
+    return this.notifications.getActiveAlertSourceIds();
   }
 
   async commitNotificationFetch(): Promise<void> {
-    const completion = this.pendingNotificationPollCompletion;
-    if (!completion) return;
-    await this.persistNotificationPollState({
-      checkpointSince: completion.checkpointSince,
-      pendingSince: undefined,
-      continuationUrl: undefined,
-      pollIntervalSeconds: completion.pollIntervalSeconds,
-      nextPollAt: completion.nextPollAt,
-      etag: completion.etag,
-      lastModified: completion.lastModified,
-    });
-    this.pendingNotificationPollCompletion = null;
+    await this.notifications.commitNotificationFetch();
   }
 
   /**
@@ -533,101 +428,7 @@ export class GitHubIssuesConnector implements IConnector {
    * upstream (PR merged, issue closed, review submitted).
    */
   async reconcileAlerts(activeSourceIds: string[]): Promise<import('../index').AlertReconciliation[]> {
-    const results: import('../index').AlertReconciliation[] = [];
-    const CONCURRENCY = 5;
-
-    for (let i = 0; i < activeSourceIds.length; i += CONCURRENCY) {
-      const batch = activeSourceIds.slice(i, i + CONCURRENCY);
-      const batchResults = await Promise.allSettled(
-        batch.map(sourceId => this.reconcileSingleAlert(sourceId))
-      );
-      for (const result of batchResults) {
-        if (result.status === 'fulfilled' && result.value) {
-          results.push(result.value);
-        }
-      }
-      // Yield between batches to keep event loop responsive
-      if (i + CONCURRENCY < activeSourceIds.length) {
-        await new Promise(resolve => setTimeout(resolve, 25));
-      }
-    }
-
-    return results;
-  }
-
-  /** Reconcile a single alert — extracted for parallel execution */
-  private async reconcileSingleAlert(sourceId: string): Promise<import('../index').AlertReconciliation | null> {
-      // Extract the GitHub notification thread ID
-      const match = sourceId.match(/^[^:]*:gh-notif-(.+)$/);
-      if (!match) return null;
-
-      const threadId = match[1];
-      try {
-        const res = await this.client!.restFetch(`/notifications/threads/${threadId}`);
-        if (res.status === 404) {
-          return { sourceId, resolved: true, reason: 'notification_deleted' };
-        }
-        if (!res.ok) return null;
-
-        const thread = await res.json() as { unread: boolean; subject: { url?: string; type?: string }; reason: string };
-
-        // If GitHub already marked it as read and it's not a high-signal type, resolve
-        if (!thread.unread && !['review_requested', 'assign', 'security_alert'].includes(thread.reason)) {
-          return { sourceId, resolved: true, reason: 'read_upstream' };
-        }
-
-        // For PRs: check if the PR is merged/closed, or if review is no longer requested
-        if (thread.subject?.type === 'PullRequest' && thread.subject?.url) {
-          const prPath = thread.subject.url.replace('https://api.github.com', '');
-          const prRes = await this.client!.restFetch(prPath);
-          if (prRes.ok) {
-            const pr = await prRes.json() as {
-              state: string;
-              merged: boolean;
-              requested_reviewers?: Array<{ login: string }>;
-              requested_teams?: Array<{ slug: string }>;
-            };
-            if (pr.state === 'closed' || pr.merged) {
-              return {
-                sourceId,
-                resolved: true,
-                reason: pr.merged ? 'pr_merged' : 'pr_closed',
-              };
-            }
-
-            // If this was a review_requested notification and the user is no
-            // longer in the requested reviewers list, their review is done
-            if (thread.reason === 'review_requested' && this.authenticatedUser) {
-              const pendingForUser = (pr.requested_reviewers || [])
-                .some(r => r.login.toLowerCase() === this.authenticatedUser.toLowerCase());
-              if (!pendingForUser) {
-                return {
-                  sourceId,
-                  resolved: true,
-                  reason: 'review_submitted',
-                };
-              }
-            }
-          }
-        }
-
-        // For issues: check if closed
-        if (thread.subject?.type === 'Issue' && thread.subject?.url) {
-          const issueRes = await this.client!.restFetch(thread.subject.url.replace('https://api.github.com', ''));
-          if (issueRes.ok) {
-            const issue = await issueRes.json() as { state: string };
-            if (issue.state === 'closed') {
-              return { sourceId, resolved: true, reason: 'issue_closed' };
-            }
-          }
-        }
-
-        // Still active
-        return { sourceId, resolved: false };
-      } catch {
-        // On error, don't resolve — fail-open
-        return null;
-      }
+    return this.notifications.reconcileAlerts(activeSourceIds);
   }
 
   async createTask(task: Partial<TaskItem>): Promise<TaskItem> {
@@ -1220,466 +1021,6 @@ export class GitHubIssuesConnector implements IConnector {
     };
   }
 
-  // ─── Private: GitHub Projects V2 ─────────────────────────────────────────
-
-  /** Tracks project ownership so item queries use the correct owner type/login */
-  private projectOwnerMap = new Map<string, { type: 'user' | 'organization'; login: string }>();
-
-  private async fetchProjectsV2(): Promise<GitHubProjectV2[]> {
-    const projects: GitHubProjectV2[] = [];
-    const seenIds = new Set<string>();
-
-    const addProjects = (nodes: GitHubProjectV2[], ownerType: 'user' | 'organization', ownerLogin: string) => {
-      for (const p of nodes) {
-        if (p.closed || seenIds.has(p.id)) continue;
-        seenIds.add(p.id);
-        projects.push(p);
-        this.projectOwnerMap.set(p.id, { type: ownerType, login: ownerLogin });
-      }
-    };
-
-    // 1. Fetch projects owned by the authenticated user (viewer)
-    const viewerQuery = `
-      query($cursor: String) {
-        viewer {
-          login
-          projectsV2(first: 20, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              id
-              number
-              title
-              shortDescription
-              url
-              closed
-              items { totalCount }
-            }
-          }
-        }
-      }
-    `;
-
-    try {
-      let hasNextPage = true;
-      const variables: Record<string, unknown> = {};
-      let viewerLogin = '';
-      while (hasNextPage) {
-        const data = await this.client!.graphqlFetchAny(viewerQuery, variables);
-        if (data.errors?.length) {
-          connectorLogger.warn({ errors: data.errors }, 'GitHub Projects V2 viewer query errors');
-          break;
-        }
-        viewerLogin = viewerLogin || data.data?.viewer?.login || '';
-        const connection = data.data?.viewer?.projectsV2;
-        const nodes: GitHubProjectV2[] = connection?.nodes || [];
-        addProjects(nodes, 'user', viewerLogin);
-        hasNextPage = connection?.pageInfo?.hasNextPage || false;
-        if (hasNextPage && connection?.pageInfo?.endCursor) {
-          variables.cursor = connection.pageInfo.endCursor;
-        }
-      }
-    } catch (err) {
-      connectorLogger.warn({ err }, 'Failed to fetch viewer GitHub Projects V2');
-    }
-
-    // 2. Fetch org-level and repo-level projects from configured repos
-    const orgsQueried = new Set<string>();
-    for (const repo of this.repos) {
-      const [owner, name] = repo.split('/');
-
-      // Repo-level projects
-      try {
-        const repoProjectsQuery = `
-          query($owner: String!, $name: String!, $cursor: String) {
-            repository(owner: $owner, name: $name) {
-              projectsV2(first: 20, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
-                pageInfo { hasNextPage endCursor }
-                nodes {
-                  id
-                  number
-                  title
-                  shortDescription
-                  url
-                  closed
-                  items { totalCount }
-                  owner { __typename ... on Organization { login } ... on User { login } }
-                }
-              }
-            }
-          }
-        `;
-        let hasNextPage = true;
-        const vars: Record<string, unknown> = { owner, name };
-        while (hasNextPage) {
-          const data = await this.client!.graphqlFetchAny(repoProjectsQuery, vars);
-          if (data.errors?.length) {
-            connectorLogger.warn({ repo, errors: data.errors }, 'GitHub Projects V2 repo query errors');
-            break;
-          }
-          const connection = data.data?.repository?.projectsV2;
-          const nodes = (connection?.nodes || []) as Array<GitHubProjectV2 & { owner?: { __typename: string; login: string } }>;
-          for (const node of nodes) {
-            const ownerType = node.owner?.__typename === 'Organization' ? 'organization' : 'user';
-            const ownerLogin = node.owner?.login || owner;
-            addProjects([node], ownerType as 'user' | 'organization', ownerLogin);
-          }
-          hasNextPage = connection?.pageInfo?.hasNextPage || false;
-          if (hasNextPage && connection?.pageInfo?.endCursor) {
-            vars.cursor = connection.pageInfo.endCursor;
-          }
-        }
-      } catch (err) {
-        connectorLogger.warn({ repo, err }, 'Failed to fetch repo-level Projects V2');
-      }
-
-      // Org-level projects (query each org only once)
-      if (!orgsQueried.has(owner)) {
-        orgsQueried.add(owner);
-        try {
-          const orgProjectsQuery = `
-            query($login: String!, $cursor: String) {
-              organization(login: $login) {
-                projectsV2(first: 20, after: $cursor, orderBy: { field: UPDATED_AT, direction: DESC }) {
-                  pageInfo { hasNextPage endCursor }
-                  nodes {
-                    id
-                    number
-                    title
-                    shortDescription
-                    url
-                    closed
-                    items { totalCount }
-                  }
-                }
-              }
-            }
-          `;
-          let hasNextPage = true;
-          const vars: Record<string, unknown> = { login: owner };
-          while (hasNextPage) {
-            const data = await this.client!.graphqlFetchAny(orgProjectsQuery, vars);
-            if (data.errors?.length) {
-              // Not an org — that's fine, skip silently
-              break;
-            }
-            const connection = data.data?.organization?.projectsV2;
-            if (!connection) break; // owner is a user, not an org
-            const nodes: GitHubProjectV2[] = connection.nodes || [];
-            addProjects(nodes, 'organization', owner);
-            hasNextPage = connection.pageInfo?.hasNextPage || false;
-            if (hasNextPage && connection.pageInfo?.endCursor) {
-              vars.cursor = connection.pageInfo.endCursor;
-            }
-          }
-        } catch {
-          // Owner is not an org or token lacks access — skip silently
-        }
-      }
-    }
-
-    connectorLogger.info({ count: projects.length, titles: projects.map(p => p.title) }, 'Discovered GitHub Projects V2');
-    assertUniqueGitHubProjectIdentities(projects.map((project) => ({ project })));
-    return projects;
-  }
-
-  private async fetchProjectItemsForProject(
-    project: Pick<GitHubProjectV2, 'id' | 'number'>,
-  ): Promise<{
-    items: GitHubProjectV2Item[];
-    state: GitHubProjectAssociation['membershipState'];
-  }> {
-    const items: GitHubProjectV2Item[] = [];
-    const projectNumber = project.number;
-
-    const ownerInfo = this.projectOwnerMap.get(project.id);
-
-    // Use organization query for org-owned projects, user query otherwise
-    const ownerField = ownerInfo?.type === 'organization' ? 'organization' : 'user';
-    const query = `
-      query($login: String!, $projectNumber: Int!, $cursor: String) {
-        ${ownerField}(login: $login) {
-          projectV2(number: $projectNumber) {
-            items(first: 50, after: $cursor) {
-              pageInfo { hasNextPage endCursor }
-              nodes {
-                id
-                type
-                fieldValues(first: 10) {
-                  nodes {
-                    __typename
-                    ... on ProjectV2ItemFieldSingleSelectValue {
-                      field { ... on ProjectV2SingleSelectField { name } }
-                      name
-                    }
-                    ... on ProjectV2ItemFieldTextValue {
-                      field { ... on ProjectV2Field { name } }
-                      text
-                    }
-                    ... on ProjectV2ItemFieldDateValue {
-                      field { ... on ProjectV2Field { name } }
-                      date
-                    }
-                  }
-                }
-                content {
-                  __typename
-                  ... on Issue {
-                    id
-                    number
-                    title
-                    body
-                    state
-                    createdAt
-                    updatedAt
-                    closedAt
-                    url
-                    labels(first: 20) { nodes { name color } }
-                    assignees(first: 5) { nodes { login } }
-                    repository { nameWithOwner }
-                  }
-                  ... on DraftIssue {
-                    title
-                    body
-                    createdAt
-                    updatedAt
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    `;
-
-    try {
-      let login: string;
-      if (ownerInfo) {
-        login = ownerInfo.login;
-      } else {
-        // Fallback: get authenticated user login
-        const userRes = await this.client!.restFetch('/user');
-        if (!userRes.ok) return { items, state: 'inaccessible' };
-        const userData = await userRes.json();
-        login = userData.login;
-      }
-
-      let hasNextPage = true;
-      const variables: Record<string, unknown> = { login, projectNumber };
-      while (hasNextPage) {
-        const data = await this.client!.graphqlFetchAny(query, variables);
-        if (data.errors?.length) {
-          connectorLogger.warn({ projectNumber, errors: data.errors }, 'GitHub Project items query errors');
-          return { items, state: items.length > 0 ? 'partial' : 'inaccessible' };
-        }
-        const connection = data.data?.[ownerField]?.projectV2?.items;
-        if (!connection) return { items, state: 'inaccessible' };
-        const nodes: GitHubProjectV2Item[] = connection?.nodes || [];
-        items.push(...nodes);
-        hasNextPage = connection?.pageInfo?.hasNextPage || false;
-        if (hasNextPage) {
-          if (!connection.pageInfo?.endCursor) return { items, state: 'partial' };
-          variables.cursor = connection.pageInfo.endCursor;
-        }
-      }
-    } catch (err) {
-      connectorLogger.warn({ projectNumber, err }, 'Failed to fetch items for GitHub Project');
-      return { items, state: items.length > 0 ? 'partial' : 'inaccessible' };
-    }
-
-    return { items, state: 'complete' };
-  }
-
-  private async fetchProjectTaskContext(): Promise<{
-    metadataBySourceId: Map<string, Array<{
-      projectNumber: number;
-      projectTitle: string;
-      sourceId: string;
-      fields: Record<string, string>;
-    }>>;
-    draftTasks: TaskItem[];
-  }> {
-    const projects = await this.fetchProjectsV2();
-    this.lastProjectAssociations = [];
-    const metadataBySourceId = new Map<string, Array<{
-      projectNumber: number;
-      projectTitle: string;
-      sourceId: string;
-      fields: Record<string, string>;
-    }>>();
-    const draftTasks: TaskItem[] = [];
-
-    for (const project of projects) {
-      const membership = await this.fetchProjectItemsForProject(project);
-      const association: GitHubProjectAssociation = {
-        project,
-        membershipState: membership.state,
-        taskSourceIds: [],
-        taskIdentityEvidence: [],
-      };
-
-      for (const item of membership.items) {
-        if (!item.content) {
-          association.membershipState = 'partial';
-          continue;
-        }
-
-        // Extract project field values (Status, Priority, etc.)
-        const projectFields = this.extractProjectFields(item);
-
-        if (item.content.__typename === 'Issue') {
-          if (
-            !item.content.repository
-            || !item.content.id
-            || !item.content.number
-          ) {
-            association.membershipState = 'partial';
-            continue;
-          }
-          const repo = item.content.repository.nameWithOwner;
-          const issueSourceId = `${repo}:${item.content.number}`;
-
-          const isConfiguredRepo = this.repos.some(
-            (r: string) => r.toLowerCase() === repo.toLowerCase()
-          );
-          if (isConfiguredRepo) {
-            const projectMetadata = metadataBySourceId.get(issueSourceId) || [];
-            projectMetadata.push({
-              projectNumber: project.number,
-              projectTitle: project.title,
-              sourceId: `project:${project.number}`,
-              fields: projectFields,
-            });
-            metadataBySourceId.set(issueSourceId, projectMetadata);
-            association.taskSourceIds.push(issueSourceId);
-            const repositoryEvidence = this.repositoryEvidenceBySourceId.get(repo);
-            if (repositoryEvidence) {
-              association.taskIdentityEvidence.push({
-                sourceId: issueSourceId,
-                evidence: issueEvidenceFromGraphQL(
-                  item.content.id,
-                  item.content.number,
-                  item.content.url,
-                  repositoryEvidence,
-                  this.client!.origin,
-                  new Date().toISOString(),
-                ),
-              });
-            }
-          }
-        } else if (item.content.__typename === 'DraftIssue') {
-          const task = this.draftIssueToTask(item, project, projectFields);
-          draftTasks.push(task);
-          association.taskSourceIds.push(task.sourceId);
-        }
-      }
-
-      this.lastProjectAssociations.push(association);
-    }
-
-    return { metadataBySourceId, draftTasks };
-  }
-
-  private extractProjectFields(item: GitHubProjectV2Item): Record<string, string> {
-    const fields: Record<string, string> = {};
-    for (const fv of item.fieldValues.nodes) {
-      const fieldName = fv.field?.name;
-      if (!fieldName) continue;
-      if (fv.name) fields[fieldName] = fv.name;
-      else if (fv.text) fields[fieldName] = fv.text;
-      else if (fv.date) fields[fieldName] = fv.date;
-    }
-    return fields;
-  }
-
-  private projectItemToTask(item: GitHubProjectV2Item, project: GitHubProjectV2, repo: string): TaskItem {
-    const content = item.content!;
-    const labelNodes = content.labels?.nodes || [];
-    const projectFields = this.extractProjectFields(item);
-
-    return {
-      id: randomUUID(),
-      sourceId: `${repo}:${content.number}`,
-      connectorType: this.type,
-      connectorInstanceId: this.id,
-      title: content.title || 'Untitled',
-      description: content.body || undefined,
-      status: content.state === 'CLOSED' ? 'done' : 'todo',
-      priority: 'none',
-      createdAt: content.createdAt || new Date().toISOString(),
-      updatedAt: content.updatedAt || new Date().toISOString(),
-      completedAt: content.closedAt || undefined,
-      parentId: undefined,
-      childIds: [],
-      depth: 0,
-      isChecklistItem: false,
-      sourceListId: repo,
-      sourceListName: repo,
-      hubProjectIds: [],
-      tags: labelNodes.map((label: { name: string; color: string }) => ({
-        id: randomUUID(),
-        name: label.name,
-        slug: label.name.toLowerCase().replace(/\s+/g, '-'),
-        type: 'source' as const,
-        source: this.type,
-        color: `#${label.color}`,
-        confirmed: true,
-        createdAt: new Date().toISOString(),
-      })),
-      assignee: content.assignees?.nodes?.[0]?.login || undefined,
-      metadata: {
-        issueNumber: content.number,
-        nodeId: content.id,
-        url: content.url,
-        githubProjects: [{
-          projectNumber: project.number,
-          projectTitle: project.title,
-          sourceId: `project:${project.number}`,
-          fields: projectFields,
-        }],
-      },
-      syncStatus: 'synced',
-      lastSyncedAt: new Date().toISOString(),
-    };
-  }
-
-  private draftIssueToTask(item: GitHubProjectV2Item, project: GitHubProjectV2, projectFields: Record<string, string>): TaskItem {
-    const content = item.content!;
-    return {
-      id: randomUUID(),
-      sourceId: `project:${project.number}:draft:${item.id}`,
-      connectorType: this.type,
-      connectorInstanceId: this.id,
-      title: content.title || 'Untitled draft',
-      description: content.body || undefined,
-      status: 'todo',
-      priority: 'none',
-      createdAt: content.createdAt || new Date().toISOString(),
-      updatedAt: content.updatedAt || new Date().toISOString(),
-      parentId: undefined,
-      childIds: [],
-      depth: 0,
-      isChecklistItem: false,
-      // Draft issues have no repo — they live only in the project.
-      // No sourceListId; they're accessible via their hub project association.
-      sourceListId: undefined,
-      sourceListName: `${project.title} (draft)`,
-      hubProjectIds: [],
-      tags: [],
-      metadata: {
-        draftIssueId: item.id,
-        isDraft: true,
-        githubProjects: [{
-          projectNumber: project.number,
-          projectTitle: project.title,
-          sourceId: `project:${project.number}`,
-          fields: projectFields,
-        }],
-      },
-      syncStatus: 'synced',
-      lastSyncedAt: new Date().toISOString(),
-    };
-  }
-
   private async fetchIssue(sourceId: string): Promise<GitHubRestIssue> {
     const { repo, issueNumber } = parseSourceId(sourceId);
     const response = await this.client!.restFetch(`/repos/${repo}/issues/${issueNumber}`, {
@@ -2250,213 +1591,6 @@ export class GitHubIssuesConnector implements IConnector {
     return `${await this.resolveConfiguredRepositoryName(repo)}:${issueNumber}`;
   }
 
-  // ─── Private: Notifications ─────────────────────────────────────────────
-
-  private async fetchGitHubNotifications(cutoff: Date): Promise<GitHubNotification[]> {
-    const now = new Date();
-    const nextPollAt = this.notificationPollState.nextPollAt
-      ? new Date(this.notificationPollState.nextPollAt)
-      : null;
-    if (nextPollAt && nextPollAt > now) return [];
-
-    const notifications = new Map<string, GitHubNotification>();
-    const reasonFilter = new Set(this.notificationReasons.map((reason) => reason.toLowerCase()));
-    const pollStartedAt = now.toISOString();
-    const cutoffIso = this.notificationPollState.pendingSince
-      || this.notificationPollState.checkpointSince
-      || cutoff.toISOString();
-    const participatingParam = this.participatingOnly ? '&participating=true' : '';
-    let nextUrl: string | null =
-      `/notifications?all=true&per_page=${GITHUB_NOTIFICATION_PAGE_SIZE}`
-      + `&since=${encodeURIComponent(cutoffIso)}${participatingParam}`;
-    let firstPage = true;
-    let pollResponse: Response | null = null;
-    const restartingIncompleteWindow = Boolean(this.notificationPollState.continuationUrl);
-    this.pendingNotificationPollCompletion = null;
-
-    await this.persistNotificationPollState({
-      pendingSince: cutoffIso,
-      continuationUrl: nextUrl,
-    });
-
-    try {
-      while (nextUrl) {
-        const headers: Record<string, string> = {};
-        if (firstPage && !restartingIncompleteWindow && this.notificationPollState.etag) {
-          headers['If-None-Match'] = this.notificationPollState.etag;
-        }
-        if (firstPage && !restartingIncompleteWindow && this.notificationPollState.lastModified) {
-          headers['If-Modified-Since'] = this.notificationPollState.lastModified;
-        }
-        const res = await this.client!.restFetch(nextUrl, { headers });
-        if (firstPage && res.status === 304) {
-          this.stageNotificationPollCompletion(res, pollStartedAt);
-          return [];
-        }
-        if (!res.ok) {
-          await this.deferNotificationPoll(res);
-          throw new Error(`Failed to fetch GitHub notifications: HTTP ${res.status}`);
-        }
-
-        if (firstPage) {
-          pollResponse = res;
-        }
-        const batch = (await res.json()) as GitHubNotification[];
-        for (const notification of batch) {
-          const normalizedReason = notification.reason.toLowerCase();
-          if (reasonFilter.size === 0 || reasonFilter.has(normalizedReason)) {
-            notifications.set(notification.id, notification);
-          }
-        }
-
-        nextUrl = this.parseLinkNext(res.headers.get('link'));
-        await this.persistNotificationPollState({
-          continuationUrl: nextUrl || undefined,
-        });
-        firstPage = false;
-      }
-    } catch (error) {
-      await this.persistNotificationPollState({
-        pendingSince: cutoffIso,
-        continuationUrl: nextUrl || this.notificationPollState.continuationUrl,
-      });
-      throw error;
-    }
-
-    this.stageNotificationPollCompletion(pollResponse, pollStartedAt);
-    return Array.from(notifications.values()).sort((left, right) =>
-      right.updated_at.localeCompare(left.updated_at)
-    );
-  }
-
-  private stageNotificationPollCompletion(
-    response: Response | null,
-    checkpointSince: string,
-  ): void {
-    const interval = this.parsePositiveInteger(
-      response?.headers.get('x-poll-interval') ?? null,
-      this.notificationPollState.pollIntervalSeconds
-        ?? DEFAULT_GITHUB_POLL_INTERVAL_SECONDS,
-    );
-    const jitteredInterval = Math.max(1, Math.round(interval * (0.9 + Math.random() * 0.2)));
-    this.pendingNotificationPollCompletion = {
-      checkpointSince,
-      pollIntervalSeconds: interval,
-      nextPollAt: new Date(Date.now() + jitteredInterval * 1_000).toISOString(),
-      etag: response?.headers.get('etag') || this.notificationPollState.etag,
-      lastModified: response?.headers.get('last-modified')
-        || this.notificationPollState.lastModified,
-    };
-  }
-
-  private async deferNotificationPoll(response: Response): Promise<void> {
-    const retryAt = this.getGitHubRetryAt(response);
-    if (!retryAt) return;
-    const boundedRetryAt = new Date(Math.min(
-      retryAt.getTime(),
-      Date.now() + 24 * 60 * 60 * 1_000,
-    ));
-    await this.persistNotificationPollState({
-      nextPollAt: boundedRetryAt.toISOString(),
-    });
-  }
-
-  private getGitHubRetryAt(response: Response): Date | undefined {
-    const retryAfter = this.parsePositiveInteger(response.headers.get('retry-after'), 0);
-    if (retryAfter > 0) {
-      return new Date(Date.now() + retryAfter * 1_000);
-    }
-    if (response.headers.get('x-ratelimit-remaining') === '0') {
-      const resetSeconds = this.parsePositiveInteger(
-        response.headers.get('x-ratelimit-reset'),
-        0,
-      );
-      if (resetSeconds > 0) return new Date(resetSeconds * 1_000);
-    }
-    return undefined;
-  }
-
-  private parsePositiveInteger(value: string | null, fallback: number): number {
-    const parsed = Number.parseInt(value || '', 10);
-    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
-  }
-
-  private async persistNotificationPollState(
-    patch: Partial<GitHubNotificationPollState>,
-  ): Promise<void> {
-    if (!this.config) throw new Error('GitHub connector is not initialized');
-    const transaction = sqlite.transaction(() => {
-      const row = sqlite.prepare(
-        'SELECT settings FROM connector_configs WHERE id = ?',
-      ).get(this.id) as { settings: string | null } | undefined;
-      if (!row) throw new Error(`GitHub connector ${this.id} no longer exists`);
-      const latestSettings = row.settings ? JSON.parse(row.settings) as Record<string, unknown> : {};
-      const nextState = {
-        ...((latestSettings.notificationPollState || {}) as GitHubNotificationPollState),
-      };
-      for (const [key, value] of Object.entries(patch)) {
-        if (value === undefined) {
-          delete nextState[key as keyof GitHubNotificationPollState];
-        } else {
-          Object.assign(nextState, { [key]: value });
-        }
-      }
-      const settings = { ...latestSettings, notificationPollState: nextState };
-      sqlite.prepare(`
-        UPDATE connector_configs SET settings = ?, updated_at = ? WHERE id = ?
-      `).run(JSON.stringify(settings), new Date().toISOString(), this.id);
-      return { settings, nextState };
-    });
-    const { settings, nextState } = transaction.immediate();
-    this.notificationPollState = nextState;
-    this.config = { ...this.config, settings };
-  }
-
-  /** Extract the `next` URL from a GitHub Link header */
-  private parseLinkNext(linkHeader: string | null): string | null {
-    if (!linkHeader) return null;
-    const match = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-    if (!match) return null;
-    // Return path only (strip origin so restFetch can prepend base)
-    try {
-      const url = new URL(match[1]);
-      return url.pathname + url.search;
-    } catch {
-      return match[1];
-    }
-  }
-
-  private mapGitHubLevel(reason: string): InboundNotification['level'] {
-    switch (reason) {
-      case 'security_alert': return 'urgent';
-      case 'review_requested':
-      case 'assign': return 'action_needed';
-      case 'mention':
-      case 'ci_activity': return 'heads_up';
-      default: return 'fyi';
-    }
-  }
-
-  private mapGitHubCategory(reason: string, subjectType: string): string {
-    switch (reason) {
-      case 'review_requested': return 'pr_review';
-      case 'mention': return 'mention';
-      case 'assign': return 'assignment';
-      case 'ci_activity': return 'ci_cd';
-      case 'security_alert': return 'security';
-      default: return subjectType === 'Release' ? 'release' : 'github';
-    }
-  }
-
-  private buildGitHubWebUrl(notification: GitHubNotification): string {
-    const apiUrl = notification.subject.url;
-    if (!apiUrl) return `https://github.com/${notification.repository.full_name}`;
-
-    return apiUrl
-      .replace('https://api.github.com/repos/', 'https://github.com/')
-      .replace('/pulls/', '/pull/')
-      .replace('/issues/', '/issues/');
-  }
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────

@@ -79,16 +79,15 @@ describe('MobileDashboard', () => {
     expect(skeletons.length).toBeGreaterThan(0);
   });
 
-  describe('F-83: Status snapshot (today metrics)', () => {
+  describe('F-83: Status snapshot (today summary)', () => {
     it('renders today summary metrics', async () => {
       render(<MobileDashboard />);
       await waitFor(() => {
         expect(screen.getByText('Today')).toBeInTheDocument();
       });
-      expect(screen.getByText('18')).toBeInTheDocument(); // totalOpen + completedToday
-      expect(screen.getByText('6')).toBeInTheDocument();  // done
-      expect(screen.getByText('In Progress')).toBeInTheDocument();
-      expect(screen.getByText('75% complete')).toBeInTheDocument();
+      expect(screen.getByText('6 of 18 done')).toBeInTheDocument();
+      expect(screen.getByText((_, element) => element?.textContent === '2 in progress · 1 overdue')).toBeInTheDocument();
+      expect(screen.getByText('75%')).toBeInTheDocument();
     });
   });
 
@@ -134,7 +133,7 @@ describe('MobileDashboard', () => {
     });
   });
 
-  describe('F-85: Go To navigation grid', () => {
+  describe('F-85: Go To action strip', () => {
     it('renders navigation destinations', async () => {
       render(<MobileDashboard />);
       await waitFor(() => {

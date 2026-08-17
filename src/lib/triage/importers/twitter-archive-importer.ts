@@ -12,7 +12,7 @@
  * the API route) are responsible for extracting the raw text of the relevant
  * `data/*.js` files and passing them in here.
  */
-import { ingestTriageImport } from '..';
+import { ingestTriageImport } from '../capture';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 

@@ -23,7 +23,7 @@ const MARKDOWN_ACTIONS: Array<{
   { action: 'bold', label: 'Bold', shortcut: 'Ctrl+B', icon: Bold },
   { action: 'italic', label: 'Italic', shortcut: 'Ctrl+I', icon: Italic },
   { action: 'link', label: 'Insert link', shortcut: 'Ctrl+K', icon: Link2 },
-  { action: 'code', label: 'Inline code', icon: Code },
+  { action: 'code', label: 'Code', icon: Code },
   { action: 'list', label: 'Bulleted list', icon: List },
 ];
 
@@ -76,13 +76,19 @@ export function MarkdownEditor({
       nextSelectionStart = start + 2;
       nextSelectionEnd = end + (2 * lines.length);
     } else {
+      const selected = value.slice(start, end);
+      const codeWrapper: [string, string] = selected.includes('\n')
+        ? [
+            `${start > 0 && value[start - 1] !== '\n' ? '\n' : ''}\`\`\`\n`,
+            `\n\`\`\`${end < value.length && value[end] !== '\n' ? '\n' : ''}`,
+          ]
+        : ['`', '`'];
       const [prefix, suffix] = {
         bold: ['**', '**'],
         italic: ['_', '_'],
         link: ['[', '](url)'],
-        code: ['`', '`'],
+        code: codeWrapper,
       }[action];
-      const selected = value.slice(start, end);
       nextValue = value.slice(0, start) + prefix + selected + suffix + value.slice(end);
       nextSelectionStart = start + prefix.length;
       nextSelectionEnd = nextSelectionStart + selected.length;

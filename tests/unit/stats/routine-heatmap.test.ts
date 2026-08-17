@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { buildRoutineHeatmapDays } from '@/lib/stats/routine-heatmap';
+import {
+  buildRoutineHeatmapDays,
+  getRoutineWeekContext,
+} from '@/lib/stats/routine-heatmap';
 
 const WEEK_MONDAY = '2026-07-27';
 
@@ -73,5 +76,17 @@ describe('buildRoutineHeatmapDays', () => {
       config: {},
       completionDates: [],
     })).toEqual([null, null, null, null, null, null, null]);
+  });
+});
+
+describe('getRoutineWeekContext', () => {
+  it('keeps Sunday evening in the current local week after UTC rolls to Monday', () => {
+    expect(getRoutineWeekContext(
+      new Date('2026-08-17T01:00:00.000Z'),
+      'America/New_York',
+    )).toEqual({
+      today: '2026-08-16',
+      weekMonday: '2026-08-10',
+    });
   });
 });

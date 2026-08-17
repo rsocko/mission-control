@@ -222,7 +222,7 @@ vi.mock('crypto', async (importOriginal) => {
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
-import { SyncScheduler } from '@/lib/sync';
+import { SyncExecutionPipeline } from '@/lib/sync';
 import { syncLogger } from '@/lib/logger';
 
 describe('stale in_progress verification', () => {
@@ -271,10 +271,10 @@ describe('stale in_progress verification', () => {
       } as Partial<TaskItem>),
     };
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50)); // let hydration complete
 
-    const result = await scheduler.runSync('github-1');
+    const result = await scheduler.runSyncLocally('github-1');
 
     expect(result.success, result.errors.join('; ')).toBe(true);
     expect(result.tasksUpdated).toBeGreaterThanOrEqual(1);
@@ -328,10 +328,10 @@ describe('stale in_progress verification', () => {
       } as Partial<TaskItem>),
     };
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = await scheduler.runSync('github-1');
+    const result = await scheduler.runSyncLocally('github-1');
 
     expect(result.success, result.errors.join('; ')).toBe(true);
     // Should NOT have updated the task's status
@@ -391,10 +391,10 @@ describe('stale in_progress verification', () => {
       updateTask: vi.fn(),
     };
 
-    const scheduler = new SyncScheduler();
+    const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    await scheduler.runSync('github-1');
+    await scheduler.runSyncLocally('github-1');
 
     // updateTask should NOT be called for verification — task was already in pull results
     expect(mockConnectorInstance.updateTask).not.toHaveBeenCalled();

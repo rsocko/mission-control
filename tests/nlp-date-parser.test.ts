@@ -128,6 +128,24 @@ describe('parseTaskInput – chrono-node integration', () => {
     expect(r.title).toBe('submit report next friday');
   });
 
+  it('suggests only the trailing date when the title contains multiple dates', () => {
+    const r = parseTaskInput('meeting tomorrow and report friday');
+    expect(r.dueDate).toBeNull();
+    expect(r.dateSuggestion).toEqual({
+      date: '2026-07-17',
+      label: 'Friday',
+      matchedText: 'friday',
+    });
+    expect(r.title).toBe('meeting tomorrow and report friday');
+  });
+
+  it('removes only the trailing date on submission when the title contains multiple dates', () => {
+    const r = parseTaskInputForSubmission('meeting tomorrow and report friday');
+    expect(r.dueDate).toBe('2026-07-17');
+    expect(r.dateSuggestion).toBeNull();
+    expect(r.title).toBe('meeting tomorrow and report');
+  });
+
   it.each([
     ['buy milk today', '2026-07-15', 'buy milk'],
     ['buy milk tomorrow', '2026-07-16', 'buy milk'],

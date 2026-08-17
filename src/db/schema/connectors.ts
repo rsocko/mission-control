@@ -251,6 +251,16 @@ export const runtimeTelemetrySamples = sqliteTable('runtime_telemetry_samples', 
   index('idx_runtime_telemetry_samples_role_id').on(table.role, table.id),
 ]);
 
+export const workerHealthSnapshot = sqliteTable('worker_health_snapshot', {
+  id: text('id').primaryKey(),
+  schemaVersion: integer('schema_version').notNull(),
+  generatedAt: text('generated_at').notNull(),
+  workerInstanceId: text('worker_instance_id').notNull(),
+  workerRevision: text('worker_revision').notNull(),
+  generationDurationMs: integer('generation_duration_ms').notNull(),
+  payload: text('payload', { mode: 'json' }).notNull(),
+});
+
 export const syncSchedules = sqliteTable('sync_schedules', {
   connectorId: text('connector_id').primaryKey(),
   intervalMinutes: integer('interval_minutes').notNull(),

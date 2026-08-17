@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from 'react';
 
 export type VoiceCaptureState = 'idle' | 'listening' | 'unsupported' | 'denied';
 
@@ -27,6 +27,11 @@ function isInstalledEdgePwa(): boolean {
     && window.matchMedia?.('(display-mode: standalone)').matches === true;
 }
 
+const subscribeToSpeechRecognitionSupport = () => () => {};
+const getSpeechRecognitionSupport = () =>
+  'SpeechRecognition' in window || 'webkitSpeechRecognition' in window;
+const getServerSpeechRecognitionSupport = () => false;
+
 export function useVoiceCapture(options: UseVoiceCaptureOptions = {}): UseVoiceCaptureReturn {
   const { onTranscript, onInterimTranscript, onError, onEnd, lang = 'en-US' } = options;
   const [state, setState] = useState<VoiceCaptureState>('idle');
@@ -36,8 +41,11 @@ export function useVoiceCapture(options: UseVoiceCaptureOptions = {}): UseVoiceC
   const microphonePreflightRef = useRef<Promise<'ready' | 'denied'> | null>(null);
   const startRequestRef = useRef(0);
   const suppressedEndRef = useRef(new WeakSet<SpeechRecognition>());
-  const isSupported = typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window);
+  const isSupported = useSyncExternalStore(
+    subscribeToSpeechRecognitionSupport,
+    getSpeechRecognitionSupport,
+    getServerSpeechRecognitionSupport,
+  );
 
   useEffect(() => {
     const suppressedEnds = suppressedEndRef.current;

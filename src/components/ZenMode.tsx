@@ -12,6 +12,9 @@ import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { formatDueDate } from '@/lib/utils/date-format';
 
 interface ZenTask {
   id: string;
@@ -65,7 +68,7 @@ export function ZenMode() {
   useEffect(() => {
     if (viewMode !== 'zen') return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewMode('normal');
+      if (e.key === 'Escape' && !shouldBlockGlobalShortcut(e)) setViewMode('normal');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -227,17 +230,13 @@ export function ZenMode() {
                           </p>
                         </button>
                         {task.priority !== 'none' && (
-                          <span className={`text-xs font-semibold uppercase tracking-wider ${
-                           task.priority === 'critical' ? 'text-rose-400' :
-                           task.priority === 'high' ? 'text-orange-400' :
-                           task.priority === 'medium' ? 'text-amber-300' : 'text-sky-400'
-                          }`}>
+                          <span className={`text-xs font-semibold uppercase tracking-wider ${getTaskPriorityVisual(task.priority).textClass}`}>
                             {task.priority}
                           </span>
                         )}
                         {task.dueDate && (
                           <span className="text-xs text-[var(--text-muted)] tabular-nums">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {formatDueDate(task.dueDate)}
                           </span>
                         )}
                       </motion.div>

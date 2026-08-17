@@ -20,6 +20,10 @@ describe('ideation conversion transaction', () => {
       body: JSON.stringify({
         name: 'Integrated graph project',
         color: '#6366f1',
+        sourceWorkspace: {
+          id: 'workspace-source',
+          revision: 7,
+        },
         nodes: [
           {
             id: 'root',
@@ -106,6 +110,13 @@ describe('ideation conversion transaction', () => {
     const dependencies = await db.select().from(schema.taskDependencies);
 
     expect(projects).toHaveLength(1);
+    expect(projects[0].metadata).toEqual({
+      source: 'ideation',
+      sourceWorkspace: {
+        id: 'workspace-source',
+        revision: 7,
+      },
+    });
     expect(phases.map((phase) => phase.name)).toEqual(['Build']);
     expect(persistedTasks).toEqual(expect.arrayContaining([
       expect.objectContaining({ title: 'First task', priority: 'high', assignee: 'me', depth: 0 }),

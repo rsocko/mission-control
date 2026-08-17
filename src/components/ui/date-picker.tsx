@@ -165,7 +165,7 @@ export function DatePicker({
                   'w-full px-2.5 py-1.5 text-xs rounded-md',
                   'bg-[var(--surface-0)] border border-[var(--border-strong)]',
                   'text-[var(--text-primary)] placeholder:text-[var(--text-muted)]',
-                  'focus:border-[var(--accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/30',
+                  'outline-none',
                 )}
               />
               {nlpPreview && (

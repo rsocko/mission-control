@@ -12,13 +12,16 @@ import {
   startOfWeek,
   subDays,
 } from 'date-fns';
-import { FolderGit2, ListChecks, ListTodo } from 'lucide-react';
-import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
-import type { ProjectHealth, TaskPriority, TaskStatus } from '@/types';
+import type { ProjectHealth, TaskStatus } from '@/types';
 import type { TaskFilterContext } from '@/lib/task-filter-context';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
+export {
+  getProjectTaskConnectorIcon as getConnectorIcon,
+  getProjectTaskPriorityColor as getPriorityDotColor,
+} from '@/lib/projects/task-visuals';
 import type {
   GanttPhaseRow,
   GanttZoom,
@@ -133,13 +136,6 @@ export function getPhaseColor(phase: ProjectPhase, project?: ProjectRecord | nul
   return phase.color || project?.color || 'var(--accent-500)';
 }
 
-export function getConnectorIcon(connectorType: string) {
-  if (connectorType === 'local') return LocalSourceIcon;
-  if (connectorType === 'github-issues') return FolderGit2;
-  if (connectorType === 'microsoft-todo' || connectorType === 'ms-todo') return ListTodo;
-  return ListChecks;
-}
-
 /** Returns a status-based color for phase indicators in the Gantt chart: gray (pending), blue (in_progress), green (completed). */
 export function getPhaseStatusColor(status: ProjectPhase['status']): string {
   switch (status) {
@@ -154,31 +150,7 @@ export function getPhaseStatusColor(status: ProjectPhase['status']): string {
 
 /** Returns a status-based color for task dots in the Gantt chart. */
 export function getTaskStatusColor(status: TaskStatus): string {
-  switch (status) {
-    case 'done':
-      return 'var(--success)';
-    case 'in_progress':
-      return 'var(--accent-500)';
-    case 'cancelled':
-      return 'var(--warning)';
-    default:
-      return 'var(--text-muted)';
-  }
-}
-
-export function getPriorityDotColor(priority: TaskPriority) {
-  switch (priority) {
-    case 'critical':
-      return 'var(--danger)';
-    case 'high':
-      return 'var(--warning)';
-    case 'medium':
-      return 'var(--accent-500)';
-    case 'low':
-      return 'var(--text-secondary)';
-    default:
-      return 'var(--border-strong)';
-  }
+  return getTaskStatusVisual(status).color;
 }
 
 export function getProgressSummary(tasks: ProjectTask[]): ProgressSummary {

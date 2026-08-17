@@ -87,6 +87,7 @@ vi.mock('@/db/schema', () => ({
   weeklyOneThing: { taskId: 'taskId' },
   prioritySyncLog: { taskId: 'taskId' },
   quickSortLog: { taskId: 'taskId' },
+  quickSortOperations: { taskId: 'taskId' },
   taskLinkedSources: { taskId: 'taskId' },
   taskAttachments: { taskId: 'taskId' },
   projectPhaseItems: { taskId: 'taskId' },

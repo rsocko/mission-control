@@ -23,6 +23,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import type { ProjectHealth, ProjectProgress } from '@/types';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -379,6 +380,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
 
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (shouldBlockGlobalShortcut(e)) return;
       // '/' focuses search (when not in an input)
       const tag = (e.target as HTMLElement).tagName;
       const isEditable = ['INPUT', 'TEXTAREA'].includes(tag) || (e.target as HTMLElement).isContentEditable;
@@ -473,6 +475,7 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
               <Tooltip content="New Project">
                 <button
                   onClick={() => setShowCreateModal(true)}
+                  aria-label="New project"
                   className="flex h-5 w-5 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--accent-400)] transition-colors"
                 >
                   <Plus size={12} />

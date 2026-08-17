@@ -53,9 +53,9 @@ vi.mock('@/lib/mode', () => ({
   isDemoMode: vi.fn(() => false),
 }));
 
-// We mock the triage index so ingestTriageImport is controllable
+// We mock the triage capture module so ingestTriageImport is controllable
 const mockIngest = vi.fn();
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   ingestTriageImport: mockIngest,
 }));
 

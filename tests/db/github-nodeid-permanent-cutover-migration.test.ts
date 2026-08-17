@@ -7,7 +7,7 @@ const JOURNAL = JSON.parse(
   readFileSync(resolve(process.cwd(), 'drizzle/meta/_journal.json'), 'utf8'),
 ) as { entries: Array<{ idx: number; tag: string }> };
 
-const CUTOVER_TAG = '0102_github_nodeid_permanent_cutover';
+const CUTOVER_TAG = '0105_github_nodeid_permanent_cutover';
 
 function applyMigration(
   sqlite: Database.Database,

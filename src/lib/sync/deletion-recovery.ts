@@ -13,6 +13,7 @@ import {
   projectAutoIncludeExclusions,
   projectPhaseItems,
   quickSortLog,
+  quickSortOperations,
   syncDeletionCandidates,
   syncDeletionSnapshots,
   taskAttachments,
@@ -163,6 +164,7 @@ export async function archiveAndDeleteTask(
     tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, taskId)).run();
     tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId)).run();
     tx.delete(quickSortLog).where(eq(quickSortLog.taskId, taskId)).run();
+    tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, taskId)).run();
     tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId)).run();
     tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
     tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId)).run();

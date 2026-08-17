@@ -20,6 +20,7 @@ import { useViewMode } from '@/lib/hooks/useViewMode';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 interface FocusItem {
   id: string;
@@ -57,14 +58,6 @@ const CONNECTOR_ICONS: Record<string, string> = {
   'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'document-intelligence': '/icons/agents/owl.svg',
-};
-
-const PRIORITY_DOT: Record<string, string> = {
-  critical: 'bg-rose-500',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-  none: '',
 };
 
 function ConnectorIcon({ type, size = 14 }: { type: string; size?: number }) {
@@ -246,6 +239,7 @@ export function Focus3Panel({
                   taskIds: items.map(item => item.taskId),
                   label: 'Focus 3',
                 })}
+                aria-label="Enter calm focus mode"
                 className="p-1.5 text-[var(--text-muted)] hover:text-slate-300 hover:bg-[var(--surface-2)] rounded transition-colors"
               >
                 <Moon size={13} />
@@ -280,6 +274,7 @@ export function Focus3Panel({
               type="button"
               onClick={() => setCollapsed((current) => !current)}
               aria-expanded={!collapsed}
+              aria-label={collapsed ? 'Expand Focus 3' : 'Collapse Focus 3'}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)] rounded transition-colors"
             >
               {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
@@ -383,8 +378,8 @@ export function Focus3Panel({
                   className="flex items-center gap-2 px-2.5 py-2 rounded-md hover:bg-white/5 transition-colors group/sug"
                 >
                   <ConnectorIcon type={s.connectorType} size={12} />
-                  {PRIORITY_DOT[s.priority] && (
-                    <span className={`w-1.5 h-1.5 rounded-full ${PRIORITY_DOT[s.priority]}`} />
+                  {s.priority !== 'none' && (
+                    <span className={`w-1.5 h-1.5 rounded-full ${getTaskPriorityVisual(s.priority).dotClass}`} />
                   )}
                   <span className="text-xs text-[var(--text-primary)] truncate flex-1">
                     {s.title}
@@ -537,8 +532,8 @@ function FocusSlot({
       </div>
 
       {/* Priority dot */}
-      {PRIORITY_DOT[item.priority] && (
-        <span className={`w-2 h-2 rounded-full ${PRIORITY_DOT[item.priority]} flex-shrink-0`} />
+      {item.priority !== 'none' && (
+        <span className={`w-2 h-2 rounded-full ${getTaskPriorityVisual(item.priority).dotClass} flex-shrink-0`} />
       )}
 
       {/* Remove button */}

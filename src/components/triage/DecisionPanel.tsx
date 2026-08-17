@@ -134,10 +134,7 @@ export default function DecisionPanel({
   return (
     <section className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-1)] p-4">
       <div className="flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Decision panel</h3>
-          <p className="text-xs text-[var(--text-tertiary)]">Route the item, archive it, or defer it.</p>
-        </div>
+        <h3 className="text-sm font-semibold text-[var(--text-primary)]">Decision panel</h3>
         <div className="rounded-full border border-[var(--border)] bg-[var(--surface-0)] px-3 py-1 text-xs text-[var(--text-secondary)] [font-variant-numeric:tabular-nums]">
           Score {selectedItem.aiRelevanceScore}
         </div>

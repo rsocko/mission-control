@@ -177,6 +177,9 @@ vi.mock('@xyflow/react', () => ({
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('@/components/ideation/IdeationWorkspaceBar', () => ({
+  IdeationWorkspaceBar: () => null,
+}));
 
 import IdeationCanvas from '@/components/ideation/IdeationCanvas';
 

@@ -313,6 +313,10 @@ export class SyncWorker {
     return this.active?.job ?? null;
   }
 
+  hasPendingWork(): boolean {
+    return this.active !== null || getSyncQueueMetrics().queued > 0;
+  }
+
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }

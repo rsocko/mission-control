@@ -125,14 +125,25 @@ vi.mock('@/lib/logger', () => ({
   requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
-vi.mock('@/lib/triage', () => ({
-  listTriageItems: vi.fn(() => Promise.resolve({ items: [], total: 0 })),
+vi.mock('@/lib/triage/capture', () => ({
   createTriageCapture: vi.fn(() => Promise.resolve({ id: 'triage-1', url: 'https://example.com', status: 'pending' })),
+}));
+
+vi.mock('@/lib/triage/query', () => ({
+  listTriageItems: vi.fn(() => Promise.resolve({ items: [], total: 0 })),
+  isValidTriageStatus: vi.fn((s: string) => ['pending', 'snoozed', 'actioned', 'dismissed', 'all'].includes(s)),
+  isValidTriageSource: vi.fn((s: string) => ['reddit', 'youtube', 'github', 'web', 'all'].includes(s)),
+}));
+
+vi.mock('@/lib/triage/actions', () => ({
   applyTriageAction: vi.fn((id: string, action: string) => Promise.resolve({ id, status: action === 'dismiss' ? 'dismissed' : 'actioned' })),
   undoTriageAction: vi.fn((id: string) => Promise.resolve({ id, status: 'pending' })),
   isUndoableTriageAction: vi.fn((action: string) => ['complete_action', 'dismiss', 'snooze'].includes(action)),
-  isValidTriageStatus: vi.fn((s: string) => ['pending', 'snoozed', 'actioned', 'dismissed', 'all'].includes(s)),
-  isValidTriageSource: vi.fn((s: string) => ['reddit', 'youtube', 'github', 'web', 'all'].includes(s)),
+  TriageActionInProgressError: class TriageActionInProgressError extends Error {},
+}));
+
+vi.mock('@/lib/triage/lifecycle', () => ({
+  hardDeleteTriageItem: vi.fn(() => Promise.resolve(true)),
 }));
 
 vi.mock('@/lib/ai', () => ({

@@ -2,7 +2,24 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import db from '@/db';
 import { quickSortLog } from '@/db/schema';
-import { gte, sql } from 'drizzle-orm';
+import { and, gte, isNull, ne, sql } from 'drizzle-orm';
+import {
+  formatDateInLocalTimezone,
+  getLocalDateBoundsISO,
+  getLocalToday,
+} from '@/lib/utils/date';
+
+function shiftDate(date: string, days: number): string {
+  const value = new Date(`${date}T12:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function getWeekMonday(date: string): string {
+  const value = new Date(`${date}T12:00:00Z`);
+  const day = value.getUTCDay();
+  return shiftDate(date, day === 0 ? -6 : 1 - day);
+}
 
 /**
  * GET /api/tasks/quick-sort-stats
@@ -12,14 +29,9 @@ import { gte, sql } from 'drizzle-orm';
  * - streak: consecutive days with at least one quick sort action
  */
 export async function GET() {
-  // Week boundary: Monday 00:00 local-ish (use ISO week start)
-  const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0 = Sunday
-  const daysFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  const weekStart = new Date(now);
-  weekStart.setUTCDate(now.getUTCDate() - daysFromMonday);
-  weekStart.setUTCHours(0, 0, 0, 0);
-  const weekStartIso = weekStart.toISOString();
+  const today = getLocalToday();
+  const weekStartDate = getWeekMonday(today);
+  const { dayStart: weekStartIso } = getLocalDateBoundsISO(weekStartDate);
 
   // Aggregate this-week counts by mode (exclude skipped)
   const weekRows = await db
@@ -28,7 +40,11 @@ export async function GET() {
       count: sql<number>`count(*)`.as('count'),
     })
     .from(quickSortLog)
-    .where(gte(quickSortLog.triagedAt, weekStartIso))
+    .where(and(
+      gte(quickSortLog.triagedAt, weekStartIso),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    ))
     .groupBy(quickSortLog.mode);
 
   const byMode: Record<string, number> = {};
@@ -38,38 +54,36 @@ export async function GET() {
     weekTotal += row.count;
   }
 
-  // Streak: fetch distinct calendar dates (UTC) with at least one action,
-  // ordered most-recent first, for up to 90 days.
-  const ninetyDaysAgo = new Date(now);
-  ninetyDaysAgo.setUTCDate(now.getUTCDate() - 90);
-  const ninetyDaysAgoIso = ninetyDaysAgo.toISOString();
+  // Streak: fetch recent timestamps, then bucket them in the configured timezone.
+  const ninetyDaysAgo = shiftDate(today, -90);
+  const { dayStart: ninetyDaysAgoIso } = getLocalDateBoundsISO(ninetyDaysAgo);
 
   const dateRows = await db
-    .selectDistinct({
-      day: sql<string>`substr(${quickSortLog.triagedAt}, 1, 10)`.as('day'),
+    .select({
+      triagedAt: quickSortLog.triagedAt,
     })
     .from(quickSortLog)
-    .where(gte(quickSortLog.triagedAt, ninetyDaysAgoIso))
-    .orderBy(sql`substr(${quickSortLog.triagedAt}, 1, 10) DESC`);
+    .where(and(
+      gte(quickSortLog.triagedAt, ninetyDaysAgoIso),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    ));
 
-  const todayStr = now.toISOString().slice(0, 10);
   let streak = 0;
 
   if (dateRows.length > 0) {
     // Check consecutive days ending today (or yesterday if today has no actions)
-    const activeDays = new Set(dateRows.map((r) => r.day));
-    const startDay = activeDays.has(todayStr) ? todayStr : (() => {
-      const yesterday = new Date(now);
-      yesterday.setUTCDate(now.getUTCDate() - 1);
-      return yesterday.toISOString().slice(0, 10);
-    })();
+    const activeDays = new Set(dateRows.map((row) => (
+      formatDateInLocalTimezone(new Date(row.triagedAt))
+    )));
+    const startDay = activeDays.has(today) ? today : shiftDate(today, -1);
 
     if (activeDays.has(startDay)) {
       streak = 1;
-      const cursor = new Date(`${startDay}T00:00:00Z`);
+      let cursor = startDay;
       while (true) {
-        cursor.setUTCDate(cursor.getUTCDate() - 1);
-        const prevDay = cursor.toISOString().slice(0, 10);
+        cursor = shiftDate(cursor, -1);
+        const prevDay = cursor;
         if (activeDays.has(prevDay)) {
           streak++;
         } else {

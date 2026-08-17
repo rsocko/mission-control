@@ -12,6 +12,10 @@ type EmptyResponse = {
     highPriority: number;
     assignedToMe: number;
     myDay: number;
+    recentlyCreated: number;
+    recentlyClosed: number;
+    waiting: number;
+    inbox: number;
   };
   hasMore: boolean;
   sourceCounts: Record<string, number>;
@@ -25,6 +29,9 @@ const EMPTY_STATS = {
   highPriority: 0,
   assignedToMe: 0,
   myDay: 0,
+  recentlyCreated: 0,
+  recentlyClosed: 0,
+  waiting: 0,
   inbox: 0,
 };
 

@@ -83,27 +83,27 @@ export function CadenceInsightsView({ routines }: { routines: Routine[] }) {
 
   const colorMap = {
     increase: {
-      border: 'border-l-blue-500',
+      border: 'border-blue-500/30',
       bg: 'bg-blue-950/20',
       label: 'text-blue-400',
       labelText: '📈 Increase frequency suggestion',
     },
     decrease: {
-      border: 'border-l-amber-500',
+      border: 'border-amber-500/30',
       bg: 'bg-amber-950/20',
       label: 'text-amber-400',
       labelText: '📉 Decrease frequency suggestion',
     },
     confirmed: {
-      border: 'border-l-emerald-500',
+      border: 'border-emerald-500/30',
       bg: 'bg-emerald-950/20',
       label: 'text-emerald-400',
       labelText: 'Confirmed pattern',
     },
     pattern: {
-      border: 'border-l-purple-500',
-      bg: 'bg-purple-950/20',
-      label: 'text-purple-400',
+      border: 'border-cyan-500/30',
+      bg: 'bg-cyan-950/20',
+      label: 'text-cyan-400',
       labelText: '🆕 Pattern detected',
     },
   };
@@ -135,7 +135,7 @@ export function CadenceInsightsView({ routines }: { routines: Routine[] }) {
               <div
                 key={insight.routine.id}
                 className={cn(
-                  'rounded-[var(--radius-lg)] border border-[var(--border)] border-l-4 p-5',
+                  'rounded-[var(--radius-lg)] border p-5',
                   colors.border,
                   colors.bg,
                 )}

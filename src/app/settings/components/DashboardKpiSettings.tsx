@@ -218,7 +218,7 @@ export function DashboardKpiSettings() {
       <div>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Dashboard KPIs</h2>
         <p className="text-sm text-[var(--text-tertiary)] mt-1">
-          Choose which stat cards appear at the top of the dashboard. Drag to reorder. Maximum {MAX_KPI_CARDS} cards.
+          Drag to reorder. Max {MAX_KPI_CARDS} cards.
         </p>
       </div>
 

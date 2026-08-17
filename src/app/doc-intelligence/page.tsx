@@ -16,8 +16,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils/cn';
+import { parseLocalDate } from '@/lib/utils/date-format';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 
@@ -64,7 +66,7 @@ export default function DocIntelligencePage() {
   const [tasks, setTasks] = useState<DiTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [actionTypeFilter, setActionTypeFilter] = useState<ActionTypeFilter>('all');
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -331,7 +333,7 @@ function ActionRow({ task, isSelected, onClick }: { task: DiTask; isSelected: bo
             {task.dueDate && (
               <span className="flex items-center gap-0.5 text-[10px] text-[var(--text-muted)]">
                 <Clock size={10} />
-                {new Date(task.dueDate).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {parseLocalDate(task.dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
               </span>
             )}
           </div>

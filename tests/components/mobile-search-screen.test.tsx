@@ -158,6 +158,60 @@ describe('MobileSearchScreen', () => {
     expect(hasAlphaRequest()).toBe(true);
   });
 
+  it('shows keyword results without waiting for semantic route detection', async () => {
+    let resolveStatus!: (response: {
+      ok: boolean;
+      json: () => Promise<{
+        semanticEnabled: boolean;
+        semanticAvailable: boolean;
+        results: never[];
+      }>;
+    }) => void;
+    const statusResponse = new Promise<{
+      ok: boolean;
+      json: () => Promise<{
+        semanticEnabled: boolean;
+        semanticAvailable: boolean;
+        results: never[];
+      }>;
+    }>((resolve) => {
+      resolveStatus = resolve;
+    });
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('__status_check__')) return statusResponse;
+      if (url.includes('/api/ai/search?')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ results: [makeResult()], durationMs: 42, note: null }),
+        });
+      }
+      return Promise.reject(new Error(`Unexpected fetch: ${url}`));
+    });
+
+    render(<MobileSearchScreen isOpen={true} onClose={vi.fn()} initialQuery="alpha" />);
+
+    await screen.findByRole('button', { name: /open task alpha task/i });
+    const keywordCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
+    expect(keywordCalls).toHaveLength(1);
+    expect(String(keywordCalls[0][0])).toContain('mode=keyword');
+
+    resolveStatus({
+      ok: true,
+      json: () => Promise.resolve({
+        semanticEnabled: true,
+        semanticAvailable: true,
+        results: [],
+      }),
+    });
+
+    await waitFor(() => {
+      const searchCalls = mockFetch.mock.calls.filter(([url]) => String(url).includes('q=alpha'));
+      expect(searchCalls).toHaveLength(2);
+      expect(String(searchCalls[1][0])).toContain('mode=semantic');
+    });
+  });
+
   it('renders filter chips and filters results by type', async () => {
     mockSearchApi([
       makeResult({ id: 'task-1', title: 'Alpha task', href: '/tasks/task-1' }),

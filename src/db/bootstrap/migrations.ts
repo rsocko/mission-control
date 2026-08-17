@@ -69,6 +69,12 @@ export function _runMigrationsIndividually(
               && message.includes('no such table: task_triage_log')
             )
             || (
+              // `task_triage_log` is owned by the task-activity safety net, which
+              // runs after migrations, so a fresh database has no table to alter.
+              entry.tag === '0104_quick_sort_undo'
+              && message.includes('no such table: task_triage_log')
+            )
+            || (
               entry.tag === '0060_optimize_list_queries'
               && message.includes('no such table')
             )

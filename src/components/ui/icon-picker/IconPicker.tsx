@@ -344,7 +344,7 @@ export const IconPicker = memo(function IconPicker({
   return (
     <div className="flex flex-col w-[420px] max-h-[520px] bg-[var(--surface-1)] rounded-xl border border-[var(--border)] shadow-2xl overflow-hidden">
       {/* ── Search Bar (always visible, top of picker) ────── */}
-      <div className="flex items-center gap-1.5 px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]">
+      <div className="input-glow flex items-center gap-1.5 px-3 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]">
         <Search size={15} className="shrink-0 text-[var(--text-muted)]" />
         <input
           type="text"

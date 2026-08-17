@@ -17,6 +17,7 @@ import {
 import { parseFilterQuery, type FilterToken, type FilterTokenType } from '@/lib/utils/parseFilterQuery';
 import type { EnabledSource, HubProject, ListGroup, SourceList, TaskTag } from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 interface TaskKeywordFilterProps {
   filteredCount: number;
@@ -87,6 +88,7 @@ const QUICK_FILTER_LABELS: Record<string, string> = {
   week: 'Due This Week',
   assigned: 'Assigned to Me',
   recentlyCreated: 'Recently Created',
+  recentlyClosed: 'Recently Closed',
   waiting: 'Waiting / On Hold',
 };
 
@@ -759,6 +761,7 @@ export function TaskKeywordFilter({
   // Keyboard shortcut: "/" to focus when not already in an input
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(e)) return;
       if (e.key === '/' && !isInputFocused()) {
         e.preventDefault();
         inputRef.current?.focus();

@@ -10,6 +10,7 @@ import {
   type WordInsightsResult,
 } from '@/lib/word-insights/types';
 import { cn } from '@/lib/utils';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 const SOURCE_LABELS: Record<WordInsightSource, string> = {
   title: 'Titles',
@@ -29,7 +30,7 @@ export default function WordInsightsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedWord, setSelectedWord] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const requestIdRef = useRef(0);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -98,9 +99,6 @@ export default function WordInsightsView() {
       <div className="mx-auto max-w-7xl px-4 py-6 pb-12 sm:px-6">
         <header className="mb-5">
           <h1 className="text-2xl font-bold">Word Insights</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Explore recurring words and the exact tasks they came from.
-          </p>
         </header>
 
         <section

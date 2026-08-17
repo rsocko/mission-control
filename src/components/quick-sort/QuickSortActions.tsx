@@ -15,14 +15,17 @@ import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
+import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
 
 // ─── Priority ───────────────────────────────────────────────────────────────
 
 const PRIORITY_OPTIONS = [
-  { value: 'critical', label: 'P0', sublabel: 'Critical', classes: 'border-rose-700/60 bg-rose-950/50 text-rose-400 active:bg-rose-900/70' },
-  { value: 'high', label: 'P1', sublabel: 'High', classes: 'border-orange-700/60 bg-orange-950/50 text-orange-400 active:bg-orange-900/70' },
-  { value: 'medium', label: 'P2', sublabel: 'Medium', classes: 'border-amber-700/60 bg-amber-950/50 text-amber-300 active:bg-amber-900/70' },
-  { value: 'low', label: 'P3', sublabel: 'Low', classes: 'border-sky-700/60 bg-sky-950/50 text-sky-400 active:bg-sky-900/70' },
+  ...(['critical', 'high', 'medium', 'low'] as const).map((value) => ({
+    value,
+    label: TASK_PRIORITY_VISUALS[value].shortLabel,
+    sublabel: TASK_PRIORITY_VISUALS[value].label,
+    classes: TASK_PRIORITY_VISUALS[value].badgeClass,
+  })),
 ] as const;
 
 // ─── Effort ─────────────────────────────────────────────────────────────────
@@ -82,7 +85,7 @@ function TagPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+      <div className="input-glow flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
         <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
         <input
           ref={inputRef}

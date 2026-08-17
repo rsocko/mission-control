@@ -34,6 +34,14 @@ export function getQuickFilterCondition(quickFilter: string | null, today: strin
     return gte(tasks.createdAt, sevenDaysAgo);
   }
 
+  if (quickFilter === 'recentlyClosed') {
+    const sevenDaysAgo = getLocalDaysFromNow(-7);
+    return and(
+      inArray(tasks.status, ['done', 'cancelled']),
+      gte(tasks.completedAt, sevenDaysAgo),
+    );
+  }
+
   if (quickFilter === 'waiting') {
     return inArray(tasks.microStatus, ['waiting_on_someone', 'blocked_external', 'on_hold']);
   }

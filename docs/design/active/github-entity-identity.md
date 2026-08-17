@@ -59,7 +59,7 @@ mode to select, no comparison mode, and no rollback to locator identity:
   is an `unbound_local_row` block, not an adoption and not a duplicate;
 - the comparison runtime, comparison evidence tables, post-cutover attestation,
   and rollback commands have been removed. Migration
-  `0102_github_nodeid_permanent_cutover` drops
+  `0105_github_nodeid_permanent_cutover` drops
   `github_identity_comparison_runs`, `github_identity_comparison_records`, and
   `github_identity_sub_issue_population_members` and removes every
   `comparison_run_id` dependency from the operational write-fencing tables;

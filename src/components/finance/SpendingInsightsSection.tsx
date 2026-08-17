@@ -21,6 +21,12 @@ import type {
 } from './types';
 import { FinanceInsightDetail } from './FinanceInsightDetail';
 import {
+  currentAppHistoryDetail,
+  getAppHistorySnapshot,
+  pushAppHistoryDetail,
+  replaceAppHistoryDetail,
+} from '@/lib/navigation/app-history';
+import {
   FINANCE_INSIGHT_KIND_LABELS,
   formatFinanceMoney,
   formatFinancePercentage,
@@ -30,7 +36,6 @@ import {
 } from './insight-presentation';
 
 const OCCURRENCE_ID_PATTERN = /^occurrence-v1_[A-Za-z0-9_-]{43}$/;
-const DRAWER_HISTORY_KEY = 'financeInsightDrawerOccurrenceId';
 const GROUPS: Array<{
   kind: InsightOccurrenceSummaryV1['kind'];
   title: string;
@@ -128,25 +133,32 @@ export function SpendingInsightsSection({ refreshToken = 0 }: { refreshToken?: n
 
   const openDetail = useCallback((occurrenceId: string) => {
     const replacing = selectedRef.current !== null;
-    const nextState = { ...window.history.state, [DRAWER_HISTORY_KEY]: occurrenceId };
+    const currentDetail = currentAppHistoryDetail();
+    const detail = {
+      kind: 'detail' as const,
+      param: 'insight',
+      parentHref: currentDetail?.param === 'insight'
+        ? currentDetail.parentHref
+        : `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    };
     if (replacing) {
-      window.history.replaceState(nextState, '', financeUrlWithInsight(occurrenceId));
+      replaceAppHistoryDetail(financeUrlWithInsight(occurrenceId), detail);
     } else {
-      window.history.pushState(nextState, '', financeUrlWithInsight(occurrenceId));
+      pushAppHistoryDetail(financeUrlWithInsight(occurrenceId), detail);
     }
     selectedRef.current = occurrenceId;
     setSelectedOccurrenceId(occurrenceId);
   }, []);
 
   const closeDetail = useCallback(() => {
-    const state = window.history.state as Record<string, unknown> | null;
-    const openedHere = state?.[DRAWER_HISTORY_KEY] === selectedRef.current;
+    const openedHere = currentAppHistoryDetail()?.param === 'insight'
+      && getAppHistorySnapshot().canGoBack;
     selectedRef.current = null;
     setSelectedOccurrenceId(null);
     if (openedHere) {
       window.history.back();
     } else {
-      window.history.replaceState(state, '', financeUrlWithInsight(null));
+      replaceAppHistoryDetail(financeUrlWithInsight(null), null);
     }
   }, []);
 

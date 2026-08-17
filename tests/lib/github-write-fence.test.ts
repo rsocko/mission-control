@@ -16,6 +16,17 @@ describe('GitHub write fence', () => {
     delete process.env.MC_MODE;
   });
 
+  it('explains how to recover from blocked stable identity evidence', async () => {
+    const { GitHubWriteFenceError } = await import('@/lib/external-identities');
+    const error = new GitHubWriteFenceError('stable_identity_evidence_blocked');
+
+    expect(error).toMatchObject({
+      code: 'stable_identity_evidence_blocked',
+      message:
+        'GitHub sync is paused because this task identity needs reconciliation. Run a full GitHub sync, then retry.',
+    });
+  });
+
   it('dispatches only an agreeing legacy route and quarantines a stale mode lease', async () => {
     const [{ default: db, sqlite }, schema, identity] = await Promise.all([
       import('@/db'),

@@ -108,6 +108,26 @@ describe('sync worker runtime', () => {
     expect(() => assertSupportedWorkerReplicaCount('1')).not.toThrow();
   });
 
+  it('reports pending work from either the active execution or durable queue', async () => {
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.getSyncQueueMetrics.mockReturnValueOnce({
+      queued: 1,
+      running: 0,
+      retrying: 0,
+      cancelled: 0,
+      oldestQueuedAgeMs: 0,
+      missedSchedules: 0,
+      oldestScheduleOverdueMs: 0,
+      overBudget: 0,
+      expiredLeases: 0,
+    });
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(vi.fn(), { ownerId: 'worker-a', pollIntervalMs: 1 });
+
+    expect(worker.hasPendingWork()).toBe(true);
+    expect(worker.hasPendingWork()).toBe(false);
+  });
+
   it('records successful work only after the connector returns success', async () => {
     const { SyncWorker } = await import('@/lib/sync/worker');
     const execute = vi.fn().mockResolvedValue(result(true));

@@ -11,6 +11,7 @@ type TaskStats = {
   assignedToMe: number;
   myDay: number;
   recentlyCreated: number;
+  recentlyClosed: number;
   waiting: number;
   inbox: number;
 };
@@ -46,7 +47,7 @@ export async function getStats(baseWhere: ReturnType<typeof and> | undefined, op
   const assignedCondition = await getAssignedFilterCondition();
   const inboxCondition = await getInboxFilterCondition();
 
-  const [totalOpen, overdue, dueThisWeek, highPriority, assignedToMe, myDay, recentlyCreated, waiting, inbox] = await Promise.all([
+  const [totalOpen, overdue, dueThisWeek, highPriority, assignedToMe, myDay, recentlyCreated, recentlyClosed, waiting, inbox] = await Promise.all([
     countTasks(openWhere),
     countTasks(withCondition(openWhere, getQuickFilterCondition('overdue', today, weekFromNow))),
     countTasks(withCondition(openWhere, getQuickFilterCondition('week', today, weekFromNow))),
@@ -54,6 +55,7 @@ export async function getStats(baseWhere: ReturnType<typeof and> | undefined, op
     countTasks(withCondition(openWhere, assignedCondition)),
     countTasks(withCondition(openWhere, getQuickFilterCondition('myDay', today, weekFromNow, myDayTaskIds))),
     countTasks(withCondition(openWhere, getQuickFilterCondition('recentlyCreated', today, weekFromNow))),
+    countTasks(withCondition(baseWhere, getQuickFilterCondition('recentlyClosed', today, weekFromNow))),
     countTasks(withCondition(openWhere, getQuickFilterCondition('waiting', today, weekFromNow))),
     countTasks(withCondition(openWhere, inboxCondition)),
   ]);
@@ -66,6 +68,7 @@ export async function getStats(baseWhere: ReturnType<typeof and> | undefined, op
     assignedToMe,
     myDay,
     recentlyCreated,
+    recentlyClosed,
     waiting,
     inbox,
   };

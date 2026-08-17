@@ -4,6 +4,34 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const {
+  placeTasksInProjectPhase,
+  removeTasksFromProjectPhase,
+  updateProjectPhaseItem,
+} = vi.hoisted(() => ({
+  placeTasksInProjectPhase: vi.fn(),
+  removeTasksFromProjectPhase: vi.fn(),
+  updateProjectPhaseItem: vi.fn(),
+}));
+
+class MockProjectHierarchyServiceError extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 403 | 404 | 409,
+    readonly code: string,
+    readonly current?: unknown,
+  ) {
+    super(message);
+  }
+}
+
+vi.mock('@/lib/projects/hierarchy-service', () => ({
+  placeTasksInProjectPhase,
+  removeTasksFromProjectPhase,
+  updateProjectPhaseItem,
+  ProjectHierarchyServiceError: MockProjectHierarchyServiceError,
+}));
+
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
 type ChainableProxy = Record<PropertyKey, unknown>;
@@ -92,6 +120,45 @@ beforeEach(() => {
   mockDb.insert.mockImplementation(() => chainable([]));
   mockDb.update.mockImplementation(() => chainable(undefined));
   mockDb.delete.mockImplementation(() => chainable(undefined));
+  placeTasksInProjectPhase.mockReset().mockImplementation(async ({
+    phaseId,
+    taskIds,
+    toIndex,
+    newItem,
+  }) => ({
+    hierarchy: {
+      phaseItemsByPhase: {
+        [phaseId]: [{
+          id: 'item-1',
+          phaseId,
+          taskId: taskIds[0],
+          sortOrder: toIndex,
+          estimatedEffortHours: newItem?.estimatedEffortHours ?? null,
+          isProposed: newItem?.isProposed ?? false,
+          proposalType: newItem?.proposalType ?? null,
+        }],
+      },
+    },
+  }));
+  updateProjectPhaseItem.mockReset().mockImplementation(async ({
+    phaseId,
+    taskId,
+    toIndex,
+    updates,
+  }) => ({
+    hierarchy: {
+      phaseItemsByPhase: {
+        [phaseId]: [{
+          id: 'item-1',
+          phaseId,
+          taskId,
+          sortOrder: toIndex ?? 0,
+          ...updates,
+        }],
+      },
+    },
+  }));
+  removeTasksFromProjectPhase.mockReset().mockResolvedValue({});
 });
 
 // ─── PROJECT PHASES - List ─────────────────────────────────────────────────
@@ -289,6 +356,9 @@ describe('POST /api/project-phases/[id]/items', () => {
     const data = await response.json();
     expect(data).toHaveProperty('item');
     expect(data.item.taskId).toBe('task-1');
+    expect(placeTasksInProjectPhase).toHaveBeenCalledWith(expect.objectContaining({
+      preserveExistingPosition: true,
+    }));
   });
 
   it('should return 400 when taskId is missing', async () => {
@@ -322,6 +392,9 @@ describe('POST /api/project-phases/[id]/items', () => {
     });
     const response = await POST(request, { params: Promise.resolve({ id: 'phase-1' }) });
     expect(response.status).toBe(201);
+    expect(placeTasksInProjectPhase).toHaveBeenCalledWith(expect.objectContaining({
+      preserveExistingPosition: false,
+    }));
   });
 });
 

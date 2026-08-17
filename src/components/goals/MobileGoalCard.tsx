@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react';
 import { CheckCircle, Circle, ChevronDown, ChevronUp, Target, Brain, Lightbulb, Rocket, Server, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
+import { parseLocalDate } from '@/lib/utils/date-format';
 import type { GoalItem } from './types';
 
 interface MobileGoalCardProps {
@@ -52,7 +53,7 @@ export function MobileGoalCard({ item, onTap }: MobileGoalCardProps) {
 
   // Format due date
   const dueLabel = item.dueDate
-    ? new Date(item.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    ? parseLocalDate(item.dueDate)?.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) ?? null
     : null;
 
   return (

@@ -7,12 +7,9 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
-  GripVertical,
   Lightbulb,
-  ListChecks,
   LoaderCircle,
   Plus,
-  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -20,40 +17,24 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LocalSourceIcon } from "@/components/ui/LocalSourceIcon";
 import { fadeSlideUp, modalContent, modalOverlay, scaleIn, staggerContainer } from "@/lib/motion";
+import type { TaskPriority } from "@/types";
 import {
   executeProjectHierarchyCommand,
   loadProjectHierarchy,
 } from "@/lib/projects/hierarchy-client";
-
-export interface PhaseProposal {
-  phases: Array<{
-    name: string;
-    description: string;
-    color: string;
-    estimatedDays: number;
-    taskIds: string[];
-    reasoning: string;
-  }>;
-  overallReasoning: string;
-  suggestedNewTasks: Array<{
-    title: string;
-    description: string;
-    phase: string;
-    reasoning: string;
-  }>;
-  suggestedClosures: Array<{
-    taskId: string;
-    title: string;
-    reasoning: string;
-  }>;
-}
+import type { PhaseProposal } from "@/lib/projects/phase-planning";
+import {
+  getProjectTaskConnectorIcon as getConnectorIcon,
+  getProjectTaskPriorityColor as getPriorityDotColor,
+  PROJECT_TASK_PRIORITY_LABELS as PRIORITY_LABELS,
+} from "@/lib/projects/task-visuals";
+export type { PhaseProposal } from "@/lib/projects/phase-planning";
 
 interface ProposalTask {
   id: string;
   title: string;
-  priority: string;
+  priority: TaskPriority;
   status: string;
   connectorType: string;
 }
@@ -71,42 +52,13 @@ type EditablePhase = PhaseProposal["phases"][number] & {
   originalName: string;
 };
 
-const PRIORITY_LABELS: Record<string, string> = {
-  critical: "P0",
-  high: "P1",
-  medium: "P2",
-  low: "P3",
-  none: "—",
-};
-
 const STATUS_BADGE_VARIANTS: Record<string, "default" | "secondary" | "success" | "warning" | "danger" | "outline"> = {
   todo: "secondary",
   in_progress: "default",
   done: "success",
-  cancelled: "warning",
+  blocked: "danger",
+  cancelled: "secondary",
 };
-
-function getPriorityDotColor(priority: string) {
-  switch (priority) {
-    case "critical":
-      return "var(--danger)";
-    case "high":
-      return "var(--warning)";
-    case "medium":
-      return "var(--accent-500)";
-    case "low":
-      return "var(--success)";
-    default:
-      return "var(--text-tertiary)";
-  }
-}
-
-function getConnectorIcon(connectorType: string) {
-  if (connectorType === "local") return LocalSourceIcon;
-  if (connectorType === "github-issues") return Sparkles;
-  if (connectorType === "microsoft-todo" || connectorType === "ms-todo") return ListChecks;
-  return GripVertical;
-}
 
 function normalizePhaseKey(value: string) {
   return value.trim().toLowerCase();

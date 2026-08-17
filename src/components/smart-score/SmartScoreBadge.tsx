@@ -60,16 +60,16 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
                 </div>
 
                 <div className="space-y-2.5">
-                  <BreakdownRow label="Priority" value={breakdown.priorityBase ?? 0} max={20} color="from-rose-400 to-pink-500" />
-                  <BreakdownRow label="Entity tier" value={breakdown.entityTier} max={30} color="from-blue-400 to-blue-500" />
-                  <BreakdownRow label="Urgency" value={breakdown.urgency} max={25} color="from-sky-400 to-blue-400" />
-                  <BreakdownRow label="Source rank" value={breakdown.sourceRank} max={12} color="from-indigo-400 to-purple-400" />
-                  <BreakdownRow label="Freshness" value={breakdown.freshness} max={13} color="from-emerald-400 to-green-400" />
+                  <BreakdownRow label="Priority" value={breakdown.priorityBase ?? 0} max={20} color="bg-rose-400" />
+                  <BreakdownRow label="Entity tier" value={breakdown.entityTier} max={30} color="bg-blue-400" />
+                  <BreakdownRow label="Urgency" value={breakdown.urgency} max={25} color="bg-sky-400" />
+                  <BreakdownRow label="Source rank" value={breakdown.sourceRank} max={12} color="bg-cyan-400" />
+                  <BreakdownRow label="Freshness" value={breakdown.freshness} max={13} color="bg-emerald-400" />
                   {(breakdown.effortBonus ?? 0) !== 0 && (
-                    <BreakdownRow label={breakdown.effortBonus > 0 ? 'Quick-win bonus' : 'Heavy-lift penalty'} value={breakdown.effortBonus} max={5} color="from-violet-400 to-purple-400" isPenalty={breakdown.effortBonus < 0} />
+                    <BreakdownRow label={breakdown.effortBonus > 0 ? 'Quick-win bonus' : 'Heavy-lift penalty'} value={breakdown.effortBonus} max={5} color={breakdown.effortBonus > 0 ? 'bg-emerald-400' : 'bg-amber-400'} isPenalty={breakdown.effortBonus < 0} />
                   )}
                   {breakdown.snoozePenalty < 0 && (
-                    <BreakdownRow label="Snooze penalty" value={breakdown.snoozePenalty} max={15} color="from-amber-400 to-orange-400" isPenalty />
+                    <BreakdownRow label="Snooze penalty" value={breakdown.snoozePenalty} max={15} color="bg-amber-400" isPenalty />
                   )}
                 </div>
 
@@ -96,7 +96,7 @@ function BreakdownRow({ label, value, max, color, isPenalty }: { label: string; 
       </div>
       <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
         <div
-          className={`h-full rounded-full bg-gradient-to-r ${color}`}
+          className={`h-full rounded-full ${color}`}
           style={{ width: `${pct}%` }}
         />
       </div>

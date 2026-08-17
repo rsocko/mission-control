@@ -5,6 +5,9 @@ import { Menu, Search, WifiOff, Cloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useOnlineStatus } from '@/lib/hooks/useOnlineStatus';
 import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
+import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import type { NavigationCounts } from '@/lib/navigation/badges';
 
 export interface MobileHeaderProps {
   /** Screen title displayed in center */
@@ -21,6 +24,7 @@ export interface MobileHeaderProps {
   isDrawerOpen?: boolean;
   /** Callback when search icon is tapped */
   onSearchPress?: () => void;
+  navigationCounts?: NavigationCounts;
 }
 
 /**
@@ -34,10 +38,11 @@ export interface MobileHeaderProps {
  */
 export type NotificationDotColor = 'red' | 'orange' | 'amber' | null;
 
-export function useNotificationDotColor(): NotificationDotColor {
+export function useNotificationDotColor(enabled = true): NotificationDotColor {
   const [dotColor, setDotColor] = useState<NotificationDotColor>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     const mql = window.matchMedia('(max-width: 639px)');
     if (!mql.matches) return;
 
@@ -92,7 +97,7 @@ export function useNotificationDotColor(): NotificationDotColor {
       abortController?.abort();
       if (timer) clearTimeout(timer);
     };
-  }, []);
+  }, [enabled]);
 
   return dotColor;
 }
@@ -113,8 +118,10 @@ export function MobileHeader({
   menuButtonRef,
   isDrawerOpen = false,
   onSearchPress,
+  navigationCounts,
 }: MobileHeaderProps) {
-  const dotColor = useNotificationDotColor();
+  const dotColor = useNotificationDotColor(!navigationCounts);
+  const { preferences } = useNavigationBadgePreferences();
   const isOnline = useOnlineStatus();
   const { totalPendingCount } = useOfflineQueue();
 
@@ -133,6 +140,12 @@ export function MobileHeader({
       : dotColor === 'amber'
         ? 'bg-amber-400'
         : '';
+  const showNavigationNotificationBadge = Boolean(
+    navigationCounts
+    && preferences.enabled
+    && preferences.items.notifications
+    && navigationCounts.notifications > 0,
+  );
 
   return (
     <header className="flex flex-col sm:hidden">
@@ -142,18 +155,24 @@ export function MobileHeader({
           ref={menuButtonRef}
           onClick={onMenuPress}
           className="relative flex items-center justify-center w-11 h-11 min-w-[44px] min-h-[44px] rounded-lg text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-          aria-label={dotColor ? 'Open menu (has notifications)' : 'Open menu'}
+          aria-label={showNavigationNotificationBadge || dotColor ? 'Open menu (has notifications)' : 'Open menu'}
           aria-expanded={isDrawerOpen}
           aria-controls="mobile-navigation-drawer"
         >
           <Menu size={20} />
           {/* Notification dot indicator (F-9) — colored by most severe level */}
-          {dotColor && (
+          {showNavigationNotificationBadge && navigationCounts ? (
+            <NavigationBadge
+              count={navigationCounts.notifications}
+              tone={navigationCounts.notificationTone}
+              overlay
+            />
+          ) : dotColor && !navigationCounts ? (
             <span
               className={cn('absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ring-2 ring-[var(--surface-0)]', dotColorClass)}
               aria-hidden="true"
             />
-          )}
+          ) : null}
         </button>
 
         {/* Screen title */}

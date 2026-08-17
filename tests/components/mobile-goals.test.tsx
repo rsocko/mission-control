@@ -144,8 +144,7 @@ describe('MobileGoalCard', () => {
 
   it('shows key results count and due date', () => {
     render(<MobileGoalCard item={mockGoalWithMilestones} />);
-    expect(screen.getByText(/3 key results/)).toBeInTheDocument();
-    expect(screen.getByText(/Due Aug \d+/)).toBeInTheDocument();
+    expect(screen.getByText('3 key results · Due Aug 31')).toBeInTheDocument();
   });
 
   it('shows milestone expand button with count', () => {
@@ -262,6 +261,30 @@ describe('MobileGoalsPage', () => {
 
     const allBtn = screen.getByText('All');
     expect(allBtn.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('keeps a date-only quarter boundary in its local calendar quarter', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 9, 15, 12));
+    fetchSpy.mockResolvedValue(new Response(JSON.stringify({
+      items: [{
+        ...mockGoalWithoutMilestones,
+        id: 'quarter-boundary',
+        title: 'Start Q4',
+        dueDate: '2026-10-01',
+      }],
+      counts: { goal: 1, idea: 0, brainstorm: 0 },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    render(<MobileGoalsPage />);
+    await waitFor(() => screen.getByText('Start Q4'));
+    fireEvent.click(screen.getByRole('button', { name: 'Q4 2026' }));
+
+    expect(screen.getByText('Start Q4')).toBeInTheDocument();
+    vi.useRealTimers();
   });
 
   it('shows empty state when no goals match period', async () => {

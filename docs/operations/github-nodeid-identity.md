@@ -63,7 +63,7 @@ accepted terminal exceptions, and the read-only history of the one-way cutover.
 The mode, rollback, comparison-evidence, and comparison-cycle commands were
 removed with the permanent cutover and are rejected as unsupported.
 
-## Migration `0102_github_nodeid_permanent_cutover`
+## Migration `0105_github_nodeid_permanent_cutover`
 
 This migration removes the cutover evidence tables
 (`github_identity_comparison_records` ≈1.28 GiB and

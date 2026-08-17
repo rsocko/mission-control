@@ -1,10 +1,36 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { projectPhaseItems } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
+import { and, eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
-import { getStoredTaskMutationPolicy } from '@/lib/tasks/mutation-policy';
+import {
+  placeTasksInProjectPhase,
+  ProjectHierarchyServiceError,
+  removeTasksFromProjectPhase,
+  updateProjectPhaseItem,
+} from '@/lib/projects/hierarchy-service';
+import type { ProjectHierarchyCommand } from '@/lib/projects/hierarchy-types';
+
+type PhaseItemUpdates = Extract<
+  ProjectHierarchyCommand,
+  { type: 'update_phase_item' }
+>['updates'];
+
+function hierarchyErrorResponse(error: ProjectHierarchyServiceError) {
+  return NextResponse.json({
+    error: error.message,
+    code: error.code,
+    current: error.current,
+  }, { status: error.status });
+}
+
+function hierarchyItem(
+  hierarchy: Awaited<ReturnType<typeof placeTasksInProjectPhase>>['hierarchy'],
+  phaseId: string,
+  taskId: string,
+) {
+  return hierarchy.phaseItemsByPhase[phaseId]?.find((item) => item.taskId === taskId);
+}
 
 /**
  * GET /api/project-phases/[id]/items — List items in a phase
@@ -15,7 +41,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const items = await db.select().from(projectPhaseItems)
       .where(eq(projectPhaseItems.phaseId, id))
       .orderBy(projectPhaseItems.sortOrder);
-
     return NextResponse.json({ items });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch phase items', error);
@@ -31,37 +56,50 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const body = await request.json();
     const { taskId, sortOrder, estimatedEffortHours, isProposed, proposalType } = body;
 
-    if (!taskId) {
+    if (typeof taskId !== 'string' || !taskId.trim()) {
       return NextResponse.json({ error: 'taskId is required' }, { status: 400 });
     }
-    const mutation = await getStoredTaskMutationPolicy(taskId, 'phases');
-    if (!mutation) return ApiErrors.notFound('Task');
-    if (mutation.policy.mutation === 'blocked') {
-      return ApiErrors.forbidden(
-        mutation.policy.reason ?? 'Phases cannot be changed for this task source',
-      );
+    if (
+      sortOrder !== undefined
+      && (!Number.isInteger(sortOrder) || sortOrder < 0)
+    ) {
+      return NextResponse.json({ error: 'sortOrder must be a non-negative integer' }, { status: 400 });
+    }
+    if (
+      estimatedEffortHours !== undefined
+      && estimatedEffortHours !== null
+      && (typeof estimatedEffortHours !== 'number' || estimatedEffortHours < 0)
+    ) {
+      return NextResponse.json({ error: 'estimatedEffortHours must be a non-negative number or null' }, { status: 400 });
+    }
+    if (isProposed !== undefined && typeof isProposed !== 'boolean') {
+      return NextResponse.json({ error: 'isProposed must be a boolean' }, { status: 400 });
+    }
+    if (
+      proposalType !== undefined
+      && proposalType !== null
+      && typeof proposalType !== 'string'
+    ) {
+      return NextResponse.json({ error: 'proposalType must be a string or null' }, { status: 400 });
     }
 
-    const id = randomUUID();
-    const now = new Date().toISOString();
-
-    await db.insert(projectPhaseItems).values({
-      id,
+    const result = await placeTasksInProjectPhase({
       phaseId,
-      taskId,
-      sortOrder: sortOrder ?? 0,
-      estimatedEffortHours: estimatedEffortHours || null,
-      isProposed: isProposed ?? false,
-      proposalType: proposalType || null,
-      createdAt: now,
-    }).onConflictDoNothing();
-
-    const [item] = await db.select().from(projectPhaseItems).where(and(
-      eq(projectPhaseItems.phaseId, phaseId),
-      eq(projectPhaseItems.taskId, taskId),
-    ));
-    return NextResponse.json({ item }, { status: 201 });
+      taskIds: [taskId],
+      toIndex: sortOrder ?? 0,
+      preserveExistingPosition: sortOrder === undefined,
+      newItem: {
+        estimatedEffortHours: estimatedEffortHours ?? null,
+        isProposed: isProposed ?? false,
+        proposalType: proposalType ?? null,
+      },
+      actor: { type: 'user' },
+    });
+    return NextResponse.json({
+      item: hierarchyItem(result.hierarchy, phaseId, taskId),
+    }, { status: 201 });
   } catch (error) {
+    if (error instanceof ProjectHierarchyServiceError) return hierarchyErrorResponse(error);
     return ApiErrors.internal('Failed to add phase item', error);
   }
 }
@@ -74,21 +112,46 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { id: phaseId } = await params;
     const { searchParams } = new URL(request.url);
     const itemId = searchParams.get('item_id');
-
     if (!itemId) {
       return NextResponse.json({ error: 'item_id query param is required' }, { status: 400 });
     }
 
     const body = await request.json();
-    const updates: Record<string, unknown> = {};
-    const allowedFields = ['sortOrder', 'estimatedEffortHours', 'isProposed', 'proposalType'];
-    for (const field of allowedFields) {
-      if (field in body) {
-        updates[field] = body[field];
-      }
+    const hasSortOrder = Object.prototype.hasOwnProperty.call(body, 'sortOrder');
+    const allowedMetadataFields = [
+      'estimatedEffortHours',
+      'isProposed',
+      'proposalType',
+    ] as const;
+    const updates: PhaseItemUpdates = {};
+    for (const field of allowedMetadataFields) {
+      if (field in body) updates[field] = body[field];
     }
-    if (Object.keys(updates).length === 0) {
+    if (!hasSortOrder && Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
+    }
+    if (
+      hasSortOrder
+      && (!Number.isInteger(body.sortOrder) || body.sortOrder < 0)
+    ) {
+      return NextResponse.json({ error: 'sortOrder must be a non-negative integer' }, { status: 400 });
+    }
+    if (
+      body.estimatedEffortHours !== undefined
+      && body.estimatedEffortHours !== null
+      && (typeof body.estimatedEffortHours !== 'number' || body.estimatedEffortHours < 0)
+    ) {
+      return NextResponse.json({ error: 'estimatedEffortHours must be a non-negative number or null' }, { status: 400 });
+    }
+    if (body.isProposed !== undefined && typeof body.isProposed !== 'boolean') {
+      return NextResponse.json({ error: 'isProposed must be a boolean' }, { status: 400 });
+    }
+    if (
+      body.proposalType !== undefined
+      && body.proposalType !== null
+      && typeof body.proposalType !== 'string'
+    ) {
+      return NextResponse.json({ error: 'proposalType must be a string or null' }, { status: 400 });
     }
 
     const [existingItem] = await db.select({ taskId: projectPhaseItems.taskId })
@@ -98,24 +161,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         eq(projectPhaseItems.phaseId, phaseId),
       ));
     if (!existingItem) return ApiErrors.notFound('Phase item');
-    const mutation = await getStoredTaskMutationPolicy(existingItem.taskId, 'phases');
-    if (!mutation) return ApiErrors.notFound('Task');
-    if (mutation.policy.mutation === 'blocked') {
-      return ApiErrors.forbidden(
-        mutation.policy.reason ?? 'Phases cannot be changed for this task source',
-      );
-    }
 
-    await db.update(projectPhaseItems).set(updates).where(
-      and(
-        eq(projectPhaseItems.id, itemId),
-        eq(projectPhaseItems.phaseId, phaseId),
-      )
-    );
-
-    const [item] = await db.select().from(projectPhaseItems).where(eq(projectPhaseItems.id, itemId));
-    return NextResponse.json({ item });
+    const result = await updateProjectPhaseItem({
+      phaseId,
+      taskId: existingItem.taskId,
+      toIndex: hasSortOrder ? body.sortOrder : undefined,
+      updates,
+      actor: { type: 'user' },
+    });
+    return NextResponse.json({
+      item: hierarchyItem(result.hierarchy, phaseId, existingItem.taskId),
+    });
   } catch (error) {
+    if (error instanceof ProjectHierarchyServiceError) return hierarchyErrorResponse(error);
     return ApiErrors.internal('Failed to update phase item', error);
   }
 }
@@ -125,30 +183,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
  */
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const { id } = await params;
+    const { id: phaseId } = await params;
     const { searchParams } = new URL(request.url);
     const taskId = searchParams.get('task_id');
-
     if (!taskId) {
       return NextResponse.json({ error: 'task_id query param is required' }, { status: 400 });
     }
-    const mutation = await getStoredTaskMutationPolicy(taskId, 'phases');
-    if (!mutation) return ApiErrors.notFound('Task');
-    if (mutation.policy.mutation === 'blocked') {
-      return ApiErrors.forbidden(
-        mutation.policy.reason ?? 'Phases cannot be changed for this task source',
-      );
-    }
 
-    await db.delete(projectPhaseItems).where(
-      and(
-        eq(projectPhaseItems.phaseId, id),
-        eq(projectPhaseItems.taskId, taskId),
-      )
-    );
-
+    await removeTasksFromProjectPhase({
+      phaseId,
+      taskIds: [taskId],
+      actor: { type: 'user' },
+    });
     return NextResponse.json({ success: true });
   } catch (error) {
+    if (error instanceof ProjectHierarchyServiceError) return hierarchyErrorResponse(error);
     return ApiErrors.internal('Failed to remove phase item', error);
   }
 }

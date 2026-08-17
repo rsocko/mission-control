@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "type": "command",
+        "matcher": "edit|create|apply_patch",
+        "bash": "[ ! -f \"$(git rev-parse --show-toplevel)/.github/skills/impeccable/scripts/hook.mjs\" ] || ! node -e \"process.exit(Math.min(parseInt(process.versions.node,10),22)===22?0:1)\" 2>/dev/null || node \"$(git rev-parse --show-toplevel)/.github/skills/impeccable/scripts/hook.mjs\"",
+        "powershell": "$inputJson = [Console]::In.ReadToEnd(); $root = git rev-parse --show-toplevel; $hook = Join-Path $root '.github/skills/impeccable/scripts/hook.mjs'; if ((Test-Path -LiteralPath $hook) -and ([int](node -p \"process.versions.node.split('.')[0]\") -ge 22)) { $inputJson | node $hook }",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

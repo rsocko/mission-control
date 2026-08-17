@@ -1,8 +1,10 @@
 # Product
 
-## Register
+<!-- impeccable:product-schema 1 -->
 
-product
+## Platform
+
+web
 
 ## Users
 
@@ -12,26 +14,53 @@ Power user managing 50+ active tasks across multiple sources (Microsoft Todo, Gi
 
 Mission Control aggregates tasks, alerts, and project status from disparate source systems into one unified interface. It replaces tab-switching and mental overhead with a dense, keyboard-driven command center. Success = the user opens MC once, sees the full picture, acts on what matters, and trusts the system to keep sources in sync.
 
-## Brand Personality
+## Positioning
+
+Mission Control is a source-aware control plane rather than another task database. It combines work from multiple systems, preserves provenance, infers useful organization, and lets the user decide and act without returning to each source.
+
+## Operating Context
+
+- Desktop is the high-density operating surface for scanning, filtering, triaging, and editing large task sets.
+- Mobile is a guided, action-first companion. Its first viewport prioritizes the next task, quick capture, and urgent queues before status or navigation.
+- Work moves between Microsoft To Do, GitHub, local tasks, calendars, notifications, projects, routines, and future connectors.
+- The primary workflow is open once, assess what needs attention, act inline, and trust write-through synchronization.
+
+## Capabilities and Constraints
+
+- Aggregates tasks, notifications, projects, routines, and triage items while preserving source provenance.
+- Supports keyboard navigation, quick capture, inline editing, filters, saved views, and responsive desktop/mobile workflows.
+- External write-back must remain explicit, observable, and safe; demo mode must never imply that sample changes are durable.
+- The interface may adapt its information architecture by viewport: dense on desktop and guided on mobile, without becoming a separate product.
+- AI assistance may recommend, infer, or summarize, but the UI must identify its output and preserve user control.
+
+## Brand Commitments
 
 Focused, capable, efficient.
 
 Voice: direct, no filler. Interface: information-dense but never cluttered. Every element earns its pixels. Motion is purposeful (confirms actions, reveals hierarchy), never decorative.
 
-## Anti-references
+### Anti-references
 
 - **Jira / Monday.com** — overwhelming chrome, nested menus, configuration ceremony, visual noise
 - **Generic SaaS templates** — hero-metric cards, identical rounded-corner grids, gradient accents, startup polish without substance
 - **Todoist / playful task apps** — candy colors, gamification, over-simplified views that hide information
 - **Apple Reminders** — too sparse, no density, no power-user affordances, treats tasks as an afterthought
 
-## Design Principles
+## Evidence on Hand
+
+- The repository contains the working application, automated tests, seeded synthetic demo data, and connector implementations.
+- `docs/development/impeccable-assessment.md` records the current interface assessment and verified detector findings.
+- `DESIGN.md` and `.impeccable/design.json` document the shipped design system.
+- No testimonials, customer claims, usage benchmarks, or commercial proof are established; future work must not fabricate them.
+
+## Product Principles
 
 1. **Density over simplicity** — show more information per viewport; trust the user to parse it. Whitespace is structural, not decorative.
 2. **Auto-infer over manual ceremony** — derive status, tags, and groupings from data. Never ask the user to configure what can be computed.
 3. **Act from anywhere** — keyboard shortcuts, quick-add, inline editing. Minimize navigation to accomplish an action.
 4. **Source-aware, not source-bound** — surface where data came from (icons, subtle indicators) but never let source boundaries dictate the UX.
 5. **Optimistic and immediate** — write-through on actions, instant UI feedback, correct on failure rather than block on confirmation.
+6. **Adapt by context** — desktop favors dense operational control; mobile guides the user toward the most important immediate action.
 
 ## Accessibility & Inclusion
 

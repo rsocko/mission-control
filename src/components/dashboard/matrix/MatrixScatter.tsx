@@ -29,6 +29,7 @@ import {
 } from '@/lib/matrix/projection';
 import { cn } from '@/lib/utils';
 import { getLocalToday } from '@/lib/utils/client-date';
+import { getTaskPriorityVisual, getTaskStatusVisual } from '@/lib/constants/task-formatting';
 import type { HubProject, Task } from '@/types/dashboard';
 
 interface MatrixScatterProps {
@@ -58,20 +59,6 @@ const QUADRANT_COLORS: Record<MatrixAxisMode, Array<{ background: string; text: 
   ],
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  todo: '#64748b',
-  in_progress: '#3b82f6',
-  blocked: '#ef4444',
-  waiting: '#f59e0b',
-  done: '#10b981',
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: '#ef4444',
-  high: '#f97316',
-  medium: '#3b82f6',
-  low: '#64748b',
-};
 const PRIORITY_RANK: Record<string, number> = {
   none: 0,
   low: 1,
@@ -133,8 +120,8 @@ function taskColor(
   projects: Map<string, HubProject>,
 ): string {
   if (mode === 'urgency') return urgencyColor(item.urgency);
-  if (mode === 'status') return STATUS_COLORS[item.task.status] ?? '#64748b';
-  if (mode === 'priority') return PRIORITY_COLORS[item.task.priority] ?? '#64748b';
+  if (mode === 'status') return item.task.status === 'waiting' ? '#f59e0b' : getTaskStatusVisual(item.task.status).color;
+  if (mode === 'priority') return getTaskPriorityVisual(item.task.priority).color;
   return projectColors(item.task, projects)[0] ?? '#64748b';
 }
 

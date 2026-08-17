@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-14T17:30:52.489Z",
+  "generatedAt": "2026-08-16T20:08:00.000-04:00",
   "title": "Design System: Mission Control",
   "extensions": {
     "colorMeta": {
@@ -147,6 +147,30 @@
         "displayName": "Muted Information Cyan",
         "canonical": "#155e75",
         "tonalRamp": ["#083344", "#164e63", "#155e75", "#0e7490", "#0891b2", "#06b6d4", "#67e8f9", "#ecfeff"]
+      },
+      "priority-critical": {
+        "role": "secondary",
+        "displayName": "Critical Priority Rose",
+        "canonical": "#f43f5e",
+        "tonalRamp": ["#4c0519", "#881337", "#9f1239", "#be123c", "#e11d48", "#f43f5e", "#fda4af", "#fff1f2"]
+      },
+      "priority-high": {
+        "role": "secondary",
+        "displayName": "High Priority Orange",
+        "canonical": "#fb923c",
+        "tonalRamp": ["#431407", "#7c2d12", "#9a3412", "#c2410c", "#ea580c", "#fb923c", "#fdba74", "#fff7ed"]
+      },
+      "priority-medium": {
+        "role": "secondary",
+        "displayName": "Medium Priority Amber",
+        "canonical": "#fbbf24",
+        "tonalRamp": ["#451a03", "#78350f", "#92400e", "#b45309", "#d97706", "#fbbf24", "#fde68a", "#fffbeb"]
+      },
+      "priority-low": {
+        "role": "secondary",
+        "displayName": "Low Priority Sky",
+        "canonical": "#38bdf8",
+        "tonalRamp": ["#082f49", "#0c4a6e", "#075985", "#0369a1", "#0284c7", "#38bdf8", "#bae6fd", "#f0f9ff"]
       },
       "source-todo": {
         "role": "secondary",
@@ -344,6 +368,11 @@
       {
         "name": "The Semantic Evidence Rule",
         "body": "Color must correspond to an action, state, priority, project, or source and must be reinforced by text, iconography, or position.",
+        "section": "colors"
+      },
+      {
+        "name": "The Task Visual Standard",
+        "body": "Every task-facing badge, dot, menu, chart, graph, desktop view, and mobile view consumes the shared task priority and status definitions. Other semantic domains retain separate palettes.",
         "section": "colors"
       },
       {

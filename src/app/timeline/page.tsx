@@ -4,7 +4,7 @@ import type { ComponentType } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle, CalendarDays, CheckSquare, ChevronLeft, ChevronRight, FileText, GitBranch, Mail, MessageSquare, Pin, MailOpen } from 'lucide-react';
 import { getLocalToday } from '@/lib/utils/client-date';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { getTaskPriorityVisual, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { uiLogger } from '@/lib/client-logger';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
@@ -27,14 +27,6 @@ const CONNECTOR_ICONS: Record<string, { icon: ComponentType<{ size?: number; cla
   'outlook-calendar': { icon: CalendarDays, label: 'Calendar' },
   'rymessage': { icon: MessageSquare, label: 'RyMessage' },
   'document-intelligence': { icon: FileText, label: 'Docs' },
-};
-
-const PRIORITY_DOT: Record<string, string> = {
-  critical: 'bg-rose-500',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-  none: 'bg-gray-300',
 };
 
 export default function TimelinePage() {
@@ -156,7 +148,7 @@ export default function TimelinePage() {
                                     : 'text-[var(--text-secondary)]'
                               }`}
                               title={task.title}>
-                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${PRIORITY_DOT[task.priority] || PRIORITY_DOT.none}`} />
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getTaskPriorityVisual(task.priority).dotClass}`} />
                               <span className="truncate">{task.title}</span>
                             </div>
                           ))}
@@ -191,7 +183,7 @@ export default function TimelinePage() {
             .slice(0, 10)
             .map(task => (
               <div key={task.id} className="flex items-center gap-2 p-2 rounded border border-[var(--border-subtle)] hover:bg-[var(--surface-0)]">
-                <span className={`w-2 h-2 rounded-full ${PRIORITY_DOT[task.priority]}`} />
+                <span className={`w-2 h-2 rounded-full ${getTaskPriorityVisual(task.priority).dotClass}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-[var(--text-primary)] truncate">{task.title}</p>
                   <p className="text-xs text-[var(--text-muted)] flex items-center gap-1">{task.dueDate} · {(() => { const c = CONNECTOR_ICONS[task.connectorType]; return c ? <c.icon size={10} /> : <Pin size={10} />; })()}</p>

@@ -1,8 +1,14 @@
+import {
+  PRIORITY_DOT_COLORS,
+  PRIORITY_LABELS as TASK_PRIORITY_LABELS,
+  TASK_STATUS_VISUALS,
+} from '@/lib/constants/task-formatting';
+
 export const DEFAULT_COLUMNS = [
-  { id: 'backlog', name: 'Backlog', color: '#6b7280', statusMapping: ['todo'] },
-  { id: 'in-progress', name: 'In Progress', color: '#3b82f6', statusMapping: ['in_progress'] },
+  { id: 'backlog', name: 'Backlog', color: TASK_STATUS_VISUALS.todo.color, statusMapping: ['todo'] },
+  { id: 'in-progress', name: 'In Progress', color: TASK_STATUS_VISUALS.in_progress.color, statusMapping: ['in_progress'] },
   { id: 'review', name: 'Review', color: '#8b5cf6', statusMapping: [] as string[] },
-  { id: 'done', name: 'Done', color: '#22c55e', statusMapping: ['done'] },
+  { id: 'done', name: 'Done', color: TASK_STATUS_VISUALS.done.color, statusMapping: ['done'] },
 ];
 
 export const CONNECTOR_BRAND_ICONS: Record<string, string> = {
@@ -25,20 +31,8 @@ export const SOURCES = [
   { id: 'custom-rest', name: 'Custom REST', icon: '/icons/connectors/custom-rest.svg' },
 ];
 
-export const PRIORITY_DOTS: Record<string, string> = {
-  critical: 'bg-rose-500',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-  none: '',
-};
+export const PRIORITY_DOTS = PRIORITY_DOT_COLORS;
 
-export const PRIORITY_LABELS: Record<string, string> = {
-  critical: 'P0',
-  high: 'P1',
-  medium: 'P2',
-  low: 'P3',
-  none: '',
-};
+export const PRIORITY_LABELS = TASK_PRIORITY_LABELS;
 
 export const VISIBLE_LIMIT = 15;

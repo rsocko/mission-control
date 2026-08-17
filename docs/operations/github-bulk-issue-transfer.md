@@ -5,10 +5,11 @@ sidebar_label: GitHub Bulk Issue Transfer
 
 # GitHub bulk issue transfer
 
-Use this operation only for a reviewed repository cutover. It transfers every
-open and closed issue through Mission Control's stable-node-ID path while
-preserving Mission Control task IDs and local metadata. Pull requests are never
-included.
+Use this operation only for a reviewed repository cutover. Its safe default
+transfers only the issue node IDs in a reviewed allowlist through Mission
+Control's stable-node-ID path while preserving Mission Control task IDs and
+local metadata. Pull requests are never included. Repository-wide transfer is
+available only through the explicit `--all-issues` option.
 
 ## Preconditions
 
@@ -27,19 +28,52 @@ included.
 
 Preview is the default and performs no database or GitHub mutation:
 
+Create and archive a reviewed JSON manifest:
+
+```json
+{
+  "version": 1,
+  "sourceRepository": "owner/source",
+  "issueNodeIds": ["I_kwDOExample1", "I_kwDOExample2"]
+}
+```
+
 ```bash
 npm run github:bulk-transfer -- preview \
   --connector <connector-id> \
   --source owner/source \
   --target owner/target \
+  --allowlist /reviewed/owl-issues.json \
   --backup /backups/mission-control.db \
   --actor <operator>
 ```
 
 Archive the complete JSON output. Confirm that `go` is true, open plus closed
-counts equal the source issue count, every issue has one stable task binding,
-and there are no reasons. The `planHash` commits to repository identities,
-backup digest, task IDs, issue node IDs, and before-state metadata digests.
+counts equal the selected issue count, every selected issue has one stable task
+binding, and there are no reasons. Unknown IDs, pull request IDs, and IDs from
+another source repository fail closed as `approved_issue_node_id_not_in_source`.
+The `planHash` commits to repository identities, the exact manifest SHA-256,
+the normalized approved node ID set, backup digest, task IDs, issue node IDs,
+and before-state metadata digests.
+
+For a deliberately reviewed whole-repository transfer, replace `--allowlist`
+with `--all-issues`. Omitting both options is an error.
+
+API callers must make the same explicit choice by sending either:
+
+```json
+{
+  "scope": {
+    "mode": "reviewed-allowlist",
+    "sourceRepository": "owner/source",
+    "manifestSha256": "<lowercase-sha256>",
+    "issueNodeIds": ["I_kwDOExample1", "I_kwDOExample2"]
+  }
+}
+```
+
+or `{ "scope": { "mode": "all-issues" } }`. Duplicate IDs and incomplete
+scope objects are rejected before preview.
 
 ## Execute and monitor
 
@@ -50,6 +84,7 @@ npm run github:bulk-transfer -- execute \
   --connector <connector-id> \
   --source owner/source \
   --target owner/target \
+  --allowlist /reviewed/owl-issues.json \
   --backup /backups/mission-control.db \
   --actor <operator> \
   --idempotency-key <unique-key> \
@@ -72,7 +107,8 @@ higher value. The maximum is eight.
 ## Resume, abort, and incidents
 
 Repeat `execute` (or use `resume`) with the same arguments, idempotency key, and
-plan hash after a pre-dispatch interruption. Verified items are skipped.
+plan hash after a pre-dispatch interruption. For allowlisted runs, use the
+exact same manifest bytes. Verified items are skipped.
 
 If any item remains `transferring`, its GitHub mutation outcome is ambiguous.
 The operation fails closed, leaves the connector disabled, and refuses replay
@@ -84,6 +120,25 @@ npm run github:bulk-transfer -- reconcile \
   --run <run-id> --task <task-id> --target-number <number> \
   --actor <operator> --confirm reconcile
 ```
+
+If GitHub assigned a successor node ID during the native transfer, the first
+reconcile attempt fails closed with `explicit successor authorization is
+required`. Independently verify the source node ID from the archived preview
+and the successor node ID from the target issue, SHA-256 hash both raw node ID
+strings, and repeat reconciliation with the reviewed authorization:
+
+```bash
+npm run github:bulk-transfer -- reconcile \
+  --run <run-id> --task <task-id> --target-number <number> \
+  --actor <operator> --confirm reconcile \
+  --source-node-digest <source-node-id-sha256> \
+  --successor-node-digest <successor-node-id-sha256> \
+  --successor-reason '<reviewed reason>' \
+  --successor-key <unique-idempotency-key>
+```
+
+All four successor options are required together. Archive the evidence and
+command output; do not put raw node IDs into logs when digests are sufficient.
 
 Never retry or repair an ambiguous item directly through GitHub or SQL. After
 all ambiguous items are reconciled, resume the original run.

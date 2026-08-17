@@ -17,6 +17,7 @@ import type { HubProject, TaskContextMenuActions } from '@/components/task-list/
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import {
   executeProjectHierarchyCommand,
   loadProjectHierarchy,
@@ -135,7 +136,7 @@ export function ProjectPageProvider({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hierarchyAnnouncement, setHierarchyAnnouncement] = useState('');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const hierarchyRevisionRef = useRef(0);
   const hierarchyProjectIdRef = useRef<string | null>(null);

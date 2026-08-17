@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { useSidebarExpanded } from '@/lib/hooks/useSidebarExpanded';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 export interface DashboardTaskDestination {
   id: string;
@@ -22,14 +23,14 @@ type ConfirmDialog = {
 };
 type SaveTemplateTask = { id: string; title: string; subtasks?: string[] } | null;
 
-export function useDashboardUiState(initialSelectedTaskId: string | null) {
+export function useDashboardUiState() {
   const viewStore = useDashboardViewStore();
   const { setCollapsedListGroups: persistCollapsedListGroups, setCollapsedSections: persistCollapsedSections } = viewStore;
   const { sidebarExpanded, setSidebarExpanded, sidebarMode, setSidebarMode } = useSidebarExpanded();
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialSelectedTaskId);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [listSearch, setListSearch] = useState('');
   const [collapsedListGroups, setCollapsedListGroups] = useState<Set<string>>(
     new Set(viewStore.collapsedListGroups),

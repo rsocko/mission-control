@@ -271,7 +271,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     staleTime: 5 * 60 * 1000,
   });
   const allAssignees = filterOptionsQuery.data?.assignees ?? [];
-  const dashboardUi = useDashboardUiState(searchParams.get('taskId'));
+  const dashboardUi = useDashboardUiState();
   const {
     bulkMode, bulkSelected, collapsedGroups, selectedTaskId, sidebarExpanded, sidebarMode,
     listSearch, collapsedListGroups, confirmDialog, saveTemplateTask, collapsedSections,
@@ -382,9 +382,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       if (taskId) {
         e.preventDefault();
         setSelectedTaskId(taskId);
-        const url = new URL(window.location.href);
-        url.searchParams.set('taskId', taskId);
-        window.history.replaceState(null, '', url);
       }
     };
     window.addEventListener('mc:select-task', handler);

@@ -81,7 +81,8 @@ describe('dashboard state modules', () => {
   });
 
   it('owns sidebar and selection UI state without dashboard data dependencies', () => {
-    const { result } = renderHook(() => useDashboardUiState('task-1'));
+    window.history.replaceState({}, '', '/?taskId=task-1');
+    const { result } = renderHook(() => useDashboardUiState());
 
     expect(result.current.state.selectedTaskId).toBe('task-1');
     act(() => result.current.actions.toggleSection('sources'));

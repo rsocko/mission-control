@@ -117,4 +117,11 @@ describe('MobileHeader search (F-14)', () => {
     expect(searchButton.className).toContain('min-w-[44px]');
     expect(searchButton.className).toContain('min-h-[44px]');
   });
+
+  it('does not add persistent Back or Forward controls on mobile', () => {
+    render(<MobileHeader title="Today" onMenuPress={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Forward' })).not.toBeInTheDocument();
+  });
 });

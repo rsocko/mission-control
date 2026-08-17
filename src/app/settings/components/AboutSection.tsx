@@ -17,6 +17,7 @@ import {
   APP_SUPPORT_URL,
   APP_VERSION,
 } from '@/lib/app-metadata';
+import { MissionControlIcon } from '@/components/ui/MissionControlIcon';
 
 const ABOUT_LINKS = [
   {
@@ -85,19 +86,24 @@ export function AboutSection() {
   }, []);
 
   return (
-    <div>
-      <h2 className="mb-1 text-xl font-semibold text-[var(--text-primary)]">About {APP_NAME}</h2>
+    <div className="font-sans">
+      <h2 className="mb-1 text-xl font-semibold tracking-[-0.02em] text-[var(--text-primary)]">About {APP_NAME}</h2>
       <p className="mb-6 text-sm text-[var(--text-tertiary)]">
         Project information, resources, and release details
       </p>
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5">
         <div className="flex items-center gap-4">
-          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-sky-500 to-violet-500">
-            <span className="text-lg font-bold text-white">MC</span>
+          <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-xl border border-[var(--border-strong)] bg-[var(--surface-0)]">
+            <MissionControlIcon
+              size={36}
+              className="drop-shadow-[0_0_8px_rgba(168,85,247,0.25)]"
+            />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-[var(--text-primary)]">{APP_NAME}</h3>
+            <h3 className="text-lg font-bold tracking-[-0.02em] text-[var(--text-primary)]">
+              {APP_NAME}
+            </h3>
             <p className="mt-0.5 text-sm leading-5 text-[var(--text-secondary)]">{APP_DESCRIPTION}</p>
           </div>
         </div>

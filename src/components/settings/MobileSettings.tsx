@@ -16,7 +16,8 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
-import { useNavBadgesVisible } from '@/components/layout/MobileBottomNav';
+import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import { NAV_BADGE_OPTIONS } from '@/lib/navigation/badges';
 import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/components/ui/CompletionBurst';
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
@@ -96,8 +97,8 @@ export function MobileSettings() {
   const router = useRouter();
   const { progress } = useSyncStream();
 
-  // Nav badge visibility (persisted in localStorage)
-  const [navBadgesVisible, setNavBadgesVisible] = useNavBadgesVisible();
+  const { preferences: navBadgePreferences, setEnabled: setNavBadgesEnabled, setItemEnabled } =
+    useNavigationBadgePreferences();
 
   // Completion animation setting (persisted in localStorage)
   const [animationEnabled, setAnimationEnabled] = useState(true);
@@ -226,14 +227,30 @@ export function MobileSettings() {
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm text-[var(--text-primary)]">Navigation Badges</p>
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Show count badges on bottom nav tabs</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Master control for navigation counts</p>
           </div>
           <Toggle
-            enabled={navBadgesVisible}
-            onChange={setNavBadgesVisible}
+            enabled={navBadgePreferences.enabled}
+            onChange={setNavBadgesEnabled}
             label="Navigation Badges"
           />
         </div>
+        {NAV_BADGE_OPTIONS.map((option) => (
+          <div
+            key={option.key}
+            className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]"
+          >
+            <div className="flex-1 min-w-0 mr-3">
+              <p className="text-sm text-[var(--text-primary)]">{option.label}</p>
+              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{option.description}</p>
+            </div>
+            <Toggle
+              enabled={navBadgePreferences.items[option.key]}
+              onChange={(enabled) => setItemEnabled(option.key, enabled)}
+              label={`Show ${option.label} badge`}
+            />
+          </div>
+        ))}
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
             <p className="text-sm text-[var(--text-primary)]">Completion Animations</p>

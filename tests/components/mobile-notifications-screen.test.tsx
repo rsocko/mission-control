@@ -395,8 +395,12 @@ describe('MobileNotificationsScreen', () => {
       expect(await screen.findByText('Invented Market mover')).toBeInTheDocument();
       expect(screen.queryByText('Fictional Transit mover')).not.toBeInTheDocument();
       expect(screen.queryByText('Invented Market task')).not.toBeInTheDocument();
-      expect(screen.getByRole('combobox', { name: 'Category filter' })).toHaveTextContent('Finance (2)');
-      expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toHaveTextContent('Invented Market (2)');
+      expect(screen.getByRole('button', {
+        name: 'Clear Category: Finance filter',
+      })).toHaveTextContent('Category: Finance');
+      expect(screen.getByRole('button', {
+        name: 'Clear Merchant: Invented Market filter',
+      })).toHaveTextContent('Merchant: Invented Market');
       expect(screen.getByText('2 filters applied')).toBeInTheDocument();
       expect(screen.getByRole('button', {
         name: 'Clear Merchant: Invented Market filter',
@@ -446,7 +450,9 @@ describe('MobileNotificationsScreen', () => {
         expect(screen.getByText('Manager alias')).toBeInTheDocument();
         expect(screen.getByText('Monarch alias')).toBeInTheDocument();
         expect(screen.queryByText('GitHub source')).not.toBeInTheDocument();
-        expect(screen.getByRole('combobox', { name: 'Source filter' })).toHaveTextContent('Finance Manager');
+        expect(screen.getByRole('button', {
+          name: 'Clear Source: Finance Manager filter',
+        })).toHaveTextContent('Source: Finance Manager');
         await waitFor(() => {
           expect(mockFetch).toHaveBeenCalledWith(
             '/api/notifications?source=finance-manager',

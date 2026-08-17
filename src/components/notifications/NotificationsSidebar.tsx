@@ -6,13 +6,11 @@ import Link from 'next/link';
 import {
   AlertTriangle, ClipboardCheck, BellRing, Info, Newspaper, Inbox,
   ChevronRight, PanelLeftClose, PanelLeftOpen, Globe,
-  Mail, MailOpen, Eye, EyeOff, Sparkles,
-  Server, CheckSquare, DollarSign, Home, AtSign, Package,
-  Settings, Calendar,
+  Mail, MailOpen, Eye, EyeOff, Settings, Calendar,
   type LucideIcon,
 } from 'lucide-react';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
-import type { NotificationLevel, NotificationCategory, NotificationState } from '@/types';
+import type { NotificationLevel, NotificationState } from '@/types';
 import { NOTIFICATION_SOURCE_ICONS } from '@/types/dashboard';
 
 // ─── Sidebar item (mirrors dashboard SidebarItem) ────────────────────────────
@@ -98,18 +96,6 @@ const LEVEL_ITEMS: { value: NotificationLevel; label: string; icon: LucideIcon; 
   { value: 'digest', label: 'Digest', icon: Newspaper, dotColor: '#a855f7' },
 ];
 
-// ─── Category config ─────────────────────────────────────────────────────────
-
-const CATEGORY_ITEMS: { value: NotificationCategory; label: string; icon: LucideIcon }[] = [
-  { value: 'system', label: 'System', icon: Server },
-  { value: 'tasks', label: 'Tasks', icon: CheckSquare },
-  { value: 'finance', label: 'Finance', icon: DollarSign },
-  { value: 'home', label: 'Home', icon: Home },
-  { value: 'social', label: 'Social', icon: AtSign },
-  { value: 'ai_insights', label: 'AI Insights', icon: Sparkles },
-  { value: 'packages', label: 'Packages', icon: Package },
-];
-
 // ─── State config ────────────────────────────────────────────────────────────
 
 const STATE_ITEMS: { value: NotificationState; label: string; icon: LucideIcon }[] = [
@@ -142,9 +128,15 @@ interface NotificationsSidebarProps {
   hook: UseNotificationsReturn;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  savedViews?: React.ReactNode;
 }
 
-export function NotificationsSidebar({ hook, collapsed, onToggleCollapse }: NotificationsSidebarProps) {
+export function NotificationsSidebar({
+  hook,
+  collapsed,
+  onToggleCollapse,
+  savedViews,
+}: NotificationsSidebarProps) {
   const { facets, filters } = hook;
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
 
@@ -213,6 +205,8 @@ export function NotificationsSidebar({ hook, collapsed, onToggleCollapse }: Noti
       aria-label="Notification filters"
       className="hidden sm:flex flex-col w-56 bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0"
     >
+      {savedViews}
+
       {/* ── Level section ── */}
       <div className="mb-4">
         <div className="flex items-center justify-between">
@@ -251,41 +245,6 @@ export function NotificationsSidebar({ hook, collapsed, onToggleCollapse }: Noti
                 color={dotColor}
               />
             ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Category section ── */}
-      <div className="mb-4">
-        <SectionHeader
-          label="Category"
-          collapsed={collapsedSections.has('category')}
-          onToggle={() => toggleSection('category')}
-          hasActiveFilter={!!filters.category}
-        />
-        {!collapsedSections.has('category') && (
-          <div className="space-y-0.5">
-            <SidebarItem
-              icon={<Inbox size={14} className="text-blue-400" />}
-              label="All"
-              count={totalCount}
-              active={!filters.category}
-              onClick={() => hook.setCategoryFilter(null)}
-            />
-            {CATEGORY_ITEMS.filter(({ value }) => (facets.category[value] || 0) > 0).map(
-              ({ value, label, icon: Icon }) => (
-                <SidebarItem
-                  key={value}
-                  icon={<Icon size={14} />}
-                  label={label}
-                  count={facets.category[value] || 0}
-                  active={filters.category === value}
-                  onClick={() =>
-                    hook.setCategoryFilter(filters.category === value ? null : value)
-                  }
-                />
-              ),
-            )}
           </div>
         )}
       </div>
@@ -333,41 +292,6 @@ export function NotificationsSidebar({ hook, collapsed, onToggleCollapse }: Noti
                     }
                   />
                 ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── State section ── */}
-      {(facets.merchant.length > 0 || filters.merchant) && (
-        <div className="mb-4">
-          <SectionHeader
-            label="Merchant"
-            collapsed={collapsedSections.has('merchant')}
-            onToggle={() => toggleSection('merchant')}
-            hasActiveFilter={!!filters.merchant}
-          />
-          {!collapsedSections.has('merchant') && (
-            <div className="space-y-0.5">
-              <SidebarItem
-                icon={<DollarSign size={14} className="text-blue-400" />}
-                label="All Merchants"
-                count={totalCount}
-                active={!filters.merchant}
-                onClick={() => hook.setMerchantFilter(null)}
-              />
-              {facets.merchant.map(merchant => (
-                <SidebarItem
-                  key={merchant.key}
-                  icon={<DollarSign size={14} />}
-                  label={merchant.label}
-                  count={merchant.count}
-                  active={filters.merchant === merchant.key}
-                  onClick={() => hook.setMerchantFilter(
-                    filters.merchant === merchant.key ? null : merchant.key,
-                  )}
-                />
-              ))}
             </div>
           )}
         </div>

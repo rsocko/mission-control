@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission Control Notifications Filtering Redesign</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --surface-0: #0b1120;
+      --panel: #111827;
+      --panel-2: #1e293b;
+      --surface-3: #334155;
+      --line: #1e293b;
+      --line-strong: #334155;
+      --muted: #8190a6;
+      --secondary: #94a3b8;
+      --tertiary: #8b9ab5;
+      --text: #f8fafc;
+      --blue: #3b82f6;
+      --blue-soft: #60a5fa;
+      --blue-bg: #1e3a8a;
+      --red: #ef4444;
+      --red-bg: #991b1b;
+      --amber: #f59e0b;
+      --amber-bg: #92400e;
+      --green: #10b981;
+      --green-bg: #065f46;
+      --violet: #a855f7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 1080px;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input { font: inherit; color: inherit; }
+    .page { max-width: 1500px; margin: 0 auto; padding: 28px; }
+    .intro { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
+    h1 { margin: 0 0 7px; font-size: 20px; }
+    .intro p { max-width: 800px; margin: 0; color: var(--secondary); line-height: 1.5; }
+    .tabs { display: flex; gap: 7px; }
+    .tab, .button {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 9px 13px;
+      cursor: pointer;
+    }
+    .tab.active, .button.primary { border-color: var(--blue); background: var(--blue-bg); color: var(--text); }
+    .concept { display: none; }
+    .concept.active { display: block; }
+    .concept-note { margin: 10px 0 12px; color: var(--secondary); }
+    .recommended {
+      margin-right: 8px;
+      border: 1px solid var(--green);
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: var(--green-bg);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .app {
+      height: 760px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--bg);
+    }
+    .rail {
+      overflow-y: auto;
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      padding: 14px 12px;
+    }
+    .section-title {
+      margin: 10px 9px 6px;
+      color: var(--tertiary);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    .rail-item {
+      display: flex;
+      width: 100%;
+      min-height: 31px;
+      align-items: center;
+      gap: 8px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      padding: 0 9px;
+      color: var(--secondary);
+      text-align: left;
+    }
+    .rail-item.active { background: var(--blue-bg); color: var(--blue-soft); }
+    .rail-item span:nth-child(2) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .rule { height: 1px; margin: 11px 8px; background: var(--line); }
+    .main { min-width: 0; display: flex; flex-direction: column; }
+    .header { padding: 17px 21px 13px; border-bottom: 1px solid var(--line); background: var(--panel); }
+    .title-row, .toolbar, .chips, .quick-filters { display: flex; align-items: center; gap: 8px; }
+    .title { font-size: 20px; font-weight: 600; }
+    .spacer { flex: 1; }
+    .badge { border: 1px solid var(--red); border-radius: 999px; background: var(--red-bg); color: var(--text); padding: 3px 8px; font-size: 12px; }
+    .quick-filters { margin-top: 14px; }
+    .quick {
+      display: grid;
+      min-width: 145px;
+      grid-template-columns: auto 1fr;
+      gap: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-2);
+      padding: 9px 11px;
+      text-align: left;
+    }
+    .quick strong { grid-row: span 2; align-self: center; font-size: 20px; }
+    .quick small { color: var(--muted); }
+    .toolbar { margin-top: 12px; }
+    .search {
+      display: flex;
+      min-height: 36px;
+      max-width: 520px;
+      flex: 1;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-0);
+      padding: 0 11px;
+      color: var(--muted);
+    }
+    .search input { width: 100%; border: 0; outline: 0; background: transparent; padding: 0 8px; }
+    .chips { min-height: 34px; margin-top: 7px; }
+    .chip { border: 1px solid var(--blue); border-radius: 999px; background: var(--blue-bg); color: var(--text); padding: 5px 9px; }
+    .link { border: 0; background: transparent; color: var(--blue-soft); }
+    .content { min-height: 0; display: grid; grid-template-columns: 430px 1fr; flex: 1; }
+    .list { border-right: 1px solid var(--line); background: var(--surface-0); }
+    .list-head { display: flex; height: 42px; align-items: center; border-bottom: 1px solid var(--line); padding: 0 13px; color: var(--secondary); }
+    .card {
+      display: grid;
+      grid-template-columns: 28px 1fr auto;
+      gap: 9px;
+      margin: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+    }
+    .card.selected { border-color: var(--blue); background: var(--blue-bg); }
+    .source { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 8px; background: var(--amber-bg); color: var(--amber); }
+    .card strong { display: block; margin-bottom: 7px; }
+    .card p { margin: 0; color: var(--secondary); font-size: 12px; }
+    .detail { display: grid; place-items: center; color: var(--muted); text-align: center; }
+    .annotations { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
+    .annotation { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px; }
+    .annotation p { margin: 6px 0 0; color: var(--secondary); line-height: 1.5; }
+    .views { display: flex; gap: 6px; margin-top: 11px; }
+    .view { border: 1px solid var(--line); border-radius: 999px; background: var(--panel-2); color: var(--secondary); padding: 5px 9px; }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="intro">
+      <div>
+        <h1>Notifications filtering redesign</h1>
+        <p>The approved hybrid preserves fast sidebar facets and saved views while replacing the permanent field grid with the task-list filtering pattern. The alternative records the lower-change facet-heavy direction considered during review.</p>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-target="hybrid">A · Hybrid</button>
+        <button class="tab" data-target="conservative">B · Conservative</button>
+      </div>
+    </div>
+
+    <section id="hybrid" class="concept active">
+      <div class="concept-note"><span class="recommended">Approved</span>Saved views and common facets in the rail; quick queues and one advanced filter builder above the list.</div>
+      <div class="app">
+        <aside class="rail">
+          <div class="section-title">Saved views</div>
+          <button class="rail-item active"><span>▣</span><span>Inbox</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>⌁</span><span>Review requests</span><span class="count">5</span></button>
+          <button class="rail-item"><span>@</span><span>Mentions</span><span class="count">8</span></button>
+          <button class="rail-item"><span>⌂</span><span>Participating</span><span class="count">31</span></button>
+          <button class="rail-item"><span>＋</span><span>Save current view</span></button>
+          <div class="rule"></div>
+          <div class="section-title">Level</div>
+          <button class="rail-item active"><span>▣</span><span>All</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>△</span><span>Urgent</span><span class="count">2</span></button>
+          <button class="rail-item"><span>☑</span><span>Action needed</span><span class="count">12</span></button>
+          <button class="rail-item"><span>♧</span><span>Heads up</span><span class="count">4,622</span></button>
+          <div class="section-title">State</div>
+          <button class="rail-item active"><span>◉</span><span>All</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>✉</span><span>Unread</span><span class="count">4,635</span></button>
+          <button class="rail-item"><span>✓</span><span>Read</span><span class="count">1</span></button>
+          <div class="section-title">Source</div>
+          <button class="rail-item active"><span>◎</span><span>All sources</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>$</span><span>Finance Manager</span><span class="count">4,632</span></button>
+          <button class="rail-item"><span>▦</span><span>Document Intelligence</span><span class="count">4</span></button>
+          <div class="section-title">Time</div>
+          <button class="rail-item active"><span>◷</span><span>Any time</span></button>
+          <button class="rail-item"><span>◷</span><span>Today</span></button>
+          <button class="rail-item"><span>◷</span><span>Last 7 days</span></button>
+        </aside>
+        <div class="main">
+          <header class="header">
+            <div class="title-row"><span style="color:var(--blue)">♧</span><span class="title">Notifications</span><span class="badge">4,635 unread</span><span class="spacer"></span><button class="button">Mark all read</button><button class="button">↻</button><button class="button">•••</button></div>
+            <div class="quick-filters">
+              <button class="quick"><strong style="color:var(--red)">2</strong><span>Urgent</span><small>unread</small></button>
+              <button class="quick"><strong style="color:var(--amber)">12</strong><span>Action needed</span><small>unread</small></button>
+              <button class="quick"><strong style="color:var(--violet)">14</strong><span>Actionable</span><small>can be handled</small></button>
+              <button class="quick"><strong style="color:var(--blue)">4,635</strong><span>Unread</span><small>all sources</small></button>
+            </div>
+            <div class="toolbar"><label class="search">⌕<input placeholder="Search notifications"><span>/</span></label><button class="button primary">＋ Add filter</button><button class="button">Newest⌄</button></div>
+            <div class="chips"><button class="chip">State: Unread ×</button><button class="chip">Category: Finance ×</button><button class="chip">Source: Finance Manager ×</button><button class="link">Clear all</button></div>
+          </header>
+          <div class="content">
+            <section class="list">
+              <div class="list-head">□&nbsp; Select visible <span class="spacer"></span>4,632 matching</div>
+              <article class="card selected"><span class="source">$</span><div><strong>● Review a finance attribution exception</strong><p>Tryion · Finance · Action needed</p></div><span>6d</span></article>
+              <article class="card"><span class="source">$</span><div><strong>● Review a finance attribution exception</strong><p>Tryion · Finance · Heads up</p></div><span>6d</span></article>
+              <article class="card"><span class="source">$</span><div><strong>● Review a finance attribution exception</strong><p>Tryion · Finance · Heads up</p></div><span>5d</span></article>
+            </section>
+            <section class="detail"><div><div style="font-size:2.5rem">♧</div><strong>Select a notification to view details</strong><p>Use J / K to navigate · R to toggle read · S to snooze</p></div></section>
+          </div>
+        </div>
+      </div>
+      <div class="annotations">
+        <div class="annotation"><strong>Common filters stay one click away</strong><p>Level, State, Source, and Time remain in the familiar dashboard-style rail.</p></div>
+        <div class="annotation"><strong>Advanced filters scale</strong><p>Category, Merchant, Repository, Owner, Reason, Subject type, Source account, and Participating use one searchable builder.</p></div>
+        <div class="annotation"><strong>Saved views remain prominent</strong><p>Built-in and custom views live at the top of the rail; saving appears only for a new filter combination.</p></div>
+        <div class="annotation"><strong>Actions are separated</strong><p>Global actions stay in the title row and bulk actions appear only after selection.</p></div>
+      </div>
+    </section>
+
+    <section id="conservative" class="concept">
+      <div class="concept-note">Alternative considered: preserve the full facet rail and only move the rare free-text criteria behind “More filters.”</div>
+      <div class="app">
+        <aside class="rail">
+          <div class="section-title">Level</div>
+          <button class="rail-item active"><span>▣</span><span>All</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>△</span><span>Urgent</span><span class="count">2</span></button>
+          <button class="rail-item"><span>☑</span><span>Action needed</span><span class="count">12</span></button>
+          <div class="section-title">Category</div>
+          <button class="rail-item active"><span>▣</span><span>All</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>$</span><span>Finance</span><span class="count">4,632</span></button>
+          <div class="section-title">Source</div>
+          <button class="rail-item active"><span>◎</span><span>All sources</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>$</span><span>Finance Manager</span><span class="count">4,632</span></button>
+          <div class="section-title">State</div>
+          <button class="rail-item active"><span>◉</span><span>All</span><span class="count">4,636</span></button>
+          <button class="rail-item"><span>✉</span><span>Unread</span><span class="count">4,635</span></button>
+          <div class="section-title">Time</div>
+          <button class="rail-item active"><span>◷</span><span>Any time</span></button>
+          <button class="rail-item"><span>◷</span><span>Today</span></button>
+        </aside>
+        <div class="main">
+          <header class="header">
+            <div class="title-row"><span style="color:var(--blue)">♧</span><span class="title">Notifications</span><span class="badge">4,635 unread</span><span class="spacer"></span><button class="button">Mark all read</button><button class="button">↻</button></div>
+            <div class="views"><button class="view">Inbox</button><button class="view">Review requests · 5</button><button class="view">Mentions · 8</button><button class="view">＋ Saved views</button></div>
+            <div class="toolbar"><label class="search">⌕<input placeholder="Search notifications"></label><button class="button primary">＋ More filters</button><button class="button">Newest⌄</button></div>
+          </header>
+          <div class="content">
+            <section class="list"><div class="list-head">□&nbsp; Select visible <span class="spacer"></span>4,636 matching</div><article class="card selected"><span class="source">$</span><div><strong>● Review a finance attribution exception</strong><p>Tryion · Finance · Heads up</p></div><span>6d</span></article><article class="card"><span class="source">$</span><div><strong>● Review a finance attribution exception</strong><p>Tryion · Finance · Heads up</p></div><span>5d</span></article></section>
+            <section class="detail"><div><div style="font-size:2.5rem">♧</div><strong>Select a notification to view details</strong></div></section>
+          </div>
+        </div>
+      </div>
+      <div class="annotations">
+        <div class="annotation"><strong>Lower change</strong><p>The current facet rail remains the primary control.</p></div>
+        <div class="annotation"><strong>Less duplication</strong><p>The permanent top field grid is still removed.</p></div>
+        <div class="annotation"><strong>Saved views stay visible</strong><p>Views remain a compact row above search.</p></div>
+        <div class="annotation"><strong>Main drawback</strong><p>The rail mixes navigation and every filtering dimension, so it becomes harder to scan as sources grow.</p></div>
+      </div>
+    </section>
+  </main>
+  <script>
+    document.querySelectorAll('.tab').forEach((tab) => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab, .concept').forEach((item) => item.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById(tab.dataset.target).classList.add('active');
+      });
+    });
+  </script>
+</body>
+</html>

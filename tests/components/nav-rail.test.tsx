@@ -198,17 +198,42 @@ describe('NavRail', () => {
     expect(screen.getByText('Never')).toBeInTheDocument();
   });
 
-  it('only shows inline sync details when the navigation is pinned', () => {
+  it('shows inline sync details whenever the navigation is expanded', () => {
     renderNavRail({ isSyncing: true });
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     const getInlineStatus = () =>
       screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
 
     expect(getInlineStatus()).toHaveClass('opacity-0', 'max-w-0');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+    fireEvent.mouseEnter(nav);
+    act(() => vi.advanceTimersByTime(300));
 
     expect(getInlineStatus()).toHaveClass('opacity-100', 'max-w-[150px]');
     expect(getInlineStatus()).toHaveTextContent('Syncing…');
+  });
+
+  it('previews sync status while hovering the control or popover', () => {
+    renderNavRail({ isSyncing: true });
+    const trigger = screen.getByRole('button', { name: 'Sync status' });
+
+    fireEvent.mouseEnter(trigger);
+
+    const popover = screen.getByRole('dialog', { name: 'Sync status details' });
+    expect(popover).toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    expect(popover).toBeInTheDocument();
+
+    fireEvent.mouseLeave(trigger);
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(popover);
+    act(() => vi.advanceTimersByTime(100));
+    expect(popover).toBeInTheDocument();
+
+    fireEvent.mouseLeave(popover);
+    act(() => vi.advanceTimersByTime(100));
+    expect(screen.queryByRole('dialog', { name: 'Sync status details' })).not.toBeInTheDocument();
   });
 
   it('groups navigation by purpose', () => {

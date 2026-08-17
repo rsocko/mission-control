@@ -194,14 +194,15 @@ describe('NavRail', () => {
 
   it('only shows inline sync details when the navigation is pinned', () => {
     renderNavRail({ isSyncing: true });
-    const inlineStatus = screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
+    const getInlineStatus = () =>
+      screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
 
-    expect(inlineStatus).toHaveClass('opacity-0', 'max-w-0');
+    expect(getInlineStatus()).toHaveClass('opacity-0', 'max-w-0');
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(inlineStatus).toHaveClass('opacity-100', 'max-w-[150px]');
-    expect(inlineStatus).toHaveTextContent('Syncing…');
+    expect(getInlineStatus()).toHaveClass('opacity-100', 'max-w-[150px]');
+    expect(getInlineStatus()).toHaveTextContent('Syncing…');
   });
 
   it('groups navigation by purpose', () => {

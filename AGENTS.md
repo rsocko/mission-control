@@ -4,6 +4,31 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+## Dependency Restoration Policy
+
+Corporate development environments use the approved npm registry at
+`https://packagefeedproxy.microsoft.io/npm/`. Some versions locked by this repository may not
+yet be mirrored there.
+
+- Do not run `npm install` or `npm ci` as routine session setup. First use the existing
+  `node_modules` and run the smallest relevant validation command; restore only when a command
+  fails because dependencies are actually missing.
+- Before any restore, run `npm config get registry`. If it is not the approved registry above,
+  stop and report the configuration problem. Never switch to or retry against the public npm
+  registry.
+- The committed `package-lock.json` is authoritative. Restore with
+  `npm ci --prefer-offline --no-audit --no-fund --fetch-retries=0 --fetch-timeout=15000`.
+  Do not use unconstrained installs or request newer package versions.
+- If the approved registry lacks a locked package or version, stop after the first failed
+  restore. Do not retry, add a different registry, use an unapproved tarball/cache, or downgrade
+  the dependency merely to make installation succeed.
+- Add or update a dependency only when the task explicitly requires it. Confirm the exact
+  version exists in the approved registry before editing either package manifest, then keep
+  `package.json` and `package-lock.json` in sync.
+- When restoration is blocked, continue work that does not require missing dependencies. Run
+  only validations supported by the existing installation and report the remaining validation
+  as blocked by the approved registry rather than repeatedly attempting installation.
+
 ## Local Dev Testing
 
 When you need to spin up a test instance of Mission Control (e.g., to validate a fix, test a feature, or run E2E checks without deploying):
@@ -16,7 +41,7 @@ When you need to spin up a test instance of Mission Control (e.g., to validate a
    AI_MODEL=llama3.1:8b
    ```
 
-2. **Install deps**: `npm install` (also install `server-only` if missing)
+2. **Restore dependencies only if required**: follow the Dependency Restoration Policy above.
 
 3. **Start the dev server** on an available port through the managed service:
    ```bash
@@ -37,7 +62,7 @@ When you need to spin up a test instance of Mission Control (e.g., to validate a
 - Never launch a development server directly or with tool-level `detach`. The managed service registers the process tree, applies resource and TTL limits, and closes its Windows Job Object when the terminal or Copilot session ends.
 - Use `npm run dev:services` to see ports, uptime, memory, CPU limits, and owning worktrees; use `npm run dev:stop -- <id>` for supervised cleanup.
 - Use `npm run dev:uncapped -- --port <port>` only for temporary profiling that cannot fit inside the normal resource boundary. It remains supervised and has a shorter TTL.
-- The seed script requires `server-only` to be installed as a package dep.
+- The seed script requires the existing `server-only` package dependency.
 - Always set `MC_DB_PATH` env var when running `db:seed` — it defaults to a different path otherwise.
 - DB migrations run automatically via `src/db/index.ts` on first connection (no manual `db:migrate` needed for dev).
 - The `data/` directory is gitignored — dev databases are local-only.

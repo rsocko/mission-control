@@ -341,11 +341,14 @@ async function finishCapture(source) {
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== 'mc-import-progress') return;
 
+  const terminalErrors = Array.isArray(message.errors)
+    ? message.errors.filter((error) => typeof error === 'string' && error.trim())
+    : [];
   const state = {
     imported: message.imported ?? 0,
     skipped: message.skipped ?? 0,
     done: !!message.done,
-    error: message.error || null,
+    error: message.error || terminalErrors[0] || null,
   };
   setImportState(message.platform, state.done ? null : state);
 
@@ -354,6 +357,7 @@ chrome.runtime.onMessage.addListener((message) => {
   if (!btn || !statusEl) return;
 
   const isPassive = SOURCES.find((s) => s.id === message.platform)?.livePassive;
+  const counts = `${message.imported ?? 0} imported, ${message.skipped ?? 0} skipped`;
 
   if (message.error) {
     statusEl.textContent = message.error;
@@ -364,7 +368,16 @@ chrome.runtime.onMessage.addListener((message) => {
     return;
   }
 
-  const counts = `${message.imported ?? 0} imported, ${message.skipped ?? 0} skipped`;
+  if (message.done && terminalErrors.length) {
+    const remaining = terminalErrors.length > 1 ? ` (+${terminalErrors.length - 1} more)` : '';
+    statusEl.textContent = `Finished with errors - ${counts}. ${terminalErrors[0]}${remaining}`;
+    statusEl.className = 'import-status error';
+    btn.disabled = false;
+    btn.textContent = isPassive ? 'Start Capture' : 'Import Saved Items';
+    delete btn.dataset.capturing;
+    return;
+  }
+
   if (message.done) {
     statusEl.textContent = `Done - ${counts}`;
     statusEl.className = 'import-status success';

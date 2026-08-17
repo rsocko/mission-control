@@ -63,7 +63,10 @@ vi.mock('@/db/schema', () => ({
     parentId: 'parentId',
     status: 'status',
   },
-  myDayItems: {},
+  myDayItems: {
+    taskId: 'taskId',
+    date: 'date',
+  },
   sourceLists: {},
   taskTags: {},
   tags: {},
@@ -96,7 +99,11 @@ vi.mock('@/app/api/tasks/filter-query', () => ({
 describe('GET /api/tasks/group-counts', () => {
   beforeEach(() => {
     mocks.select.mockReset();
-    mocks.select.mockReturnValue(chainable([{ group: 'To Do', count: 2 }]));
+    mocks.select.mockImplementation((selection: Record<string, unknown>) => (
+      Object.hasOwn(selection, 'taskId')
+        ? chainable([])
+        : chainable([{ group: 'To Do', count: 2 }])
+    ));
     mocks.where.mockClear();
     mocks.eq.mockClear();
     mocks.getInboxFilterCondition.mockClear();

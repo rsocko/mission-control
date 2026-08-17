@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
+import { getTaskStatusGroupLabel } from '@/lib/tasks/task-status-groups';
 import type { Task, TaskResponse } from '@/types/dashboard';
 
 export type VirtualRow =
@@ -113,7 +114,7 @@ export function useTaskListVirtualization({
       let key: string;
       if (groupBy === 'source') key = task.connectorType || 'local';
       else if (groupBy === 'list') key = task.sourceListName || 'No List';
-      else if (groupBy === 'status') key = task.status === 'done' ? 'Completed' : task.status === 'cancelled' ? 'Cancelled' : task.status === 'in_progress' ? 'In Progress' : 'To Do';
+      else if (groupBy === 'status') key = getTaskStatusGroupLabel(task.status);
       else if (groupBy === 'priority') key = task.priority || 'none';
       else if (groupBy === 'dueDate') {
         if (!task.dueDate) key = 'No Due Date';

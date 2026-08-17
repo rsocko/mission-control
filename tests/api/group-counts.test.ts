@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   const genericCondition = { type: 'generic' };
   const select = vi.fn();
   const where = vi.fn();
+  const eq = vi.fn();
   const getInboxFilterCondition = vi.fn(async () => inboxCondition);
   const getQuickFilterCondition = vi.fn(() => genericCondition);
   const withCondition = vi.fn((baseWhere, condition) => ({ baseWhere, condition }));
@@ -14,6 +15,7 @@ const mocks = vi.hoisted(() => {
     inboxCondition,
     select,
     where,
+    eq,
     getInboxFilterCondition,
     getQuickFilterCondition,
     withCondition,
@@ -47,7 +49,7 @@ vi.mock('@/db', () => ({
 vi.mock('drizzle-orm', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   count: vi.fn(() => ({ as: vi.fn(() => 'count') })),
-  eq: vi.fn(),
+  eq: mocks.eq,
   inArray: vi.fn(),
   notInArray: vi.fn(),
   sql: vi.fn(() => ({ as: vi.fn(() => 'group') })),
@@ -56,10 +58,15 @@ vi.mock('drizzle-orm', () => ({
 vi.mock('@/db/schema', () => ({
   tasks: {
     connectorInstanceId: 'connectorInstanceId',
+    connectorType: 'connectorType',
+    localDisposition: 'localDisposition',
     parentId: 'parentId',
     status: 'status',
   },
-  myDayItems: {},
+  myDayItems: {
+    taskId: 'taskId',
+    date: 'date',
+  },
   sourceLists: {},
   taskTags: {},
   tags: {},
@@ -92,8 +99,13 @@ vi.mock('@/app/api/tasks/filter-query', () => ({
 describe('GET /api/tasks/group-counts', () => {
   beforeEach(() => {
     mocks.select.mockReset();
-    mocks.select.mockReturnValue(chainable([{ group: 'To Do', count: 2 }]));
+    mocks.select.mockImplementation((selection: Record<string, unknown>) => (
+      Object.hasOwn(selection, 'taskId')
+        ? chainable([])
+        : chainable([{ group: 'To Do', count: 2 }])
+    ));
     mocks.where.mockClear();
+    mocks.eq.mockClear();
     mocks.getInboxFilterCondition.mockClear();
     mocks.getQuickFilterCondition.mockClear();
     mocks.withCondition.mockClear();
@@ -116,6 +128,7 @@ describe('GET /api/tasks/group-counts', () => {
     expect(mocks.where).toHaveBeenCalledWith(
       mocks.withCondition.mock.results[0].value,
     );
+    expect(mocks.eq).toHaveBeenCalledWith('localDisposition', 'active');
   });
 
   it('leaves non-Inbox quick filters on the generic path', async () => {

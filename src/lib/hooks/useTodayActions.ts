@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import type {
   CalendarEvent,
   ConfirmDialogState,
@@ -90,6 +91,7 @@ export function useTodayActions({
       body: JSON.stringify({ taskId, date: todayISO }),
     });
     const data = await res.json();
+    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
     if (data.writeBack?.attempted && !data.writeBack?.success) {
       toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
     }
@@ -101,6 +103,7 @@ export function useTodayActions({
     const params = new URLSearchParams({ taskId, date: todayISO });
     const res = await fetch(`/api/my-day?${params.toString()}`, { method: 'DELETE' });
     const data = await res.json();
+    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
     if (data.writeBack?.attempted && !data.writeBack?.success) {
       toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
     }

@@ -10,6 +10,7 @@ import {
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { DuplicateCandidate } from '@/components/task-detail/DuplicateTaskPreview';
 import type { TaskDetail, TaskTag } from '@/components/task-detail/task-detail-types';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
 vi.mock('sonner', () => ({
@@ -212,6 +213,8 @@ describe('useTaskDetailData', () => {
 describe('useTaskDetailMutations', () => {
   it('saves a field and reports the change to the host', async () => {
     const onUpdate = vi.fn();
+    const onNavigationCountsRefresh = vi.fn();
+    window.addEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, onNavigationCountsRefresh, { once: true });
     const fetchMock = stubFetch(() => jsonResponse({}));
     const { result } = renderMutations({ onUpdate });
 
@@ -225,6 +228,7 @@ describe('useTaskDetailMutations', () => {
     }));
     expect(result.current.task?.priority).toBe('low');
     expect(onUpdate).toHaveBeenCalledWith({ priority: 'low' });
+    expect(onNavigationCountsRefresh).toHaveBeenCalledOnce();
   });
 
   it('refuses blocked fields with the policy reason', async () => {

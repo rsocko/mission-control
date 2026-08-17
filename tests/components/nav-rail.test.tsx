@@ -249,12 +249,17 @@ describe('NavRail', () => {
       'data-pressure-level',
       'medium',
     );
+    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
+      'data-state',
+      'collapsed',
+    );
     expect(screen.queryByText('12')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(screen.getByText('12')).toHaveAttribute('aria-label', '12 items need attention');
-    expect(screen.queryByTestId('navigation-pressure-bar')).not.toBeInTheDocument();
+    const expandedIndicator = screen.getByLabelText('12 items need attention');
+    expect(expandedIndicator).toHaveAttribute('data-state', 'expanded');
+    expect(within(expandedIndicator).getByText('12')).toBeInTheDocument();
   });
 
   it('pulses only urgent notification indicators', () => {
@@ -280,11 +285,11 @@ describe('NavRail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
     const notificationLink = screen.getByRole('link', { name: /^Notifications/ });
-    expect(within(notificationLink).getByText('4')).toHaveClass(
+    expect(within(notificationLink).getByLabelText('4 items need attention')).toHaveClass(
       'bg-red-500',
       'motion-safe:animate-pulse',
     );
-    expect(screen.queryAllByTestId('navigation-pressure-bar')).toHaveLength(0);
+    expect(screen.queryAllByTestId('navigation-rail-indicator')).toHaveLength(2);
   });
 
   it('uses distinct colors for adjacent Routines and Triage icons', () => {

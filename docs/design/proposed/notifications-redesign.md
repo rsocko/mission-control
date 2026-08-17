@@ -2,7 +2,7 @@
 title: "Notifications Redesign"
 status: proposed
 created: 2026-07-22
-last_reviewed: 2026-07-31
+last_reviewed: 2026-08-17
 category: design
 related:
   - "[Triage Queue](../proposed/triage-queue.md)"
@@ -24,6 +24,29 @@ The redesign introduces:
 - Rich cards with source/category identity, metadata, grouping, and stronger CTA patterns
 - A dedicated **`/notifications`** page for triage, bulk actions, and keyboard-driven processing
 - An extensible action registry so core features and plugins can attach first-class actions
+
+## August 17 Filtering Revision
+
+The approved filtering mockups are available at
+[`docs/mockups/mockup-notifications-filtering-redesign.html`](../../mockups/mockup-notifications-filtering-redesign.html).
+
+The dedicated Notifications page uses a hybrid model:
+
+1. **The left rail keeps frequent one-click facets.** Level, State, Source, and
+   Time remain visible and continue to mirror the Dashboard navigation pattern.
+2. **Saved views live at the top of the rail.** Built-in and custom views share
+   one location. `Save current view` appears only when the active criteria do
+   not already match a saved view.
+3. **Advanced criteria use the task-list filtering pattern.** Category,
+   Merchant, Repository, Owner, Reason, Subject type, Source account,
+   Participating, and Actionable are selected from one searchable `Add filter`
+   control and represented as removable chips.
+4. **Quick filters show useful non-zero queues.** Urgent, Action needed,
+   Actionable, and Unread appear as count-bearing buttons only when their
+   global count is greater than zero.
+5. **Actions do not compete with filters.** Page-wide actions stay in the title
+   row. Selection and matching counts move to the list header, and bulk actions
+   remain contextual.
 
 ## July 31 Interaction Revision
 

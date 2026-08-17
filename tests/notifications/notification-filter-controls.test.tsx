@@ -27,13 +27,18 @@ const query: NotificationQuery = {
 };
 
 describe('shared notification filter controls', () => {
-  it('gives desktop and mobile identical choices, selected labels, and applied counts', () => {
+  it('offers task-style filter types and facet-backed values on desktop and mobile', () => {
     const onDesktopChange = vi.fn();
     const onMobileChange = vi.fn();
     render(
       <>
         <div data-testid="desktop">
-          <NotificationFilterControls query={query} facets={facets} onChange={onDesktopChange} />
+          <NotificationFilterControls
+            query={query}
+            facets={facets}
+            onChange={onDesktopChange}
+            includeCommonFilters={false}
+          />
         </div>
         <div data-testid="mobile">
           <NotificationFilterControls
@@ -47,22 +52,18 @@ describe('shared notification filter controls', () => {
     );
 
     const desktop = within(screen.getByTestId('desktop'));
+    fireEvent.click(desktop.getByRole('button', { name: 'Add filter' }));
+    expect(desktop.getByRole('dialog', { name: 'Add a notification filter' })).toBeInTheDocument();
+    expect(desktop.queryByRole('button', { name: 'Source' })).not.toBeInTheDocument();
+    fireEvent.click(desktop.getByRole('button', { name: 'Category' }));
+    expect(desktop.getByRole('button', { name: /Finance\s+3/ })).toBeInTheDocument();
+    expect(desktop.getByRole('button', { name: /Tasks\s+2/ })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
     const mobile = within(screen.getByTestId('mobile'));
-    for (const label of ['Category filter', 'Source filter', 'Merchant filter']) {
-      const desktopControl = desktop.getByRole('combobox', { name: label });
-      const mobileControl = mobile.getByRole('combobox', { name: label });
-      fireEvent.click(desktopControl);
-      const desktopOptions = screen.getAllByRole('option').map(option => option.textContent);
-      fireEvent.keyDown(desktopControl, { key: 'Escape' });
-      fireEvent.click(mobileControl);
-      expect(screen.getAllByRole('option').map(option => option.textContent)).toEqual(desktopOptions);
-      fireEvent.keyDown(mobileControl, { key: 'Escape' });
-    }
-    expect(desktop.getByRole('combobox', { name: 'Category filter' })).toHaveTextContent('Finance (3)');
-    expect(mobile.getByRole('combobox', { name: 'Source filter' })).toHaveTextContent('Finance Manager (3)');
-    expect(mobile.getByRole('combobox', { name: 'Merchant filter' })).toHaveTextContent('Invented Market (2)');
-    expect(desktop.getByText('3 filters applied')).toBeInTheDocument();
-    expect(mobile.getByText('3 filters applied')).toBeInTheDocument();
+    fireEvent.click(mobile.getByRole('button', { name: 'Add filter' }));
+    expect(mobile.getByRole('button', { name: 'Source' })).toBeInTheDocument();
+    expect(mobile.getByRole('button', { name: 'Add filter' })).toHaveClass('min-h-[44px]');
     expect(activeNotificationFilters(query, facets).map(filter => filter.label)).toEqual([
       'Category: Finance',
       'Merchant: Invented Market',
@@ -70,7 +71,36 @@ describe('shared notification filter controls', () => {
     ]);
   });
 
-  it('clears one or all filters without changing sort and exposes mobile touch targets', () => {
+  it('adds free-text and boolean criteria through the builder', () => {
+    const onChange = vi.fn();
+    render(
+      <NotificationFilterControls
+        query={DEFAULT_NOTIFICATION_QUERY}
+        facets={facets}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Repository' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Repository' }), {
+      target: { value: 'octo/app' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...DEFAULT_NOTIFICATION_QUERY,
+      repository: 'octo/app',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Participating only' }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...DEFAULT_NOTIFICATION_QUERY,
+      participating: true,
+    });
+  });
+
+  it('clears one or all filters without changing sort and returns focus to the builder', () => {
     const onChange = vi.fn();
     render(
       <NotificationFilterControls
@@ -87,16 +117,16 @@ describe('shared notification filter controls', () => {
     expect(merchantChip).toHaveClass('min-h-[44px]');
     fireEvent.click(merchantChip);
     expect(onChange).toHaveBeenLastCalledWith({ ...query, merchant: null, sort: 'oldest' });
+    expect(screen.getByRole('button', { name: 'Add filter' })).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'Clear all filters' }));
     expect(onChange).toHaveBeenLastCalledWith({
       ...DEFAULT_NOTIFICATION_QUERY,
       sort: 'oldest',
     });
-    expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toHaveClass('min-h-[44px]');
   });
 
-  it('moves focus to a stable filter control when an applied filter unmounts', () => {
+  it('keeps chip focus recovery stable as controlled filters unmount', () => {
     function FilterHarness() {
       const [currentQuery, setCurrentQuery] = useState(query);
       return (
@@ -109,16 +139,9 @@ describe('shared notification filter controls', () => {
     }
 
     render(<FilterHarness />);
-    const merchantChip = screen.getByRole('button', {
+    fireEvent.click(screen.getByRole('button', {
       name: 'Clear Merchant: Invented Market filter',
-    });
-    merchantChip.focus();
-    fireEvent.click(merchantChip);
-    expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toHaveFocus();
-
-    const clearAll = screen.getByRole('button', { name: 'Clear all filters' });
-    clearAll.focus();
-    fireEvent.click(clearAll);
-    expect(screen.getByRole('combobox', { name: 'Category filter' })).toHaveFocus();
+    }));
+    expect(screen.getByRole('button', { name: 'Add filter' })).toHaveFocus();
   });
 });

@@ -253,8 +253,7 @@ describe('NotificationsPage data states', () => {
 
     render(<NotificationsPage />);
 
-    expect(screen.getByRole('combobox', { name: 'Category filter' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Merchant filter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add filter' })).toBeInTheDocument();
     expect(screen.getByText('2 filters applied')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', {
       name: 'Clear Merchant: Invented Market filter',
@@ -264,6 +263,34 @@ describe('NotificationsPage data states', () => {
       ...hookState.filters,
       merchant: null,
     });
+  });
+
+  it('shows only non-zero quick filters and applies them with one click', () => {
+    const replaceFilters = vi.fn();
+    hookState = makeHook({
+      stats: {
+        total: 2,
+        unread: 0,
+        attention: 2,
+        urgent: 2,
+        actionNeeded: 0,
+        headsUp: 0,
+        fyi: 0,
+        digest: 0,
+        actionable: 0,
+      },
+      replaceFilters,
+    });
+
+    render(<NotificationsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: /Urgent/ }));
+    expect(replaceFilters).toHaveBeenCalledWith({
+      ...DEFAULT_NOTIFICATION_QUERY,
+      level: 'urgent',
+      state: 'unread',
+    });
+    expect(screen.queryByRole('button', { name: /Action needed/ })).not.toBeInTheDocument();
   });
 
   it('consumes browser history query changes before writing filter state back to the URL', () => {

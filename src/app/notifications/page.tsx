@@ -8,7 +8,8 @@ import { NotificationViewsBar } from '@/components/notifications/NotificationVie
 import { AnimatePresence, motion } from 'motion/react';
 import {
   Bell, Search, Archive, CheckCheck, Trash2,
-  ArrowUpDown, RefreshCw, Loader2,
+  AlertTriangle, ArrowUpDown, ClipboardCheck, Mail,
+  RefreshCw, Loader2, Zap,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -382,6 +383,63 @@ function DesktopNotificationsPage() {
           : status.lastSyncAt
             ? `Last synced ${new Date(status.lastSyncAt).toLocaleString()}`
             : 'Waiting for first sync';
+  const quickFilters = [
+    {
+      key: 'urgent',
+      label: 'Urgent',
+      detail: 'Unread',
+      count: hook.stats.urgent,
+      icon: AlertTriangle,
+      active: hook.filters.level === 'urgent' && hook.filters.state === 'unread',
+      onClick: () => {
+        const active = hook.filters.level === 'urgent' && hook.filters.state === 'unread';
+        hook.replaceFilters({
+          ...hook.filters,
+          level: active ? null : 'urgent',
+          state: active ? null : 'unread',
+        });
+      },
+      accent: 'text-red-300',
+    },
+    {
+      key: 'action-needed',
+      label: 'Action needed',
+      detail: 'Unread',
+      count: hook.stats.actionNeeded,
+      icon: ClipboardCheck,
+      active: hook.filters.level === 'action_needed' && hook.filters.state === 'unread',
+      onClick: () => {
+        const active = hook.filters.level === 'action_needed'
+          && hook.filters.state === 'unread';
+        hook.replaceFilters({
+          ...hook.filters,
+          level: active ? null : 'action_needed',
+          state: active ? null : 'unread',
+        });
+      },
+      accent: 'text-amber-300',
+    },
+    {
+      key: 'actionable',
+      label: 'Actionable',
+      detail: 'Can be handled',
+      count: hook.stats.actionable,
+      icon: Zap,
+      active: hook.filters.actionableOnly,
+      onClick: () => hook.setActionableOnly(!hook.filters.actionableOnly),
+      accent: 'text-violet-300',
+    },
+    {
+      key: 'unread',
+      label: 'Unread',
+      detail: 'Across all sources',
+      count: hook.stats.unread,
+      icon: Mail,
+      active: hook.filters.state === 'unread',
+      onClick: () => hook.setStateFilter(hook.filters.state === 'unread' ? null : 'unread'),
+      accent: 'text-blue-300',
+    },
+  ].filter(filter => filter.count > 0);
 
   return (
     <div className="flex h-full bg-[var(--bg-primary)]">
@@ -393,6 +451,15 @@ function DesktopNotificationsPage() {
         hook={hook}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        savedViews={(
+          <NotificationViewsBar
+            query={hook.filters}
+            activeViewId={searchParams.get('view')}
+            onApply={handleApplyView}
+            onAnnouncement={setAnnouncement}
+            variant="sidebar"
+          />
+        )}
       />
 
       {/* Main area: header + list/detail split */}
@@ -406,11 +473,6 @@ function DesktopNotificationsPage() {
               {hook.stats.unread > 0 && (
                 <span className="text-xs bg-red-900/40 text-red-300 px-2 py-0.5 rounded-full border border-red-800/30">
                   {hook.stats.unread} unread
-                </span>
-              )}
-              {hook.stats.urgent > 0 && (
-                <span className="text-xs bg-red-900/40 text-red-300 px-2 py-0.5 rounded-full border border-red-800/30">
-                  {hook.stats.urgent} urgent
                 </span>
               )}
             </div>
@@ -435,13 +497,6 @@ function DesktopNotificationsPage() {
               </button>
             </div>
           </div>
-
-          <NotificationViewsBar
-            query={hook.filters}
-            activeViewId={searchParams.get('view')}
-            onApply={handleApplyView}
-            onAnnouncement={setAnnouncement}
-          />
 
           <div
             role={status.failedWritebacks > 0 || status.error ? 'alert' : undefined}
@@ -468,20 +523,44 @@ function DesktopNotificationsPage() {
             )}
           </div>
 
+          {quickFilters.length > 0 && (
+            <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Notification quick filters">
+              {quickFilters.map(filter => {
+                const Icon = filter.icon;
+                return (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    aria-pressed={filter.active}
+                    onClick={filter.onClick}
+                    className={`flex min-w-36 items-center gap-3 rounded-lg border px-3 py-2 text-left transition-colors ${
+                      filter.active
+                        ? 'border-[var(--accent)] bg-[var(--accent)]/10'
+                        : 'border-[var(--border)] bg-[var(--surface-2)] hover:bg-[var(--surface-3)]'
+                    }`}
+                  >
+                    <Icon size={16} className={filter.accent} aria-hidden="true" />
+                    <span className="text-base font-semibold tabular-nums text-[var(--text-primary)]">
+                      {filter.count}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-xs font-medium text-[var(--text-primary)]">
+                        {filter.label}
+                      </span>
+                      <span className="block truncate text-xs text-[var(--text-muted)]">
+                        {filter.detail}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {/* Toolbar: URL-backed search and sort */}
-          <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-              <input
-                type="checkbox"
-                aria-label="Select visible results"
-                checked={allSelected}
-                onChange={toggleSelectAll}
-                className="h-3.5 w-3.5 accent-[var(--accent)]"
-              />
-              Select visible
-            </label>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Search */}
-            <div className="relative flex-1 max-w-xs">
+            <div className="relative min-w-64 flex-1 max-w-lg">
               <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
               <input
                 id="notification-search"
@@ -492,6 +571,14 @@ function DesktopNotificationsPage() {
                 className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--surface-0)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
             </div>
+
+            <NotificationFilterControls
+              query={hook.filters}
+              facets={hook.facets}
+              onChange={hook.replaceFilters}
+              desktopInline
+              includeCommonFilters={false}
+            />
 
             {/* Sort toggle */}
             <Select
@@ -508,40 +595,6 @@ function DesktopNotificationsPage() {
               </SelectContent>
             </Select>
           </div>
-
-          <div className="mt-2 grid grid-cols-2 gap-1 sm:grid-cols-5">
-            {([
-              ['repository', 'Repository', hook.filters.repository, hook.setRepositoryFilter],
-              ['owner', 'Owner', hook.filters.owner, hook.setOwnerFilter],
-              ['reason', 'Reason', hook.filters.reason, hook.setReasonFilter],
-              ['subject-type', 'Subject type', hook.filters.subjectType, hook.setSubjectTypeFilter],
-              ['source-account', 'Source account', hook.filters.sourceAccount, hook.setSourceAccountFilter],
-            ] as const).map(([id, label, value, setter]) => (
-              <label key={id} htmlFor={`notification-${id}`} className="block">
-                <span className="sr-only">{label}</span>
-                <input
-                  id={`notification-${id}`}
-                  value={value ?? ''}
-                  placeholder={label}
-                  onChange={event => setter(event.target.value || null)}
-                  className="h-7 w-full rounded border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
-                />
-              </label>
-            ))}
-          </div>
-          <label className="mt-1 inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
-            <input
-              type="checkbox"
-              checked={hook.filters.participating}
-              onChange={event => hook.setParticipatingFilter(event.target.checked)}
-            />
-            Participating only
-          </label>
-          <NotificationFilterControls
-            query={hook.filters}
-            facets={hook.facets}
-            onChange={hook.replaceFilters}
-          />
 
           {/* Bulk action bar */}
           {selectionScope && (bulkSelected.size > 0 || selectionScope === 'all_matching') && (
@@ -603,6 +656,21 @@ function DesktopNotificationsPage() {
         <div className="flex flex-1 overflow-hidden">
           {/* Notification list */}
           <div ref={listRef} className="w-[420px] flex-shrink-0 border-r border-[var(--border)] overflow-y-auto">
+            <div className="sticky top-0 z-10 flex h-10 items-center border-b border-[var(--border)] bg-[var(--surface-1)] px-3">
+              <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <input
+                  type="checkbox"
+                  aria-label="Select visible results"
+                  checked={allSelected}
+                  onChange={toggleSelectAll}
+                  className="h-3.5 w-3.5 accent-[var(--accent)]"
+                />
+                Select visible
+              </label>
+              <span className="ml-auto text-xs tabular-nums text-[var(--text-muted)]">
+                {hook.matchingCount.toLocaleString()} matching
+              </span>
+            </div>
             {hook.isLoading && filteredNotifications.length === 0 ? (
               <div className="flex h-full items-center justify-center" role="status">
                 <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />

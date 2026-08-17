@@ -2,7 +2,10 @@ import { useMemo, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { NotificationCard } from '@/components/notifications/NotificationCard';
-import { NotificationsPanel } from '@/components/notifications/NotificationsPanel';
+import {
+  CollapsedNotificationsRail,
+  NotificationsPanel,
+} from '@/components/notifications/NotificationsPanel';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationBulkResult } from '@/lib/hooks/useNotifications';
 import { DEFAULT_NOTIFICATION_QUERY } from '@/lib/notifications/query';
@@ -226,6 +229,22 @@ function Harness({
 }
 
 describe('NotificationsPanel V2', () => {
+  it('shows only the highest-severity count in the collapsed rail badge', () => {
+    render(
+      <CollapsedNotificationsRail
+        attentionCount={8}
+        urgentCount={2}
+        actionCount={3}
+        headsUpCount={1}
+        fyiCount={2}
+        onExpand={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('2')).toHaveClass('bg-red-500');
+    expect(screen.queryByText('8')).not.toBeInTheDocument();
+  });
+
   it('shows unread counts by level with complementary attribute filters', () => {
     render(<Harness />);
 

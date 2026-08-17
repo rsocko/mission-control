@@ -21,6 +21,7 @@ import type { NotificationItem, NotificationLevel } from '@/types';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
 import { NavigationBadge } from '@/components/layout/NavigationBadge';
 import { panelSlideFromRight } from '@/lib/motion';
+import { getNotificationBadgeState } from '@/lib/navigation/badges';
 
 interface NotificationsPanelProps {
   hook: UseNotificationsReturn;
@@ -401,15 +402,24 @@ export function CollapsedNotificationsRail({
   attentionCount,
   urgentCount,
   actionCount,
+  headsUpCount,
+  fyiCount,
   onExpand,
 }: {
   attentionCount: number;
   urgentCount: number;
   actionCount: number;
+  headsUpCount: number;
+  fyiCount: number;
   onExpand: () => void;
 }) {
-  const displayCount = attentionCount;
-  const badgeTone = urgentCount > 0 ? 'red' : actionCount > 0 ? 'amber' : 'blue';
+  const badge = getNotificationBadgeState({
+    attention: attentionCount,
+    urgent: urgentCount,
+    actionNeeded: actionCount,
+    headsUp: headsUpCount,
+    fyi: fyiCount,
+  });
 
   return (
     <aside
@@ -424,7 +434,7 @@ export function CollapsedNotificationsRail({
         title="Show notifications"
       >
         <Bell size={16} />
-        <NavigationBadge count={displayCount} tone={badgeTone} overlay />
+        <NavigationBadge count={badge.count} tone={badge.tone} overlay />
       </button>
     </aside>
   );

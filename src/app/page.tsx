@@ -649,6 +649,8 @@ function DashboardPageInner() {
               attentionCount={notificationsHook.stats.attention}
               urgentCount={notificationsHook.stats.urgent}
               actionCount={notificationsHook.stats.actionNeeded}
+              headsUpCount={notificationsHook.stats.headsUp}
+              fyiCount={notificationsHook.stats.fyi}
               onExpand={notificationsHook.togglePanel}
             />
           )}

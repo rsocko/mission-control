@@ -2,6 +2,7 @@ import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskFilterContext } from '@/lib/task-filter-context';
 import type { LocalDisposition, TaskSourceModel } from '@/types';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { PRIORITY_BADGE_COLORS, PRIORITY_LABELS as TASK_PRIORITY_LABELS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 import type { TaskEditPolicy } from '@/types';
 
 export interface TaskTag {
@@ -177,35 +178,17 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'scout': 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
 };
 
-export const PRIORITY_COLORS: Record<string, string> = {
-  critical: 'text-rose-400 bg-rose-900/40 border-rose-700/50',
-  high: 'text-orange-400 bg-orange-900/30 border-orange-800/40',
-  medium: 'text-amber-300 bg-amber-900/25 border-amber-700/35',
-  low: 'text-sky-400 bg-sky-900/25 border-sky-700/35',
-  none: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
-};
+export const PRIORITY_COLORS = PRIORITY_BADGE_COLORS;
 
-export const PRIORITY_LABELS: Record<string, string> = {
-  critical: 'P0',
-  high: 'P1',
-  medium: 'P2',
-  low: 'P3',
-  none: '—',
-};
+export const PRIORITY_LABELS = TASK_PRIORITY_LABELS;
 
-export const STATUS_COLORS: Record<string, string> = {
-  todo: 'text-slate-400 bg-slate-900/30 border-slate-700/40',
-  in_progress: 'text-blue-400 bg-blue-900/30 border-blue-800/40',
-  done: 'text-green-400 bg-green-900/30 border-green-800/40',
-  cancelled: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
-};
+export const STATUS_COLORS: Record<string, string> = Object.fromEntries(
+  Object.entries(TASK_STATUS_VISUALS).map(([status, visual]) => [status, visual.badgeClass]),
+);
 
-export const STATUS_LABELS: Record<string, string> = {
-  todo: 'To Do',
-  in_progress: 'In Progress',
-  done: 'Done',
-  cancelled: 'Cancelled',
-};
+export const STATUS_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(TASK_STATUS_VISUALS).map(([status, visual]) => [status, visual.label]),
+);
 
 // ─── NOTIFICATION LEVEL DESIGN TOKENS ───────────────────────────────────────
 

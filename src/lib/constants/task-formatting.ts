@@ -1,9 +1,137 @@
+import type { EffortMeasure, TaskPriority, TaskStatus } from '@/types';
+
 /**
- * Centralized task formatting constants.
+ * Canonical task visual semantics.
  *
- * Consolidates PRIORITY_COLORS, PRIORITY_LABELS, PRIORITY_OPTIONS,
- * and STATUS_OPTIONS that were previously duplicated across 5+ files.
+ * Task-facing UI must consume these definitions instead of assigning colors
+ * locally. Other domains (project status, triage status, connector health,
+ * notification severity, and micro-status) own separate visual semantics.
  */
+
+export type TaskVisualStatus = TaskStatus | 'blocked';
+
+interface TaskVisualDefinition {
+  label: string;
+  textClass: string;
+  dotClass: string;
+  borderClass: string;
+  badgeClass: string;
+  actionClass: string;
+  color: string;
+}
+
+interface TaskPriorityVisualDefinition extends TaskVisualDefinition {
+  shortLabel: string;
+}
+
+export const TASK_PRIORITY_VISUALS = {
+  critical: {
+    label: 'Critical',
+    shortLabel: 'P0',
+    textClass: 'text-rose-400',
+    dotClass: 'bg-rose-500',
+    borderClass: 'border-rose-500/60',
+    badgeClass: 'text-rose-400 bg-rose-900/40 border-rose-700/50',
+    actionClass: 'text-rose-400 hover:bg-rose-400/15 hover:text-rose-300',
+    color: '#f43f5e',
+  },
+  high: {
+    label: 'High',
+    shortLabel: 'P1',
+    textClass: 'text-orange-400',
+    dotClass: 'bg-orange-400',
+    borderClass: 'border-orange-400/60',
+    badgeClass: 'text-orange-400 bg-orange-900/30 border-orange-800/40',
+    actionClass: 'text-orange-400 hover:bg-orange-400/15 hover:text-orange-300',
+    color: '#fb923c',
+  },
+  medium: {
+    label: 'Medium',
+    shortLabel: 'P2',
+    textClass: 'text-amber-300',
+    dotClass: 'bg-amber-400',
+    borderClass: 'border-amber-400/60',
+    badgeClass: 'text-amber-300 bg-amber-900/25 border-amber-700/35',
+    actionClass: 'text-amber-300 hover:bg-amber-300/15 hover:text-amber-200',
+    color: '#fbbf24',
+  },
+  low: {
+    label: 'Low',
+    shortLabel: 'P3',
+    textClass: 'text-sky-400',
+    dotClass: 'bg-sky-400',
+    borderClass: 'border-sky-400/60',
+    badgeClass: 'text-sky-400 bg-sky-900/25 border-sky-700/35',
+    actionClass: 'text-sky-400 hover:bg-sky-400/15 hover:text-sky-300',
+    color: '#38bdf8',
+  },
+  none: {
+    label: 'None',
+    shortLabel: '—',
+    textClass: 'text-[var(--text-muted)]',
+    dotClass: 'bg-slate-500',
+    borderClass: 'border-[var(--border)]',
+    badgeClass: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
+    actionClass: 'text-slate-400 hover:bg-slate-400/15 hover:text-slate-300',
+    color: '#64748b',
+  },
+} as const satisfies Record<TaskPriority, TaskPriorityVisualDefinition>;
+
+export const TASK_STATUS_VISUALS = {
+  todo: {
+    label: 'To do',
+    textClass: 'text-[var(--text-muted)]',
+    dotClass: 'bg-slate-500',
+    borderClass: 'border-slate-500/60',
+    badgeClass: 'text-slate-400 bg-slate-900/30 border-slate-700/40',
+    actionClass: 'text-slate-400 hover:bg-slate-400/15 hover:text-slate-300',
+    color: '#94a3b8',
+  },
+  in_progress: {
+    label: 'In progress',
+    textClass: 'text-[var(--accent-400)]',
+    dotClass: 'bg-[var(--accent-500)]',
+    borderClass: 'border-[var(--accent-500)]/60',
+    badgeClass: 'text-[var(--accent-400)] bg-[var(--accent-900)]/30 border-[var(--accent-800)]/40',
+    actionClass: 'text-[var(--accent-400)] hover:bg-[var(--accent-400)]/15 hover:text-[var(--accent-300)]',
+    color: '#3b82f6',
+  },
+  blocked: {
+    label: 'Blocked',
+    textClass: 'text-[var(--danger)]',
+    dotClass: 'bg-[var(--danger)]',
+    borderClass: 'border-[var(--danger)]/60',
+    badgeClass: 'text-[var(--danger)] bg-[var(--danger-muted)]/30 border-[var(--danger)]/20',
+    actionClass: 'text-[var(--danger)] hover:bg-[var(--danger)]/15 hover:text-red-300',
+    color: '#ef4444',
+  },
+  done: {
+    label: 'Done',
+    textClass: 'text-[var(--success)]',
+    dotClass: 'bg-[var(--success)]',
+    borderClass: 'border-[var(--success)]/60',
+    badgeClass: 'text-[var(--success)] bg-[var(--success-muted)]/30 border-[var(--success)]/20',
+    actionClass: 'text-[var(--success)] hover:bg-[var(--success)]/15 hover:text-emerald-300',
+    color: '#10b981',
+  },
+  cancelled: {
+    label: 'Cancelled',
+    textClass: 'text-[var(--text-muted)]',
+    dotClass: 'bg-slate-500',
+    borderClass: 'border-[var(--border)]',
+    badgeClass: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
+    actionClass: 'text-slate-400 hover:bg-slate-400/15 hover:text-slate-300',
+    color: '#64748b',
+  },
+} as const satisfies Record<TaskVisualStatus, TaskVisualDefinition>;
+
+export function getTaskPriorityVisual(priority: TaskPriority | string) {
+  return TASK_PRIORITY_VISUALS[priority as TaskPriority] ?? TASK_PRIORITY_VISUALS.none;
+}
+
+export function getTaskStatusVisual(status: TaskVisualStatus | string) {
+  return TASK_STATUS_VISUALS[status as TaskVisualStatus] ?? TASK_STATUS_VISUALS.todo;
+}
 
 // ---------------------------------------------------------------------------
 // Priority
@@ -11,47 +139,31 @@
 
 /** Text color classes for priority badges (simple — text only). */
 export const PRIORITY_TEXT_COLORS: Record<string, string> = {
-  critical: 'text-rose-400',
-  high: 'text-orange-400',
-  medium: 'text-amber-300',
-  low: 'text-sky-400',
-  none: 'text-[var(--text-muted)]',
+  ...Object.fromEntries(Object.entries(TASK_PRIORITY_VISUALS).map(([key, visual]) => [key, visual.textClass])),
 };
 
 /** Full badge classes for priority (text + background + border). */
 export const PRIORITY_BADGE_COLORS: Record<string, string> = {
-  critical: 'text-rose-400 bg-rose-900/40 border-rose-700/50',
-  high: 'text-orange-400 bg-orange-900/30 border-orange-800/40',
-  medium: 'text-amber-300 bg-amber-900/25 border-amber-700/35',
-  low: 'text-sky-400 bg-sky-900/25 border-sky-700/35',
-  none: 'text-[var(--text-muted)] bg-[var(--surface-0)] border-[var(--border)]',
+  ...Object.fromEntries(Object.entries(TASK_PRIORITY_VISUALS).map(([key, visual]) => [key, visual.badgeClass])),
 };
 
 /** Dot color classes used in priority option lists. */
 export const PRIORITY_DOT_COLORS: Record<string, string> = {
-  critical: 'bg-rose-500',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-  none: '',
+  ...Object.fromEntries(Object.entries(TASK_PRIORITY_VISUALS).map(([key, visual]) => [key, visual.dotClass])),
 };
 
 /** Short labels for priority display. */
 export const PRIORITY_LABELS: Record<string, string> = {
-  critical: 'P0',
-  high: 'P1',
-  medium: 'P2',
-  low: 'P3',
-  none: '—',
+  ...Object.fromEntries(Object.entries(TASK_PRIORITY_VISUALS).map(([key, visual]) => [key, visual.shortLabel])),
 };
 
 /** Priority options for dropdowns/selectors. */
 export const PRIORITY_OPTIONS = [
-  { value: 'none', label: 'None', dot: '' },
-  { value: 'low', label: 'Low', dot: 'bg-sky-400' },
-  { value: 'medium', label: 'Medium', dot: 'bg-amber-400' },
-  { value: 'high', label: 'High', dot: 'bg-orange-400' },
-  { value: 'critical', label: 'Critical', dot: 'bg-rose-500' },
+  { value: 'none', label: TASK_PRIORITY_VISUALS.none.label, dot: TASK_PRIORITY_VISUALS.none.dotClass },
+  { value: 'low', label: TASK_PRIORITY_VISUALS.low.label, dot: TASK_PRIORITY_VISUALS.low.dotClass },
+  { value: 'medium', label: TASK_PRIORITY_VISUALS.medium.label, dot: TASK_PRIORITY_VISUALS.medium.dotClass },
+  { value: 'high', label: TASK_PRIORITY_VISUALS.high.label, dot: TASK_PRIORITY_VISUALS.high.dotClass },
+  { value: 'critical', label: TASK_PRIORITY_VISUALS.critical.label, dot: TASK_PRIORITY_VISUALS.critical.dotClass },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -74,11 +186,7 @@ export const TASK_STATUS_FILTER_OPTIONS = [
 
 /** Human-readable status labels. */
 export const STATUS_LABELS: Record<string, string> = {
-  todo: 'To do',
-  in_progress: 'In progress',
-  done: 'Done',
-  blocked: 'Blocked',
-  cancelled: 'Cancelled',
+  ...Object.fromEntries(Object.entries(TASK_STATUS_VISUALS).map(([key, visual]) => [key, visual.label])),
 };
 
 /** Whether a task is no longer active, regardless of how it ended. */
@@ -89,8 +197,6 @@ export function isInactiveTaskStatus(status: string): boolean {
 // ---------------------------------------------------------------------------
 // Effort
 // ---------------------------------------------------------------------------
-
-import type { EffortMeasure } from '@/types';
 
 /** Valid effort values (1–5). */
 export const EFFORT_VALUES = [1, 2, 3, 4, 5] as const;

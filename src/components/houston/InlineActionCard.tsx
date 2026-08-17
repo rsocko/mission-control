@@ -139,7 +139,7 @@ function CreateTaskContent({
         value={title}
         onChange={e => onTitleChange(e.target.value)}
         placeholder="Task title…"
-        className="w-full px-3 py-2 text-sm rounded-lg bg-[var(--surface-0)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+        className="w-full px-3 py-2 text-sm rounded-lg bg-[var(--surface-0)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
       />
       <div className="flex gap-1.5">
         {priorityOptions.map(p => (

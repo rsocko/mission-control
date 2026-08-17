@@ -11,6 +11,7 @@ import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 interface CalmTask {
   id: string;
@@ -104,7 +105,7 @@ export function CalmMode() {
   useEffect(() => {
     if (viewMode !== 'calm') return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewMode('normal');
+      if (e.key === 'Escape' && !shouldBlockGlobalShortcut(e)) setViewMode('normal');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

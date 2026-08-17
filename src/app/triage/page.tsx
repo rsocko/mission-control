@@ -23,6 +23,7 @@ import { useTriageData } from '@/lib/hooks/useTriageData';
 import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
 import { toast } from 'sonner';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -166,6 +167,7 @@ export default function TriagePage() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       const target = event.target as HTMLElement;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;

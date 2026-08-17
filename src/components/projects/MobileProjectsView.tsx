@@ -278,7 +278,7 @@ function ProjectDetailSheet({
               onChange={e => setQuickAddValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Add a task..."
-              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
             />
           </div>
           <button

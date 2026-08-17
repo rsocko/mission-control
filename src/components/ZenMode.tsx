@@ -13,6 +13,7 @@ import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 interface ZenTask {
   id: string;
@@ -66,7 +67,7 @@ export function ZenMode() {
   useEffect(() => {
     if (viewMode !== 'zen') return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setViewMode('normal');
+      if (e.key === 'Escape' && !shouldBlockGlobalShortcut(e)) setViewMode('normal');
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);

@@ -45,6 +45,7 @@ import type { QuickAddPendingTask } from './quick-add-types';
 import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
 import { getLocalToday } from '@/lib/utils/client-date';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import {
   fetchQuickAddSuggestion,
   getQuickAddProjectAffordance,
@@ -622,6 +623,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   // Global keyboard shortcut: N to focus
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(e)) return;
+
       if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;

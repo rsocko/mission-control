@@ -422,7 +422,7 @@ export function PhaseAssignView({
                 </AnimatePresence>
               </div>
               <div className={cn(
-                'flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1',
+                'input-glow flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1',
                 isDragging && 'opacity-50 pointer-events-none',
               )}>
                 <Search size={12} className="text-[var(--text-tertiary)]" />

@@ -445,7 +445,7 @@ function TriageSourcesSection() {
               value={newPlaylistLabel}
               onChange={(e) => setNewPlaylistLabel(e.target.value)}
               placeholder="Label (optional)"
-              className="flex-1 rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              className="flex-1 rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
             />
             <button
               type="button"

@@ -31,7 +31,7 @@ export function RenameTagDialog({ busy, dispatch, onSubmit, state }: RenameTagDi
             }}
             placeholder="New name..."
             autoFocus
-            className="w-full px-3 py-2 text-sm bg-[var(--surface-0)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40 mb-4"
+            className="w-full px-3 py-2 text-sm bg-[var(--surface-0)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none mb-4"
           />
           {state.tag.type === 'source' && (
             <p className="text-[10px] text-amber-400 bg-amber-900/20 border border-amber-800/30 rounded-md px-2.5 py-1.5 mb-4">

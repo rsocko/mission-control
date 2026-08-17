@@ -489,7 +489,7 @@ function AllSourceListItem({
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
                 onBlur={handleBlur}
                 autoFocus
-                className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
+                className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
               />
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-8 w-8 items-center justify-center rounded-lg text-green-400 hover:bg-green-500/10" title="Save">
                 {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
@@ -652,7 +652,7 @@ function SortableUngroupedItem({
                 onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
                 onBlur={handleBlur}
                 autoFocus
-                className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
+                className="h-8 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
               />
               <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-7 w-7 items-center justify-center rounded-md text-green-400 transition-[background-color] hover:bg-green-500/10" title="Save">
                 {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={13} /></motion.span> : <Check size={13} />}
@@ -1015,7 +1015,7 @@ function SortableListItem({ sourceList, connectorName, onRename }: { sourceList:
               onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveRename(); if (e.key === 'Escape') cancel(); }}
               onBlur={handleBlur}
               autoFocus
-              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
+              className="h-7 min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-sm text-[var(--text-primary)] outline-none transition-[border-color,box-shadow]"
             />
             <button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => void handleSaveRename()} disabled={saving} className="flex h-6 w-6 items-center justify-center rounded text-green-400 hover:bg-green-500/10" title="Save">
               {saving ? <motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 0.8, ease: 'linear' }}><Loader2 size={11} /></motion.span> : <Check size={11} />}

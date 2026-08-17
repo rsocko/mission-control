@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { CheckCircle2, Link2, Loader2, Merge, Trash2 } from 'lucide-react';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { modalContent, modalOverlay } from '@/lib/motion';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 import type { TagDialogAction, TagDialogState } from '../dialog-state';
 import { cannotUseAsMergeTarget, chooseDefaultMergeTarget } from '../heuristics';
 import type { MergeMode, ReviewTag } from '../types';
@@ -39,6 +40,7 @@ export function MergeTagsDialog({
     getServerPortalRoot,
   );
   const close = () => dispatch({ type: 'close' });
+  useCloseOnEscape(close, !!state);
   const targetTag = state
     ? reviewTags.find(tag => tag.id === state.targetId) ?? null
     : null;
@@ -57,7 +59,7 @@ export function MergeTagsDialog({
             variants={modalOverlay}
             initial="hidden"
             animate="show"
-            exit="hidden"
+            exit="exit"
             className="fixed inset-0 bg-black/60 z-50"
             onClick={close}
           />
@@ -65,7 +67,7 @@ export function MergeTagsDialog({
             variants={modalContent}
             initial="hidden"
             animate="show"
-            exit="hidden"
+            exit="exit"
             role="dialog"
             aria-modal="true"
             aria-labelledby="merge-dialog-title"

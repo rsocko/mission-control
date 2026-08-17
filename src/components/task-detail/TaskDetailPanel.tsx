@@ -206,6 +206,7 @@ import {
   taskRemovalConfirmation,
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
+import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { getDeepLinkInfo } from '@/lib/utils/deep-links';
 import { getLocalToday } from '@/lib/utils/client-date';
@@ -807,6 +808,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
       });
       if (!response.ok) throw new Error(`Failed to save ${field}`);
       onUpdate?.({ [field]: value });
+      notifyNavigationCountsChanged();
       return true;
     } catch {
       toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
@@ -963,6 +965,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
       if (!ensureFieldsEditable('status')) return;
       setTask((prev) => prev ? { ...prev, status: 'cancelled', statusReason: reason } : prev);
       onUpdate?.({ status: 'cancelled', statusReason: reason });
+      notifyNavigationCountsChanged();
       return;
     }
     // For GitHub tasks being cancelled (plain), offer close reason selection
@@ -982,6 +985,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
     }
     setTask((prev) => prev ? { ...prev, status, statusReason: null } : prev);
     onUpdate?.({ status });
+    notifyNavigationCountsChanged();
   }, [ensureFieldsEditable, taskId, onUpdate, task?.connectorType]);
 
   const handleComplete = useCallback(() => {
@@ -1020,6 +1024,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
         current?.id === taskId ? { ...current, isInMyDay: nextIsInMyDay } : current
       ));
       onUpdate?.();
+      notifyNavigationCountsChanged();
       if (nextIsInMyDay) {
         window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
           detail: { taskId, title: task?.title },
@@ -1056,6 +1061,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
             if (!response.ok) throw new Error('Failed to delete task');
             toast.success('Task deleted');
             onUpdate?.();
+            notifyNavigationCountsChanged();
             onClose();
           } catch {
             toast.error('Failed to delete task');
@@ -1082,6 +1088,7 @@ export function TaskDetailPanel({ taskId, onClose, onUpdate, onSubtaskCountChang
     setShowCloseReasonPicker(false);
     setPendingStatus(null);
     onUpdate?.({ status, statusReason: reason });
+    notifyNavigationCountsChanged();
   }, [ensureFieldsEditable, taskId, onUpdate, pendingStatus]);
 
   const handlePriorityChange = async (priority: string) => {

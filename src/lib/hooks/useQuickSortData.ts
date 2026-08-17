@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type { LocalDisposition, TaskEditPolicy, TaskSourceModel } from '@/types';
 
@@ -165,6 +166,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
   /** Refresh counts after an action. */
   const refreshCounts = useCallback(() => {
     void fetchCounts();
+    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
   }, [fetchCounts]);
 
   /** Revalidate queue membership and card context without restoring dismissed tasks. */

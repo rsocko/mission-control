@@ -23,6 +23,14 @@ import {
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { drawerSlideIn, drawerOverlay } from '@/lib/motion';
+import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import {
+  EMPTY_NAVIGATION_COUNTS,
+  type NavBadgeKey,
+  type NavBadgeTone,
+  type NavigationCounts,
+} from '@/lib/navigation/badges';
 
 interface DrawerNavItem {
   href: string;
@@ -30,6 +38,8 @@ interface DrawerNavItem {
   icon: React.ComponentType<{ size?: number; className?: string }>;
   iconColor: string;
   requiresFeature?: 'financeEnabled';
+  badgeKey?: NavBadgeKey;
+  badgeTone?: NavBadgeTone;
 }
 
 const drawerNavItems: DrawerNavItem[] = [
@@ -38,8 +48,8 @@ const drawerNavItems: DrawerNavItem[] = [
   { href: '/projects', label: 'Projects', icon: ChartNetwork, iconColor: 'text-violet-400' },
   { href: '/graph', label: 'Graph', icon: Orbit, iconColor: 'text-indigo-400' },
   { href: '/goals', label: 'Goals', icon: Target, iconColor: 'text-rose-400' },
-  { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400' },
-  { href: '/scout/reconciliation', label: 'Reconciliation', icon: ShieldCheck, iconColor: 'text-emerald-400' },
+  { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400', badgeKey: 'notifications', badgeTone: 'blue' },
+  { href: '/scout/reconciliation', label: 'Reconciliation', icon: ShieldCheck, iconColor: 'text-emerald-400', badgeKey: 'reconciliation', badgeTone: 'amber' },
   { href: '/routines', label: 'Routines', icon: Repeat, iconColor: 'text-emerald-400' },
   { href: '/insights', label: 'Insights', icon: Activity, iconColor: 'text-pink-400' },
   { href: '/finance', label: 'Money', icon: Coins, iconColor: 'text-amber-400', requiresFeature: 'financeEnabled' },
@@ -51,15 +61,23 @@ export interface MobileDrawerProps {
   onClose: () => void;
   returnFocusRef: RefObject<HTMLElement | null>;
   features?: { financeEnabled?: boolean } | null;
+  counts?: NavigationCounts;
 }
 
-export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: MobileDrawerProps) {
+export function MobileDrawer({
+  isOpen,
+  onClose,
+  returnFocusRef,
+  features,
+  counts = EMPTY_NAVIGATION_COUNTS,
+}: MobileDrawerProps) {
   const pathname = usePathname();
   const { progress } = useSyncStream();
   const [searchQuery, setSearchQuery] = useState('');
   const drawerRef = useRef<HTMLElement>(null);
   const hasOpenedRef = useRef(false);
   const prefersReducedMotion = useReducedMotion();
+  const { preferences } = useNavigationBadgePreferences();
 
   useEffect(() => {
     if (isOpen) hasOpenedRef.current = true;
@@ -221,6 +239,10 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
               )).map((item) => {
                 const active = isActive(item.href);
                 const Icon = item.icon;
+                const badgeCount = item.badgeKey ? counts[item.badgeKey] : 0;
+                const badgeTone = item.badgeKey === 'notifications'
+                  ? counts.notificationTone
+                  : item.badgeTone;
                 return (
                   <Link
                     key={item.href}
@@ -238,6 +260,11 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
                     )}
                     <Icon size={20} className={cn('flex-shrink-0', active ? item.iconColor.replace('400', '300') : item.iconColor)} />
                     <span>{item.label}</span>
+                    {preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                      <span className="ml-auto">
+                        <NavigationBadge count={badgeCount} tone={badgeTone} />
+                      </span>
+                    )}
                   </Link>
                 );
               })}

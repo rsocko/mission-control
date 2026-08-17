@@ -94,6 +94,7 @@ vi.mock('@/lib/hooks/useSyncStream', () => ({
 
 import { MobileDrawer } from '@/components/layout/MobileDrawer';
 import { MobileHeader, useNotificationDotColor } from '@/components/layout/MobileHeader';
+import { EMPTY_NAVIGATION_COUNTS } from '@/lib/navigation/badges';
 
 const unusedReturnFocusRef = React.createRef<HTMLElement>();
 
@@ -109,6 +110,25 @@ beforeEach(() => {
 // ─── MobileDrawer Tests ─────────────────────────────────────────────────────
 
 describe('MobileDrawer', () => {
+  it('shows shared notification and reconciliation counts', () => {
+    render(
+      <MobileDrawer
+        isOpen
+        onClose={vi.fn()}
+        returnFocusRef={unusedReturnFocusRef}
+        counts={{
+          ...EMPTY_NAVIGATION_COUNTS,
+          notifications: 12,
+          reconciliation: 3,
+          notificationTone: 'red',
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Notifications/ })).toHaveTextContent('12');
+    expect(screen.getByRole('link', { name: /Reconciliation/ })).toHaveTextContent('3');
+  });
+
   it('renders drawer content when open', () => {
     render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
 
@@ -365,6 +385,24 @@ describe('MobileDrawer', () => {
 // ─── MobileHeader Tests ─────────────────────────────────────────────────────
 
 describe('MobileHeader', () => {
+  it('shows the shared notification count on the menu button', () => {
+    render(
+      <MobileHeader
+        title="Today"
+        onMenuPress={vi.fn()}
+        navigationCounts={{
+          ...EMPTY_NAVIGATION_COUNTS,
+          notifications: 12,
+          notificationTone: 'amber',
+        }}
+      />,
+    );
+
+    const menu = screen.getByLabelText('Open menu (has notifications)');
+    expect(menu).toHaveTextContent('12');
+    expect(screen.getByText('12')).toHaveClass('bg-amber-400');
+  });
+
   it('renders hamburger icon (F-8)', () => {
     render(<MobileHeader title="Today" onMenuPress={vi.fn()} />);
 

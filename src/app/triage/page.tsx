@@ -19,6 +19,7 @@ import TriageStreamItem from '@/components/triage/TriageStreamItem';
 import TriageSyncStatus from '@/components/triage/TriageSyncStatus';
 import { MobileTriageView } from '@/components/triage/mobile';
 import { ACTION_META, SORT_OPTIONS, type TriageSortOption, type ViewMode } from '@/components/triage/types';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { useTriageData } from '@/lib/hooks/useTriageData';
 import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
@@ -212,6 +213,7 @@ export default function TriagePage() {
           if (options?.showSuccessToast !== false) {
             toast.success(`${label} applied`);
           }
+          window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Network error — action failed');
@@ -251,6 +253,7 @@ export default function TriagePage() {
         return false;
       }
       await loadItems();
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       toast.success('Action undone');
       return true;
     } catch (err) {

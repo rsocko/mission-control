@@ -456,6 +456,9 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
     fireEvent.keyDown(document, { key: '2' });
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: 'Undo Set priority' }),
+    ).toBeEnabled());
 
     const globalUndo = vi.fn();
     window.addEventListener('keydown', globalUndo);

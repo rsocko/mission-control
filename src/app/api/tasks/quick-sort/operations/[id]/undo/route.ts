@@ -42,8 +42,9 @@ export async function POST(
       eq(quickSortOperations.state, 'applied'),
       isNull(quickSortOperations.undoneAt),
     ))
-    .returning({ id: quickSortOperations.id });
-  if (!claimed.get()) {
+    .returning({ id: quickSortOperations.id })
+    .get();
+  if (!claimed) {
     return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
   }
 

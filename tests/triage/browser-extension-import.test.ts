@@ -83,6 +83,7 @@ describe('browser extension imports', () => {
       <div id="configError"></div>
       <button id="saveConfig"></button>
       <button id="settingsBtn"></button>
+      <button id="openSidePanelBtn"></button>
       <button id="openMcBtn"></button>
       <div id="dynamicContent"></div>
     `;

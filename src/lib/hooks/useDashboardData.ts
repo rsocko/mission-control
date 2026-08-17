@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
@@ -846,35 +845,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   } = taskActions;
 
   // ─── Computed Values ───────────────────────────────────────────────────────
-
-  const [badgeMode] = useBadgeMode();
-
-  const badgeCount = useMemo(() => {
-    switch (badgeMode) {
-      case 'unread_notifications':
-        return 0;
-      case 'myday_incomplete': {
-        // Count My Day items that aren't done, using the statuses fetched
-        // from the My Day API (not the paginated task list).
-        let count = 0;
-        for (const [, status] of myDayItemStatuses) {
-          if (status !== 'done') count++;
-        }
-        return count;
-      }
-      case 'overdue': {
-        const today = getClientToday();
-        return taskResponse.tasks.filter(
-          (t) => t.status !== 'done' && t.dueDate != null && t.dueDate < today,
-        ).length;
-      }
-      case 'off':
-      default:
-        return 0;
-    }
-  }, [badgeMode, taskResponse.tasks, myDayItemStatuses]);
-
-  useAppBadge(badgeCount);
 
   const sidebarSourceCounts = allSourceCounts;
 

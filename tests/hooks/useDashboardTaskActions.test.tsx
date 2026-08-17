@@ -7,6 +7,7 @@ import {
   type DashboardTaskExit,
 } from '@/lib/hooks/useDashboardTaskActions';
 import type { Task, TaskResponse } from '@/types/dashboard';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -143,5 +144,22 @@ describe('useDashboardTaskActions', () => {
 
     expect(result.current.taskResponse.tasks[0].priority).toBe('none');
     expect(toast.error).toHaveBeenCalledWith('Failed to update priority');
+  });
+
+  it('refreshes navigation counts when My Day membership changes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    }));
+    const refreshListener = vi.fn();
+    window.addEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, refreshListener);
+    const { result } = renderHook(() => useHarness());
+
+    await act(async () => {
+      await result.current.actions.addToMyDay('task-1');
+    });
+
+    expect(refreshListener).toHaveBeenCalledTimes(1);
+    window.removeEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, refreshListener);
   });
 });

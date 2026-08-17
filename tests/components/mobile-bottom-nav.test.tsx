@@ -74,6 +74,7 @@ vi.mock('next/link', () => ({
 }));
 
 import { MobileBottomNav } from '@/components/layout/MobileBottomNav';
+import { EMPTY_NAVIGATION_COUNTS } from '@/lib/navigation/badges';
 
 beforeEach(() => {
   mockPathname = '/today';
@@ -187,9 +188,8 @@ describe('MobileBottomNav', () => {
       });
     });
 
-    const { findByText } = render(<MobileBottomNav />);
-    // Badge should appear after fetch resolves
-    const badge = await findByText('5');
+    render(<MobileBottomNav counts={{ ...EMPTY_NAVIGATION_COUNTS, triage: 5 }} />);
+    const badge = screen.getByText('5');
     expect(badge).toBeDefined();
     expect(badge.className).toContain('bg-red-500');
   });
@@ -208,9 +208,8 @@ describe('MobileBottomNav', () => {
       });
     });
 
-    const { findByText } = render(<MobileBottomNav />);
-    // Uses no_priority only (avoids double-counting tasks missing multiple fields)
-    const badge = await findByText('7');
+    render(<MobileBottomNav counts={{ ...EMPTY_NAVIGATION_COUNTS, quickSort: 7 }} />);
+    const badge = screen.getByText('7');
     expect(badge).toBeDefined();
     expect(badge.className).toContain('bg-amber-400');
   });
@@ -229,8 +228,8 @@ describe('MobileBottomNav', () => {
       });
     });
 
-    const { findByText } = render(<MobileBottomNav />);
-    const badge = await findByText('99+');
+    render(<MobileBottomNav counts={{ ...EMPTY_NAVIGATION_COUNTS, triage: 150 }} />);
+    const badge = screen.getByText('99+');
     expect(badge).toBeDefined();
   });
 
@@ -259,21 +258,9 @@ describe('MobileBottomNav', () => {
     expect(screen.queryByLabelText(/items/)).toBeNull();
   });
 
-  it('handles partial API failure (one endpoint down)', async () => {
-    mockFetch.mockImplementation((url: string) => {
-      if (typeof url === 'string' && url.includes('/api/triage')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ stats: { pending: 3 } }),
-        });
-      }
-      // Sort API fails
-      return Promise.reject(new Error('Sort API down'));
-    });
-
-    const { findByText } = render(<MobileBottomNav />);
-    // Triage badge should still appear
-    const badge = await findByText('3');
+  it('renders available counts when another queue is empty', () => {
+    render(<MobileBottomNav counts={{ ...EMPTY_NAVIGATION_COUNTS, triage: 3 }} />);
+    const badge = screen.getByText('3');
     expect(badge).toBeDefined();
     expect(badge.className).toContain('bg-red-500');
   });

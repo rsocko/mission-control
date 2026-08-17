@@ -11,6 +11,7 @@ import {
 import { toast } from 'sonner';
 import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import {
   removeTaskFromResponse,
   replaceTaskInKeywordFilteredResponse,
@@ -259,6 +260,7 @@ export function useDashboardTaskActions(
         next.set(taskId, task?.status || 'todo');
         return next;
       });
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
       } else {
@@ -285,6 +287,7 @@ export function useDashboardTaskActions(
         next.delete(taskId);
         return next;
       });
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
       } else {

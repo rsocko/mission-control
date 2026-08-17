@@ -51,6 +51,22 @@ import {
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
 
+const taskWriteThroughQueues = new Map<string, Promise<void>>();
+
+class TaskRevisionConflictError extends Error {}
+
+function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Promise<void> {
+  const previous = taskWriteThroughQueues.get(taskId) ?? Promise.resolve();
+  const queued = previous.catch(() => {}).then(write);
+  taskWriteThroughQueues.set(taskId, queued);
+  void queued.finally(() => {
+    if (taskWriteThroughQueues.get(taskId) === queued) {
+      taskWriteThroughQueues.delete(taskId);
+    }
+  }).catch(() => {});
+  return queued;
+}
+
 /**
  * PATCH /api/tasks/[id] — Update a task (title, status, priority, tags, etc.)
  * Immediate write-through: updates local DB optimistically, then pushes to source.
@@ -73,6 +89,13 @@ export async function PATCH(
     const [currentTask] = await db.select().from(tasks).where(eq(tasks.id, id));
     if (!currentTask) {
       return ApiErrors.notFound('Task');
+    }
+    const expectedUpdatedAt = request.headers.get('x-expected-task-updated-at');
+    if (expectedUpdatedAt && currentTask.updatedAt !== expectedUpdatedAt) {
+      return NextResponse.json({
+        error: 'Task changed before this update could be applied',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
     }
     if (
       currentTask.connectorType === 'microsoft-todo-work'
@@ -293,7 +316,16 @@ export async function PATCH(
         }
       }
 
-      tx.update(tasks).set(updates).where(eq(tasks.id, id)).run();
+      const updateResult = tx.update(tasks)
+        .set(updates)
+        .where(and(
+          eq(tasks.id, id),
+          expectedUpdatedAt ? eq(tasks.updatedAt, expectedUpdatedAt) : undefined,
+        ))
+        .run();
+      if (expectedUpdatedAt && updateResult.changes === 0) {
+        throw new TaskRevisionConflictError('Task changed during update');
+      }
 
       if (input.estimatedDuration !== undefined || input.recurrence !== undefined) {
         tx.insert(taskSchedules).values({
@@ -416,7 +448,7 @@ export async function PATCH(
         ...pickWriteThroughUpdates(input, updates, policies, statusReasonPolicy),
         ...(tagWriteThrough ? { tags: tagWriteThrough } : {}),
       };
-      writeThrough(currentTask, writeThroughUpdates, id).catch((err) => {
+      enqueueTaskWriteThrough(id, () => writeThrough(currentTask, writeThroughUpdates, id)).catch((err) => {
         logger.error({ err, taskId: id }, 'Write-through task update failed unexpectedly');
       });
     }
@@ -439,6 +471,12 @@ export async function PATCH(
       ),
     });
   } catch (error) {
+    if (error instanceof TaskRevisionConflictError) {
+      return NextResponse.json({
+        error: error.message,
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
+    }
     return ApiErrors.internal('Failed to update task', error);
   }
 }

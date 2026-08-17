@@ -149,13 +149,22 @@ test('supports numeric desktop shortcuts for the active queue', async ({ page })
   await page.getByRole('button', { name: /Set Priority/ }).click();
   await expect(page.getByRole('heading', { name: task.title })).toBeVisible();
 
-  const patchRequest = page.waitForRequest((request) => (
-    request.method() === 'PATCH' && request.url().endsWith(`/api/tasks/${task.id}`)
+  const operationRequest = page.waitForRequest((request) => (
+    request.method() === 'POST' && request.url().endsWith('/api/tasks/quick-sort/operations')
   ));
   await page.keyboard.press('2');
 
-  expect((await patchRequest).postDataJSON()).toEqual({ priority: 'high' });
+  expect((await operationRequest).postDataJSON().patch).toEqual({ priority: 'high' });
   await expect(page.getByText('All caught up!')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Undo Set priority' })).toBeEnabled();
+
+  const undoRequest = page.waitForRequest((request) => (
+    request.method() === 'POST' && request.url().endsWith('/undo')
+  ));
+  await page.keyboard.press('Control+z');
+  await undoRequest;
+
+  await expect(page.getByRole('heading', { name: task.title })).toBeVisible();
 });
 
 test('mounts the queue region when the active workspace crosses into desktop', async ({ page }) => {

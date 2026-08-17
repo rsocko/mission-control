@@ -338,4 +338,19 @@ describe('Quick Sort plan/schedule queue', () => {
       hasFocusedSuggestion: false,
     })).toBe('snapBack');
   });
+
+  it('treats swipe down as undo only when operation history is available', () => {
+    const gesture = {
+      axis: 'y' as const,
+      offsetX: 0,
+      offsetY: 120,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    };
+
+    expect(getQuickSortSwipeAction({ ...gesture, hasUndo: true })).toBe('undo');
+    expect(getQuickSortSwipeAction({ ...gesture, hasUndo: false })).toBe('snapBack');
+  });
 });

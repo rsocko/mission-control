@@ -37,13 +37,13 @@ import { fromZonedTime } from 'date-fns-tz';
 import {
   formatDateInLocalTimezone,
   getLocalDateBoundsISO,
-  getLocalToday,
 } from '@/lib/utils/date';
 import { computeFlowInsights, type FlowInsightsResult } from '@/lib/stats/flow-query';
 import type { FlowFilters } from '@/lib/stats/flow';
 import { buildTaskAgeDistribution, type TaskAgeBucket } from './task-age';
 import {
   buildRoutineHeatmapDays,
+  getRoutineWeekContext,
   type RoutineCadenceConfig,
 } from './routine-heatmap';
 
@@ -379,7 +379,10 @@ async function getProjectActivity(start: string, end: string): Promise<ProjectAc
   return results.sort((a, b) => b.completed - a.completed).slice(0, 8);
 }
 
-async function getRoutineHeatmap(weekMonday: string): Promise<RoutineHeatmapEntry[]> {
+async function getRoutineHeatmap(
+  weekMonday: string,
+  today: string,
+): Promise<RoutineHeatmapEntry[]> {
   const activeRoutines = await db.select()
     .from(routines)
     .where(and(eq(routines.isActive, true), eq(routines.isArchived, false)));
@@ -416,7 +419,6 @@ async function getRoutineHeatmap(weekMonday: string): Promise<RoutineHeatmapEntr
     }
   }
 
-  const today = getToday();
   return activeRoutines.map(routine => {
     const routineCompletionDates = completionMap.get(routine.id) ?? new Set();
     const days = buildRoutineHeatmapDays({
@@ -802,15 +804,11 @@ export async function computeInsightsSection(
     };
   }
 
-  const activityToday = getLocalToday();
+  const { today: activityToday, weekMonday } = getRoutineWeekContext(now, timeZone);
   const activityStart = fmtDate(addDays(subYears(new Date(activityToday + 'T12:00:00'), 1), 1));
-  const todayDate = new Date(today + 'T12:00:00');
-  const dayOfWeek = todayDate.getDay();
-  const monday = new Date(todayDate);
-  monday.setDate(monday.getDate() + (dayOfWeek === 0 ? -6 : 1 - dayOfWeek));
   const [projectActivity, routineHeatmap, activityHeatmap] = await Promise.all([
     getProjectActivity(periodStart, periodEnd),
-    getRoutineHeatmap(fmtDate(monday)),
+    getRoutineHeatmap(weekMonday, activityToday),
     getActivityHeatmap(activityStart, activityToday),
   ]);
 

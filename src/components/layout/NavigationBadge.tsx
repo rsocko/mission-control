@@ -88,11 +88,14 @@ export function NavigationBadge({
 }) {
   if (count <= 0) return null;
 
+  const level = getPressureLevel(count);
+
   return (
     <motion.span
       className={cn(
         'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold leading-none tabular-nums',
         TONE_CLASSES[tone],
+        morphId && level === 'high' && 'w-[30px]',
         overlay && 'absolute -right-2.5 -top-2',
         pulse && 'motion-safe:animate-pulse',
       )}

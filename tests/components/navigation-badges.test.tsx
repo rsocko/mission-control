@@ -55,6 +55,16 @@ describe('navigation badges', () => {
     expect(screen.getByText('99+')).toHaveAttribute('aria-label', '125 items need attention');
   });
 
+  it('matches high-pressure shared badge width to its collapsed line', () => {
+    const { rerender } = render(
+      <NavigationBadge count={60} tone="amber" morphId="myDay" />,
+    );
+    expect(screen.getByText('60')).toHaveClass('w-[30px]');
+
+    rerender(<NavigationBadge count={60} tone="amber" />);
+    expect(screen.getByText('60')).not.toHaveClass('w-[30px]');
+  });
+
   it('uses discrete centered pressure lengths for collapsed navigation', () => {
     const { rerender } = render(
       <NavigationPressureBar count={7} tone="amber" morphId="myDay" />,

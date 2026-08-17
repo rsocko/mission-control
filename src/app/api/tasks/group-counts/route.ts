@@ -1,33 +1,14 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
-import { tasks, myDayItems, taskTags, tags, taskProjects, hubProjects, projectPhaseItems, projectPhases } from '@/db/schema';
-import { eq, and, notInArray, inArray, sql, count } from 'drizzle-orm';
-
+import { tasks, taskTags, tags, taskProjects, hubProjects, projectPhaseItems, projectPhases } from '@/db/schema';
+import { eq, and, inArray, sql, count } from 'drizzle-orm';
 import {
-  getAssignedFilterCondition,
-  getDateBounds,
-  getInboxFilterCondition,
-  getQuickFilterCondition,
-  withCondition,
-} from '../query-builder';
-import {
-  getMultiTagFilterCondition,
-  getProjectFilterCondition,
-  getTagSlugFilterCondition,
-} from '../filter-factory';
-import { getLocalToday } from '@/lib/utils/date';
-import {
-  getFilterQueryConditions,
-  getSourceListGroupCondition,
-  getSourceListIdsCondition,
-} from '../filter-query';
-import {
-  normalizedCsv,
   TaskQueryValidationError,
   validateTaskQueryParams,
 } from '../query-input';
 import { ApiErrors } from '@/lib/api-error';
 import logger from '@/lib/logger';
+import { getCanonicalTaskFilterWhere } from '../canonical-filter';
 
 /**
  * GET /api/tasks/group-counts?groupBy=status&...filters
@@ -50,99 +31,17 @@ export async function GET(request: Request) {
   }
 
   const groupBy = searchParams.get('groupBy');
-  const source = searchParams.get('source');
-  const sources = normalizedCsv(searchParams, 'sources');
-  const listId = searchParams.get('listId');
-  const listIds = normalizedCsv(searchParams, 'listIds');
-  const listGroupId = searchParams.get('listGroupId');
-  const tagSlug = searchParams.get('tag');
-  const tagSlugs = normalizedCsv(searchParams, 'tagSlugs');
-  const projectId = searchParams.get('projectId');
-  const quickFilter = searchParams.get('quickFilter');
-  const myDayDate = searchParams.get('myDayDate');
-  const openOnly = searchParams.get('openOnly') === 'true'
-    && quickFilter !== 'recentlyClosed';
-  const parentOnly = searchParams.get('parentOnly') === 'true';
-  const priorities = normalizedCsv(searchParams, 'priorities');
-  const statuses = normalizedCsv(searchParams, 'statuses');
-  const filterQuery = searchParams.get('filterQuery')?.trim();
-  const ageMin = searchParams.get('ageMin') ? parseInt(searchParams.get('ageMin')!, 10) : null;
-  const ageMax = searchParams.get('ageMax') ? parseInt(searchParams.get('ageMax')!, 10) : null;
 
   if (!groupBy) {
     return NextResponse.json({ error: 'groupBy parameter required' }, { status: 400 });
   }
 
   try {
-    const { today, weekFromNow } = getDateBounds();
-    const conditions = [];
-
-    // Exclude soft-deleted connectors
-    conditions.push(
-      sql`${tasks.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`
-    );
-
-    if (sources.length > 0) conditions.push(inArray(tasks.connectorType, sources));
-    else if (source) conditions.push(eq(tasks.connectorType, source));
-    if (parentOnly) conditions.push(sql`${tasks.parentId} IS NULL`);
-    if (openOnly && statuses.length === 0) conditions.push(notInArray(tasks.status, ['done', 'cancelled']));
-    if (listIds.length > 0) {
-      conditions.push(getSourceListIdsCondition(listIds));
-    } else if (listId) {
-      conditions.push(getSourceListIdsCondition([listId]));
-    }
-    if (listGroupId) {
-      conditions.push(getSourceListGroupCondition(listGroupId));
-    }
-    if (priorities.length > 0) conditions.push(inArray(tasks.priority, priorities));
-    if (statuses.length > 0) conditions.push(inArray(tasks.status, statuses));
-    if (filterQuery) {
-      conditions.push(...await getFilterQueryConditions(filterQuery, today, weekFromNow));
-    }
-    if (ageMin !== null && !isNaN(ageMin)) {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - ageMin);
-      conditions.push(sql`${tasks.createdAt} <= ${cutoff.toISOString()}`);
-    }
-    if (ageMax !== null && !isNaN(ageMax)) {
-      const cutoff = new Date();
-      cutoff.setDate(cutoff.getDate() - ageMax);
-      conditions.push(sql`${tasks.createdAt} >= ${cutoff.toISOString()}`);
-    }
-
-    if (tagSlug) {
-      conditions.push(getTagSlugFilterCondition(tagSlug));
-    }
-
-    if (tagSlugs.length > 0) {
-      conditions.push(getMultiTagFilterCondition(tagSlugs));
-    }
-
-    if (projectId) {
-      conditions.push(getProjectFilterCondition(projectId));
-    }
-
-    const baseWhere = conditions.length > 0 ? and(...conditions) : undefined;
-
-    // Apply quick filters
-    const myDayRows = quickFilter === 'myDay'
-      ? await db.select({ taskId: myDayItems.taskId }).from(myDayItems).where(eq(
-          myDayItems.date,
-          myDayDate && /^\d{4}-\d{2}-\d{2}$/.test(myDayDate) ? myDayDate : getLocalToday(),
-        ))
-      : [];
-    const myDayTaskIds = myDayRows.map(r => r.taskId);
-
-    const quickFilterCondition = quickFilter === 'assigned'
-      ? await getAssignedFilterCondition()
-      : quickFilter === 'inbox'
-        ? await getInboxFilterCondition()
-        : getQuickFilterCondition(quickFilter, today, weekFromNow, myDayTaskIds);
-    const taskWhere = withCondition(baseWhere, quickFilterCondition);
+    const { taskWhere, today } = await getCanonicalTaskFilterWhere(searchParams);
 
     // Determine the group expression
     let groupExpr: ReturnType<typeof sql>;
-    const todayStr = getLocalToday();
+    const todayStr = today;
 
     switch (groupBy) {
       case 'status':

@@ -55,6 +55,7 @@ import {
   TaskQueryValidationError,
   validateTaskQueryParams,
 } from './query-input';
+import { getTaskStatusGroupFilter } from '@/lib/tasks/task-status-groups';
 
 const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
@@ -167,14 +168,12 @@ export async function GET(request: Request) {
       const todayStr = getLocalToday();
       switch (groupBy) {
         case 'status': {
-          const statusMap: Record<string, string[]> = {
-            'Completed': ['done'],
-            'Cancelled': ['cancelled'],
-            'In Progress': ['in_progress'],
-            'To Do': ['todo'],
-          };
-          const mapped = statusMap[groupValue];
-          if (mapped) conditions.push(inArray(tasks.status, mapped));
+          const statusFilter = getTaskStatusGroupFilter(groupValue);
+          if (statusFilter?.mode === 'include') {
+            conditions.push(inArray(tasks.status, statusFilter.statuses));
+          } else if (statusFilter?.mode === 'exclude') {
+            conditions.push(notInArray(tasks.status, statusFilter.statuses));
+          }
           break;
         }
         case 'priority':

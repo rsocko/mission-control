@@ -1,6 +1,5 @@
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem, ConnectorCapabilities } from '@/types';
-import type { GitHubIdentityPhase } from '@/db/schema';
 import type { SyncAuditEntry } from './index';
 import db from '@/db';
 import {
@@ -32,13 +31,12 @@ import {
 } from './recurring-task-reconciliation';
 import { getLocalToday } from '@/lib/utils/date';
 import {
-  canWriteShadowIdentity,
   persistGitHubLinkedSourceIdentityBatch,
   persistExternalIdentityBatch,
 } from '@/lib/external-identities';
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import type {
-  GitHubIdentityComparisonRuntime,
+  GitHubStableIdentityRuntime,
   GitHubIdentityResolutionDecision,
 } from '@/lib/external-identities';
 import {
@@ -109,8 +107,7 @@ export async function upsertTasks(
   isFullSync?: boolean,
   discoveredLists?: Array<{ id: string; name: string }>,
   auditLog?: SyncAuditEntry[],
-  identityPhase: GitHubIdentityPhase | null = null,
-  identityComparison?: GitHubIdentityComparisonRuntime,
+  identityRuntime?: GitHubStableIdentityRuntime,
   inaccessibleSourceListIds: ReadonlySet<string> = new Set(),
 ): Promise<{
   added: number;
@@ -179,7 +176,7 @@ export async function upsertTasks(
     }
   }
   const githubLinkedSourceRows = connector.type === 'github-issues'
-    && (identityComparison || canWriteShadowIdentity(identityPhase))
+    && Boolean(identityRuntime)
     ? await db.select({
         id: taskLinkedSources.id,
         taskId: taskLinkedSources.taskId,
@@ -271,14 +268,14 @@ export async function upsertTasks(
       const hierarchyObservation = readGitHubHierarchyObservation(task, connectorId);
       if (hierarchyObservation.kind === 'incomplete') {
         githubHierarchyGenerationComplete = false;
-        identityComparison?.markIneligible(hierarchyObservation.reasonCode);
+        identityRuntime?.markBlocked(hierarchyObservation.reasonCode);
       } else if (hierarchyObservation.kind === 'complete') {
         if (!mergeGitHubHierarchyObservation(
           githubHierarchyObservations,
           hierarchyObservation.observation,
         )) {
           githubHierarchyGenerationComplete = false;
-          identityComparison?.markIneligible('sub_issue_observation_conflict');
+          identityRuntime?.markBlocked('sub_issue_observation_conflict');
         }
       }
       remoteSourceIds.add(task.sourceId);
@@ -323,8 +320,8 @@ export async function upsertTasks(
     }
 
     const tasksByList = new Map<string | null, TaskItem[]>();
-    if (identityComparison) {
-      identityComparison.markNetworkPage();
+    if (identityRuntime) {
+      identityRuntime.markNetworkPage();
       const comparisonTasks = pageTasks.filter((task) => {
         if (comparisonObservedSourceIds.has(task.sourceId)) return false;
         comparisonObservedSourceIds.add(task.sourceId);
@@ -332,7 +329,7 @@ export async function upsertTasks(
       });
       for (let index = 0; index < comparisonTasks.length; index += 500) {
         const chunk = comparisonTasks.slice(index, index + 500);
-        const decisions = identityComparison.observeBatch(
+        const decisions = identityRuntime.resolveBatch(
           'task',
           'task',
           chunk.map((remoteTask) => {
@@ -346,8 +343,9 @@ export async function upsertTasks(
             );
             return {
               candidateKey: remoteTask.sourceId,
-              legacySelectedLocalIds: existing ? [existing.id] : [],
-              legacyAction: existing ? 'update' : 'create',
+              locatorMatchedLocalIds: existing ? [existing.id] : [],
+              boundAction: 'update' as const,
+              unboundAction: 'create' as const,
               evidence: remoteTask.externalIdentity,
               localTaskId: existing?.id,
             };
@@ -375,10 +373,10 @@ export async function upsertTasks(
         })
       ));
       for (let index = 0; index < linkedCandidates.length; index += 500) {
-        const decisions = identityComparison.observeLinkedSourceBatch(
+        const decisions = identityRuntime.resolveLinkedSourceBatch(
           linkedCandidates.slice(index, index + 500),
         );
-        if (identityComparison.modeSnapshot.effectiveMode === 'stable') {
+        {
           const linkedByCandidate = new Map(
             linkedCandidates.slice(index, index + 500)
               .map((candidate) => [candidate.candidateKey, candidate] as const),
@@ -406,7 +404,7 @@ export async function upsertTasks(
         }
       }
     }
-    const applicablePageTasks = identityComparison?.modeSnapshot.effectiveMode === 'stable'
+    const applicablePageTasks = identityRuntime
       ? pageTasks.filter((task) => (
           identityDecisionBySourceId.get(task.sourceId)?.appliedSource === 'stable'
         ))
@@ -458,7 +456,7 @@ export async function upsertTasks(
 
       for (const remoteTask of batch) {
         remoteSourceIds.add(remoteTask.sourceId);
-        const stableDecision = identityComparison?.modeSnapshot.effectiveMode === 'stable'
+        const stableDecision = identityRuntime
           ? identityDecisionBySourceId.get(remoteTask.sourceId)
           : undefined;
         const existing = stableDecision?.selectedLocalId
@@ -492,7 +490,7 @@ export async function upsertTasks(
           }
         }
 
-        identityComparison?.assertDecisionsCurrent(
+        identityRuntime?.assertDecisionsCurrent(
           batch.flatMap((task) => {
             const decision = identityDecisionBySourceId.get(task.sourceId);
             return decision ? [decision] : [];
@@ -548,7 +546,7 @@ export async function upsertTasks(
             // next sync cycle will reconcile.
             // Refs: #1692
             if (stableDecision?.outcome === 'locator_change') {
-              identityComparison?.assertDecisionsCurrent([stableDecision]);
+              identityRuntime?.assertDecisionsCurrent([stableDecision]);
               await db.update(tasks).set({
                 sourceId: remoteTask.sourceId,
               }).where(eq(tasks.id, existing.id));
@@ -642,7 +640,7 @@ export async function upsertTasks(
 
       // ─── Execute bulk insert (single SQL statement for all new tasks) ───
       if (pendingInserts.length > 0) {
-        identityComparison?.assertDecisionsCurrent(
+        identityRuntime?.assertDecisionsCurrent(
           pendingInserts.flatMap(({ remoteTask }) => {
             const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
             return decision ? [decision] : [];
@@ -709,7 +707,7 @@ export async function upsertTasks(
       for (let ui = 0; ui < pendingUpdates.length; ui++) {
         const { existing, remoteTask } = pendingUpdates[ui];
         const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
-        if (decision) identityComparison?.assertDecisionsCurrent([decision]);
+        if (decision) identityRuntime?.assertDecisionsCurrent([decision]);
         const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
         const indexedTask = await applyRemoteUpdate(existing, remoteTask, now, canSyncTags, resolvedName, tagsBySlug, caps);
         tasksToIndex.push(indexedTask);
@@ -733,13 +731,11 @@ export async function upsertTasks(
         if ((ti + 1) % 10 === 0) await yieldToEventLoop();
       }
 
-      if (canWriteShadowIdentity(identityPhase)) {
+      if (identityRuntime) {
         const identityWrites: ExternalIdentityWrite[] = [];
         for (const remoteTask of batch) {
           if (!remoteTask.externalIdentity) continue;
-          const decision = identityComparison?.modeSnapshot.effectiveMode === 'stable'
-            ? identityDecisionBySourceId.get(remoteTask.sourceId)
-            : undefined;
+          const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
           const persisted = decision?.selectedLocalId
             ? existingById.get(decision.selectedLocalId)
             : existingBySourceId.get(remoteTask.sourceId);
@@ -758,8 +754,7 @@ export async function upsertTasks(
         }
         persistExternalIdentityBatch(
           identityWrites,
-          identityPhase,
-          identityComparison?.modeSnapshot,
+          identityRuntime.modeSnapshot,
         );
         const linkedIdentityWrites = new Map<string, {
           linkedSourceId: string;
@@ -782,8 +777,7 @@ export async function upsertTasks(
         persistGitHubLinkedSourceIdentityBatch(
           connectorId,
           [...linkedIdentityWrites.values()],
-          identityPhase,
-          identityComparison?.modeSnapshot,
+          identityRuntime.modeSnapshot,
         );
       }
 
@@ -857,7 +851,7 @@ export async function upsertTasks(
         }>;
       }
     ).getIdentityObservationState?.() ?? [];
-    if (identityComparison) {
+    if (identityRuntime) {
       const observationByRepository = new Map(
         observationState.map((state) => [state.sourceId.toLowerCase(), state.state]),
       );
@@ -865,7 +859,7 @@ export async function upsertTasks(
         (linked) => !comparisonObservedLinkedSourceIds.has(linked.id),
       );
       for (let index = 0; index < unobservedLinkedSources.length; index += 500) {
-        identityComparison.observeLinkedSourceBatch(
+        identityRuntime.resolveLinkedSourceBatch(
           unobservedLinkedSources.slice(index, index + 500).map((linked) => {
             const repository = githubRepositoryFromLegacySourceId(linked.sourceId);
             const repositoryState = repository
@@ -897,7 +891,7 @@ export async function upsertTasks(
       audit,
       prefetchedForDeletion,
       {
-        identityComparison,
+        identityRuntime,
         inaccessibleSourceListIds: currentInaccessibleSourceListIds,
       },
     );
@@ -934,7 +928,7 @@ export async function upsertTasks(
         alias.sourceId,
         alias.canonicalSourceId,
       ])),
-      { identityComparison },
+      { identityRuntime },
     );
   }
 

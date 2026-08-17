@@ -5,15 +5,13 @@ import {
   externalEntityLocators,
   taskLinkedSourceEntities,
   taskLinkedSources,
-  type GitHubIdentityPhase,
 } from '@/db/schema';
-import {
-  assertGitHubIdentityModeSnapshotInTransaction,
-  canWriteShadowIdentity,
-  digestExternalIdentifier,
-} from './service';
-import type { GitHubIdentityStableResolutionAlternative } from './comparison-types';
-import type { GitHubIdentityModeSnapshot } from './comparison-types';
+import { digestExternalIdentifier } from './service';
+import { assertGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import type {
+  GitHubIdentityModeSnapshot,
+  GitHubStableResolution,
+} from './stable-identity-types';
 import type { ExternalIdentityEvidence } from './types';
 
 const MAX_BATCH_SIZE = 500;
@@ -41,7 +39,7 @@ export interface GitHubLinkedSourceIdentityWrite {
 
 export interface GitHubLinkedSourceIdentityWriteResult {
   linkedSourceId: string;
-  state: 'associated' | 'collision' | 'legacy_only' | 'skipped';
+  state: 'associated' | 'collision' | 'unbound';
 }
 
 interface LinkedSourceLookupRow {
@@ -61,7 +59,6 @@ interface LinkedSourceLookupRow {
 export function persistGitHubLinkedSourceIdentityBatch(
   connectorInstanceId: string,
   writes: readonly GitHubLinkedSourceIdentityWrite[],
-  phase: GitHubIdentityPhase | null,
   modeSnapshot?: GitHubIdentityModeSnapshot,
 ): readonly GitHubLinkedSourceIdentityWriteResult[] {
   assertBatchSize(writes.length);
@@ -71,9 +68,6 @@ export function persistGitHubLinkedSourceIdentityBatch(
     && modeSnapshot.connectorInstanceId !== connectorInstanceId
   ) {
     throw new Error('Linked-source identity writes do not match the frozen connector');
-  }
-  if (!canWriteShadowIdentity(phase)) {
-    return writes.map((write) => ({ linkedSourceId: write.linkedSourceId, state: 'skipped' }));
   }
 
   return runTransaction((tx) => {
@@ -91,7 +85,7 @@ export function persistGitHubLinkedSourceIdentityBatch(
     for (const write of writes) {
       const linked = linkedById.get(write.linkedSourceId);
       if (!linked || !write.evidence) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'legacy_only' });
+        results.push({ linkedSourceId: write.linkedSourceId, state: 'unbound' });
         continue;
       }
 
@@ -111,7 +105,7 @@ export function persistGitHubLinkedSourceIdentityBatch(
         eq(externalEntities.stableId, identity.stableId),
       )).limit(1).get();
       if (!entity) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'legacy_only' });
+        results.push({ linkedSourceId: write.linkedSourceId, state: 'unbound' });
         continue;
       }
 
@@ -155,17 +149,13 @@ export function persistGitHubLinkedSourceIdentityBatch(
       }
 
       const observedAt = write.evidence.entity.observedAt;
-      if (
-        phase === 'stable_primary'
-        || phase === 'compatibility'
-        || phase === 'complete'
-      ) {
-        const currentSourceId = canonicalLegacySourceId(write.evidence);
-        if (linked.sourceId !== currentSourceId) {
-          tx.update(taskLinkedSources).set({
-            sourceId: currentSourceId,
-          }).where(eq(taskLinkedSources.id, linked.id)).run();
-        }
+      // The linked-source `source_id` is a mutable locator: NodeID identity is
+      // authoritative, so repoint the locator whenever GitHub reports a new one.
+      const currentSourceId = canonicalLegacySourceId(write.evidence);
+      if (linked.sourceId !== currentSourceId) {
+        tx.update(taskLinkedSources).set({
+          sourceId: currentSourceId,
+        }).where(eq(taskLinkedSources.id, linked.id)).run();
       }
       tx.insert(taskLinkedSourceEntities).values({
         linkedSourceId: linked.id,
@@ -191,7 +181,7 @@ export function resolveGitHubLinkedSourceIdentityBatch(
   connectorInstanceId: string,
   candidates: readonly GitHubLinkedSourceIdentityCandidate[],
 ): {
-  resolutions: ReadonlyMap<string, GitHubIdentityStableResolutionAlternative>;
+  resolutions: ReadonlyMap<string, GitHubStableResolution>;
   lookupMs: number;
   queryCount: number;
 } {
@@ -295,7 +285,7 @@ export function resolveGitHubLinkedSourceIdentityBatch(
   `).all(...params) as LinkedSourceLookupRow[];
   const lookupMs = Math.max(0, Math.round(performance.now() - startedAt));
   const rowByKey = new Map(rows.map((row) => [row.candidateKey, row]));
-  const resolutions = new Map<string, GitHubIdentityStableResolutionAlternative>();
+  const resolutions = new Map<string, GitHubStableResolution>();
 
   for (const candidate of candidates) {
     const row = rowByKey.get(candidate.candidateKey);

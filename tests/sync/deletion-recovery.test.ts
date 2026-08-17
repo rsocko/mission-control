@@ -387,7 +387,7 @@ describe('sync deletion recovery', () => {
     ]);
   });
 
-  it('preflights a verified shadow binding and restores the original ID to pending source push', async () => {
+  it('preflights a verified NodeID binding and restores the original ID to pending source push', async () => {
     const { db, schema, now } = await setupGitHubTask();
     const { archiveAndDeleteTask, restoreDeletionSnapshot } = await import('@/lib/sync/deletion-recovery');
     const archived = await archiveAndDeleteTask('task-1', 'remote_missing');
@@ -395,12 +395,12 @@ describe('sync deletion recovery', () => {
     const [snapshot] = await db.select().from(schema.syncDeletionSnapshots);
     expect(snapshot).toMatchObject({
       originalTaskId: 'task-1',
-      identityMode: 'comparison',
+      identityMode: 'stable',
       identityModeRevision: 3,
       issueEntityId: 'issue-entity',
       repositoryEntityId: 'repo-entity',
       locatorRevision: 1,
-      bindingState: 'shadow',
+      bindingState: 'active',
       bindingRevision: now,
     });
     const preflight = vi.fn(async () => ({
@@ -461,10 +461,9 @@ describe('sync deletion recovery', () => {
     const identity = await import('@/lib/external-identities');
     const { archiveAndDeleteTask, restoreDeletionSnapshot } = await import('@/lib/sync/deletion-recovery');
     db.update(schema.githubIdentityMigrations).set({
-      phase: 'stable_primary',
+      phase: 'complete',
     }).where(eq(schema.githubIdentityMigrations.connectorInstanceId, 'github-recovery')).run();
     db.update(schema.githubIdentityControls).set({
-      stablePrimaryEnabled: true,
       modeRevision: 4,
     }).where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-recovery')).run();
     db.update(schema.externalEntityBindings).set({
@@ -480,14 +479,11 @@ describe('sync deletion recovery', () => {
       identityModeRevision: 4,
       bindingState: 'active',
     });
-    expect(identity.rollbackGitHubStablePrimary({
-      connectorInstanceId: 'github-recovery',
-      expectedRevision: 4,
-      actor: 'recovery-test',
-      reason: 'Fence stable recovery',
-      idempotencyKey: 'recovery-stable-rollback',
-      now,
-    })).toMatchObject({ ok: true, snapshot: { modeRevision: 5 } });
+    // A connector identity epoch bump must fence a recovery frozen at the old one.
+    db.update(schema.githubIdentityControls).set({ modeRevision: 5, updatedAt: now })
+      .where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-recovery')).run();
+    expect(identity.getGitHubIdentityModeSnapshot('github-recovery'))
+      .toMatchObject({ modeRevision: 5 });
     await expect(restoreDeletionSnapshot(snapshot.id, 'local'))
       .rejects.toThrow('stale_mode_revision');
     expect(db.select().from(schema.syncDeletionSnapshots)
@@ -509,13 +505,13 @@ describe('sync deletion recovery', () => {
     }).where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-recovery')).run();
 
     await expect(archiveAndDeleteTask('task-1', 'stale_delete', {
-      identityMode: 'comparison',
+      identityMode: 'stable',
       identityModeRevision: 3,
       issueEntityId: 'issue-entity',
       repositoryEntityId: 'repo-entity',
       hostKey: 'github.com',
       locatorRevision: 1,
-      bindingState: 'shadow',
+      bindingState: 'active',
       bindingRevision: now,
       sourceId: 'owner/repo:7',
     })).resolves.toBeNull();
@@ -545,12 +541,11 @@ async function setupGitHubTask() {
   }).run();
   db.insert(schema.githubIdentityMigrations).values({
     connectorInstanceId: 'github-recovery',
-    phase: 'comparing',
+    phase: 'complete',
     updatedAt: now,
   }).run();
   db.insert(schema.githubIdentityControls).values({
     connectorInstanceId: 'github-recovery',
-    stablePrimaryEnabled: false,
     modeRevision: 3,
     updatedAt: now,
   }).run();
@@ -635,7 +630,7 @@ async function setupGitHubTask() {
       connectorInstanceId: 'github-recovery',
       bindingType: 'source_list',
       localId: 'repo-list',
-      state: 'shadow',
+      state: 'active',
       verifiedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -646,7 +641,7 @@ async function setupGitHubTask() {
       connectorInstanceId: 'github-recovery',
       bindingType: 'task',
       localId: 'task-1',
-      state: 'shadow',
+      state: 'active',
       verifiedAt: now,
       createdAt: now,
       updatedAt: now,

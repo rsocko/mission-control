@@ -135,12 +135,28 @@ vi.mock('@/lib/connectors', () => ({
 }));
 
 vi.mock('@/lib/external-identities', () => ({
-  GitHubIdentityComparisonRuntime: class {},
+  GITHUB_IDENTITY_MODE: 'stable',
+  GitHubStableIdentityRuntime: class {
+    modeSnapshot = {
+      connectorInstanceId: 'stale-verify',
+      effectiveMode: 'stable',
+      modeRevision: 1,
+      capturedAt: '2026-07-27T00:00:00.000Z',
+    };
+    markNetworkPage() {}
+    markBlocked() {}
+    assertCurrentMode() {}
+    assertDecisionsCurrent() {}
+    hasResolvedStableLocalId() { return false; }
+    resolveBatch() { return []; }
+    resolveDeduplicatedBatch() { return []; }
+    applyResolvedBatch() { return []; }
+    resolveLinkedSourceBatch() { return []; }
+    complete() {}
+  },
   getGitHubIdentityModeSnapshot: vi.fn((connectorInstanceId: string) => ({
     connectorInstanceId,
-    phase: 'rollback_legacy',
-    effectiveMode: 'legacy',
-    stablePrimaryEnabled: false,
+    effectiveMode: 'stable',
     modeRevision: 1,
     capturedAt: '2026-07-27T00:00:00.000Z',
   })),

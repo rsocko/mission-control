@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorConfig } from '@/types';
+import { runFencedGitHubWrite } from '../fixtures/github-write-fence';
 
 vi.mock('crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('crypto')>();
@@ -17,8 +18,6 @@ vi.mock('@/lib/external-identities', async (importOriginal) => {
   return {
     ...actual,
     getGitHubIdentityModeSnapshot: () => ({
-      effectiveMode: 'legacy',
-      stablePrimaryEnabled: false,
       revision: 1,
     }),
   };
@@ -60,8 +59,17 @@ describe('GitHub issue tag write-back', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
 
-    await connector.addTagToTask('acme/app:42', 'Needs review');
-    await connector.removeTagFromTask('acme/app:42', 'Needs review');
+    const route = {
+      connectorInstanceId: 'github-1',
+      taskId: 'task-42',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: 42,
+    };
+    await runFencedGitHubWrite(connector, route, () =>
+      connector.addTagToTask('acme/app:42', 'Needs review'));
+    await runFencedGitHubWrite(connector, route, () =>
+      connector.removeTagFromTask('acme/app:42', 'Needs review'));
 
     expect(calls[0]).toMatchObject({
       url: expect.stringContaining('/repos/acme/app/issues/42/labels'),
@@ -98,7 +106,13 @@ describe('GitHub issue tag write-back', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
 
-    await connector.updateTask('acme/app:42', { description: '' });
+    await runFencedGitHubWrite(connector, {
+      connectorInstanceId: 'github-1',
+      taskId: 'task-42',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: 42,
+    }, () => connector.updateTask('acme/app:42', { description: '' }));
 
     expect(calls).toContainEqual(expect.objectContaining({
       url: expect.stringContaining('/repos/acme/app/issues/42'),
@@ -141,10 +155,17 @@ describe('GitHub issue tag write-back', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
 
-    const created = await connector.createTask({
+    const created = await runFencedGitHubWrite(connector, {
+      connectorInstanceId: 'github-1',
+      taskId: 'task-new',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: null,
+      operation: 'create',
+    }, () => connector.createTask({
       title: 'Created issue',
       sourceListId: 'acme/app',
-    });
+    }));
 
     expect(created.sourceId).toBe('acme/app:42');
     expect(created.externalIdentity?.entity.identity.stableId).toBe('I_created');

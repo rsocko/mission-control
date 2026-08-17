@@ -122,8 +122,7 @@ export async function previewGitHubBulkTransfer(
   if (!remote.listIssues) throw new Error('GitHub remote does not support issue enumeration');
 
   const reasons: string[] = [];
-  const mode = getGitHubIdentityModeSnapshot(input.connectorInstanceId);
-  if (mode.effectiveMode !== 'stable') reasons.push('stable_primary_matching_required');
+  getGitHubIdentityModeSnapshot(input.connectorInstanceId);
   if (!backupReady(input.backupProof, dependencies.now?.() ?? new Date())) {
     reasons.push('verified_recent_backup_required');
   }
@@ -670,9 +669,6 @@ function recordChangedIssueIdentity(input: {
   const sourceStableIdDigest = identityDigest(input.item.issueStableId);
   const successorStableIdDigest = identityDigest(input.evidence.entity.identity.stableId);
   const mode = getGitHubIdentityModeSnapshot(input.run.connectorInstanceId);
-  if (mode.effectiveMode !== 'stable') {
-    throw new Error('Bulk transfer successor reconciliation requires stable-primary mode');
-  }
   const sourceBinding = readGitHubTaskTransferBinding(
     db,
     input.run.connectorInstanceId,
@@ -731,10 +727,7 @@ function recordChangedIssueIdentity(input: {
       tx,
       input.run.connectorInstanceId,
     );
-    if (
-      currentMode.effectiveMode !== 'stable'
-      || currentMode.modeRevision !== mode.modeRevision
-    ) {
+    if (currentMode.modeRevision !== mode.modeRevision) {
       throw new Error('Bulk transfer successor reconciliation identity mode changed');
     }
     const currentTask = tx.select({
@@ -1326,20 +1319,21 @@ function blockingStateCount(connectorInstanceId: string): number {
   connectorInstanceId);
 }
 
+/**
+ * Tasks an operator durably retired with an authoritative-deletion exception.
+ * The proof is the latest accepted exception event plus the task still being
+ * cancelled; no comparison evidence is consulted.
+ */
 function getDurablyAuthoritativeDeletedTaskIds(
   connectorInstanceId: string,
 ): ReadonlySet<string> {
   const rows = sqlite.prepare(`
     SELECT DISTINCT exception.local_id AS taskId
     FROM github_identity_exception_events AS exception
-    INNER JOIN github_identity_comparison_runs AS proof_run
-      ON proof_run.id = exception.comparison_run_id
-    INNER JOIN github_identity_comparison_records AS proof_record
-      ON proof_record.run_id = proof_run.id
-      AND proof_record.surface = 'deletion'
-      AND proof_record.local_task_id = exception.local_id
-      AND proof_record.outcome = 'inaccessible'
-      AND proof_record.reason = 'access_denied'
+    INNER JOIN tasks AS task
+      ON task.id = exception.local_id
+      AND task.connector_instance_id = exception.connector_instance_id
+      AND task.status = 'cancelled'
     WHERE exception.connector_instance_id = ?
       AND exception.binding_type = 'task'
       AND exception.category = 'terminal_inaccessible'
@@ -1352,19 +1346,6 @@ function getDurablyAuthoritativeDeletedTaskIds(
           AND latest.binding_type = exception.binding_type
           AND latest.local_id = exception.local_id
           AND latest.category = exception.category
-      )
-      AND proof_run.connector_instance_id = exception.connector_instance_id
-      AND proof_run.sync_kind = 'full'
-      AND proof_run.state = 'succeeded'
-      AND EXISTS (
-        SELECT 1
-        FROM github_identity_comparison_runs AS soak_run
-        WHERE soak_run.connector_instance_id = exception.connector_instance_id
-          AND soak_run.id != proof_run.id
-          AND soak_run.sync_kind = 'full'
-          AND soak_run.state = 'succeeded'
-          AND soak_run.evidence_eligible = 1
-          AND soak_run.started_at >= exception.created_at
       )
   `).all(connectorInstanceId) as Array<{ taskId: string }>;
   return new Set(rows.map((row) => row.taskId));

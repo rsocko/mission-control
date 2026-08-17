@@ -1,47 +1,30 @@
 export * from './types';
-export * from './comparison-types';
+export * from './stable-identity-types';
 export * from './github-backfill';
 export {
   createGitHubIdentityCacheGeneration,
   resolveGitHubIdentityBatch,
 } from './resolver';
 export {
-  deriveGitHubIdentityEffectiveMode,
+  assertGitHubIdentityModeSnapshotInTransaction,
+  ensureGitHubIdentityControlsInTransaction,
   getGitHubIdentityModeSnapshot,
   getGitHubIdentityModeSnapshotInTransaction,
-  transitionGitHubIdentityMode,
-  transitionGitHubIdentityModeInTransaction,
-} from './mode-control';
-export {
-  enableGitHubStablePrimary,
-  rollbackGitHubStablePrimary,
-} from './stable-primary';
-export type { GitHubStablePrimaryCommand } from './stable-primary';
-export {
-  appendGitHubIdentityComparisonRecords,
-  appendGitHubIdentityComparisonRecordsInTransaction,
-  completeGitHubIdentityComparisonRun,
-  completeGitHubIdentityComparisonRunInTransaction,
-  startGitHubIdentityComparisonRun,
-  startGitHubIdentityComparisonRunInTransaction,
-} from './comparison-service';
-export type {
-  GitHubIdentityComparisonDecisionRecord,
-  GitHubIdentityComparisonRunRecord,
-} from './comparison-service';
+} from './identity-mode';
 export {
   getLatestGitHubIdentityException,
+  hasAcceptedGitHubTerminalInaccessibleException,
   recordGitHubIdentityException,
   recordGitHubIdentityExceptionInTransaction,
-} from './compatibility-exceptions';
-export type { GitHubIdentityExceptionEvent } from './compatibility-exceptions';
+} from './identity-exceptions';
+export type { GitHubIdentityExceptionEvent } from './identity-exceptions';
 export {
   resolveGitHubStableIdentityBatch,
-} from './comparison-query';
+} from './stable-lookup';
 export type {
   GitHubStableLookupCandidate,
   GitHubStableLookupResult,
-} from './comparison-query';
+} from './stable-lookup';
 export {
   persistGitHubLinkedSourceIdentityBatch,
   resolveGitHubLinkedSourceIdentityBatch,
@@ -52,12 +35,12 @@ export type {
   GitHubLinkedSourceIdentityWrite,
   GitHubLinkedSourceIdentityWriteResult,
 } from './linked-source-identity';
-export { GitHubIdentityComparisonRuntime } from './comparison-runtime';
+export { GitHubStableIdentityRuntime } from './stable-identity-runtime';
 export type {
-  GitHubComparisonObservationCandidate,
-  GitHubComparisonResolvedCandidate,
-  GitHubIdentityComparisonRuntimeOptions,
-} from './comparison-runtime';
+  GitHubStableIdentityCandidate,
+  GitHubStableResolvedCandidate,
+  GitHubStableIdentityRuntimeOptions,
+} from './stable-identity-runtime';
 export {
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
@@ -95,21 +78,8 @@ export type {
   GitHubWriteOutcomeResolutionCommand,
   GitHubWriteOutcomeResolutionResult,
 } from './write-outcome-resolution';
-export {
-  getGitHubIdentityComparisonStatus,
-  getGitHubStablePrimaryEligibility,
-} from './comparison-status';
-export type {
-  GitHubIdentityComparisonStatusOptions,
-  GitHubStablePrimaryEligibility,
-} from './comparison-status';
-export {
-  reconcileGitHubComparisonCycle,
-} from './comparison-cycle-reconciliation';
-export type {
-  GitHubComparisonCycleReconciliationCommand,
-  GitHubComparisonCycleReconciliationResult,
-} from './comparison-cycle-reconciliation';
+export { getGitHubIdentityStatus } from './identity-status';
+export type { GitHubIdentityStatusOptions } from './identity-status';
 export {
   provenSupersededGitHubTaskIds,
   readGitHubTaskTransferBinding,
@@ -122,7 +92,6 @@ export type {
   GitHubTaskTransferReconciliationResult,
 } from './task-transfer-reconciliation';
 export {
-  canWriteShadowIdentity,
   createExternalEntityKey,
   createNewGitHubConnectorIdentityState,
   digestExternalIdentifier,

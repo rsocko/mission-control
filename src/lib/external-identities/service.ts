@@ -7,7 +7,6 @@ import {
   externalEntityBindings,
   externalEntityLocators,
   githubIdentityCollisions,
-  githubIdentityControls,
   githubIdentityMigrations,
   type ExternalBindingState,
   type GitHubCollisionCategory,
@@ -33,7 +32,11 @@ import type {
   NormalizedExternalEntityLocator,
 } from './types';
 import { digestExternalIdentifier } from './identifier-digest';
-import type { GitHubIdentityModeSnapshot } from './comparison-types';
+import {
+  assertGitHubIdentityModeSnapshotInTransaction,
+  ensureGitHubIdentityControlsInTransaction,
+} from './identity-mode';
+import type { GitHubIdentityModeSnapshot } from './stable-identity-types';
 
 export { digestExternalIdentifier } from './identifier-digest';
 
@@ -43,23 +46,23 @@ type IdentityDatabase = ExternalIdentityTransaction;
 const MAX_BATCH_SIZE = 500;
 const MAX_COLLISION_IDS = 50;
 const LOCATOR_PATH_CHUNK_SIZE = 100;
-const SHADOW_WRITE_PHASES = new Set<GitHubIdentityPhase>([
-  'shadow_write',
-  'backfilling',
-  'comparing',
-  'stable_primary',
-  'compatibility',
-  'complete',
-]);
-const STAGE_ONE_PHASE_TRANSITIONS: Record<
-  Extract<GitHubIdentityPhase, 'disabled' | 'schema_ready' | 'shadow_write' | 'backfilling' | 'paused'>,
+/**
+ * Backfill lifecycle only. GitHub identity is permanently NodeID-first, so
+ * these phases never select an identity mode and can never return a connector
+ * to locator identity.
+ */
+const BACKFILL_PHASE_TRANSITIONS: Record<
+  GitHubIdentityPhase,
   ReadonlySet<GitHubIdentityPhase>
 > = {
-  disabled: new Set(['disabled', 'schema_ready', 'shadow_write', 'backfilling', 'paused']),
+  disabled: new Set([
+    'disabled', 'schema_ready', 'shadow_write', 'backfilling', 'paused', 'complete',
+  ]),
   schema_ready: new Set(['disabled', 'schema_ready']),
   shadow_write: new Set(['schema_ready', 'shadow_write']),
-  backfilling: new Set(['shadow_write', 'backfilling', 'paused']),
+  backfilling: new Set(['shadow_write', 'backfilling', 'paused', 'complete']),
   paused: new Set(['backfilling', 'paused']),
+  complete: new Set(['backfilling', 'complete']),
 };
 
 interface PersistedEntity {
@@ -296,10 +299,6 @@ export function recordExternalIdentityCollisionInTransaction(
   return persistCollision(database, input, true);
 }
 
-export function canWriteShadowIdentity(phase: GitHubIdentityPhase | null): boolean {
-  return phase !== null && SHADOW_WRITE_PHASES.has(phase);
-}
-
 export function getGitHubIdentityPhase(connectorInstanceId: string): GitHubIdentityPhase | null {
   const row = db.select({ phase: githubIdentityMigrations.phase })
     .from(githubIdentityMigrations)
@@ -309,6 +308,11 @@ export function getGitHubIdentityPhase(connectorInstanceId: string): GitHubIdent
   return row?.phase ?? null;
 }
 
+/**
+ * A new GitHub connector starts NodeID-first immediately: sync-time identity
+ * observation binds every entity it sees, and the backfill phase only tracks
+ * how much of the pre-existing history has been swept.
+ */
 export function createNewGitHubConnectorIdentityState(
   database: IdentityDatabase,
   connectorInstanceId: string,
@@ -319,11 +323,12 @@ export function createNewGitHubConnectorIdentityState(
     phase: 'shadow_write',
     updatedAt: now,
   }).onConflictDoNothing().run();
+  ensureGitHubIdentityControlsInTransaction(database, connectorInstanceId, now);
 }
 
 export function updateGitHubIdentityPhase(
   connectorInstanceId: string,
-  phase: Extract<GitHubIdentityPhase, 'disabled' | 'schema_ready' | 'shadow_write' | 'backfilling' | 'paused'>,
+  phase: GitHubIdentityPhase,
   now = new Date().toISOString(),
 ): void {
   runTransaction((tx) => {
@@ -337,7 +342,7 @@ export function updateGitHubIdentityPhase(
     if (!current) {
       throw new Error('GitHub identity migration state is missing for this connector');
     }
-    if (!STAGE_ONE_PHASE_TRANSITIONS[phase].has(current.phase)) {
+    if (!BACKFILL_PHASE_TRANSITIONS[phase].has(current.phase)) {
       throw new Error(`GitHub identity phase cannot transition from ${current.phase} to ${phase}`);
     }
 
@@ -355,17 +360,18 @@ export function updateGitHubIdentityPhase(
   });
 }
 
+/**
+ * Persists observed GitHub NodeIDs. Identity capture is unconditional after the
+ * permanent cutover, and every verified observation produces an active binding:
+ * a locator is never authoritative on its own.
+ */
 export function persistExternalIdentityBatch(
   writes: ExternalIdentityWrite[],
-  phase: GitHubIdentityPhase | null,
   modeSnapshot?: GitHubIdentityModeSnapshot,
 ): ExternalIdentityWriteResult[] {
   if (writes.length === 0) return [];
   if (writes.length > MAX_BATCH_SIZE) {
     throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
-  }
-  if (!canWriteShadowIdentity(phase)) {
-    return writes.map((write) => ({ target: write.target, state: 'skipped' }));
   }
   if (
     modeSnapshot
@@ -375,56 +381,12 @@ export function persistExternalIdentityBatch(
     throw new Error('External identity writes do not match the frozen connector');
   }
 
-  const bindingState = (
-    phase === 'stable_primary'
-    || phase === 'compatibility'
-    || phase === 'complete'
-  ) ? 'active' : 'shadow';
   return runTransaction((tx) => {
     if (modeSnapshot) {
       assertGitHubIdentityModeSnapshotInTransaction(tx, modeSnapshot);
     }
-    return persistExternalIdentityBatchInTransaction(tx, writes, true, bindingState);
+    return persistExternalIdentityBatchInTransaction(tx, writes, true, 'active');
   });
-}
-
-export function assertGitHubIdentityModeSnapshotInTransaction(
-  database: IdentityDatabase,
-  snapshot: GitHubIdentityModeSnapshot,
-): void {
-  const migration = database.select({ phase: githubIdentityMigrations.phase })
-    .from(githubIdentityMigrations)
-    .where(eq(githubIdentityMigrations.connectorInstanceId, snapshot.connectorInstanceId))
-    .limit(1)
-    .get();
-  const control = database.select({
-    stablePrimaryEnabled: githubIdentityControls.stablePrimaryEnabled,
-    modeRevision: githubIdentityControls.modeRevision,
-  }).from(githubIdentityControls)
-    .where(eq(githubIdentityControls.connectorInstanceId, snapshot.connectorInstanceId))
-    .limit(1)
-    .get();
-  const currentPhase = migration?.phase ?? null;
-  const currentStable = control?.stablePrimaryEnabled ?? false;
-  const currentRevision = control?.modeRevision ?? 0;
-  const currentMode = currentPhase === 'comparing'
-    ? 'comparison'
-    : currentStable && (
-        currentPhase === 'stable_primary'
-        || currentPhase === 'compatibility'
-        || currentPhase === 'complete'
-      )
-      ? 'stable'
-      : 'legacy';
-  if (
-    currentMode !== snapshot.effectiveMode
-    || currentRevision !== snapshot.modeRevision
-    || currentStable !== snapshot.stablePrimaryEnabled
-  ) {
-    throw new Error(
-      `GitHub identity mode changed from ${snapshot.effectiveMode}:${snapshot.modeRevision}`,
-    );
-  }
 }
 
 export function persistExternalIdentityBatchInTransaction(

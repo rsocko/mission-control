@@ -180,31 +180,28 @@ describe('durable sync job queue', () => {
     expect(Date.parse(immediate.availableAt)).toBeLessThan(Date.parse('2099-01-01T00:10:00.000Z'));
   });
 
-  it('stamps GitHub identity mode at enqueue and retains it across retry', () => {
+  it('stamps the GitHub identity epoch at enqueue and retains it across retry', () => {
     const now = '2026-08-03T00:00:00.000Z';
     database.sqlite.prepare(`
       INSERT INTO github_identity_migrations (connector_instance_id, phase, updated_at)
-      VALUES ('github-1', 'comparing', ?)
+      VALUES ('github-1', 'complete', ?)
     `).run(now);
     database.sqlite.prepare(`
       INSERT INTO github_identity_controls (
-        connector_instance_id, stable_primary_enabled, mode_revision, updated_at
-      ) VALUES ('github-1', 0, 7, ?)
+        connector_instance_id, mode_revision, updated_at
+      ) VALUES ('github-1', 7, ?)
     `).run(now);
     const queued = queue.enqueueSyncJob('github-1', { maxAttempts: 2 });
     expect(queued).toMatchObject({
-      identityMode: 'comparison',
+      identityMode: 'stable',
       identityModeRevision: 7,
     });
 
     const claimed = queue.claimNextSyncJob('worker-a')!;
-    expect(claimed).toMatchObject({ identityMode: 'comparison', identityModeRevision: 7 });
-    database.sqlite.prepare(`
-      UPDATE github_identity_migrations SET phase = 'stable_primary' WHERE connector_instance_id = 'github-1'
-    `).run();
+    expect(claimed).toMatchObject({ identityMode: 'stable', identityModeRevision: 7 });
     database.sqlite.prepare(`
       UPDATE github_identity_controls
-      SET stable_primary_enabled = 1, mode_revision = 8
+      SET mode_revision = 8
       WHERE connector_instance_id = 'github-1'
     `).run();
     expect(queue.failSyncJob(claimed, 'worker-a', 'retry identity stamp')).toBe('queued');
@@ -213,39 +210,35 @@ describe('durable sync job queue', () => {
     `).run(now, queued.id);
     expect(queue.claimNextSyncJob('worker-b')).toMatchObject({
       id: queued.id,
-      identityMode: 'comparison',
+      identityMode: 'stable',
       identityModeRevision: 7,
     });
 
   });
 
-  it('never reinterprets a queued legacy job after cutover', async () => {
+  it('never reinterprets a job queued against an older identity epoch', async () => {
     const now = '2026-08-03T00:00:00.000Z';
     database.sqlite.prepare(`
       INSERT INTO github_identity_migrations (connector_instance_id, phase, updated_at)
-      VALUES ('github-1', 'backfilling', ?)
+      VALUES ('github-1', 'complete', ?)
     `).run(now);
     database.sqlite.prepare(`
       INSERT INTO github_identity_controls (
-        connector_instance_id, stable_primary_enabled, mode_revision, updated_at
-      ) VALUES ('github-1', 0, 4, ?)
+        connector_instance_id, mode_revision, updated_at
+      ) VALUES ('github-1', 4, ?)
     `).run(now);
     const queued = queue.enqueueSyncJob('github-1');
-    expect(queued).toMatchObject({ identityMode: 'legacy', identityModeRevision: 4 });
-    database.sqlite.prepare(`
-      UPDATE github_identity_migrations
-      SET phase = 'stable_primary' WHERE connector_instance_id = 'github-1'
-    `).run();
+    expect(queued).toMatchObject({ identityMode: 'stable', identityModeRevision: 4 });
     database.sqlite.prepare(`
       UPDATE github_identity_controls
-      SET stable_primary_enabled = 1, mode_revision = 5
+      SET mode_revision = 5
       WHERE connector_instance_id = 'github-1'
     `).run();
 
     const claimed = queue.claimNextSyncJob('worker-a')!;
     expect(claimed).toMatchObject({
       id: queued.id,
-      identityMode: 'legacy',
+      identityMode: 'stable',
       identityModeRevision: 4,
     });
 
@@ -254,9 +247,8 @@ describe('durable sync job queue', () => {
     );
     expect(() => validateAndFreezeGitHubIdentityContext('github-1', {
       connectorInstanceId: 'github-1',
-      effectiveMode: claimed.identityMode!,
       modeRevision: claimed.identityModeRevision!,
-    })).toThrow('legacy:4 is stale');
+    })).toThrow('revision 4 is stale');
   });
 
   it('cancels a legacy unstamped GitHub queue row instead of stamping it at claim', () => {

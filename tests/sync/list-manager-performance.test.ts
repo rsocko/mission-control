@@ -31,7 +31,7 @@ vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...values: unknown[]) => values),
 }));
 vi.mock('@/lib/external-identities', () => ({
-  canWriteShadowIdentity: vi.fn(() => false),
+  getGitHubIdentityPhase: vi.fn(() => false),
   persistExternalIdentityBatch: vi.fn(),
 }));
 vi.mock('@/lib/logger', () => ({

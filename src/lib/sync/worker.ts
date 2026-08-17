@@ -185,7 +185,6 @@ export class SyncWorker {
           ? undefined
           : Object.freeze({
               connectorInstanceId: job.connectorId,
-              effectiveMode: job.identityMode,
               modeRevision: job.identityModeRevision,
             }),
       });

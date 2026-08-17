@@ -1,9 +1,11 @@
 import type {
   GitHubIdentityBatchResolution,
   GitHubIdentityBatchResolutionInput,
+  GitHubIdentityOutcome,
+  GitHubIdentityReason,
   GitHubIdentityResolutionCandidate,
   GitHubIdentityResolutionDecision,
-} from './comparison-types';
+} from './stable-identity-types';
 
 const MAX_BATCH_SIZE = 500;
 
@@ -12,17 +14,18 @@ function selectedId(ids: readonly string[]): string | null {
   return unique.length === 1 ? unique[0] : null;
 }
 
-function decideOutcome(candidate: GitHubIdentityResolutionCandidate): Pick<
-  GitHubIdentityResolutionDecision,
-  'outcome' | 'reason'
-> {
-  const legacyIds = [...new Set(candidate.legacy.selectedLocalIds)];
+/**
+ * Decides one candidate from NodeID evidence alone. Locator matches never
+ * select a row; they only prove that a local row exists whose NodeID binding is
+ * missing or contradictory, which must block instead of silently duplicating.
+ */
+function decideOutcome(
+  candidate: GitHubIdentityResolutionCandidate,
+): { outcome: GitHubIdentityOutcome; reason: GitHubIdentityReason } {
   const stableIds = [...new Set(candidate.stable.selectedLocalIds)];
+  const locatorIds = [...new Set(candidate.locatorMatchedLocalIds ?? [])];
   if (candidate.stable.pathReused) {
     return { outcome: 'path_reuse', reason: 'locator_owned_by_other_entity' };
-  }
-  if (legacyIds.length > 1) {
-    return { outcome: 'collision', reason: 'multiple_legacy_candidates' };
   }
   if (candidate.stable.evidence === 'collision' || stableIds.length > 1) {
     return { outcome: 'collision', reason: 'multiple_stable_bindings' };
@@ -34,43 +37,29 @@ function decideOutcome(candidate: GitHubIdentityResolutionCandidate): Pick<
     return { outcome: 'partial_fetch', reason: 'fetch_incomplete' };
   }
   if (candidate.stable.evidence === 'missing') {
-    return {
-      outcome: legacyIds.length === 1 ? 'legacy_fallback' : 'missing_stable_id',
-      reason: legacyIds.length === 1 ? 'legacy_only' : 'missing_stable_evidence',
-    };
+    return { outcome: 'missing_stable_id', reason: 'missing_stable_evidence' };
   }
-
-  const legacyId = selectedId(legacyIds);
-  const stableId = selectedId(stableIds);
-  if (
-    candidate.stable.locatorChanged
-    && stableId !== null
-    && (legacyId === null || legacyId === stableId)
-  ) {
+  if (locatorIds.length > 1) {
+    return { outcome: 'collision', reason: 'multiple_locator_matches' };
+  }
+  if (stableIds.length === 0 && locatorIds.length === 1) {
+    return { outcome: 'unbound_local_row', reason: 'local_row_missing_stable_binding' };
+  }
+  if (candidate.stable.locatorChanged && stableIds.length === 1) {
     return { outcome: 'locator_change', reason: 'current_locator_changed' };
   }
-  if (legacyId !== stableId || candidate.legacy.action !== candidate.stable.action) {
-    return { outcome: 'stable_legacy_disagree', reason: 'selected_ids_differ' };
-  }
-  return { outcome: 'agreement', reason: 'exact_match' };
+  return { outcome: 'resolved', reason: 'stable_binding_match' };
 }
 
 function appliedDecision(
-  mode: GitHubIdentityBatchResolutionInput['modeSnapshot']['effectiveMode'],
-  outcome: GitHubIdentityResolutionDecision['outcome'],
-  legacyId: string | null,
+  outcome: GitHubIdentityOutcome,
   stableId: string | null,
   candidate: GitHubIdentityResolutionCandidate,
-): Pick<GitHubIdentityResolutionDecision, 'appliedSource' | 'selectedLocalId' | 'selectedAction'> {
-  if (mode !== 'stable') {
-    return {
-      appliedSource: legacyId === null && candidate.legacy.selectedLocalIds.length > 1
-        ? 'blocked'
-        : 'legacy',
-      selectedLocalId: legacyId,
-      selectedAction: candidate.legacy.action,
-    };
-  }
+): Pick<
+  GitHubIdentityResolutionDecision,
+  'appliedSource' | 'selectedLocalId' | 'selectedAction' | 'reason'
+> | null {
+  if (outcome !== 'resolved' && outcome !== 'locator_change') return null;
   if (
     stableId !== null
     && candidate.stable.bindingState !== undefined
@@ -80,16 +69,21 @@ function appliedDecision(
       || candidate.stable.locatorRevision === undefined
     )
   ) {
-    return { appliedSource: 'blocked', selectedLocalId: null, selectedAction: 'none' };
-  }
-  if (outcome === 'agreement' || outcome === 'locator_change') {
     return {
-      appliedSource: 'stable',
-      selectedLocalId: stableId,
-      selectedAction: candidate.stable.action,
+      appliedSource: 'blocked',
+      selectedLocalId: null,
+      selectedAction: 'none',
+      reason: 'binding_not_active',
     };
   }
-  return { appliedSource: 'blocked', selectedLocalId: null, selectedAction: 'none' };
+  return {
+    appliedSource: 'stable',
+    selectedLocalId: stableId,
+    selectedAction: candidate.stable.action,
+    reason: outcome === 'locator_change'
+      ? 'current_locator_changed'
+      : 'stable_binding_match',
+  };
 }
 
 export function resolveGitHubIdentityBatch(
@@ -104,7 +98,9 @@ export function resolveGitHubIdentityBatch(
       || left.candidateKey.localeCompare(right.candidateKey));
   const decisions = candidates.map((candidate) => {
     const key = `${candidate.surface}\0${candidate.candidateKey}`;
-    if (seen.has(key)) throw new Error(`Duplicate GitHub identity candidate: ${candidate.candidateKey}`);
+    if (seen.has(key)) {
+      throw new Error(`Duplicate GitHub identity candidate: ${candidate.candidateKey}`);
+    }
     seen.add(key);
     if (
       candidate.stable.stableIdDigest !== undefined
@@ -112,41 +108,38 @@ export function resolveGitHubIdentityBatch(
     ) {
       throw new Error('GitHub identity candidates require a lowercase SHA-256 stable ID digest');
     }
-    for (const value of [candidate.legacy.lookupMs ?? 0, candidate.stable.lookupMs ?? 0]) {
-      if (!Number.isSafeInteger(value) || value < 0) {
-        throw new Error('GitHub identity lookup durations must be non-negative integers');
-      }
+    const lookupMs = candidate.stable.lookupMs ?? 0;
+    if (!Number.isSafeInteger(lookupMs) || lookupMs < 0) {
+      throw new Error('GitHub identity lookup durations must be non-negative integers');
     }
 
-    const legacyId = selectedId(candidate.legacy.selectedLocalIds);
     const stableId = selectedId(candidate.stable.selectedLocalIds);
+    const locatorId = selectedId(candidate.locatorMatchedLocalIds ?? []);
     const result = decideOutcome(candidate);
+    const applied = appliedDecision(result.outcome, stableId, candidate) ?? {
+      appliedSource: 'blocked' as const,
+      selectedLocalId: null,
+      selectedAction: 'none' as const,
+      reason: result.reason,
+    };
     return Object.freeze({
       candidateKey: candidate.candidateKey,
       surface: candidate.surface,
       localTaskId: candidate.localTaskId ?? null,
       localSourceListId: candidate.localSourceListId ?? null,
       externalEntityId: candidate.stable.externalEntityId ?? null,
-      legacySelectedLocalId: legacyId,
-      stableSelectedLocalId: stableId,
-      legacyAction: candidate.legacy.action,
-      stableAction: candidate.stable.action,
-      ...result,
-      ...appliedDecision(
-        input.modeSnapshot.effectiveMode,
-        result.outcome,
-        legacyId,
-        stableId,
-        candidate,
-      ),
+      outcome: result.outcome,
+      ...applied,
+      locatorMatchSuperseded: applied.appliedSource === 'stable'
+        && locatorId !== null
+        && locatorId !== stableId,
       stableIdDigest: candidate.stable.stableIdDigest ?? null,
       locatorRevision: candidate.stable.locatorRevision ?? null,
       bindingRevision: candidate.stable.bindingRevision ?? null,
-      legacyLookupMs: candidate.legacy.lookupMs ?? 0,
-      stableLookupMs: candidate.stable.lookupMs ?? 0,
+      lookupMs,
     } satisfies GitHubIdentityResolutionDecision);
   });
-  const outcomeCounts: Partial<Record<GitHubIdentityResolutionDecision['outcome'], number>> = {};
+  const outcomeCounts: Partial<Record<GitHubIdentityOutcome, number>> = {};
   for (const decision of decisions) {
     outcomeCounts[decision.outcome] = (outcomeCounts[decision.outcome] ?? 0) + 1;
   }

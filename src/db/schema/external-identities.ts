@@ -22,74 +22,20 @@ export type ExternalBindingState = (typeof EXTERNAL_BINDING_STATES)[number];
 export const EXTERNAL_LOCATOR_SOURCES = ['graphql', 'rest', 'backfill', 'operator'] as const;
 export type ExternalLocatorSource = (typeof EXTERNAL_LOCATOR_SOURCES)[number];
 
+/**
+ * GitHub identity is permanently NodeID-first. The phase set now only tracks
+ * NodeID backfill coverage for a connector; it never selects an identity mode
+ * and it can never return the connector to locator ("legacy") identity.
+ */
 export const GITHUB_IDENTITY_PHASES = [
   'disabled',
   'schema_ready',
   'shadow_write',
   'backfilling',
-  'comparing',
-  'stable_primary',
-  'compatibility',
-  'complete',
   'paused',
-  'rollback_legacy',
+  'complete',
 ] as const;
 export type GitHubIdentityPhase = (typeof GITHUB_IDENTITY_PHASES)[number];
-
-export const GITHUB_IDENTITY_EFFECTIVE_MODES = ['legacy', 'comparison', 'stable'] as const;
-export type GitHubIdentityEffectiveMode = (typeof GITHUB_IDENTITY_EFFECTIVE_MODES)[number];
-
-export const GITHUB_IDENTITY_COMPARISON_SURFACES = [
-  'source_list',
-  'task',
-  'project_association',
-  'dependency',
-  'sub_issue',
-  'linked_source',
-  'deletion',
-  'write_route',
-] as const;
-export type GitHubIdentityComparisonSurface =
-  (typeof GITHUB_IDENTITY_COMPARISON_SURFACES)[number];
-
-export const GITHUB_IDENTITY_COMPARISON_ACTIONS = [
-  'create',
-  'update',
-  'present',
-  'delete_candidate',
-  'none',
-] as const;
-export type GitHubIdentityComparisonAction =
-  (typeof GITHUB_IDENTITY_COMPARISON_ACTIONS)[number];
-
-export const GITHUB_IDENTITY_COMPARISON_OUTCOMES = [
-  'agreement',
-  'legacy_fallback',
-  'missing_stable_id',
-  'collision',
-  'stable_legacy_disagree',
-  'locator_change',
-  'path_reuse',
-  'inaccessible',
-  'partial_fetch',
-] as const;
-export type GitHubIdentityComparisonOutcome =
-  (typeof GITHUB_IDENTITY_COMPARISON_OUTCOMES)[number];
-
-export const GITHUB_IDENTITY_COMPARISON_REASONS = [
-  'exact_match',
-  'legacy_only',
-  'missing_stable_evidence',
-  'multiple_legacy_candidates',
-  'multiple_stable_bindings',
-  'selected_ids_differ',
-  'current_locator_changed',
-  'locator_owned_by_other_entity',
-  'access_denied',
-  'fetch_incomplete',
-] as const;
-export type GitHubIdentityComparisonReason =
-  (typeof GITHUB_IDENTITY_COMPARISON_REASONS)[number];
 
 export const GITHUB_TASK_WRITE_OPERATIONS = [
   'create', 'update', 'complete', 'delete', 'label', 'comment',
@@ -109,31 +55,6 @@ export const GITHUB_WRITE_CYCLE_RECONCILIATION_STATES = [
 export type GitHubWriteCycleReconciliationState =
   (typeof GITHUB_WRITE_CYCLE_RECONCILIATION_STATES)[number];
 
-export const GITHUB_IDENTITY_COMPARISON_RUN_STATES = [
-  'running',
-  'succeeded',
-  'failed',
-  'cancelled',
-] as const;
-export type GitHubIdentityComparisonRunState =
-  (typeof GITHUB_IDENTITY_COMPARISON_RUN_STATES)[number];
-
-export const GITHUB_COMPARISON_INTERRUPTION_STATES = [
-  'none',
-  'unresolved',
-  'resolved',
-  'retired',
-] as const;
-export type GitHubComparisonInterruptionState =
-  (typeof GITHUB_COMPARISON_INTERRUPTION_STATES)[number];
-
-export const GITHUB_COMPARISON_INTERRUPTION_SURFACES = [
-  'comparison',
-  'sub_issue',
-] as const;
-export type GitHubComparisonInterruptionSurface =
-  (typeof GITHUB_COMPARISON_INTERRUPTION_SURFACES)[number];
-
 export const GITHUB_IDENTITY_EXCEPTION_CATEGORIES = [
   'terminal_inaccessible',
 ] as const;
@@ -150,6 +71,18 @@ export const GITHUB_IDENTITY_EXCEPTION_PROOF_TYPES = [
 ] as const;
 export type GitHubIdentityExceptionProofType =
   (typeof GITHUB_IDENTITY_EXCEPTION_PROOF_TYPES)[number];
+
+/**
+ * Archival-only proof label. Exception accepts recorded before the permanent
+ * NodeID cutover were proven by a comparison run rather than a proof type, and
+ * the comparison evidence tables are gone. Relabelling them as a real proof
+ * would fabricate evidence, so they keep this honest historical marker. Current
+ * code never writes it.
+ */
+export const GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE = 'legacy_comparison_evidence';
+export type GitHubIdentityExceptionStoredProofType =
+  | GitHubIdentityExceptionProofType
+  | typeof GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE;
 
 export const GITHUB_BACKFILL_STATES = [
   'pending',
@@ -328,39 +261,42 @@ export const githubIdentityMigrations = sqliteTable('github_identity_migrations'
   index('idx_github_identity_migrations_phase').on(table.phase, table.updatedAt),
   check(
     'github_identity_migrations_phase_check',
-    sql`${table.phase} IN ('disabled', 'schema_ready', 'shadow_write', 'backfilling', 'comparing', 'stable_primary', 'compatibility', 'complete', 'paused', 'rollback_legacy')`,
+    sql`${table.phase} IN ('disabled', 'schema_ready', 'shadow_write', 'backfilling', 'paused', 'complete')`,
   ),
   check('github_identity_migrations_batch_size_check', sql`${table.batchSize} BETWEEN 1 AND 500`),
 ]);
 
+/**
+ * Holds the connector identity epoch (`mode_revision`). GitHub identity is
+ * permanently NodeID-first, so this table no longer selects a mode: the
+ * revision is only the durable fence token that in-flight write cycles and
+ * leases are validated against.
+ */
 export const githubIdentityControls = sqliteTable('github_identity_controls', {
   connectorInstanceId: text('connector_instance_id')
     .primaryKey()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
-  stablePrimaryEnabled: integer('stable_primary_enabled', { mode: 'boolean' })
-    .notNull()
-    .default(false),
   modeRevision: integer('mode_revision').notNull().default(1),
-  lastModeEventId: integer('last_mode_event_id'),
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   check('github_identity_controls_revision_check', sql`${table.modeRevision} >= 1`),
-  check(
-    'github_identity_controls_stable_flag_check',
-    sql`${table.stablePrimaryEnabled} IN (0, 1)`,
-  ),
 ]);
 
+/**
+ * Append-only history of the one-way cutover to NodeID identity. Nothing writes
+ * to this table any more: it is retained purely so operators can read what
+ * happened, which is why the phase and mode columns are untyped text.
+ */
 export const githubIdentityModeEvents = sqliteTable('github_identity_mode_events', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   connectorInstanceId: text('connector_instance_id')
     .notNull()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
   idempotencyKey: text('idempotency_key').notNull(),
-  oldPhase: text('old_phase').$type<GitHubIdentityPhase>().notNull(),
-  newPhase: text('new_phase').$type<GitHubIdentityPhase>().notNull(),
-  oldEffectiveMode: text('old_effective_mode').$type<GitHubIdentityEffectiveMode>().notNull(),
-  newEffectiveMode: text('new_effective_mode').$type<GitHubIdentityEffectiveMode>().notNull(),
+  oldPhase: text('old_phase').notNull(),
+  newPhase: text('new_phase').notNull(),
+  oldEffectiveMode: text('old_effective_mode').notNull(),
+  newEffectiveMode: text('new_effective_mode').notNull(),
   oldStablePrimaryEnabled: integer('old_stable_primary_enabled', { mode: 'boolean' }).notNull(),
   newStablePrimaryEnabled: integer('new_stable_primary_enabled', { mode: 'boolean' }).notNull(),
   oldModeRevision: integer('old_mode_revision').notNull(),
@@ -374,231 +310,12 @@ export const githubIdentityModeEvents = sqliteTable('github_identity_mode_events
     .on(table.connectorInstanceId, table.idempotencyKey),
   index('idx_github_identity_mode_events_connector')
     .on(table.connectorInstanceId, table.id),
-  check(
-    'github_identity_mode_events_old_phase_check',
-    sql`${table.oldPhase} IN ('disabled', 'schema_ready', 'shadow_write', 'backfilling', 'comparing', 'stable_primary', 'compatibility', 'complete', 'paused', 'rollback_legacy')`,
-  ),
-  check(
-    'github_identity_mode_events_new_phase_check',
-    sql`${table.newPhase} IN ('disabled', 'schema_ready', 'shadow_write', 'backfilling', 'comparing', 'stable_primary', 'compatibility', 'complete', 'paused', 'rollback_legacy')`,
-  ),
-  check(
-    'github_identity_mode_events_old_mode_check',
-    sql`${table.oldEffectiveMode} IN ('legacy', 'comparison', 'stable')`,
-  ),
-  check(
-    'github_identity_mode_events_new_mode_check',
-    sql`${table.newEffectiveMode} IN ('legacy', 'comparison', 'stable')`,
-  ),
-  check(
-    'github_identity_mode_events_revision_check',
-    sql`${table.oldModeRevision} >= 0 AND ${table.newModeRevision} = ${table.oldModeRevision} + 1`,
-  ),
 ]);
-
-export const githubIdentityComparisonRuns = sqliteTable('github_identity_comparison_runs', {
-  id: text('id').primaryKey(),
-  connectorInstanceId: text('connector_instance_id')
-    .notNull()
-    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
-  jobId: text('job_id'),
-  ownerId: text('owner_id'),
-  ownerTokenDigest: text('owner_token_digest'),
-  ownerHeartbeatAt: text('owner_heartbeat_at'),
-  ownerLeaseExpiresAt: text('owner_lease_expires_at'),
-  predecessorRunId: text('predecessor_run_id'),
-  identityMode: text('identity_mode').$type<GitHubIdentityEffectiveMode>().notNull(),
-  identityModeRevision: integer('identity_mode_revision').notNull(),
-  syncKind: text('sync_kind').$type<'full' | 'incremental'>().notNull(),
-  state: text('state').$type<GitHubIdentityComparisonRunState>().notNull().default('running'),
-  pageCount: integer('page_count').notNull().default(0),
-  queryCount: integer('query_count').notNull().default(0),
-  outcomeCounts: text('outcome_counts', { mode: 'json' })
-    .$type<Partial<Record<GitHubIdentityComparisonOutcome, number>>>()
-    .notNull()
-    .default(sql`'{}'`),
-  lookupLatencyP50Ms: integer('lookup_latency_p50_ms'),
-  lookupLatencyP95Ms: integer('lookup_latency_p95_ms'),
-  lookupLatencyP99Ms: integer('lookup_latency_p99_ms'),
-  evidenceEligible: integer('evidence_eligible', { mode: 'boolean' }).notNull().default(false),
-  subIssueGenerationComplete: integer('sub_issue_generation_complete', { mode: 'boolean' })
-    .notNull()
-    .default(false),
-  subIssueExpectedChildCount: integer('sub_issue_expected_child_count').notNull().default(0),
-  subIssueExpectedParentCount: integer('sub_issue_expected_parent_count').notNull().default(0),
-  subIssuePopulationCount: integer('sub_issue_population_count').notNull().default(0),
-  subIssuePopulationDigest: text('sub_issue_population_digest'),
-  subIssueObservedChildCount: integer('sub_issue_observed_child_count').notNull().default(0),
-  subIssueObservedChildDigest: text('sub_issue_observed_child_digest'),
-  interruptionState: text('interruption_state')
-    .$type<GitHubComparisonInterruptionState>()
-    .notNull()
-    .default('none'),
-  interruptionSurface: text('interruption_surface')
-    .$type<GitHubComparisonInterruptionSurface>(),
-  interruptedAt: text('interrupted_at'),
-  interruptedByOwnerId: text('interrupted_by_owner_id'),
-  interruptionReason: text('interruption_reason'),
-  reconciledAt: text('reconciled_at'),
-  reconciledBy: text('reconciled_by'),
-  reconciliationReason: text('reconciliation_reason'),
-  reconciliationKey: text('reconciliation_key'),
-  resolvedByRunId: text('resolved_by_run_id'),
-  startedAt: text('started_at').notNull(),
-  completedAt: text('completed_at'),
-  errorCode: text('error_code'),
-}, (table) => [
-  index('idx_github_identity_comparison_runs_connector')
-    .on(table.connectorInstanceId, table.startedAt),
-  index('idx_github_identity_comparison_runs_job').on(table.jobId),
-  index('idx_github_identity_comparison_runs_interruption')
-    .on(table.connectorInstanceId, table.interruptionState, table.identityModeRevision),
-  uniqueIndex('idx_github_identity_comparison_runs_reconciliation_key')
-    .on(table.connectorInstanceId, table.reconciliationKey),
-  check(
-    'github_identity_comparison_runs_mode_check',
-    sql`${table.identityMode} IN ('legacy', 'comparison', 'stable')`,
-  ),
-  check(
-    'github_identity_comparison_runs_kind_check',
-    sql`${table.syncKind} IN ('full', 'incremental')`,
-  ),
-  check(
-    'github_identity_comparison_runs_state_check',
-    sql`${table.state} IN ('running', 'succeeded', 'failed', 'cancelled')`,
-  ),
-  check(
-    'github_identity_comparison_runs_counts_check',
-    sql`${table.identityModeRevision} >= 0
-      AND ${table.pageCount} >= 0
-      AND ${table.queryCount} >= 0
-      AND ${table.subIssuePopulationCount} >= 0
-      AND ${table.subIssueObservedChildCount} >= 0`,
-  ),
-  check(
-    'github_identity_comparison_runs_owner_check',
-    sql`(
-      ${table.ownerId} IS NULL
-      AND ${table.ownerTokenDigest} IS NULL
-      AND ${table.ownerHeartbeatAt} IS NULL
-      AND ${table.ownerLeaseExpiresAt} IS NULL
-    ) OR (
-      ${table.ownerId} IS NOT NULL
-      AND ${table.ownerTokenDigest} IS NOT NULL
-      AND ${table.ownerHeartbeatAt} IS NOT NULL
-      AND ${table.ownerLeaseExpiresAt} IS NOT NULL
-    )`,
-  ),
-  check(
-    'github_identity_comparison_runs_population_check',
-    sql`(
-      ${table.subIssuePopulationDigest} IS NULL
-      AND ${table.subIssueObservedChildDigest} IS NULL
-    ) OR (
-      length(${table.subIssuePopulationDigest}) = 64
-      AND length(${table.subIssueObservedChildDigest}) = 64
-    )`,
-  ),
-  check(
-    'github_identity_comparison_runs_interruption_check',
-    sql`${table.interruptionState} IN ('none', 'unresolved', 'resolved', 'retired')
-      AND (
-        (${table.interruptionState} = 'none' AND ${table.interruptionSurface} IS NULL)
-        OR (
-          ${table.interruptionState} != 'none'
-          AND ${table.interruptionSurface} IN ('comparison', 'sub_issue')
-          AND ${table.interruptedAt} IS NOT NULL
-          AND ${table.interruptionReason} IS NOT NULL
-        )
-      )`,
-  ),
-]);
-
-export const githubIdentityComparisonRecords = sqliteTable('github_identity_comparison_records', {
-  id: text('id').primaryKey(),
-  runId: text('run_id')
-    .notNull()
-    .references(() => githubIdentityComparisonRuns.id, { onDelete: 'cascade' }),
-  jobId: text('job_id'),
-  surface: text('surface').$type<GitHubIdentityComparisonSurface>().notNull(),
-  candidateKey: text('candidate_key').notNull(),
-  localTaskId: text('local_task_id'),
-  localSourceListId: text('local_source_list_id'),
-  externalEntityId: text('external_entity_id')
-    .references(() => externalEntities.id, { onDelete: 'set null' }),
-  legacySelectedLocalId: text('legacy_selected_local_id'),
-  stableSelectedLocalId: text('stable_selected_local_id'),
-  legacyAction: text('legacy_action').$type<GitHubIdentityComparisonAction>().notNull(),
-  stableAction: text('stable_action').$type<GitHubIdentityComparisonAction>().notNull(),
-  outcome: text('outcome').$type<GitHubIdentityComparisonOutcome>().notNull(),
-  reason: text('reason').$type<GitHubIdentityComparisonReason>().notNull(),
-  stableIdDigest: text('stable_id_digest'),
-  locatorRevision: integer('locator_revision'),
-  legacyLookupMs: integer('legacy_lookup_ms').notNull().default(0),
-  stableLookupMs: integer('stable_lookup_ms').notNull().default(0),
-  createdAt: text('created_at').notNull(),
-}, (table) => [
-  uniqueIndex('idx_github_identity_comparison_records_candidate')
-    .on(table.runId, table.surface, table.candidateKey),
-  index('idx_github_identity_comparison_records_outcome')
-    .on(table.runId, table.outcome),
-  index('idx_github_identity_comparison_records_entity').on(table.externalEntityId),
-  check(
-    'github_identity_comparison_records_surface_check',
-    sql`${table.surface} IN ('source_list', 'task', 'project_association', 'dependency', 'sub_issue', 'linked_source', 'deletion', 'write_route')`,
-  ),
-  check(
-    'github_identity_comparison_records_action_check',
-    sql`${table.legacyAction} IN ('create', 'update', 'present', 'delete_candidate', 'none')
-      AND ${table.stableAction} IN ('create', 'update', 'present', 'delete_candidate', 'none')`,
-  ),
-  check(
-    'github_identity_comparison_records_outcome_check',
-    sql`${table.outcome} IN ('agreement', 'legacy_fallback', 'missing_stable_id', 'collision', 'stable_legacy_disagree', 'locator_change', 'path_reuse', 'inaccessible', 'partial_fetch')`,
-  ),
-  check(
-    'github_identity_comparison_records_reason_check',
-    sql`${table.reason} IN ('exact_match', 'legacy_only', 'missing_stable_evidence', 'multiple_legacy_candidates', 'multiple_stable_bindings', 'selected_ids_differ', 'current_locator_changed', 'locator_owned_by_other_entity', 'access_denied', 'fetch_incomplete')`,
-  ),
-  check(
-    'github_identity_comparison_records_metrics_check',
-    sql`(${table.locatorRevision} IS NULL OR ${table.locatorRevision} >= 1)
-      AND ${table.legacyLookupMs} >= 0 AND ${table.stableLookupMs} >= 0`,
-  ),
-]);
-
-export const githubIdentitySubIssuePopulationMembers = sqliteTable(
-  'github_identity_sub_issue_population_members',
-  {
-    id: text('id').primaryKey(),
-    runId: text('run_id')
-      .notNull()
-      .references(() => githubIdentityComparisonRuns.id, { onDelete: 'cascade' }),
-    localTaskId: text('local_task_id').notNull(),
-    sourceIdDigest: text('source_id_digest').notNull(),
-    issueNumber: integer('issue_number').notNull(),
-    memberDigest: text('member_digest').notNull(),
-    observed: integer('observed', { mode: 'boolean' }).notNull().default(false),
-    createdAt: text('created_at').notNull(),
-  },
-  (table) => [
-    uniqueIndex('idx_github_sub_issue_population_run_task')
-      .on(table.runId, table.localTaskId),
-    uniqueIndex('idx_github_sub_issue_population_run_member')
-      .on(table.runId, table.memberDigest),
-    check(
-      'github_sub_issue_population_member_check',
-      sql`${table.issueNumber} > 0
-        AND length(${table.sourceIdDigest}) = 64
-        AND length(${table.memberDigest}) = 64`,
-    ),
-  ],
-);
 
 /**
- * A write lease freezes the legacy route and the comparison facts that allowed
- * it.  It deliberately has no task foreign key: a deletion snapshot can retain
- * the evidence after the task is removed.
+ * A write lease freezes the NodeID route that authorized one GitHub mutation.
+ * It deliberately has no task foreign key: a deletion snapshot can retain the
+ * evidence after the task is removed.
  */
 export const taskSourceWriteLeases = sqliteTable('task_source_write_leases', {
   id: text('id').primaryKey(),
@@ -610,14 +327,9 @@ export const taskSourceWriteLeases = sqliteTable('task_source_write_leases', {
   operation: text('operation').$type<GitHubTaskWriteOperation>().notNull(),
   taskVersion: text('task_version').notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
-  effectiveMode: text('effective_mode').$type<GitHubIdentityEffectiveMode>().notNull(),
   modeRevision: integer('mode_revision').notNull(),
-  comparisonRunId: text('comparison_run_id')
-    .references(() => githubIdentityComparisonRuns.id, { onDelete: 'set null' }),
   writeCycleId: text('write_cycle_id')
     .references(() => githubIdentityWriteCycles.id, { onDelete: 'set null' }),
-  legacyRoute: text('route').notNull().default('legacy'),
-  route: text('identity_route').notNull().default('legacy'),
   state: text('state').$type<GitHubTaskWriteLeaseState>().notNull().default('claimed'),
   cycleObservedAt: text('cycle_observed_at'),
   cycleOutcome: text('cycle_outcome')
@@ -649,10 +361,6 @@ export const taskSourceWriteLeases = sqliteTable('task_source_write_leases', {
   check(
     'task_source_write_leases_state_check',
     sql`${table.state} IN ('claimed', 'authorized', 'dispatched', 'succeeded', 'failed', 'blocked', 'unknown', 'expired')`,
-  ),
-  check(
-    'task_source_write_leases_identity_route_check',
-    sql`${table.route} IN ('legacy', 'stable')`,
   ),
   check(
     'task_source_write_leases_reason_check',
@@ -696,14 +404,11 @@ export const githubIdentityWriteCycles = sqliteTable('github_identity_write_cycl
   connectorInstanceId: text('connector_instance_id')
     .notNull()
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
-  comparisonRunId: text('comparison_run_id')
-    .references(() => githubIdentityComparisonRuns.id, { onDelete: 'set null' }),
   jobId: text('job_id'),
-  effectiveMode: text('effective_mode').$type<GitHubIdentityEffectiveMode>().notNull(),
   modeRevision: integer('mode_revision').notNull(),
   pendingCandidateCount: integer('pending_candidate_count').notNull().default(0),
   observedRouteCount: integer('observed_route_count').notNull().default(0),
-  legacyAppliedCount: integer('legacy_applied_count').notNull().default(0),
+  appliedCount: integer('applied_count').notNull().default(0),
   blockedCount: integer('blocked_count').notNull().default(0),
   failedCount: integer('failed_count').notNull().default(0),
   unknownCount: integer('unknown_count').notNull().default(0),
@@ -735,7 +440,7 @@ export const githubIdentityWriteCycles = sqliteTable('github_identity_write_cycl
   check(
     'github_identity_write_cycles_count_check',
     sql`${table.pendingCandidateCount} >= 0 AND ${table.observedRouteCount} >= 0
-      AND ${table.legacyAppliedCount} >= 0 AND ${table.blockedCount} >= 0
+      AND ${table.appliedCount} >= 0 AND ${table.blockedCount} >= 0
       AND ${table.failedCount} >= 0 AND ${table.unknownCount} >= 0`,
   ),
 ]);
@@ -802,9 +507,7 @@ export const githubIdentityExceptionEvents = sqliteTable('github_identity_except
   idempotencyKey: text('idempotency_key').notNull(),
   actor: text('actor').notNull(),
   reason: text('reason').notNull(),
-  proofType: text('proof_type').$type<GitHubIdentityExceptionProofType>(),
-  comparisonRunId: text('comparison_run_id')
-    .references(() => githubIdentityComparisonRuns.id, { onDelete: 'restrict' }),
+  proofType: text('proof_type').$type<GitHubIdentityExceptionStoredProofType>(),
   createdAt: text('created_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_github_identity_exception_events_idempotency')
@@ -825,26 +528,12 @@ export const githubIdentityExceptionEvents = sqliteTable('github_identity_except
   ),
   check(
     'github_identity_exception_events_proof_check',
-    sql`${table.proofType} IS NULL OR ${table.proofType} IN ('stage1_inaccessible', 'post_backfill_authoritative_deletion')`,
+    sql`${table.proofType} IS NULL OR ${table.proofType} IN ('stage1_inaccessible', 'post_backfill_authoritative_deletion', 'legacy_comparison_evidence')`,
   ),
   check(
     'github_identity_exception_events_proof_state_check',
-    sql`(
-      ${table.action} = 'revoke'
-      AND ${table.proofType} IS NULL
-      AND ${table.comparisonRunId} IS NULL
-    ) OR (
-      ${table.action} = 'accept'
-      AND (
-        (
-          (${table.proofType} IS NULL OR ${table.proofType} = 'stage1_inaccessible')
-          AND ${table.comparisonRunId} IS NULL
-        ) OR (
-          ${table.proofType} = 'post_backfill_authoritative_deletion'
-          AND ${table.comparisonRunId} IS NOT NULL
-        )
-      )
-    )`,
+    sql`(${table.action} = 'revoke' AND ${table.proofType} IS NULL)
+      OR (${table.action} = 'accept' AND ${table.proofType} IS NOT NULL)`,
   ),
 ]);
 

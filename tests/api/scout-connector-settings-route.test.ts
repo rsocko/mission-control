@@ -41,6 +41,7 @@ vi.mock('@/db/schema', () => ({
     settings: 'settings',
   },
   githubIdentityMigrations: {},
+  githubIdentityControls: {},
   focusItems: {},
   hubProjects: { id: 'id' },
   myDayItems: {},

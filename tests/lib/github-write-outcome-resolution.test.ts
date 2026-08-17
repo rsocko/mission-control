@@ -48,7 +48,6 @@ describe('GitHub post-dispatch outcome resolution', () => {
       outcomes: Array<{
         lease: { id: string; taskId: string; idempotencyKey: string };
         frozenTargets: Array<Record<string, unknown>>;
-        comparisonEvidence: { count: number };
       }>;
     };
 
@@ -61,7 +60,6 @@ describe('GitHub post-dispatch outcome resolution', () => {
           taskId: fixture.taskId,
           idempotencyKey: `${fixture.taskId}:complete:${now}`,
         },
-        comparisonEvidence: { count: 1 },
       }],
     });
     expect(inspected.outcomes[0].frozenTargets[0]).toHaveProperty('locatorRevision');
@@ -118,7 +116,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
       .toMatchObject({
         state: 'completed',
         observedRouteCount: 1,
-        legacyAppliedCount: 1,
+        appliedCount: 1,
         unknownCount: 0,
         reconciliationState: 'resolved',
       });
@@ -144,21 +142,16 @@ describe('GitHub post-dispatch outcome resolution', () => {
     });
     expect(reader.readGitHubWriteOutcome).toHaveBeenCalledTimes(1);
 
-    const status = identity.getGitHubIdentityComparisonStatus(fixture.connectorId, {
+    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: {
         incompleteWriteCycles: number;
-        unknownWriteLeases: number;
       };
-      stageTwo: { blockers: string[] };
     };
     expect(status.operationalState).toMatchObject({
       incompleteWriteCycles: 0,
-      unknownWriteLeases: 0,
     });
-    expect(status.stageTwo.blockers).not.toContain('pending_write_cycle_incomplete');
-    expect(status.stageTwo.blockers).not.toContain('unknown_write_outcome');
   });
 
   it('quarantines an orphaned running dispatch only after stopped-owner confirmation', async () => {
@@ -217,7 +210,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
         reconciliationReason: 'Authoritative outcome inspection',
         reconciliationIdempotencyKey: `resolve-${orphaned.leaseId}`,
       });
-    expect((identity.getGitHubIdentityComparisonStatus(orphaned.connectorId, {
+    expect((identity.getGitHubIdentityStatus(orphaned.connectorId, {
       now,
     }) as { operationalState: { incompleteWriteCycles: number } })
       .operationalState.incompleteWriteCycles).toBe(0);
@@ -266,19 +259,16 @@ describe('GitHub post-dispatch outcome resolution', () => {
         syncStatus: 'pending_push',
         pushRetryCount: 0,
       });
-    let status = identity.getGitHubIdentityComparisonStatus(fixture.connectorId, {
+    let status = identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: { incompleteWriteCycles: number };
-      stageTwo: { blockers: string[] };
     };
     expect(status.operationalState.incompleteWriteCycles).toBe(1);
-    expect(status.stageTwo.blockers).toContain('pending_write_cycle_incomplete');
 
     const retryCycle = database.default.insert(schema.githubIdentityWriteCycles).values({
       id: `${fixture.cycleId}-retry`,
       connectorInstanceId: fixture.connectorId,
-      effectiveMode: 'comparison',
       modeRevision: 1,
       pendingCandidateCount: 1,
       observedRouteCount: 1,
@@ -293,7 +283,6 @@ describe('GitHub post-dispatch outcome resolution', () => {
       operation: 'complete',
       taskVersion: now,
       idempotencyKey: `${fixture.taskId}:complete:${now}`,
-      effectiveMode: 'comparison',
       modeRevision: 1,
       writeCycleId: retryCycle.id,
       state: 'dispatched',
@@ -327,7 +316,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
     expect(database.default.select().from(schema.githubIdentityWriteCycles)
       .where(eq(schema.githubIdentityWriteCycles.id, fixture.cycleId)).get())
       .toMatchObject({ reconciliationState: 'superseded' });
-    status = identity.getGitHubIdentityComparisonStatus(fixture.connectorId, { now }) as typeof status;
+    status = identity.getGitHubIdentityStatus(fixture.connectorId, { now }) as typeof status;
     expect(status.operationalState.incompleteWriteCycles).toBe(0);
   });
 
@@ -638,12 +627,11 @@ function seedOutcome(suffix: string, options: SeedOptions = {}) {
   }).run();
   database.default.insert(schema.githubIdentityMigrations).values({
     connectorInstanceId: connectorId,
-    phase: 'comparing',
+    phase: 'complete',
     updatedAt: now,
   }).run();
   database.default.insert(schema.githubIdentityControls).values({
     connectorInstanceId: connectorId,
-    stablePrimaryEnabled: false,
     modeRevision: 1,
     updatedAt: now,
   }).run();
@@ -746,23 +734,9 @@ function seedOutcome(suffix: string, options: SeedOptions = {}) {
       updatedAt: now,
     },
   ]).run();
-  database.default.insert(schema.githubIdentityComparisonRuns).values({
-    id: runId,
-    connectorInstanceId: connectorId,
-    identityMode: 'comparison',
-    identityModeRevision: 1,
-    syncKind: 'incremental',
-    state: 'cancelled',
-    evidenceEligible: false,
-    startedAt: '2026-08-10T17:59:00.000Z',
-    completedAt: now,
-    errorCode: 'interrupted',
-  }).run();
   database.default.insert(schema.githubIdentityWriteCycles).values({
     id: cycleId,
     connectorInstanceId: connectorId,
-    comparisonRunId: runId,
-    effectiveMode: 'comparison',
     modeRevision: 1,
     pendingCandidateCount: options.pendingCandidateCount ?? 1,
     observedRouteCount: 0,
@@ -781,9 +755,7 @@ function seedOutcome(suffix: string, options: SeedOptions = {}) {
     operation,
     taskVersion: now,
     idempotencyKey: `${taskId}:${operation}:${now}`,
-    effectiveMode: 'comparison',
     modeRevision: 1,
-    comparisonRunId: runId,
     writeCycleId: cycleId,
     state: leaseState,
     cycleObservedAt: now,
@@ -821,18 +793,6 @@ function seedOutcome(suffix: string, options: SeedOptions = {}) {
       issueNumber: null,
     },
   ]).run();
-  database.default.insert(schema.githubIdentityComparisonRecords).values({
-    id: `record-${suffix}`,
-    runId,
-    surface: 'write_route',
-    candidateKey: `write:${taskId}:${operation}:${leaseId}`,
-    localTaskId: taskId,
-    legacyAction: 'update',
-    stableAction: 'update',
-    outcome: 'agreement',
-    reason: 'exact_match',
-    createdAt: now,
-  }).run();
   return {
     connectorId,
     taskId,

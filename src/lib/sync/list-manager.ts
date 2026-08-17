@@ -5,13 +5,9 @@ import { sourceLists as sourceListsTable, listGroups as listGroupsTable } from '
 import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { syncLogger } from '@/lib/logger';
-import type { GitHubIdentityPhase } from '@/db/schema';
-import {
-  canWriteShadowIdentity,
-  persistExternalIdentityBatch,
-} from '@/lib/external-identities';
+import { persistExternalIdentityBatch } from '@/lib/external-identities';
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
-import type { GitHubIdentityComparisonRuntime } from '@/lib/external-identities';
+import type { GitHubStableIdentityRuntime } from '@/lib/external-identities';
 
 /**
  * Yield to the event loop so healthchecks and other callbacks can run.
@@ -29,8 +25,7 @@ const LIST_INSERT_BATCH_SIZE = 100;
 export async function upsertSourceLists(
   connectorId: string,
   remoteSourceLists: SourceList[],
-  identityPhase: GitHubIdentityPhase | null = null,
-  identityComparison?: GitHubIdentityComparisonRuntime,
+  identityRuntime?: GitHubStableIdentityRuntime,
   inaccessibleSourceListIds: ReadonlySet<string> = new Set(),
   preserveStaleLists = false,
 ): Promise<Map<string, string>> {
@@ -58,21 +53,24 @@ export async function upsertSourceLists(
   const pendingUpdates: Array<{ id: string; payload: Record<string, unknown> }> = [];
   const persistedIdsBySourceId = new Map<string, string>();
   const stableDecisions = new Map<string, ReturnType<
-    GitHubIdentityComparisonRuntime['observeBatch']
+    GitHubStableIdentityRuntime['resolveBatch']
   >[number]>();
 
-  if (identityComparison) {
+  if (identityRuntime) {
     for (let index = 0; index < remoteSourceLists.length; index += 500) {
       const chunk = remoteSourceLists.slice(index, index + 500);
-      const decisions = identityComparison.observeBatch(
+      const decisions = identityRuntime.resolveBatch(
         'source_list',
         'source_list',
         chunk.map((remoteSourceList) => {
           const existing = existingBySourceId.get(remoteSourceList.sourceId);
           return {
             candidateKey: remoteSourceList.sourceId,
-            legacySelectedLocalIds: existing ? [existing.id] : [],
-            legacyAction: existing ? 'update' : 'create',
+            // Locator match is a guard only: an existing row without a NodeID
+            // binding blocks instead of being adopted or duplicated.
+            locatorMatchedLocalIds: existing ? [existing.id] : [],
+            boundAction: 'update' as const,
+            unboundAction: 'create' as const,
             evidence: remoteSourceList.externalIdentity,
             localSourceListId: existing?.id,
           };
@@ -83,13 +81,15 @@ export async function upsertSourceLists(
   }
 
   for (const remoteSourceList of remoteSourceLists) {
-    const stableDecision = identityComparison?.modeSnapshot.effectiveMode === 'stable'
+    const stableDecision = identityRuntime
       ? stableDecisions.get(remoteSourceList.sourceId)
       : undefined;
-    if (stableDecision?.appliedSource === 'blocked') continue;
+    if (identityRuntime && stableDecision?.appliedSource !== 'stable') continue;
     const listId = remoteSourceList.id || `${connectorId}:${remoteSourceList.sourceId}`;
-    const existing = stableDecision?.selectedLocalId
-      ? existingById.get(stableDecision.selectedLocalId)
+    const existing = identityRuntime
+      ? (stableDecision?.selectedLocalId
+          ? existingById.get(stableDecision.selectedLocalId)
+          : undefined)
       : existingBySourceId.get(remoteSourceList.sourceId);
     const persistedId = existing?.id || listId;
     persistedIdsBySourceId.set(remoteSourceList.sourceId, persistedId);
@@ -124,12 +124,12 @@ export async function upsertSourceLists(
     }
   }
 
-  identityComparison?.assertDecisionsCurrent(stableDecisions.values());
+  identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
 
   // Bound each synchronous SQLite statement so unusually large tenants do not
   // block health checks while persisting list discovery.
   for (let index = 0; index < pendingInserts.length; index += LIST_INSERT_BATCH_SIZE) {
-    identityComparison?.assertDecisionsCurrent(stableDecisions.values());
+    identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
     await db.insert(sourceListsTable).values(
       pendingInserts.slice(index, index + LIST_INSERT_BATCH_SIZE),
     );
@@ -141,7 +141,7 @@ export async function upsertSourceLists(
   // Execute updates in batches of 10 with yields
   for (let i = 0; i < pendingUpdates.length; i++) {
     const { id, payload } = pendingUpdates[i];
-    identityComparison?.assertDecisionsCurrent(stableDecisions.values());
+    identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
     await db.update(sourceListsTable).set(payload).where(eq(sourceListsTable.id, id));
     if ((i + 1) % 10 === 0) await yieldToEventLoop();
   }
@@ -150,37 +150,10 @@ export async function upsertSourceLists(
   for (const row of existingRows) {
     if (!discoveredListIds.has(row.id)) {
       if (preserveStaleLists) continue;
-      if (inaccessibleSourceListIds.has(row.sourceId)) {
-        identityComparison?.observeResolvedBatch('deletion', [{
-          candidateKey: `source_list:${row.sourceId}`,
-          localSourceListId: row.id,
-          legacySelectedLocalIds: [row.id],
-          legacyAction: 'none',
-          stable: {
-            selectedLocalIds: [],
-            action: 'none',
-            evidence: 'inaccessible',
-          },
-        }]);
-        if (identityComparison?.modeSnapshot.effectiveMode === 'stable') {
-          continue;
-        }
-        continue;
-      }
-      identityComparison?.observeResolvedBatch('deletion', [{
-        candidateKey: `source_list:${row.sourceId}`,
-        localSourceListId: row.id,
-        legacySelectedLocalIds: [row.id],
-        legacyAction: 'delete_candidate',
-        stable: {
-          selectedLocalIds: [],
-          action: 'none',
-          evidence: 'missing',
-        },
-      }]);
-      if (identityComparison?.modeSnapshot.effectiveMode === 'stable') {
-        continue;
-      }
+      // Under permanent NodeID identity, remote absence of a locator is never
+      // authoritative for a GitHub source list: retain it and let repoint or
+      // transfer tooling resolve the entity.
+      if (identityRuntime || inaccessibleSourceListIds.has(row.sourceId)) continue;
       if (row.groupId) {
         await db.update(sourceListsTable)
           .set({ lastSyncedAt: null })
@@ -192,7 +165,7 @@ export async function upsertSourceLists(
     }
   }
 
-  if (canWriteShadowIdentity(identityPhase)) {
+  if (identityRuntime) {
     const identityWrites: ExternalIdentityWrite[] = remoteSourceLists.flatMap((remoteSourceList) => {
       if (!remoteSourceList.externalIdentity) return [];
       const localId = persistedIdsBySourceId.get(remoteSourceList.sourceId);
@@ -210,8 +183,7 @@ export async function upsertSourceLists(
     for (let index = 0; index < identityWrites.length; index += 500) {
       persistExternalIdentityBatch(
         identityWrites.slice(index, index + 500),
-        identityPhase,
-        identityComparison?.modeSnapshot,
+        identityRuntime.modeSnapshot,
       );
     }
   }

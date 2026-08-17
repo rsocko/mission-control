@@ -38,12 +38,11 @@ describe('stale queued GitHub identity jobs', () => {
     }).run();
     db.insert(schema.githubIdentityMigrations).values({
       connectorInstanceId: 'stale-stable-job',
-      phase: 'stable_primary',
+      phase: 'complete',
       updatedAt: now,
     }).run();
     db.insert(schema.githubIdentityControls).values({
       connectorInstanceId: 'stale-stable-job',
-      stablePrimaryEnabled: true,
       modeRevision: 8,
       updatedAt: now,
     }).run();
@@ -55,11 +54,10 @@ describe('stale queued GitHub identity jobs', () => {
     });
 
     db.update(schema.githubIdentityMigrations).set({
-      phase: 'rollback_legacy',
+      phase: 'complete',
       updatedAt: now,
     }).run();
     db.update(schema.githubIdentityControls).set({
-      stablePrimaryEnabled: false,
       modeRevision: 9,
       updatedAt: now,
     }).run();
@@ -88,7 +86,7 @@ describe('stale queued GitHub identity jobs', () => {
       attempt: 1,
       identityMode: 'stable',
       identityModeRevision: 8,
-      error: expect.stringContaining('stable:8 is stale'),
+      error: expect.stringContaining('revision 8 is stale'),
     });
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS value
@@ -104,7 +102,7 @@ describe('stale queued GitHub identity jobs', () => {
     const current = queue.enqueueSyncJob('stale-stable-job');
     expect(current).toMatchObject({
       status: 'queued',
-      identityMode: 'legacy',
+      identityMode: 'stable',
       identityModeRevision: 9,
     });
     expect(current.id).not.toBe(stale.id);

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { runFencedGitHubWrite } from '../fixtures/github-write-fence';
 import type { ConnectorConfig } from '@/types';
 
 vi.mock('crypto', async (importOriginal) => {
@@ -25,8 +26,6 @@ vi.mock('@/lib/external-identities', async (importOriginal) => {
   return {
     ...actual,
     getGitHubIdentityModeSnapshot: () => ({
-      effectiveMode: 'legacy',
-      stablePrimaryEnabled: false,
       revision: 1,
     }),
   };
@@ -78,7 +77,14 @@ describe('micro-status cleanup for terminal states', () => {
       settings: { repos: ['owner/repo'], syncMicroStatus: false },
     } as ConnectorConfig);
 
-    await connector.completeTask('owner/repo:42');
+    await runFencedGitHubWrite(connector, {
+      connectorInstanceId: 'github-test',
+      taskId: 'task-42',
+      owner: 'owner',
+      repository: 'repo',
+      issueNumber: 42,
+      operation: 'complete',
+    }, () => connector.completeTask('owner/repo:42'));
 
     const deleteCall = calls.find(call => call.init?.method === 'DELETE');
     const closeCall = calls.find(call => call.init?.method === 'PATCH');

@@ -89,7 +89,7 @@ describe('pull marker adoption', () => {
         sourceId: 'list-1:remote-1',
       })],
       expect.objectContaining({
-        identityComparison: undefined,
+        identityRuntime: undefined,
         inaccessibleSourceListIds: expect.any(Set),
       }),
     );

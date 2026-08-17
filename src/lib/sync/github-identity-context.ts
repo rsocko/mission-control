@@ -2,26 +2,28 @@ import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
 } from '@/lib/external-identities';
-import { getGitHubIdentityModeSnapshot } from '@/lib/external-identities';
+import { GITHUB_IDENTITY_MODE, getGitHubIdentityModeSnapshot } from '@/lib/external-identities';
 
 export class StaleGitHubIdentityContextError extends Error {
   readonly code = 'stale_github_identity_context';
 
   constructor(
     readonly connectorInstanceId: string,
-    readonly frozenMode: GitHubIdentityRunContext['effectiveMode'],
     readonly frozenRevision: number,
-    readonly currentMode: GitHubIdentityRunContext['effectiveMode'],
     readonly currentRevision: number,
   ) {
     super(
-      `Queued GitHub identity context ${frozenMode}:${frozenRevision} is stale`
-      + ` (current ${currentMode}:${currentRevision})`,
+      `Queued GitHub identity context revision ${frozenRevision} is stale`
+      + ` (current ${currentRevision})`,
     );
     this.name = 'StaleGitHubIdentityContextError';
   }
 }
 
+/**
+ * Freezes the identity epoch a queued job was planned against. GitHub identity
+ * is permanently NodeID-first, so only the revision can go stale.
+ */
 export function freezeGitHubIdentityContext(
   connectorId: string,
   context: GitHubIdentityRunContext,
@@ -32,13 +34,7 @@ export function freezeGitHubIdentityContext(
   }
   return Object.freeze({
     connectorInstanceId: context.connectorInstanceId,
-    phase: context.effectiveMode === 'stable'
-      ? 'stable_primary'
-      : context.effectiveMode === 'comparison'
-        ? 'comparing'
-        : null,
-    effectiveMode: context.effectiveMode,
-    stablePrimaryEnabled: context.effectiveMode === 'stable',
+    effectiveMode: GITHUB_IDENTITY_MODE,
     modeRevision: context.modeRevision,
     capturedAt,
   });
@@ -51,20 +47,12 @@ export function validateAndFreezeGitHubIdentityContext(
 ): GitHubIdentityModeSnapshot {
   const frozen = freezeGitHubIdentityContext(connectorId, context, capturedAt);
   const current = getGitHubIdentityModeSnapshot(connectorId, capturedAt);
-  if (
-    current.effectiveMode !== frozen.effectiveMode
-    || current.modeRevision !== frozen.modeRevision
-    || current.stablePrimaryEnabled !== frozen.stablePrimaryEnabled
-  ) {
+  if (current.modeRevision !== frozen.modeRevision) {
     throw new StaleGitHubIdentityContextError(
       connectorId,
-      frozen.effectiveMode,
       frozen.modeRevision,
-      current.effectiveMode,
       current.modeRevision,
     );
   }
   return current;
 }
-
-export const freezeGitHubComparisonIdentityContext = freezeGitHubIdentityContext;

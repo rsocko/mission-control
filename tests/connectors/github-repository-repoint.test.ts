@@ -692,7 +692,7 @@ function seedRepository(
       evidence: { entity: repositoryObservation(owner, name, repositoryStableId) },
     },
     issueWrite(connectorId, taskId, repository, 17, issueStableId, repositoryStableId),
-  ], 'shadow_write');
+  ]);
   return { taskId, relatedTaskId, dependencyId, sourceListId };
 }
 
@@ -739,7 +739,7 @@ function seedTargetRepository(
       legacyIdentity: repository,
     },
     evidence: { entity: repositoryObservation(owner, name, repositoryStableId) },
-  }], 'shadow_write');
+  }]);
 }
 
 function seedInterruptedOperation(

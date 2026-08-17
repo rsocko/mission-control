@@ -1,10 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { sqlite } from '@/db';
-import type {
-  GitHubIdentityEffectiveMode,
-  GitHubIdentityPhase,
-} from '@/db/schema';
-import { deriveGitHubIdentityEffectiveMode } from '@/lib/external-identities/mode-control';
+import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities';
 import type { SyncResult } from '@/types';
 import type { SyncStreamEvent } from './events';
 import { connectorSyncLeaseOwner, recoverExpiredSyncJobs } from './connector-lock';
@@ -30,7 +26,7 @@ export interface SyncJob {
   result: SyncResult | null;
   error: string | null;
   durationBudgetMs: number;
-  identityMode: GitHubIdentityEffectiveMode | null;
+  identityMode: string | null;
   identityModeRevision: number | null;
   createdAt: string;
   updatedAt: string;
@@ -54,7 +50,7 @@ interface SyncJobDatabaseRow {
   result: string | null;
   error: string | null;
   durationBudgetMs: number;
-  identityMode: GitHubIdentityEffectiveMode | null;
+  identityMode: string | null;
   identityModeRevision: number | null;
   createdAt: string;
   updatedAt: string;
@@ -136,33 +132,28 @@ function deserializeJob(row: SyncJobDatabaseRow): SyncJob {
   };
 }
 
+/**
+ * Stamps the queued job with the connector identity epoch. GitHub identity is
+ * permanently NodeID-first, so only the revision is variable.
+ */
 function captureGitHubIdentityStamp(connectorId: string): {
-  mode: GitHubIdentityEffectiveMode;
+  mode: typeof GITHUB_IDENTITY_MODE;
   revision: number;
 } | null {
   const row = sqlite.prepare(`
     SELECT
       connector_configs.type,
-      github_identity_migrations.phase,
-      COALESCE(github_identity_controls.stable_primary_enabled, 0) AS stablePrimaryEnabled,
       COALESCE(github_identity_controls.mode_revision, 0) AS modeRevision
     FROM connector_configs
-    LEFT JOIN github_identity_migrations
-      ON github_identity_migrations.connector_instance_id = connector_configs.id
     LEFT JOIN github_identity_controls
       ON github_identity_controls.connector_instance_id = connector_configs.id
     WHERE connector_configs.id = ?
   `).get(connectorId) as {
     type: string;
-    phase: GitHubIdentityPhase | null;
-    stablePrimaryEnabled: number;
     modeRevision: number;
   } | undefined;
   if (!row || row.type !== 'github-issues') return null;
-  return {
-    mode: deriveGitHubIdentityEffectiveMode(row.phase, row.stablePrimaryEnabled === 1),
-    revision: row.modeRevision,
-  };
+  return { mode: GITHUB_IDENTITY_MODE, revision: row.modeRevision };
 }
 
 function isGitHubConnector(connectorId: string): boolean {

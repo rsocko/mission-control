@@ -1,5 +1,5 @@
 import db, { runTransaction, sqlite } from '@/db';
-import { getGitHubIdentityModeSnapshotInTransaction } from './mode-control';
+import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
 
 export interface GitHubWriteCycleReconciliationCommand {
   connectorInstanceId: string;
@@ -39,8 +39,6 @@ export type GitHubWriteCycleReconciliationResult =
 
 interface CycleRow {
   id: string;
-  comparisonRunId: string | null;
-  effectiveMode: string;
   modeRevision: number;
   pendingCandidateCount: number;
   state: string;
@@ -97,7 +95,7 @@ export function reconcileInterruptedGitHubWriteCycle(
           reasonCode: cycle.reconciliationState === 'superseded'
             ? 'superseded_by_succeeded_retry'
             : 'pre_dispatch_retryable',
-          observedRouteCount: comparisonRecordCount(cycle.comparisonRunId),
+          observedRouteCount: observedRouteCount(cycle.id),
         };
       }
       const code = cycle.reconciliationCode === 'possible_post_dispatch_outcome'
@@ -143,10 +141,7 @@ export function reconcileInterruptedGitHubWriteCycle(
     if (current.modeRevision !== command.expectedRevision) {
       return failure(cycle.id, 'revision_conflict', 'Connector mode revision changed');
     }
-    if (
-      cycle.modeRevision !== current.modeRevision
-      || cycle.effectiveMode !== current.effectiveMode
-    ) {
+    if (cycle.modeRevision !== current.modeRevision) {
       return failure(
         cycle.id,
         'stale_cycle_context',
@@ -162,12 +157,12 @@ export function reconcileInterruptedGitHubWriteCycle(
     }
 
     let leases = loadRelatedLeases(cycle);
-    if (hasAmbiguousFallback(cycle, leases) || !recordsMatchLeases(cycle, leases)) {
+    if (!leasesMatchCycleBudget(cycle, leases)) {
       quarantineCycle(cycle.id, command, now, 'ambiguous_cycle_evidence');
       return failure(
         cycle.id,
         'ambiguous_cycle_evidence',
-        'Durable comparison and lease evidence does not identify one write cycle',
+        'Durable lease evidence does not identify one write cycle',
         true,
       );
     }
@@ -188,9 +183,9 @@ export function reconcileInterruptedGitHubWriteCycle(
             unknown_reason = COALESCE(unknown_reason, 'interrupted_after_dispatch'),
             finalized_at = COALESCE(finalized_at, ?),
             updated_at = ?
-        WHERE (write_cycle_id = ? OR (write_cycle_id IS NULL AND comparison_run_id = ?))
+        WHERE write_cycle_id = ?
           AND state = 'dispatched'
-      `).run(now, now, cycle.id, cycle.comparisonRunId);
+      `).run(now, now, cycle.id);
       refreshQuarantinedCycleCounts(cycle);
       quarantineCycle(cycle.id, command, now, 'possible_post_dispatch_outcome');
       return failure(
@@ -274,12 +269,12 @@ export function reconcileInterruptedGitHubWriteCycle(
     const reasonCode = superseded
       ? 'superseded_by_succeeded_retry'
       : 'pre_dispatch_retryable';
-    const observedRouteCount = comparisonRecordCount(cycle.comparisonRunId);
+    const observedCount = observedRouteCount(cycle.id);
     const counts = leaseOutcomeCounts(leases);
     sqlite.prepare(`
       UPDATE github_identity_write_cycles
       SET observed_route_count = ?,
-          legacy_applied_count = 0,
+          applied_count = 0,
           blocked_count = ?,
           failed_count = ?,
           unknown_count = 0,
@@ -291,7 +286,7 @@ export function reconcileInterruptedGitHubWriteCycle(
           reconciliation_idempotency_key = ?
       WHERE id = ?
     `).run(
-      observedRouteCount,
+      observedCount,
       counts.blocked,
       counts.failed,
       reconciliationState,
@@ -308,7 +303,7 @@ export function reconcileInterruptedGitHubWriteCycle(
       cycleId: cycle.id,
       reconciliationState,
       reasonCode,
-      observedRouteCount,
+      observedRouteCount: observedCount,
     };
   });
 }
@@ -338,8 +333,6 @@ function validateCommand(command: GitHubWriteCycleReconciliationCommand): void {
 function loadCycle(connectorInstanceId: string, cycleId: string): CycleRow | undefined {
   return sqlite.prepare(`
     SELECT id,
-      comparison_run_id AS comparisonRunId,
-      effective_mode AS effectiveMode,
       mode_revision AS modeRevision,
       pending_candidate_count AS pendingCandidateCount,
       state,
@@ -367,9 +360,8 @@ function loadRelatedLeases(cycle: CycleRow): LeaseRow[] {
       finalized_at AS finalizedAt
     FROM task_source_write_leases
     WHERE write_cycle_id = ?
-      OR (write_cycle_id IS NULL AND comparison_run_id = ?)
     ORDER BY created_at, id
-  `).all(cycle.id, cycle.comparisonRunId) as LeaseRow[];
+  `).all(cycle.id) as LeaseRow[];
 }
 
 function expireRelatedUndispatchedLeases(cycle: CycleRow, now: string): void {
@@ -378,46 +370,30 @@ function expireRelatedUndispatchedLeases(cycle: CycleRow, now: string): void {
     SET state = 'expired',
         finalized_at = COALESCE(finalized_at, ?),
         updated_at = ?
-    WHERE (write_cycle_id = ? OR (write_cycle_id IS NULL AND comparison_run_id = ?))
+    WHERE write_cycle_id = ?
       AND state IN ('claimed', 'authorized')
       AND dispatched_at IS NULL
       AND expires_at <= ?
-  `).run(now, now, cycle.id, cycle.comparisonRunId, now);
+  `).run(now, now, cycle.id, now);
 }
 
-function hasAmbiguousFallback(cycle: CycleRow, leases: readonly LeaseRow[]): boolean {
-  if (!cycle.comparisonRunId) return false;
-  const hasFallbackLease = leases.some((lease) => lease.writeCycleId === null);
-  if (!hasFallbackLease) return false;
-  const cycles = sqlite.prepare(`
-    SELECT COUNT(*) AS value
-    FROM github_identity_write_cycles
-    WHERE comparison_run_id = ?
-  `).get(cycle.comparisonRunId) as { value: number };
-  return Number(cycles.value) !== 1;
+/**
+ * Every lease that reached a route decision carries `cycle_observed_at`, so the
+ * lease rows themselves bound the cycle. A cycle that collected more leases
+ * than it planned candidates, or leases without a route observation, is
+ * ambiguous and must be quarantined rather than reconciled.
+ */
+function leasesMatchCycleBudget(cycle: CycleRow, leases: readonly LeaseRow[]): boolean {
+  return leases.length <= cycle.pendingCandidateCount
+    && leases.every((lease) => lease.writeCycleId === cycle.id);
 }
 
-function recordsMatchLeases(cycle: CycleRow, leases: readonly LeaseRow[]): boolean {
-  if (!cycle.comparisonRunId) return leases.length === 0;
-  const records = sqlite.prepare(`
-    SELECT candidate_key AS candidateKey
-    FROM github_identity_comparison_records
-    WHERE run_id = ? AND surface = 'write_route'
-  `).all(cycle.comparisonRunId) as Array<{ candidateKey: string }>;
-  if (records.length > cycle.pendingCandidateCount || leases.length > cycle.pendingCandidateCount) {
-    return false;
-  }
-  return records.every((record) =>
-    leases.some((lease) => record.candidateKey.endsWith(`:${lease.id}`)));
-}
-
-function comparisonRecordCount(comparisonRunId: string | null): number {
-  if (!comparisonRunId) return 0;
+function observedRouteCount(cycleId: string): number {
   const row = sqlite.prepare(`
     SELECT COUNT(*) AS value
-    FROM github_identity_comparison_records
-    WHERE run_id = ? AND surface = 'write_route'
-  `).get(comparisonRunId) as { value: number };
+    FROM task_source_write_leases
+    WHERE write_cycle_id = ? AND cycle_observed_at IS NOT NULL
+  `).get(cycleId) as { value: number };
   return Number(row.value);
 }
 
@@ -425,16 +401,16 @@ function refreshQuarantinedCycleCounts(cycle: CycleRow): void {
   const unknownCount = sqlite.prepare(`
     SELECT COUNT(*) AS value
     FROM task_source_write_leases
-    WHERE (write_cycle_id = ? OR (write_cycle_id IS NULL AND comparison_run_id = ?))
+    WHERE write_cycle_id = ?
       AND state = 'unknown'
-  `).get(cycle.id, cycle.comparisonRunId) as { value: number };
+  `).get(cycle.id) as { value: number };
   sqlite.prepare(`
     UPDATE github_identity_write_cycles
     SET observed_route_count = ?,
         unknown_count = ?
     WHERE id = ?
   `).run(
-    comparisonRecordCount(cycle.comparisonRunId),
+    observedRouteCount(cycle.id),
     Number(unknownCount.value),
     cycle.id,
   );

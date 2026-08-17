@@ -36,12 +36,11 @@ describe('GitHub write fence', () => {
     }).run();
     db.insert(schema.githubIdentityMigrations).values({
       connectorInstanceId: 'github-fence',
-      phase: 'comparing',
+      phase: 'complete',
       updatedAt: now,
     }).run();
     db.insert(schema.githubIdentityControls).values({
       connectorInstanceId: 'github-fence',
-      stablePrimaryEnabled: false,
       modeRevision: 4,
       updatedAt: now,
     }).run();
@@ -69,7 +68,7 @@ describe('GitHub write fence', () => {
     }).run();
     seedIdentity(db, schema, now);
 
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -77,14 +76,13 @@ describe('GitHub write fence', () => {
     const firstCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: firstCycle,
     });
     identity.verifyGitHubWritePreflight(authorization, {
@@ -97,7 +95,6 @@ describe('GitHub write fence', () => {
     identity.finalizeGitHubWrite(authorization, 'succeeded');
     expect(db.select().from(schema.taskSourceWriteLeases).all()
       .find((lease) => lease.id === authorization.leaseId)).toMatchObject({
-      route: 'legacy',
       state: 'succeeded',
       modeRevision: 4,
     });
@@ -116,14 +113,13 @@ describe('GitHub write fence', () => {
     const staleCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const stale = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'comment',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: staleCycle,
     });
     sqlite.prepare(`
@@ -161,7 +157,7 @@ describe('GitHub write fence', () => {
     expect(db.select().from(schema.githubIdentityWriteCycles).all()
       .some((cycle) => cycle.pendingCandidateCount === 1
         && cycle.observedRouteCount === 1
-        && cycle.legacyAppliedCount === 1
+        && cycle.appliedCount === 1
         && cycle.state === 'completed')).toBe(true);
   });
 
@@ -174,11 +170,6 @@ describe('GitHub write fence', () => {
       connector: {
         type: 'github-issues',
         preflightWriteRoute: async () => {
-          sqlite.prepare(`
-            UPDATE github_identity_comparison_runs
-            SET owner_token_digest = ?
-            WHERE connector_instance_id = ? AND state = 'running'
-          `).run('0'.repeat(64), 'github-fence');
           sqlite.prepare(`
             UPDATE github_identity_write_cycles
             SET state = 'interrupted', completed_at = ?
@@ -218,11 +209,6 @@ describe('GitHub write fence', () => {
         runAuthorizedWrite: async (_route, write) => write(),
       },
       write: async () => {
-        sqlite.prepare(`
-          UPDATE github_identity_comparison_runs
-          SET owner_token_digest = ?
-          WHERE connector_instance_id = ? AND state = 'running'
-        `).run('0'.repeat(64), 'github-fence');
         throw new Error('connection_closed_after_dispatch');
       },
     }).then(
@@ -265,21 +251,14 @@ describe('GitHub write fence', () => {
         }),
         runAuthorizedWrite: async (_route, write) => write(),
       },
-      write: async () => {
-        sqlite.prepare(`
-          UPDATE github_identity_comparison_runs
-          SET owner_token_digest = ?
-          WHERE connector_instance_id = ? AND state = 'running'
-        `).run('0'.repeat(64), 'github-fence');
-        return 'applied';
-      },
+      write: async () => 'applied',
     })).resolves.toBe('applied');
 
     expect(db.select().from(schema.githubIdentityWriteCycles).all()).toContainEqual(
       expect.objectContaining({
         state: 'completed',
         observedRouteCount: 1,
-        legacyAppliedCount: 1,
+        appliedCount: 1,
       }),
     );
   });
@@ -327,13 +306,13 @@ describe('GitHub write fence', () => {
       ]),
     );
     const cycles = db.select().from(schema.githubIdentityWriteCycles).all();
-    expect(cycles.some((cycle) => cycle.unknownCount === 1 && cycle.legacyAppliedCount === 0))
+    expect(cycles.some((cycle) => cycle.unknownCount === 1 && cycle.appliedCount === 0))
       .toBe(true);
   });
 
-  it('blocks legacy locator disagreement and a binding revision race', async () => {
+  it('keeps a renamed locator authoritative by NodeID and blocks a binding revision race', async () => {
     const { db, sqlite, schema, identity, now } = await setupFixture();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -341,21 +320,24 @@ describe('GitHub write fence', () => {
     const disagreementCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
 
+    // source_id is a mutable locator: a rename must not change the route, which
+    // stays the NodeID-bound issue.
     db.update(schema.tasks).set({
       sourceId: 'owner/replacement:7',
       updatedAt: '2026-08-10T12:01:00.000Z',
     }).where((await import('drizzle-orm')).eq(schema.tasks.id, 'task-1')).run();
-    expect(() => identity.authorizeGitHubWrite({
+    const renamed = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: disagreementCycle,
-    })).toThrow('stable_legacy_route_disagreement');
+    });
+    expect(renamed).toMatchObject({ owner: 'owner', repository: 'repo', issueNumber: 7 });
+    identity.blockGitHubWrite(renamed.leaseId, renamed.token, 'test_cleanup');
     identity.finishGitHubWriteCycle(disagreementCycle, {
       observed: 1,
       applied: 0,
@@ -371,14 +353,13 @@ describe('GitHub write fence', () => {
     const bindingCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: bindingCycle,
     });
     sqlite.prepare(`
@@ -393,7 +374,7 @@ describe('GitHub write fence', () => {
 
   it('rolls back lease observation when the linked cycle is interrupted before its counter update', async () => {
     const { db, sqlite, schema, identity } = await setupFixture();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -401,24 +382,24 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
-    const observe = runtime.observeResolvedBatch.bind(runtime);
-    runtime.observeResolvedBatch = ((...args: Parameters<typeof observe>) => {
-      observe(...args);
+    const observe = runtime.applyResolvedBatch.bind(runtime);
+    runtime.applyResolvedBatch = ((...args: Parameters<typeof observe>) => {
+      const decisions = observe(...args);
       sqlite.prepare(`
         UPDATE github_identity_write_cycles
         SET state = 'interrupted', completed_at = ?
         WHERE id = ?
       `).run('2026-08-10T12:00:01.000Z', cycleId);
-    }) as typeof runtime.observeResolvedBatch;
+      return decisions;
+    }) as typeof runtime.applyResolvedBatch;
 
     expect(() => identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     })).toThrow('write_cycle_observation_lost');
 
@@ -441,7 +422,7 @@ describe('GitHub write fence', () => {
   it('rejects dispatch when the linked cycle observation marker is absent', async () => {
     const { db, schema, identity } = await setupFixture();
     const { eq } = await import('drizzle-orm');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -449,14 +430,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     db.update(schema.taskSourceWriteLeases).set({
@@ -477,7 +457,7 @@ describe('GitHub write fence', () => {
 
   it('fences dispatch after cycle interruption and prevents a stale finisher from changing it', async () => {
     const { db, sqlite, schema, identity } = await setupFixture();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -485,14 +465,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     sqlite.prepare(`
@@ -514,7 +493,7 @@ describe('GitHub write fence', () => {
       .where((await import('drizzle-orm')).eq(schema.githubIdentityWriteCycles.id, cycleId))
       .get()).toMatchObject({
       state: 'interrupted',
-      legacyAppliedCount: 0,
+      appliedCount: 0,
       blockedCount: 0,
     });
     expect(db.select().from(schema.taskSourceWriteLeases)
@@ -531,7 +510,7 @@ describe('GitHub write fence', () => {
 
   it('prevents a dispatched stale finisher from changing an interrupted cycle', async () => {
     const { db, sqlite, schema, identity } = await setupFixture();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
@@ -539,14 +518,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     identity.verifyGitHubWritePreflight(authorization, {
@@ -581,7 +559,7 @@ describe('GitHub write fence', () => {
       lastSyncedAt: '2020-01-01T00:00:00.000Z',
     }).where((await import('drizzle-orm')).eq(schema.tasks.id, 'task-1')).run();
     const modeSnapshot = identity.getGitHubIdentityModeSnapshot('github-fence');
-    const firstRuntime = new identity.GitHubIdentityComparisonRuntime({
+    const firstRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       syncKind: 'incremental',
@@ -625,7 +603,7 @@ describe('GitHub write fence', () => {
       connector,
       undefined,
       undefined,
-      { identityComparison: firstRuntime, identityMode: modeSnapshot },
+      { identityRuntime: firstRuntime, identityMode: modeSnapshot },
     );
     await preflightStarted;
 
@@ -634,7 +612,7 @@ describe('GitHub write fence', () => {
       connector,
       undefined,
       undefined,
-      { identityComparison: firstRuntime, identityMode: modeSnapshot },
+      { identityRuntime: firstRuntime, identityMode: modeSnapshot },
     )).resolves.toEqual({ pushed: 0, errors: [] });
     resumePreflight();
     await expect(firstPush).resolves.toEqual({ pushed: 1, errors: [] });
@@ -648,7 +626,7 @@ describe('GitHub write fence', () => {
       connector,
       undefined,
       undefined,
-      { identityComparison: firstRuntime, identityMode: modeSnapshot },
+      { identityRuntime: firstRuntime, identityMode: modeSnapshot },
     );
     expect(duplicate.pushed).toBe(0);
     expect(duplicate.errors).toEqual([]);
@@ -691,7 +669,7 @@ describe('GitHub write fence', () => {
       updatedAt: '2026-08-10T11:59:00.000Z',
     }).run();
     const modeSnapshot = identity.getGitHubIdentityModeSnapshot('github-fence');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       syncKind: 'incremental',
@@ -699,14 +677,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 2,
     });
     const first = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     identity.confirmGitHubWriteDispatch(first);
@@ -723,7 +700,7 @@ describe('GitHub write fence', () => {
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     identity.blockGitHubWrite(second.leaseId, second.token, 'test_cleanup');
@@ -741,7 +718,7 @@ describe('GitHub write fence', () => {
     const { db, schema, identity } = await setupFixture();
     const { claimTaskForPush, loadClaimedTaskForPush } = await import('@/lib/sync/push-lease');
     const { eq } = await import('drizzle-orm');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
@@ -753,7 +730,6 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     db.update(schema.tasks).set({
@@ -766,7 +742,7 @@ describe('GitHub write fence', () => {
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
       expectedTaskVersion: claimed!.updatedAt,
       taskPushLeaseToken: token!,
@@ -822,7 +798,7 @@ describe('GitHub write fence', () => {
   it('expires an abandoned undispatched lease before authorizing its retry cycle', async () => {
     const { db, schema, identity } = await setupFixture();
     const { eq } = await import('drizzle-orm');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
@@ -830,14 +806,13 @@ describe('GitHub write fence', () => {
     const abandonedCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const abandoned = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: abandonedCycle,
     });
     db.update(schema.taskSourceWriteLeases).set({
@@ -847,7 +822,6 @@ describe('GitHub write fence', () => {
     const retryCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     expect(db.select().from(schema.taskSourceWriteLeases)
@@ -868,7 +842,7 @@ describe('GitHub write fence', () => {
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: retryCycle,
     });
     identity.blockGitHubWrite(retry.leaseId, retry.token, 'test_cleanup');
@@ -889,7 +863,7 @@ describe('GitHub write fence', () => {
       sourceId: 'local:task-1',
       updatedAt: '2026-08-10T12:01:00.000Z',
     }).where(eq(schema.tasks.id, 'task-1')).run();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
@@ -897,14 +871,13 @@ describe('GitHub write fence', () => {
     const firstCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const first = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'create',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: firstCycle,
     });
     expect(db.select().from(schema.taskSourceWriteLeases)
@@ -928,7 +901,6 @@ describe('GitHub write fence', () => {
     const retryCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
 
@@ -936,7 +908,7 @@ describe('GitHub write fence', () => {
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'create',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: retryCycle,
     })).toThrow('write_already_succeeded');
     expect(identity.finishGitHubWriteCycle(retryCycle, {
@@ -953,7 +925,7 @@ describe('GitHub write fence', () => {
     const { db, schema, identity, now } = await setupFixture();
     const { eq } = await import('drizzle-orm');
     const modeSnapshot = identity.getGitHubIdentityModeSnapshot('github-fence');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       syncKind: 'incremental',
@@ -961,14 +933,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     identity.confirmGitHubWriteDispatch(authorization);
@@ -1003,7 +974,7 @@ describe('GitHub write fence', () => {
     const { db, schema, identity, now } = await setupFixture();
     const { eq } = await import('drizzle-orm');
     const modeSnapshot = identity.getGitHubIdentityModeSnapshot('github-fence');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       syncKind: 'incremental',
@@ -1011,14 +982,13 @@ describe('GitHub write fence', () => {
     const cycleId = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const authorization = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     identity.confirmGitHubWriteDispatch(authorization);
@@ -1065,7 +1035,7 @@ describe('GitHub write fence', () => {
 
   it('does not collapse unscoped label writes into a prior succeeded task lease', async () => {
     const { identity } = await setupFixture();
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
@@ -1073,14 +1043,13 @@ describe('GitHub write fence', () => {
     const firstCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const first = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'label',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: firstCycle,
     });
     identity.confirmGitHubWriteDispatch(first);
@@ -1095,7 +1064,6 @@ describe('GitHub write fence', () => {
     const secondCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
 
@@ -1103,7 +1071,7 @@ describe('GitHub write fence', () => {
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'label',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: secondCycle,
     });
     expect(second.leaseId).not.toBe(first.leaseId);
@@ -1159,11 +1127,10 @@ describe('GitHub write fence', () => {
     const { db, schema, identity, now } = await setupFixture();
     const { eq } = await import('drizzle-orm');
     db.update(schema.githubIdentityMigrations).set({
-      phase: 'stable_primary',
+      phase: 'complete',
       updatedAt: now,
     }).where(eq(schema.githubIdentityMigrations.connectorInstanceId, 'github-fence')).run();
     db.update(schema.githubIdentityControls).set({
-      stablePrimaryEnabled: true,
       modeRevision: 5,
       updatedAt: now,
     }).where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-fence')).run();
@@ -1209,8 +1176,6 @@ describe('GitHub write fence', () => {
     expect(db.select().from(schema.taskSourceWriteLeases)
       .where(eq(schema.taskSourceWriteLeases.taskId, 'task-1')).all())
       .toContainEqual(expect.objectContaining({
-        effectiveMode: 'stable',
-        route: 'stable',
         state: 'succeeded',
       }));
     await expect(identity.executeFencedGitHubTaskMutation({
@@ -1225,8 +1190,6 @@ describe('GitHub write fence', () => {
     const unknownLease = db.select().from(schema.taskSourceWriteLeases)
       .where(eq(schema.taskSourceWriteLeases.operation, 'label')).get()!;
     expect(unknownLease).toMatchObject({
-      effectiveMode: 'stable',
-      route: 'stable',
       state: 'unknown',
     });
 
@@ -1293,7 +1256,7 @@ describe('GitHub write fence', () => {
     expect(routedFetch.mock.calls.some(([path]) => path.includes('/repos/legacy/path')))
       .toBe(false);
 
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
@@ -1301,30 +1264,24 @@ describe('GitHub write fence', () => {
     const staleCycle = identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
-      comparisonRunId: runtime.runId,
       pendingCandidateCount: 1,
     });
     const stale = identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'comment',
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: staleCycle,
     });
-    expect(identity.rollbackGitHubStablePrimary({
-      connectorInstanceId: 'github-fence',
-      expectedRevision: 5,
-      actor: 'write-fence-test',
-      reason: 'Fence an authorized stable write',
-      idempotencyKey: 'write-fence-rollback',
-      now,
-    })).toMatchObject({ ok: true, snapshot: { modeRevision: 6 } });
+    // Bumping the connector identity epoch must fence an already authorized write.
+    db.update(schema.githubIdentityControls).set({ modeRevision: 6, updatedAt: now })
+      .where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-fence')).run();
     expect(() => identity.confirmGitHubWriteDispatch(stale))
       .toThrow('stale_mode_lease_or_locator');
     expect(db.select().from(schema.taskSourceWriteLeases)
       .where(eq(schema.taskSourceWriteLeases.id, unknownLease.id)).get())
-      .toMatchObject({ state: 'unknown', route: 'stable' });
-    runtime.complete('failed', 'rollback_revision_fence');
+      .toMatchObject({ state: 'unknown' });
+    runtime.complete('failed', 'identity_revision_fence');
   });
 });
 
@@ -1348,12 +1305,11 @@ async function setupFixture() {
   }).run();
   db.insert(schema.githubIdentityMigrations).values({
     connectorInstanceId: 'github-fence',
-    phase: 'comparing',
+    phase: 'complete',
     updatedAt: now,
   }).run();
   db.insert(schema.githubIdentityControls).values({
     connectorInstanceId: 'github-fence',
-    stablePrimaryEnabled: false,
     modeRevision: 4,
     updatedAt: now,
   }).run();
@@ -1447,7 +1403,7 @@ function seedIdentity(
       connectorInstanceId: 'github-fence',
       bindingType: 'source_list',
       localId: 'repo-list',
-      state: 'shadow',
+      state: 'active',
       verifiedAt: now,
       createdAt: now,
       updatedAt: now,
@@ -1458,7 +1414,7 @@ function seedIdentity(
       connectorInstanceId: 'github-fence',
       bindingType: 'task',
       localId: 'task-1',
-      state: 'shadow',
+      state: 'active',
       verifiedAt: now,
       createdAt: now,
       updatedAt: now,

@@ -7,9 +7,6 @@ import {
   uniqueIndex,
   primaryKey,
 } from 'drizzle-orm/sqlite-core';
-import type {
-  GitHubIdentityEffectiveMode,
-} from './external-identities';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { tasks } from './tasks';
 
@@ -143,7 +140,7 @@ export const syncLog = sqliteTable('sync_log', {
   startedAt: text('started_at'),
   attempt: integer('attempt'),
   maxAttempts: integer('max_attempts'),
-  identityMode: text('identity_mode').$type<GitHubIdentityEffectiveMode>(),
+  identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
 }, (table) => [
   index('idx_sync_log_job_id').on(table.jobId),
@@ -173,7 +170,7 @@ export const syncJobs = sqliteTable('sync_jobs', {
   result: text('result', { mode: 'json' }),
   error: text('error'),
   durationBudgetMs: integer('duration_budget_ms').notNull().default(300000),
-  identityMode: text('identity_mode').$type<GitHubIdentityEffectiveMode>(),
+  identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
@@ -272,7 +269,7 @@ export const syncDeletionCandidates = sqliteTable('sync_deletion_candidates', {
   firstMissingAt: text('first_missing_at').notNull(),
   lastMissingAt: text('last_missing_at').notNull(),
   missingCount: integer('missing_count').notNull().default(1),
-  identityMode: text('identity_mode').$type<GitHubIdentityEffectiveMode>(),
+  identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
   issueEntityId: text('issue_entity_id'),
   repositoryEntityId: text('repository_entity_id'),
@@ -300,7 +297,7 @@ export const syncDeletionSnapshots = sqliteTable('sync_deletion_snapshots', {
   restoredAt: text('restored_at'),
   restoredTaskId: text('restored_task_id'),
   restoreMode: text('restore_mode').$type<'local' | 'source'>(),
-  identityMode: text('identity_mode').$type<GitHubIdentityEffectiveMode>(),
+  identityMode: text('identity_mode'),
   identityModeRevision: integer('identity_mode_revision'),
   issueEntityId: text('issue_entity_id'),
   repositoryEntityId: text('repository_entity_id'),
@@ -345,10 +342,7 @@ export const dependencyReconciliationSnapshots = sqliteTable(
     collectionCompletedAt: text('collection_completed_at'),
     collectionPageCount: integer('collection_page_count').notNull().default(0),
     overflowFetchCount: integer('overflow_fetch_count').notNull().default(0),
-    identityMode: text('identity_mode')
-      .$type<GitHubIdentityEffectiveMode>()
-      .notNull()
-      .default('legacy'),
+    identityMode: text('identity_mode').notNull().default('stable'),
     identityModeRevision: integer('identity_mode_revision').notNull().default(0),
     identityEvidenceSource: text('identity_evidence_source')
       .$type<'graphql-node' | 'rest-unavailable' | 'legacy-unavailable'>()
@@ -357,7 +351,6 @@ export const dependencyReconciliationSnapshots = sqliteTable(
     identityEvidenceEligible: integer('identity_evidence_eligible', { mode: 'boolean' })
       .notNull()
       .default(false),
-    identityComparisonRunId: text('identity_comparison_run_id'),
     identityEvidenceFailureReason: text('identity_evidence_failure_reason'),
     failedAt: text('failed_at'),
     nextAttemptAt: text('next_attempt_at'),

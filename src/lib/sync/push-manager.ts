@@ -34,7 +34,7 @@ import {
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
   persistExternalIdentityBatch,
-  type GitHubIdentityComparisonRuntime,
+  type GitHubStableIdentityRuntime,
   type GitHubWriteAuthorization,
 } from '@/lib/external-identities';
 
@@ -43,8 +43,8 @@ const MAX_PUSH_RETRIES = 5;
 
 type PushPendingOptions = {
   deleteGhostsOnNotFound?: boolean;
-  identityComparison?: GitHubIdentityComparisonRuntime;
-  identityMode?: { effectiveMode: 'legacy' | 'comparison' | 'stable'; modeRevision: number };
+  identityRuntime?: GitHubStableIdentityRuntime;
+  identityMode?: { modeRevision: number };
   jobId?: string;
   connectorOperationLeaseHeld?: boolean;
 };
@@ -65,9 +65,8 @@ export async function pushPendingChanges(
   options?: PushPendingOptions,
 ): Promise<{ pushed: number; errors: string[] }> {
   const fencedGitHubPush = connector.type === 'github-issues'
-    && options?.identityMode
-    && options.identityMode.effectiveMode !== 'legacy';
-  if (!fencedGitHubPush || options.connectorOperationLeaseHeld) {
+    && options?.identityMode !== undefined;
+  if (!fencedGitHubPush || options?.connectorOperationLeaseHeld) {
     return pushPendingChangesWithLease(connectorId, connector, auditLog, taskIds, options);
   }
   try {
@@ -114,8 +113,7 @@ async function pushPendingChangesWithLease(
   );
   const canDelete = !caps || caps.delete !== false;
   const fencedGitHubPush = connector.type === 'github-issues'
-    && options?.identityMode
-    && options.identityMode.effectiveMode !== 'legacy';
+    && options?.identityMode !== undefined;
 
   if (taskIds && taskIds.length === 0) {
     return { pushed: 0, errors: [] };
@@ -268,9 +266,8 @@ async function pushPendingChangesWithLease(
     try {
       writeCycleId = beginGitHubWriteCycle({
         connectorInstanceId: connectorId,
-        modeSnapshot: options.identityMode!,
-        comparisonRunId: options.identityComparison?.runId,
-        jobId: options.jobId,
+        modeSnapshot: options!.identityMode!,
+        jobId: options?.jobId,
         pendingCandidateCount: pushLeaseTokens.size,
       });
     } catch (error) {
@@ -387,7 +384,7 @@ async function pushPendingChangesWithLease(
             connectorId,
             task.id,
             created,
-            options?.identityComparison,
+            options?.identityRuntime,
           );
           const finalized = await completeTaskPush(
             task.id,
@@ -435,7 +432,7 @@ async function pushPendingChangesWithLease(
               connectorId,
               task.id,
               created,
-              options?.identityComparison,
+              options?.identityRuntime,
             );
             const finalized = await completeTaskPush(
               task.id,
@@ -869,7 +866,6 @@ async function dispatchGitHubWrite<T>(
   dispatch: () => Promise<T>,
 ): Promise<T> {
   if (connector.type !== 'github-issues') return dispatch();
-  if (options?.identityMode?.effectiveMode === 'legacy') return dispatch();
   if (options?.identityMode === undefined) {
     throw new GitHubWriteFenceError('missing_frozen_identity_mode');
   }
@@ -878,7 +874,7 @@ async function dispatchGitHubWrite<T>(
     connectorInstanceId: connectorId,
     taskId: task.id,
     operation,
-    comparisonRuntime: options?.identityComparison,
+    identityRuntime: options?.identityRuntime,
     writeCycleId: cycle.writeCycleId,
     participantTaskIds,
     expectedTaskVersion: taskPushLeaseToken ? task.updatedAt : undefined,
@@ -928,7 +924,7 @@ function persistCreatedGitHubIdentity(
   connectorInstanceId: string,
   taskId: string,
   created: TaskItem,
-  runtime?: GitHubIdentityComparisonRuntime,
+  runtime?: GitHubStableIdentityRuntime,
 ): void {
   if (!runtime || !created.externalIdentity) return;
   try {
@@ -941,7 +937,7 @@ function persistCreatedGitHubIdentity(
         legacyIdentity: created.sourceId,
       },
       evidence: created.externalIdentity,
-    }], runtime.modeSnapshot.phase, runtime.modeSnapshot);
+    }], runtime.modeSnapshot);
   } catch (error) {
     syncLogger.error(
       { err: error, connectorId: connectorInstanceId, taskId },

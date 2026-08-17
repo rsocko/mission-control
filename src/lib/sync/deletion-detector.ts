@@ -7,8 +7,8 @@ import { syncLogger } from '@/lib/logger';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   digestExternalIdentifier,
-  type GitHubComparisonResolvedCandidate,
-  type GitHubIdentityComparisonRuntime,
+  type GitHubStableResolvedCandidate,
+  type GitHubStableIdentityRuntime,
   type GitHubIdentityResolutionDecision,
 } from '@/lib/external-identities';
 
@@ -26,7 +26,7 @@ export interface DeletionDetectionTask {
 }
 
 interface DeletionIdentityOptions {
-  identityComparison?: GitHubIdentityComparisonRuntime;
+  identityRuntime?: GitHubStableIdentityRuntime;
   inaccessibleSourceListIds?: ReadonlySet<string>;
 }
 
@@ -65,7 +65,7 @@ export async function detectDeletions(
 ): Promise<{ removed: number; localOnlyProtected: number }> {
   let removed = 0;
 
-  if (remoteSourceIds.size === 0 && !identityOptions.identityComparison) {
+  if (remoteSourceIds.size === 0 && !identityOptions.identityRuntime) {
     return { removed: 0, localOnlyProtected: 0 };
   }
 
@@ -89,17 +89,17 @@ export async function detectDeletions(
   const candidateBySourceId = new Map(existingCandidates.map(row => [row.sourceId, row]));
   const localTaskBySourceId = new Map(localTasks.map(row => [row.sourceId, row]));
   const inaccessibleSourceListIds = identityOptions.inaccessibleSourceListIds ?? new Set<string>();
-  const identityStateByLocalId = identityOptions.identityComparison
+  const identityStateByLocalId = identityOptions.identityRuntime
     ? loadLocalIdentityStates(connectorId)
     : new Map<string, LocalIdentityState>();
   const stableDecisionByLocalId = new Map<string, GitHubIdentityResolutionDecision>();
 
-  if (identityOptions.identityComparison) {
-    const candidates = localTasks.map((local): GitHubComparisonResolvedCandidate => {
+  if (identityOptions.identityRuntime) {
+    const candidates = localTasks.map((local): GitHubStableResolvedCandidate => {
       const identityState = identityStateByLocalId.get(local.id);
-      const legacyAction = legacyDeletionAction(local, remoteSourceIds, isFullSync);
+      const observedAction = observedDeletionAction(local, remoteSourceIds, isFullSync);
       const sourceInaccessible = isSourceInaccessible(local, inaccessibleSourceListIds);
-      let stable: GitHubComparisonResolvedCandidate['stable'];
+      let stable: GitHubStableResolvedCandidate['stable'];
       if (sourceInaccessible) {
         stable = {
           selectedLocalIds: [],
@@ -152,11 +152,11 @@ export async function detectDeletions(
           evidence: 'missing',
         };
       } else {
-        const observed = identityOptions.identityComparison!
-          .hasObservedStableLocalId(local.id);
+        const observed = identityOptions.identityRuntime!
+          .hasResolvedStableLocalId(local.id);
         stable = {
           selectedLocalIds: [local.id],
-          action: observed ? 'present' : legacyAction,
+          action: observed ? 'present' : observedAction,
           evidence: 'verified',
           externalEntityId: identityState.externalEntityId,
           stableIdDigest: identityState.stableId
@@ -175,13 +175,12 @@ export async function detectDeletions(
       return {
         candidateKey: `task:${local.sourceId}`,
         localTaskId: local.id,
-        legacySelectedLocalIds: [local.id],
-        legacyAction,
+        locatorMatchedLocalIds: [local.id],
         stable,
       };
     });
     for (let index = 0; index < candidates.length; index += 500) {
-      const decisions = identityOptions.identityComparison.observeResolvedBatch(
+      const decisions = identityOptions.identityRuntime.applyResolvedBatch(
         'deletion',
         candidates.slice(index, index + 500),
       );
@@ -189,7 +188,7 @@ export async function detectDeletions(
         if (decision.localTaskId) stableDecisionByLocalId.set(decision.localTaskId, decision);
       }
     }
-    identityOptions.identityComparison.assertDecisionsCurrent(
+    identityOptions.identityRuntime.assertDecisionsCurrent(
       stableDecisionByLocalId.values(),
     );
   }
@@ -216,7 +215,7 @@ export async function detectDeletions(
     if (remoteSourceIds.has(local.sourceId)) continue;
 
     const identityState = identityStateByLocalId.get(local.id);
-    const stableDecision = identityOptions.identityComparison?.modeSnapshot.effectiveMode === 'stable'
+    const stableDecision = identityOptions.identityRuntime
       ? stableDecisionByLocalId.get(local.id)
       : undefined;
     if (
@@ -231,7 +230,7 @@ export async function detectDeletions(
     const identityProtected = (
       isSourceInaccessible(local, inaccessibleSourceListIds)
       || (
-        Boolean(identityOptions.identityComparison)
+        Boolean(identityOptions.identityRuntime)
         && (
           !identityState?.externalEntityId
           || !identityState.repositoryEntityId
@@ -243,7 +242,7 @@ export async function detectDeletions(
       || identityState?.backfillState === 'collision'
       || identityState?.backfillState === 'inaccessible'
       || (
-        identityOptions.identityComparison?.modeSnapshot.effectiveMode === 'stable'
+        Boolean(identityOptions.identityRuntime)
         && (
           !stableDecision
           || stableDecision.appliedSource !== 'stable'
@@ -353,8 +352,8 @@ export async function detectDeletions(
             'Completed recurring task not in remote — purged by source',
             audit,
             identityState,
-            identityOptions.identityComparison?.modeSnapshot,
-            identityOptions.identityComparison,
+            identityOptions.identityRuntime?.modeSnapshot,
+            identityOptions.identityRuntime,
           );
           if (removal) removed++;
           continue;
@@ -374,8 +373,8 @@ export async function detectDeletions(
         'Not found in remote during two consecutive full syncs — deleted or completed remotely',
         audit,
         identityState,
-        identityOptions.identityComparison?.modeSnapshot,
-        identityOptions.identityComparison,
+        identityOptions.identityRuntime?.modeSnapshot,
+        identityOptions.identityRuntime,
       );
       if (removal) removed++;
     }
@@ -402,7 +401,12 @@ function isSourceInaccessible(
   return separator > 0 && inaccessibleSourceIds.has(task.sourceId.slice(0, separator));
 }
 
-function legacyDeletionAction(
+/**
+ * Derives the deletion action implied by this sync's remote observation. It
+ * describes what the stream showed, not identity: NodeID resolution decides
+ * whether the action is applied.
+ */
+function observedDeletionAction(
   task: DeletionDetectionTask,
   remoteSourceIds: ReadonlySet<string>,
   isFullSync: boolean,
@@ -468,8 +472,8 @@ async function quarantineOrArchive(
   removalReason: string,
   audit: SyncAuditEntry[],
   identityState?: LocalIdentityState,
-  modeSnapshot?: { effectiveMode: 'legacy' | 'comparison' | 'stable'; modeRevision: number },
-  identityRuntime?: GitHubIdentityComparisonRuntime,
+  modeSnapshot?: { effectiveMode: 'stable'; modeRevision: number },
+  identityRuntime?: GitHubStableIdentityRuntime,
 ): Promise<boolean> {
   const requiredMissingFullSyncs = 2;
   const now = new Date().toISOString();

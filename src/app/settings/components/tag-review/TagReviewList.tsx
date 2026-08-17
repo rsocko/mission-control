@@ -109,7 +109,7 @@ export function TagReviewList(props: TagReviewListProps) {
             value={searchQuery}
             onChange={event => onSearchChange(event.target.value)}
             placeholder="Filter tags..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--surface-1)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/40 focus:border-blue-500/40"
+            className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--surface-1)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
         </div>
         <Select value={sortBy} onValueChange={value => onSortChange(value as TagSort)}>

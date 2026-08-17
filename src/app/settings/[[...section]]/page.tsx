@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Plug, RefreshCw, Tag, FlaskConical, Inbox, Layers,
   FolderTree, Settings2, Brain, Activity, Database, Star, Puzzle, HardDrive, Smartphone, Search, X,
+  Info,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -41,6 +42,7 @@ import { DashboardKpiSettings } from '../components/DashboardKpiSettings';
 import { ShortcutsSection } from '../components/ShortcutsSection';
 import { NotificationEnrichmentSection } from '../components/NotificationEnrichmentSection';
 import { RuntimeTelemetrySection } from '../components/RuntimeTelemetrySection';
+import { AboutSection } from '../components/AboutSection';
 import { PushNotificationSettings } from '@/components/settings/PushNotificationSettings';
 import { PriorityEntitiesPanel } from '@/components/smart-score';
 import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
@@ -67,6 +69,7 @@ const SLUG_TO_SECTION: Record<string, ActiveSection> = {
   'general': 'general',
   'notifications': 'notifications',
   'runtime': 'runtime',
+  'about': 'about',
 };
 
 const SECTION_TO_SLUG: Record<ActiveSection, string> = Object.fromEntries(
@@ -111,6 +114,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'runtime', icon: Activity, label: 'Runtime Telemetry' },
       { id: 'mode', icon: FlaskConical, label: 'App Mode' },
       { id: 'general', icon: Settings2, label: 'Other' },
+      { id: 'about', icon: Info, label: 'About' },
     ],
   },
 ];
@@ -150,7 +154,13 @@ export default function SettingsPage() {
   return (
     <>
     {/* Mobile settings view (F-99, F-100, F-101) */}
-    <MobileSettings />
+    {activeSection === 'about' ? (
+      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
+        <AboutSection />
+      </div>
+    ) : (
+      <MobileSettings />
+    )}
 
     {/* Desktop settings view */}
     <div className="hidden sm:flex h-full">
@@ -164,7 +174,7 @@ export default function SettingsPage() {
             onChange={event => setSettingsQuery(event.target.value)}
             placeholder="Find a setting..."
             aria-label="Search settings"
-            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] pl-9 pr-8 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-blue-500/60 focus:ring-2 focus:ring-blue-500/20"
+            className="h-9 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] pl-9 pr-8 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
           />
           {settingsQuery && (
             <button
@@ -378,6 +388,11 @@ export default function SettingsPage() {
             {activeSection === 'mode' && (
               <motion.div key="mode" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                 <AppModeSection />
+              </motion.div>
+            )}
+            {activeSection === 'about' && (
+              <motion.div key="about" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <AboutSection />
               </motion.div>
             )}
           </AnimatePresence>

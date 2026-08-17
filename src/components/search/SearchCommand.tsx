@@ -445,7 +445,7 @@ export function SearchCommand() {
 
                   {/* Search input header */}
                   <div className="shrink-0 border-b border-[var(--border)] p-3 sm:p-4">
-                    <div className="flex items-center gap-3">
+                    <div className="input-glow flex items-center gap-3 rounded-[var(--radius-md)]">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--surface-1)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
                         {loading ? (
                           <Loader2 size={15} className="animate-spin text-[var(--accent-400)]" />

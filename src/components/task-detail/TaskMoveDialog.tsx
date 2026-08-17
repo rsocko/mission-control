@@ -488,7 +488,7 @@ export function TaskMoveDialog({
                               {/* Search input (shown when 6+ lists) */}
                               {preview.targetLists.length >= 6 && (
                                 <div className="px-3 py-1.5 border-b border-[var(--border-subtle)]">
-                                  <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
+                                  <div className="input-glow flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
                                     <Search size={11} className="shrink-0 text-[var(--text-muted)]" />
                                     <input
                                       type="text"

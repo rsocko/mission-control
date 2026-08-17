@@ -86,6 +86,17 @@ describe('browser extension imports', () => {
       <button id="openSidePanelBtn"></button>
       <button id="openMcBtn"></button>
       <div id="dynamicContent"></div>
+      <div id="status"></div>
+      <div id="sendTabsView">
+        <button id="tabsBackBtn"></button>
+        <input type="checkbox" id="tabsSelectAll" />
+        <span id="tabsCount"></span>
+        <div id="tabsList"></div>
+        <input type="checkbox" id="tabsCloseThem" />
+        <textarea id="tabsBatchNote"></textarea>
+        <button id="tabsSendBtn"></button>
+        <div id="tabsStatus"></div>
+      </div>
     `;
 
     let progressListener: ImportProgressListener | undefined;

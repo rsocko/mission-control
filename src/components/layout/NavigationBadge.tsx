@@ -57,8 +57,10 @@ export function NavigationPressureBar({
         'absolute -bottom-1.5 left-1/2 h-[3px] -translate-x-1/2 rounded-full',
         PRESSURE_TONE_CLASSES[tone],
         PRESSURE_WIDTH_CLASSES[level],
+        morphId && level === 'low' && 'origin-bottom',
         pulse && 'motion-safe:animate-pulse',
       )}
+      style={morphId && level === 'low' ? { originY: 1 } : undefined}
       layoutId={morphId}
       transition={morphId ? MORPH_TRANSITION : undefined}
       data-morph-id={morphId}
@@ -84,14 +86,18 @@ export function NavigationBadge({
 }) {
   if (count <= 0) return null;
 
+  const level = getPressureLevel(count);
+
   return (
     <motion.span
       className={cn(
         'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold leading-none tabular-nums',
         TONE_CLASSES[tone],
+        morphId && level === 'low' && 'origin-bottom',
         overlay && 'absolute -right-2.5 -top-2',
         pulse && 'motion-safe:animate-pulse',
       )}
+      style={morphId && level === 'low' ? { originY: 1 } : undefined}
       layoutId={morphId}
       transition={morphId ? MORPH_TRANSITION : undefined}
       data-morph-id={morphId}

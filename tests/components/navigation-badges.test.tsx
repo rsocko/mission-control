@@ -56,13 +56,21 @@ describe('navigation badges', () => {
   });
 
   it('uses discrete centered pressure lengths for collapsed navigation', () => {
-    const { rerender } = render(<NavigationPressureBar count={7} tone="amber" />);
+    const { rerender } = render(
+      <NavigationPressureBar count={7} tone="amber" morphId="myDay" />,
+    );
     expect(screen.getByLabelText('7 items need attention')).toHaveAttribute('data-pressure-level', 'low');
-    expect(screen.getByLabelText('7 items need attention')).toHaveClass('left-1/2', '-translate-x-1/2', 'w-2');
+    expect(screen.getByLabelText('7 items need attention')).toHaveClass(
+      'left-1/2',
+      '-translate-x-1/2',
+      'w-2',
+      'origin-bottom',
+    );
 
-    rerender(<NavigationPressureBar count={12} tone="amber" />);
+    rerender(<NavigationPressureBar count={12} tone="amber" morphId="myDay" />);
     expect(screen.getByLabelText('12 items need attention')).toHaveAttribute('data-pressure-level', 'medium');
     expect(screen.getByLabelText('12 items need attention')).toHaveClass('w-4');
+    expect(screen.getByLabelText('12 items need attention')).not.toHaveClass('origin-bottom');
 
     rerender(<NavigationPressureBar count={99} tone="red" />);
     expect(screen.getByLabelText('99 items need attention')).toHaveAttribute('data-pressure-level', 'high');
@@ -78,19 +86,24 @@ describe('navigation badges', () => {
 
     rerender(<NavigationBadge count={4} tone="amber" />);
     expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
+
+    rerender(<NavigationBadge count={12} tone="amber" />);
+    expect(screen.getByText('12')).not.toHaveClass('origin-bottom');
   });
 
   it('keeps the same shared element identity between pressure bar and badge', () => {
     const { rerender } = render(
-      <NavigationPressureBar count={12} tone="amber" morphId="myDay" />,
+      <NavigationPressureBar count={4} tone="amber" morphId="myDay" />,
     );
-    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
+    expect(screen.getByLabelText('4 items need attention')).toHaveAttribute(
       'data-morph-id',
       'myDay',
     );
+    expect(screen.getByLabelText('4 items need attention')).toHaveClass('origin-bottom');
 
-    rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
-    expect(screen.getByText('12')).toHaveAttribute('data-morph-id', 'myDay');
+    rerender(<NavigationBadge count={4} tone="amber" morphId="myDay" />);
+    expect(screen.getByText('4')).toHaveAttribute('data-morph-id', 'myDay');
+    expect(screen.getByText('4')).toHaveClass('origin-bottom');
   });
 
   it('requests navigation counts for the browser-local date', async () => {

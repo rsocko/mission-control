@@ -95,7 +95,7 @@ export function HoustonSuggestions({ onAction, disabled = false }: HoustonSugges
     async function fetchContext() {
       try {
         const [tasksRes, triageRes] = await Promise.allSettled([
-          fetch('/api/tasks?openOnly=true&countsOnly=true'),
+          fetch('/api/tasks?openOnly=true&parentOnly=true&countsOnly=true'),
           fetch('/api/triage?status=pending&limit=0'),
         ]);
 

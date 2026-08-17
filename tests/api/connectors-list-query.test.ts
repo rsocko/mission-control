@@ -47,19 +47,40 @@ beforeAll(async () => {
     name: 'Repository',
     type: 'repo',
   });
-  await db.insert(tasks).values({
-    id: 'task-1',
-    sourceId: 'issue-1',
+  const taskDefaults = {
     connectorType: 'github-issues',
     connectorInstanceId: 'connector-1',
-    title: 'Open issue',
-    status: 'todo',
-    priority: 'medium',
+    priority: 'medium' as const,
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
     lastSyncedAt: '2026-08-01T00:00:00.000Z',
     sourceListId: 'repo-1',
-  });
+  };
+  await db.insert(tasks).values([
+    {
+      ...taskDefaults,
+      id: 'task-1',
+      sourceId: 'issue-1',
+      title: 'Open issue',
+      status: 'todo',
+    },
+    {
+      ...taskDefaults,
+      id: 'task-1-subtask',
+      sourceId: 'issue-1-subtask',
+      title: 'Open subtask',
+      status: 'todo',
+      parentId: 'task-1',
+      depth: 1,
+    },
+    {
+      ...taskDefaults,
+      id: 'task-cancelled',
+      sourceId: 'issue-cancelled',
+      title: 'Cancelled issue',
+      status: 'cancelled',
+    },
+  ]);
   await db.insert(syncLog).values([
     {
       id: 'sync-older',
@@ -83,7 +104,7 @@ beforeAll(async () => {
 }, 30_000);
 
 describe('GET /api/connectors list queries', () => {
-  it('returns grouped task counts and only the latest successful sync', async () => {
+  it('returns top-level open task counts and only the latest successful sync', async () => {
     const response = await GET(new Request('http://localhost/api/connectors'));
     const body = await response.json();
 

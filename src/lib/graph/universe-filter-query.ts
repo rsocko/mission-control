@@ -12,6 +12,7 @@ export function buildUniverseGraphSearchParams(
   const graphParams = new URLSearchParams({
     dimensions: dimensions.join(','),
     maxNodes: String(maxNodes),
+    parentOnly: 'true',
   });
   return taskFilterContextToTaskQuery(context, graphParams);
 }

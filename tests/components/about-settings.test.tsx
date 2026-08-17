@@ -14,9 +14,11 @@ describe('AboutSection', () => {
       json: async () => ({ live: true, revision: '0123456789abcdef0123456789abcdef' }),
     }));
 
-    render(<AboutSection />);
+    const { container } = render(<AboutSection />);
 
     expect(screen.getByRole('heading', { name: 'About Mission Control' })).toBeInTheDocument();
+    expect(container.querySelector('.lucide-satellite')).toBeInTheDocument();
+    expect(screen.queryByText('MC')).not.toBeInTheDocument();
     expect(screen.getByText(`v${packageJson.version}`)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('0123456789ab')).toBeInTheDocument());
     expect(fetch).toHaveBeenCalledWith('/api/health/live', expect.objectContaining({

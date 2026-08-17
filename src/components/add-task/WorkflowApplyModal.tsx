@@ -9,6 +9,7 @@ import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import type { TaskTemplate } from '@/types';
 import { taskLogger } from '@/lib/client-logger';
 import { applyQuickAddWorkflowTemplate } from '@/lib/quick-add/submission';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import type { QuickAddDestination } from './quick-add-types';
 
 interface WorkflowApplyModalProps {
@@ -91,12 +92,6 @@ export function WorkflowApplyModal({
       setIsSubmitting(false);
     }
   }, [isSubmitting, checkedCount, template.id, destination, checked, onApplied, onClose]);
-
-  const PRIORITY_STYLES: Record<string, string> = {
-    high: 'bg-orange-900/30 text-orange-400',
-    critical: 'bg-rose-900/40 text-rose-400',
-    medium: 'bg-amber-900/25 text-amber-300',
-  };
 
   return (
     <AnimatePresence>
@@ -213,7 +208,7 @@ export function WorkflowApplyModal({
                   )}
                 </div>
                 {wt.priority && wt.priority !== 'none' && (
-                  <span className={`text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${PRIORITY_STYLES[wt.priority] || ''}`}>
+                  <span className={`text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded flex-shrink-0 ${getTaskPriorityVisual(wt.priority).badgeClass}`}>
                     {wt.priority}
                   </span>
                 )}

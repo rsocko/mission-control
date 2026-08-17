@@ -1,28 +1,12 @@
 import { FolderGit2, ListChecks, ListTodo } from 'lucide-react';
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
 import type { TaskPriority } from '@/types';
+import { getTaskPriorityVisual, PRIORITY_LABELS } from '@/lib/constants/task-formatting';
 
-export const PROJECT_TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
-  critical: 'P0',
-  high: 'P1',
-  medium: 'P2',
-  low: 'P3',
-  none: '—',
-};
+export const PROJECT_TASK_PRIORITY_LABELS = PRIORITY_LABELS as Record<TaskPriority, string>;
 
 export function getProjectTaskPriorityColor(priority: TaskPriority | string) {
-  switch (priority) {
-    case 'critical':
-      return 'var(--danger)';
-    case 'high':
-      return 'var(--warning)';
-    case 'medium':
-      return 'var(--accent-500)';
-    case 'low':
-      return 'var(--text-secondary)';
-    default:
-      return 'var(--border-strong)';
-  }
+  return getTaskPriorityVisual(priority).color;
 }
 
 export function getProjectTaskConnectorIcon(connectorType: string) {

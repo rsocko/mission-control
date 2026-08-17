@@ -58,24 +58,6 @@ function isSyncManaged(project: { metadata?: Record<string, unknown> }): boolean
   return !!(project.metadata as Record<string, unknown> | undefined)?.syncManaged;
 }
 
-// ─── PROGRESS BAR COLORS ────────────────────────────────────────────────────
-
-function getProgressGradient(color: string): string {
-  // Map project colors to gradient classes
-  const colorMap: Record<string, string> = {
-    '#8b5cf6': 'from-violet-400 to-violet-500',
-    '#6366f1': 'from-indigo-400 to-indigo-500',
-    '#3b82f6': 'from-blue-400 to-blue-500',
-    '#0ea5e9': 'from-sky-400 to-sky-500',
-    '#10b981': 'from-emerald-400 to-emerald-500',
-    '#f59e0b': 'from-amber-400 to-amber-500',
-    '#ef4444': 'from-red-400 to-red-500',
-    '#ec4899': 'from-pink-400 to-pink-500',
-    '#0a84ff': 'from-sky-400 to-sky-500',
-  };
-  return colorMap[color] || 'from-blue-400 to-blue-500';
-}
-
 function getHealthLabel(progress: ProjectProgress): string {
   if (progress.totalTasks === 0) return 'no tasks';
   const overdue = progress.health === 'behind' || progress.health === 'at_risk';
@@ -141,8 +123,8 @@ function MobileProjectCard({
         <>
           <div className="mt-3 h-1.5 rounded-full bg-[var(--surface-3)] overflow-hidden">
             <div
-              className={cn('h-1.5 rounded-full bg-gradient-to-r transition-[width] duration-500', getProgressGradient(project.color))}
-              style={{ width: `${pct}%` }}
+              className="h-1.5 rounded-full transition-[width] duration-500"
+              style={{ width: `${pct}%`, backgroundColor: project.color || 'var(--accent)' }}
             />
           </div>
           <div className="mt-2 flex items-center justify-between text-xs text-[var(--text-muted)]">
@@ -266,8 +248,8 @@ function ProjectDetailSheet({
             <div className="mt-3">
               <div className="h-2 rounded-full bg-[var(--surface-3)] overflow-hidden">
                 <div
-                  className={cn('h-2 rounded-full bg-gradient-to-r transition-[width] duration-500', getProgressGradient(project.color))}
-                  style={{ width: `${pct}%` }}
+                  className="h-2 rounded-full transition-[width] duration-500"
+                  style={{ width: `${pct}%`, backgroundColor: project.color || 'var(--accent)' }}
                 />
               </div>
               <div className="mt-1.5 flex items-center justify-between text-xs text-[var(--text-muted)]">
@@ -296,7 +278,7 @@ function ProjectDetailSheet({
               onChange={e => setQuickAddValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Add a task..."
-              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
             />
           </div>
           <button

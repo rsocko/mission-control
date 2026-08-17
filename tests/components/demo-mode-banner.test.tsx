@@ -21,7 +21,7 @@ describe('DemoModeBanner', () => {
     render(<DemoModeBanner />);
 
     expect(await screen.findByText(/Public Demo/)).toBeInTheDocument();
-    expect(screen.getByText(/Changes reset whenever the demo restarts/)).toBeInTheDocument();
+    expect(screen.getByText(/changes reset on restart/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Switch to Live/ })).not.toBeInTheDocument();
   });
 
@@ -34,7 +34,7 @@ describe('DemoModeBanner', () => {
 
     expect(await screen.findByText(/Demo Mode/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Switch to Live/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm switch to Live' }));
     await waitFor(() => expect(screen.queryByText(/Demo Mode/)).not.toBeInTheDocument());
   });
 });

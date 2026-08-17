@@ -197,7 +197,7 @@ export function ShortcutsSection() {
         </div>
       </div>
       <p className="text-sm text-[var(--text-tertiary)] mb-4">
-        Configure the items that appear in the taskbar right-click menu when the app is pinned. Drag to reorder, toggle visibility, or add new pages.
+        Configure the items that appear in the taskbar right-click menu when the app is pinned.
       </p>
 
       {/* Enabled count indicator */}

@@ -19,13 +19,14 @@ describe('demo mode banner layout', () => {
     expect(banner).toBeLessThan(mobileHeader);
   });
 
-  it('stacks banner content on narrow screens', () => {
+  it('keeps banner content compact on narrow screens', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/components/DemoModeBanner.tsx'),
       'utf8',
     );
 
-    expect(source).toContain('flex-col');
-    expect(source).toContain('sm:flex-row');
+    expect(source).toContain('min-h-10');
+    expect(source).toContain('truncate');
+    expect(source).not.toContain('flex-col');
   });
 });

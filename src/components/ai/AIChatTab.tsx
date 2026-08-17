@@ -117,7 +117,7 @@ export function AIChatTab({
 
         <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-1)]">
           <div className="flex items-end gap-3 max-w-3xl mx-auto">
-            <textarea ref={inputRef} rows={1} value={input} onChange={event => onInputChange(event.target.value)} onKeyDown={onKeyDown} placeholder="Ask Houston about your tasks, request analysis, or plan your day..." className="flex-1 px-4 py-3 border border-[var(--border)] rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm bg-[var(--surface-0)] text-[var(--text-primary)]" disabled={loading} />
+            <textarea ref={inputRef} rows={1} value={input} onChange={event => onInputChange(event.target.value)} onKeyDown={onKeyDown} placeholder="Ask Houston about your tasks, request analysis, or plan your day..."             className="flex-1 px-4 py-3 border border-[var(--border)] rounded-lg resize-none outline-none text-sm bg-[var(--surface-0)] text-[var(--text-primary)]" disabled={loading} />
             <button onClick={() => void onSend()} disabled={loading || !input.trim()} className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 transition-colors">
               <Send className="w-4 h-4" />
               {loading ? 'Sending…' : 'Send'}

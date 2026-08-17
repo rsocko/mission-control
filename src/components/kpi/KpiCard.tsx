@@ -244,9 +244,25 @@ interface KpiCardProps {
   active?: boolean;
   /** Compact mode — hides subtitle text (used when 6 cards are shown on smaller screens) */
   compact?: boolean;
+  /** Inline mode — compact metric for a shared operational summary bar */
+  inline?: boolean;
 }
 
-export function KpiCard({ definition, data, onClick, active, compact }: KpiCardProps) {
+function formatInlineValue(definition: KpiCardDefinition, data: KpiCardData) {
+  switch (definition.visualType) {
+    case 'fraction':
+    case 'fraction_dots':
+      return `${data.value}/${data.max || (definition.visualType === 'fraction_dots' ? 3 : 0)}`;
+    case 'percentage':
+      return `${data.value}%`;
+    case 'counter_dots':
+      return `${data.value} days`;
+    default:
+      return String(data.value);
+  }
+}
+
+export function KpiCard({ definition, data, onClick, active, compact, inline }: KpiCardProps) {
   const effectiveAccent = data.accent || (data.value > 0 ? definition.accent : undefined);
   const accentClasses = getAccent(effectiveAccent, data.value);
   const IconComponent = ICON_MAP[definition.icon];
@@ -254,6 +270,39 @@ export function KpiCard({ definition, data, onClick, active, compact }: KpiCardP
   const subtitle = data.subtitle || definition.subtitle;
 
   const hasInlineSecondary = definition.visualType === 'counter_sparkline' || definition.visualType === 'percentage' || definition.visualType === 'fraction';
+
+  if (inline) {
+    return (
+      <motion.div
+        className={`flex min-h-14 min-w-0 flex-1 items-center gap-2 px-3 ${active ? 'bg-[var(--accent-muted)]/20' : ''} ${
+          isClickable ? 'cursor-pointer hover:bg-[var(--surface-2)]' : ''
+        }`}
+        variants={statCardVariants}
+        onClick={onClick}
+        onKeyDown={isClickable ? (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onClick?.();
+          }
+        } : undefined}
+        role={isClickable ? 'button' : undefined}
+        tabIndex={isClickable ? 0 : undefined}
+        whileTap={isClickable ? { scale: 0.98 } : undefined}
+      >
+        {IconComponent && (
+          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-md)] ${accentClasses.icon}`}>
+            <IconComponent size={14} />
+          </span>
+        )}
+        <span className="min-w-0">
+          <span className="block truncate text-xs text-[var(--text-muted)]">{definition.label}</span>
+          <span className={`block text-base font-semibold tabular-nums ${accentClasses.value}`}>
+            {formatInlineValue(definition, data)}
+          </span>
+        </span>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
-import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Search, Repeat, Plus, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
-import { CONNECTOR_COLORS, CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
+import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Plus, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
+import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
-import { PRIORITY_OPTIONS, PRIORITY_DOT_COLORS, getEffortOptions, DEFAULT_EFFORT_MEASURE } from '@/lib/constants/task-formatting';
+import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE } from '@/lib/constants/task-formatting';
 import { dropdownVariants } from '@/lib/motion';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { parseTaskInput, parseTaskInputForSubmission, ParsedTask } from '@/lib/parse-task-input';
@@ -40,35 +40,39 @@ import {
   type QuickAddPreferences,
 } from '@/lib/quick-add-preferences';
 import type { QuickAddProject } from '@/lib/parse-task-input';
+import { DestinationPicker } from './DestinationPicker';
+import type { QuickAddPendingTask } from './quick-add-types';
+import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
+import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
+import { getLocalToday } from '@/lib/utils/client-date';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import {
+  fetchQuickAddSuggestion,
+  getQuickAddProjectAffordance,
+  getQuickAddSubmissionMessage,
+  getVisibleQuickAddProject,
+  mergeQuickAddSuggestions,
+  planQuickAddSubmission,
+  resolveQuickAddProjectId,
+  submitQuickAdd,
+  syncQuickAddProjectActive,
+  undoQuickAddTasks,
+  type QuickAddProjectAffordance,
+  type VisibleQuickAddProject,
+} from '@/lib/quick-add/submission';
+
+export {
+  getQuickAddProjectAffordance,
+  getVisibleQuickAddProject,
+  resolveQuickAddProjectId,
+  syncQuickAddProjectActive,
+};
+export type { QuickAddProjectAffordance, VisibleQuickAddProject };
 
 const LazyTaskDetailPanel = dynamic(
   () => import('@/components/task-detail/TaskDetailPanel').then(mod => ({ default: mod.TaskDetailPanel })),
   { ssr: false }
 );
-
-interface Destination {
-  id: string;
-  label: string;
-  shortLabel: string;
-  connectorType: string;
-  account: 'personal' | 'work' | null;
-  color: string;
-  listId?: string;
-  listName?: string;
-  listSelectionMode?: 'required' | 'optional' | 'not-applicable';
-  groupName?: string;
-  groupSortOrder?: number;
-}
-
-// Fallback destination when no connectors are configured (local-only)
-const LOCAL_DESTINATION: Destination = {
-  id: 'local',
-  label: 'Local',
-  shortLabel: 'Local',
-  connectorType: 'local',
-  account: null,
-  color: CONNECTOR_COLORS.local,
-};
 
 function ConnectorIconImg({ type, size = 14 }: { type: string; size?: number }) {
   const src = CONNECTOR_ICON_PATHS[type];
@@ -79,57 +83,8 @@ function ConnectorIconImg({ type, size = 14 }: { type: string; size?: number }) 
   return <ClipboardList size={size} className="flex-shrink-0 text-[var(--text-muted)]" />;
 }
 
-interface DestGroup {
-  label: string;
-  connectorType?: string;
-  destinations: Destination[];
-}
-
 interface QuickAddBarProps {
   onTaskAdded?: () => void;
-}
-
-export interface VisibleQuickAddProject {
-  id: string;
-  name: string;
-}
-
-export interface QuickAddProjectAffordance {
-  ariaLabel: string;
-  tooltip: string;
-}
-
-export function getVisibleQuickAddProject(
-  projectId: string | null,
-  projectName: string | null,
-): VisibleQuickAddProject | null {
-  const name = projectName?.trim();
-  return projectId && name ? { id: projectId, name } : null;
-}
-
-export function resolveQuickAddProjectId(
-  explicitProjectId: string | null,
-  contextProject: VisibleQuickAddProject | null,
-  contextProjectActive: boolean,
-): string | undefined {
-  return explicitProjectId || (contextProjectActive ? contextProject?.id : undefined);
-}
-
-export function getQuickAddProjectAffordance(
-  projectName: string,
-  active: boolean,
-): QuickAddProjectAffordance {
-  if (active) {
-    return {
-      ariaLabel: `Adding tasks to project ${projectName}. Click to remove.`,
-      tooltip: `New tasks will be added to ${projectName}. Click to remove.`,
-    };
-  }
-
-  return {
-    ariaLabel: `Add new tasks to project ${projectName}`,
-    tooltip: `Add new tasks to ${projectName}`,
-  };
 }
 
 export function QuickAddProjectControl({
@@ -176,29 +131,23 @@ export function QuickAddProjectControl({
   );
 }
 
-export function syncQuickAddProjectActive(
-  previousProjectId: string | null,
-  nextProjectId: string | null,
-  currentActive: boolean,
-): boolean {
-  return previousProjectId === nextProjectId ? currentActive : Boolean(nextProjectId);
+type PendingTask = QuickAddPendingTask;
+
+export function scrollListTypeaheadSelectionIntoView(
+  container: HTMLElement | null,
+  index: number,
+): void {
+  container
+    ?.querySelector<HTMLElement>(`[data-list-typeahead-index="${index}"]`)
+    ?.scrollIntoView({ block: 'nearest' });
 }
 
-interface PendingTask {
-  id: string;
-  text: string;
-  /** Index of the parent task in the pending list (for nested paste). null = top-level. */
-  parentIndex: number | null;
-  /** Whether the source text indicated completion (e.g. `- [x]`). */
-  isComplete: boolean;
+function isPendingSubtask(task: PendingTask): boolean {
+  return task.parentIndex !== null || Boolean(task.parentTaskId);
 }
 
 function normalizePendingTaskText(text: string): string {
   return normalizePasteText(text);
-}
-
-function stripTaskListPrefix(line: string): string {
-  return line.replace(/^\s*(?:[-•*]|\d+\.)\s+/, '');
 }
 
 function extractPendingTasks(text: string): { committed: PendingTask[]; remaining: string } {
@@ -238,48 +187,6 @@ function extractPendingTasksForTyping(text: string): { committed: PendingTask[];
 }
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
-const SUGGESTION_CONFIDENCE_THRESHOLD = 0.4;
-
-/** Filter a QuickSortSuggestion to only include fields above the confidence threshold. */
-function filterSuggestion(s: QuickSortSuggestion): QuickSortSuggestion | null {
-  const priority = s.priority && s.priority.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD ? s.priority : null;
-  const effort = s.effort && s.effort.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD ? s.effort : null;
-  const tags = s.tags.filter(t => t.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD);
-  if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags };
-}
-
-/**
- * Merge two QuickSortSuggestions.  `override` fields win when present;
- * tags are de-duplicated by id.
- */
-function mergeSuggestions(
-  base: QuickSortSuggestion | null | undefined,
-  override: QuickSortSuggestion | null | undefined,
-): QuickSortSuggestion | null {
-  if (!base && !override) return null;
-  if (!base) return override ?? null;
-  if (!override) return base;
-
-  const priority = override.priority ?? base.priority;
-  const effort = override.effort ?? base.effort;
-  // De-duplicate tags by id AND name, preferring override entries
-  const seenIds = new Set<string>();
-  const seenNames = new Set<string>();
-  const mergedTags: QuickSortSuggestion['tags'] = [];
-  for (const t of [...override.tags, ...base.tags]) {
-    const nameLower = t.name.toLowerCase();
-    if (!seenIds.has(t.id) && !seenNames.has(nameLower)) {
-      seenIds.add(t.id);
-      seenNames.add(nameLower);
-      mergedTags.push(t);
-    }
-  }
-
-  if (!priority && !effort && mergedTags.length === 0) return null;
-  return { priority, effort, tags: mergedTags };
-}
-
 interface InlineToast {
   message: string;
   taskIds: string[];
@@ -304,38 +211,50 @@ interface InlineToast {
 
 export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [input, setInput] = useState('');
+  const quickAddCtx = useQuickAddContext();
+  const {
+    destinations,
+    destination,
+    selectDestination,
+    isPickerOpen: showDestPicker,
+    setPickerOpen: setShowDestPicker,
+  } = useQuickAddDestinations({
+    sourceFilter: quickAddCtx.sourceFilter,
+    listFilter: quickAddCtx.listFilter,
+    listFilterName: quickAddCtx.listFilterName,
+    listFilterConnectorType: quickAddCtx.listFilterConnectorType,
+  });
+  const {
+    isPickerOpen: showTemplatePicker,
+    setPickerOpen: setShowTemplatePicker,
+    workflowTemplate,
+    setWorkflowTemplate,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    typeahead: templateTypeahead,
+    typeaheadIndex: templateTypeaheadIndex,
+    setTypeaheadIndex: setTemplateTypeaheadIndex,
+  } = useQuickAddTemplates(input);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  const [currentInputParentTaskId, setCurrentInputParentTaskId] = useState<string>();
   const [pendingChipsRef] = useListAnimate({ duration: 150 });
   const [parsed, setParsed] = useState<ParsedTask | null>(null);
   const [isFocused, setIsFocused] = useState(false);
-  const [destinations, setDestinations] = useState<Destination[]>([LOCAL_DESTINATION]);
-  const [destination, setDestination] = useState<Destination>(LOCAL_DESTINATION);
-  const [showDestPicker, setShowDestPicker] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [listTypeaheadIndex, setListTypeaheadIndex] = useState(0);
-  // Destination picker search & keyboard nav
-  const [destSearch, setDestSearch] = useState('');
-  const [destNavIndex, setDestNavIndex] = useState(0);
-  const destSearchRef = useRef<HTMLInputElement>(null);
-  const destScrollRef = useRef<HTMLDivElement>(null);
+  const listTypeaheadScrollRef = useRef<HTMLDivElement>(null);
   // Animation state for the "flying token" when a list is selected
   const [pillFlash, setPillFlash] = useState(false);
   const [flyingToken, setFlyingToken] = useState<{ label: string; from: DOMRect; to: DOMRect } | null>(null);
   const [shouldRefocusInput, setShouldRefocusInput] = useState(false);
-  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [showPlusMenu, setShowPlusMenu] = useState(false);
-  const [workflowTemplate, setWorkflowTemplate] = useState<TaskTemplate | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   // Task ID to show in the popover detail dialog (from "View" toast action)
   const [viewTaskId, setViewTaskId] = useState<string | null>(null);
   // Compound split hint: shown when NLP detects "verb and verb" pattern during typing
   const [compoundSplitHint, setCompoundSplitHint] = useState<string[] | null>(null);
-  const [templateTypeaheadIndex, setTemplateTypeaheadIndex] = useState(0);
-  const [cachedTemplates, setCachedTemplates] = useState<TaskTemplate[]>([]);
-  const templatesFetchedRef = useRef(false);
   // Tag / priority / effort typeahead state
   const [tagTypeaheadIndex, setTagTypeaheadIndex] = useState(0);
   const [priorityTypeaheadIndex, setPriorityTypeaheadIndex] = useState(0);
@@ -352,7 +271,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const destPillRef = useRef<HTMLButtonElement>(null);
   const nextPendingTaskIdRef = useRef(0);
-  const quickAddCtx = useQuickAddContext();
   // Local toggle for My Day — initialized from context, can be toggled by user
   const [myDayActive, setMyDayActive] = useState(false);
   const visibleContextProject = useMemo(
@@ -361,10 +279,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   );
   const [contextProjectActive, setContextProjectActive] = useState(false);
   const contextProjectIdRef = useRef<string | null>(null);
-  // Tracks whether the user manually overrode the destination via the pill picker
-  const userOverrodeDestRef = useRef(false);
-  // Tracks whether we've already reconciled the destination after list-level destinations loaded
-  const reconciledRef = useRef(false);
   // When true, submit the task after the next typeahead acceptance clears the dropdown
   const submitAfterTypeaheadRef = useRef(false);
 
@@ -419,140 +333,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     contextProjectIdRef.current = nextProjectId;
   }, [visibleContextProject?.id]);
 
-  // Reset dest search when picker opens/closes
-  useEffect(() => {
-    if (showDestPicker) {
-      setDestSearch('');
-      setDestNavIndex(0);
-      // Focus search input after animation frame
-      requestAnimationFrame(() => destSearchRef.current?.focus());
-    }
-  }, [showDestPicker]);
-
-  // Build grouped & filtered destination list for the picker
-  const destPickerGroups = useMemo((): DestGroup[] => {
-    const query = destSearch.toLowerCase().trim();
-
-    // Filter destinations by search query
-    const filtered = query
-      ? destinations.filter(d => {
-          const searchable = [d.shortLabel, d.label, d.listName, d.groupName, d.connectorType]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase();
-          return searchable.includes(query);
-        })
-      : destinations;
-
-    // Separate top-level sources (no listId) from list destinations
-    const sources = filtered.filter(d => !d.listId);
-    const lists = filtered.filter(d => d.listId);
-
-    const groups: DestGroup[] = [];
-
-    // Add top-level sources as their own group
-    if (sources.length > 0) {
-      groups.push({
-        label: 'Sources',
-        destinations: [...sources].sort((a, b) => a.shortLabel.localeCompare(b.shortLabel)),
-      });
-    }
-
-    // Group lists by connector, then by list group within each connector
-    const byConnector = new Map<string, Destination[]>();
-    for (const d of lists) {
-      const key = d.id; // connector instance id
-      if (!byConnector.has(key)) byConnector.set(key, []);
-      byConnector.get(key)!.push(d);
-    }
-
-    for (const [connectorId, connectorLists] of byConnector) {
-      // Find the parent source destination for the header label
-      const parentSource = destinations.find(d => d.id === connectorId && !d.listId);
-      const connectorLabel = parentSource?.shortLabel || connectorId;
-      const connectorType = parentSource?.connectorType || connectorLists[0]?.connectorType;
-
-      // Sub-group by listGroup
-      const byGroup = new Map<string, Destination[]>();
-      const ungrouped: Destination[] = [];
-      for (const d of connectorLists) {
-        if (d.groupName) {
-          if (!byGroup.has(d.groupName)) byGroup.set(d.groupName, []);
-          byGroup.get(d.groupName)!.push(d);
-        } else {
-          ungrouped.push(d);
-        }
-      }
-
-      // Sort groups by their sortOrder, then alphabetically
-      const sortedGroupNames = [...byGroup.keys()].sort((a, b) => {
-        const aOrder = byGroup.get(a)![0]?.groupSortOrder ?? Infinity;
-        const bOrder = byGroup.get(b)![0]?.groupSortOrder ?? Infinity;
-        if (aOrder !== bOrder) return aOrder - bOrder;
-        return a.localeCompare(b);
-      });
-
-      // If there are list groups, create sub-grouped entries
-      if (sortedGroupNames.length > 0) {
-        for (const groupName of sortedGroupNames) {
-          const groupDests = [...byGroup.get(groupName)!].sort((a, b) =>
-            (a.shortLabel).localeCompare(b.shortLabel)
-          );
-          groups.push({
-            label: `${connectorLabel} › ${groupName}`,
-            connectorType,
-            destinations: groupDests,
-          });
-        }
-      }
-
-      // Ungrouped lists under this connector
-      if (ungrouped.length > 0) {
-        const sortedUngrouped = [...ungrouped].sort((a, b) => a.shortLabel.localeCompare(b.shortLabel));
-        groups.push({
-          label: sortedGroupNames.length > 0 ? `${connectorLabel} › Other` : connectorLabel,
-          connectorType,
-          destinations: sortedUngrouped,
-        });
-      }
-    }
-
-    return groups;
-  }, [destinations, destSearch]);
-
-  // Flat list for keyboard navigation
-  const flatPickerDests = useMemo(() =>
-    destPickerGroups.flatMap(g => g.destinations),
-    [destPickerGroups]
-  );
-
-  // Clamp nav index when filtered list changes
-  useEffect(() => {
-    setDestNavIndex(i => Math.min(i, Math.max(flatPickerDests.length - 1, 0)));
-  }, [flatPickerDests.length]);
-
-  // Scroll keyboard-navigated item into view
-  useEffect(() => {
-    if (!showDestPicker) return;
-    const container = destScrollRef.current;
-    if (!container) return;
-    const item = container.querySelector(`[data-dest-idx="${destNavIndex}"]`);
-    if (item) {
-      item.scrollIntoView({ block: 'nearest' });
-    }
-  }, [destNavIndex, showDestPicker]);
-
-  // Precompute group start indices for flat keyboard nav
-  const groupStartIndices = useMemo(() => {
-    const indices: number[] = [];
-    let acc = 0;
-    for (const g of destPickerGroups) {
-      indices.push(acc);
-      acc += g.destinations.length;
-    }
-    return indices;
-  }, [destPickerGroups]);
-
   // Derive typeahead state from input — active when typing `/query` (at start or after a space, no space after it yet)
   const listTypeahead = (() => {
     const match = input.match(/(?:^|\s)\/(\S*)$/); // typing /... at start or after space, no trailing space
@@ -573,47 +353,17 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     return matches.length > 0 ? { query, matches } : null;
   })();
 
-  // Derive template typeahead state — active when typing `t/query`
-  const templateTypeahead = useMemo(() => {
-    const match = input.match(/(?:^|\s)t\/(\S*)$/);
-    if (!match) return null;
-    const query = match[1].toLowerCase();
-    if (cachedTemplates.length === 0) return null;
-
-    const matches = query
-      ? cachedTemplates.filter(t => t.name.toLowerCase().includes(query))
-      : cachedTemplates;
-    return matches.length > 0 ? { query, matches } : null;
-  }, [input, cachedTemplates]);
-
-  // Fetch templates lazily when t/ typeahead activates
-  useEffect(() => {
-    if (!templateTypeahead && !input.match(/(?:^|\s)t\/$/)) return;
-    if (templatesFetchedRef.current) return;
-    templatesFetchedRef.current = true;
-    fetch('/api/subtask-templates')
-      .then(r => r.json())
-      .then(data => setCachedTemplates(data.templates || []))
-      .catch(() => {});
-  }, [input, templateTypeahead]);
-
-  // Reset template typeahead index when matches change
-  useEffect(() => {
-    setTemplateTypeaheadIndex(0);
-  }, [templateTypeahead?.query]);
-
   // Accept a template typeahead selection
   const acceptTemplateTypeahead = useCallback((template: TaskTemplate) => {
-    // Strip the t/slug portion from input
-    const cleaned = input.replace(/(?:^|\s)t\/\S*$/, '').trim();
     setInput(template.name);
+    setCurrentInputParentTaskId(undefined);
     setParsed(parseInput(template.name));
     setSelectedTemplateId(template.id);
     setShowModal(true);
     if (inputHandleRef.current) {
       inputHandleRef.current.setText(template.name);
     }
-  }, [input, parseInput]);
+  }, [parseInput, setSelectedTemplateId]);
 
   // ── Tag typeahead: active when typing `#query` ───────────────────────────
   const tagTypeahead = useMemo(() => {
@@ -634,9 +384,15 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     if (tagsFetchedRef.current) return;
     tagsFetchedRef.current = true;
     fetch('/api/tags')
-      .then(r => r.json())
+      .then(r => {
+        if (!r.ok) throw new Error(`Failed to load tags (${r.status})`);
+        return r.json();
+      })
       .then(data => setCachedTags(data.tags || []))
-      .catch(() => {});
+      .catch((error) => {
+        tagsFetchedRef.current = false;
+        taskLogger.error('Failed to fetch Quick Add tags', { error });
+      });
   }, [input, tagTypeahead]);
 
   // Reset tag typeahead index when matches change
@@ -777,182 +533,30 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     inputHandleRef.current?.focus();
   }, [input]);
 
-  // Reset manual override and reconciliation flag when the page-level filter actually changes (new user intent)
-  useEffect(() => {
-    userOverrodeDestRef.current = false;
-    reconciledRef.current = false;
-  }, [quickAddCtx.sourceFilter, quickAddCtx.listFilter]);
-
   useEffect(() => {
     if (!shouldRefocusInput) return;
     inputHandleRef.current?.focus();
     setShouldRefocusInput(false);
   }, [shouldRefocusInput]);
 
-  // Sync destination from page-level filter context (source/list filters)
-  // Uses a ref to read destinations without depending on its array reference
-  const destinationsRef = useRef(destinations);
-  destinationsRef.current = destinations;
-  // User-configured default capture destination (fetched from settings)
-  const [defaultCaptureDest, setDefaultCaptureDest] = useState<{ connectorType: string; sourceListId?: string } | null>(null);
-
-  // Fetch user's configured default capture destination
-  useEffect(() => {
-    fetch('/api/settings/capture-destination')
-      .then(r => r.json())
-      .then(data => {
-        if (data.destination) {
-          setDefaultCaptureDest(data.destination);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (userOverrodeDestRef.current) return; // user manually picked — don't override
-    const dests = destinationsRef.current;
-    if (dests.length <= 1) return; // still loading
-
-    if (quickAddCtx.listFilter && quickAddCtx.listFilterConnectorType) {
-      const listDest = dests.find(
-        d => d.listId === quickAddCtx.listFilter && d.connectorType === quickAddCtx.listFilterConnectorType
-      );
-      if (listDest) {
-        setDestination(listDest);
-        return;
-      }
-      const sourceDest = dests.find(
-        d => d.connectorType === quickAddCtx.listFilterConnectorType && !d.listId
-      );
-      if (sourceDest) setDestination(sourceDest);
-    } else if (quickAddCtx.sourceFilter) {
-      const sourceDest = dests.find(
-        d => d.connectorType === quickAddCtx.sourceFilter && !d.listId
-      );
-      if (sourceDest) setDestination(sourceDest);
-    } else if (defaultCaptureDest) {
-      // No context filter active — fall back to user-configured default
-      const defaultDest = defaultCaptureDest.sourceListId
-        ? dests.find(d => d.connectorType === defaultCaptureDest.connectorType && d.listId === defaultCaptureDest.sourceListId)
-        : dests.find(d => d.connectorType === defaultCaptureDest.connectorType && !d.listId);
-      if (defaultDest) setDestination(defaultDest);
-    }
-  }, [quickAddCtx.sourceFilter, quickAddCtx.listFilter, quickAddCtx.listFilterConnectorType, defaultCaptureDest]);
-
-  // Load available destinations from feature flags
-  useEffect(() => {
-    let cancelled = false;
-    const abortController = new AbortController();
-
-    fetch('/api/features', { signal: abortController.signal })
-      .then(r => r.json())
-      .then(data => {
-        if (cancelled) return;
-        if (data.taskDestinations && data.taskDestinations.length > 0) {
-          const dynamicDests: Destination[] = data.taskDestinations.map((td: { id: string; type: string; name: string; account?: string; listSelectionMode?: string }) => {
-            const account = (td.account as 'personal' | 'work') || null;
-            return {
-              id: td.id,
-              label: td.name,
-              shortLabel: td.name,
-              connectorType: td.type,
-              account,
-              color: CONNECTOR_COLORS[td.type] || 'var(--text-muted)',
-              listSelectionMode: (td.listSelectionMode as Destination['listSelectionMode']) || undefined,
-            };
-          });
-          // Always include local as a fallback
-          dynamicDests.push(LOCAL_DESTINATION);
-          setDestinations(dynamicDests);
-          // Apply user-configured default if available; otherwise first connector
-          const cfg = defaultCaptureDest;
-          const defaultDest = cfg
-            ? dynamicDests.find(d => d.connectorType === cfg.connectorType && !d.listId)
-            : null;
-          setDestination(defaultDest || dynamicDests[0]);
-
-          // Load source lists for quick-add-to-list (/ prefix)
-          for (const td of data.taskDestinations) {
-            fetch(`/api/connectors/${td.id}/lists`, { signal: abortController.signal })
-              .then(r => r.ok ? r.json() : { sourceLists: [] })
-              .then(listData => {
-                if (cancelled) return;
-                const lists = listData.sourceLists || listData.lists || [];
-                const groups: Array<{ id: string; name: string; sortOrder: number }> = listData.groups || [];
-                const groupMap = new Map(groups.map(g => [g.id, g]));
-                if (lists.length) {
-                  setDestinations(prev => {
-                    const listDests: Destination[] = lists.map((l: { sourceId: string; name: string; groupId?: string; sortOrder?: number }) => {
-                      const group = l.groupId ? groupMap.get(l.groupId) : undefined;
-                      return {
-                        id: td.id,
-                        label: `${td.name} › ${l.name}`,
-                        shortLabel: l.name,
-                        connectorType: td.type,
-                        account: (td.account as 'personal' | 'work') || null,
-                        color: CONNECTOR_COLORS[td.type] || 'var(--text-muted)',
-                        listId: l.sourceId,
-                        listName: l.name,
-                        listSelectionMode: (td.listSelectionMode as Destination['listSelectionMode']) || undefined,
-                        groupName: group?.name,
-                        groupSortOrder: group?.sortOrder,
-                      };
-                    });
-                    // Deduplicate by listId to prevent strict-mode double-appends
-                    const existingListIds = new Set(prev.filter(d => d.listId).map(d => `${d.id}-${d.listId}`));
-                    const newDests = listDests.filter(d => !existingListIds.has(`${d.id}-${d.listId}`));
-                    return newDests.length > 0 ? [...prev, ...newDests] : prev;
-                  });
-                }
-              })
-              .catch((err) => { taskLogger.error('Failed to fetch available lists', { err }); });
-          }
-        }
-      })
-      .catch((err) => { taskLogger.error('Failed to fetch connectors for quick add', { err }); });
-
-    return () => {
-      cancelled = true;
-      abortController.abort();
-    };
-  }, []);
-
-  // Reconcile destination when list-level destinations arrive after the filter context was already set.
-  // The context sync effect only runs on filter changes, but if lists load late we need one extra pass.
-  useEffect(() => {
-    // Only reconcile once, and only if we haven't manually overridden
-    if (reconciledRef.current || userOverrodeDestRef.current) return;
-    const hasListDests = destinations.some(d => d.listId);
-    if (!hasListDests) return;
-    // If a list filter is active and our current destination doesn't match, fix it
-    if (quickAddCtx.listFilter && quickAddCtx.listFilterConnectorType) {
-      const listDest = destinations.find(
-        d => d.listId === quickAddCtx.listFilter && d.connectorType === quickAddCtx.listFilterConnectorType
-      );
-      if (listDest && (destination.listId !== listDest.listId || destination.connectorType !== listDest.connectorType)) {
-        setDestination(listDest);
-      }
-      // Only mark reconciled if we actually found the target list destination
-      if (listDest) {
-        reconciledRef.current = true;
-      }
-    }
-  }, [destinations, quickAddCtx.listFilter, quickAddCtx.listFilterConnectorType, destination]);
-
   // Reset typeahead index when matches change
   useEffect(() => {
     setListTypeaheadIndex(0);
   }, [listTypeahead?.query]);
 
+  useEffect(() => {
+    scrollListTypeaheadSelectionIntoView(listTypeaheadScrollRef.current, listTypeaheadIndex);
+  }, [listTypeaheadIndex, listTypeahead?.query]);
+
   // Accept a typeahead list selection: set destination pill and strip the /query from input
-  const acceptListTypeahead = useCallback((dest: Destination) => {
+  const acceptListTypeahead = useCallback((dest: (typeof destinations)[number]) => {
     // Animate the token "flying" from the input to the destination pill
     const editorEl = barRef.current?.querySelector('[data-lexical-editor]');
     const pillEl = destPillRef.current;
     if (editorEl && pillEl) {
       const from = editorEl.getBoundingClientRect();
       const to = pillEl.getBoundingClientRect();
-      const label = dest.listName || dest.shortLabel;
+      const label = dest.listName || dest.shortLabel || dest.label;
       setFlyingToken({ label, from, to });
       setTimeout(() => setFlyingToken(null), 400);
     }
@@ -964,9 +568,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     if (inputHandleRef.current) {
       inputHandleRef.current.setText(cleaned);
     }
-    setDestination(dest);
+    selectDestination(dest, { manual: true });
     inputHandleRef.current?.focus();
-  }, [input]);
+  }, [input, selectDestination]);
 
   // Parse input on change
   useEffect(() => {
@@ -987,7 +591,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           )
         );
         if (listDest) {
-          setDestination(listDest);
+          selectDestination(listDest, { manual: true });
           // Remove the /slug portion, keep text before and after it
           const cleaned = input.replace(/(?:^|\s)\/\S+\s/, ' ').trim();
           setInput(cleaned);
@@ -1003,22 +607,24 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       // Auto-detect destination from parsed result
       if (result.destination === 'work') {
         const workDest = destinations.find(d => d.account === 'work');
-        if (workDest) setDestination(workDest);
+        if (workDest) selectDestination(workDest, { manual: true });
       } else if (result.destination === 'github') {
         const ghDest = destinations.find(d => d.connectorType === 'github-issues');
-        if (ghDest) setDestination(ghDest);
+        if (ghDest) selectDestination(ghDest, { manual: true });
       } else if (result.destination === 'personal') {
         const personalDest = destinations.find(d => d.account === 'personal');
-        if (personalDest) setDestination(personalDest);
+        if (personalDest) selectDestination(personalDest, { manual: true });
       }
     } else {
       setParsed(null);
     }
-  }, [input, destinations, parseInput]);
+  }, [input, destinations, parseInput, selectDestination]);
 
   // Global keyboard shortcut: N to focus
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(e)) return;
+
       if (e.key === 'n' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         const target = e.target as HTMLElement;
         if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
@@ -1033,7 +639,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [setShowTemplatePicker]);
 
   // Listen for custom event to open quick-add (from mobile "Add task" button).
   // On mobile the bar is visually hidden, so we open the full AddTaskModal directly.
@@ -1059,22 +665,23 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     const handler = () => setShowTemplatePicker(true);
     window.addEventListener('mission-control:open-template-picker', handler);
     return () => window.removeEventListener('mission-control:open-template-picker', handler);
-  }, []);
+  }, [setShowTemplatePicker]);
 
   // Template selection handlers
   const handleSelectSingleTemplate = useCallback((template: TaskTemplate) => {
     // Pre-fill the input with template name and open AddTaskModal with template ID
     setInput(template.name);
+    setCurrentInputParentTaskId(undefined);
     setParsed(parseInput(template.name));
     setSelectedTemplateId(template.id);
     setShowModal(true);
     setShowTemplatePicker(false);
-  }, [parseInput]);
+  }, [parseInput, setSelectedTemplateId, setShowTemplatePicker]);
 
   const handleSelectWorkflowTemplate = useCallback((template: TaskTemplate) => {
     setWorkflowTemplate(template);
     setShowTemplatePicker(false);
-  }, []);
+  }, [setShowTemplatePicker, setWorkflowTemplate]);
 
   // Close destination picker on outside click
   useEffect(() => {
@@ -1087,7 +694,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       document.addEventListener('mousedown', handler);
       return () => document.removeEventListener('mousedown', handler);
     }
-  }, [showDestPicker]);
+  }, [setShowDestPicker, showDestPicker]);
 
   // Close plus menu on outside click
   useEffect(() => {
@@ -1105,260 +712,82 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const handleSubmit = useCallback(async () => {
     if (isSubmitting) return;
 
-    const cleanInput = normalizePendingTaskText(input.replace(/^\/\S+\s/, ''));
-
-    // Apply compound task splitting at submit time (deferred from typing)
-    let currentInputTasks: PendingTask[] = [];
-    if (cleanInput) {
-      const compoundParts = splitCompoundTask(cleanInput);
-      if (compoundParts && compoundParts.length >= 2) {
-        currentInputTasks = compoundParts.map((text, i) => ({
-          id: `current-${i}`,
-          text: normalizePendingTaskText(text),
-          parentIndex: null,
-          isComplete: false,
-        }));
-      } else {
-        currentInputTasks = [{ id: 'current', text: cleanInput, parentIndex: null, isComplete: false }];
-      }
-    }
-
-    // Build the full task list: pending chips + current input (possibly split)
-    const allTasks: PendingTask[] = [
-      ...pendingTasks,
-      ...currentInputTasks,
-    ];
-    if (allTasks.length === 0) return;
-    const unresolvedProject = allTasks
-      .map(task => parseInput(task.text))
-      .find(task => task.project && !task.projectId);
-    if (unresolvedProject?.project) {
-      if (projectsLoadState === 'loading') {
+    const parseOptions = {
+      ...quickAddPreferences,
+      projects: cachedProjects,
+    };
+    const plan = planQuickAddSubmission({
+      input,
+      pendingTasks,
+      destination,
+      contextListId: quickAddCtx.listFilter,
+      contextListName: quickAddCtx.listFilterName,
+      parseOptions,
+      projectsLoadState,
+      currentInputParentTaskId,
+    });
+    if (plan.block) {
+      if (plan.block.reason === 'empty') return;
+      if (plan.block.reason === 'project-loading') {
         toast.info('Projects are still loading. Try again in a moment.');
-      } else if (projectsLoadState === 'error') {
+      } else if (plan.block.reason === 'project-load-error') {
         toast.error('Projects could not be loaded. Remove the +Project token or reload and try again.');
-      } else {
-        toast.error(`Project “${unresolvedProject.project}” was not found. Select it from the +Project suggestions.`);
+      } else if (plan.block.reason === 'project-not-found') {
+        toast.error(`Project “${plan.block.projectName}” was not found. Select it from the +Project suggestions.`);
+      } else if (plan.block.reason === 'destination-required') {
+        setShowModal(true);
       }
-      return;
-    }
-
-    // Fall back to the filter context's list when the destination pill doesn't carry one
-    const resolvedListId = destination.listId || quickAddCtx.listFilter || undefined;
-    const resolvedListName = destination.listName || quickAddCtx.listFilterName || undefined;
-
-    // If this connector requires a list (e.g. GitHub repos) and none is resolved,
-    // open the expanded modal so the user can pick one instead of silently failing.
-    if (destination.listSelectionMode === 'required' && !resolvedListId) {
-      setShowModal(true);
       return;
     }
 
     setIsSubmitting(true);
-
     try {
-      // Separate parent tasks (parentIndex === null) from subtasks
-      const parentTasks = allTasks.filter(t => t.parentIndex === null);
-      const subtasks = allTasks.filter(t => t.parentIndex !== null);
-
-      // Create parent tasks first
-      const parentResults = await Promise.allSettled(
-        parentTasks.map(async (task) => {
-          const taskData = parseInputForSubmit(task.text);
-          const res = await fetch('/api/tasks', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: taskData.title,
-              dueDate: taskData.dueDate,
-              priority: taskData.priority || 'none',
-              connectorType: destination.connectorType,
-              connectorInstanceId: destination.connectorType === 'local'
-                ? undefined
-                : destination.id,
-              sourceListId: resolvedListId,
-              sourceListName: resolvedListName,
-              estimatedDuration: taskData.estimatedDuration || undefined,
-              recurrence: taskData.recurrence || undefined,
-              effort: taskData.effort || undefined,
-              projectIds: (() => {
-                const projectId = resolveQuickAddProjectId(
-                  taskData.projectId,
-                  visibleContextProject,
-                  contextProjectActive,
-                );
-                return projectId ? [projectId] : undefined;
-              })(),
-              tagSlugs: (() => {
-                const merged = new Set(taskData.tags);
-                if (quickAddCtx.defaultTags) quickAddCtx.defaultTags.forEach(t => merged.add(t));
-                return merged.size > 0 ? [...merged] : undefined;
-              })(),
-            }),
-          });
-
-          if (!res.ok) {
-            throw new Error(`Failed to create task: ${task.text}`);
-          }
-
-          const { id: newTaskId, editPolicy } = await res.json() as {
-            id: string;
-            editPolicy: TaskEditPolicy;
-          };
-
-          // POST /api/tasks always creates with status 'todo' — mark complete if source indicated [x]
-          if (task.isComplete && newTaskId) {
-            if (!canEditTaskField(editPolicy, 'status')) {
-              throw new Error(taskFieldBlockedReason(editPolicy, 'status'));
-            }
-            const completionResponse = await fetch(`/api/tasks/${newTaskId}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'done' }),
-            });
-            if (!completionResponse.ok) {
-              throw new Error(`Failed to mark task complete: ${task.text}`);
-            }
-          }
-
-          // Add to My Day if active
-          if (myDayActive) {
-            const { getLocalToday } = await import('@/lib/utils/client-date');
-            const myDayRes = await fetch('/api/my-day', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ taskId: newTaskId, date: getLocalToday() }),
-            });
-            if (!myDayRes.ok) {
-              taskLogger.error('Failed to add task to My Day', { taskId: newTaskId, status: myDayRes.status });
-            } else {
-              window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
-                detail: {
-                  taskId: newTaskId,
-                  title: taskData.title,
-                  priority: taskData.priority || 'none',
-                  dueDate: taskData.dueDate || null,
-                  connectorType: destination.connectorType || 'local',
-                  sourceListName: resolvedListName || null,
-                  status: task.isComplete ? 'done' : 'todo',
-                  editPolicy,
-                },
-              }));
-            }
-          }
-
-          return { id: newTaskId, editPolicy };
-        })
-      );
-
-      // Build a map from allTasks index → created parent task ID
-      const parentIndexToId = new Map<number, string>();
-      let parentResultIdx = 0;
-      for (let i = 0; i < allTasks.length; i++) {
-        if (allTasks[i].parentIndex === null) {
-          const result = parentResults[parentResultIdx];
-          if (result && result.status === 'fulfilled') {
-            parentIndexToId.set(i, result.value.id);
-          }
-          parentResultIdx++;
-        }
-      }
-
-      // Create subtasks under their parent tasks
-      const subtaskResults = await Promise.allSettled(
-        subtasks.map(async (task) => {
-          const parentId = task.parentIndex !== null ? parentIndexToId.get(task.parentIndex) : null;
-          if (!parentId) {
-            throw new Error(`Parent task not created for subtask: ${task.text}`);
-          }
-
-          const taskData = parseInput(task.text);
-          const res = await fetch(`/api/tasks/${parentId}/subtasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title: taskData.title }),
-          });
-
-          if (!res.ok) {
-            throw new Error(`Failed to create subtask: ${task.text}`);
-          }
-
-          const { subtask, editPolicy } = await res.json() as {
-            subtask?: { id: string };
-            editPolicy: TaskEditPolicy;
-          };
-
-          // Mark as complete if source indicated [x]
-          if (task.isComplete && subtask?.id) {
-            if (!canEditTaskField(editPolicy, 'status')) {
-              throw new Error(taskFieldBlockedReason(editPolicy, 'status'));
-            }
-            const completionResponse = await fetch(`/api/tasks/${subtask.id}`, {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ status: 'done' }),
-            });
-            if (!completionResponse.ok) {
-              throw new Error(`Failed to mark subtask complete: ${task.text}`);
-            }
-          }
-
-          if (!subtask?.id) throw new Error(`Subtask response missing ID: ${task.text}`);
-          return { id: subtask.id, editPolicy };
-        })
-      );
-
-      const totalCount = parentTasks.length + subtasks.length;
-      const allResults = [...parentResults, ...subtaskResults];
-      const failedCount = allResults.filter(r => r.status === 'rejected').length;
-      const successfulCount = totalCount - failedCount;
-      const createdTasks = allResults
-        .filter((result): result is PromiseFulfilledResult<{ id: string; editPolicy: TaskEditPolicy }> => result.status === 'fulfilled')
-        .map((result) => result.value);
-      const createdTaskIds = createdTasks.map((task) => task.id);
+      const result = await submitQuickAdd({
+        getToday: getLocalToday,
+        onMyDayItemAdded: (item) => {
+          window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
+            detail: item,
+          }));
+        },
+        onMyDayAddFailed: (taskId, status) => {
+          taskLogger.error('Failed to add task to My Day', { taskId, status });
+        },
+      }, {
+        plan,
+        destination,
+        defaultTags: quickAddCtx.defaultTags,
+        addToMyDay: myDayActive,
+        contextProject: visibleContextProject,
+        contextProjectActive,
+        parseOptions,
+      });
+      const createdTaskIds = result.createdTasks.map((task) => task.id);
       const createdTaskPolicies = Object.fromEntries(
-        createdTasks.map((task) => [task.id, task.editPolicy]),
+        result.createdTasks.map((task) => [task.id, task.editPolicy]),
       );
 
-      if (failedCount === 0) {
+      if (result.status === 'success') {
         setInput('');
+        setCurrentInputParentTaskId(undefined);
         setPendingTasks([]);
         setParsed(null);
         setCompoundSplitHint(null);
         const myDaySuffix = myDayActive ? ' · ☀️ My Day' : '';
-        const subtaskSuffix = subtasks.length > 0 ? ` (${subtasks.length} subtask${subtasks.length === 1 ? '' : 's'})` : '';
-        const toastMessage = `Added ${parentTasks.length} ${parentTasks.length === 1 ? 'task' : 'tasks'}${subtaskSuffix}`;
         const toastDestSuffix = `${destination.account ? ` · ${destination.account}` : ''}${myDaySuffix}`;
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-
-        // For single-task adds, capture metadata to show in the toast
-        let singleTaskMeta: InlineToast['singleTaskMeta'] = undefined;
-        if (parentTasks.length === 1 && subtasks.length === 0) {
-          const taskData = parseInputForSubmit(parentTasks[0].text);
-          singleTaskMeta = {
-            title: taskData.title,
-            listName: resolvedListName || null,
-            priority: taskData.priority,
-            dueDate: taskData.dueDate,
-            dueDateLabel: taskData.dueDateLabel,
-          };
-        }
-
         setInlineToast({
-          message: toastMessage,
+          message: getQuickAddSubmissionMessage(result),
           taskIds: createdTaskIds,
           editPolicies: createdTaskPolicies,
           destSuffix: toastDestSuffix,
-          singleTaskMeta,
+          singleTaskMeta: result.singleTaskMeta,
         });
         toastTimerRef.current = setTimeout(() => setInlineToast(null), 6000);
         onTaskAdded?.();
         window.dispatchEvent(new CustomEvent('mission-control:task-added'));
 
-        // For single-task adds: compute NLP hints immediately, then fetch AI suggestions
         if (createdTaskIds.length === 1) {
-          // NLP hints from title keywords — shown instantly
-          const cleanTitle = singleTaskMeta?.title ?? parentTasks[0].text;
+          const cleanTitle = result.singleTaskMeta?.title ?? plan.tasks[0].text;
           const nlpHints = parseNlpHints(cleanTitle, cachedTags);
           if (nlpHints) {
             setInlineToast(prev => prev && prev.taskIds[0] === createdTaskIds[0]
@@ -1370,48 +799,49 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             toastTimerRef.current = setTimeout(() => setInlineToast(null), 10000);
           }
 
-          // AI suggestions (non-blocking) — merge with NLP hints when they arrive
-          fetch(`/api/tasks/quick-sort/suggestions?taskIds=${createdTaskIds[0]}`)
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-              if (!data?.suggestions) return;
-              const raw = data.suggestions[createdTaskIds[0]] as QuickSortSuggestion | undefined;
-              if (!raw) return;
-              const filtered = filterSuggestion(raw);
-              if (!filtered) return;
-              // Merge: AI suggestions take precedence over NLP hints
+          fetchQuickAddSuggestion({}, createdTaskIds[0])
+            .then((suggestion) => {
+              if (!suggestion) return;
               setInlineToast(prev => {
                 if (!prev || prev.taskIds[0] !== createdTaskIds[0]) return prev;
-                const merged = mergeSuggestions(prev.suggestions, filtered);
+                const merged = mergeQuickAddSuggestions(prev.suggestions, suggestion);
                 return { ...prev, suggestions: merged };
               });
               if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
               toastTimerRef.current = setTimeout(() => setInlineToast(null), 10000);
             })
-            .catch(() => {}); // Silently ignore suggestion fetch failures
+            .catch((error) => {
+              taskLogger.error('Failed to fetch Quick Add suggestions', { error });
+            });
         }
       } else {
-        // On partial failure, re-queue failed parent tasks (subtasks of failed parents are lost)
-        const failedParentTexts = parentTasks.filter((_, i) => parentResults[i].status === 'rejected').map(t => t.text);
-        if (failedParentTexts.length > 0) {
-          setPendingTasks(failedParentTexts.slice(0, -1).map(text => ({
+        if (result.retryTasks.length > 0) {
+          const retryTasks = result.retryTasks.map((task) => ({
+            ...task,
             id: `pending-task-${nextPendingTaskIdRef.current++}`,
-            text,
-            parentIndex: null,
-            isComplete: false,
-          })));
-          setInput(failedParentTexts[failedParentTexts.length - 1] ?? '');
+          }));
+          const lastRetryTask = retryTasks[retryTasks.length - 1];
+          const canMoveLastTaskToInput = lastRetryTask.parentIndex === null
+            && !lastRetryTask.parentTaskId
+            && !retryTasks.some((task) => task.parentIndex === retryTasks.length - 1);
+          setPendingTasks(canMoveLastTaskToInput ? retryTasks.slice(0, -1) : retryTasks);
+          setInput(canMoveLastTaskToInput ? lastRetryTask.text : '');
+          setCurrentInputParentTaskId(
+            canMoveLastTaskToInput ? lastRetryTask.parentTaskId : undefined,
+          );
         } else {
           setInput('');
+          setCurrentInputParentTaskId(undefined);
           setPendingTasks([]);
         }
-        const partialMessage = successfulCount > 0
-          ? `Added ${successfulCount} ${successfulCount === 1 ? 'item' : 'items'} · ${failedCount} still pending`
-          : 'Unable to add tasks';
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-        setInlineToast({ message: partialMessage, taskIds: [], editPolicies: {} });
+        setInlineToast({
+          message: getQuickAddSubmissionMessage(result),
+          taskIds: [],
+          editPolicies: {},
+        });
         toastTimerRef.current = setTimeout(() => setInlineToast(null), 5000);
-        if (successfulCount > 0) {
+        if (result.createdTasks.length > 0) {
           onTaskAdded?.();
           window.dispatchEvent(new CustomEvent('mission-control:task-added'));
         }
@@ -1421,7 +851,24 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     } finally {
       setIsSubmitting(false);
     }
-  }, [input, pendingTasks, destination, isSubmitting, onTaskAdded, myDayActive, quickAddCtx.listFilter, quickAddCtx.listFilterName, quickAddCtx.defaultTags, parseInput, parseInputForSubmit, projectsLoadState, visibleContextProject, contextProjectActive]);
+  }, [
+    cachedProjects,
+    cachedTags,
+    contextProjectActive,
+    currentInputParentTaskId,
+    destination,
+    input,
+    isSubmitting,
+    myDayActive,
+    onTaskAdded,
+    pendingTasks,
+    projectsLoadState,
+    quickAddCtx.defaultTags,
+    quickAddCtx.listFilter,
+    quickAddCtx.listFilterName,
+    quickAddPreferences,
+    visibleContextProject,
+  ]);
 
   // After typeahead acceptance clears the dropdown, auto-submit if flagged
   useEffect(() => {
@@ -1434,11 +881,18 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const commitCurrentInputToPending = useCallback(() => {
     const normalized = normalizePendingTaskText(input.replace(/^\/\S+\s/, ''));
     if (!normalized) return false;
-    setPendingTasks(prev => [...prev, { id: `pending-task-${nextPendingTaskIdRef.current++}`, text: normalized, parentIndex: null, isComplete: false }]);
+    setPendingTasks(prev => [...prev, {
+      id: `pending-task-${nextPendingTaskIdRef.current++}`,
+      text: normalized,
+      parentIndex: null,
+      parentTaskId: currentInputParentTaskId,
+      isComplete: false,
+    }]);
     setInput('');
+    setCurrentInputParentTaskId(undefined);
     setParsed(null);
     return true;
-  }, [input]);
+  }, [currentInputParentTaskId, input]);
 
   const handlePendingTaskEdit = useCallback((taskId: string) => {
     const selectedTask = pendingTasks.find(task => task.id === taskId);
@@ -1460,13 +914,20 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         return task;
       });
       if (currentInput) {
-        updated.push({ id: `pending-task-${nextPendingTaskIdRef.current++}`, text: currentInput, parentIndex: null, isComplete: false });
+        updated.push({
+          id: `pending-task-${nextPendingTaskIdRef.current++}`,
+          text: currentInput,
+          parentIndex: null,
+          parentTaskId: currentInputParentTaskId,
+          isComplete: false,
+        });
       }
       return updated;
     });
     setInput(selectedTask.text);
+    setCurrentInputParentTaskId(selectedTask.parentTaskId);
     setShouldRefocusInput(true);
-  }, [input, pendingTasks]);
+  }, [currentInputParentTaskId, input, pendingTasks]);
 
   const handlePendingTaskDelete = useCallback((taskId: string) => {
     setPendingTasks(prev => {
@@ -1491,7 +952,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         const baseOffset = prev.length;
         return [
           ...prev,
-          ...committed.map((task, i) => ({
+          ...committed.map((task) => ({
             id: `pending-task-${nextPendingTaskIdRef.current++}`,
             text: task.text,
             parentIndex: task.parentIndex !== null ? task.parentIndex + baseOffset : null,
@@ -1543,6 +1004,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       if (e.key === 'Escape') {
         e.preventDefault();
         setInput('');
+        setCurrentInputParentTaskId(undefined);
         return true;
       }
       return false;
@@ -1575,6 +1037,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       if (e.key === 'Escape') {
         e.preventDefault();
         setInput('');
+        setCurrentInputParentTaskId(undefined);
         return true;
       }
       return false;
@@ -1691,6 +1154,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       const lastTask = pendingTasks[pendingTasks.length - 1];
       setPendingTasks(prev => prev.slice(0, -1));
       setInput(lastTask.text);
+      setCurrentInputParentTaskId(lastTask.parentTaskId);
       setCompoundSplitHint(null);
       return true;
     }
@@ -1705,12 +1169,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       return true;
     } else if (e.key === 'Escape') {
       setInput('');
+      setCurrentInputParentTaskId(undefined);
       setCompoundSplitHint(null);
       inputHandleRef.current?.blur();
       return true;
     }
     return false;
-  }, [templateTypeahead, templateTypeaheadIndex, acceptTemplateTypeahead, listTypeahead, listTypeaheadIndex, acceptListTypeahead, tagTypeahead, tagTypeaheadIndex, acceptTagTypeahead, projectTypeahead, projectTypeaheadIndex, acceptProjectTypeahead, priorityTypeahead, priorityTypeaheadIndex, acceptPriorityTypeahead, effortTypeahead, effortTypeaheadIndex, acceptEffortTypeahead, input, pendingTasks, commitCurrentInputToPending, handleSubmit]);
+  }, [templateTypeahead, templateTypeaheadIndex, setTemplateTypeaheadIndex, acceptTemplateTypeahead, listTypeahead, listTypeaheadIndex, acceptListTypeahead, tagTypeahead, tagTypeaheadIndex, acceptTagTypeahead, projectTypeahead, projectTypeaheadIndex, acceptProjectTypeahead, priorityTypeahead, priorityTypeaheadIndex, acceptPriorityTypeahead, effortTypeahead, effortTypeaheadIndex, acceptEffortTypeahead, input, pendingTasks, commitCurrentInputToPending, handleSubmit]);
 
   const inlineToastPolicies = inlineToast?.taskIds
     .map((taskId) => inlineToast.editPolicies[taskId])
@@ -1809,14 +1274,14 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               <div
                 key={task.id}
                 className={`inline-flex max-w-full items-center gap-1 rounded-lg border px-2.5 py-1 text-xs ${
-                  task.parentIndex !== null
+                  isPendingSubtask(task)
                     ? 'ml-3 border-purple-800/30 bg-purple-900/20 text-purple-200'
                     : task.isComplete
                       ? 'border-green-800/30 bg-green-900/20 text-green-200 line-through opacity-70'
                       : 'border-blue-800/30 bg-blue-900/20 text-blue-200'
                 }`}
               >
-                <Tooltip content={task.parentIndex !== null ? 'Edit pending subtask' : 'Edit pending task'}>
+                <Tooltip content={isPendingSubtask(task) ? 'Edit pending subtask' : 'Edit pending task'}>
                   <button
                     type="button"
                     onMouseDown={(e) => {
@@ -1825,11 +1290,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     }}
                     className="max-w-[240px] truncate text-left hover:text-white"
                   >
-                    <span className="mr-1">{task.parentIndex !== null ? '↳' : task.isComplete ? <CheckSquare size={12} className="inline" /> : <Check size={12} className="inline" />}</span>
+                    <span className="mr-1">{isPendingSubtask(task) ? '↳' : task.isComplete ? <CheckSquare size={12} className="inline" /> : <Check size={12} className="inline" />}</span>
                     {task.text}
                   </button>
                 </Tooltip>
-                <Tooltip content={task.parentIndex !== null ? 'Remove pending subtask' : 'Remove pending task'}>
+                <Tooltip content={isPendingSubtask(task) ? 'Remove pending subtask' : 'Remove pending task'}>
                   <button
                     type="button"
                     onMouseDown={(e) => {
@@ -1837,13 +1302,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                       handlePendingTaskDelete(task.id);
                     }}
                     className={`transition-colors hover:text-white ${
-                      task.parentIndex !== null
+                      isPendingSubtask(task)
                         ? 'text-purple-300'
                         : task.isComplete
                           ? 'text-green-300'
                           : 'text-blue-300'
                     }`}
-                    aria-label={`Remove pending ${task.parentIndex !== null ? 'subtask' : 'task'} ${task.text}`}
+                    aria-label={`Remove pending ${isPendingSubtask(task) ? 'subtask' : 'task'} ${task.text}`}
                   >
                     ×
                   </button>
@@ -1864,7 +1329,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     d.listName && d.listName === quickAddCtx.listFilterName
                   );
                   if (listDest) {
-                    setDestination(listDest);
+                    selectDestination(listDest, { manual: true });
                   }
                 }
               }}
@@ -1878,9 +1343,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   : destination.listName
                     ? `Add task to ${destination.listName}...`
                     : destination.listSelectionMode === 'required' && !destination.listId
-                      ? `Add task to ${destination.shortLabel} (pick a ${destination.connectorType === 'github-issues' ? 'repo' : 'list'} with /name)...`
+                      ? `Add task to ${destination.shortLabel ?? destination.label} (pick a ${destination.connectorType === 'github-issues' ? 'repo' : 'list'} with /name)...`
                       : quickAddCtx.sourceFilter
-                        ? `Add task to ${destination.shortLabel}...`
+                        ? `Add task to ${destination.shortLabel ?? destination.label}...`
                         : 'Add a task... (t/ for templates)'
               }
               className="min-w-[12rem]"
@@ -1896,7 +1361,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    isVoiceListening ? voiceStop() : voiceStart();
+                    if (isVoiceListening) {
+                      voiceStop();
+                    } else {
+                      voiceStart();
+                    }
                   }}
                   aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
                   className={cn(
@@ -1976,7 +1445,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               title={destination.label}
             >
               <ConnectorIconImg type={destination.connectorType} size={14} />
-              <span className="max-w-[120px] truncate">{destination.shortLabel}</span>
+              <span className="max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
               <span className="text-[var(--text-muted)]">▾</span>
             </motion.button>
 
@@ -2114,15 +1583,16 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 <span>Select a list</span>
                 <span className="normal-case tracking-normal font-normal">↑↓ navigate · ↵ select</span>
               </div>
-              <div className="max-h-48 overflow-y-auto">
+              <div ref={listTypeaheadScrollRef} className="max-h-48 overflow-y-auto">
                 {listTypeahead.matches.map((dest, i) => {
                   const isActive = i === listTypeaheadIndex;
-                  const name = dest.listName || dest.shortLabel;
+                  const name = dest.listName || dest.shortLabel || dest.label;
                   // Highlight the matching substring
                   const matchIdx = name.toLowerCase().indexOf(listTypeahead.query);
                   return (
                     <button
                       key={`${dest.id}-${dest.listId}`}
+                      data-list-typeahead-index={i}
                       onMouseDown={(e) => {
                         e.preventDefault(); // prevent blur
                         acceptListTypeahead(dest);
@@ -2400,111 +1870,17 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           )}
         </AnimatePresence>
 
-        {/* Destination picker dropdown */}
-        <AnimatePresence>
-          {showDestPicker && (
-            <motion.div
-              className="absolute right-0 top-full z-50 mt-1.5 flex max-h-[min(420px,calc(100vh-120px))] w-72 flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[var(--shadow-lg)]"
-              variants={dropdownVariants}
-              initial="hidden"
-              animate="show"
-              exit="exit"
-            >
-              {/* Search input */}
-              <div className="px-2.5 pt-2.5 pb-1.5">
-                <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[var(--surface-0)] border border-[var(--border)] rounded-lg">
-                  <Search size={13} className="text-[var(--text-muted)] flex-shrink-0" />
-                  <input
-                    ref={destSearchRef}
-                    type="text"
-                    value={destSearch}
-                    onChange={e => { setDestSearch(e.target.value); setDestNavIndex(0); }}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault();
-                        setDestNavIndex(i => Math.min(i + 1, flatPickerDests.length - 1));
-                      } else if (e.key === 'ArrowUp') {
-                        e.preventDefault();
-                        setDestNavIndex(i => Math.max(i - 1, 0));
-                      } else if (e.key === 'Enter' && flatPickerDests.length > 0) {
-                        e.preventDefault();
-                        const dest = flatPickerDests[destNavIndex];
-                        if (dest) {
-                          setDestination(dest);
-                          setShowDestPicker(false);
-                          userOverrodeDestRef.current = true;
-                          setInput(prev => prev.replace(/^\/\S+\s/, ''));
-                        }
-                      } else if (e.key === 'Escape') {
-                        e.preventDefault();
-                        setShowDestPicker(false);
-                      }
-                    }}
-                    placeholder="Search destinations..."
-                    className="flex-1 bg-transparent text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none shadow-none border-none"
-                  />
-                </div>
-              </div>
-
-              {/* Scrollable grouped list */}
-              <div ref={destScrollRef} className="overflow-y-auto flex-1 min-h-0">
-                {destPickerGroups.length === 0 && (
-                  <div className="px-3 py-4 text-xs text-[var(--text-muted)] text-center">
-                    No matching destinations
-                  </div>
-                )}
-                {destPickerGroups.map((group, groupIdx) => {
-                  const groupStartIdx = groupStartIndices[groupIdx] ?? 0;
-
-                  return (
-                    <div key={group.label}>
-                      <div className="px-3 pt-2 pb-1 text-[12px] font-semibold text-[var(--text-muted)] uppercase tracking-wider flex items-center gap-1.5 sticky top-0 bg-[var(--surface-1)]">
-                        {group.connectorType && <ConnectorIconImg type={group.connectorType} size={11} />}
-                        <span className="truncate">{group.label}</span>
-                      </div>
-                      {group.destinations.map((dest, i) => {
-                        const flatIdx = groupStartIdx + i;
-                        const isNavTarget = flatIdx === destNavIndex;
-                        const isSelected = destination.id === dest.id && destination.listId === dest.listId;
-                        return (
-                          <button
-                            key={`${dest.id}-${dest.listId || 'default'}`}
-                            data-dest-idx={flatIdx}
-                            onClick={() => {
-                              setDestination(dest);
-                              setShowDestPicker(false);
-                              userOverrodeDestRef.current = true;
-                              setInput(prev => prev.replace(/^\/\S+\s/, ''));
-                            }}
-                            onMouseEnter={() => setDestNavIndex(flatIdx)}
-                            className={`w-full flex items-center gap-2.5 px-3 py-1.5 text-sm text-left transition-colors ${
-                              isNavTarget ? 'bg-[var(--accent)]/10 text-[var(--text-primary)]'
-                              : isSelected ? 'bg-[var(--surface-2)]'
-                              : 'text-[var(--text-secondary)] hover:bg-[var(--surface-0)]'
-                            }`}
-                          >
-                            <ConnectorIconImg type={dest.connectorType} size={14} />
-                            <span className="flex-1 min-w-0">
-                              <span className="block text-xs text-[var(--text-primary)] truncate">{dest.shortLabel}</span>
-                              {dest.shortLabel !== dest.label && (
-                                <span className="block text-[12px] text-[var(--text-muted)] truncate">{dest.label}</span>
-                              )}
-                            </span>
-                            {isSelected && <span className="text-blue-400 text-xs flex-shrink-0"><Check size={12} /></span>}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="border-t border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
-                💡 Type <code className="text-blue-400">@work</code> or <code className="text-green-400">@github</code> to auto-select · <code className="text-purple-400">/list</code> to pick a list
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <DestinationPicker
+          open={showDestPicker}
+          destinations={destinations}
+          selectedDestination={destination}
+          onSelect={(nextDestination) => {
+            selectDestination(nextDestination, { manual: true });
+            setShowDestPicker(false);
+            setInput((current) => current.replace(/^\/\S+\s/, ''));
+          }}
+          onClose={() => setShowDestPicker(false)}
+        />
 
         {/* Inline toast notification */}
         <AnimatePresence>
@@ -2559,23 +1935,23 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     disabled={Boolean(undoBlockedReason)}
                     title={undoBlockedReason}
                     onClick={async () => {
-                      const results = await Promise.all(inlineToast.taskIds.map(id => fetch(`/api/tasks/${id}`, { method: 'DELETE' })));
-                      const failed = results.filter(r => !r.ok);
-                      if (failed.length > 0) {
-                        toast.error('Undo failed — task could not be removed');
+                      try {
+                        const result = await undoQuickAddTasks({}, inlineToast.taskIds);
+                        if (result.closedConnectorType) {
+                          const label = CONNECTOR_LABELS[result.closedConnectorType]
+                            || result.closedConnectorType;
+                          toast.info(`Undone · closed as not planned on ${label}`, { duration: 4000 });
+                        }
                         setInlineToast(null);
-                        return;
+                        onTaskAdded?.();
+                        window.dispatchEvent(new CustomEvent('mission-control:task-added'));
+                      } catch (error) {
+                        taskLogger.error('Failed to undo Quick Add submission', { error });
+                        toast.error(error instanceof Error
+                          ? error.message
+                          : 'Undo failed — task could not be removed');
+                        setInlineToast(null);
                       }
-                      // Check if any task was closed (not deleted) and show appropriate message
-                      const bodies = await Promise.all(results.map(r => r.json().catch(() => ({}))));
-                      const closedResult = bodies.find(b => b.action === 'closed');
-                      if (closedResult) {
-                        const label = CONNECTOR_LABELS[closedResult.connectorType] || closedResult.connectorType;
-                        toast.info(`Undone · closed as not planned on ${label}`, { duration: 4000 });
-                      }
-                      setInlineToast(null);
-                      onTaskAdded?.();
-                      window.dispatchEvent(new CustomEvent('mission-control:task-added'));
                     }}
                   >
                     Undo
@@ -2687,6 +2063,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             onClose={() => { setShowModal(false); setSelectedTemplateId(null); }}
             onSubmit={() => {
               setInput('');
+              setCurrentInputParentTaskId(undefined);
               setParsed(null);
               setShowModal(false);
               setSelectedTemplateId(null);

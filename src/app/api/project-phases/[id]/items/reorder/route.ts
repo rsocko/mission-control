@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { projectPhaseItems } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
-import { getStoredTaskMutationPolicy } from '@/lib/tasks/mutation-policy';
+import {
+  ProjectHierarchyServiceError,
+  reorderTasksInProjectPhase,
+} from '@/lib/projects/hierarchy-service';
 
 /**
  * PUT /api/project-phases/[id]/items/reorder — Bulk-update item sortOrder within a phase.
@@ -13,43 +13,33 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     const { id: phaseId } = await params;
     const body = await request.json();
-    const orderedTaskIds: string[] = body.orderedTaskIds;
+    const orderedTaskIds: unknown = body.orderedTaskIds;
 
-    if (!Array.isArray(orderedTaskIds) || orderedTaskIds.length === 0) {
+    if (
+      !Array.isArray(orderedTaskIds)
+      || orderedTaskIds.length === 0
+      || orderedTaskIds.some((taskId) => typeof taskId !== 'string' || !taskId.trim())
+      || new Set(orderedTaskIds).size !== orderedTaskIds.length
+    ) {
       return NextResponse.json({ error: 'orderedTaskIds must be a non-empty array' }, { status: 400 });
     }
-    const mutations = await Promise.all(
-      orderedTaskIds.map((taskId) => getStoredTaskMutationPolicy(taskId, 'phases')),
-    );
-    if (mutations.some((entry) => entry === null)) return ApiErrors.notFound('Task');
-    const blocked = mutations.find((entry) => entry?.policy.mutation === 'blocked');
-    if (blocked) {
-      return ApiErrors.forbidden(
-        blocked.policy.reason ?? 'Phase placement cannot be changed for this task source',
-      );
-    }
 
-    runTransaction((tx) => {
-      for (let i = 0; i < orderedTaskIds.length; i++) {
-        tx.update(projectPhaseItems)
-          .set({ sortOrder: i })
-          .where(
-            and(
-              eq(projectPhaseItems.phaseId, phaseId),
-              eq(projectPhaseItems.taskId, orderedTaskIds[i]),
-            ),
-          )
-          .run();
-      }
+    const result = await reorderTasksInProjectPhase({
+      phaseId,
+      orderedTaskIds,
+      actor: { type: 'user' },
     });
-
-    // Return updated items
-    const items = await db.select().from(projectPhaseItems)
-      .where(eq(projectPhaseItems.phaseId, phaseId))
-      .orderBy(projectPhaseItems.sortOrder);
-
-    return NextResponse.json({ items });
+    return NextResponse.json({
+      items: result.hierarchy.phaseItemsByPhase[phaseId] ?? [],
+    });
   } catch (error) {
+    if (error instanceof ProjectHierarchyServiceError) {
+      return NextResponse.json({
+        error: error.message,
+        code: error.code,
+        current: error.current,
+      }, { status: error.status });
+    }
     return ApiErrors.internal('Failed to reorder phase items', error);
   }
 }

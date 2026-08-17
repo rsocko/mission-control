@@ -238,12 +238,9 @@ function TargetRunway({
 
   return (
     <section className="rounded-xl border border-[var(--border)] bg-[var(--surface-1)]">
-      <div className="flex items-start justify-between gap-4 px-4 pb-2 pt-4">
-        <div>
-          <h2 className="text-sm font-semibold text-[var(--text-primary)]">Target runway</h2>
-          <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Nearest project deadlines, ordered by urgency.</p>
-        </div>
-        <CalendarClock size={16} className="mt-0.5 flex-shrink-0 text-[var(--accent-400)]" />
+      <div className="flex items-center justify-between gap-4 px-4 pb-2 pt-4">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Target runway</h2>
+        <CalendarClock size={16} className="flex-shrink-0 text-[var(--accent-400)]" />
       </div>
 
       <div className="divide-y divide-[var(--border)] px-3 pb-2">

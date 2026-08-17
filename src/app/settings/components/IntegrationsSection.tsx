@@ -17,6 +17,7 @@ import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import { settingsLogger } from '@/lib/client-logger';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 import type { N8NConfigState, OutboundWebhookSubscription, InboundWebhookConfig } from './types';
 import { INTEGRATION_EVENT_OPTIONS } from './types';
 
@@ -619,6 +620,7 @@ function WebhookModal({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
+  useCloseOnEscape(onClose);
   const [name, setName] = useState(webhook?.name || '');
   const [url, setUrl] = useState(webhook?.url || '');
   const [secret, setSecret] = useState(webhook?.secret || '');
@@ -675,6 +677,9 @@ function WebhookModal({
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label={webhook ? 'Edit webhook' : 'Add webhook'}
         className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >
@@ -785,6 +790,7 @@ function InboundWebhookModal({
   onClose: () => void;
   onSaved: () => void | Promise<void>;
 }) {
+  useCloseOnEscape(onClose);
   const [name, setName] = useState(webhook?.name || '');
   const [sourceLabel, setSourceLabel] = useState(webhook?.sourceLabel || 'webhook');
   const [secret, setSecret] = useState(webhook?.secret || '');
@@ -833,6 +839,9 @@ function InboundWebhookModal({
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label={webhook ? 'Edit inbound endpoint' : 'Add inbound endpoint'}
         className="w-full max-w-2xl rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-6 shadow-2xl"
         onClick={(event) => event.stopPropagation()}
       >

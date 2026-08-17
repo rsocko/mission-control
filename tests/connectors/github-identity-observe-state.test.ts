@@ -39,13 +39,15 @@ describe('GitHub identity observation state', () => {
     const partial = new GitHubIssuesConnector();
     await partial.initialize(config);
     const partialInternal = partial as unknown as {
-      fetchProjectTaskContext: () => Promise<{
-        metadataBySourceId: Map<string, unknown>;
-        draftTasks: never[];
-      }>;
+      projectsSync: {
+        fetchProjectTaskContext: () => Promise<{
+          metadataBySourceId: Map<string, unknown>;
+          draftTasks: never[];
+        }>;
+      };
       fetchIssuesFromRepo: () => AsyncGenerator<never[]>;
     };
-    partialInternal.fetchProjectTaskContext = async () => ({
+    partialInternal.projectsSync.fetchProjectTaskContext = async () => ({
       metadataBySourceId: new Map(),
       draftTasks: [],
     });
@@ -65,7 +67,7 @@ describe('GitHub identity observation state', () => {
     const inaccessible = new GitHubIssuesConnector();
     await inaccessible.initialize(config);
     const inaccessibleInternal = inaccessible as unknown as typeof partialInternal;
-    inaccessibleInternal.fetchProjectTaskContext = partialInternal.fetchProjectTaskContext;
+    inaccessibleInternal.projectsSync.fetchProjectTaskContext = partialInternal.projectsSync.fetchProjectTaskContext;
     inaccessibleInternal.fetchIssuesFromRepo = async function* () {
       throw new Error('first page failed');
     };
@@ -94,44 +96,46 @@ describe('GitHub identity observation state', () => {
     };
     const internal = connector as unknown as {
       repositoryEvidenceBySourceId: Map<string, ExternalIdentityObservation>;
-      fetchProjectsV2: () => Promise<Array<{
-        id: string;
-        number: number;
-        title: string;
-        shortDescription: string | null;
-        url: string;
-      }>>;
-      fetchProjectItemsForProject: () => Promise<{
-        items: Array<{
+      projectsSync: {
+        fetchProjectsV2: () => Promise<Array<{
           id: string;
-          content: {
-            __typename: 'Issue';
+          number: number;
+          title: string;
+          shortDescription: string | null;
+          url: string;
+        }>>;
+        fetchProjectItemsForProject: () => Promise<{
+          items: Array<{
             id: string;
-            number: number;
-            title: string;
-            body: string;
-            state: string;
-            createdAt: string;
-            updatedAt: string;
-            closedAt: null;
-            url: string;
-            repository: { nameWithOwner: string };
-          };
-          fieldValues: { nodes: never[] };
+            content: {
+              __typename: 'Issue';
+              id: string;
+              number: number;
+              title: string;
+              body: string;
+              state: string;
+              createdAt: string;
+              updatedAt: string;
+              closedAt: null;
+              url: string;
+              repository: { nameWithOwner: string };
+            };
+            fieldValues: { nodes: never[] };
+          }>;
+          state: 'complete';
         }>;
-        state: 'complete';
-      }>;
+      };
       fetchRepoTaskPages: () => AsyncGenerator<never[]>;
     };
     internal.repositoryEvidenceBySourceId.set('acme/app', repositoryEvidence);
-    internal.fetchProjectsV2 = async () => [{
+    internal.projectsSync.fetchProjectsV2 = async () => [{
       id: 'P_project_7',
       number: 7,
       title: 'Roadmap',
       shortDescription: null,
       url: 'https://github.com/orgs/acme/projects/7',
     }];
-    internal.fetchProjectItemsForProject = async () => ({
+    internal.projectsSync.fetchProjectItemsForProject = async () => ({
       items: [{
         id: 'project-item-1',
         content: {
@@ -184,16 +188,27 @@ describe('GitHub identity observation state', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
     const internal = connector as unknown as {
-      projectOwnerMap: Map<string, { type: 'organization'; login: string }>;
+      projectsSync: {
+        projectOwnerMap: Map<string, { type: 'organization'; login: string }>;
+        fetchProjectItemsForProject: (
+          context: {
+            client: { graphqlFetchAny: ReturnType<typeof vi.fn> };
+            repos: string[];
+            connectorId: string;
+            connectorType: string;
+            repositoryEvidenceBySourceId: Map<string, ExternalIdentityObservation>;
+          },
+          project: { id: string; number: number },
+        ) => Promise<{
+          items: Array<{ id: string }>;
+          state: 'complete' | 'partial' | 'inaccessible';
+        }>;
+      };
       client: {
         graphqlFetchAny: ReturnType<typeof vi.fn>;
       };
-      fetchProjectItemsForProject: (project: { id: string; number: number }) => Promise<{
-        items: Array<{ id: string }>;
-        state: 'complete' | 'partial' | 'inaccessible';
-      }>;
     };
-    internal.projectOwnerMap.set('P_project_7', { type: 'organization', login: 'acme' });
+    internal.projectsSync.projectOwnerMap.set('P_project_7', { type: 'organization', login: 'acme' });
     internal.client.graphqlFetchAny = vi.fn()
       .mockResolvedValueOnce({
         data: {
@@ -211,7 +226,13 @@ describe('GitHub identity observation state', () => {
         errors: [{ type: 'RATE_LIMITED' }],
       });
 
-    await expect(internal.fetchProjectItemsForProject({
+    await expect(internal.projectsSync.fetchProjectItemsForProject({
+      client: internal.client,
+      repos: [],
+      connectorId: config.id,
+      connectorType: config.type,
+      repositoryEvidenceBySourceId: new Map(),
+    }, {
       id: 'P_project_7',
       number: 7,
     })).resolves.toEqual({
@@ -225,31 +246,33 @@ describe('GitHub identity observation state', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
     const internal = connector as unknown as {
-      fetchProjectsV2: () => Promise<Array<{
-        id: string;
-        number: number;
-        title: string;
-        shortDescription: null;
-        url: string;
-      }>>;
-      fetchProjectItemsForProject: () => Promise<{
-        items: Array<{
+      projectsSync: {
+        fetchProjectsV2: () => Promise<Array<{
           id: string;
-          content: null;
-          fieldValues: { nodes: never[] };
+          number: number;
+          title: string;
+          shortDescription: null;
+          url: string;
+        }>>;
+        fetchProjectItemsForProject: () => Promise<{
+          items: Array<{
+            id: string;
+            content: null;
+            fieldValues: { nodes: never[] };
+          }>;
+          state: 'complete';
         }>;
-        state: 'complete';
-      }>;
+      };
       fetchRepoTaskPages: () => AsyncGenerator<never[]>;
     };
-    internal.fetchProjectsV2 = async () => [{
+    internal.projectsSync.fetchProjectsV2 = async () => [{
       id: 'P_redacted',
       number: 8,
       title: 'Redacted',
       shortDescription: null,
       url: 'https://github.com/orgs/acme/projects/8',
     }];
-    internal.fetchProjectItemsForProject = async () => ({
+    internal.projectsSync.fetchProjectItemsForProject = async () => ({
       items: [{
         id: 'project-item-redacted',
         content: null,

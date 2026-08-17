@@ -187,6 +187,10 @@ type ReconcileOptions = {
 };
 
 const DEFAULT_DEPENDENCY_BATCH_SIZE = 25;
+// Bound the statements issued while the finalization transaction owns the
+// writer lock so large snapshots cannot exhaust other processes' busy timeout.
+const DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE = 100;
+const DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE = 500;
 const DEFAULT_STREAMED_DEPENDENCY_BATCH_SIZE = 500;
 const DEFAULT_RETRY_BASE_MS = 15 * 60 * 1000;
 const MAX_RETRY_BACKOFF_MS = 6 * 60 * 60 * 1000;
@@ -662,11 +666,20 @@ function snapshotProgress(
   };
 }
 
-export async function getDependencyReconciliationHealth(): Promise<
+export async function getDependencyReconciliationHealth(
+  connectorInstanceIds?: string[],
+  shouldDefer?: () => boolean,
+): Promise<
   Map<string, DependencyReconciliationProgress>
 > {
-  const [latestRows, completedRows, edgeCountRows, terminalRows] = await Promise.all([
-    db.select().from(dependencyReconciliationSnapshots).where(
+  if (connectorInstanceIds?.length === 0) return new Map();
+  if (shouldDefer?.()) return new Map();
+  const connectorFilter = connectorInstanceIds
+    ? inArray(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceIds)
+    : undefined;
+  const [latestRows, completedRows] = await Promise.all([
+    db.select().from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
       eq(
         dependencyReconciliationSnapshots.id,
         sql`(
@@ -678,8 +691,9 @@ export async function getDependencyReconciliationHealth(): Promise<
           LIMIT 1
         )`,
       ),
-    ),
-    db.select().from(dependencyReconciliationSnapshots).where(
+    )),
+    db.select().from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
       eq(
         dependencyReconciliationSnapshots.id,
         sql`(
@@ -692,24 +706,38 @@ export async function getDependencyReconciliationHealth(): Promise<
           LIMIT 1
         )`,
       ),
-    ),
-    db.select({
-      snapshotId: dependencyReconciliationEdges.snapshotId,
-      count: sql<number>`COUNT(*)`,
-    }).from(dependencyReconciliationEdges)
-      .groupBy(dependencyReconciliationEdges.snapshotId),
+    )),
+  ]);
+  if (shouldDefer?.()) return new Map();
+  const relevantSnapshotIds = Array.from(new Set([
+    ...latestRows.map((row) => row.id),
+    ...completedRows.map((row) => row.id),
+  ]));
+  const [edgeCountRows, terminalRows] = await Promise.all([
+    relevantSnapshotIds.length === 0
+      ? Promise.resolve([])
+      : db.select({
+          snapshotId: dependencyReconciliationEdges.snapshotId,
+          count: sql<number>`COUNT(*)`,
+        }).from(dependencyReconciliationEdges)
+          .where(inArray(dependencyReconciliationEdges.snapshotId, relevantSnapshotIds))
+          .groupBy(dependencyReconciliationEdges.snapshotId),
     db.select({
       connectorInstanceId: dependencyReconciliationSnapshots.connectorInstanceId,
       status: dependencyReconciliationSnapshots.status,
       startedAt: dependencyReconciliationSnapshots.startedAt,
-    }).from(dependencyReconciliationSnapshots).where(inArray(
-      dependencyReconciliationSnapshots.status,
-      ['completed', 'partial', 'failed'],
+    }).from(dependencyReconciliationSnapshots).where(and(
+      connectorFilter,
+      inArray(
+        dependencyReconciliationSnapshots.status,
+        ['completed', 'partial', 'failed'],
+      ),
     )).orderBy(
       dependencyReconciliationSnapshots.connectorInstanceId,
       desc(dependencyReconciliationSnapshots.startedAt),
     ),
   ]);
+  if (shouldDefer?.()) return new Map();
   const lastCompleted = new Map(
     completedRows.map((row) => [row.connectorInstanceId, row]),
   );
@@ -2256,6 +2284,41 @@ async function finalizeSnapshot(
     return { snapshot: partial, removed: 0 };
   }
 
+  // Decide the finalization mutations before acquiring the writer lock so the
+  // transaction only executes a bounded number of set-based statements.
+  const insertableEdges = snapshot.identityMode === 'stable'
+    ? stableEdges.map(({ blocker, blocked }) => ({
+      id: randomUUID(),
+      taskId: blocked.id,
+      dependsOnTaskId: blocker.id,
+      type: 'blocks' as const,
+      connectorInstanceId,
+      syncStatus: 'synced' as const,
+      syncAction: null,
+      syncError: null,
+      lastSyncedAt: completedAt,
+      createdAt: completedAt,
+    }))
+    : [];
+  const removableDependencyIds = localDependencies.filter((dependency) => {
+    if (
+      dependency.connectorInstanceId !== connectorInstanceId
+      || dependency.syncAction
+      || dependency.syncStatus !== 'synced'
+      || !candidateIds.has(dependency.id)
+    ) return false;
+    const blocked = taskById.get(dependency.taskId);
+    if (!blocked) return false;
+    if (
+      snapshot.identityMode === 'stable'
+        ? !deletionEligibleTaskIds.has(blocked.id)
+          || unresolvedBlockedTaskIds.has(blocked.id)
+        : !deletionEligibleSourceIds.has(blocked.sourceId)
+          || unresolvedBlockedSourceIds.has(blocked.sourceId)
+    ) return false;
+    return !remoteKeys.has(`${dependency.dependsOnTaskId}\u0000${dependency.taskId}`);
+  }).map((dependency) => dependency.id);
+
   let removed = 0;
   let imported = 0;
   let prunedSnapshots = 0;
@@ -2265,47 +2328,29 @@ async function finalizeSnapshot(
       snapshot,
       { cursor: snapshot.cursor, now: completedAt },
     )) return false;
-    if (snapshot.identityMode === 'stable') {
-      for (const { blocker, blocked } of stableEdges) {
-        imported += tx.insert(taskDependencies).values({
-          id: randomUUID(),
-          taskId: blocked.id,
-          dependsOnTaskId: blocker.id,
-          type: 'blocks',
-          connectorInstanceId,
-          syncStatus: 'synced',
-          syncAction: null,
-          syncError: null,
-          lastSyncedAt: completedAt,
-          createdAt: completedAt,
-        }).onConflictDoNothing().run().changes;
-      }
+    for (
+      let index = 0;
+      index < insertableEdges.length;
+      index += DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE
+    ) {
+      imported += tx.insert(taskDependencies).values(
+        insertableEdges.slice(index, index + DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE),
+      ).onConflictDoNothing().run().changes;
     }
-    for (const dependency of localDependencies) {
-      if (
-        dependency.connectorInstanceId !== connectorInstanceId
-        || dependency.syncAction
-        || dependency.syncStatus !== 'synced'
-        || !candidateIds.has(dependency.id)
-      ) continue;
-      const blocked = taskById.get(dependency.taskId);
-      if (!blocked) continue;
-      if (
-        snapshot.identityMode === 'stable'
-          ? !deletionEligibleTaskIds.has(blocked.id)
-            || unresolvedBlockedTaskIds.has(blocked.id)
-          : !deletionEligibleSourceIds.has(blocked.sourceId)
-            || unresolvedBlockedSourceIds.has(blocked.sourceId)
-      ) continue;
-      const key = `${dependency.dependsOnTaskId}\u0000${dependency.taskId}`;
-      if (remoteKeys.has(key)) continue;
-      const deleteResult = tx.delete(taskDependencies).where(and(
-        eq(taskDependencies.id, dependency.id),
+    for (
+      let index = 0;
+      index < removableDependencyIds.length;
+      index += DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE
+    ) {
+      removed += tx.delete(taskDependencies).where(and(
+        inArray(
+          taskDependencies.id,
+          removableDependencyIds.slice(index, index + DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE),
+        ),
         eq(taskDependencies.connectorInstanceId, connectorInstanceId),
         eq(taskDependencies.syncStatus, 'synced'),
         isNull(taskDependencies.syncAction),
-      )).run();
-      removed += deleteResult.changes;
+      )).run().changes;
     }
 
     const completed = tx.update(dependencyReconciliationSnapshots).set({

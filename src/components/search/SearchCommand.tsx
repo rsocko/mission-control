@@ -17,8 +17,9 @@ import {
 } from '@/lib/quick-add-preferences';
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
+import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
-type SearchMode = 'keyword' | 'semantic' | 'hybrid';
 type TypeFilter = 'all' | 'tasks' | 'notifications';
 
 interface SearchResult {
@@ -36,25 +37,12 @@ interface SearchResult {
   metadata: Record<string, unknown>;
 }
 
-interface SearchResponse {
-  note?: string | null;
-  semanticAvailable?: boolean;
-  durationMs?: number;
-  results: SearchResult[];
-}
-
 interface ActiveFilters {
   type: TypeFilter;
   source: string | null;
   status: string | null;
   excludeDone: boolean;
 }
-
-const MODE_OPTIONS: Array<{ label: string; mode: SearchMode; requiresSemantic?: boolean }> = [
-  { label: 'Text', mode: 'keyword' },
-  { label: 'Semantic', mode: 'semantic', requiresSemantic: true },
-  { label: 'Both', mode: 'hybrid', requiresSemantic: true },
-];
 
 const RECENT_SEARCHES_KEY = 'mc:recent-searches';
 const MAX_RECENT_SEARCHES = 5;
@@ -128,12 +116,6 @@ export function SearchCommand() {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
-  const [mode, setMode] = useState<SearchMode>('keyword');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [note, setNote] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [semanticAvailable, setSemanticAvailable] = useState<boolean | null>(null);
-  const [durationMs, setDurationMs] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ActiveFilters>({ type: 'all', source: null, status: null, excludeDone: true });
@@ -147,21 +129,23 @@ export function SearchCommand() {
     () => parseTaskInput(query, { ...quickAddPreferences, projects }),
     [query, quickAddPreferences, projects],
   );
-
-  // Check semantic availability on mount and auto-switch to hybrid if available
-  useEffect(() => {
-    fetch('/api/ai/search?q=__status_check__&mode=hybrid&limit=1')
-      .then((r) => r.json())
-      .then((payload: SearchResponse) => {
-        setSemanticAvailable(payload.semanticAvailable ?? false);
-        if (payload.semanticAvailable) {
-          setMode('hybrid');
-        }
-      })
-      .catch(() => {
-        setSemanticAvailable(false);
-      });
-  }, []);
+  const {
+    results,
+    note,
+    keywordLoading: loading,
+    semanticLoading,
+    keywordDurationMs: durationMs,
+    semanticEnabled,
+    semanticAvailable,
+  } = useProgressiveSearch({
+    query: debouncedQuery,
+    enabled: open,
+    type: filters.type,
+    limit: 30,
+    source: filters.source,
+    status: filters.status,
+    excludeDone: filters.excludeDone,
+  });
 
   useEffect(() => {
     const syncPreferences = () => setQuickAddPreferencesState(getQuickAddPreferences());
@@ -193,14 +177,10 @@ export function SearchCommand() {
     setOpen(nextOpen);
 
     if (!nextOpen) {
-      setLoading(false);
       setActiveIndex(-1);
       setPreviewTaskId(null);
       setShowFilters(false);
       if (!query.trim()) {
-        setResults([]);
-        setNote(null);
-        setDurationMs(null);
         setFilters({ type: 'all', source: null, status: null, excludeDone: true });
       }
     }
@@ -211,31 +191,23 @@ export function SearchCommand() {
     setActiveIndex(-1);
 
     if (!value.trim()) {
-      setResults([]);
-      setNote(null);
-      setDurationMs(null);
-      setLoading(false);
-    } else {
-      // Immediately show loading state for responsive feedback
-      setLoading(true);
+      setDebouncedQuery('');
     }
   }, []);
-
-  // Fast debounce: keyword is nearly instant, semantic needs a tiny delay
-  const debounceMs = mode === 'keyword' ? 80 : 200;
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setDebouncedQuery(query.trim());
-    }, debounceMs);
+    }, 80);
 
     return () => window.clearTimeout(timeoutId);
-  }, [query, debounceMs]);
+  }, [query]);
 
   useEffect(() => {
     const openSearch = () => setOpen(true);
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!open && shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setOpen((current) => !current);
@@ -249,7 +221,7 @@ export function SearchCommand() {
       window.removeEventListener('mission-control:open-search', openSearch as EventListener);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -262,55 +234,6 @@ export function SearchCommand() {
 
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
-
-  useEffect(() => {
-    if (!open || !debouncedQuery) {
-      if (!debouncedQuery) setLoading(false);
-      return;
-    }
-
-    const controller = new AbortController();
-    const params = new URLSearchParams({
-      q: debouncedQuery,
-      mode,
-      type: filters.type,
-      limit: '30',
-    });
-
-    fetch(`/api/ai/search?${params.toString()}`, { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-
-        return response.json() as Promise<SearchResponse>;
-      })
-      .then((payload) => {
-        setResults(payload.results);
-        setNote(payload.note ?? null);
-        setDurationMs(payload.durationMs ?? null);
-        if (payload.semanticAvailable !== undefined) {
-          setSemanticAvailable(payload.semanticAvailable);
-        }
-        setActiveIndex(-1);
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        setResults([]);
-        setNote(error instanceof Error ? error.message : 'Search failed.');
-        setDurationMs(null);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [debouncedQuery, mode, open, filters.type]);
 
   // Apply client-side filters (source, status) on top of API results
   const filteredResults = useMemo(() => {
@@ -354,6 +277,10 @@ export function SearchCommand() {
   const clearFilters = () => {
     setFilters({ type: 'all', source: null, status: null, excludeDone: true });
   };
+
+  useEffect(() => {
+    setActiveIndex(-1);
+  }, [filters.excludeDone, filters.source, filters.status, filters.type]);
 
   const openResult = useCallback((result: SearchResult) => {
     saveRecentSearch(query);
@@ -520,7 +447,7 @@ export function SearchCommand() {
 
                   {/* Search input header */}
                   <div className="shrink-0 border-b border-[var(--border)] p-3 sm:p-4">
-                    <div className="flex items-center gap-3">
+                    <div className="input-glow flex items-center gap-3 rounded-[var(--radius-md)]">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--surface-1)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
                         {loading ? (
                           <Loader2 size={15} className="animate-spin text-[var(--accent-400)]" />
@@ -545,34 +472,14 @@ export function SearchCommand() {
 
                     {/* Mode and filter row */}
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                      {MODE_OPTIONS.map((option) => {
-                        const active = option.mode === mode;
-                        const disabled = option.requiresSemantic && semanticAvailable === false;
-                        return (
-                          <button
-                            key={option.mode}
-                            type="button"
-                            disabled={disabled}
-                            onClick={() => {
-                              if (disabled) return;
-                              setMode(option.mode);
-                              if (query.trim()) {
-                                setLoading(true);
-                              }
-                            }}
-                            title={disabled ? 'Requires an AI embedding provider to be configured' : undefined}
-                            className={cn(
-                              'rounded-full px-2.5 py-1 text-[11px] font-medium transition-[background-color,color,box-shadow,transform] duration-150 active:scale-[0.96]',
-                              disabled && 'cursor-not-allowed opacity-40',
-                              active && !disabled
-                                ? 'bg-[var(--accent-900)]/50 text-[var(--accent-300)] shadow-[inset_0_0_0_1px_rgba(96,165,250,0.28)]'
-                                : 'bg-[var(--surface-1)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]'
-                            )}
-                          >
-                            {option.label}
-                          </button>
-                        );
-                      })}
+                      <span className="rounded-full bg-[var(--surface-1)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+                        Keyword
+                      </span>
+                      {semanticEnabled && semanticAvailable ? (
+                        <span className="rounded-full bg-[var(--accent-900)]/30 px-2.5 py-1 text-[11px] font-medium text-[var(--accent-300)] shadow-[inset_0_0_0_1px_rgba(96,165,250,0.2)]">
+                          {semanticLoading ? 'Finding related…' : 'Related results on'}
+                        </span>
+                      ) : null}
 
                       <div className="mx-1 h-4 w-px bg-[var(--border)]" />
 
@@ -708,12 +615,12 @@ export function SearchCommand() {
                       )}
                     </AnimatePresence>
 
-                    {semanticAvailable === false && mode !== 'keyword' && (
+                    {semanticEnabled && !semanticAvailable ? (
                       <div className="mt-2.5 flex items-center gap-2 rounded-[var(--radius-md)] border border-yellow-500/20 bg-yellow-500/5 px-3 py-1.5 text-[11px] text-yellow-200/80">
                         <AlertTriangle size={11} className="shrink-0 text-yellow-400/70" />
-                        <span>Semantic unavailable — using text fallback. Configure AI provider in settings.</span>
+                        <span>Related results are unavailable. Keyword search remains active.</span>
                       </div>
-                    )}
+                    ) : null}
                   </div>
 
                   {/* Results area */}
@@ -800,7 +707,7 @@ export function SearchCommand() {
                       </div>
                     ) : null}
 
-                    {loading && debouncedQuery ? (
+                    {loading && debouncedQuery && filteredResults.length === 0 ? (
                       <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
                         <Loader2 size={14} className="animate-spin" />
                         Searching...
@@ -808,7 +715,7 @@ export function SearchCommand() {
                     ) : null}
 
                     {/* Inline typing indicator before debounce fires */}
-                    {loading && !debouncedQuery && query.trim() ? (
+                    {!loading && query.trim() && query.trim() !== debouncedQuery ? (
                       <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
                         <Loader2 size={14} className="animate-spin" />
                         <span className="animate-pulse">Typing...</span>
@@ -827,22 +734,12 @@ export function SearchCommand() {
                             >
                               Clear filters to see all {results.length} result{results.length !== 1 ? 's' : ''}
                             </button>
-                          ) : mode !== 'keyword' ? (
-                            <button
-                              type="button"
-                              onClick={() => { setMode('keyword'); setLoading(true); }}
-                              className="text-[var(--accent-400)] hover:underline"
-                            >
-                              Try Text search instead?
-                            </button>
-                          ) : (
-                            'Try different keywords or a broader phrase.'
-                          )}
+                          ) : 'Try different keywords or a broader phrase.'}
                         </p>
                       </div>
                     ) : null}
 
-                    {!loading && filteredResults.length > 0 ? (
+                    {filteredResults.length > 0 ? (
                       <motion.div
                         className="space-y-4"
                         initial="hidden"
@@ -885,6 +782,11 @@ export function SearchCommand() {
                                         </div>
                                       )}
                                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                        {result.source === 'semantic' ? (
+                                          <span className="rounded-md bg-[var(--accent-900)]/30 px-1.5 py-0.5 text-xs text-[var(--accent-300)]">
+                                            Related
+                                          </span>
+                                        ) : null}
                                         {result.metadata.status ? (
                                           <span
                                             className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
@@ -954,6 +856,11 @@ export function SearchCommand() {
                                           </div>
                                         )}
                                         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                                          {result.source === 'semantic' ? (
+                                            <span className="rounded-md bg-[var(--accent-900)]/30 px-1.5 py-0.5 text-xs text-[var(--accent-300)]">
+                                              Related
+                                            </span>
+                                          ) : null}
                                           {result.metadata.category ? (
                                             <span
                                               className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"

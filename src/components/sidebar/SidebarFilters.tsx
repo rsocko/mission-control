@@ -2,12 +2,11 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, AlertCircle, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, RefreshCw, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox } from 'lucide-react';
+import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import { formatSyncTime } from '@/lib/utils/dashboard-helpers';
-import type { TaskTag, TaskResponse, HubProject, ListGroup, SourceList, EnabledSource, SyncStatusEntry, SavedView } from '@/types/dashboard';
+import type { TaskTag, TaskResponse, HubProject, ListGroup, SourceList, EnabledSource, SavedView } from '@/types/dashboard';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import type { SidebarMode } from '@/lib/hooks/useSidebarExpanded';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
@@ -28,7 +27,6 @@ interface SidebarFiltersProps {
   enabledSources: EnabledSource[];
   sourceLists: SourceList[];
   listGroups: ListGroup[];
-  syncStatus: SyncStatusEntry[];
   allTags: TaskTag[];
   projects: HubProject[];
   savedViews: SavedView[];
@@ -53,7 +51,6 @@ interface SidebarFiltersProps {
   listSearch: string;
   tagSearch: string;
   tagsExpanded: boolean;
-  isSyncing: boolean;
 
   // Actions
   setSourceFilter: (v: string | null) => void;
@@ -87,12 +84,12 @@ interface SidebarFiltersProps {
 
 export function SidebarFilters(props: SidebarFiltersProps) {
   const {
-    taskResponse, enabledSources, sourceLists, listGroups, syncStatus, allTags,
+    taskResponse, enabledSources, sourceLists, listGroups, allTags,
     projects, savedViews, allSourceCounts,
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter,
     sidebarExpanded, sidebarMode, collapsedSections, expandedSourceLists, collapsedListGroups,
-    listSearch, tagSearch, tagsExpanded, isSyncing,
+    listSearch, tagSearch, tagsExpanded,
     setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter, setProjectFilter,
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
@@ -383,6 +380,7 @@ export function SidebarFilters(props: SidebarFiltersProps) {
               { id: 'week', label: 'Due This Week' },
               { id: 'assigned', label: 'Assigned to Me' },
               { id: 'recentlyCreated', label: 'Recently Created' },
+              { id: 'recentlyClosed', label: 'Recently Closed' },
               { id: 'waiting', label: 'Waiting / On Hold' },
             ].map(f => (
               <label key={f.id} className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
@@ -460,6 +458,15 @@ export function SidebarFilters(props: SidebarFiltersProps) {
             count={taskResponse.stats.recentlyCreated || 0}
             active={quickFilter === 'recentlyCreated'}
             onClick={() => setQuickFilter(quickFilter === 'recentlyCreated' ? null : 'recentlyCreated')}
+          />
+          )}
+          {!hiddenQuickFilters.includes('recentlyClosed') && (
+          <SidebarNavItem
+            icon={<CheckCircle2 size={14} className="text-violet-400" />}
+            label="Recently Closed"
+            count={taskResponse.stats.recentlyClosed || 0}
+            active={quickFilter === 'recentlyClosed'}
+            onClick={() => setQuickFilter(quickFilter === 'recentlyClosed' ? null : 'recentlyClosed')}
           />
           )}
           {!hiddenQuickFilters.includes('waiting') && (
@@ -734,50 +741,6 @@ export function SidebarFilters(props: SidebarFiltersProps) {
         </div>
         )}
       </div>
-
-      {/* Sync Status Section - stays at bottom, scrolls with content */}
-      {syncStatus.length > 0 && (
-        <div className="mt-auto pt-4 border-t border-[var(--border-subtle)]">
-          <button
-            onClick={() => toggleSection('syncStatus')}
-            className="w-full flex items-center gap-1 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide mb-2 hover:text-[var(--text-secondary)] transition-colors"
-          >
-            <ChevronRight size={11} className={`transition-transform duration-150 ${collapsedSections.has('syncStatus') ? '' : 'rotate-90'}`} />
-            <span>Sync Status</span>
-            {isSyncing && (
-              <span className="flex items-center gap-1 text-blue-400 font-normal normal-case tracking-normal ml-2">
-                <RefreshCw size={10} className="animate-spin" />
-                <span className="text-xs">Syncing…</span>
-              </span>
-            )}
-          </button>
-          {!collapsedSections.has('syncStatus') && (
-          <div className="space-y-2">
-            {syncStatus.filter((status) => status.enabled).map((status) => (
-              <div key={status.type} className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-1.5">
-                  {CONNECTOR_ICONS[status.type] && (
-                    <Image src={CONNECTOR_ICONS[status.type]} alt={status.type} width={12} height={12} />
-                  )}
-                  <span className="text-[var(--text-muted)] truncate max-w-[80px]">{status.name}</span>
-                </div>
-                {status.lastSyncedAt ? (
-                  <span className="flex items-center gap-1 text-green-400">
-                    <CheckCircle2 size={10} />
-                    <span>{formatSyncTime(status.lastSyncedAt)}</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-[var(--text-muted)]">
-                    <AlertCircle size={10} />
-                    <span>Never</span>
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-          )}
-        </div>
-      )}
     </aside>
   );
 }

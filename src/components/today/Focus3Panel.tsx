@@ -246,6 +246,7 @@ export function Focus3Panel({
                   taskIds: items.map(item => item.taskId),
                   label: 'Focus 3',
                 })}
+                aria-label="Enter calm focus mode"
                 className="p-1.5 text-[var(--text-muted)] hover:text-slate-300 hover:bg-[var(--surface-2)] rounded transition-colors"
               >
                 <Moon size={13} />
@@ -280,6 +281,7 @@ export function Focus3Panel({
               type="button"
               onClick={() => setCollapsed((current) => !current)}
               aria-expanded={!collapsed}
+              aria-label={collapsed ? 'Expand Focus 3' : 'Collapse Focus 3'}
               className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)] rounded transition-colors"
             >
               {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}

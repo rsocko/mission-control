@@ -8,6 +8,7 @@ import {
   projectAutoIncludeExclusions,
   projectPhaseItems,
   quickSortLog,
+  quickSortOperations,
   taskAttachments,
   taskDependencies,
   taskLinkedSources,
@@ -60,6 +61,7 @@ function runLocalTaskDeletion(taskId: string, recursive: boolean): void {
       tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, id)).run();
       tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, id)).run();
       tx.delete(quickSortLog).where(eq(quickSortLog.taskId, id)).run();
+      tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, id)).run();
       tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, id)).run();
       tx.delete(taskAttachments).where(eq(taskAttachments.taskId, id)).run();
       tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, id)).run();

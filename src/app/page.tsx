@@ -32,7 +32,6 @@ import {
 } from '@/lib/tasks/client-edit-policy';
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
-import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { useTaskListVirtualization } from '@/lib/hooks/useTaskListVirtualization';
 import { useVirtualFlip } from '@/lib/hooks/useVirtualFlip';
@@ -81,7 +80,6 @@ export default function DashboardPage() {
 function DashboardPageInner() {
   const { state, actions, computed } = useDashboardData();
   const prefersReducedMotion = useReducedMotion() ?? false;
-  const { progress: syncProgress } = useSyncStream();
   const { toggleSection, isCollapsed } = useDashboardSections();
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
@@ -149,7 +147,6 @@ function DashboardPageInner() {
       <DashboardSidebar
         state={state}
         actions={actions}
-        isSyncing={syncProgress.isSyncing || state.isSyncing}
         sourceHasLists={computed.sourceHasLists}
         getSourceListsForType={computed.getSourceListsForType}
         originHref="/"
@@ -233,7 +230,9 @@ function DashboardPageInner() {
           </div>
         )}
 
-        <div className="flex min-h-0 flex-1 flex-col bg-[var(--surface-1)] rounded-lg border border-[var(--border)]">
+        <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] rounded-lg border border-[var(--border)] ${
+          state.loading || filteredTaskResponse.total > 0 ? 'flex-1' : 'flex-none'
+        }`}>
           {/* Task list header */}
           <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
             <h2 className="font-semibold text-[var(--text-primary)] flex-shrink-0">
@@ -296,8 +295,8 @@ function DashboardPageInner() {
               ))}
             </div>
           ) : filteredTaskResponse.total === 0 ? (
-            <div className="p-8 text-center text-[var(--text-muted)]">
-              <p className="text-lg mb-2">No tasks found</p>
+            <div className="p-5 text-center text-[var(--text-muted)]">
+              <p className="mb-1 text-base font-medium text-[var(--text-secondary)]">No tasks found</p>
               {state.sourceFilter || state.listFilter || state.listGroupFilter || state.tagFilter.length > 0 || state.quickFilter || state.projectFilter || state.priorityFilter.length > 0 || state.statusFilter.length > 0 || textFilter ? (
                 <div className="flex flex-col items-center gap-3">
                   <p className="text-sm">{textFilter ? `No tasks match "${textFilter}"` : 'No tasks match these filters'}</p>
@@ -659,7 +658,7 @@ function DashboardPageInner() {
           aria-hidden={state.selectedTaskId ? true : undefined}
           inert={state.selectedTaskId ? true : undefined}
         >
-          {notificationsHook.panelVisible ? (
+          {notificationsHook.panelVisible && (notificationsHook.isLoading || notificationsHook.stats.total > 0 || notificationsHook.error) ? (
             <NotificationsPanel hook={notificationsHook} />
           ) : (
             <CollapsedNotificationsRail

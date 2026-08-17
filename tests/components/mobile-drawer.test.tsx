@@ -41,6 +41,7 @@ vi.mock('motion/react', () => {
     initial?: unknown;
     animate?: unknown;
     exit?: unknown;
+    onAnimationComplete?: (definition: unknown) => void;
   };
 
   const MotionDiv = React.forwardRef<HTMLDivElement, MotionProps<HTMLDivElement>>(
@@ -50,8 +51,12 @@ vi.mock('motion/react', () => {
     }
   );
   const MotionNav = React.forwardRef<HTMLElement, MotionProps<HTMLElement>>(
-    function MotionNav({ children, ...props }, ref) {
+    function MotionNav({ children, onAnimationComplete, ...props }, ref) {
       const { variants, initial, animate, exit, ...rest } = props;
+      React.useEffect(() => {
+        if (animate !== 'show') return;
+        queueMicrotask(() => onAnimationComplete?.('show'));
+      }, [animate, onAnimationComplete]);
       return <nav ref={ref} {...rest}>{children}</nav>;
     }
   );
@@ -147,6 +152,14 @@ describe('MobileDrawer', () => {
 
     expect(screen.getByLabelText('Search')).toBeDefined();
     expect(screen.getByPlaceholderText('Search…')).toBeDefined();
+  });
+
+  it('focuses search after the drawer entrance animation completes', async () => {
+    render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
   });
 
   it('includes sync status indicator (F-7)', () => {
@@ -261,7 +274,9 @@ describe('MobileDrawer', () => {
     render(<DrawerHarness />);
     const trigger = screen.getByLabelText('Open menu');
     fireEvent.click(trigger);
-    expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Search…')).toBe(document.activeElement);
+    });
 
     closeDrawer();
 
@@ -337,11 +352,19 @@ describe('MobileDrawer', () => {
 
   it('wraps keyboard focus within the open drawer', () => {
     render(<MobileDrawer isOpen={true} onClose={vi.fn()} returnFocusRef={unusedReturnFocusRef} />);
-    const focusable = screen.getByLabelText('Drawer navigation').querySelectorAll<HTMLElement>(
+    const drawer = screen.getByLabelText('Drawer navigation');
+    const focusable = drawer.querySelectorAll<HTMLElement>(
       'a[href], button, input, [tabindex]:not([tabindex="-1"])'
     );
     const first = focusable[0];
     const last = focusable[focusable.length - 1];
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+
+    drawer.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(document.activeElement).toBe(last);
 
     last.focus();
     fireEvent.keyDown(document, { key: 'Tab' });

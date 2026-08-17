@@ -383,7 +383,7 @@ export default function IconsPage() {
         <div className="max-w-[1600px] mx-auto px-4 py-3">
           {/* Search row */}
           <div className="flex items-center gap-3 mb-3">
-            <div className="flex items-center gap-2 flex-1 bg-[#111118] border border-[#1e1e2e] rounded-xl px-4 py-2.5 focus-within:border-blue-500/50 transition-colors">
+            <div className="input-glow flex items-center gap-2 flex-1 bg-[#111118] border border-[#1e1e2e] rounded-xl px-4 py-2.5">
               <Search size={18} className="shrink-0 text-gray-500" />
               <input
                 ref={searchInputRef}

@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import { animate, motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
-import { Check, FileText, FolderOpen, Sparkles, Tag } from 'lucide-react';
+import { Check, FileText, FolderOpen, RotateCcw, SkipForward, Sparkles, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { triggerHaptic } from '@/lib/utils/haptics';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
@@ -10,6 +10,62 @@ import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from
 import { getMissingFields } from '@/lib/hooks/useQuickSortData';
 
 const SWIPE_THRESHOLD_X = 100;
+const SWIPE_THRESHOLD_Y = 100;
+
+type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'undo' | 'snapBack';
+
+export function getQuickSortSwipeAction({
+  axis,
+  offsetX,
+  offsetY,
+  velocityX,
+  velocityY,
+  hasSuggestions,
+  hasFocusedSuggestion,
+  hasUndo = false,
+}: {
+  axis: 'x' | 'y' | null;
+  offsetX: number;
+  offsetY: number;
+  velocityX: number;
+  velocityY: number;
+  hasSuggestions: boolean;
+  hasFocusedSuggestion: boolean;
+  hasUndo?: boolean;
+}): QuickSortSwipeAction {
+  if (
+    axis === 'x' &&
+    hasSuggestions &&
+    (offsetX < -SWIPE_THRESHOLD_X || velocityX < -500)
+  ) {
+    return 'acceptSuggestions';
+  }
+
+  if (
+    axis === 'x' &&
+    hasFocusedSuggestion &&
+    (offsetX > SWIPE_THRESHOLD_X || velocityX > 500)
+  ) {
+    return 'acceptFocused';
+  }
+
+  if (
+    axis === 'y' &&
+    (offsetY < -SWIPE_THRESHOLD_Y || velocityY < -500)
+  ) {
+    return 'skip';
+  }
+
+  if (
+    axis === 'y'
+    && hasUndo
+    && (offsetY > SWIPE_THRESHOLD_Y || velocityY > 500)
+  ) {
+    return 'undo';
+  }
+
+  return 'snapBack';
+}
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
 
@@ -50,6 +106,11 @@ interface QuickSortCardProps {
   onAcceptSuggestions: (taskId: string) => void;
   /** Swipe right: accept only the current mode's suggestion */
   onAcceptFocused: (taskId: string) => void;
+  /** Swipe up: skip this task */
+  onSkip: (taskId: string) => void | Promise<void>;
+  /** Swipe down: undo the previous Quick Sort operation */
+  onUndo?: () => void | Promise<void>;
+  undoLabel?: string;
 }
 
 export default function QuickSortCard({
@@ -59,8 +120,12 @@ export default function QuickSortCard({
   stackIndex,
   onAcceptSuggestions,
   onAcceptFocused,
+  onSkip,
+  onUndo,
+  undoLabel,
 }: QuickSortCardProps) {
   const x = useMotionValue(0);
+  const y = useMotionValue(0);
   const dragAxis = useRef<'x' | 'y' | null>(null);
 
   const hasSuggestions = !!(suggestion && (suggestion.priority || suggestion.effort || suggestion.tags.length > 0));
@@ -78,6 +143,8 @@ export default function QuickSortCard({
   // Swipe-right focused apply
   const focusedRevealWidth = useTransform(x, [0, 200], [0, 160]);
   const focusedRevealOpacity = useTransform(x, [0, 40, SWIPE_THRESHOLD_X], [0, 0.6, 1]);
+  const skipRevealOpacity = useTransform(y, [-SWIPE_THRESHOLD_Y, -40, 0], [1, 0.6, 0]);
+  const undoRevealOpacity = useTransform(y, [0, 40, SWIPE_THRESHOLD_Y], [0, 0.6, 1]);
 
   const handleDragStart = useCallback(() => {
     dragAxis.current = null;
@@ -99,9 +166,13 @@ export default function QuickSortCard({
         } else {
           x.set(hasFocusedSuggestion ? info.offset.x : Math.min(30, info.offset.x));
         }
+      } else if (dragAxis.current === 'y') {
+        y.set(info.offset.y < 0
+          ? info.offset.y
+          : onUndo ? info.offset.y : Math.min(30, info.offset.y));
       }
     },
-    [x, hasSuggestions, hasFocusedSuggestion]
+    [x, y, hasSuggestions, hasFocusedSuggestion, onUndo]
   );
 
   const handleDragEnd = useCallback(
@@ -109,28 +180,49 @@ export default function QuickSortCard({
       const axis = dragAxis.current;
       dragAxis.current = null;
 
-      if (
-        axis === 'x' &&
-        hasSuggestions &&
-        (info.offset.x < -SWIPE_THRESHOLD_X || info.velocity.x < -500)
-      ) {
+      const action = getQuickSortSwipeAction({
+        axis,
+        offsetX: info.offset.x,
+        offsetY: info.offset.y,
+        velocityX: info.velocity.x,
+        velocityY: info.velocity.y,
+        hasSuggestions,
+        hasFocusedSuggestion,
+        hasUndo: !!onUndo,
+      });
+
+      if (action === 'acceptSuggestions') {
         // Swipe left = accept ALL AI suggestions
         triggerHaptic('medium');
         onAcceptSuggestions(task.id);
-      } else if (
-        axis === 'x' &&
-        hasFocusedSuggestion &&
-        (info.offset.x > SWIPE_THRESHOLD_X || info.velocity.x > 500)
-      ) {
+      } else if (action === 'acceptFocused') {
         // Swipe right = accept only current mode's suggestion
         triggerHaptic('medium');
         onAcceptFocused(task.id);
+      } else if (action === 'skip') {
+        triggerHaptic('medium');
+        const skipTarget = -Math.max(window.innerHeight, 600);
+        void animate(y, skipTarget, { duration: 0.18, ease: 'easeIn' }).then(() => {
+          try {
+            void Promise.resolve(onSkip(task.id)).finally(() => {
+              animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+            });
+          } catch {
+            animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+          }
+        });
+      } else if (action === 'undo' && onUndo) {
+        triggerHaptic('medium');
+        void Promise.resolve(onUndo()).finally(() => {
+          animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+        });
       } else {
         // Snap back with spring animation
         animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
+        animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
       }
     },
-    [onAcceptSuggestions, onAcceptFocused, task.id, x, hasSuggestions, hasFocusedSuggestion]
+    [onAcceptSuggestions, onAcceptFocused, onSkip, onUndo, task.id, x, y, hasSuggestions, hasFocusedSuggestion]
   );
 
   // Build the list of suggestions to show in the reveal area (swipe left)
@@ -194,10 +286,8 @@ export default function QuickSortCard({
           ? 'What tags apply?'
           : 'When is it due?';
 
-  // Cards behind top card are scaled down and shifted up slightly
+  // Cards behind the top card render as passive stack layers.
   const isTop = stackIndex === 0;
-  const scale = 1 - stackIndex * 0.04;
-  const yOffset = stackIndex * 10;
 
   if (!isTop) {
     return (
@@ -241,6 +331,29 @@ export default function QuickSortCard({
         </motion.div>
       )}
 
+      <motion.div
+        className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 pt-4"
+        style={{ opacity: skipRevealOpacity }}
+      >
+        <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-950/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
+          <SkipForward size={14} />
+          Skip
+        </div>
+      </motion.div>
+
+      {onUndo && (
+        <motion.div
+          className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center gap-2 pt-4"
+          style={{ opacity: undoRevealOpacity }}
+          aria-hidden="true"
+        >
+          <span className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-lg">
+            <RotateCcw size={15} />
+            Undo {undoLabel}
+          </span>
+        </motion.div>
+      )}
+
       {/* Reveal area on the LEFT (shown when swiping RIGHT — focused apply) */}
       {hasFocusedSuggestion && (
         <motion.div
@@ -263,8 +376,11 @@ export default function QuickSortCard({
 
       {/* The card itself — fills available height for a larger swipe target */}
       <motion.div
-        className="relative flex h-full min-h-0 touch-pan-y cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
-        style={{ x }}
+        data-quick-sort-card-task-id={task.id}
+        tabIndex={-1}
+        aria-label={`Task: ${task.title}`}
+        className="relative flex h-full min-h-0 touch-none cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
+        style={{ x, y }}
         onPanStart={handleDragStart}
         onPan={handleDrag}
         onPanEnd={handleDragEnd}

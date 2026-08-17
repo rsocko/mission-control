@@ -12,7 +12,6 @@ import { MobileSheet } from '@/components/ui/MobileSheet';
 import { DashboardSkeleton } from '@/components/ui/Skeleton';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
-import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { getMatrixPaginationDecision } from '@/lib/matrix/scales';
@@ -27,7 +26,6 @@ export default function MatrixPage() {
 
 function MatrixPageInner() {
   const { state, actions, computed } = useDashboardData({ includeScoreBreakdown: true });
-  const { progress } = useSyncStream();
   const lastAutoLoad = useRef({ signature: '', count: -1 });
   const textFilter = useDashboardViewStore((store) => store.textFilter);
   const isMobile = useIsMobile(639);
@@ -109,7 +107,6 @@ function MatrixPageInner() {
         <DashboardSidebar
           state={state}
           actions={actions}
-          isSyncing={progress.isSyncing || state.isSyncing}
           sourceHasLists={computed.sourceHasLists}
           getSourceListsForType={computed.getSourceListsForType}
           originHref="/matrix"

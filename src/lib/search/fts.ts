@@ -2,6 +2,11 @@ import db, { sqlite } from '@/db';
 import { notifications, tasks } from '@/db/schema';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
+interface SearchFilters {
+  source?: string;
+  status?: string;
+  excludeDone?: boolean;
+}
 
 export interface SearchResult {
   type: 'task' | 'notification';
@@ -238,7 +243,9 @@ export async function warmUpFTS() {
   await ensureFTSReady();
 }
 
-function searchTasks(query: string, limit: number): SearchResult[] {
+function searchTasks(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+  const source = filters.source ?? null;
+  const status = filters.status ?? null;
   const rows = sqlite
     .prepare(
       `
@@ -257,11 +264,23 @@ function searchTasks(query: string, limit: number): SearchResult[] {
         FROM tasks_fts
         INNER JOIN tasks t ON t.id = tasks_fts.entityId
         WHERE tasks_fts MATCH ?
+          AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
+          AND (? IS NULL OR t.status = ?)
+          AND (? = 0 OR LOWER(t.status) <> 'done')
         ORDER BY rank
         LIMIT ?
       `
     )
-    .all(query, limit) as Array<{
+    .all(
+      query,
+      source,
+      source,
+      source,
+      status,
+      status,
+      filters.excludeDone ? 1 : 0,
+      limit,
+    ) as Array<{
       rowid: number;
       id: string;
       raw_title: string;
@@ -299,7 +318,9 @@ function searchTasks(query: string, limit: number): SearchResult[] {
   }));
 }
 
-function searchNotifications(query: string, limit: number): SearchResult[] {
+function searchNotifications(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+  const source = filters.source ?? null;
+  const status = filters.status ?? null;
   const rows = sqlite
     .prepare(
       `
@@ -319,11 +340,22 @@ function searchNotifications(query: string, limit: number): SearchResult[] {
         FROM alerts_fts
         INNER JOIN notifications a ON a.id = alerts_fts.entityId
         WHERE alerts_fts MATCH ?
+          AND (? IS NULL OR a.connector_type = ?)
+          AND (? IS NULL OR a.category = ?)
+          AND (? = 0 OR LOWER(a.category) <> 'done')
         ORDER BY rank
         LIMIT ?
       `
     )
-    .all(query, limit) as Array<{
+    .all(
+      query,
+      source,
+      source,
+      status,
+      status,
+      filters.excludeDone ? 1 : 0,
+      limit,
+    ) as Array<{
       rowid: number;
       id: string;
       raw_title: string;
@@ -365,7 +397,7 @@ function searchNotifications(query: string, limit: number): SearchResult[] {
 
 export async function searchFTS(
   query: string,
-  options: { type?: SearchScope; limit?: number } = {},
+  options: { type?: SearchScope; limit?: number } & SearchFilters = {},
 ): Promise<SearchResult[]> {
   const normalizedQuery = query.trim();
   if (!normalizedQuery) {
@@ -379,8 +411,8 @@ export async function searchFTS(
   const matchQuery = toMatchQuery(normalizedQuery);
 
   const results = [
-    ...(type === 'all' || type === 'tasks' ? searchTasks(matchQuery, limit) : []),
-    ...(type === 'all' || type === 'notifications' ? searchNotifications(matchQuery, limit) : []),
+    ...(type === 'all' || type === 'tasks' ? searchTasks(matchQuery, limit, options) : []),
+    ...(type === 'all' || type === 'notifications' ? searchNotifications(matchQuery, limit, options) : []),
   ];
 
   return results

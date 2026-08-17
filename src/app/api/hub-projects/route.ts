@@ -9,6 +9,10 @@ import {
 import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { normalizeProjectJsonCollections, resolveProjectIconColor } from '@/lib/projects/normalize-project';
+import {
+  hubProjectRulesChanged,
+  parseHubProjectUpdate,
+} from '@/lib/projects/hub-project-update';
 import { normalizeAutoIncludeRules, reevaluateProject } from '@/lib/rules';
 import { dbLogger } from '@/lib/logger';
 
@@ -113,24 +117,29 @@ export async function POST(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const { id: projectId, ...rawUpdates } = body;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return ApiErrors.badRequest('Invalid project update body');
+    }
+    const { id: rawProjectId, ...rawUpdates } = body;
 
-    if (!projectId) {
+    if (typeof rawProjectId !== 'string' || !rawProjectId.trim()) {
       return ApiErrors.badRequest('Project id is required');
     }
+    const projectId = rawProjectId.trim();
 
+    const parsedUpdates = parseHubProjectUpdate(rawUpdates);
+    if (!parsedUpdates.success) {
+      return ApiErrors.badRequest(parsedUpdates.message);
+    }
     const updates = {
-      ...rawUpdates,
-      ...('autoIncludeRules' in rawUpdates
-        ? { autoIncludeRules: normalizeAutoIncludeRules(rawUpdates.autoIncludeRules) }
-        : {}),
+      ...parsedUpdates.updates,
       updatedAt: new Date().toISOString(),
     };
     await db.update(hubProjects).set(updates).where(eq(hubProjects.id, projectId));
 
     let evaluation = null;
     let evaluationFailed = false;
-    if ('autoIncludeRules' in rawUpdates || 'sourceBindings' in rawUpdates) {
+    if (hubProjectRulesChanged(parsedUpdates.updates)) {
       try {
         evaluation = await reevaluateProject(projectId);
       } catch (error) {

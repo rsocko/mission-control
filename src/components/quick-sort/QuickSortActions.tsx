@@ -82,7 +82,7 @@ function TagPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+      <div className="input-glow flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
         <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
         <input
           ref={inputRef}

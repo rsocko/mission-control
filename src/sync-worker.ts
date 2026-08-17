@@ -29,6 +29,7 @@ async function main(): Promise<void> {
     { triageSyncScheduler },
     { publicRuntimeRelease },
     { DurableAiRunStore, DurableAiRunWorker },
+    { WorkerHealthSnapshotScheduler },
   ] = await Promise.all([
     import('@/lib/sync'),
     import('@/lib/sync/worker'),
@@ -36,6 +37,7 @@ async function main(): Promise<void> {
     import('@/lib/triage/scheduler'),
     import('@/lib/runtime/release'),
     import('@/lib/ai/durable-runs'),
+    import('@/lib/telemetry/health-snapshot'),
   ]);
 
   assertSupportedWorkerReplicaCount();
@@ -63,6 +65,10 @@ async function main(): Promise<void> {
       },
     },
   );
+  const healthSnapshotScheduler = new WorkerHealthSnapshotScheduler(
+    telemetry.instanceId,
+    () => worker.hasPendingWork(),
+  );
   worker.start();
   aiRunWorker.start();
 
@@ -78,12 +84,14 @@ async function main(): Promise<void> {
   } catch (error) {
     syncLogger.warn({ err: error }, 'Sync worker: triage auto-sync initialization failed');
   }
+  healthSnapshotScheduler.start();
 
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = (signal: NodeJS.Signals) => {
     if (shutdownPromise) return;
     shutdownPromise = (async () => {
       syncLogger.info({ signal }, 'Sync worker shutting down');
+      healthSnapshotScheduler.stop();
       await Promise.all([
         syncScheduler.stopAll(),
         worker.stop(),

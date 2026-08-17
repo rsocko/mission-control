@@ -84,7 +84,10 @@ private key and token-encryption key in the deployment secret store.
 | `AI_PROVIDER` | `ollama` | Provider: `openai`, `azure`, `ollama`, or `bifrost` |
 | `AI_BASE_URL` | `http://localhost:11434/v1` | API endpoint (Ollama default shown) |
 | `AI_MODEL` | `llama3.1:8b` | Model to use for completions |
+| `AI_SEMANTIC_SEARCH_ENABLED` | `false` | Opt in to meaning-based search enrichment. The saved AI setting takes precedence |
 | `AI_EMBEDDING_MODEL` | Auto | Embedding model (defaults: `nomic-embed-text` for Ollama, `ollama/nomic-embed-text:latest` for Bifrost, `text-embedding-3-small` otherwise) |
+| `MC_QUERY_EMBEDDING_CACHE_MAX_ENTRIES` | `128` | Maximum successful interactive query vectors retained per process |
+| `MC_QUERY_EMBEDDING_CACHE_TTL_MS` | `300000` | TTL for process-local query vectors; identical in-flight requests are coalesced and failures are not cached |
 | `MC_SEMANTIC_CACHE_MAX_ENTRIES` | `2048` | Maximum number of parsed `Float32` embedding vectors retained by each process |
 | `MC_SEMANTIC_CACHE_MAX_BYTES` | `33554432` | Maximum estimated bytes retained by the embedding LRU; both cache limits are enforced |
 | `MC_SEMANTIC_SEARCH_MAX_CANDIDATES` | `2000` | Maximum current, provider/model-compatible embeddings scored by one semantic query, selected by newest source update first |
@@ -113,6 +116,20 @@ Set `AI_PROVIDER=bifrost`, `BIFROST_BASE_URL=https://gateway.example.com/v1`,
 and use a provider-qualified model such as `azure/gpt-4o-mini`. Mission Control
 loads the gateway's model catalog from `/v1/models` and enforces sensitivity
 routing from the model's provider prefix.
+
+Semantic search is a separate, off-by-default feature under **Settings → AI
+Provider**. Its embedding model is independent from the completion model.
+Bifrost embedding IDs must be provider-qualified (for example,
+`ollama/nomic-embed-text:latest`). Entity embeddings remain durable in SQLite,
+while query embeddings are kept only in a bounded in-memory cache and never
+written as query history. Interactive searches report `not-ready` until
+compatible entity embeddings exist; index maintenance runs separately and is
+never triggered by a query.
+
+Search requests may include `source`, `status`, and `excludeDone=true`. These
+filters are applied to both keyword and semantic results before they are
+returned. Keyword filtering considers the best 50 FTS candidates; semantic
+filtering is applied in SQLite before the configured candidate limit is scored.
 :::
 
 Settings can also be changed at runtime. `GET /api/ai/provider` returns the

@@ -91,6 +91,10 @@ const convertSchema = z.object({
   name: z.string().trim().min(1).max(200),
   color: z.string().regex(/^#[0-9a-f]{6}$/i),
   nodes: z.array(nodeSchema).min(1).max(500),
+  sourceWorkspace: z.object({
+    id: z.string().min(1).max(100),
+    revision: z.number().int().positive(),
+  }).optional(),
 });
 
 function slugify(value: string): string {
@@ -281,7 +285,12 @@ export async function POST(request: Request) {
         autoIncludeRules: [],
         kanbanColumns: [],
         defaultView: 'list',
-        metadata: { source: 'ideation' },
+        metadata: {
+          source: 'ideation',
+          ...(parsed.data.sourceWorkspace
+            ? { sourceWorkspace: parsed.data.sourceWorkspace }
+            : {}),
+        },
         createdAt: now,
         updatedAt: now,
       }).run();

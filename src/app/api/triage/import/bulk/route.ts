@@ -3,11 +3,11 @@ import { withRuntimeOperation } from '@/lib/telemetry/operations';
 import {
   ingestTriageImport,
   ingestTriageImports,
-  isValidTriageSource,
+  type TriageImportInput,
   type TriageImportResult,
-} from '@/lib/triage';
+} from '@/lib/triage/capture';
+import { isValidTriageSource } from '@/lib/triage/query';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
-import type { TriageImportInput } from '@/lib/triage';
 import { cacheThumbnail } from '@/lib/triage/thumbnail-cache';
 import logger from '@/lib/logger';
 

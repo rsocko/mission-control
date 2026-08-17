@@ -90,6 +90,14 @@ describe('TaskKeywordFilter applied sidebar filters', () => {
     expect(useDashboardViewStore.getState().sourceFilter).toBe('github-issues');
   });
 
+  it('labels the recently closed quick filter', () => {
+    useDashboardViewStore.setState({ quickFilter: 'recentlyClosed' });
+
+    render(<TaskKeywordFilter {...defaultProps} />);
+
+    expect(screen.getByText('quick:Recently Closed')).toBeInTheDocument();
+  });
+
   it('restores a removed query token', () => {
     useDashboardViewStore.setState({ textFilter: 'priority:high status:todo' });
 

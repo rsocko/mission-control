@@ -326,9 +326,6 @@ function ConnectTasksStep({
         <h2 className="mt-4 text-[1.375rem] font-semibold text-[var(--text-primary)]">
           Connect Task Sources
         </h2>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-          Where do your tasks live today?
-        </p>
       </div>
 
       <div className="mt-6 space-y-3">
@@ -389,9 +386,6 @@ function ConnectContentStep({ onNext, prefersReducedMotion }: { onNext: () => vo
         <h2 className="mt-4 text-[1.375rem] font-semibold text-[var(--text-primary)]">
           Connect Content Sources
         </h2>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-          Import content you&apos;ve saved across the web.
-        </p>
       </div>
 
       <div className="mt-6 space-y-3">
@@ -455,7 +449,7 @@ function PermissionsStep({
           Permissions
         </h2>
         <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-          Enable these to get the most out of Mission Control.
+          Allow reminders and calendar-aware scheduling.
         </p>
       </div>
 
@@ -557,9 +551,6 @@ function PreferencesStep({
         <h2 className="mt-4 text-[1.375rem] font-semibold text-[var(--text-primary)]">
           Your Preferences
         </h2>
-        <p className="mt-2 text-sm text-[var(--text-tertiary)]">
-          Help Houston understand your schedule.
-        </p>
       </div>
 
       <div className="mt-6 space-y-4">

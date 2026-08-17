@@ -21,17 +21,7 @@ import { taskLogger } from '@/lib/client-logger';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import { EffortSelect } from '@/components/EffortBadge';
-
-interface Destination {
-  id: string;
-  label: string;
-  connectorType: string;
-  account: 'personal' | 'work' | null;
-  color: string;
-  listId?: string;
-  listName?: string;
-  listSelectionMode?: 'required' | 'optional' | 'not-applicable';
-}
+import type { QuickAddDestination } from './quick-add-types';
 
 interface Tag {
   id: string;
@@ -85,12 +75,14 @@ export interface TaskPrefill {
 interface AddTaskModalProps {
   initialInput: string;
   initialParsed: ParsedTask | null;
-  initialDestination: Destination;
-  destinations: Destination[];
+  initialDestination: QuickAddDestination;
+  destinations: QuickAddDestination[];
   onClose: () => void;
   onSubmit: () => void;
   /** Pre-select a project by ID when opening from a project detail page */
   initialProjectId?: string;
+  /** Let the caller attach the task after creation through its domain workflow. */
+  deferProjectAssignment?: boolean;
   /** Pre-select a list by sourceId when opening with a list filter active */
   initialListId?: string;
   /** Called with the new task ID after successful creation */
@@ -130,6 +122,7 @@ export function AddTaskModal({
   onClose,
   onSubmit,
   initialProjectId,
+  deferProjectAssignment = false,
   initialListId,
   onTaskCreated,
   initialTemplateId,
@@ -313,7 +306,7 @@ export function AddTaskModal({
           sourceListName: (selectedListId ? availableLists.find(l => l.sourceId === selectedListId)?.name : destination.listName) || undefined,
           tags: selectedTags.map(t => t.id),
           tagSlugs: prefillTagSlugs,
-          projectIds: selectedProjectId ? [selectedProjectId] : [],
+          projectIds: selectedProjectId && !deferProjectAssignment ? [selectedProjectId] : [],
           subtasks: subtasks.length > 0 ? subtasks : undefined,
           estimatedDuration: estimatedDuration || undefined,
           effort: effort || undefined,

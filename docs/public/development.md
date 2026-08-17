@@ -36,6 +36,11 @@ See [continuous integration and container publication](continuous-integration.md
 for CI trust boundaries, GHCR digest publication, and required repository
 settings.
 
+UI changes also use the repository-scoped
+[Impeccable design review](../development/impeccable.md). Its deterministic
+hook, explicit audit command, local opt-out, privacy boundary, and update
+process are documented there.
+
 Do not commit `.env.local`, databases, logs, screenshots containing real data,
 or generated connector exports. Use `example.test`, reserved documentation IP
 addresses, and synthetic account names in all examples.

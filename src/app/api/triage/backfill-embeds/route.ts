@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import db from '@/db';
 import { triageItems } from '@/db/schema';
 import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm';
-import { resolveAndStoreEmbed } from '@/lib/triage';
+import { resolveAndStoreEmbed } from '@/lib/triage/capture';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { DomainRateLimiter } from '@/lib/triage/domain-rate-limiter';
 import logger from '@/lib/logger';

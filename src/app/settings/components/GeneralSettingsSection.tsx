@@ -108,8 +108,7 @@ function GeneralSettingsSection() {
 
   return (
     <div>
-      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-1">General</h2>
-      <p className="text-sm text-[var(--text-tertiary)] mb-6">App-wide preferences</p>
+      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-6">General</h2>
 
       <div className="bg-[var(--surface-2)] rounded-lg border border-[var(--border)] p-5">
         <div className="flex items-center gap-2 mb-3">
@@ -400,7 +399,9 @@ function DopamineMenuSettingsCard() {
               {settings.rewards.map((reward) => (
                 <div
                   key={reward.id}
-                  className="flex items-center gap-2 bg-[var(--surface-1)] rounded-md border border-[var(--border)] px-3 py-2 group"
+                  className={`flex items-center gap-2 bg-[var(--surface-1)] rounded-md border border-[var(--border)] px-3 py-2 group ${
+                    editingReward === reward.id ? 'input-glow' : ''
+                  }`}
                 >
                   {editingReward === reward.id ? (
                     <>

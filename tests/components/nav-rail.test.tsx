@@ -3,13 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
+import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 
 function renderNavRail({
   isAiActive = false,
   isSyncing = false,
+  syncStatus = [],
 }: {
   isAiActive?: boolean;
   isSyncing?: boolean;
+  syncStatus?: ConnectorHealthInfo[];
 } = {}) {
   return render(
     <TooltipProvider>
@@ -17,6 +20,7 @@ function renderNavRail({
         features={{ aiEnabled: true, financeEnabled: true }}
         isAiActive={isAiActive}
         isSyncing={isSyncing}
+        syncStatus={syncStatus}
       />
     </TooltipProvider>
   );
@@ -161,6 +165,44 @@ describe('NavRail', () => {
       'alternating'
     );
     random.mockRestore();
+  });
+
+  it('opens sync status from the nav and shows active syncing state', () => {
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'local',
+          name: 'Local',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: undefined,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    const heading = screen.getByRole('heading', { name: 'Sync Status' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(heading);
+    expect(screen.getAllByText('Syncing…').length).toBeGreaterThan(0);
+    expect(screen.getByText('Local')).toBeInTheDocument();
+    expect(screen.getByText('Never')).toBeInTheDocument();
+  });
+
+  it('only shows inline sync details when the navigation is pinned', () => {
+    renderNavRail({ isSyncing: true });
+    const getInlineStatus = () =>
+      screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
+
+    expect(getInlineStatus()).toHaveClass('opacity-0', 'max-w-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    expect(getInlineStatus()).toHaveClass('opacity-100', 'max-w-[150px]');
+    expect(getInlineStatus()).toHaveTextContent('Syncing…');
   });
 
   it('groups navigation by purpose', () => {

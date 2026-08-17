@@ -58,6 +58,7 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
   const { progress } = useSyncStream();
   const [searchQuery, setSearchQuery] = useState('');
   const drawerRef = useRef<HTMLElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const hasOpenedRef = useRef(false);
   const prefersReducedMotion = useReducedMotion();
 
@@ -71,27 +72,30 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
     returnFocusRef.current?.focus();
   }, [isOpen, returnFocusRef]);
 
+  const handleDrawerAnimationComplete = useCallback((definition: unknown) => {
+    if (definition === 'show') searchInputRef.current?.focus({ preventScroll: true });
+  }, []);
+
   // Close on Escape key
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        e.preventDefault();
+        onClose();
+      }
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
-  // Focus trap: contain Tab within drawer and auto-focus on open
+  // Focus trap: contain Tab within drawer without opening the mobile keyboard
   useEffect(() => {
     if (!isOpen) return;
     const drawer = drawerRef.current;
     if (!drawer) return;
 
-    // Move focus into the drawer
-    const firstFocusable = drawer.querySelector<HTMLElement>(
-      'a[href], button, input, [tabindex]:not([tabindex="-1"])'
-    );
-    firstFocusable?.focus();
+    drawer.focus();
 
     function handleTab(e: KeyboardEvent) {
       if (e.key !== 'Tab' || !drawer) return;
@@ -101,6 +105,12 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
       if (focusable.length === 0) return;
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
+
+      if (document.activeElement === drawer) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+        return;
+      }
 
       if (e.shiftKey) {
         if (document.activeElement === first) {
@@ -176,11 +186,13 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
           {/* Drawer panel */}
           <motion.nav
             ref={drawerRef}
+            tabIndex={-1}
             className="absolute top-0 left-0 bottom-0 w-[280px] bg-[var(--surface-1)] border-r border-[var(--border)] flex flex-col safe-area-pt safe-area-pb"
             variants={drawerSlideIn}
             initial="hidden"
             animate="show"
             exit="exit"
+            onAnimationComplete={handleDrawerAnimationComplete}
             aria-label="Drawer navigation"
           >
             {/* User avatar + name */}
@@ -197,9 +209,10 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
             {/* Search bar */}
             <div className="px-4 pb-3">
               <form onSubmit={handleSearchSubmit}>
-                <div className="flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                <div className="input-glow flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                   <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
                   <input
+                    ref={searchInputRef}
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}

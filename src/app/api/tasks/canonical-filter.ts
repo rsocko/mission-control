@@ -95,7 +95,8 @@ export async function buildCanonicalTaskFilterConditions(
     conditions.push(eq(tasks.localDisposition, 'active'));
   }
 
-  const openOnly = searchParams.get('openOnly') === 'true';
+  const openOnly = searchParams.get('openOnly') === 'true'
+    && quickFilter !== 'recentlyClosed';
   if (openOnly && !statuses.length && !status) {
     conditions.push(notInArray(tasks.status, ['done', 'cancelled']));
   }

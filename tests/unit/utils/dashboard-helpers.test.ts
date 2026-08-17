@@ -41,6 +41,7 @@ const response = (tasks: Task[]): TaskResponse => ({
     assignedToMe: tasks.length,
     myDay: 0,
     recentlyCreated: 0,
+    recentlyClosed: 0,
     waiting: 0,
     inbox: tasks.length,
   },

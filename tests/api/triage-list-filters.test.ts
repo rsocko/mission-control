@@ -4,8 +4,11 @@ const { listTriageItems } = vi.hoisted(() => ({
   listTriageItems: vi.fn(),
 }));
 
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   createTriageCapture: vi.fn(),
+}));
+
+vi.mock('@/lib/triage/query', () => ({
   isValidTriageSource: (value: string | null) => value === 'github',
   isValidTriageStatus: (value: string | null) => value === 'pending',
   listTriageItems,

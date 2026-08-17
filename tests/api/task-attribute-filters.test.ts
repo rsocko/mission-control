@@ -5,6 +5,7 @@ describe('task attribute filtering', () => {
   let sqlite: typeof import('@/db').sqlite;
   let schema: typeof import('@/db/schema');
   let buildConditions: typeof import('@/app/api/tasks/canonical-filter').buildCanonicalTaskFilterConditions;
+  let getCanonicalWhere: typeof import('@/app/api/tasks/canonical-filter').getCanonicalTaskFilterWhere;
   let and: typeof import('drizzle-orm').and;
 
   beforeAll(async () => {
@@ -23,6 +24,7 @@ describe('task attribute filtering', () => {
     sqlite = dbModule.sqlite;
     schema = schemaModule;
     buildConditions = filterModule.buildCanonicalTaskFilterConditions;
+    getCanonicalWhere = filterModule.getCanonicalTaskFilterWhere;
     and = drizzle.and;
   }, 30_000);
 
@@ -131,11 +133,11 @@ describe('task attribute filtering', () => {
   }
 
   async function matchingParamIds(params: URLSearchParams): Promise<string[]> {
-    const { conditions } = await buildConditions(params);
+    const { taskWhere } = await getCanonicalWhere(params);
     const rows = await db
       .select({ id: schema.tasks.id })
       .from(schema.tasks)
-      .where(and(...conditions));
+      .where(taskWhere);
     return rows.map((row) => row.id).sort();
   }
 
@@ -219,6 +221,36 @@ describe('task attribute filtering', () => {
     await db.insert(schema.tasks).values(task('100%-ready', now));
     await expect(matchingIds('title:%')).resolves.toEqual(['100%-ready']);
     await expect(matchingIds('title:_')).resolves.toEqual([]);
+  });
+
+  it('shows only tasks closed within the last seven days even when open-only is requested', async () => {
+    const now = new Date();
+    const recent = new Date(now);
+    recent.setDate(recent.getDate() - 2);
+    const stale = new Date(now);
+    stale.setDate(stale.getDate() - 9);
+
+    await db.insert(schema.tasks).values([
+      {
+        ...task('recently-closed', now.toISOString()),
+        status: 'done',
+        completedAt: recent.toISOString(),
+      },
+      {
+        ...task('stale-closed', now.toISOString()),
+        status: 'cancelled',
+        completedAt: stale.toISOString(),
+      },
+      {
+        ...task('open-with-completion-date', now.toISOString()),
+        completedAt: recent.toISOString(),
+      },
+    ]);
+
+    await expect(matchingParamIds(new URLSearchParams({
+      quickFilter: 'recentlyClosed',
+      openOnly: 'true',
+    }))).resolves.toEqual(['recently-closed']);
   });
 });
 

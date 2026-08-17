@@ -44,6 +44,7 @@ vi.mock('@/db/schema', () => ({
     dueDate: 'due_date', connectorType: 'connector_type',
     connectorInstanceId: 'connector_instance_id', sourceListId: 'source_list_id',
     sourceListName: 'source_list_name', createdAt: 'created_at', updatedAt: 'updated_at',
+    completedAt: 'completed_at',
     parentId: 'parent_id', assignee: 'assignee', effort: 'effort',
     snoozedUntil: 'snoozed_until',
     localDisposition: 'local_disposition',
@@ -118,6 +119,15 @@ describe('GET /api/tasks — sortBy=createdAt support (PR #307)', () => {
     const { GET } = await import('@/app/api/tasks/route');
     const logger = (await import('@/lib/logger')).default;
     const request = new Request(`${BASE}/api/tasks?sortBy=createdAt&sortDirection=desc`);
+    const response = await GET(request);
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+  });
+
+  it('should accept sortBy=completedAt without error', async () => {
+    const { GET } = await import('@/app/api/tasks/route');
+    const logger = (await import('@/lib/logger')).default;
+    const request = new Request(`${BASE}/api/tasks?sortBy=completedAt&sortDirection=desc`);
     const response = await GET(request);
     expect(logger.error).not.toHaveBeenCalled();
     expect(response.status).toBe(200);

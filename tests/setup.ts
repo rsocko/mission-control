@@ -1,5 +1,10 @@
 import '@testing-library/jest-dom/vitest';
+import { configure } from '@testing-library/dom';
 import { vi } from 'vitest';
+
+// Sharded DOM tests can be delayed by runner contention even when the test
+// itself remains within the project's 10-second timeout.
+configure({ asyncUtilTimeout: 5_000 });
 
 type MockSqlExpression = {
   type: string;
@@ -29,10 +34,4 @@ vi.mock('drizzle-orm', () => ({
   sql: vi.fn(() => ({})),
   like: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'like', col, val })),
   notLike: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'notLike', col, val })),
-}));
-
-// Mock crypto
-vi.mock('crypto', () => ({
-  default: {},
-  randomUUID: () => 'test-uuid-1234',
 }));

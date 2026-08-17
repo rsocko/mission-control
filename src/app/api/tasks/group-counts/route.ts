@@ -60,7 +60,8 @@ export async function GET(request: Request) {
   const projectId = searchParams.get('projectId');
   const quickFilter = searchParams.get('quickFilter');
   const myDayDate = searchParams.get('myDayDate');
-  const openOnly = searchParams.get('openOnly') === 'true';
+  const openOnly = searchParams.get('openOnly') === 'true'
+    && quickFilter !== 'recentlyClosed';
   const parentOnly = searchParams.get('parentOnly') === 'true';
   const priorities = normalizedCsv(searchParams, 'priorities');
   const statuses = normalizedCsv(searchParams, 'statuses');

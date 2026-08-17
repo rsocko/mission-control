@@ -17,7 +17,7 @@ import {
   createTriageCapture,
   createTriageTextCapture,
   detectSourcePlatform,
-} from '@/lib/triage';
+} from '@/lib/triage/capture';
 
 const idempotencyRetentionMilliseconds = 24 * 60 * 60 * 1_000;
 const maximumCapturesPerMinute = 30;

@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import {
   isIdeationDescendant,
   type IdeationNode,
@@ -58,6 +57,9 @@ function propertiesEqual(first: IdeationProperty | undefined, second: IdeationPr
 interface IdeationState {
   nodes: IdeationNode[];
   selectedNodeId: string | null;
+  workspaceId: string | null;
+  workspaceRevision: number | null;
+  flushWorkspace: (() => Promise<boolean>) | null;
   past: IdeationNode[][];
   addNode: (
     parentId: string | null,
@@ -80,6 +82,9 @@ interface IdeationState {
   outdentNode: (id: string) => void;
   deleteNode: (id: string) => void;
   selectNode: (id: string | null) => void;
+  setWorkspaceContext: (id: string | null, revision: number | null) => void;
+  setWorkspaceFlusher: (flush: (() => Promise<boolean>) | null) => void;
+  replaceNodes: (nodes: IdeationNode[]) => void;
   clear: () => void;
   undo: () => void;
 }
@@ -91,10 +96,12 @@ function withHistory(state: IdeationState): Pick<IdeationState, 'past'> {
 }
 
 export const useIdeationStore = create<IdeationState>()(
-  persist(
     (set, get) => ({
       nodes: createInitialNodes(),
       selectedNodeId: null,
+      workspaceId: null,
+      workspaceRevision: null,
+      flushWorkspace: null,
       past: [],
       addNode: (parentId, kind = 'idea', label = 'Untitled', index) => {
         const id = crypto.randomUUID();
@@ -300,6 +307,16 @@ export const useIdeationStore = create<IdeationState>()(
         };
       }),
       selectNode: (selectedNodeId) => set({ selectedNodeId }),
+      setWorkspaceContext: (workspaceId, workspaceRevision) => set({
+        workspaceId,
+        workspaceRevision,
+      }),
+      setWorkspaceFlusher: (flushWorkspace) => set({ flushWorkspace }),
+      replaceNodes: (nodes) => set({
+        nodes,
+        selectedNodeId: null,
+        past: [],
+      }),
       clear: () => set({
         nodes: createInitialNodes(),
         selectedNodeId: null,
@@ -317,9 +334,4 @@ export const useIdeationStore = create<IdeationState>()(
         };
       }),
     }),
-    {
-      name: 'mission-control:ideation',
-      partialize: (state) => ({ nodes: state.nodes }),
-    },
-  ),
 );

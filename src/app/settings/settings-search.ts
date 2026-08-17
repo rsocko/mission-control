@@ -1,3 +1,5 @@
+import { useEffect, useState } from 'react';
+
 export type SettingsSection =
   | 'general'
   | 'connectors'
@@ -14,7 +16,8 @@ export type SettingsSection =
   | 'storage'
   | 'shortcuts'
   | 'notifications'
-  | 'runtime';
+  | 'runtime'
+  | 'about';
 
 export interface SettingsSearchItem {
   title: string;
@@ -42,6 +45,7 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   mode: 'App Mode',
   general: 'Other',
   runtime: 'Runtime Telemetry',
+  about: 'About',
 };
 
 export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
@@ -110,6 +114,12 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'App badge count', section: 'general', sectionLabel: 'System', keywords: ['icon', 'unread count'] },
   { title: 'Navigation badges', section: 'general', sectionLabel: 'System', target: 'Navigation tab badges', keywords: ['tabs', 'counts'] },
   { title: 'Dopamine Menu', section: 'general', sectionLabel: 'System', keywords: ['rewards', 'completion'] },
+  { title: 'About Mission Control', section: 'about', sectionLabel: 'System', keywords: ['app', 'version', 'release', 'project'] },
+  { title: 'Version', section: 'about', sectionLabel: 'System', keywords: ['release', 'build'] },
+  { title: 'Build', section: 'about', sectionLabel: 'System', keywords: ['revision', 'commit', 'sha', 'release'] },
+  { title: 'Documentation', section: 'about', sectionLabel: 'System', keywords: ['help', 'guides', 'setup'] },
+  { title: 'Support and feedback', section: 'about', sectionLabel: 'System', keywords: ['github', 'issues', 'bug'] },
+  { title: 'Licensing status', section: 'about', sectionLabel: 'System', keywords: ['license', 'legal'] },
 ];
 
 function normalize(value: string) {
@@ -164,6 +174,31 @@ export function findSettingsTarget(root: ParentNode, targetText: string, section
   return { target, sectionHeading };
 }
 
+export function focusSettingsTarget(root: ParentNode, targetText: string, sectionName: string) {
+  const { target, sectionHeading } = findSettingsTarget(root, targetText, sectionName);
+  const element = target ?? sectionHeading;
+  if (!element) return false;
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const hadTabIndex = element.hasAttribute('tabindex');
+  if (!hadTabIndex) element.tabIndex = -1;
+  element.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+  element.focus({ preventScroll: true });
+  if (!reduceMotion) {
+    element.animate(
+      [
+        { outline: '2px solid rgb(59 130 246 / 0.9)', outlineOffset: '6px', backgroundColor: 'rgb(59 130 246 / 0.12)' },
+        { outline: '2px solid transparent', outlineOffset: '10px', backgroundColor: 'transparent' },
+      ],
+      { duration: 1800, easing: 'ease-out' },
+    );
+  }
+  if (!hadTabIndex) {
+    element.addEventListener('blur', () => element.removeAttribute('tabindex'), { once: true });
+  }
+  return Boolean(target);
+}
+
 function getUrlSettingTarget() {
   if (typeof window === 'undefined') return null;
   return new URLSearchParams(window.location.search).get('setting');
@@ -180,4 +215,3 @@ export function useSettingsUrlTarget() {
 
   return [target, setTarget] as const;
 }
-import { useEffect, useState } from 'react';

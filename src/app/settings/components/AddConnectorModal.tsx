@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ChevronRight, Loader2, Shield, Eye, EyeOff,
@@ -18,6 +18,8 @@ import {
   defaultTyrionBridgeUrlForEnvironment,
 } from '@/lib/connectors/monarch-money/constants';
 import { ConnectorBrandIcon } from './ConnectorBrandIcon';
+import { useConnectorCreation } from './useConnectorCreation';
+import { useOAuthConnectorInstanceId } from './useOAuthConnectorInstanceId';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -142,41 +144,28 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
 function WorkTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose: () => void; onAdded: () => void }) {
   const [name, setName] = useState('Microsoft To Do - Work');
   const [tier, setTier] = useState<'standard' | 'extended'>('standard');
-  const [status, setStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [error, setError] = useState('');
+  const creation = useConnectorCreation();
 
   async function createConnector() {
-    setStatus('saving');
-    setError('');
     const extended = tier === 'extended';
     try {
-      const response = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'microsoft-todo-work',
-          name: name.trim() || 'Microsoft To Do - Work',
-          enabled: true,
-          syncMode: 'manual',
-          capabilities: {},
-          credentials: {},
-          settings: {
-            transport: extended ? 'power-automate-graph' : 'power-automate-standard',
-            capabilityProfile: extended ? 'extended-v1' : 'standard-v1',
-          },
-          syncedLists: [],
-        }),
+      await creation.create({
+        type: 'microsoft-todo-work',
+        name: name.trim() || 'Microsoft To Do - Work',
+        enabled: true,
+        syncMode: 'manual',
+        capabilities: {},
+        credentials: {},
+        settings: {
+          transport: extended ? 'power-automate-graph' : 'power-automate-standard',
+          capabilityProfile: extended ? 'extended-v1' : 'standard-v1',
+        },
+        syncedLists: [],
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to create connector');
-      setStatus('success');
-    } catch (createError) {
-      setError(createError instanceof Error ? createError.message : 'Failed to create connector');
-      setStatus('error');
-    }
+    } catch { /* rendered by the shared creation state */ }
   }
 
-  if (status === 'success') {
+  if (creation.status === 'success') {
     return (
       <div className="text-center py-4">
         <CheckCircle2 size={40} className="mx-auto text-emerald-400 mb-3" />
@@ -233,18 +222,18 @@ function WorkTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClo
           Graph tokens, or connection IDs into Mission Control.
         </div>
 
-        {error && (
+        {creation.error && (
           <div className="rounded-lg border border-red-800/40 bg-red-900/20 p-2 text-sm text-red-300">
-            {error}
+            {creation.error}
           </div>
         )}
 
         <button
           onClick={createConnector}
-          disabled={status === 'saving'}
+          disabled={creation.status === 'creating'}
           className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          {status === 'saving' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+          {creation.status === 'creating' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           Create Work To Do connector
         </button>
       </div>
@@ -320,9 +309,10 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_TYRION_SETUP_BRIDGE_URL);
   const [serviceToken, setServiceToken] = useState('');
   const [enabled, setEnabled] = useState(true);
-  const [status, setStatus] = useState<'idle' | 'testing' | 'saving' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [testResult, setTestResult] = useState<{ success: boolean; details: string } | null>(null);
+  const creation = useConnectorCreation();
 
   async function testConnection() {
     setStatus('testing');
@@ -354,40 +344,24 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   }
 
   async function createConnector() {
-    setStatus('saving');
+    setStatus('idle');
     setErrorMessage('');
-
     try {
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'finance-manager',
-          name: instanceName.trim() || 'Tyrion',
-          enabled,
-          syncMode: 'poll',
-          pollIntervalMinutes: 240,
-          capabilities: { read: true, write: true, delete: false, sync: true, lists: false, subtasks: false, tags: true, tagWriteBack: false },
-          credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
-          settings: { bridgeUrl: bridgeUrl.trim() },
-          syncedLists: [],
-        }),
+      await creation.create({
+        type: 'finance-manager',
+        name: instanceName.trim() || 'Tyrion',
+        enabled,
+        syncMode: 'poll',
+        pollIntervalMinutes: 240,
+        capabilities: { read: true, write: true, delete: false, sync: true, lists: false, subtasks: false, tags: true, tagWriteBack: false },
+        credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
+        settings: { bridgeUrl: bridgeUrl.trim() },
+        syncedLists: [],
       });
-
-      if (res.ok) {
-        setStatus('success');
-      } else {
-        const data = await res.text();
-        setStatus('error');
-        setErrorMessage(data || 'Failed to create connector');
-      }
-    } catch (err) {
-      setStatus('error');
-      setErrorMessage(String(err));
-    }
+    } catch { /* rendered by the shared creation state */ }
   }
 
-  if (status === 'success') {
+  if (creation.status === 'success') {
     return (
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-4">
         <div className="w-14 h-14 rounded-full bg-emerald-900/30 border border-emerald-800/30 flex items-center justify-center mx-auto mb-3">
@@ -493,17 +467,17 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
           </div>
         )}
 
-        {status === 'error' && (
+        {(status === 'error' || creation.status === 'error') && (
           <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
             className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400 flex items-center gap-2">
-            <XCircle size={14} /> {errorMessage}
+            <XCircle size={14} /> {creation.error || errorMessage}
           </motion.div>
         )}
 
         <div className="flex flex-col gap-2">
           <motion.button
             onClick={testConnection}
-            disabled={status === 'testing' || status === 'saving'}
+            disabled={status === 'testing' || creation.status === 'creating'}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-[var(--surface-2)] text-[var(--text-secondary)] rounded-lg text-sm font-medium hover:bg-[var(--surface-3)] disabled:opacity-50 flex items-center justify-center gap-2 border border-[var(--border)]"
           >
@@ -516,11 +490,11 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
 
           <motion.button
             onClick={createConnector}
-            disabled={status === 'saving'}
+            disabled={creation.status === 'creating'}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {status === 'saving' ? (
+            {creation.status === 'creating' ? (
               <><Loader2 size={14} className="animate-spin" /> Saving...</>
             ) : (
               <><Save size={14} /> Add Tyrion</>
@@ -545,9 +519,10 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
   const [showApiKey, setShowApiKey] = useState(false);
   const [modules, setModules] = useState({ actionQueue: true, statements: true, eobMatching: true });
   const [enabled, setEnabled] = useState(true);
-  const [status, setStatus] = useState<'idle' | 'testing' | 'saving' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'testing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [testResult, setTestResult] = useState<{ success: boolean; details: string } | null>(null);
+  const creation = useConnectorCreation();
 
   function toggleModule(key: keyof typeof modules) {
     setModules(prev => ({ ...prev, [key]: !prev[key] }));
@@ -589,43 +564,27 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
   }
 
   async function createConnector() {
-    setStatus('saving');
+    setStatus('idle');
     setErrorMessage('');
-
     try {
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'document-intelligence',
-          name: instanceName.trim() || 'OWL',
-          enabled,
-          syncMode: 'poll',
-          pollIntervalMinutes: 60,
-          capabilities: { read: true, write: true, delete: false, sync: true, lists: true, subtasks: false, tags: true, tagWriteBack: false },
-          credentials: apiKey.trim() ? { apiKey: apiKey.trim() } : {},
-          settings: {
-            baseUrl: baseUrl.trim() || DEFAULT_DOCUMENT_INTELLIGENCE_URL,
-            modules,
-          },
-          syncedLists: [],
-        }),
+      await creation.create({
+        type: 'document-intelligence',
+        name: instanceName.trim() || 'OWL',
+        enabled,
+        syncMode: 'poll',
+        pollIntervalMinutes: 60,
+        capabilities: { read: true, write: true, delete: false, sync: true, lists: true, subtasks: false, tags: true, tagWriteBack: false },
+        credentials: apiKey.trim() ? { apiKey: apiKey.trim() } : {},
+        settings: {
+          baseUrl: baseUrl.trim() || DEFAULT_DOCUMENT_INTELLIGENCE_URL,
+          modules,
+        },
+        syncedLists: [],
       });
-
-      if (res.ok) {
-        setStatus('success');
-      } else {
-        const data = await res.text();
-        setStatus('error');
-        setErrorMessage(data || 'Failed to create connector');
-      }
-    } catch (err) {
-      setStatus('error');
-      setErrorMessage(String(err));
-    }
+    } catch { /* rendered by the shared creation state */ }
   }
 
-  if (status === 'success') {
+  if (creation.status === 'success') {
     return (
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="text-center py-4">
         <div className="w-14 h-14 rounded-full bg-indigo-900/30 border border-indigo-800/30 flex items-center justify-center mx-auto mb-3">
@@ -688,7 +647,7 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
               placeholder="Leave blank if not required"
-              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 font-mono"
+              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none font-mono"
             />
             <button
               type="button"
@@ -749,17 +708,17 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
           </div>
         )}
 
-        {status === 'error' && (
+        {(status === 'error' || creation.status === 'error') && (
           <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
             className="p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400 flex items-center gap-2">
-            <XCircle size={14} /> {errorMessage}
+            <XCircle size={14} /> {creation.error || errorMessage}
           </motion.div>
         )}
 
         <div className="flex flex-col gap-2">
           <motion.button
             onClick={testConnection}
-            disabled={status === 'testing' || status === 'saving'}
+            disabled={status === 'testing' || creation.status === 'creating'}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-[var(--surface-2)] text-[var(--text-secondary)] rounded-lg text-sm font-medium hover:bg-[var(--surface-3)] disabled:opacity-50 flex items-center justify-center gap-2 border border-[var(--border)]"
           >
@@ -772,11 +731,11 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
 
           <motion.button
             onClick={createConnector}
-            disabled={status === 'saving'}
+            disabled={creation.status === 'creating'}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {status === 'saving' ? (
+            {creation.status === 'creating' ? (
               <><Loader2 size={14} className="animate-spin" /> Saving...</>
             ) : (
               <><Save size={14} /> Add OWL</>
@@ -804,15 +763,15 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
   onAdded: () => void;
 }) {
   const [accountType, setAccountType] = useState<'personal' | 'work'>('personal');
-  const [status, setStatus] = useState<'idle' | 'checking' | 'connecting' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'checking' | 'connecting' | 'success' | 'error'>('checking');
   const [existingAccount, setExistingAccount] = useState<{ id: string; email: string; hasPermission: boolean } | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const creation = useConnectorCreation();
 
-  const instanceId = `${connectorType}-${Date.now()}`;
+  const getInstanceId = useOAuthConnectorInstanceId(connectorType);
 
   // Check for existing Microsoft accounts on mount
   useEffect(() => {
-    setStatus('checking');
     fetch('/api/connectors')
       .then(r => r.json())
       .then(data => {
@@ -834,59 +793,11 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
       .catch(() => setStatus('idle'));
   }, []);
 
-  async function reuseExistingAccount() {
-    if (!existingAccount) return;
-    setStatus('connecting');
-    setErrorMessage('');
-
-    try {
-      // Create new connector instance that shares credentials with existing MS account
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: connectorType,
-          name: title,
-          enabled: true,
-          syncMode: 'poll',
-          pollIntervalMinutes: 10,
-          capabilities: { read: true, write: false, delete: false, sync: true },
-          credentials: {},
-          settings: { accountType, sharedCredentialsFrom: existingAccount.id },
-          syncedLists: [],
-        }),
-      });
-
-      if (res.ok) {
-        // Copy credentials from existing connector
-        const copyRes = await fetch(`/api/connectors/${existingAccount.id}/share-credentials`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ targetConnectorId: `${connectorType}-${Date.now()}` }),
-        });
-
-        // Even if credential sharing fails, the connector was created â€” 
-        // user can re-auth with progressive consent
-        if (!copyRes.ok) {
-          // Fall back to new OAuth with additional scopes
-          startOAuth();
-          return;
-        }
-
-        setStatus('success');
-        setTimeout(() => { onAdded(); onClose(); }, 800);
-      } else {
-        throw new Error('Failed to create connector');
-      }
-    } catch {
-      // Fall back to fresh OAuth
-      startOAuth();
-    }
-  }
-
   function startOAuth() {
+    const instanceId = getInstanceId();
     setStatus('connecting');
     setErrorMessage('');
+    creation.markCreating();
 
     const authUrl = `/api/auth/microsoft/connect?instanceId=${encodeURIComponent(instanceId)}&accountType=${accountType}&connectorType=${encodeURIComponent(connectorType)}`;
     const popup = window.open(authUrl, 'microsoft-oauth', 'width=600,height=700,popup=yes');
@@ -901,10 +812,12 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
       clearTimeout(timeoutId);
 
       if (event.data.success) {
+        creation.markSuccess();
         setStatus('success');
         popup?.close();
         setTimeout(() => { onAdded(); onClose(); }, 800);
       } else {
+        creation.markError(event.data.error || 'OAuth sign-in failed.');
         setStatus('error');
         setErrorMessage(event.data.error || 'OAuth sign-in failed.');
         popup?.close();
@@ -923,6 +836,7 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
           window.removeEventListener('message', handleMessage);
           clearInterval(pollInterval);
           clearTimeout(timeoutId);
+          creation.markSuccess();
           setStatus('success');
           popup?.close();
           setTimeout(() => { onAdded(); onClose(); }, 800);
@@ -935,10 +849,9 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
     const timeoutId = setTimeout(() => {
       window.removeEventListener('message', handleMessage);
       clearInterval(pollInterval);
-      if (status === 'connecting') {
-        setStatus('error');
-        setErrorMessage('OAuth sign-in timed out. Please try again.');
-      }
+      creation.markError('OAuth sign-in timed out. Please try again.');
+      setStatus('error');
+      setErrorMessage('OAuth sign-in timed out. Please try again.');
     }, 300000);
   }
 
@@ -983,8 +896,8 @@ function OutlookSetup({ connectorType, title, description, permissions, onBack, 
         </div>
       )}
 
-      {status === 'error' && errorMessage && (
-        <div className="text-sm text-red-400 mb-4">{errorMessage}</div>
+      {status === 'error' && (errorMessage || creation.error) && (
+        <div className="text-sm text-red-400 mb-4">{creation.error || errorMessage}</div>
       )}
 
       {status === 'idle' && (
@@ -1060,14 +973,15 @@ function MicrosoftTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
   const [status, setStatus] = useState<'idle' | 'connecting' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [configComplete, setConfigComplete] = useState(false);
+  const creation = useConnectorCreation();
 
-  // Stable ID that persists across re-renders (Date.now() as bare const would regenerate)
-  const instanceIdRef = useRef(`mstodo-${Date.now()}`);
-  const instanceId = instanceIdRef.current;
+  const getInstanceId = useOAuthConnectorInstanceId('mstodo');
 
   async function startOAuth() {
+    const instanceId = getInstanceId();
     setStatus('connecting');
     setErrorMessage('');
+    creation.markCreating();
 
     const authUrl = `/api/auth/microsoft/connect?instanceId=${encodeURIComponent(instanceId)}&accountType=${accountType}${instanceName ? `&name=${encodeURIComponent(instanceName)}` : ''}`;
     const popup = window.open(authUrl, 'microsoft-oauth', 'width=600,height=700,popup=yes');
@@ -1082,10 +996,12 @@ function MicrosoftTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       clearTimeout(timeoutId);
 
       if (event.data.success) {
+        creation.markSuccess();
         setStatus('success');
         popup?.close();
         setConfigComplete(true);
       } else {
+        creation.markError(event.data.error || 'OAuth sign-in failed.');
         setStatus('error');
         setErrorMessage(event.data.error || 'OAuth sign-in failed.');
         popup?.close();
@@ -1104,6 +1020,7 @@ function MicrosoftTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
           window.removeEventListener('message', handleMessage);
           clearInterval(pollInterval);
           clearTimeout(timeoutId);
+          creation.markSuccess();
           setStatus('success');
           popup?.close();
           setConfigComplete(true);
@@ -1116,42 +1033,31 @@ function MicrosoftTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
     const timeoutId = setTimeout(() => {
       window.removeEventListener('message', handleMessage);
       clearInterval(pollInterval);
-      if (status === 'connecting') {
-        setStatus('error');
-        setErrorMessage('OAuth sign-in timed out. Please try again.');
-      }
+      creation.markError('OAuth sign-in timed out. Please try again.');
+      setStatus('error');
+      setErrorMessage('OAuth sign-in timed out. Please try again.');
     }, 300000);
   }
 
   async function createWithoutOAuth() {
     setStatus('connecting');
     try {
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'microsoft-todo',
-          name: instanceName || `Microsoft Todo (${accountType})`,
-          enabled: true,
-          syncMode: 'poll',
-          pollIntervalMinutes: 5,
-          capabilities: { read: true, write: true, delete: true, sync: true, lists: true, subtasks: true, tags: true, tagWriteBack: true },
-          credentials: {},
-          settings: { accountType, syncMicroStatus: false },
-          syncedLists: [],
-        }),
+      await creation.create({
+        type: 'microsoft-todo',
+        name: instanceName || `Microsoft Todo (${accountType})`,
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: { read: true, write: true, delete: true, sync: true, lists: true, subtasks: true, tags: true, tagWriteBack: true },
+        credentials: {},
+        settings: { accountType, syncMicroStatus: false },
+        syncedLists: [],
       });
-      if (res.ok) {
-        setStatus('success');
-        setConfigComplete(true);
-      } else {
-        const data = await res.text();
-        setStatus('error');
-        setErrorMessage(data || 'Failed to create connector');
-      }
+      setStatus('success');
+      setConfigComplete(true);
     } catch (err) {
       setStatus('error');
-      setErrorMessage(String(err));
+      setErrorMessage(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -1224,7 +1130,7 @@ function MicrosoftTodoSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       {status === 'error' && (
         <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
           className="mb-4 p-3 bg-red-900/20 border border-red-800/30 rounded-lg text-sm text-red-400 flex items-center gap-2">
-          <XCircle size={14} /> {errorMessage || 'Connection failed. Please try again.'}
+          <XCircle size={14} /> {creation.error || errorMessage || 'Connection failed. Please try again.'}
         </motion.div>
       )}
 
@@ -1283,9 +1189,9 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
   const [showToken, setShowToken] = useState(false);
   const [status, setStatus] = useState<'idle' | 'testing' | 'success' | 'scanning-labels' | 'labels-found' | 'normalizing-labels' | 'done' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
-  const [detectedScopes, setDetectedScopes] = useState<string[]>([]);
   const [scopeWarnings, setScopeWarnings] = useState<Array<{ scope: string; label: string }>>([]);
   const [createdConnectorId, setCreatedConnectorId] = useState<string | null>(null);
+  const creation = useConnectorCreation();
   const [labelScanResult, setLabelScanResult] = useState<{
     normalizations: Array<{ current: string; canonical: string; category: string; issueCount: number; repo: string }>;
     totalLabelsToNormalize: number;
@@ -1295,7 +1201,6 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
   async function testAndCreate() {
     setStatus('testing');
     setErrorMessage('');
-    setDetectedScopes([]);
     setScopeWarnings([]);
 
     const repoList = repos.split('\n').map(r => r.trim()).filter(Boolean);
@@ -1324,7 +1229,6 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
       // Detect token scopes from response header
       const oauthScopes = (testRes.headers.get('x-oauth-scopes') || '')
         .split(',').map(s => s.trim()).filter(Boolean);
-      setDetectedScopes(oauthScopes);
 
       // Check for missing recommended scopes (classic tokens only)
       if (oauthScopes.length > 0) {
@@ -1334,30 +1238,27 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
         setScopeWarnings(warnings);
       }
 
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'github-issues',
-          name: instanceName || `GitHub (${user.login})`,
-          enabled: true,
-          syncMode: 'poll',
-          pollIntervalMinutes: 10,
-          capabilities: { read: true, write: true, delete: false, sync: true, lists: true, subtasks: true, tags: true, tagWriteBack: true, tagScope: 'per-list', tagCreationMode: 'predefined' },
-          credentials: { token: pat },
-          settings: {
-            repos: repoList,
-            username: user.login,
-            fetchNotifications: syncNotifications,
-            syncMicroStatus: false,
-          },
-          syncedLists: repoList,
-        }),
+      const created = await creation.create({
+        type: 'github-issues',
+        name: instanceName || `GitHub (${user.login})`,
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 10,
+        capabilities: { read: true, write: true, delete: false, sync: true, lists: true, subtasks: true, tags: true, tagWriteBack: true, tagScope: 'per-list', tagCreationMode: 'predefined' },
+        credentials: { token: pat },
+        settings: {
+          repos: repoList,
+          username: user.login,
+          fetchNotifications: syncNotifications,
+          syncMicroStatus: false,
+        },
+        syncedLists: repoList,
       });
-
-      if (res.ok) {
-        const created = await res.json();
-        const connId = created.id || created.connector?.id;
+      {
+        const nestedConnector = created.connector as { id?: unknown } | undefined;
+        const connId = typeof created.id === 'string'
+          ? created.id
+          : typeof nestedConnector?.id === 'string' ? nestedConnector.id : null;
         setCreatedConnectorId(connId);
 
         // Auto-scan for non-canonical labels
@@ -1378,14 +1279,10 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
           }
         }
         setStatus('done');
-      } else {
-        const data = await res.text();
-        setStatus('error');
-        setErrorMessage(data || 'Failed to create connector');
       }
     } catch (err) {
       setStatus('error');
-      setErrorMessage(String(err));
+      setErrorMessage(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -1537,7 +1434,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
             value={pat}
             onChange={e => setPat(e.target.value)}
             placeholder="ghp_..."
-            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
           <button onClick={() => setShowToken(!showToken)} type="button"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
@@ -1653,9 +1550,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
 // ─── Scout Setup ────────────────────────────────────────────────────────────
 
 function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose: () => void; onAdded: () => void }) {
-  const [enabling, setEnabling] = useState(false);
-  const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
+  const creation = useConnectorCreation();
 
   const mcpSnippet = JSON.stringify({
     'mission-control': {
@@ -1665,46 +1560,32 @@ function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose:
   }, null, 2);
 
   async function handleEnable() {
-    setEnabling(true);
-    setError('');
     try {
-      const res = await fetch('/api/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: 'scout-primary',
-          type: 'scout',
-          name: 'Scout',
-          syncMode: 'push',
-          capabilities: {
-            read: true,
-            write: false,
-            delete: false,
-            sync: false,
-            subtasks: false,
-            lists: true,
-            tags: true,
-            tagWriteBack: false,
-            listSelectionMode: 'not-applicable',
-          },
-        }),
+      await creation.create({
+        id: 'scout-primary',
+        type: 'scout',
+        name: 'Scout',
+        syncMode: 'push',
+        capabilities: {
+          read: true,
+          write: false,
+          delete: false,
+          sync: false,
+          subtasks: false,
+          lists: true,
+          tags: true,
+          tagWriteBack: false,
+          listSelectionMode: 'not-applicable',
+        },
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        // If already exists, that's fine
-        if (res.status === 409 || (data.error && data.error.includes('already'))) {
-          setDone(true);
-          onAdded();
-          return;
-        }
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      setDone(true);
       onAdded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to register connector');
+      const message = err instanceof Error ? err.message : 'Failed to register connector';
+      if (message.toLowerCase().includes('already')) {
+        creation.markSuccess();
+        onAdded();
+      }
     }
-    setEnabling(false);
   }
 
   return (
@@ -1719,23 +1600,23 @@ function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose:
           <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
             1. Register the connector
           </label>
-          {done ? (
+          {creation.status === 'success' ? (
             <p className="text-sm text-emerald-400 flex items-center gap-1.5">
               <CheckCircle2 size={14} /> Scout connector registered. It will appear in your connectors list.
             </p>
           ) : (
             <Button
               onClick={handleEnable}
-              disabled={enabling}
+              disabled={creation.status === 'creating'}
               className="bg-blue-600 hover:bg-blue-500 text-white text-sm"
             >
-              {enabling ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
+              {creation.status === 'creating' ? <Loader2 size={14} className="animate-spin mr-1.5" /> : null}
               Enable Scout Connector
             </Button>
           )}
-          {error && (
+          {creation.error && creation.status === 'error' && (
             <p className="mt-2 text-xs text-red-400 flex items-center gap-1">
-              <AlertTriangle size={10} /> {error}
+              <AlertTriangle size={10} /> {creation.error}
             </p>
           )}
         </div>
@@ -1758,7 +1639,7 @@ function ScoutSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose:
           <ChevronRight size={12} className="rotate-180" /> Back
         </button>
         <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
-          {done ? 'Done' : 'Close'}
+          {creation.status === 'success' ? 'Done' : 'Close'}
         </button>
       </div>
     </div>

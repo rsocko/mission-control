@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getTriageItemById } from '@/lib/triage';
+import { getTriageItemById } from '@/lib/triage/query';
 import { extractMultipleActions } from '@/lib/triage/actions/multi-action-extract';
 import logger from '@/lib/logger';
 

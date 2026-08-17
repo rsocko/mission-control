@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import db, { runTransaction } from '@/db';
+import { isDatabaseContentionError } from '@/db/contention';
 import {
   myDayItems,
   myDayExclusions,
@@ -37,77 +38,111 @@ function isValidDateParameter(value: string): boolean {
     && parsed.getUTCDate() === day;
 }
 
+type MyDayDatabase = Parameters<Parameters<typeof runTransaction>[0]>[0];
+
+/**
+ * Read the completed tasks for a date that are not yet represented in My Day.
+ * Runs without the writer lock so callers can skip the write entirely when
+ * there is nothing to auto-include.
+ */
+function findCompletedTasksToAutoInclude(
+  reader: MyDayDatabase,
+  date: string,
+  taskVisibilityConditions: ReturnType<typeof getTaskSourceVisibilityConditions>,
+): Array<{ id: string; completedAt: string }> {
+  const { dayStart, nextDayStart } = getLocalDateBoundsISO(date);
+
+  const completedTasks = reader.select({
+    id: tasks.id,
+    completedAt: tasks.completedAt,
+  })
+    .from(tasks)
+    .where(and(
+      eq(tasks.status, 'done'),
+      gte(
+        sql<number>`julianday(${tasks.completedAt})`,
+        sql<number>`julianday(${dayStart})`,
+      ),
+      lt(
+        sql<number>`julianday(${tasks.completedAt})`,
+        sql<number>`julianday(${nextDayStart})`,
+      ),
+      eq(tasks.depth, 0),
+      isNull(tasks.parentId),
+      ...taskVisibilityConditions,
+    ))
+    .all();
+
+  if (completedTasks.length === 0) return [];
+
+  const existingTaskIds = new Set(
+    reader.select({ taskId: myDayItems.taskId })
+      .from(myDayItems)
+      .where(eq(myDayItems.date, date))
+      .all()
+      .map((item) => item.taskId),
+  );
+  const excludedTaskIds = new Set(
+    reader.select({ taskId: myDayExclusions.taskId })
+      .from(myDayExclusions)
+      .where(eq(myDayExclusions.date, date))
+      .all()
+      .map((item) => item.taskId),
+  );
+
+  return completedTasks.flatMap((task) => (
+    task.completedAt
+      && !existingTaskIds.has(task.id)
+      && !excludedTaskIds.has(task.id)
+      ? [{ id: task.id, completedAt: task.completedAt }]
+      : []
+  ));
+}
+
 function includeCompletedTasksForDate(
   date: string,
   taskVisibilityConditions: ReturnType<typeof getTaskSourceVisibilityConditions>,
 ): void {
-  const { dayStart, nextDayStart } = getLocalDateBoundsISO(date);
+  // Avoid contending for the writer lock when the read-only view already shows
+  // that there is nothing to auto-include.
+  if (findCompletedTasksToAutoInclude(db, date, taskVisibilityConditions).length === 0) return;
 
-  runTransaction((tx) => {
-    const completedTasks = tx.select({
-      id: tasks.id,
-      completedAt: tasks.completedAt,
-    })
-      .from(tasks)
-      .where(and(
-        eq(tasks.status, 'done'),
-        gte(
-          sql<number>`julianday(${tasks.completedAt})`,
-          sql<number>`julianday(${dayStart})`,
-        ),
-        lt(
-          sql<number>`julianday(${tasks.completedAt})`,
-          sql<number>`julianday(${nextDayStart})`,
-        ),
-        eq(tasks.depth, 0),
-        isNull(tasks.parentId),
-        ...taskVisibilityConditions,
-      ))
-      .all();
+  try {
+    runTransaction((tx) => {
+      const pendingTasks = findCompletedTasksToAutoInclude(
+        tx,
+        date,
+        taskVisibilityConditions,
+      );
+      if (pendingTasks.length === 0) return;
 
-    if (completedTasks.length === 0) return;
-
-    const existingTaskIds = new Set(
-      tx.select({ taskId: myDayItems.taskId })
+      const [maxOrder] = tx.select({ max: sql<number>`MAX("order")` })
         .from(myDayItems)
         .where(eq(myDayItems.date, date))
-        .all()
-        .map((item) => item.taskId),
-    );
-    const excludedTaskIds = new Set(
-      tx.select({ taskId: myDayExclusions.taskId })
-        .from(myDayExclusions)
-        .where(eq(myDayExclusions.date, date))
-        .all()
-        .map((item) => item.taskId),
-    );
-    const [maxOrder] = tx.select({ max: sql<number>`MAX("order")` })
-      .from(myDayItems)
-      .where(eq(myDayItems.date, date))
-      .all();
-    let order = (maxOrder?.max || 0) + 1;
+        .all();
+      let order = (maxOrder?.max || 0) + 1;
 
-    for (const task of completedTasks) {
-      if (
-        !task.completedAt
-        || existingTaskIds.has(task.id)
-        || excludedTaskIds.has(task.id)
-      ) {
-        continue;
+      for (const task of pendingTasks) {
+        tx.insert(myDayItems).values({
+          id: `md-completed-${crypto.randomUUID().slice(0, 8)}`,
+          taskId: task.id,
+          date,
+          addedAt: task.completedAt,
+          isAutoIncluded: true,
+          order,
+        }).run();
+        order++;
       }
-
-      tx.insert(myDayItems).values({
-        id: `md-completed-${crypto.randomUUID().slice(0, 8)}`,
-        taskId: task.id,
-        date,
-        addedAt: task.completedAt,
-        isAutoIncluded: true,
-        order,
-      }).run();
-      existingTaskIds.add(task.id);
-      order++;
-    }
-  });
+    });
+  } catch (error) {
+    // Auto-inclusion is best-effort maintenance: a reader must not fail because
+    // background sync or maintenance currently owns the writer lock.
+    if (!isDatabaseContentionError(error)) throw error;
+    logger.warn(
+      { err: error, date },
+      'Skipped My Day completed-task auto-include because SQLite is write-contended',
+    );
+  }
 }
 
 /**

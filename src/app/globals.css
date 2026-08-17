@@ -208,10 +208,31 @@ p, li {
 }
 
 /* Wrapper variant: containers with an embedded input glow on focus-within. */
-/* Apply the class .input-glow to any wrapper <div> around a bare input.    */
+/* Apply .input-glow to the visual boundary around an embedded text field.  */
+.input-glow {
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
 .input-glow:focus-within {
   border-color: var(--border-focus);
   box-shadow: var(--shadow-focus-glow);
+}
+
+/* The wrapper owns focus presentation; its embedded field remains bare. */
+.input-glow :where(
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"],
+  input[type="url"],
+  input[type="tel"],
+  input[type="number"],
+  input:not([type]),
+  textarea
+):focus {
+  box-shadow: none;
 }
 
 /* Selection */

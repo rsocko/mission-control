@@ -1,14 +1,19 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
-  Loader2, Trash2, Save, Eye, EyeOff, FolderTree,
-  CheckCircle2, MessageCircle, RefreshCw, SquarePlay, ListVideo, Plus, X, Bookmark,
+  Loader2, Save, FolderTree, MessageCircle, RefreshCw, SquarePlay, ListVideo, Plus, X,
 } from 'lucide-react';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { settingsLogger } from '@/lib/client-logger';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ConnectorBrandIcon } from './ConnectorBrandIcon';
+import {
+  DocumentIntelligenceSourcePanel,
+  GitHubSourcePanel,
+  KarakeepSourcePanel,
+  RedditSourcePanel,
+  YouTubeSourcePanel,
+} from './triage-sources/CredentialSourcePanels';
 
 interface TriageSourceConfig {
   github: { pat: string; username: string; configured: boolean; connectedViaConnector: boolean };
@@ -32,32 +37,9 @@ interface PlaylistSyncState {
 
 function TriageSourcesSection() {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState<'github' | 'reddit' | 'youtube' | 'karakeep' | null>(null);
-  const [deleting, setDeleting] = useState<'github' | 'reddit' | 'youtube' | 'karakeep' | null>(null);
   const [config, setConfig] = useState<TriageSourceConfig | null>(null);
+  const [configRevision, setConfigRevision] = useState(0);
   const [statusMessage, setStatusMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
-
-  // Form state
-  const [githubPat, setGithubPat] = useState('');
-  const [githubUsername, setGithubUsername] = useState('');
-  const [redditClientId, setRedditClientId] = useState('');
-  const [redditClientSecret, setRedditClientSecret] = useState('');
-  const [redditRefreshToken, setRedditRefreshToken] = useState('');
-  const [redditUsername, setRedditUsername] = useState('');
-  const [youtubeClientId, setYoutubeClientId] = useState('');
-  const [youtubeClientSecret, setYoutubeClientSecret] = useState('');
-  const [youtubeRefreshToken, setYoutubeRefreshToken] = useState('');
-  const [karakeepUrl, setKarakeepUrl] = useState('');
-  const [karakeepApiKey, setKarakeepApiKey] = useState('');
-  const [showKarakeepApiKey, setShowKarakeepApiKey] = useState(false);
-
-  const [showGithubPat, setShowGithubPat] = useState(false);
-  const [showRedditSecret, setShowRedditSecret] = useState(false);
-  const [showRedditToken, setShowRedditToken] = useState(false);
-  const [showYoutubeSecret, setShowYoutubeSecret] = useState(false);
-  const [showYoutubeToken, setShowYoutubeToken] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
-
   // Auto-sync schedule state
   const [ghAutoSyncEnabled, setGhAutoSyncEnabled] = useState(false);
   const [ghAutoSyncInterval, setGhAutoSyncInterval] = useState(30);
@@ -90,20 +72,8 @@ function TriageSourcesSection() {
       ]);
       const data = await sourceRes.json();
       setConfig(data);
-      setGithubPat(data.github.pat || '');
-      setGithubUsername(data.github.username || '');
-      setRedditClientId(data.reddit.clientId || '');
-      setRedditClientSecret(data.reddit.clientSecret || '');
-      setRedditRefreshToken(data.reddit.refreshToken || '');
-      setRedditUsername(data.reddit.username || '');
-      setYoutubeClientId(data.youtube?.clientId || '');
-      setYoutubeClientSecret(data.youtube?.clientSecret || '');
-      setYoutubeRefreshToken(data.youtube?.refreshToken || '');
+      setConfigRevision(revision => revision + 1);
       setPlaylists(data.youtube?.playlists || []);
-      setKarakeepUrl(data.karakeep?.url || '');
-      // Don't load the masked API key into state — it would be sent back on save
-      // and overwrite the real key. Keep field empty; placeholder shows it's configured.
-      setKarakeepApiKey('');
 
       if (autoSyncRes.ok) {
         const autoSyncData = await autoSyncRes.json();
@@ -275,70 +245,12 @@ function TriageSourcesSection() {
     }
   }
 
-  useEffect(() => { loadConfig(); }, [loadConfig]);
-
-  async function handleSaveGitHub() {
-    setSaving('github');
-    setStatusMessage(null);
-    try {
-      const res = await fetch('/api/triage/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: 'github', credentials: { pat: githubPat, username: githubUsername } }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      setStatusMessage({ tone: 'success', text: 'GitHub credentials saved' });
-      await loadConfig();
-    } catch {
-      setStatusMessage({ tone: 'error', text: 'Failed to save GitHub credentials' });
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function handleSaveReddit() {
-    setSaving('reddit');
-    setStatusMessage(null);
-    try {
-      const res = await fetch('/api/triage/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'reddit',
-          credentials: { clientId: redditClientId, clientSecret: redditClientSecret, refreshToken: redditRefreshToken, username: redditUsername },
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      setStatusMessage({ tone: 'success', text: 'Reddit credentials saved' });
-      await loadConfig();
-    } catch {
-      setStatusMessage({ tone: 'error', text: 'Failed to save Reddit credentials' });
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function handleSaveYoutube() {
-    setSaving('youtube');
-    setStatusMessage(null);
-    try {
-      const res = await fetch('/api/triage/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'youtube',
-          credentials: { clientId: youtubeClientId, clientSecret: youtubeClientSecret, refreshToken: youtubeRefreshToken },
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      setStatusMessage({ tone: 'success', text: 'YouTube credentials saved' });
-      await loadConfig();
-    } catch {
-      setStatusMessage({ tone: 'error', text: 'Failed to save YouTube credentials' });
-    } finally {
-      setSaving(null);
-    }
-  }
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      void loadConfig();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [loadConfig]);
 
   async function savePlaylists(updated: Array<{ id: string; label: string; enabled: boolean }>) {
     setPlaylists(updated);
@@ -378,58 +290,6 @@ function TriageSourcesSection() {
     savePlaylists(playlists.map((p) => (p.id === id ? { ...p, enabled } : p)));
   }
 
-  async function handleSaveKarakeep() {
-    setSaving('karakeep');
-    setStatusMessage(null);
-    try {
-      const res = await fetch('/api/triage/sources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source: 'karakeep',
-          credentials: { url: karakeepUrl, apiKey: karakeepApiKey },
-        }),
-      });
-      if (!res.ok) throw new Error('Failed to save');
-      setStatusMessage({ tone: 'success', text: 'Karakeep credentials saved' });
-      await loadConfig();
-    } catch {
-      setStatusMessage({ tone: 'error', text: 'Failed to save Karakeep credentials' });
-    } finally {
-      setSaving(null);
-    }
-  }
-
-  async function handleDelete(source: 'github' | 'reddit' | 'youtube' | 'karakeep') {
-    const sourceName = source === 'github' ? 'GitHub' : source === 'reddit' ? 'Reddit' : source === 'youtube' ? 'YouTube' : 'Karakeep';
-    setConfirmDialog({
-      open: true,
-      title: `Remove ${sourceName} credentials?`,
-      message: `This will remove your ${sourceName} triage source credentials. You can reconfigure them later.`,
-      confirmLabel: 'Remove',
-      variant: 'danger',
-      onConfirm: async () => {
-        setConfirmDialog((d) => ({ ...d, open: false }));
-        setDeleting(source);
-        setStatusMessage(null);
-        try {
-          const res = await fetch('/api/triage/sources', {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ source }),
-          });
-          if (!res.ok) throw new Error('Failed to delete');
-          setStatusMessage({ tone: 'success', text: `${sourceName} credentials removed` });
-          await loadConfig();
-        } catch {
-          setStatusMessage({ tone: 'error', text: `Failed to remove ${source} credentials` });
-        } finally {
-          setDeleting(null);
-        }
-      },
-    });
-  }
-
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-[var(--text-tertiary)]">
@@ -447,101 +307,14 @@ function TriageSourcesSection() {
         </p>
       </div>
 
-      {statusMessage && (
-        <div className={`rounded-[10px] border px-3 py-2 text-sm ${
-          statusMessage.tone === 'success'
-            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-            : 'border-red-500/30 bg-red-500/10 text-red-300'
-        }`}>
-          {statusMessage.text}
-        </div>
-      )}
-
-      {/* GitHub Stars */}
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-[10px] bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
-              <FolderTree size={16} className="text-violet-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">GitHub Stars</h3>
-              <p className="text-xs text-[var(--text-tertiary)]">Import your starred repositories</p>
-            </div>
-          </div>
-          {config?.github.configured && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-              <CheckCircle2 size={12} /> Connected
-            </span>
-          )}
-        </div>
-
-        {config?.github.connectedViaConnector ? (
-          <div className="rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-3">
-            <p className="text-sm text-[var(--text-secondary)]">
-              GitHub is connected via the Issues connector. Star imports will use the same connection.
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Personal Access Token</label>
-                <div className="relative">
-                  <input
-                    type={showGithubPat ? 'text' : 'password'}
-                    value={githubPat}
-                    onChange={(e) => setGithubPat(e.target.value)}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowGithubPat(!showGithubPat)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  >
-                    {showGithubPat ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                <p className="mt-1 text-[12px] text-[var(--text-muted)]">Needs <code className="bg-[var(--surface-2)] px-1 rounded text-[12px]">read:user</code> scope. Create one at github.com/settings/tokens.</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Username <span className="text-[var(--text-muted)]">(optional)</span></label>
-                <input
-                  type="text"
-                  value={githubUsername}
-                  onChange={(e) => setGithubUsername(e.target.value)}
-                  placeholder="your-github-username"
-                  className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)]">
-              <button
-                type="button"
-                onClick={handleSaveGitHub}
-                disabled={!githubPat || saving === 'github'}
-                className="flex items-center gap-1.5 rounded-[8px] bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {saving === 'github' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                Save
-              </button>
-              {config?.github.configured && !config.github.connectedViaConnector && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete('github')}
-                  disabled={deleting === 'github'}
-                  className="flex items-center gap-1.5 rounded-[8px] border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-                >
-                  {deleting === 'github' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                  Remove
-                </button>
-              )}
-            </div>
-          </>
-        )}
-      </div>
+      <GitHubSourcePanel
+        key={`github-${configRevision}`}
+        configured={config?.github.configured ?? false}
+        connectedViaConnector={config?.github.connectedViaConnector ?? false}
+        pat={config?.github.pat ?? ''}
+        username={config?.github.username ?? ''}
+        onChanged={loadConfig}
+      />
 
       {/* GitHub Stars Auto-Sync Schedule */}
       {config?.github.configured && (
@@ -589,205 +362,24 @@ function TriageSourcesSection() {
         </div>
       )}
 
-      {/* Reddit Saved */}
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-[10px] bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
-              <MessageCircle size={16} className="text-orange-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Reddit Saved</h3>
-              <p className="text-xs text-[var(--text-tertiary)]">Import your saved posts and comments</p>
-            </div>
-          </div>
-          {config?.reddit.configured && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-              <CheckCircle2 size={12} /> Connected
-            </span>
-          )}
-        </div>
+      <RedditSourcePanel
+        key={`reddit-${configRevision}`}
+        configured={config?.reddit.configured ?? false}
+        clientId={config?.reddit.clientId ?? ''}
+        clientSecret={config?.reddit.clientSecret ?? ''}
+        refreshToken={config?.reddit.refreshToken ?? ''}
+        username={config?.reddit.username ?? ''}
+        onChanged={loadConfig}
+      />
 
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Client ID</label>
-            <input
-              type="text"
-              value={redditClientId}
-              onChange={(e) => setRedditClientId(e.target.value)}
-              placeholder="your-app-client-id"
-              className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Client Secret</label>
-            <div className="relative">
-              <input
-                type={showRedditSecret ? 'text' : 'password'}
-                value={redditClientSecret}
-                onChange={(e) => setRedditClientSecret(e.target.value)}
-                placeholder="your-app-client-secret"
-                className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowRedditSecret(!showRedditSecret)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              >
-                {showRedditSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Refresh Token</label>
-            <div className="relative">
-              <input
-                type={showRedditToken ? 'text' : 'password'}
-                value={redditRefreshToken}
-                onChange={(e) => setRedditRefreshToken(e.target.value)}
-                placeholder="your-refresh-token"
-                className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowRedditToken(!showRedditToken)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              >
-                {showRedditToken ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-            <p className="mt-1 text-[12px] text-[var(--text-muted)]">Create a Reddit app at reddit.com/prefs/apps — use &ldquo;script&rdquo; type. Generate a refresh token via the OAuth2 flow.</p>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Username <span className="text-[var(--text-muted)]">(optional)</span></label>
-            <input
-              type="text"
-              value={redditUsername}
-              onChange={(e) => setRedditUsername(e.target.value)}
-              placeholder="your-reddit-username"
-              className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-            />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)]">
-          <button
-            type="button"
-            onClick={handleSaveReddit}
-            disabled={!redditClientId || !redditClientSecret || !redditRefreshToken || saving === 'reddit'}
-            className="flex items-center gap-1.5 rounded-[8px] bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving === 'reddit' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-            Save
-          </button>
-          {config?.reddit.configured && (
-            <button
-              type="button"
-              onClick={() => handleDelete('reddit')}
-              disabled={deleting === 'reddit'}
-              className="flex items-center gap-1.5 rounded-[8px] border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-            >
-              {deleting === 'reddit' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-              Remove
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* YouTube Playlists */}
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-[10px] bg-red-500/10 border border-red-500/20 flex items-center justify-center">
-              <SquarePlay size={16} className="text-red-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">YouTube Playlists</h3>
-              <p className="text-xs text-[var(--text-tertiary)]">Import videos from Watch Later, Liked Videos, and custom playlists</p>
-            </div>
-          </div>
-          {config?.youtube.configured && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-              <CheckCircle2 size={12} /> Connected
-            </span>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Client ID</label>
-            <input
-              type="text"
-              value={youtubeClientId}
-              onChange={(e) => setYoutubeClientId(e.target.value)}
-              placeholder="your-oauth-client-id.apps.googleusercontent.com"
-              className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Client Secret</label>
-            <div className="relative">
-              <input
-                type={showYoutubeSecret ? 'text' : 'password'}
-                value={youtubeClientSecret}
-                onChange={(e) => setYoutubeClientSecret(e.target.value)}
-                placeholder="your-oauth-client-secret"
-                className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowYoutubeSecret(!showYoutubeSecret)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              >
-                {showYoutubeSecret ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Refresh Token</label>
-            <div className="relative">
-              <input
-                type={showYoutubeToken ? 'text' : 'password'}
-                value={youtubeRefreshToken}
-                onChange={(e) => setYoutubeRefreshToken(e.target.value)}
-                placeholder="your-refresh-token"
-                className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowYoutubeToken(!showYoutubeToken)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              >
-                {showYoutubeToken ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
-            </div>
-            <p className="mt-1 text-[12px] text-[var(--text-muted)]">Create an OAuth client at console.cloud.google.com with the YouTube Data API v3 enabled, then generate a refresh token with the `youtube.readonly` scope.</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)]">
-          <button
-            type="button"
-            onClick={handleSaveYoutube}
-            disabled={!youtubeClientId || !youtubeClientSecret || !youtubeRefreshToken || saving === 'youtube'}
-            className="flex items-center gap-1.5 rounded-[8px] bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving === 'youtube' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-            Save
-          </button>
-          {config?.youtube.configured && (
-            <button
-              type="button"
-              onClick={() => handleDelete('youtube')}
-              disabled={deleting === 'youtube'}
-              className="flex items-center gap-1.5 rounded-[8px] border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-            >
-              {deleting === 'youtube' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-              Remove
-            </button>
-          )}
-        </div>
-
+      <YouTubeSourcePanel
+        key={`youtube-${configRevision}`}
+        configured={config?.youtube.configured ?? false}
+        clientId={config?.youtube.clientId ?? ''}
+        clientSecret={config?.youtube.clientSecret ?? ''}
+        refreshToken={config?.youtube.refreshToken ?? ''}
+        onChanged={loadConfig}
+      >
         {/* Playlist list editor — YouTube supports multiple named playlists,
             unlike the single-account GitHub/Reddit sources above. */}
         <div className="mt-4 pt-4 border-t border-[var(--border-subtle)]">
@@ -853,7 +445,7 @@ function TriageSourcesSection() {
               value={newPlaylistLabel}
               onChange={(e) => setNewPlaylistLabel(e.target.value)}
               placeholder="Label (optional)"
-              className="flex-1 rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              className="flex-1 rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
             />
             <button
               type="button"
@@ -864,8 +456,13 @@ function TriageSourcesSection() {
               <Plus size={12} /> Add
             </button>
           </div>
+          {statusMessage && (
+            <p role={statusMessage.tone === 'error' ? 'alert' : 'status'} className={`mt-2 text-xs ${statusMessage.tone === 'error' ? 'text-red-400' : 'text-emerald-400'}`}>
+              {statusMessage.text}
+            </p>
+          )}
         </div>
-      </div>
+      </YouTubeSourcePanel>
 
       {/* YouTube Auto-Sync Schedule */}
       {config?.youtube.configured && (
@@ -915,51 +512,13 @@ function TriageSourcesSection() {
 
       {/* OWL */}
       {diConnectorConfigured && (
-        <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-[10px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-                <ConnectorBrandIcon type="document-intelligence" size={16} />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-[var(--text-primary)]">OWL</h3>
-                <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Import Paperless-ngx document actions into the triage gallery</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={diAutoSyncEnabled}
-              disabled={autoSyncSaving}
-              onClick={() => handleDiAutoSyncToggle(!diAutoSyncEnabled)}
-              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500/50 disabled:opacity-50 ${diAutoSyncEnabled ? 'bg-blue-600' : 'bg-[var(--surface-3)]'}`}
-            >
-              <span className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${diAutoSyncEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
-            </button>
-          </div>
-
-          {diAutoSyncEnabled && (
-            <div className="flex items-center gap-3 pt-2 border-t border-[var(--border-subtle)]">
-              <label className="text-xs text-[var(--text-secondary)]">Sync every</label>
-              <Select
-                value={String(diAutoSyncInterval)}
-                onValueChange={(value) => handleDiAutoSyncIntervalChange(Number(value))}
-                disabled={autoSyncSaving}
-              >
-                <SelectTrigger variant="inline" aria-label="OWL sync interval">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="5">5 minutes</SelectItem>
-                  <SelectItem value="10">10 minutes</SelectItem>
-                  <SelectItem value="15">15 minutes</SelectItem>
-                  <SelectItem value="30">30 minutes</SelectItem>
-                  <SelectItem value="60">1 hour</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </div>
+        <DocumentIntelligenceSourcePanel
+          autoSyncEnabled={diAutoSyncEnabled}
+          intervalMinutes={diAutoSyncInterval}
+          saving={autoSyncSaving}
+          onToggle={handleDiAutoSyncToggle}
+          onIntervalChange={handleDiAutoSyncIntervalChange}
+        />
       )}
 
       {/* Manual Sync */}
@@ -1067,101 +626,12 @@ function TriageSourcesSection() {
         </div>
       )}
 
-      {/* Karakeep */}
-      <div className="rounded-[14px] border border-[var(--border)] bg-[var(--surface-1)] p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-[10px] bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
-              <Bookmark size={16} className="text-blue-400" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">Karakeep</h3>
-              <p className="text-xs text-[var(--text-tertiary)]">Save triage items as bookmarks</p>
-            </div>
-          </div>
-          {config?.karakeep?.configured && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium">
-              <CheckCircle2 size={12} /> Connected
-            </span>
-          )}
-        </div>
-
-        {config?.karakeep?.configuredViaEnv && !config.karakeep.url ? (
-          <div className="rounded-[10px] border border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-3">
-            <p className="text-sm text-[var(--text-secondary)]">
-              Karakeep is connected via environment variables (MC_KARAKEEP_URL + MC_KARAKEEP_API_KEY).
-            </p>
-          </div>
-        ) : (
-          <>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">Instance URL</label>
-                <input
-                  type="text"
-                  value={karakeepUrl}
-                  onChange={(e) => setKarakeepUrl(e.target.value)}
-                  placeholder="https://karakeep.example.com"
-                  className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-                />
-                <p className="mt-1 text-[12px] text-[var(--text-muted)]">The base URL of your Karakeep instance.</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-[var(--text-secondary)] mb-1.5">API Key</label>
-                <div className="relative">
-                  <input
-                    type={showKarakeepApiKey ? 'text' : 'password'}
-                    value={karakeepApiKey}
-                    onChange={(e) => setKarakeepApiKey(e.target.value)}
-                    placeholder={config?.karakeep?.configured ? 'Key configured — enter new key to change' : 'your-karakeep-api-key'}
-                    className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50 pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowKarakeepApiKey(!showKarakeepApiKey)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-                  >
-                    {showKarakeepApiKey ? <EyeOff size={14} /> : <Eye size={14} />}
-                  </button>
-                </div>
-                <p className="mt-1 text-[12px] text-[var(--text-muted)]">Generate an API key in your Karakeep settings.</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mt-4 pt-3 border-t border-[var(--border-subtle)]">
-              <button
-                type="button"
-                onClick={handleSaveKarakeep}
-                disabled={!karakeepUrl || (!karakeepApiKey && !config?.karakeep?.configured) || saving === 'karakeep'}
-                className="flex items-center gap-1.5 rounded-[8px] bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                {saving === 'karakeep' ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                Save
-              </button>
-              {config?.karakeep?.configured && !config.karakeep.configuredViaEnv && (
-                <button
-                  type="button"
-                  onClick={() => handleDelete('karakeep')}
-                  disabled={deleting === 'karakeep'}
-                  className="flex items-center gap-1.5 rounded-[8px] border border-red-500/30 px-3 py-1.5 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
-                >
-                  {deleting === 'karakeep' ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                  Remove
-                </button>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      <ConfirmDialog
-        open={confirmDialog.open}
-        title={confirmDialog.title}
-        message={confirmDialog.message}
-        confirmLabel={confirmDialog.confirmLabel}
-        confirmVariant={confirmDialog.variant}
-        onConfirm={confirmDialog.onConfirm}
-        onCancel={() => setConfirmDialog((d) => ({ ...d, open: false }))}
+      <KarakeepSourcePanel
+        key={`karakeep-${configRevision}`}
+        configured={config?.karakeep?.configured ?? false}
+        configuredViaEnv={config?.karakeep?.configuredViaEnv ?? false}
+        url={config?.karakeep?.url ?? ''}
+        onChanged={loadConfig}
       />
 
       <ExtensionScrapeConfigSection />

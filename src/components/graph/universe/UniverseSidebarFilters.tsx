@@ -77,7 +77,6 @@ export function UniverseSidebarFilters({
       enabledSources={options.sources}
       sourceLists={options.sourceLists}
       listGroups={options.listGroups}
-      syncStatus={[]}
       allTags={options.tags}
       projects={options.projects}
       savedViews={options.savedViews}
@@ -98,7 +97,6 @@ export function UniverseSidebarFilters({
       listSearch={listSearch}
       tagSearch={tagSearch}
       tagsExpanded={tagsExpanded}
-      isSyncing={false}
       setSourceFilter={(value) => {
         const sourceChanged = value !== selectedSourceRef.current;
         selectedSourceRef.current = value;

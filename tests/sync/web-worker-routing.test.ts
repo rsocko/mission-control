@@ -143,8 +143,12 @@ describe('web sync routing in durable mode', () => {
   });
 
   it('keeps durable scheduling in the persisted schedule table', async () => {
-    const { SyncScheduler } = await import('@/lib/sync');
-    const scheduler = new SyncScheduler();
+    const { SyncCronScheduler } = await import('@/lib/sync');
+    const scheduler = new SyncCronScheduler(
+      vi.fn(),
+      vi.fn(),
+      vi.fn(() => []),
+    );
 
     scheduler.schedule({
       id: 'github-1',
@@ -166,8 +170,12 @@ describe('web sync routing in durable mode', () => {
   it('replaces and removes active cron jobs in inline mode', async () => {
     queueMocks.isDurableSyncMode.mockReturnValue(false);
     const cron = (await import('node-cron')).default;
-    const { SyncScheduler } = await import('@/lib/sync');
-    const scheduler = new SyncScheduler();
+    const { SyncCronScheduler } = await import('@/lib/sync');
+    const scheduler = new SyncCronScheduler(
+      vi.fn(),
+      vi.fn(),
+      vi.fn(() => []),
+    );
     const config = {
       id: 'github-inline',
       type: 'github-issues',

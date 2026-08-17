@@ -664,6 +664,26 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
   });
 
+  it('syntax highlights fenced code blocks using their declared language', async () => {
+    const formattedTask = {
+      ...task,
+      description: '```yaml\nruns-on: [self-hosted, macOS, ARM64, ios]\n```',
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/tasks/task-1') return json({ task: formattedTask });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
+    await waitFor(() => {
+      const code = notes.querySelector('code.language-yaml.hljs');
+      expect(code).toBeInTheDocument();
+      expect(code?.querySelector('.hljs-attr')).toHaveTextContent('runs-on');
+    });
+  });
+
   it('keeps toolbar selection and focus while formatting and persists single newlines', async () => {
     const onUpdate = vi.fn();
     const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -736,13 +756,14 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
   it('does not show a checklist update as saved when persistence fails', async () => {
     const checklistTask = { ...task, description: '- [ ] Verify persistence' };
-    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const fetchMock = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') {
         return Promise.resolve({ ok: false, json: async () => ({ error: 'Save failed' }) });
       }
       if (String(input) === '/api/tasks/task-1') return json({ task: checklistTask });
       return json({});
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
@@ -756,8 +777,16 @@ describe('TaskDetailPanel redesigned presentations', () => {
       fireEvent.click(checkbox);
     });
 
-    expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
-    expect(checkbox).not.toBeChecked();
+    await waitFor(() => {
+      expect(checkbox).not.toBeChecked();
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/tasks/task-1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ description: '- [x] Verify persistence' }),
+        }),
+      );
+    });
   });
 
   it('cancels an inline notes draft on Escape without closing task detail', async () => {
@@ -874,7 +903,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(boldButton).toHaveClass('min-h-8', 'min-w-8');
     expect(within(notesDialog).getByRole('button', { name: 'Italic' })).toBeInTheDocument();
     expect(within(notesDialog).getByRole('button', { name: 'Insert link' })).toBeInTheDocument();
-    expect(within(notesDialog).getByRole('button', { name: 'Inline code' })).toBeInTheDocument();
+    expect(within(notesDialog).getByRole('button', { name: 'Code' })).toBeInTheDocument();
     expect(within(notesDialog).getByRole('button', { name: 'Bulleted list' })).toBeInTheDocument();
   });
 

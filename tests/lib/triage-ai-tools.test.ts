@@ -4,7 +4,7 @@ const { listTriageItems } = vi.hoisted(() => ({
   listTriageItems: vi.fn(),
 }));
 
-vi.mock('@/lib/triage', () => ({ listTriageItems }));
+vi.mock('@/lib/triage/query', () => ({ listTriageItems }));
 
 import { triageTools } from '@/lib/ai/tools/triage-tools';
 import { TRIAGE_SUMMARY_RESOURCE_URI } from '@/lib/triage/summary-contract';
@@ -33,7 +33,7 @@ describe('Houston searchTriage tool', () => {
       totalFiltered: 1,
       hasMore: false,
     });
-    const execute = triageTools.searchTriage.execute as (
+    const execute = triageTools.searchTriage.execute as unknown as (
       input: Record<string, unknown>,
       options: Record<string, unknown>,
     ) => Promise<Record<string, unknown>>;

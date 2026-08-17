@@ -2,11 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { MissionControlIcon } from '@/components/ui/MissionControlIcon';
 import { SyncingMissionControlIcon } from '@/components/ui/SyncingMissionControlIcon';
+import { Popover } from '@/components/ui/Popover';
 import { BRAND_GRADIENT_END, BRAND_GRADIENT_START } from '@/lib/brand';
+import { formatSyncTime } from '@/lib/utils/dashboard-helpers';
 import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -27,6 +30,9 @@ import {
   Pin,
   PinOff,
   ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavRailPrefs } from '@/lib/hooks/useNavRailPrefs';
@@ -34,6 +40,8 @@ import {
   getSyncIconPreference,
   resolveSyncIconVariant,
 } from '@/lib/hooks/useSyncIconPreference';
+import { CONNECTOR_ICONS } from '@/types/dashboard';
+import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 
 import type { ComponentType } from 'react';
 import { NavigationBadge } from '@/components/layout/NavigationBadge';
@@ -133,6 +141,7 @@ interface NavRailProps {
   isAiActive: boolean;
   isSyncing?: boolean;
   counts?: NavigationCounts;
+  syncStatus?: ConnectorHealthInfo[];
 }
 
 function ActiveSyncIcon({ className }: { className?: string }) {
@@ -145,17 +154,21 @@ export function NavRail({
   isAiActive,
   isSyncing = false,
   counts = EMPTY_NAVIGATION_COUNTS,
+  syncStatus = [],
 }: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
   const [hovered, setHovered] = useState(false);
   const { preferences } = useNavigationBadgePreferences();
+  const [syncPopoverOpen, setSyncPopoverOpen] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickSuppressUntil = useRef(0);
 
   const expanded = pinned || hovered;
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
+  const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
+  const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
 
   const handleMouseEnter = useCallback(() => {
     if (collapseTimer.current) {
@@ -239,10 +252,7 @@ export function NavRail({
         {navGroups.map((group, groupIdx) => (
           <div key={group.label} role="group" aria-label={group.label}>
             {groupIdx > 0 && (
-              <div className={cn(
-                'h-px bg-[var(--text-tertiary)]/20 my-2.5',
-                expanded ? 'mx-3' : 'mx-3'
-              )} />
+              <div className="h-px bg-[var(--text-tertiary)]/20 my-2.5 mx-3" />
             )}
             {group.items.filter(isVisible).map((item) => {
               const active = isActive(item.href);
@@ -300,7 +310,78 @@ export function NavRail({
 
       {/* Bottom section: pin toggle + settings */}
       <div className="flex flex-col gap-0.5 pb-2 mt-auto">
-        <div className={cn('h-px bg-[var(--text-tertiary)]/20 mb-2.5', expanded ? 'mx-3' : 'mx-3')} />
+        <div className="h-px bg-[var(--text-tertiary)]/20 mb-2.5 mx-3" />
+
+        {showSyncStatusControl && (
+          <div className="relative mx-2">
+            <Tooltip content="Sync status" placement="right" disabled={expanded || syncPopoverOpen}>
+              <button
+                type="button"
+                onClick={() => setSyncPopoverOpen((current) => !current)}
+                aria-label="Sync status"
+                aria-expanded={syncPopoverOpen}
+                className="w-full flex items-center h-10 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+              >
+                <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
+                  <RefreshCw size={18} className={cn(isSyncing && 'animate-spin text-blue-400')} />
+                </span>
+                <span className={cn(
+                  'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                  expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
+                )}>
+                  Sync status
+                </span>
+              </button>
+            </Tooltip>
+
+            <Popover
+              isOpen={syncPopoverOpen}
+              onClose={() => setSyncPopoverOpen(false)}
+              align={expanded ? 'left' : 'right'}
+              width="w-72"
+              className="p-3"
+            >
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sync Status</h3>
+                {isSyncing && (
+                  <span className="flex items-center gap-1 text-xs text-blue-400">
+                    <RefreshCw size={10} className="animate-spin" />
+                    Syncing…
+                  </span>
+                )}
+              </div>
+              <div className="space-y-2 max-h-56 overflow-y-auto">
+                {activeSyncStatus.map((status) => {
+                  const isHealthy = status.status === 'healthy';
+                  return (
+                    <div key={status.id} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {CONNECTOR_ICONS[status.type] && (
+                          <Image src={CONNECTOR_ICONS[status.type]} alt={status.name} width={12} height={12} />
+                        )}
+                        <span className="text-[var(--text-secondary)] truncate">{status.name}</span>
+                      </div>
+                      {status.lastSyncAt ? (
+                        <span className={cn('flex items-center gap-1', isHealthy ? 'text-green-400' : 'text-amber-400')}>
+                          {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                          <span>{formatSyncTime(status.lastSyncAt)}</span>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-1 text-[var(--text-muted)]">
+                          <AlertCircle size={10} />
+                          <span>Never</span>
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+                {activeSyncStatus.length === 0 && (
+                  <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
+                )}
+              </div>
+            </Popover>
+          </div>
+        )}
 
         {/* Pin toggle */}
         <Tooltip content={pinned ? 'Unpin sidebar' : 'Pin sidebar'} placement="right" disabled={expanded}>

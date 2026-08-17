@@ -74,6 +74,7 @@ import {
 } from '@/lib/ideation/text-outline';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
 import { InlinePropertyEditor } from './InlinePropertyEditor';
+import { IdeationWorkspaceBar } from './IdeationWorkspaceBar';
 import '@xyflow/react/dist/style.css';
 import styles from './IdeationCanvas.module.css';
 
@@ -1234,7 +1235,7 @@ function PropertyPanel() {
 function ConvertDialog({ onClose }: { onClose: () => void }) {
   const router = useRouter();
   const nodes = useIdeationStore((state) => state.nodes);
-  const clear = useIdeationStore((state) => state.clear);
+  const flushWorkspace = useIdeationStore((state) => state.flushWorkspace);
   const root = nodes.find((node) => node.parentId === null);
   const [name, setName] = useState(root?.label ?? 'New Project');
   const [color, setColor] = useState('#6366f1');
@@ -1246,14 +1247,24 @@ function ConvertDialog({ onClose }: { onClose: () => void }) {
   const convert = async () => {
     setConverting(true);
     try {
+      if (flushWorkspace && !await flushWorkspace()) {
+        throw new Error('Resolve the workspace save issue before converting.');
+      }
+      const workspace = useIdeationStore.getState();
       const response = await fetch('/api/ideation/convert', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, color, nodes }),
+        body: JSON.stringify({
+          name,
+          color,
+          nodes,
+          sourceWorkspace: workspace.workspaceId && workspace.workspaceRevision
+            ? { id: workspace.workspaceId, revision: workspace.workspaceRevision }
+            : undefined,
+        }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? 'Conversion failed');
-      clear();
       toast.success('Project created from ideation');
       router.push(`/projects/${result.projectId}`);
     } catch (error) {
@@ -1566,6 +1577,7 @@ export default function IdeationCanvas() {
           <Lightbulb size={16} className="text-amber-300" />
           {root?.label || 'New Project Ideation'}
         </span>
+        <IdeationWorkspaceBar />
         <span className="mx-1 hidden h-4 w-px bg-[var(--border)] sm:block" />
         <Button size="sm" variant="secondary" onClick={() => addNode(selectedNodeId ?? root?.id ?? null)}>
           <Plus /> Add node

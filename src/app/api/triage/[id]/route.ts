@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import {
   applyTriageAction,
-  getTriageItemById,
-  hardDeleteTriageItem,
   isUndoableTriageAction,
   TriageActionInProgressError,
   undoTriageAction,
-} from '@/lib/triage';
+} from '@/lib/triage/actions';
+import { getTriageItemById } from '@/lib/triage/query';
+import { hardDeleteTriageItem } from '@/lib/triage/lifecycle';
 import { createGitHubIssue, buildGitHubIssueActionRecord } from '@/lib/triage/actions/github-issue';
 import logger from '@/lib/logger';
 import type { CreateTodoTaskOptions } from '@/lib/triage/actions/ms-todo';

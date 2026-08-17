@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
-    viewTransition: true,
+    useTypeScriptCli: false,
   },
   serverExternalPackages: ["pino", "pino-pretty", "re2", "metascraper", "@metascraper/helpers", "metascraper-author", "metascraper-date", "metascraper-description", "metascraper-image", "metascraper-logo", "metascraper-publisher", "metascraper-title", "metascraper-url", "metascraper-iframe", "metascraper-video"],
   turbopack: {

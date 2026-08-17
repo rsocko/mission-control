@@ -19,6 +19,7 @@ export {
   runtimeTelemetry,
   runtimeTelemetryInstances,
   runtimeTelemetrySamples,
+  workerHealthSnapshot,
   syncSchedules,
   syncDeletionCandidates,
   syncDeletionSnapshots,
@@ -83,6 +84,12 @@ export {
   projectHierarchyCommands,
   projectHierarchyMutationContext,
 } from './projects';
+
+// User-authored graph workspace artifacts and immutable checkpoints
+export {
+  graphWorkspaces,
+  graphWorkspaceVersions,
+} from './graph-workspaces';
 
 // Notifications
 export {

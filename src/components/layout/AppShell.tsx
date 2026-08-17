@@ -281,6 +281,16 @@ function AppShellInner({
   const pathname = usePathname();
   const mobileTitle = getMobileTitle(pathname);
   const routeMetadata = getRouteMetadata(pathname);
+  const mainContent = (
+    <main
+      id="main-content"
+      className="flex-1 overflow-hidden bg-[var(--background)] pb-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] sm:pb-0"
+    >
+      <MobileRouteGate route={routeMetadata}>
+        {children}
+      </MobileRouteGate>
+    </main>
+  );
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationCounts = useNavigationCounts();
   const [badgeMode] = useBadgeMode();
@@ -305,6 +315,7 @@ function AppShellInner({
         isAiActive={isAiActive}
         isSyncing={syncProgress.isSyncing}
         counts={navigationCounts}
+        syncStatus={health?.connectors ?? []}
       />
 
       {/* Right area: toolbar + content */}
@@ -334,17 +345,14 @@ function AppShellInner({
         {/* Sync Progress Banner */}
         <SyncProgressBanner progress={syncProgress} />
 
-        {/* Main Content — wrapped in ViewTransition for smooth tab navigation */}
-        <ViewTransition name="main-content">
-          <main
-            id="main-content"
-            className="flex-1 overflow-hidden bg-[var(--background)] pb-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] sm:pb-0"
-          >
-            <MobileRouteGate route={routeMetadata}>
-              {children}
-            </MobileRouteGate>
-          </main>
-        </ViewTransition>
+        {/* Quick Sort keeps a single live queue landmark during route hydration. */}
+        {pathname === '/quick-sort' ? (
+          mainContent
+        ) : (
+          <ViewTransition name="main-content">
+            {mainContent}
+          </ViewTransition>
+        )}
 
         {/* Mobile Bottom Navigation */}
         <MobileBottomNav counts={navigationCounts} />

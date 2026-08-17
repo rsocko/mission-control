@@ -13,7 +13,9 @@ class MockEventSource {
   static instances: MockEventSource[] = [];
 
   private listeners = new Map<string, EventListener>();
+  onopen: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  close = vi.fn();
 
   constructor() {
     MockEventSource.instances.push(this);
@@ -27,7 +29,6 @@ class MockEventSource {
     this.listeners.get(type)?.(new MessageEvent(type, { data: JSON.stringify(data) }));
   }
 
-  close() {}
 }
 
 afterEach(() => {
@@ -35,6 +36,7 @@ afterEach(() => {
   toastError.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 function createQueryWrapper(queryClient = new QueryClient()) {
@@ -44,6 +46,114 @@ function createQueryWrapper(queryClient = new QueryClient()) {
 }
 
 describe('useSyncStreamConnection history refresh', () => {
+  it('does not poll sync status while the SSE connection is healthy', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', MockEventSource);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+
+    act(() => {
+      MockEventSource.instances[0].onopen?.();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(90_000));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('uses one low-frequency poll after stream failure and stops it after reconnect', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', MockEventSource);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ isSyncing: false }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(queryClient),
+    });
+
+    act(() => {
+      MockEventSource.instances[0].onerror?.();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances).toHaveLength(2);
+
+    act(() => {
+      MockEventSource.instances[1].onopen?.();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(invalidateQueries).toHaveBeenCalledWith({ refetchType: 'active' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
+  it('cleans up reconnect and fallback timers on unmount', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', MockEventSource);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ isSyncing: false }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+
+    act(() => {
+      MockEventSource.instances[0].onerror?.();
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    unmount();
+    await act(() => vi.advanceTimersByTimeAsync(90_000));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances).toHaveLength(1);
+  });
+
+  it('refreshes when the stream fails during a known sync and fallback reports idle', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('EventSource', MockEventSource);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ isSyncing: false }),
+    }));
+    const queryClient = new QueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+    const { unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(queryClient),
+    });
+
+    act(() => {
+      MockEventSource.instances[0].emit('sync:start', {
+        type: 'sync:start',
+        connectorId: 'todo-1',
+        connectorName: 'Microsoft To Do',
+        phase: 'tasks',
+      });
+      MockEventSource.instances[0].onerror?.();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(invalidateQueries).toHaveBeenCalledWith({ refetchType: 'active' });
+    unmount();
+  });
+
   it('attributes sync failures to the executing worker runtime', () => {
     vi.stubGlobal('EventSource', MockEventSource);
     vi.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(3_000);

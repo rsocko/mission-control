@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAppMode, setAppMode, getSettings, updateSettings, type AppMode } from '@/lib/mode';
 import { clearDatabase, resetDemoDatabase } from '@/lib/seed-api';
-import { clearTriageSampleData } from '@/lib/triage';
+import { clearTriageSampleData } from '@/lib/triage/lifecycle';
 import { isPublicDemoMode } from '@/lib/public-demo';
 
 /**

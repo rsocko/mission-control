@@ -56,7 +56,7 @@ vi.mock('@/lib/mode', () => ({
 }));
 
 const mockIngest = vi.fn();
-vi.mock('@/lib/triage', () => ({
+vi.mock('@/lib/triage/capture', () => ({
   ingestTriageImport: mockIngest,
 }));
 

@@ -1,6 +1,8 @@
 export interface SavedAIProviderConfig {
   provider?: string;
   model?: string;
+  embeddingModel?: string;
+  semanticSearchEnabled?: boolean;
   baseUrl?: string;
   apiKey?: string;
 }
@@ -8,6 +10,8 @@ export interface SavedAIProviderConfig {
 export interface ResolvedAIConfig {
   provider: string;
   model: string;
+  embeddingModel: string;
+  semanticSearchEnabled: boolean;
   baseUrl?: string;
   apiKey?: string;
   configured: boolean;

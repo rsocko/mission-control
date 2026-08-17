@@ -3,7 +3,7 @@ import db from '@/db';
 import { triageItems } from '@/db/schema';
 import { eq, sql, and, like, inArray } from 'drizzle-orm';
 import { getThumbnailCacheStats, removeOrphanedThumbnails } from '@/lib/triage/thumbnail-cache';
-import { purgeDismissedItems } from '@/lib/triage';
+import { purgeDismissedItems } from '@/lib/triage/lifecycle';
 import { cleanupTriageItemStorage } from '@/lib/triage/capture-image-lifecycle';
 import logger from '@/lib/logger';
 

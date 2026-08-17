@@ -14,6 +14,7 @@ import { EffortBadge } from '@/components/EffortBadge';
 import { dropdownVariants, fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
+import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
 import type { ProjectHealth, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
 import { getPriorityDotColor } from './utils';
 import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, HEALTH_LABELS, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
@@ -249,9 +250,8 @@ export function PhaseStatusBadge({ status }: { status: 'pending' | 'in_progress'
 }
 
 export function TaskStatusBadge({ status, statusReason }: { status: TaskStatus; statusReason?: string | null }) {
-  const variant = status === 'done' ? 'success' : status === 'in_progress' ? 'default' : status === 'cancelled' ? 'warning' : 'secondary';
   const label = status === 'cancelled' && statusReason === 'moved' ? 'Moved' : TASK_STATUS_LABELS[status];
-  return <Badge variant={variant}>{label}</Badge>;
+  return <Badge variant="outline" className={getTaskStatusVisual(status).badgeClass}>{label}</Badge>;
 }
 
 export function PriorityDot({ priority }: { priority: TaskPriority }) {

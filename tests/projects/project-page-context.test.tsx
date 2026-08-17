@@ -163,6 +163,7 @@ function HierarchyProbe() {
 describe('ProjectPageContext', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, '', '/');
     mocks.loadHierarchy.mockResolvedValue(hierarchy);
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

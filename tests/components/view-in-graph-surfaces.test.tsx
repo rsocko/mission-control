@@ -64,58 +64,68 @@ describe('View in Graph collection surfaces', () => {
     );
     render(
       <SidebarFilters
-        taskResponse={EMPTY_TASK_RESPONSE}
-        enabledSources={[]}
-        sourceLists={[]}
-        listGroups={[]}
-        allTags={[]}
-        projects={[]}
-        savedViews={[{
-          id: 'planning',
-          name: 'Planning',
-          icon: 'pin',
-          filters: { tag: 'planning' },
-        }]}
-        allSourceCounts={{}}
-        sourceFilter={null}
-        listFilter={null}
-        listGroupFilter={null}
-        tagFilter={[]}
-        quickFilter={null}
-        projectFilter={null}
-        priorityFilter={[]}
-        statusFilter={[]}
-        sidebarExpanded={false}
-        sidebarMode="normal"
-        collapsedSections={new Set()}
-        expandedSourceLists={new Set()}
-        collapsedListGroups={new Set()}
-        listSearch=""
-        tagSearch=""
-        tagsExpanded={false}
-        setSourceFilter={vi.fn()}
-        setListFilter={vi.fn()}
-        setListGroupFilter={vi.fn()}
-        setTagFilter={vi.fn()}
-        setQuickFilter={vi.fn()}
-        setProjectFilter={vi.fn()}
-        setPriorityFilter={vi.fn()}
-        setStatusFilter={vi.fn()}
-        setSidebarExpanded={vi.fn()}
-        setSidebarMode={vi.fn()}
-        toggleSection={vi.fn()}
-        setExpandedSourceLists={vi.fn()}
-        setCollapsedListGroups={vi.fn()}
-        setListSearch={vi.fn()}
-        setTagSearch={vi.fn()}
-        setTagsExpanded={vi.fn()}
-        applyView={applyView}
-        deleteView={vi.fn()}
-        hiddenQuickFilters={[]}
-        toggleQuickFilterVisibility={vi.fn()}
-        sourceHasLists={() => false}
-        getSourceListsForType={() => []}
-        graphOrigin={{ href: `/?tf=${encodeURIComponent(originContext)}`, label: 'Dashboard' }}
+        data={{
+          taskResponse: EMPTY_TASK_RESPONSE,
+          enabledSources: [],
+          sourceLists: [],
+          listGroups: [],
+          allTags: [],
+          projects: [],
+          savedViews: [{
+            id: 'planning',
+            name: 'Planning',
+            icon: 'pin',
+            filters: { tag: 'planning' },
+          }],
+          allSourceCounts: {},
+        }}
+        filters={{
+          sourceFilter: null,
+          listFilter: null,
+          listGroupFilter: null,
+          tagFilter: [],
+          quickFilter: null,
+          projectFilter: null,
+          priorityFilter: [],
+          statusFilter: [],
+          hiddenQuickFilters: [],
+        }}
+        sidebar={{
+          sidebarExpanded: false,
+          sidebarMode: 'normal',
+          collapsedSections: new Set(),
+          expandedSourceLists: new Set(),
+          collapsedListGroups: new Set(),
+          listSearch: '',
+          tagSearch: '',
+          tagsExpanded: false,
+        }}
+        actions={{
+          setSourceFilter: vi.fn(),
+          setListFilter: vi.fn(),
+          setListGroupFilter: vi.fn(),
+          setTagFilter: vi.fn(),
+          setQuickFilter: vi.fn(),
+          setProjectFilter: vi.fn(),
+          setPriorityFilter: vi.fn(),
+          setStatusFilter: vi.fn(),
+          setSidebarExpanded: vi.fn(),
+          setSidebarMode: vi.fn(),
+          toggleSection: vi.fn(),
+          setExpandedSourceLists: vi.fn(),
+          setCollapsedListGroups: vi.fn(),
+          setListSearch: vi.fn(),
+          setTagSearch: vi.fn(),
+          setTagsExpanded: vi.fn(),
+          applyView,
+          deleteView: vi.fn(),
+          toggleQuickFilterVisibility: vi.fn(),
+        }}
+        computed={{
+          sourceHasLists: () => false,
+          getSourceListsForType: () => [],
+          graphOrigin: { href: `/?tf=${encodeURIComponent(originContext)}`, label: 'Dashboard' },
+        }}
       />,
     );
 

@@ -56,7 +56,8 @@ const STATUS_BADGE_VARIANTS: Record<string, "default" | "secondary" | "success" 
   todo: "secondary",
   in_progress: "default",
   done: "success",
-  cancelled: "warning",
+  blocked: "danger",
+  cancelled: "secondary",
 };
 
 function normalizePhaseKey(value: string) {

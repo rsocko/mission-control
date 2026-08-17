@@ -84,7 +84,7 @@ export function BulkMoveDropdown({ sourceLists, onMove, disabled = false, disabl
       {open && (
         <div role="listbox" aria-label="Move to list" className="absolute top-full left-0 mt-1 z-50 bg-[var(--surface-1)] border border-[var(--border-subtle)] rounded-[var(--radius-md)] shadow-lg py-1 max-h-72 overflow-y-auto min-w-52">
           <div className="px-2 pb-1.5 pt-1 sticky top-0 bg-[var(--surface-1)]">
-            <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
+            <div className="input-glow flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
               <Search size={12} className="shrink-0 text-[var(--text-muted)]" />
               <input
                 ref={inputRef}

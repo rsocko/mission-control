@@ -37,8 +37,8 @@ export function ConfirmDialog({ open, title, message, confirmLabel, confirmVaria
   return (
     <AlertDialogPrimitive.Root open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel(); }}>
       <AlertDialogPrimitive.Portal>
-        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 duration-150" />
-        <AlertDialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[100] -translate-x-1/2 -translate-y-1/2 bg-[var(--surface-1)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-xl p-5 max-w-sm w-full mx-4 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-150">
+        <AlertDialogPrimitive.Overlay className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 duration-200 ease-out" />
+        <AlertDialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[100] -translate-x-1/2 -translate-y-1/2 bg-[var(--surface-1)] border border-[var(--border-subtle)] rounded-[var(--radius-lg)] shadow-xl p-5 max-w-sm w-full mx-4 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 duration-200 ease-out">
           <AlertDialogPrimitive.Title className="text-sm font-semibold text-[var(--text-primary)] mb-1">
             {title}
           </AlertDialogPrimitive.Title>

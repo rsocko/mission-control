@@ -7,19 +7,12 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 /**
  * PriorityBadge — Displays P0–P3 priority labels with color coding.
  * Used across dashboard, kanban, and task detail views.
  */
-
-const PRIORITY_CONFIG: Record<string, { pLevel: string; label: string; classes: string }> = {
-  critical: { pLevel: 'P0', label: 'Critical', classes: 'text-rose-400 bg-rose-900/40 border-rose-700/50' },
-  high:     { pLevel: 'P1', label: 'High',     classes: 'text-orange-400 bg-orange-900/30 border-orange-800/40' },
-  medium:   { pLevel: 'P2', label: 'Medium',   classes: 'text-amber-300 bg-amber-900/25 border-amber-700/35' },
-  low:      { pLevel: 'P3', label: 'Low',      classes: 'text-sky-400 bg-sky-900/25 border-sky-700/35' },
-  none:     { pLevel: '—',  label: 'None',     classes: 'text-[var(--text-muted)] bg-[var(--surface-2)] border-[var(--border)]' },
-};
 
 interface PriorityBadgeProps {
   priority: string;
@@ -29,7 +22,8 @@ interface PriorityBadgeProps {
 }
 
 export function PriorityBadge({ priority, showLabel = false, size = 'sm', onClick }: PriorityBadgeProps) {
-  const config = PRIORITY_CONFIG[priority] || PRIORITY_CONFIG.none;
+  const visual = getTaskPriorityVisual(priority);
+  const config = { pLevel: visual.shortLabel, label: visual.label, classes: visual.badgeClass };
   
   if (priority === 'none') return null;
 
@@ -73,4 +67,3 @@ export function PrioritySelect({ priority, onChange, disabled }: PrioritySelectP
     </Select>
   );
 }
-

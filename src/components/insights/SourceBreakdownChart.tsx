@@ -1,9 +1,9 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
 import { Calendar, CheckSquare, ClipboardList, GitBranch, Link2, Mail } from 'lucide-react';
-import { addInsightsReturnContext, rememberInsightsDrilldown } from '@/lib/navigation/insights';
+import { addInsightsReturnContext } from '@/lib/navigation/insights';
+import { pushAppHistoryDetail } from '@/lib/navigation/app-history';
 import type { InsightsPeriod, SourceBreakdownItem } from '@/lib/stats/insights';
 
 const SOURCE_ICONS: Record<string, ReactNode> = {
@@ -38,8 +38,6 @@ interface Props {
 }
 
 export function SourceBreakdownChart({ data, period }: Props) {
-  const router = useRouter();
-
   if (data.length === 0) {
     return <div className="text-sm text-slate-500 text-center py-8">No completions this period</div>;
   }
@@ -51,8 +49,11 @@ export function SourceBreakdownChart({ data, period }: Props) {
     params.set('source', source);
     addInsightsReturnContext(params, period);
     const href = `/?${params.toString()}`;
-    rememberInsightsDrilldown(href);
-    router.push(href);
+    pushAppHistoryDetail(href, {
+      kind: 'detail',
+      param: 'origin',
+      parentHref: `${window.location.pathname}${window.location.search}${window.location.hash}`,
+    });
   };
 
   return (

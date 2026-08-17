@@ -127,7 +127,7 @@ function StepSources({
       <div className="mb-4">
         <h3 className="text-xl font-semibold">What matters most?</h3>
         <p className="text-sm text-slate-400 mt-2 max-w-[60ch]">
-          Drag your connected sources in order of importance. The AI scoring engine uses this to prioritize tasks from each system.
+          The AI scoring engine uses this order to prioritize tasks from each system.
         </p>
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -212,7 +212,7 @@ function StepProjects({
       <div className="mb-4">
         <h3 className="text-xl font-semibold">Rank your active projects</h3>
         <p className="text-sm text-slate-400 mt-2 max-w-[60ch]">
-          The top positions become Critical and High scoring tiers. Drag to reorder.
+          The top positions become Critical and High scoring tiers.
         </p>
       </div>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
@@ -293,7 +293,7 @@ function StepPeople({
       <div className="mb-4">
         <h3 className="text-xl font-semibold">Key people</h3>
         <p className="text-sm text-slate-400 mt-2 max-w-[60ch]">
-          Who is the work for or about? Add people whose related tasks should surface first.
+          Add people whose related tasks should surface first.
         </p>
       </div>
       <div className="space-y-2.5">
@@ -456,7 +456,7 @@ function StepReview({
       <div className="mb-4">
         <h3 className="text-xl font-semibold">Review your setup</h3>
         <p className="text-sm text-slate-400 mt-2">
-          Here&apos;s what the scoring engine will use. You can always adjust later in Settings → Priority Entities.
+          You can always adjust later in Settings → Priority Entities.
         </p>
       </div>
 
@@ -637,7 +637,7 @@ export function PrioritySetupWizard({ onComplete, onDismiss }: PrioritySetupWiza
                 Priority Entities
               </h2>
               <p className="mt-2 max-w-[58ch] text-sm text-slate-400">
-                Get to your first trustworthy score by ranking the systems, projects, tags, sources, and people that move your day.
+                This ranking determines what the AI scoring treats as most important.
               </p>
             </div>
             <button

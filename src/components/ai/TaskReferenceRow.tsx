@@ -4,14 +4,7 @@ import Link from 'next/link';
 import { CalendarDays, Check, Circle, ExternalLink } from 'lucide-react';
 import { formatToolDate } from '@/lib/ai/chatFormatters';
 import type { TaskReference } from '@/lib/ai/toolResultSchemas';
-
-const PRIORITY_STYLES: Record<NonNullable<TaskReference['priority']>, string> = {
-  critical: 'border-red-500/30 bg-red-500/10 text-red-300',
-  high: 'border-amber-500/30 bg-amber-500/10 text-amber-300',
-  medium: 'border-blue-500/30 bg-blue-500/10 text-blue-300',
-  low: 'border-slate-500/30 bg-slate-500/10 text-slate-300',
-  none: 'border-[var(--border-subtle)] bg-[var(--surface-2)] text-[var(--text-muted)]',
-};
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 export function TaskReferenceRow({
   task,
@@ -57,7 +50,7 @@ export function TaskReferenceRow({
         </span>
       </span>
       {task.priority ? (
-        <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium capitalize ${PRIORITY_STYLES[task.priority]}`}>
+        <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium capitalize ${getTaskPriorityVisual(task.priority).badgeClass}`}>
           {task.priority}
         </span>
       ) : null}

@@ -25,6 +25,7 @@ import {
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { cn } from '@/lib/utils';
 import {
@@ -563,7 +564,7 @@ export default function UniverseGraph() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sceneSearch, setSceneSearch] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [detailSuppressed, setDetailSuppressed] = useState(false);
   const [focusActive, setFocusActive] = useState(false);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -1204,7 +1205,7 @@ export default function UniverseGraph() {
               <SlidersHorizontal size={28} className="mx-auto text-[var(--accent-400)]" />
               <h2 className="mt-3 text-base font-semibold text-[var(--text-primary)]">Choose a task universe</h2>
               <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-                Apply task filters above or open the full filter panel. Explore all renders the default open-task universe.
+                Filter tasks above, or explore all open tasks.
               </p>
               <Button variant="secondary" className="mt-4" onClick={() => setExploreAll(true)}>
                 Explore all tasks

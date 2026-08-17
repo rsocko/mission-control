@@ -32,15 +32,8 @@ import { EffortSelect } from '@/components/EffortBadge';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus } from '@/types';
 import { cn } from '@/lib/utils';
+import { PRIORITY_TEXT_COLORS, TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 import type { MicroStatusSuggestion, TaskDetailMode } from './task-detail-types';
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: 'text-rose-400',
-  high: 'text-orange-400',
-  medium: 'text-amber-300',
-  low: 'text-sky-400',
-  none: 'text-[var(--text-muted)]',
-};
 
 const DURATION_OPTIONS = [
   { value: 'none', label: 'No duration' },
@@ -112,9 +105,7 @@ export function TaskStatusField({
           <CheckCircle2 size={13} className="flex-shrink-0 text-[var(--success)]" />
         ) : (
           <Circle size={13} className={`flex-shrink-0 ${
-            status === 'in_progress' ? 'text-[var(--accent)]' :
-            status === 'cancelled' ? 'text-red-400' :
-            'text-[var(--text-muted)]'
+            TASK_STATUS_VISUALS[status as keyof typeof TASK_STATUS_VISUALS]?.textClass ?? TASK_STATUS_VISUALS.todo.textClass
           }`} />
         )}
         Status
@@ -133,18 +124,16 @@ export function TaskStatusField({
             title={!canEditStatus ? statusBlockedReason : statusSaveLabel}
             className={
             status === 'done' ? 'text-[var(--success)]' :
-            status === 'in_progress' ? 'text-[var(--accent)]' :
-            status === 'cancelled' ? 'text-red-400' :
-            'text-[var(--text-muted)]'
+            TASK_STATUS_VISUALS[status as keyof typeof TASK_STATUS_VISUALS]?.textClass ?? TASK_STATUS_VISUALS.todo.textClass
           }>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todo" className="text-[var(--text-muted)]">To Do</SelectItem>
-            <SelectItem value="in_progress" className="text-purple-400">In Progress</SelectItem>
-            <SelectItem value="blocked" className="text-amber-400">Blocked</SelectItem>
-            <SelectItem value="done" className="text-green-400">Done</SelectItem>
-            <SelectItem value="cancelled" className="text-rose-400">Cancelled</SelectItem>
+            <SelectItem value="todo" className={TASK_STATUS_VISUALS.todo.textClass}>To Do</SelectItem>
+            <SelectItem value="in_progress" className={TASK_STATUS_VISUALS.in_progress.textClass}>In Progress</SelectItem>
+            <SelectItem value="blocked" className={TASK_STATUS_VISUALS.blocked.textClass}>Blocked</SelectItem>
+            <SelectItem value="done" className={TASK_STATUS_VISUALS.done.textClass}>Done</SelectItem>
+            <SelectItem value="cancelled" className={TASK_STATUS_VISUALS.cancelled.textClass}>Cancelled</SelectItem>
             {connectorType === 'github-issues' && (
               <>
                 <SelectItem value="cancelled:not_planned" className="text-rose-400">Close as Not Planned</SelectItem>
@@ -351,16 +340,14 @@ export function TaskPriorityField({
           aria-label="Task priority"
           title={!canEditPriority ? priorityBlockedReason : prioritySaveLabel}
           variant="inline"
-          className={PRIORITY_COLORS[priority] || PRIORITY_COLORS.none}
+          className={PRIORITY_TEXT_COLORS[priority] || PRIORITY_TEXT_COLORS.none}
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="critical" className="text-rose-400">Critical</SelectItem>
-          <SelectItem value="high" className="text-orange-400">High</SelectItem>
-          <SelectItem value="medium" className="text-amber-300">Medium</SelectItem>
-          <SelectItem value="low" className="text-sky-400">Low</SelectItem>
-          <SelectItem value="none" className="text-[var(--text-muted)]">None</SelectItem>
+          {Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => (
+            <SelectItem key={value} value={value} className={visual.textClass}>{visual.label}</SelectItem>
+          ))}
         </SelectContent>
       </Select>
     </div>

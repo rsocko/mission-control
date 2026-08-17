@@ -20,6 +20,7 @@ import {
   isCaptureImageMimeType,
 } from '@/lib/capture-image';
 import { OfflineImageQueueLimitError } from '@/lib/offline-queue';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 
 class ImageUploadHttpError extends Error {}
 
@@ -186,7 +187,7 @@ export default function CapturePageInner() {
   const [capturedImageUrl, setCapturedImageUrl] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [isShared, setIsShared] = useState(false);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [context, setContext] = useState<CaptureContext>({
     needsTriage: true,
   });

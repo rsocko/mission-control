@@ -19,6 +19,8 @@ import { NotificationCard, NotificationDetail } from './NotificationCard';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationItem, NotificationLevel } from '@/types';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
+import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import { panelSlideFromRight } from '@/lib/motion';
 
 interface NotificationsPanelProps {
   hook: UseNotificationsReturn;
@@ -136,10 +138,10 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
         {selectedNotification && (
           <motion.section
             key={selectedNotification.id}
-            initial={{ opacity: 0, x: 16, scale: 0.98 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 16, scale: 0.98 }}
-            transition={{ duration: 0.15 }}
+            variants={panelSlideFromRight}
+            initial="hidden"
+            animate="show"
+            exit="exit"
             aria-label="Notification preview"
             tabIndex={-1}
             className="absolute right-full top-3 z-40 mr-3 h-[min(620px,calc(100vh-6rem))] w-[420px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl shadow-black/50"
@@ -407,7 +409,7 @@ export function CollapsedNotificationsRail({
   onExpand: () => void;
 }) {
   const displayCount = attentionCount;
-  const badgeColor = urgentCount > 0 ? 'bg-red-500' : actionCount > 0 ? 'bg-amber-500' : 'bg-blue-500';
+  const badgeTone = urgentCount > 0 ? 'red' : actionCount > 0 ? 'amber' : 'blue';
 
   return (
     <aside
@@ -422,11 +424,7 @@ export function CollapsedNotificationsRail({
         title="Show notifications"
       >
         <Bell size={16} />
-        {displayCount > 0 && (
-          <span className={`absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] flex items-center justify-center text-[10px] font-bold leading-none text-white rounded-full px-1 ${badgeColor}`}>
-            {displayCount > 9 ? '9+' : displayCount}
-          </span>
-        )}
+        <NavigationBadge count={displayCount} tone={badgeTone} overlay />
       </button>
     </aside>
   );

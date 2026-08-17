@@ -779,7 +779,7 @@ export function ProjectPhasesTab({
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {visiblePhaseViewMode !== 'assign' && visiblePhaseViewMode !== 'graph' && (
-            <div className="flex items-center gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-3 h-9">
+            <div className="input-glow flex items-center gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-3 h-9">
               <Search size={14} className="text-[var(--text-tertiary)]" />
               <input
                 type="text"
@@ -1328,7 +1328,7 @@ export function ProjectPhasesTab({
                                       </div>
                                     ) : null}
                                     <div className="flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
-                                      <label className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 cursor-pointer hover:bg-[var(--surface-2)] hover:border-[var(--accent-500)]/40" title="Click to edit estimated days">
+                                      <label className="input-glow inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--border-strong)] bg-[var(--surface-1)] px-2 py-1 cursor-pointer hover:bg-[var(--surface-2)] hover:border-[var(--accent-500)]/40" title="Click to edit estimated days">
                                         <Clock3 size={12} className="text-[var(--text-muted)]" />
                                         <input
                                           type="number"

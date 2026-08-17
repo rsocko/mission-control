@@ -20,8 +20,7 @@ import { RoutineSnapshotWidget } from '@/components/routines/RoutineSnapshotWidg
 import { TriageQueueWidget } from '@/components/triage/TriageQueueWidget';
 import { KpiBar } from '@/components/kpi/KpiBar';
 import { InsightsBackLink } from '@/components/insights/InsightsBackLink';
-import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
-import { getNextRecurringDate, extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
+import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { BulkDispositionButtons, BulkMoveDropdown, BulkMoveToSourceButton, BulkDueDateDropdown, BulkTagDropdown, BulkPriorityDropdown, BulkStatusDropdown, executeBulkOperation, resolveSelectionAnchorIndex } from '@/components/bulk-actions';
 import { AddTaskModal, SaveTemplateModal } from '@/components/add-task';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
@@ -42,6 +41,7 @@ import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
 import { TaskViewSwitcher } from '@/components/dashboard/TaskViewSwitcher';
 import { DashboardSkeleton, TaskRowSkeleton } from '@/components/ui/Skeleton';
 import { useDashboardSections } from '@/lib/hooks/useDashboardSections';
+import { useTaskContextMenuActionFactory } from '@/lib/hooks/useTaskContextMenuActionFactory';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import dynamic from 'next/dynamic';
@@ -85,6 +85,23 @@ function DashboardPageInner() {
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
+  const getTaskContextMenuActions = useTaskContextMenuActionFactory({
+    complete: actions.completeTask,
+    addToMyDay: actions.addToMyDay,
+    removeFromMyDay: actions.removeFromMyDay,
+    setPriority: actions.setTaskPriority,
+    setStatus: actions.setTaskStatus,
+    setDueDate: actions.setTaskDueDate,
+    setLocalDisposition: actions.setTaskLocalDisposition,
+    moveToList: actions.moveTaskToList,
+    moveToSource: (taskId) => {
+      setPendingMoveDialogTaskId(taskId);
+      actions.setSelectedTaskId(taskId);
+    },
+    addToProject: actions.addTaskToProject,
+    deleteTask: actions.deleteTask,
+    saveAsTemplate: actions.setSaveTemplateTask,
+  });
   const taskSelection = useTaskSelection({
     selectedTaskId: state.selectedTaskId,
     onSelectionChange: (taskId) => {
@@ -493,46 +510,13 @@ function DashboardPageInner() {
                       taskProjectIds={task.hubProjectIds}
                       taskProjectPhaseMemberships={task.projectPhaseMemberships}
                       isInMyDay={state.myDayTaskIds.has(task.id)}
-                      actions={{
-                        onComplete: () => actions.completeTask(task.id),
-                        onSetPriority: (priority) => actions.setTaskPriority(task.id, priority),
-                        onSetStatus: (status) => actions.setTaskStatus(task.id, status),
-                        onAddToMyDay: () => actions.addToMyDay(task.id),
-                        onRemoveFromMyDay: () => actions.removeFromMyDay(task.id),
-                        onDueToday: () => actions.setTaskDueDate(task.id, getClientToday()),
-                        onDueTomorrow: () => {
-                          const d = new Date(); d.setDate(d.getDate() + 1);
-                          actions.setTaskDueDate(task.id, `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
-                        },
-                        onPickDate: (date) => actions.setTaskDueDate(task.id, date),
-                        onClearDueDate: () => actions.setTaskDueDate(task.id, ''),
-                        onSetLocalDisposition: (disposition) =>
-                          actions.setTaskLocalDisposition(task.id, disposition),
-                        onSkipToCurrent: taskRecurrence && task.dueDate
-                          ? () => {
-                              const nextDate = getNextRecurringDate(task.dueDate!.split('T')[0], taskRecurrence, getClientToday());
-                              actions.setTaskDueDate(task.id, nextDate);
-                            }
-                          : undefined,
-                        onMoveToList: (listId) => actions.moveTaskToList(task.id, listId),
-                        onMoveToSource: () => {
-                          setPendingMoveDialogTaskId(task.id);
-                          actions.setSelectedTaskId(task.id);
-                        },
-                        onAddToProject: (projectId, phaseId) => actions.addTaskToProject(task.id, projectId, phaseId),
-                        onDelete: () => actions.deleteTask(task.id),
-                        onSaveAsTemplate: () => {
-                          fetch(`/api/tasks/${task.id}/subtasks`)
-                            .then(r => r.ok ? r.json() : { subtasks: [] })
-                            .then(data => {
-                              const subtaskTitles = (data.subtasks || []).map((s: { title: string }) => s.title);
-                              actions.setSaveTemplateTask({ id: task.id, title: task.title, subtasks: subtaskTitles });
-                            })
-                            .catch(() => {
-                              actions.setSaveTemplateTask({ id: task.id, title: task.title });
-                            });
-                        },
-                      }}
+                      actions={getTaskContextMenuActions({
+                        id: task.id,
+                        title: task.title,
+                        dueDate: task.dueDate,
+                        metadata: task.metadata,
+                        isInMyDay: state.myDayTaskIds.has(task.id),
+                      })}
                     >
                     <div
                       role="listitem"
@@ -763,6 +747,13 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
   const tagsBlockedReason = selectedTaskFieldBlockedReason(policies, 'tags');
   const moveBlockedReason = selectedTasks.find((task) => !task.editPolicy.sourceMoveSupported)?.editPolicy.sourceMoveReason;
   const removalBlockedReason = selectedTaskRemovalBlockedReason(policies);
+  const updateBulkSelection = (failedIds: string[]) => {
+    actions.setBulkSelected(new Set(failedIds));
+    if (failedIds.length === 0) actions.setBulkMode(false);
+  };
+  const refreshBulkTasks = () => {
+    actions.setRefreshTrigger((count) => count + 1);
+  };
 
   return (
     <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-blue-900/20 flex items-center gap-2 flex-wrap">
@@ -803,29 +794,34 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
             const task = state.taskResponse.tasks.find(t => t.id === id);
             if (task) previousStatuses[id] = task.status || 'todo';
           }
-          const { succeeded, failed } = await executeBulkOperation(ids, (id) => fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }), `Status set on ${ids.length} task${ids.length > 1 ? 's' : ''}`);
-          if (succeeded.length > 0) {
-            const undoStatuses = Object.fromEntries(succeeded.filter(id => id in previousStatuses).map(id => [id, previousStatuses[id]]));
-            pushUndoWithToast(`Status set on ${succeeded.length} task${succeeded.length > 1 ? 's' : ''}`, async () => {
-              for (const [id, prev] of Object.entries(undoStatuses)) {
-                await fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: prev }) });
-              }
-              actions.setRefreshTrigger((n) => n + 1);
-            });
-          }
-          if (failed.length > 0) {
-            actions.setBulkSelected(new Set(failed));
-          } else {
-            actions.setBulkSelected(new Set()); actions.setBulkMode(false);
-          }
-          actions.setRefreshTrigger((n) => n + 1);
+          await executeBulkOperation(
+            ids,
+            (id) => fetch(`/api/tasks/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status }),
+            }),
+            `Status set on ${ids.length} task${ids.length > 1 ? 's' : ''}`,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+              undo: {
+                label: `Status set on ${ids.length} task${ids.length > 1 ? 's' : ''}`,
+                operation: (id) => fetch(`/api/tasks/${id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: previousStatuses[id] }),
+                }),
+              },
+            },
+          );
         }}
       />
       <BulkDispositionButtons
         tasks={selectedTasks}
         onSetDisposition={async (localDisposition) => {
           const ids = Array.from(state.bulkSelected);
-          const { failed } = await executeBulkOperation(
+          await executeBulkOperation(
             ids,
             (id) => fetch(`/api/tasks/${id}`, {
               method: 'PATCH',
@@ -835,10 +831,11 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
             localDisposition === 'handled'
               ? `Marked ${ids.length} task${ids.length > 1 ? 's' : ''} handled in Mission Control`
               : `Dismissed ${ids.length} task${ids.length > 1 ? 's' : ''} in Mission Control`,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+            },
           );
-          actions.setBulkSelected(new Set(failed));
-          if (failed.length === 0) actions.setBulkMode(false);
-          actions.setRefreshTrigger((count) => count + 1);
         }}
       />
       <BulkMoveDropdown
@@ -885,16 +882,29 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
           for (const id of ids) {
             const task = state.taskResponse.tasks.find(t => t.id === id);
             if (task) previousDates[id] = task.dueDate || null;
-            await fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: date || null }) });
           }
           const label = date ? `Due date set on ${ids.length} task${ids.length > 1 ? 's' : ''}` : `Due date cleared on ${ids.length} task${ids.length > 1 ? 's' : ''}`;
-          pushUndoWithToast(label, async () => {
-            for (const [id, prevDate] of Object.entries(previousDates)) {
-              await fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dueDate: prevDate }) });
-            }
-            actions.setRefreshTrigger((n) => n + 1);
-          });
-          actions.setBulkSelected(new Set()); actions.setBulkMode(false); actions.setRefreshTrigger((n) => n + 1);
+          await executeBulkOperation(
+            ids,
+            (id) => fetch(`/api/tasks/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ dueDate: date || null }),
+            }),
+            label,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+              undo: {
+                label,
+                operation: (id) => fetch(`/api/tasks/${id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ dueDate: previousDates[id] }),
+                }),
+              },
+            },
+          );
         }}
       />
       <BulkTagDropdown
@@ -904,12 +914,28 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
         onAddTag={async (tagId) => {
           const ids = Array.from(state.bulkSelected);
           const tagName = state.taskResponse.availableTags.find(t => t.id === tagId)?.name;
-          for (const id of ids) { await fetch(`/api/tasks/${id}/tags`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tags: [tagName].filter(Boolean) }) }); }
-          pushUndoWithToast(`Tagged ${ids.length} task${ids.length > 1 ? 's' : ''}`, async () => {
-            for (const id of ids) { await fetch(`/api/tasks/${id}/tags`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tagId }) }); }
-            actions.setRefreshTrigger((n) => n + 1);
-          });
-          actions.setBulkSelected(new Set()); actions.setBulkMode(false); actions.setRefreshTrigger((n) => n + 1);
+          const label = `Tagged ${ids.length} task${ids.length > 1 ? 's' : ''}`;
+          await executeBulkOperation(
+            ids,
+            (id) => fetch(`/api/tasks/${id}/tags`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tags: [tagName].filter(Boolean) }),
+            }),
+            label,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+              undo: {
+                label,
+                operation: (id) => fetch(`/api/tasks/${id}/tags`, {
+                  method: 'DELETE',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ tagId }),
+                }),
+              },
+            },
+          );
         }}
       />
       <BulkPriorityDropdown
@@ -921,15 +947,29 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
           for (const id of ids) {
             const task = state.taskResponse.tasks.find(t => t.id === id);
             if (task) previousPriorities[id] = task.priority || 'none';
-            await fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority }) });
           }
-          pushUndoWithToast(`Priority set on ${ids.length} task${ids.length > 1 ? 's' : ''}`, async () => {
-            for (const [id, prev] of Object.entries(previousPriorities)) {
-              await fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ priority: prev }) });
-            }
-            actions.setRefreshTrigger((n) => n + 1);
-          });
-          actions.setBulkSelected(new Set()); actions.setBulkMode(false); actions.setRefreshTrigger((n) => n + 1);
+          const label = `Priority set on ${ids.length} task${ids.length > 1 ? 's' : ''}`;
+          await executeBulkOperation(
+            ids,
+            (id) => fetch(`/api/tasks/${id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ priority }),
+            }),
+            label,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+              undo: {
+                label,
+                operation: (id) => fetch(`/api/tasks/${id}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ priority: previousPriorities[id] }),
+                }),
+              },
+            },
+          );
         }}
       />
       <button

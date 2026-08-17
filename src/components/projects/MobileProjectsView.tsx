@@ -9,7 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { getTaskPriorityVisual, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { cn } from '@/lib/utils';
 import type { ProjectProgress } from '@/types';
 import Image from 'next/image';
@@ -278,7 +278,7 @@ function ProjectDetailSheet({
               onChange={e => setQuickAddValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Add a task..."
-              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+              className="w-full rounded-xl bg-[var(--surface-2)] border border-[var(--border)] px-3 py-2.5 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
             />
           </div>
           <button
@@ -315,21 +315,13 @@ function ProjectDetailSheet({
   );
 }
 
-const PRIORITY_DOTS: Record<string, string> = {
-  critical: 'bg-red-400',
-  high: 'bg-amber-400',
-  medium: 'bg-blue-400',
-  low: 'bg-slate-400',
-  none: 'bg-slate-600',
-};
-
 function TaskRow({ task }: { task: ProjectTask }) {
   const isDone = task.status === 'done';
   const isInactive = isInactiveTaskStatus(task.status);
 
   return (
     <div className={cn('flex items-center gap-2.5 rounded-lg px-2 py-3 min-h-[44px] hover:bg-[var(--surface-2)]', isInactive && 'opacity-50')}>
-      <span className={cn('h-2 w-2 rounded-full flex-shrink-0', PRIORITY_DOTS[task.priority] || PRIORITY_DOTS.none)} />
+      <span className={cn('h-2 w-2 rounded-full flex-shrink-0', getTaskPriorityVisual(task.priority).dotClass)} />
       <span className={cn('text-sm text-[var(--text-primary)] truncate flex-1', isDone && 'line-through')}>{task.title}</span>
     </div>
   );

@@ -229,7 +229,7 @@ export function ContentTypesSection() {
         <div>
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">Content Types</h2>
           <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-            Define how triage items are classified. URL patterns and keywords are used to auto-detect the type of incoming content.
+            URL patterns and keywords are used to auto-detect the type of incoming content.
           </p>
         </div>
         <button

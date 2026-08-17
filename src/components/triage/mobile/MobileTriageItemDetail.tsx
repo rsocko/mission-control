@@ -235,10 +235,7 @@ function ActionsSection({
         onClick={() => setExpanded((v) => !v)}
         className="flex w-full items-center justify-between"
       >
-        <div>
-          <h3 className="text-sm font-semibold text-white">All actions</h3>
-          <p className="mt-0.5 text-xs text-slate-400">Route this item anywhere in one tap.</p>
-        </div>
+        <h3 className="text-sm font-semibold text-white">All actions</h3>
         <div className="flex items-center gap-2">
           <a
             href={safeSourceUrl}

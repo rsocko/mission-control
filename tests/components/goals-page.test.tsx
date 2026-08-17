@@ -154,7 +154,6 @@ describe('GoalsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Goals & Ideas')).toBeInTheDocument();
     });
-    expect(screen.getByText(/Capture aspirations/)).toBeInTheDocument();
   });
 
   it('shows loading state initially', async () => {

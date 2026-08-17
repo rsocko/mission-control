@@ -20,6 +20,7 @@ import {
 import { ConnectorBrandIcon } from './ConnectorBrandIcon';
 import { useConnectorCreation } from './useConnectorCreation';
 import { useOAuthConnectorInstanceId } from './useOAuthConnectorInstanceId';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -32,6 +33,7 @@ type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' 
 function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  useCloseOnEscape(onClose);
 
   function handleSelectType(type: string) {
     setSelectedType(type);
@@ -70,6 +72,9 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add connector"
         className="bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-[var(--border)]"
         onClick={e => e.stopPropagation()}
       >
@@ -273,8 +278,7 @@ function TierOption({
 function ConnectorTypeSelector({ onSelect, onClose }: { onSelect: (type: string) => void; onClose: () => void }) {
   return (
     <>
-      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Add Connector</h3>
-      <p className="text-sm text-[var(--text-tertiary)] mb-4">Choose a data source to connect:</p>
+      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Add Connector</h3>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 gap-3">
         {CONNECTOR_TYPES.map(ct => (
             <motion.button
@@ -647,7 +651,7 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
               placeholder="Leave blank if not required"
-              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 font-mono"
+              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none font-mono"
             />
             <button
               type="button"
@@ -1434,7 +1438,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
             value={pat}
             onChange={e => setPat(e.target.value)}
             placeholder="ghp_..."
-            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
           <button onClick={() => setShowToken(!showToken)} type="button"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">

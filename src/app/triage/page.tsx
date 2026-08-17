@@ -19,10 +19,12 @@ import TriageStreamItem from '@/components/triage/TriageStreamItem';
 import TriageSyncStatus from '@/components/triage/TriageSyncStatus';
 import { MobileTriageView } from '@/components/triage/mobile';
 import { ACTION_META, SORT_OPTIONS, type TriageSortOption, type ViewMode } from '@/components/triage/types';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { useTriageData } from '@/lib/hooks/useTriageData';
 import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
 import { toast } from 'sonner';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -166,6 +168,7 @@ export default function TriagePage() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       const target = event.target as HTMLElement;
       const tag = target?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
@@ -212,6 +215,7 @@ export default function TriagePage() {
           if (options?.showSuccessToast !== false) {
             toast.success(`${label} applied`);
           }
+          window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
         }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Network error — action failed');
@@ -251,6 +255,7 @@ export default function TriagePage() {
         return false;
       }
       await loadItems();
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
       toast.success('Action undone');
       return true;
     } catch (err) {

@@ -124,7 +124,14 @@ export function TaskAttachmentPreview({ taskId, attachment, onClose }: TaskAttac
   const downloadUrl = attachmentContentUrl(taskId, attachment.id);
 
   return (
-    <Modal isOpen onClose={onClose} title={attachment.name} size="xl" className="h-[80vh]">
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={attachment.name}
+      size="xl"
+      className="h-[80vh]"
+      contentTestId="task-attachment-preview"
+    >
       <div className="flex items-center justify-end border-b border-[var(--border-subtle)] px-5 pb-3">
         <a
           href={downloadUrl}

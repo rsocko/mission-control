@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { X } from 'lucide-react';
 import { modalOverlay, modalContent } from '@/lib/motion';
 import { uiLogger } from '@/lib/client-logger';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 interface DopamineReward {
   id: string;
@@ -25,6 +26,7 @@ interface DopamineMenuSettings {
  */
 export function DopamineMenu() {
   const [open, setOpen] = useState(false);
+  useCloseOnEscape(() => setOpen(false), open);
   const [settings, setSettings] = useState<DopamineMenuSettings | null>(null);
   const [todayCount, setTodayCount] = useState(0);
   const [pickedReward, setPickedReward] = useState<DopamineReward | null>(null);
@@ -115,6 +117,9 @@ export function DopamineMenu() {
             initial="hidden"
             animate="show"
             exit="exit"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dopamine-reward-title"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Close button */}
@@ -126,7 +131,7 @@ export function DopamineMenu() {
             </button>
 
             {/* Header */}
-            <h2 className="text-lg font-semibold text-[var(--text-primary)] pr-8">
+            <h2 id="dopamine-reward-title" className="text-lg font-semibold text-[var(--text-primary)] pr-8">
               🎉 Nice — {todayCount} task{todayCount !== 1 ? 's' : ''} done today!
             </h2>
             <p className="text-sm text-[var(--text-tertiary)] mt-1">

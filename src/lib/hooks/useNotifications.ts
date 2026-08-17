@@ -24,6 +24,7 @@ import {
   isNotificationUnread,
 } from '@/lib/notifications/lifecycle';
 import type { NotificationBulkOutcome } from '@/lib/notifications/bulk';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 
 export interface NotificationStats {
   total: number;
@@ -326,6 +327,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     }
     const result = await res.json() as NotificationBulkResult;
     setRefreshTrigger(n => n + 1);
+    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
     return result;
   }, []);
 
@@ -349,6 +351,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     setRefreshTrigger(n => n + 1);
+    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
   }, []);
 
   const snooze = useCallback(async (id: string, duration: string) => {
@@ -360,6 +363,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setRefreshTrigger(n => n + 1);
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
     } catch (e) {
       console.error('Snooze failed:', e);
     }
@@ -384,6 +388,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       }
       const data = await res.json();
       setRefreshTrigger(n => n + 1);
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
 
       // Handle navigation results from actions (e.g. open_url, navigate)
       if (data.success && data.result) {

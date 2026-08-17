@@ -38,6 +38,7 @@ import {
   scaleIn,
   staggerContainer,
 } from '@/lib/motion';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 type AgentType =
   | 'dismiss-old-notifications'
@@ -354,10 +355,9 @@ export default function AgentPanel() {
           className="bg-[var(--surface-1)] border border-[var(--border)] rounded-xl p-4 shadow-[var(--shadow-sm)]"
         >
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-[var(--text-primary)]">Recent history</h3>
-              <p className="mt-1 text-sm text-[var(--text-tertiary)]">Last 5 runs across all agents.</p>
-            </div>
+            <h3 className="text-base font-semibold text-[var(--text-primary)]">
+              Recent history <span className="text-sm font-normal text-[var(--text-tertiary)]">· all agents</span>
+            </h3>
             <Badge variant="secondary">{history.length}/5 saved</Badge>
           </div>
 
@@ -414,6 +414,7 @@ function DispatchOverlay({
 }) {
   const { agent, phase, dryRunResult, result } = state;
   const Icon = agent.icon;
+  useCloseOnEscape(onCancel, phase !== 'running');
 
   return (
     <motion.div
@@ -436,6 +437,9 @@ function DispatchOverlay({
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Dispatch ${agent.name}`}
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-4">

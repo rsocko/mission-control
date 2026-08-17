@@ -324,7 +324,7 @@ export function ProjectSettingsTab({
                 key={`name-${project.name}`}
                 type="text"
                 className={cn(
-                  "flex h-9 rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-0)] w-full max-w-md",
+                  "flex h-9 rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 outline-none w-full max-w-md",
                   project.metadata?.syncManaged ? 'opacity-60 cursor-not-allowed' : 'hover:border-[var(--border-strong)]',
                 )}
                 defaultValue={project.name}
@@ -359,7 +359,7 @@ export function ProjectSettingsTab({
               <textarea
                 key={`desc-${project.description ?? ''}`}
                 className={cn(
-                  "flex min-h-[80px] resize-y rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-0)] w-full max-w-md",
+                  "flex min-h-[80px] resize-y rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 outline-none w-full max-w-md",
                   project.metadata?.syncManaged ? 'opacity-60 cursor-not-allowed' : 'hover:border-[var(--border-strong)]',
                 )}
                 placeholder="What is this project about?"
@@ -718,7 +718,7 @@ export function ProjectSettingsTab({
                 key={`category-${project.category ?? ''}`}
                 type="text"
                 list="project-category-options"
-                className="flex h-9 rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-0)] w-48"
+                className="flex h-9 rounded-[var(--radius-md)] px-3 py-2 text-sm bg-[var(--surface-0)] text-[var(--text-primary)] border border-[var(--border)] transition-[border-color,box-shadow] duration-75 hover:border-[var(--border-strong)] outline-none w-48"
                 placeholder="e.g. Personal, Work"
                 defaultValue={project.category || ''}
                 onBlur={async (e) => {

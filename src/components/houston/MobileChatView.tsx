@@ -123,7 +123,7 @@ export function MobileChatView({
             onChange={e => onInputChange(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Message Houston…"
-            className="flex-1 px-3.5 py-2.5 border border-[var(--border)] rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent text-sm bg-[var(--surface-0)] text-[var(--text-primary)] min-h-[44px] max-h-[120px]"
+            className="flex-1 px-3.5 py-2.5 border border-[var(--border)] rounded-2xl resize-none outline-none text-sm bg-[var(--surface-0)] text-[var(--text-primary)] min-h-[44px] max-h-[120px]"
             disabled={loading}
           />
           <button

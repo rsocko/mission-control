@@ -557,7 +557,7 @@ export function MobileSearchScreen({
                 </div>
               </div>
 
-              <div className="flex min-h-14 items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface-1)]/85 px-4 shadow-[0_20px_40px_rgba(2,6,23,0.28)] backdrop-blur-xl">
+              <div className="input-glow flex min-h-14 items-center gap-3 rounded-full border border-[var(--border)] bg-[var(--surface-1)]/85 px-4 shadow-[0_20px_40px_rgba(2,6,23,0.28)] backdrop-blur-xl">
                 <Search size={18} className="shrink-0 text-[var(--text-tertiary)]" />
                 <input
                   ref={inputRef}

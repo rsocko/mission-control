@@ -3,6 +3,7 @@
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { modalContent, modalOverlay } from '@/lib/motion';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 interface DialogChromeProps {
   children: ReactNode;
@@ -19,6 +20,8 @@ export function DialogChrome({
   onClose,
   open,
 }: DialogChromeProps) {
+  useCloseOnEscape(onClose, open);
+
   return (
     <AnimatePresence>
       {open && (
@@ -27,7 +30,7 @@ export function DialogChrome({
             variants={modalOverlay}
             initial="hidden"
             animate="show"
-            exit="hidden"
+            exit="exit"
             className="fixed inset-0 bg-black/60 z-50"
             onClick={onClose}
           />
@@ -35,7 +38,7 @@ export function DialogChrome({
             variants={modalContent}
             initial="hidden"
             animate="show"
-            exit="hidden"
+            exit="exit"
             role="dialog"
             aria-modal="true"
             aria-labelledby={labelId}

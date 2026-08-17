@@ -4,6 +4,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence, useDragControls, useReducedMotion, type PanInfo } from 'motion/react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { surfaceExitTransition } from '@/lib/motion';
 
 const FOCUSABLE_SELECTOR = [
   'a[href]',
@@ -141,7 +142,7 @@ export function MobileSheet({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }}
+            transition={prefersReducedMotion ? { duration: 0 } : surfaceExitTransition}
             onClick={onClose}
             aria-hidden="true"
           />
@@ -160,9 +161,16 @@ export function MobileSheet({
             )}
             style={heightStyle}
             initial={prefersReducedMotion ? { y: 0 } : { y: '100%' }}
-            animate={{ y: 0 }}
-            exit={prefersReducedMotion ? { y: 0 } : { y: '100%' }}
-            transition={prefersReducedMotion ? { duration: 0 } : { type: 'spring', damping: 30, stiffness: 300 }}
+            animate={{
+              y: 0,
+              transition: prefersReducedMotion
+                ? { duration: 0 }
+                : { type: 'spring', damping: 30, stiffness: 300 },
+            }}
+            exit={{
+              y: prefersReducedMotion ? 0 : '100%',
+              transition: prefersReducedMotion ? { duration: 0 } : surfaceExitTransition,
+            }}
             drag="y"
             dragControls={dragControls}
             dragConstraints={{ top: 0 }}

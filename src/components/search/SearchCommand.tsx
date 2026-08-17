@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 type TypeFilter = 'all' | 'tasks' | 'notifications';
 
@@ -206,6 +207,7 @@ export function SearchCommand() {
     const openSearch = () => setOpen(true);
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!open && shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setOpen((current) => !current);
@@ -219,7 +221,7 @@ export function SearchCommand() {
       window.removeEventListener('mission-control:open-search', openSearch as EventListener);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -445,7 +447,7 @@ export function SearchCommand() {
 
                   {/* Search input header */}
                   <div className="shrink-0 border-b border-[var(--border)] p-3 sm:p-4">
-                    <div className="flex items-center gap-3">
+                    <div className="input-glow flex items-center gap-3 rounded-[var(--radius-md)]">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--surface-1)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]">
                         {loading ? (
                           <Loader2 size={15} className="animate-spin text-[var(--accent-400)]" />

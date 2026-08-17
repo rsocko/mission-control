@@ -15,9 +15,17 @@
 import db from '@/db';
 import { tasks, notifications, myDayItems, focusItems, routines, routineCompletions, triageItems } from '@/db/schema';
 import { and, eq, gte, lt, lte, sql, notInArray, inArray, isNotNull } from 'drizzle-orm';
-import { getLocalToday, getLocalDaysFromNow, getLocalDayBoundsISO } from '@/lib/utils/date';
+import {
+  formatDateInLocalTimezone,
+  getLocalDateBoundsISO,
+  getLocalToday,
+  getLocalDaysFromNow,
+  getLocalDayBoundsISO,
+  parseStoredTimestamp,
+} from '@/lib/utils/date';
 import type { CadenceConfig } from '@/lib/routines/streaks';
 import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
+import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -159,15 +167,15 @@ async function computeCompletedToday(): Promise<KpiResult> {
   const { todayStart, tomorrowStart } = getTodayBounds();
   const [row] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(and(eq(tasks.status, 'done'), gte(tasks.completedAt, todayStart), lt(tasks.completedAt, tomorrowStart)));
+    .where(and(eq(tasks.status, 'done'), timestampGte(tasks.completedAt, todayStart), timestampLt(tasks.completedAt, tomorrowStart)));
   return { slug: 'completed-today', label: 'Done Today', value: Number(row?.count ?? 0), type: 'counter', accent: 'emerald' };
 }
 
 async function computeThisWeekProgress(today: string): Promise<KpiResult> {
   const monday = getWeekMonday(today);
   const sunday = getWeekSunday(monday);
-  const mondayISO = monday + 'T00:00:00.000Z';
-  const sundayISO = sunday + 'T23:59:59.999Z';
+  const { dayStart: mondayISO } = getLocalDateBoundsISO(monday);
+  const { nextDayStart: weekEndExclusiveISO } = getLocalDateBoundsISO(sunday);
 
   // Tasks due this week (open or completed)
   const [totalRow] = await db.select({ count: sql<number>`count(*)` })
@@ -183,8 +191,8 @@ async function computeThisWeekProgress(today: string): Promise<KpiResult> {
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, mondayISO),
-      lte(tasks.completedAt, sundayISO),
+      timestampGte(tasks.completedAt, mondayISO),
+      timestampLt(tasks.completedAt, weekEndExclusiveISO),
     ));
 
   const total = Number(totalRow?.count ?? 0);
@@ -255,18 +263,22 @@ async function computeRoutinesKept(today: string): Promise<KpiResult> {
 async function computeStreak(today: string): Promise<KpiResult> {
   const daysToCheck = 90;
   const startDate = getDaysAgo(today, daysToCheck);
+  const { dayStart: startDateISO } = getLocalDateBoundsISO(startDate);
 
   const completions = await db.select({
-    completedDate: sql<string>`date(${tasks.completedAt})`,
+    completedAt: tasks.completedAt,
   })
     .from(tasks)
     .where(and(
       eq(tasks.status, 'done'),
-      gte(tasks.completedAt, startDate + 'T00:00:00.000Z'),
-    ))
-    .groupBy(sql`date(${tasks.completedAt})`);
+      timestampGte(tasks.completedAt, startDateISO),
+    ));
 
-  const completedDates = new Set(completions.map(c => c.completedDate).filter(Boolean));
+  const completedDates = new Set(completions.flatMap((completion) => (
+    completion.completedAt
+      ? [formatDateInLocalTimezone(new Date(parseStoredTimestamp(completion.completedAt)))]
+      : []
+  )));
 
   let streak = 0;
   const d = new Date(today + 'T12:00:00');
@@ -330,17 +342,14 @@ async function computeDailyAvg(today: string): Promise<KpiResult> {
 
   for (let i = days - 1; i >= 0; i--) {
     const date = getDaysAgo(today, i);
-    const nextDate = i > 0 ? getDaysAgo(today, i - 1) : today;
-    const nextDateISO = i === 0
-      ? new Date(new Date(today + 'T12:00:00').getTime() + 86400000).toISOString().slice(0, 10) + 'T00:00:00.000Z'
-      : nextDate + 'T00:00:00.000Z';
+    const { dayStart, nextDayStart } = getLocalDateBoundsISO(date);
 
     const [row] = await db.select({ count: sql<number>`count(*)` })
       .from(tasks)
       .where(and(
         eq(tasks.status, 'done'),
-        gte(tasks.completedAt, date + 'T00:00:00.000Z'),
-        lt(tasks.completedAt, nextDateISO),
+        timestampGte(tasks.completedAt, dayStart),
+        timestampLt(tasks.completedAt, nextDayStart),
       ));
     sparkline.push(Number(row?.count ?? 0));
   }

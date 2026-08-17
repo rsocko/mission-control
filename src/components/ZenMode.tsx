@@ -14,6 +14,7 @@ import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { formatDueDate } from '@/lib/utils/date-format';
 
 interface ZenTask {
   id: string;
@@ -235,7 +236,7 @@ export function ZenMode() {
                         )}
                         {task.dueDate && (
                           <span className="text-xs text-[var(--text-muted)] tabular-nums">
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {formatDueDate(task.dueDate)}
                           </span>
                         )}
                       </motion.div>

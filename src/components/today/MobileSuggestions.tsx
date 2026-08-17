@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { ConnectorIcon } from './SortableTaskRow';
 import { formatDueDate } from '@/lib/utils/date-format';
+import { getLocalToday } from '@/lib/utils/client-date';
 import type { SuggestionGroups, SuggestionTask } from './types';
 
 interface MobileSuggestionsProps {
@@ -246,7 +247,7 @@ function MobileSuggestionAccordion({
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-[var(--text-primary)] truncate">{task.title}</span>
                       {task.dueDate && (
-                        <span className={`block text-xs mt-0.5 ${task.dueDate < new Date().toISOString().slice(0, 10) ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
+                        <span className={`block text-xs mt-0.5 ${task.dueDate < getLocalToday() ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
                           {formatDueDate(task.dueDate)}
                         </span>
                       )}

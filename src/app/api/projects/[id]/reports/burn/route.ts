@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { getBurnReport } from '@/lib/reports/burn';
 import type { BurnReportMode } from '@/lib/reports/burn-types';
+import { getLocalToday } from '@/lib/utils/date';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_REPORT_DAYS = 1_830;
@@ -29,7 +30,7 @@ export async function GET(
   }
   const mode = modeParam as BurnReportMode;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getLocalToday();
   const startDate = searchParams.get('start') ?? addUtcDays(today, -89);
   const endDate = searchParams.get('end') ?? today;
   if (!isDate(startDate) || !isDate(endDate)) {

@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks } from '@/db/schema';
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { getLocalDayBoundsISO } from '@/lib/utils/date';
+import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 export async function GET() {
   try {
@@ -15,8 +16,8 @@ export async function GET() {
     }).from(tasks).where(
       and(
         eq(tasks.status, 'done'),
-        gte(tasks.completedAt, todayStart),
-        lt(tasks.completedAt, tomorrowStart),
+        timestampGte(tasks.completedAt, todayStart),
+        timestampLt(tasks.completedAt, tomorrowStart),
       )
     );
 

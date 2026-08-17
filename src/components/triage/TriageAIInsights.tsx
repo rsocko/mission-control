@@ -4,6 +4,7 @@ import { AlertTriangle, Calendar, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { ACTION_META } from '@/components/triage/types';
 import type { TriageActionType, TriageItem } from '@/types';
+import { parseLocalDate } from '@/lib/utils/date-format';
 
 interface Insight {
   id: string;
@@ -32,8 +33,11 @@ function computeInsights(items: TriageItem[], onBatchAction: (ids: string[], act
     if (item.aiUrgency !== 'time_sensitive') return false;
     const dueDate = item.rawMetadata?.parsedDueDate as string | undefined;
     if (!dueDate) return true; // marked time_sensitive but no specific date — still worth flagging
-    const due = new Date(dueDate);
-    const daysUntil = (due.getTime() - Date.now()) / 86400000;
+    const due = parseLocalDate(dueDate);
+    if (!due) return true;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const daysUntil = Math.round((due.getTime() - today.getTime()) / 86400000);
     return daysUntil <= 7 && daysUntil >= -1; // within 7 days or 1 day past
   });
 

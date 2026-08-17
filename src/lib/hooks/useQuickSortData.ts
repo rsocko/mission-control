@@ -155,6 +155,25 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, ...patch } : t)));
   }, []);
 
+  /** Return an undone task to its prior queue position without creating duplicates. */
+  const restoreTask = useCallback((task: QuickSortQueueTask, queueIndex: number) => {
+    setDoneIds((prev) => {
+      const next = new Set(prev);
+      next.delete(task.id);
+      doneIdsRef.current = next;
+      return next;
+    });
+    setTasks((prev) => {
+      const withoutTask = prev.filter((candidate) => candidate.id !== task.id);
+      const insertionIndex = Math.min(Math.max(queueIndex, 0), withoutTask.length);
+      return [
+        ...withoutTask.slice(0, insertionIndex),
+        task,
+        ...withoutTask.slice(insertionIndex),
+      ];
+    });
+  }, []);
+
   /** Track recently applied tags for surfacing in the tag picker. */
   const recordRecentTag = useCallback((tagId: string) => {
     setRecentTagIds((prev) => {
@@ -199,6 +218,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
     suggestions,
     recentTagIds,
     dismiss,
+    restoreTask,
     updateTask,
     refreshQueue,
     reloadQueue,

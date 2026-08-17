@@ -35,6 +35,7 @@ import {
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type { TriageActionRecord, TriageActionType, TriageContentType, TriageItem } from '@/types';
 import { TRIAGE_SOURCE_ICONS } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
@@ -767,6 +768,7 @@ export default function TriageGalleryView({
   // Keyboard navigation
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
+      if (shouldBlockGlobalShortcut(e)) return;
       // Ignore if focus is in an input
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;

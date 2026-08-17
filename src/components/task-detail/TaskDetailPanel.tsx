@@ -30,6 +30,7 @@ import { cn } from '@/lib/utils';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import { useResizablePanel } from '@/lib/hooks/useResizablePanel';
+import { modalContent, modalOverlay, panelSlideFromRight } from '@/lib/motion';
 import { TaskDetailHeader } from './TaskDetailHeader';
 import { TaskPropertiesSection } from './TaskPropertiesSection';
 import { TaskNotesSection } from './TaskNotesSection';
@@ -293,10 +294,19 @@ export function TaskDetailPanel({
         document.activeElement instanceof HTMLElement
         && document.activeElement.closest('[data-task-relationship-editor]')
       ) return;
+      if (document.querySelector('[data-testid="task-attachment-preview"]')) return;
+      if (confirmDialog.open) return;
       if (notesExpanded) {
         e.preventDefault();
         e.stopImmediatePropagation();
         closeExpandedNotes();
+        return;
+      }
+      if (showMoveDialog) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        setShowMoveDialog(false);
+        onMoveDialogDismissed?.();
         return;
       }
       if (
@@ -315,7 +325,17 @@ export function TaskDetailPanel({
     };
     document.addEventListener('keydown', handler, true);
     return () => document.removeEventListener('keydown', handler, true);
-  }, [closeExpandedNotes, editingDesc, mode, notesExpanded, onClose, task?.description]);
+  }, [
+    closeExpandedNotes,
+    confirmDialog.open,
+    editingDesc,
+    mode,
+    notesExpanded,
+    onClose,
+    onMoveDialogDismissed,
+    showMoveDialog,
+    task?.description,
+  ]);
 
   useEffect(() => {
     if (!notesExpanded) return;
@@ -533,20 +553,24 @@ export function TaskDetailPanel({
   // Content fade key — changes when loading a new task
   const contentKey = loading ? 'loading' : task?.id || 'empty';
 
-  const moveDialog = showMoveDialog && task ? (
-    <TaskMoveDialog
-      taskId={task.id}
-      taskTitle={task.title}
-      sourceConnectorType={task.connectorType}
-      writableConnectors={writableConnectors}
-      onClose={() => { setShowMoveDialog(false); onMoveDialogDismissed?.(); }}
-      onSuccess={(_newTaskId, action) => {
-        toast.success(action === 'move' ? 'Task moved successfully' : 'Task copied successfully');
-        onClose();
-        onUpdate?.();
-      }}
-    />
-  ) : null;
+  const moveDialog = (
+    <AnimatePresence>
+      {showMoveDialog && task ? (
+        <TaskMoveDialog
+          taskId={task.id}
+          taskTitle={task.title}
+          sourceConnectorType={task.connectorType}
+          writableConnectors={writableConnectors}
+          onClose={() => { setShowMoveDialog(false); onMoveDialogDismissed?.(); }}
+          onSuccess={(_newTaskId, action) => {
+            toast.success(action === 'move' ? 'Task moved successfully' : 'Task copied successfully');
+            onClose();
+            onUpdate?.();
+          }}
+        />
+      ) : null}
+    </AnimatePresence>
+  );
 
   const confirmDialogElement = (
     <ConfirmDialog
@@ -915,24 +939,28 @@ export function TaskDetailPanel({
           />
         )}
 
-        {portalRoot && notesExpanded && createPortal(
-          <TaskNotesDialog
-            taskTitle={task.title}
-            description={task.description}
-            descValue={descValue}
-            editing={expandedNotesEditing}
-            canEditDescription={canEditDescription}
-            sourceUrl={task.sourceUrl}
-            dialogRef={notesDialogRef}
-            editorRef={expandedDescRef}
-            onDescValueChange={setDescValue}
-            onEditingChange={setExpandedNotesEditing}
-            onCancelEdit={() => { setDescValue(task.description || ''); setExpandedNotesEditing(false); }}
-            onSave={handleDescBlur}
-            onClose={closeExpandedNotes}
-            onPaste={handleImagePaste}
-            onCheckboxToggle={canEditDescription ? handleCheckboxToggle : undefined}
-          />,
+        {portalRoot && createPortal(
+          <AnimatePresence>
+            {notesExpanded && (
+              <TaskNotesDialog
+                taskTitle={task.title}
+                description={task.description}
+                descValue={descValue}
+                editing={expandedNotesEditing}
+                canEditDescription={canEditDescription}
+                sourceUrl={task.sourceUrl}
+                dialogRef={notesDialogRef}
+                editorRef={expandedDescRef}
+                onDescValueChange={setDescValue}
+                onEditingChange={setExpandedNotesEditing}
+                onCancelEdit={() => { setDescValue(task.description || ''); setExpandedNotesEditing(false); }}
+                onSave={handleDescBlur}
+                onClose={closeExpandedNotes}
+                onPaste={handleImagePaste}
+                onCheckboxToggle={canEditDescription ? handleCheckboxToggle : undefined}
+              />
+            )}
+          </AnimatePresence>,
           portalRoot,
         )}
       </div>
@@ -959,9 +987,10 @@ export function TaskDetailPanel({
         <div className={cn('fixed inset-0 z-[90] flex justify-center', isWorkspace ? 'items-stretch p-4' : 'items-start pt-[6vh]')} role="presentation">
           <motion.div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            variants={modalOverlay}
+            initial="hidden"
+            animate="show"
+            exit="exit"
             onClick={onClose}
             aria-hidden="true"
           />
@@ -977,17 +1006,17 @@ export function TaskDetailPanel({
                 ? 'h-full w-full max-w-[1320px] rounded-2xl'
                 : 'max-h-[88vh] w-[min(920px,94vw)] rounded-2xl',
             )}
-            initial={{ opacity: 0, scale: 0.96, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.96, y: 8 }}
-            transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+            variants={modalContent}
+            initial="hidden"
+            animate="show"
+            exit="exit"
           >
             {panelContent}
           </motion.div>
         </div>
       </AnimatePresence>
       {confirmDialogElement}
-      {moveDialog && (portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog)}
+      {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
       </>
     );
 
@@ -1003,10 +1032,10 @@ export function TaskDetailPanel({
       tabIndex={focusPanelOnMount ? -1 : undefined}
       className="bg-[var(--surface-1)] border-l border-[var(--border)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)] flex-shrink-0 overflow-y-auto relative"
       style={{ width: panelWidth, maxWidth: 'min(calc(100vw - 4rem), 100%)' }}
-      initial={animatePanel ? { opacity: 0, x: 16 } : false}
-      animate={{ opacity: 1, x: 0 }}
-      exit={animatePanel ? { opacity: 0, x: 12 } : undefined}
-      transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
+      variants={animatePanel ? panelSlideFromRight : undefined}
+      initial={animatePanel ? 'hidden' : false}
+      animate={animatePanel ? 'show' : undefined}
+      exit={animatePanel ? 'exit' : undefined}
     >
       {/* Resize handle */}
       <div
@@ -1016,7 +1045,7 @@ export function TaskDetailPanel({
       {panelContent}
     </motion.aside>
     {confirmDialogElement}
-    {moveDialog && (portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog)}
+    {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
     </>
   );
 }

@@ -3,11 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import * as Popover from '@radix-ui/react-popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { MissionControlIcon } from '@/components/ui/MissionControlIcon';
 import { SyncingMissionControlIcon } from '@/components/ui/SyncingMissionControlIcon';
-import { Popover } from '@/components/ui/Popover';
 import { BRAND_GRADIENT_END, BRAND_GRADIENT_START } from '@/lib/brand';
 import { formatSyncTime } from '@/lib/utils/dashboard-helpers';
 import { usePathname } from 'next/navigation';
@@ -313,74 +313,80 @@ export function NavRail({
         <div className="h-px bg-[var(--text-tertiary)]/20 mb-2.5 mx-3" />
 
         {showSyncStatusControl && (
-          <div className="relative mx-2">
-            <Tooltip content="Sync status" placement="right" disabled={expanded || syncPopoverOpen}>
-              <button
-                type="button"
-                onClick={() => setSyncPopoverOpen((current) => !current)}
-                aria-label="Sync status"
-                aria-expanded={syncPopoverOpen}
-                className="w-full flex items-center h-10 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
-              >
-                <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
-                  <RefreshCw size={18} className={cn(isSyncing && 'animate-spin text-blue-400')} />
-                </span>
-                <span className={cn(
-                  'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-                  expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
-                )}>
-                  Sync status
-                </span>
-              </button>
-            </Tooltip>
+          <Popover.Root open={syncPopoverOpen} onOpenChange={setSyncPopoverOpen}>
+            <div className="mx-2">
+              <Tooltip content="Sync status" placement="right" disabled={pinned || syncPopoverOpen}>
+                <Popover.Trigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Sync status"
+                    className="w-full flex items-center h-10 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+                  >
+                    <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
+                      <RefreshCw size={18} className={cn(isSyncing && 'animate-spin text-blue-400')} />
+                    </span>
+                    <span className={cn(
+                      'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                      pinned ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
+                    )}>
+                      {isSyncing ? 'Syncing…' : 'Sync status'}
+                    </span>
+                  </button>
+                </Popover.Trigger>
+              </Tooltip>
+            </div>
 
-            <Popover
-              isOpen={syncPopoverOpen}
-              onClose={() => setSyncPopoverOpen(false)}
-              align={expanded ? 'left' : 'right'}
-              width="w-72"
-              className="p-3"
-            >
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sync Status</h3>
-                {isSyncing && (
-                  <span className="flex items-center gap-1 text-xs text-blue-400">
-                    <RefreshCw size={10} className="animate-spin" />
-                    Syncing…
-                  </span>
-                )}
-              </div>
-              <div className="space-y-2 max-h-56 overflow-y-auto">
-                {activeSyncStatus.map((status) => {
-                  const isHealthy = status.status === 'healthy';
-                  return (
-                    <div key={status.id} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {CONNECTOR_ICONS[status.type] && (
-                          <Image src={CONNECTOR_ICONS[status.type]} alt={status.name} width={12} height={12} />
+            <Popover.Portal>
+              <Popover.Content
+                side="right"
+                align="end"
+                sideOffset={10}
+                collisionPadding={12}
+                aria-label="Sync status details"
+                className="z-50 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-2xl"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sync Status</h3>
+                  {isSyncing && (
+                    <span className="flex items-center gap-1 text-xs text-blue-400">
+                      <RefreshCw size={10} className="animate-spin" />
+                      Syncing…
+                    </span>
+                  )}
+                </div>
+                <div className="space-y-2 max-h-56 overflow-y-auto">
+                  {activeSyncStatus.map((status) => {
+                    const isHealthy = status.status === 'healthy';
+                    return (
+                      <div key={status.id} className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          {CONNECTOR_ICONS[status.type] && (
+                            <Image src={CONNECTOR_ICONS[status.type]} alt={status.name} width={12} height={12} />
+                          )}
+                          <span className="text-[var(--text-secondary)] truncate">{status.name}</span>
+                        </div>
+                        {status.lastSyncAt ? (
+                          <span className={cn('flex items-center gap-1', isHealthy ? 'text-green-400' : 'text-amber-400')}>
+                            {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                            <span>{formatSyncTime(status.lastSyncAt)}</span>
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1 text-[var(--text-muted)]">
+                            <AlertCircle size={10} />
+                            <span>Never</span>
+                          </span>
                         )}
-                        <span className="text-[var(--text-secondary)] truncate">{status.name}</span>
                       </div>
-                      {status.lastSyncAt ? (
-                        <span className={cn('flex items-center gap-1', isHealthy ? 'text-green-400' : 'text-amber-400')}>
-                          {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                          <span>{formatSyncTime(status.lastSyncAt)}</span>
-                        </span>
-                      ) : (
-                        <span className="flex items-center gap-1 text-[var(--text-muted)]">
-                          <AlertCircle size={10} />
-                          <span>Never</span>
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-                {activeSyncStatus.length === 0 && (
-                  <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
-                )}
-              </div>
-            </Popover>
-          </div>
+                    );
+                  })}
+                  {activeSyncStatus.length === 0 && (
+                    <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
+                  )}
+                </div>
+                <Popover.Arrow className="fill-[var(--border)]" />
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
         )}
 
         {/* Pin toggle */}

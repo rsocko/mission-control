@@ -38,6 +38,7 @@ import {
   scaleIn,
   staggerContainer,
 } from '@/lib/motion';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 type AgentType =
   | 'dismiss-old-notifications'
@@ -414,6 +415,7 @@ function DispatchOverlay({
 }) {
   const { agent, phase, dryRunResult, result } = state;
   const Icon = agent.icon;
+  useCloseOnEscape(onCancel, phase !== 'running');
 
   return (
     <motion.div
@@ -436,6 +438,9 @@ function DispatchOverlay({
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Dispatch ${agent.name}`}
       >
         {/* Header */}
         <div className="flex items-center gap-3 border-b border-[var(--border)] px-5 py-4">

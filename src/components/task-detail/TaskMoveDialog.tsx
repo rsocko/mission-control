@@ -13,6 +13,7 @@ import {
 } from '@/lib/api/tasks';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import { getConnectorDisplayName } from '@/lib/connectors/display-name';
+import { modalContent, modalOverlay } from '@/lib/motion';
 
 const CONNECTOR_ICONS: Record<string, string> = {
   'local': LOCAL_CONNECTOR_ICON_PATH,
@@ -377,19 +378,30 @@ export function TaskMoveDialog({
     .map((mapping) => formatFieldLabel(mapping.field)) ?? [];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <motion.div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      variants={modalOverlay}
+      initial="hidden"
+      animate="show"
+      exit="exit"
+      onClick={onClose}
+    >
       <motion.div
         className="relative w-full max-w-md bg-[var(--surface-1)] border border-[var(--border)] rounded-2xl shadow-2xl overflow-hidden"
-        initial={{ opacity: 0, scale: 0.96, y: 8 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.96, y: 8 }}
-        transition={{ duration: 0.18 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="task-move-dialog-title"
+        variants={modalContent}
+        initial="hidden"
+        animate="show"
+        exit="exit"
+        onClick={(event) => event.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-start justify-between p-5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0">
             <p className="text-xs text-[var(--text-muted)] mb-0.5">Moving task</p>
-            <h2 className="text-sm font-semibold text-[var(--text-primary)] truncate">{taskTitle}</h2>
+            <h2 id="task-move-dialog-title" className="text-sm font-semibold text-[var(--text-primary)] truncate">{taskTitle}</h2>
           </div>
           <button
             onClick={onClose}
@@ -731,6 +743,6 @@ export function TaskMoveDialog({
           </AnimatePresence>
         </div>
       </motion.div>
-    </div>
+    </motion.div>
   );
 }

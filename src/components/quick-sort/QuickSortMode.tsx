@@ -8,6 +8,7 @@ import {
   Keyboard,
   Loader2,
   RefreshCw,
+  RotateCcw,
   Sparkles,
   Zap,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import { TaskDetailPanel, type TaskFieldUpdate } from '@/components/task-detail/
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useQuickSortData } from '@/lib/hooks/useQuickSortData';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -49,23 +51,38 @@ const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L',
 const SKIP_SNOOZE_MS = 30 * 60 * 1000;
 const QUEUE_REVALIDATE_MS = 60 * 1000;
 
-async function patchTask(taskId: string, patch: Record<string, unknown>) {
-  const res = await fetch(`/api/tasks/${taskId}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error('Failed to update task');
-  return res.json();
+interface QuickSortHistoryEntry {
+  operationId: string;
+  task: QuickSortQueueTask;
+  queueIndex: number;
+  label: string;
+  contextKey: string;
+  counted: boolean;
+  aiAccepted: boolean;
 }
 
-/** Fire-and-forget: log a quick sort action for activity stats. */
-function logQuickSortAction(taskId: string, mode: QuickSortQueueMode, action: 'applied' | 'suggestion_accepted' | 'skipped') {
-  fetch('/api/tasks/quick-sort-stats', {
+async function applyQuickSortOperation(input: {
+  operationId: string;
+  taskId: string;
+  mode: QuickSortQueueMode;
+  action: 'applied' | 'suggestion_accepted' | 'skipped';
+  label: string;
+  contextKey: string;
+  queueIndex: number;
+  patch: Record<string, unknown>;
+  logModes?: QuickSortQueueMode[];
+  aiAccepted?: boolean;
+}) {
+  const res = await fetch('/api/tasks/quick-sort/operations', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ taskId, mode, action }),
-  }).catch(() => {});
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => null) as { error?: string } | null;
+    throw new Error(data?.error ?? 'Failed to update task');
+  }
+  return res.json();
 }
 
 export default function QuickSortMode() {
@@ -83,10 +100,14 @@ export default function QuickSortMode() {
   const [sessionStartTime] = useState(() => Date.now());
   const [elapsedMinutes, setElapsedMinutes] = useState(0);
   const [aiAccepted, setAiAccepted] = useState(0);
+  const [history, setHistory] = useState<QuickSortHistoryEntry[]>([]);
+  const [undoStatus, setUndoStatus] = useState('');
   const useCompactTaskDetails = useIsMobile(1279);
   const isSingleColumnLayout = useIsMobile(1023);
   const globalChordPendingRef = useRef(false);
   const globalChordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingTaskIdsRef = useRef(new Set<string>());
+  const undoInFlightRef = useRef(false);
 
   const {
     tasks,
@@ -95,6 +116,7 @@ export default function QuickSortMode() {
     suggestions,
     recentTagIds,
     dismiss,
+    restoreTask,
     updateTask,
     refreshQueue,
     reloadQueue,
@@ -102,6 +124,107 @@ export default function QuickSortMode() {
     recordRecentTag,
   } =
     useQuickSortData(mode, scopeFilter, order);
+  const historyContextKey = JSON.stringify({ mode, scopeFilter, order });
+  const historyTail = history.at(-1);
+  const lastOperation = historyTail?.contextKey === historyContextKey ? historyTail : undefined;
+
+  useEffect(() => {
+    setHistory([]);
+    setUndoStatus('');
+  }, [historyContextKey]);
+
+  const runOperation = useCallback(async ({
+    task,
+    patch,
+    operationMode,
+    action,
+    label,
+    logModes,
+    acceptedAI = false,
+  }: {
+    task: QuickSortQueueTask;
+    patch: Record<string, unknown>;
+    operationMode: QuickSortQueueMode;
+    action: 'applied' | 'suggestion_accepted' | 'skipped';
+    label: string;
+    logModes?: QuickSortQueueMode[];
+    acceptedAI?: boolean;
+  }) => {
+    if (pendingTaskIdsRef.current.has(task.id)) {
+      throw new Error('This Quick Sort action is already in progress');
+    }
+    const queueIndex = tasks.findIndex((candidate) => candidate.id === task.id);
+    if (queueIndex < 0) throw new Error('Task is no longer in this queue');
+    const operationId = crypto.randomUUID();
+    pendingTaskIdsRef.current.add(task.id);
+    try {
+      await applyQuickSortOperation({
+        operationId,
+        taskId: task.id,
+        mode: operationMode,
+        action,
+        label,
+        contextKey: historyContextKey,
+        queueIndex,
+        patch,
+        logModes,
+        aiAccepted: acceptedAI,
+      });
+    } finally {
+      pendingTaskIdsRef.current.delete(task.id);
+    }
+    setHistory((current) => [...current, {
+      operationId,
+      task,
+      queueIndex,
+      label,
+      contextKey: historyContextKey,
+      counted: action !== 'skipped',
+      aiAccepted: acceptedAI,
+    }].slice(-20));
+    setUndoStatus(`${label} applied. Undo is available.`);
+  }, [historyContextKey, tasks]);
+
+  const handleUndo = useCallback(async () => {
+    const operation = lastOperation;
+    if (!operation || busy || undoInFlightRef.current) return;
+    undoInFlightRef.current = true;
+    setBusy(true);
+    setUndoStatus(`Undoing ${operation.label}.`);
+    try {
+      const response = await fetch(
+        `/api/tasks/quick-sort/operations/${operation.operationId}/undo`,
+        { method: 'POST' },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(data?.error ?? `Failed to undo ${operation.label}`);
+      }
+      restoreTask(operation.task, operation.queueIndex);
+      setHistory((current) => current.filter(
+        (entry) => entry.operationId !== operation.operationId,
+      ));
+      if (operation.counted) setSessionSorted((count) => Math.max(0, count - 1));
+      if (operation.aiAccepted) setAiAccepted((count) => Math.max(0, count - 1));
+      refreshCounts();
+      setStatsKey((key) => key + 1);
+      setUndoStatus(`${operation.label} undone. Task restored.`);
+      toast.success(`${operation.label} undone`);
+      requestAnimationFrame(() => {
+        const card = document.querySelector<HTMLElement>(
+          `[data-quick-sort-card-task-id="${CSS.escape(operation.task.id)}"]`,
+        );
+        card?.focus();
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Failed to undo ${operation.label}`;
+      setUndoStatus(message);
+      toast.error(message);
+    } finally {
+      undoInFlightRef.current = false;
+      setBusy(false);
+    }
+  }, [busy, lastOperation, refreshCounts, restoreTask]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -169,24 +292,28 @@ export default function QuickSortMode() {
       setBusy(true);
       try {
         const snoozedUntil = new Date(Date.now() + SKIP_SNOOZE_MS).toISOString();
-        await patchTask(taskId, { snoozedUntil });
-        logQuickSortAction(taskId, mode, 'skipped');
+        await runOperation({
+          task: task!,
+          patch: { snoozedUntil },
+          operationMode: mode,
+          action: 'skipped',
+          label: 'Skip',
+        });
         dismiss(taskId);
         refreshCounts();
         setStatsKey((k) => k + 1);
-        setSessionSorted((n) => n + 1);
         toast.info('Skipped for 30 minutes');
       } catch {
         toast.error('Failed to skip task');
       }
       setBusy(false);
     },
-    [busy, dismiss, mode, refreshCounts, tasks]
+    [busy, dismiss, mode, refreshCounts, runOperation, tasks]
   );
 
   const handleSetLocalDisposition = useCallback(
     async (localDisposition: LocalDisposition) => {
-      if (!topTask || busy) return;
+      if (!topTask || !mode || busy) return;
       if (!canSetTaskLocalDisposition(
         topTask.editPolicy,
         topTask.localDisposition,
@@ -201,12 +328,13 @@ export default function QuickSortMode() {
       }
       setBusy(true);
       try {
-        const data = await patchTask(topTask.id, { localDisposition }) as {
-          fields?: { localDisposition?: { persisted?: boolean } };
-        };
-        if (data.fields?.localDisposition?.persisted !== true) {
-          throw new Error('Mission Control state was not saved');
-        }
+        await runOperation({
+          task: topTask,
+          patch: { localDisposition },
+          operationMode: mode,
+          action: 'applied',
+          label: localDisposition === 'handled' ? 'Mark handled' : 'Dismiss',
+        });
         dismiss(topTask.id);
         refreshCounts();
         setSessionSorted((count) => count + 1);
@@ -219,7 +347,7 @@ export default function QuickSortMode() {
         setBusy(false);
       }
     },
-    [busy, dismiss, refreshCounts, topTask],
+    [busy, dismiss, mode, refreshCounts, runOperation, topTask],
   );
 
   const handleApplyPriority = useCallback(
@@ -231,8 +359,13 @@ export default function QuickSortMode() {
       }
       setBusy(true);
       try {
-        await patchTask(topTask.id, { priority });
-        logQuickSortAction(topTask.id, 'no_priority', 'applied');
+        await runOperation({
+          task: topTask,
+          patch: { priority },
+          operationMode: 'no_priority',
+          action: 'applied',
+          label: 'Set priority',
+        });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
@@ -243,7 +376,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts]
+    [topTask, busy, dismiss, refreshCounts, runOperation]
   );
 
   const handleApplyEffort = useCallback(
@@ -255,8 +388,13 @@ export default function QuickSortMode() {
       }
       setBusy(true);
       try {
-        await patchTask(topTask.id, { effort });
-        logQuickSortAction(topTask.id, 'no_effort', 'applied');
+        await runOperation({
+          task: topTask,
+          patch: { effort },
+          operationMode: 'no_effort',
+          action: 'applied',
+          label: 'Set effort',
+        });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
@@ -267,7 +405,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts]
+    [topTask, busy, dismiss, refreshCounts, runOperation]
   );
 
   const handleApplyTag = useCallback(
@@ -280,8 +418,13 @@ export default function QuickSortMode() {
       setBusy(true);
       try {
         const existingTagIds = topTask.tags.map((t) => t.id);
-        await patchTask(topTask.id, { tags: [...existingTagIds, tagId] });
-        logQuickSortAction(topTask.id, 'no_tags', 'applied');
+        await runOperation({
+          task: topTask,
+          patch: { tags: [...existingTagIds, tagId] },
+          operationMode: 'no_tags',
+          action: 'applied',
+          label: 'Add tag',
+        });
         recordRecentTag(tagId);
         dismiss(topTask.id);
         refreshCounts();
@@ -293,7 +436,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts, recordRecentTag]
+    [topTask, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
   const handleApplyDueDate = useCallback(
@@ -305,8 +448,13 @@ export default function QuickSortMode() {
       }
       setBusy(true);
       try {
-        await patchTask(topTask.id, { dueDate });
-        logQuickSortAction(topTask.id, 'no_due_date', 'applied');
+        await runOperation({
+          task: topTask,
+          patch: { dueDate },
+          operationMode: 'no_due_date',
+          action: 'applied',
+          label: 'Set due date',
+        });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
@@ -317,19 +465,25 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts]
+    [topTask, busy, dismiss, refreshCounts, runOperation]
   );
 
   const handleMarkDone = useCallback(
     async () => {
-      if (!topTask || busy) return;
+      if (!topTask || !mode || busy) return;
       if (!canEditTaskField(topTask.editPolicy, 'status')) {
         toast.error(taskFieldBlockedReason(topTask.editPolicy, 'status'));
         return;
       }
       setBusy(true);
       try {
-        await patchTask(topTask.id, { status: 'done' });
+        await runOperation({
+          task: topTask,
+          patch: { status: 'done' },
+          operationMode: mode,
+          action: 'applied',
+          label: 'Complete task',
+        });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
@@ -340,7 +494,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts]
+    [topTask, busy, dismiss, mode, refreshCounts, runOperation]
   );
 
   const handleTaskDetailUpdate = useCallback((fields?: TaskFieldUpdate) => {
@@ -376,7 +530,7 @@ export default function QuickSortMode() {
   const handleAcceptSuggestions = useCallback(
     async (taskId: string) => {
       const suggestion = suggestions[taskId];
-      if (!suggestion || busy) return;
+      if (!suggestion || !mode || busy) return;
 
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
@@ -416,17 +570,22 @@ export default function QuickSortMode() {
         }
 
         if (Object.keys(patch).length > 0) {
-          await patchTask(taskId, patch);
-          if (suggestion.priority && task.priority === 'none') {
-            logQuickSortAction(taskId, 'no_priority', 'suggestion_accepted');
-          }
-          if (suggestion.effort && task.effort === null) {
-            logQuickSortAction(taskId, 'no_effort', 'suggestion_accepted');
-          }
+          const logModes: QuickSortQueueMode[] = [];
+          if (suggestion.priority && task.priority === 'none') logModes.push('no_priority');
+          if (suggestion.effort && task.effort === null) logModes.push('no_effort');
           if (suggestion.tags.length > 0 && task.tags.length === 0) {
             suggestion.tags.forEach((tag) => recordRecentTag(tag.id));
-            logQuickSortAction(taskId, 'no_tags', 'suggestion_accepted');
+            logModes.push('no_tags');
           }
+          await runOperation({
+            task,
+            patch,
+            operationMode: mode,
+            action: 'suggestion_accepted',
+            label: 'Apply AI suggestions',
+            logModes,
+            acceptedAI: true,
+          });
         }
 
         if (applied.length > 0) {
@@ -447,7 +606,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [suggestions, tasks, busy, dismiss, refreshCounts, recordRecentTag]
+    [suggestions, tasks, busy, dismiss, mode, refreshCounts, recordRecentTag, runOperation]
   );
 
   /** Swipe-right: accept only the current mode's AI suggestion */
@@ -474,21 +633,39 @@ export default function QuickSortMode() {
       try {
         let applied = false;
         if (mode === 'no_priority' && suggestion.priority) {
-          await patchTask(taskId, { priority: suggestion.priority.value });
-          logQuickSortAction(taskId, 'no_priority', 'suggestion_accepted');
+          await runOperation({
+            task,
+            patch: { priority: suggestion.priority.value },
+            operationMode: mode,
+            action: 'suggestion_accepted',
+            label: 'Apply priority suggestion',
+            acceptedAI: true,
+          });
           toast.success(`Priority → ${suggestion.priority.value}`);
           applied = true;
         } else if (mode === 'no_effort' && suggestion.effort) {
-          await patchTask(taskId, { effort: suggestion.effort.value });
-          logQuickSortAction(taskId, 'no_effort', 'suggestion_accepted');
+          await runOperation({
+            task,
+            patch: { effort: suggestion.effort.value },
+            operationMode: mode,
+            action: 'suggestion_accepted',
+            label: 'Apply effort suggestion',
+            acceptedAI: true,
+          });
           toast.success(`Effort → ${EFFORT_LABELS[suggestion.effort.value] ?? suggestion.effort.value}`);
           applied = true;
         } else if (mode === 'no_tags' && suggestion.tags.length > 0) {
           const existingTagIds = task.tags.map((t) => t.id);
           const newTagIds = suggestion.tags.map((t) => t.id);
-          await patchTask(taskId, { tags: [...existingTagIds, ...newTagIds] });
+          await runOperation({
+            task,
+            patch: { tags: [...existingTagIds, ...newTagIds] },
+            operationMode: mode,
+            action: 'suggestion_accepted',
+            label: 'Apply tag suggestions',
+            acceptedAI: true,
+          });
           suggestion.tags.forEach((t) => recordRecentTag(t.id));
-          logQuickSortAction(taskId, 'no_tags', 'suggestion_accepted');
           toast.success(`Tags → ${suggestion.tags.map((t) => t.name).join(', ')}`);
           applied = true;
         }
@@ -507,7 +684,7 @@ export default function QuickSortMode() {
       }
       setBusy(false);
     },
-    [suggestions, tasks, mode, busy, dismiss, refreshCounts, recordRecentTag]
+    [suggestions, tasks, mode, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
   const hasAnySuggestion = !!(
@@ -525,9 +702,7 @@ export default function QuickSortMode() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!window.matchMedia('(min-width: 1024px)').matches) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-
+      if (shouldBlockGlobalShortcut(event)) return;
       const target = event.target;
       if (
         target instanceof HTMLElement
@@ -535,6 +710,20 @@ export default function QuickSortMode() {
       ) {
         return;
       }
+      if (
+        event.key.toLowerCase() === 'z'
+        && (event.metaKey || event.ctrlKey)
+        && !event.altKey
+      ) {
+        if (lastOperation && !busy && !selectedTaskId) {
+          event.preventDefault();
+          event.stopPropagation();
+          void handleUndo();
+        }
+        return;
+      }
+      if (!window.matchMedia('(min-width: 1024px)').matches) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       const key = event.key.toLowerCase();
       if (key === 'g') {
@@ -600,9 +789,11 @@ export default function QuickSortMode() {
     handleApplyPriority,
     handleMarkDone,
     handleSkip,
+    handleUndo,
     hasAnySuggestion,
     hasFocusedSuggestion,
     mode,
+    lastOperation,
     selectedTaskId,
     topTask,
   ]);
@@ -671,6 +862,16 @@ export default function QuickSortMode() {
                   Choose an action below or use the keyboard shortcuts.
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={() => void handleUndo()}
+                disabled={!lastOperation || busy}
+                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
+                aria-label={lastOperation ? `Undo ${lastOperation.label}` : 'Nothing to undo'}
+              >
+                <RotateCcw size={15} />
+                <span className="hidden sm:inline">Undo</span>
+              </button>
               {remaining > 0 && (
                 <span className="rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                   <AnimatedCounter value={remaining} className="tabular-nums" /> left
@@ -695,6 +896,8 @@ export default function QuickSortMode() {
                 <span>D done</span>
                 <span>·</span>
                 <span>V details</span>
+                <span>·</span>
+                <span>Ctrl+Z undo</span>
               </div>
             </div>
 
@@ -824,6 +1027,8 @@ export default function QuickSortMode() {
                               onAcceptSuggestions={handleAcceptSuggestions}
                               onAcceptFocused={handleAcceptFocused}
                               onSkip={handleSkip}
+                              onUndo={lastOperation ? handleUndo : undefined}
+                              undoLabel={lastOperation?.label}
                             />
                           </motion.div>
                         )}
@@ -844,7 +1049,9 @@ export default function QuickSortMode() {
                             <span className="text-slate-600">·</span>
                           </>
                         )}
-                        <span className="text-slate-400">Use the actions below to skip</span>
+                        <span className="text-slate-400">
+                          Swipe up to skip{lastOperation ? ' · down to undo' : ''}
+                        </span>
                       </div>
                     </div>
 
@@ -931,6 +1138,9 @@ export default function QuickSortMode() {
                   focusPanelOnMount
                 />
               )}
+              <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                {undoStatus}
+              </p>
             </MobileSheet>
           )}
         </div>

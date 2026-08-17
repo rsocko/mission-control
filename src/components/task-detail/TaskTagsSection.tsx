@@ -131,7 +131,7 @@ export function TaskTagsSection({
                   >
                     {/* Search / input */}
                     <div className="px-2 pt-2 pb-1.5">
-                      <div className="flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
+                      <div className="input-glow flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 py-1">
                         <Search size={12} className="shrink-0 text-[var(--text-muted)]" />
                         <input
                           type="text"

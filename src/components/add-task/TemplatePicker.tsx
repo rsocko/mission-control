@@ -145,7 +145,7 @@ export function TemplatePicker({
           onKeyDown={handleKeyDown}
         >
           {/* Search */}
-          <div className="flex items-center gap-2 px-3.5 py-2.5 border-b border-[var(--border)]">
+          <div className="input-glow flex items-center gap-2 px-3.5 py-2.5 border-b border-[var(--border)]">
             <Search size={13} className="text-[var(--text-muted)] flex-shrink-0" />
             <input
               ref={searchRef}

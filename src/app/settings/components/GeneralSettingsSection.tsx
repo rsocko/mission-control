@@ -400,7 +400,9 @@ function DopamineMenuSettingsCard() {
               {settings.rewards.map((reward) => (
                 <div
                   key={reward.id}
-                  className="flex items-center gap-2 bg-[var(--surface-1)] rounded-md border border-[var(--border)] px-3 py-2 group"
+                  className={`flex items-center gap-2 bg-[var(--surface-1)] rounded-md border border-[var(--border)] px-3 py-2 group ${
+                    editingReward === reward.id ? 'input-glow' : ''
+                  }`}
                 >
                   {editingReward === reward.id ? (
                     <>

@@ -652,7 +652,7 @@ function DocIntelligenceSetup({ onBack, onClose, onAdded }: { onBack: () => void
               value={apiKey}
               onChange={e => setApiKey(e.target.value)}
               placeholder="Leave blank if not required"
-              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 font-mono"
+              className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none font-mono"
             />
             <button
               type="button"
@@ -1439,7 +1439,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
             value={pat}
             onChange={e => setPat(e.target.value)}
             placeholder="ghp_..."
-            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50"
+            className="w-full px-3 py-2 pr-10 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           />
           <button onClick={() => setShowToken(!showToken)} type="button"
             className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]">

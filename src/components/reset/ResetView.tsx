@@ -576,7 +576,7 @@ function ReflectionPrompts({
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-5">
         <p className="text-sm font-semibold text-[var(--text-primary)]">What went well?</p>
-        <div className="mt-4 rounded-[var(--radius-md)] border border-green-500/30 bg-green-500/10 p-4">
+        <div className="input-glow mt-4 rounded-[var(--radius-md)] border border-green-500/30 bg-green-500/10 p-4">
           <textarea
             value={wentWell}
             onChange={(e) => onWentWellChange(e.target.value)}
@@ -587,7 +587,7 @@ function ReflectionPrompts({
       </div>
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-5">
         <p className="text-sm font-semibold text-[var(--text-primary)]">What needs adjustment?</p>
-        <div className="mt-4 rounded-[var(--radius-md)] border border-amber-500/30 bg-amber-500/10 p-4">
+        <div className="input-glow mt-4 rounded-[var(--radius-md)] border border-amber-500/30 bg-amber-500/10 p-4">
           <textarea
             value={needsAdjustment}
             onChange={(e) => onNeedsAdjustmentChange(e.target.value)}

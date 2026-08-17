@@ -33,6 +33,7 @@ import {
   loadConnectorData,
   requestConnectorSync,
 } from '@/lib/connectors/client';
+import { APP_NAME, APP_VERSION } from '@/lib/app-metadata';
 
 function SettingsRow({
   icon,
@@ -362,9 +363,9 @@ export function MobileSettings() {
       <SectionLabel>About</SectionLabel>
       <SectionCard>
         <SettingsRow
-          label="Version"
-          value="2.4.0"
-          trailing={<span className="text-xs text-[var(--text-tertiary)]">Build 847</span>}
+          label={`About ${APP_NAME}`}
+          value={`v${APP_VERSION}`}
+          onClick={() => router.push('/settings/about')}
         />
         <SettingsRow
           label="Storage & Cache"
@@ -379,7 +380,7 @@ export function MobileSettings() {
 
       {/* Footer */}
       <p className="mt-5 mb-4 text-center text-xs text-[var(--text-muted)]">
-        Mission Control v2.4.0
+        {APP_NAME} v{APP_VERSION}
       </p>
     </div>
   );

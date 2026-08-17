@@ -31,6 +31,12 @@ vi.mock('motion/react', () => ({
       delete rest.exit;
       return <section {...rest}>{children as React.ReactNode}</section>;
     },
+    span: ({ children, ...props }: Record<string, unknown>) => {
+      const rest = { ...props };
+      delete rest.layoutId;
+      delete rest.transition;
+      return <span {...rest}>{children as React.ReactNode}</span>;
+    },
   },
 }));
 

@@ -24,24 +24,36 @@
   if (window.__mcImportCommonLoaded) return;
   window.__mcImportCommonLoaded = true;
 
-  let relayInjected = false;
+  let relayLoadPromise = null;
   let relayRequestId = 0;
 
   function injectRelay() {
-    if (relayInjected) return;
-    relayInjected = true;
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('page-fetch-relay.js');
-    (document.head || document.documentElement).appendChild(script);
-    script.addEventListener('load', () => script.remove());
+    if (relayLoadPromise) return relayLoadPromise;
+
+    relayLoadPromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = chrome.runtime.getURL('page-fetch-relay.js');
+      script.addEventListener('load', () => {
+        script.remove();
+        resolve();
+      }, { once: true });
+      script.addEventListener('error', () => {
+        script.remove();
+        relayLoadPromise = null;
+        reject(new Error('Failed to load the page fetch relay'));
+      }, { once: true });
+      (document.head || document.documentElement).appendChild(script);
+    });
+
+    return relayLoadPromise;
   }
 
   /**
    * Fetch a URL from the page's own JS context (MAIN world) so the request
    * carries the same cookies/headers the logged-in page would send.
    */
-  function relayFetch(url, options) {
-    injectRelay();
+  async function relayFetch(url, options) {
+    await injectRelay();
     const id = `mc-${Date.now()}-${relayRequestId++}`;
 
     return new Promise((resolve, reject) => {
@@ -95,10 +107,7 @@
    * to `onMatch(url, body)`. Returns a function that stops observing.
    */
   function observeFetch(patterns, onMatch) {
-    injectRelay();
-    for (const pattern of patterns) {
-      window.dispatchEvent(new CustomEvent('mc-observe-fetch-pattern', { detail: { pattern } }));
-    }
+    let stopped = false;
 
     function handler(e) {
       const { url, body } = e.detail || {};
@@ -109,7 +118,19 @@
     }
 
     window.addEventListener('mc-observed-response', handler);
-    return () => window.removeEventListener('mc-observed-response', handler);
+    injectRelay().then(() => {
+      if (stopped) return;
+      for (const pattern of patterns) {
+        window.dispatchEvent(new CustomEvent('mc-observe-fetch-pattern', { detail: { pattern } }));
+      }
+    }).catch((err) => {
+      if (!stopped) console.error('[MC Triage] Failed to initialize fetch observer:', err);
+    });
+
+    return () => {
+      stopped = true;
+      window.removeEventListener('mc-observed-response', handler);
+    };
   }
 
   window.MCImportCommon = { relayFetch, sendBatch, reportProgress, observeFetch };

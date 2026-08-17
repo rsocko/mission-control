@@ -29,6 +29,7 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import type { TaskEditPolicy } from '@/types';
+import { TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 
 const MENU_CONTENT_CLASS =
   'z-[100] min-w-48 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl';
@@ -51,18 +52,22 @@ const NOTES_ACTION_CLASS = 'text-violet-400 hover:bg-violet-400/15 hover:text-vi
 const SNOOZE_ACTION_CLASS = 'text-blue-400 hover:bg-blue-400/15 hover:text-blue-300';
 
 const PRIORITY_OPTIONS = [
-  { value: 'critical', label: 'Critical', shortLabel: 'P0', color: 'bg-rose-400', actionClass: 'text-rose-400 hover:bg-rose-400/15 hover:text-rose-300' },
-  { value: 'high', label: 'High', shortLabel: 'P1', color: 'bg-orange-400', actionClass: 'text-orange-400 hover:bg-orange-400/15 hover:text-orange-300' },
-  { value: 'medium', label: 'Medium', shortLabel: 'P2', color: 'bg-amber-300', actionClass: 'text-amber-300 hover:bg-amber-300/15 hover:text-amber-200' },
-  { value: 'low', label: 'Low', shortLabel: 'P3', color: 'bg-sky-400', actionClass: 'text-sky-400 hover:bg-sky-400/15 hover:text-sky-300' },
-  { value: 'none', label: 'None', shortLabel: '—', color: 'bg-slate-500', actionClass: 'text-slate-400 hover:bg-slate-400/15 hover:text-slate-300' },
+  ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({
+    value,
+    label: visual.label,
+    shortLabel: visual.shortLabel,
+    color: visual.dotClass,
+    actionClass: visual.actionClass,
+  })),
 ] as const;
 
 const STATUS_OPTIONS = [
-  { value: 'todo', label: 'To Do', color: 'bg-slate-500', actionClass: 'text-slate-400 hover:bg-slate-400/15 hover:text-slate-300' },
-  { value: 'in_progress', label: 'In Progress', color: 'bg-purple-400', actionClass: 'text-purple-400 hover:bg-purple-400/15 hover:text-purple-300' },
-  { value: 'done', label: 'Done', color: 'bg-emerald-400', actionClass: 'text-emerald-400 hover:bg-emerald-400/15 hover:text-emerald-300' },
-  { value: 'cancelled', label: 'Cancelled', color: 'bg-rose-400', actionClass: 'text-rose-400 hover:bg-rose-400/15 hover:text-rose-300' },
+  ...(['todo', 'in_progress', 'done', 'cancelled'] as const).map((value) => ({
+    value,
+    label: TASK_STATUS_VISUALS[value].label,
+    color: TASK_STATUS_VISUALS[value].dotClass,
+    actionClass: TASK_STATUS_VISUALS[value].actionClass,
+  })),
 ] as const;
 
 type AsyncAction = () => void | Promise<void>;

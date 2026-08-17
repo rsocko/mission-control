@@ -18,21 +18,7 @@ import {
 } from './query';
 import type { GraphPropertyDimension } from './types';
 import type { GraphSubgraph, SharedGraphNode } from './types';
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: '#f43f5e',
-  high: '#f97316',
-  medium: '#facc15',
-  low: '#38bdf8',
-  none: '#64748b',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  todo: '#94a3b8',
-  in_progress: '#38bdf8',
-  done: '#34d399',
-  blocked: '#f87171',
-};
+import { getTaskPriorityVisual, getTaskStatusVisual } from '@/lib/constants/task-formatting';
 
 function attributeId(dimension: UniverseDimension, key: string): string {
   return dimension === 'tags'
@@ -355,8 +341,8 @@ export function buildUniverseSubgraph(input: {
     });
     taskCount += 1;
 
-    addAttribute(task, 'priority', task.priority, undefined, PRIORITY_COLORS[task.priority]);
-    addAttribute(task, 'status', task.status, undefined, STATUS_COLORS[task.status]);
+    addAttribute(task, 'priority', task.priority, undefined, getTaskPriorityVisual(task.priority).color);
+    addAttribute(task, 'status', task.status, undefined, getTaskStatusVisual(task.status).color);
     addAttribute(
       task,
       'source',

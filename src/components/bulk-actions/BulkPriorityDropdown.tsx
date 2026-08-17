@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
 
 interface BulkPriorityDropdownProps {
   onSetPriority: (priority: string) => Promise<void>;
@@ -9,11 +10,7 @@ interface BulkPriorityDropdownProps {
 }
 
 const PRIORITIES = [
-  { value: 'critical', label: 'Critical', color: 'text-rose-400' },
-  { value: 'high', label: 'High', color: 'text-orange-400' },
-  { value: 'medium', label: 'Medium', color: 'text-amber-300' },
-  { value: 'low', label: 'Low', color: 'text-sky-400' },
-  { value: 'none', label: 'None', color: 'text-[var(--text-muted)]' },
+  ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({ value, label: visual.label, color: visual.textClass })),
 ];
 
 export function BulkPriorityDropdown({ onSetPriority, disabled = false, disabledReason }: BulkPriorityDropdownProps) {

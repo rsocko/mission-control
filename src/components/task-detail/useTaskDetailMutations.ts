@@ -20,6 +20,7 @@ import {
 } from '@/lib/projects/hierarchy-client';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { LocalDisposition, TaskField } from '@/types';
+import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
   addTaskTags,
@@ -151,6 +152,7 @@ export function useTaskDetailMutations({
       const result = await patchTask(taskId, { [field]: value });
       if (!result.ok) throw new Error(`Failed to save ${field}`);
       onUpdate?.({ [field]: value });
+      notifyNavigationCountsChanged();
       return true;
     } catch {
       toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
@@ -262,6 +264,7 @@ export function useTaskDetailMutations({
       if (!ensureFieldsEditable('status')) return;
       setTask((prev) => prev ? { ...prev, status: 'cancelled', statusReason: reason } : prev);
       onUpdate?.({ status: 'cancelled', statusReason: reason });
+      notifyNavigationCountsChanged();
       return;
     }
     // For GitHub tasks being cancelled (plain), offer close reason selection
@@ -277,6 +280,7 @@ export function useTaskDetailMutations({
     }
     setTask((prev) => prev ? { ...prev, status, statusReason: null } : prev);
     onUpdate?.({ status });
+    notifyNavigationCountsChanged();
   }, [ensureFieldsEditable, onUpdate, setTask, task?.connectorType, taskId]);
 
   const handleComplete = useCallback(() => {
@@ -299,6 +303,7 @@ export function useTaskDetailMutations({
     setShowCloseReasonPicker(false);
     setPendingStatus(null);
     onUpdate?.({ status, statusReason: reason });
+    notifyNavigationCountsChanged();
   }, [ensureFieldsEditable, onUpdate, pendingStatus, setTask, taskId]);
 
   const cancelCloseReason = useCallback(() => {
@@ -312,6 +317,7 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? { ...prev, status: 'cancelled', statusReason: 'duplicate' } : prev);
     setPotentialDuplicates([]);
     onUpdate?.(updates);
+    notifyNavigationCountsChanged();
   }, [onUpdate, setPotentialDuplicates, setTask, taskId]);
 
   const handleToggleMyDay = useCallback(async () => {
@@ -337,6 +343,7 @@ export function useTaskDetailMutations({
         current?.id === taskId ? { ...current, isInMyDay: nextIsInMyDay } : current
       ));
       onUpdate?.();
+      notifyNavigationCountsChanged();
       if (nextIsInMyDay) {
         window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
           detail: { taskId, title: task?.title },
@@ -370,6 +377,7 @@ export function useTaskDetailMutations({
             await deleteTaskRequest(task.id);
             toast.success('Task deleted');
             onUpdate?.();
+            notifyNavigationCountsChanged();
             onClose();
           } catch {
             toast.error('Failed to delete task');

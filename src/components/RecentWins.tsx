@@ -6,6 +6,7 @@ import { Trophy, Check, X, ChevronDown, ChevronRight, Clock, Zap, Flame, Setting
 import { staggerContainer, fadeSlideUp, dropdownVariants } from '@/lib/motion';
 import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskPriority } from '@/types';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -33,14 +34,6 @@ interface WinsData {
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
-
-const PRIORITY_COLORS: Record<TaskPriority, string> = {
-  critical: 'text-rose-400',
-  high: 'text-orange-400',
-  medium: 'text-amber-300',
-  low: 'text-sky-400',
-  none: 'text-emerald-400/60',
-};
 
 const BADGE_CONFIG: Record<string, { icon: typeof Flame; label: string; className: string }> = {
   'overdue cleared': { icon: Flame, label: 'overdue cleared', className: 'text-orange-400' },
@@ -273,7 +266,7 @@ export function RecentWins({
             <Check
               size={11}
               strokeWidth={3}
-              className={`shrink-0 ${PRIORITY_COLORS[item.priority] || PRIORITY_COLORS.none}`}
+              className={`shrink-0 ${getTaskPriorityVisual(item.priority).textClass}`}
             />
             <span className="truncate max-w-[180px]" title={item.title}>
               {item.title}

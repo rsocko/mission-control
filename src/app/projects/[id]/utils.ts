@@ -17,6 +17,7 @@ import type { TaskFilterContext } from '@/lib/task-filter-context';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
 export {
   getProjectTaskConnectorIcon as getConnectorIcon,
   getProjectTaskPriorityColor as getPriorityDotColor,
@@ -149,16 +150,7 @@ export function getPhaseStatusColor(status: ProjectPhase['status']): string {
 
 /** Returns a status-based color for task dots in the Gantt chart. */
 export function getTaskStatusColor(status: TaskStatus): string {
-  switch (status) {
-    case 'done':
-      return 'var(--success)';
-    case 'in_progress':
-      return 'var(--accent-500)';
-    case 'cancelled':
-      return 'var(--warning)';
-    default:
-      return 'var(--text-muted)';
-  }
+  return getTaskStatusVisual(status).color;
 }
 
 export function getProgressSummary(tasks: ProjectTask[]): ProgressSummary {

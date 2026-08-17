@@ -44,6 +44,14 @@ import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 
 import type { ComponentType } from 'react';
+import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import {
+  EMPTY_NAVIGATION_COUNTS,
+  type NavBadgeKey,
+  type NavBadgeTone,
+  type NavigationCounts,
+} from '@/lib/navigation/badges';
 
 interface NavRailItem {
   href: string;
@@ -52,6 +60,8 @@ interface NavRailItem {
   iconColor?: string;
   iconSize?: number;
   requiresFeature?: 'aiEnabled' | 'financeEnabled';
+  badgeKey?: NavBadgeKey;
+  badgeTone?: NavBadgeTone;
 }
 
 interface NavRailGroup {
@@ -83,7 +93,7 @@ const navGroups: NavRailGroup[] = [
     label: 'Plan',
     items: [
       { href: '/', label: 'Dashboard', icon: LayoutDashboard, iconColor: 'text-blue-400' },
-      { href: '/today', label: 'My Day', icon: Sun, iconColor: 'text-amber-400' },
+      { href: '/today', label: 'My Day', icon: Sun, iconColor: 'text-amber-400', badgeKey: 'myDay', badgeTone: 'amber' },
       { href: '/projects', label: 'Projects', icon: ChartNetwork, iconColor: 'text-violet-400' },
       { href: '/kanban', label: 'Kanban', icon: Columns3, iconColor: 'text-cyan-400' },
       { href: '/goals', label: 'Goals', icon: Target, iconColor: 'text-rose-400' },
@@ -93,11 +103,11 @@ const navGroups: NavRailGroup[] = [
   {
     label: 'Operate',
     items: [
-      { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400' },
+      { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400', badgeKey: 'notifications', badgeTone: 'blue' },
       { href: '/routines', label: 'Routines', icon: Repeat, iconColor: 'text-emerald-400' },
-      { href: '/triage', label: 'Triage', icon: Inbox, iconColor: 'text-purple-400' },
-      { href: '/quick-sort', label: 'Quick Sort', icon: Zap, iconColor: 'text-amber-400' },
-      { href: '/scout/reconciliation', label: 'Reconciliation', icon: ShieldCheck, iconColor: 'text-emerald-400' },
+      { href: '/triage', label: 'Triage', icon: Inbox, iconColor: 'text-purple-400', badgeKey: 'triage', badgeTone: 'red' },
+      { href: '/quick-sort', label: 'Quick Sort', icon: Zap, iconColor: 'text-amber-400', badgeKey: 'quickSort', badgeTone: 'amber' },
+      { href: '/scout/reconciliation', label: 'Reconciliation', icon: ShieldCheck, iconColor: 'text-emerald-400', badgeKey: 'reconciliation', badgeTone: 'amber' },
     ],
   },
   {
@@ -130,6 +140,7 @@ interface NavRailProps {
   features: { aiEnabled: boolean; financeEnabled?: boolean } | null;
   isAiActive: boolean;
   isSyncing?: boolean;
+  counts?: NavigationCounts;
   syncStatus?: ConnectorHealthInfo[];
 }
 
@@ -138,10 +149,17 @@ function ActiveSyncIcon({ className }: { className?: string }) {
   return <SyncingMissionControlIcon variant={variant} className={className} />;
 }
 
-export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = [] }: NavRailProps) {
+export function NavRail({
+  features,
+  isAiActive,
+  isSyncing = false,
+  counts = EMPTY_NAVIGATION_COUNTS,
+  syncStatus = [],
+}: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
   const [hovered, setHovered] = useState(false);
+  const { preferences } = useNavigationBadgePreferences();
   const [syncPopoverOpen, setSyncPopoverOpen] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -239,6 +257,10 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
             {group.items.filter(isVisible).map((item) => {
               const active = isActive(item.href);
               const Icon = item.icon;
+              const badgeCount = item.badgeKey ? counts[item.badgeKey] : 0;
+              const badgeTone = item.badgeKey === 'notifications'
+                ? counts.notificationTone
+                : item.badgeTone;
               return (
                 <Tooltip key={item.href} content={item.label} placement="right" disabled={expanded}>
                   <Link
@@ -255,8 +277,11 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
                     {active && (
                       <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-sm bg-[var(--accent)]" />
                     )}
-                    <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
+                    <span className="relative w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
                       <Icon size={item.iconSize ?? 22} className={cn('flex-shrink-0', item.iconColor && (active ? item.iconColor.replace('400', '300') : item.iconColor))} />
+                      {!expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                        <NavigationBadge count={badgeCount} tone={badgeTone} overlay />
+                      )}
                     </span>
                     <span className={cn(
                       'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
@@ -264,6 +289,11 @@ export function NavRail({ features, isAiActive, isSyncing = false, syncStatus = 
                     )}>
                       {item.label}
                     </span>
+                    {expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                      <span className="ml-auto">
+                        <NavigationBadge count={badgeCount} tone={badgeTone} />
+                      </span>
+                    )}
                     {item.href === '/ai' && isAiActive && (
                       <span className={cn(
                         'w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0',

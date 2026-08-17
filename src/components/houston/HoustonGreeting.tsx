@@ -68,7 +68,7 @@ export function HoustonGreeting() {
     async function fetchSummary() {
       try {
         const [tasksRes, triageRes] = await Promise.allSettled([
-          fetch('/api/tasks?status=todo&openOnly=true&countsOnly=true'),
+          fetch('/api/tasks?status=todo&openOnly=true&parentOnly=true&countsOnly=true'),
           fetch('/api/triage?status=pending&limit=0'),
         ]);
 

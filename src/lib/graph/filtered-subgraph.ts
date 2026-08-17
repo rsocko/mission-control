@@ -68,7 +68,7 @@ export function parseFilteredSubgraphSearchParams(
   if (!dimensions.length) {
     throw new GraphQueryValidationError('At least one valid dimension is required');
   }
-  const taskQuery = new URLSearchParams();
+  const taskQuery = new URLSearchParams({ parentOnly: 'true' });
   for (const [key, value] of searchParams) {
     if (!CANONICAL_TASK_QUERY_KEYS.has(key)) continue;
     if (value.length > 1000) {

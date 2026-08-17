@@ -167,6 +167,8 @@ export function NavRail({
   const [syncPopoverOpen, setSyncPopoverOpen] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const collapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncPopoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncPopoverHovered = useRef(false);
   const clickSuppressUntil = useRef(0);
 
   const expanded = pinned || hovered;
@@ -201,9 +203,30 @@ export function NavRail({
     }
   }, []);
 
+  const openSyncPopover = useCallback(() => {
+    syncPopoverHovered.current = true;
+    if (syncPopoverCloseTimer.current) {
+      clearTimeout(syncPopoverCloseTimer.current);
+      syncPopoverCloseTimer.current = null;
+    }
+    setSyncPopoverOpen(true);
+  }, []);
+
+  const closeSyncPopoverAfterDelay = useCallback(() => {
+    syncPopoverHovered.current = false;
+    if (syncPopoverCloseTimer.current) {
+      clearTimeout(syncPopoverCloseTimer.current);
+    }
+    syncPopoverCloseTimer.current = setTimeout(() => {
+      setSyncPopoverOpen(false);
+      syncPopoverCloseTimer.current = null;
+    }, 100);
+  }, []);
+
   useEffect(() => () => {
     if (expandTimer.current) clearTimeout(expandTimer.current);
     if (collapseTimer.current) clearTimeout(collapseTimer.current);
+    if (syncPopoverCloseTimer.current) clearTimeout(syncPopoverCloseTimer.current);
   }, []);
 
   const isActive = (href: string) =>
@@ -332,12 +355,19 @@ export function NavRail({
 
         {showSyncStatusControl && (
           <Popover.Root open={syncPopoverOpen} onOpenChange={setSyncPopoverOpen}>
-            <div className="mx-2">
-              <Tooltip content="Sync status" placement="right" disabled={pinned || syncPopoverOpen}>
+            <div
+              className="mx-2"
+              onMouseEnter={openSyncPopover}
+              onMouseLeave={closeSyncPopoverAfterDelay}
+            >
+              <Tooltip content="Sync status" placement="right" disabled={expanded || syncPopoverOpen}>
                 <Popover.Trigger asChild>
                   <button
                     type="button"
                     aria-label="Sync status"
+                    onClick={(event) => {
+                      if (syncPopoverHovered.current) event.preventDefault();
+                    }}
                     className="w-full flex items-center h-10 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
                   >
                     <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
@@ -345,7 +375,7 @@ export function NavRail({
                     </span>
                     <span className={cn(
                       'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-                      pinned ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
+                      expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
                     )}>
                       {isSyncing ? 'Syncing…' : 'Sync status'}
                     </span>
@@ -362,6 +392,8 @@ export function NavRail({
                 collisionPadding={12}
                 aria-label="Sync status details"
                 className="z-50 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 shadow-2xl"
+                onMouseEnter={openSyncPopover}
+                onMouseLeave={closeSyncPopoverAfterDelay}
               >
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Sync Status</h3>

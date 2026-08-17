@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { connectorConfigs, sourceLists, tasks, listGroups } from '@/db/schema';
-import { asc, eq, and, sql, ne } from 'drizzle-orm';
+import { asc, eq, and, isNull, notInArray, sql } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { ApiErrors } from '@/lib/api-error';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
@@ -32,14 +32,19 @@ export async function GET(
       .where(eq(sourceLists.connectorInstanceId, id))
       .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.name));
 
-    // Compute actual task counts from the tasks table (open tasks only, exclude checklist items)
+    // Compute top-level open task counts from the tasks table.
     const taskCounts = await db
       .select({
         sourceListId: tasks.sourceListId,
         count: sql<number>`count(*)`.as('count'),
       })
       .from(tasks)
-      .where(and(eq(tasks.connectorInstanceId, id), ne(tasks.status, 'done'), eq(tasks.isChecklistItem, false)))
+      .where(and(
+        eq(tasks.connectorInstanceId, id),
+        notInArray(tasks.status, ['done', 'cancelled']),
+        isNull(tasks.parentId),
+        eq(tasks.isChecklistItem, false),
+      ))
       .groupBy(tasks.sourceListId);
 
     const countMap = new Map(taskCounts.map(tc => [tc.sourceListId, tc.count]));

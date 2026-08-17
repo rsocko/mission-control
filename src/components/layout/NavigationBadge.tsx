@@ -36,6 +36,8 @@ const MORPH_TRANSITION: Transition = {
   },
 };
 
+const BOTTOM_CENTER_LAYOUT_ANCHOR = { x: 0.5, y: 1 };
+
 export function NavigationPressureBar({
   count,
   tone,
@@ -57,13 +59,13 @@ export function NavigationPressureBar({
         'absolute -bottom-1.5 left-1/2 h-[3px] -translate-x-1/2 rounded-full',
         PRESSURE_TONE_CLASSES[tone],
         PRESSURE_WIDTH_CLASSES[level],
-        morphId && 'origin-bottom',
         pulse && 'motion-safe:animate-pulse',
       )}
-      style={morphId ? { originY: 1 } : undefined}
       layoutId={morphId}
+      layoutAnchor={morphId ? BOTTOM_CENTER_LAYOUT_ANCHOR : undefined}
       transition={morphId ? MORPH_TRANSITION : undefined}
       data-morph-id={morphId}
+      data-layout-anchor={morphId ? 'bottom-center' : undefined}
       data-testid="navigation-pressure-bar"
       data-pressure-level={level}
       aria-label={`${count} items need attention`}
@@ -91,14 +93,14 @@ export function NavigationBadge({
       className={cn(
         'flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-bold leading-none tabular-nums',
         TONE_CLASSES[tone],
-        morphId && 'origin-bottom',
         overlay && 'absolute -right-2.5 -top-2',
         pulse && 'motion-safe:animate-pulse',
       )}
-      style={morphId ? { originY: 1 } : undefined}
       layoutId={morphId}
+      layoutAnchor={morphId ? BOTTOM_CENTER_LAYOUT_ANCHOR : undefined}
       transition={morphId ? MORPH_TRANSITION : undefined}
       data-morph-id={morphId}
+      data-layout-anchor={morphId ? 'bottom-center' : undefined}
       aria-label={`${count} items need attention`}
     >
       {count > 99 ? '99+' : count}

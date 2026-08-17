@@ -22,82 +22,90 @@ function matchesSourceListFilter(sourceList: SourceList, listFilter: string | nu
 }
 
 interface SidebarFiltersProps {
-  // Data
-  taskResponse: TaskResponse;
-  enabledSources: EnabledSource[];
-  sourceLists: SourceList[];
-  listGroups: ListGroup[];
-  allTags: TaskTag[];
-  projects: HubProject[];
-  savedViews: SavedView[];
-  allSourceCounts: Record<string, number>;
-
-  // Filter state
-  sourceFilter: string | null;
-  listFilter: string | null;
-  listGroupFilter: string | null;
-  tagFilter: string[];
-  quickFilter: string | null;
-  projectFilter: string | null;
-  priorityFilter: string[];
-  statusFilter: string[];
-
-  // Sidebar UI state
-  sidebarExpanded: boolean;
-  sidebarMode: SidebarMode;
-  collapsedSections: Set<string>;
-  expandedSourceLists: Set<string>;
-  collapsedListGroups: Set<string>;
-  listSearch: string;
-  tagSearch: string;
-  tagsExpanded: boolean;
-
-  // Actions
-  setSourceFilter: (v: string | null) => void;
-  setListFilter: (v: string | null) => void;
-  setListGroupFilter: (v: string | null) => void;
-  setTagFilter: React.Dispatch<React.SetStateAction<string[]>>;
-  setQuickFilter: (v: string | null) => void;
-  setProjectFilter: (v: string | null) => void;
-  setPriorityFilter: React.Dispatch<React.SetStateAction<string[]>>;
-  setStatusFilter: React.Dispatch<React.SetStateAction<string[]>>;
-  setSidebarExpanded: (v: boolean) => void;
-  setSidebarMode: (mode: SidebarMode) => void;
-  toggleSection: (section: string) => void;
-  setExpandedSourceLists: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setCollapsedListGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setListSearch: (v: string) => void;
-  setTagSearch: (v: string) => void;
-  setTagsExpanded: (v: boolean) => void;
-  applyView: (view: SavedView) => void;
-  deleteView?: (id: string) => void;
-
-  // Quick filter visibility
-  hiddenQuickFilters: string[];
-  toggleQuickFilterVisibility: (filterId: string) => void;
-
-  // Computed
-  sourceHasLists: (sourceType: string) => boolean;
-  getSourceListsForType: (sourceType: string) => SourceList[];
-  graphOrigin?: GraphOrigin;
+  data: {
+    taskResponse: TaskResponse;
+    enabledSources: EnabledSource[];
+    sourceLists: SourceList[];
+    listGroups: ListGroup[];
+    allTags: TaskTag[];
+    projects: HubProject[];
+    savedViews: SavedView[];
+    allSourceCounts: Record<string, number>;
+  };
+  filters: {
+    sourceFilter: string | null;
+    listFilter: string | null;
+    listGroupFilter: string | null;
+    tagFilter: string[];
+    quickFilter: string | null;
+    projectFilter: string | null;
+    priorityFilter: string[];
+    statusFilter: string[];
+    hiddenQuickFilters: string[];
+  };
+  sidebar: {
+    sidebarExpanded: boolean;
+    sidebarMode: SidebarMode;
+    collapsedSections: Set<string>;
+    expandedSourceLists: Set<string>;
+    collapsedListGroups: Set<string>;
+    listSearch: string;
+    tagSearch: string;
+    tagsExpanded: boolean;
+  };
+  actions: {
+    setSourceFilter: (v: string | null) => void;
+    setListFilter: (v: string | null) => void;
+    setListGroupFilter: (v: string | null) => void;
+    setTagFilter: React.Dispatch<React.SetStateAction<string[]>>;
+    setQuickFilter: (v: string | null) => void;
+    setProjectFilter: (v: string | null) => void;
+    setPriorityFilter: React.Dispatch<React.SetStateAction<string[]>>;
+    setStatusFilter: React.Dispatch<React.SetStateAction<string[]>>;
+    setSidebarExpanded: (v: boolean) => void;
+    setSidebarMode: (mode: SidebarMode) => void;
+    toggleSection: (section: string) => void;
+    setExpandedSourceLists: React.Dispatch<React.SetStateAction<Set<string>>>;
+    setCollapsedListGroups: React.Dispatch<React.SetStateAction<Set<string>>>;
+    setListSearch: (v: string) => void;
+    setTagSearch: (v: string) => void;
+    setTagsExpanded: (v: boolean) => void;
+    applyView: (view: SavedView) => void;
+    deleteView?: (id: string) => void;
+    toggleQuickFilterVisibility: (filterId: string) => void;
+  };
+  computed: {
+    sourceHasLists: (sourceType: string) => boolean;
+    getSourceListsForType: (sourceType: string) => SourceList[];
+    graphOrigin?: GraphOrigin;
+  };
 }
 
-export function SidebarFilters(props: SidebarFiltersProps) {
+export function SidebarFilters({ data, filters, sidebar, actions, computed }: SidebarFiltersProps) {
   const {
     taskResponse, enabledSources, sourceLists, listGroups, allTags,
     projects, savedViews, allSourceCounts,
+  } = data;
+  const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter,
+    hiddenQuickFilters,
+  } = filters;
+  const {
     sidebarExpanded, sidebarMode, collapsedSections, expandedSourceLists, collapsedListGroups,
     listSearch, tagSearch, tagsExpanded,
+  } = sidebar;
+  const {
     setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter, setProjectFilter,
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
     setListSearch, setTagSearch, setTagsExpanded, applyView, deleteView,
-    hiddenQuickFilters, toggleQuickFilterVisibility,
+    toggleQuickFilterVisibility,
+  } = actions;
+  const {
     sourceHasLists, getSourceListsForType,
     graphOrigin,
-  } = props;
+  } = computed;
 
   const [showFilterSettings, setShowFilterSettings] = React.useState(false);
   const selectedSourceList = sourceLists.find(sourceList =>

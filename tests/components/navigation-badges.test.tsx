@@ -13,7 +13,7 @@ import {
   type NavigationBadgePreferences,
   useNavigationCounts,
 } from '@/lib/hooks/useNavigationBadges';
-import { getNotificationBadgeTone } from '@/lib/navigation/badges';
+import { getNotificationBadgeState, getNotificationBadgeTone } from '@/lib/navigation/badges';
 import { getLocalToday } from '@/lib/utils/client-date';
 
 describe('navigation badges', () => {
@@ -29,6 +29,23 @@ describe('navigation badges', () => {
     expect(getNotificationBadgeTone(1, 5)).toBe('red');
     expect(getNotificationBadgeTone(0, 5)).toBe('amber');
     expect(getNotificationBadgeTone(0, 0)).toBe('blue');
+  });
+
+  it('uses the count from only the highest notification severity', () => {
+    expect(getNotificationBadgeState({
+      attention: 9,
+      urgent: 2,
+      actionNeeded: 3,
+      headsUp: 1,
+      fyi: 3,
+    })).toEqual({ count: 2, tone: 'red' });
+    expect(getNotificationBadgeState({
+      attention: 7,
+      urgent: 0,
+      actionNeeded: 0,
+      headsUp: 2,
+      fyi: 5,
+    })).toEqual({ count: 2, tone: 'blue' });
   });
 
   it('hides zero counts and caps large counts', () => {

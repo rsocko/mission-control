@@ -11,7 +11,7 @@ import {
 import { ApiErrors } from '@/lib/api-error';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { notificationIsInInbox, notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
-import { getNotificationBadgeTone, type NavigationCounts } from '@/lib/navigation/badges';
+import { getNotificationBadgeState, type NavigationCounts } from '@/lib/navigation/badges';
 import { getLocalToday } from '@/lib/utils/date';
 
 function isValidDateParameter(value: string): boolean {
@@ -64,6 +64,8 @@ export async function GET(request: Request) {
         unread: sql<number>`COALESCE(SUM(CASE WHEN ${inboxCondition} AND ${notifications.readState} = 'unread' THEN 1 ELSE 0 END), 0)`,
         urgent: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} AND ${notifications.level} = 'urgent' THEN 1 ELSE 0 END), 0)`,
         actionNeeded: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} AND ${notifications.level} = 'action_needed' THEN 1 ELSE 0 END), 0)`,
+        headsUp: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} AND ${notifications.level} = 'heads_up' THEN 1 ELSE 0 END), 0)`,
+        fyi: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} AND ${notifications.level} = 'fyi' THEN 1 ELSE 0 END), 0)`,
       }).from(notifications).where(activeNotificationConnector),
       db.select({ count: sql<number>`COUNT(*)` })
         .from(triageItems)
@@ -93,15 +95,22 @@ export async function GET(request: Request) {
     const notificationsCount = Number(notificationRows[0]?.attention ?? 0);
     const urgentCount = Number(notificationRows[0]?.urgent ?? 0);
     const actionNeededCount = Number(notificationRows[0]?.actionNeeded ?? 0);
+    const notificationBadge = getNotificationBadgeState({
+      attention: notificationsCount,
+      urgent: urgentCount,
+      actionNeeded: actionNeededCount,
+      headsUp: Number(notificationRows[0]?.headsUp ?? 0),
+      fyi: Number(notificationRows[0]?.fyi ?? 0),
+    });
     const response: NavigationCounts = {
       myDay: Number(myDayRows[0]?.count ?? 0),
-      notifications: notificationsCount,
+      notifications: notificationBadge.count,
       triage: Number(triageRows[0]?.count ?? 0),
       quickSort: Number(quickSortRows[0]?.count ?? 0),
       reconciliation: Number(reconciliationRows[0]?.count ?? 0),
       overdue: Number(overdueRows[0]?.count ?? 0),
       unreadNotifications: Number(notificationRows[0]?.unread ?? 0),
-      notificationTone: getNotificationBadgeTone(urgentCount, actionNeededCount),
+      notificationTone: notificationBadge.tone,
     };
 
     return NextResponse.json(response);

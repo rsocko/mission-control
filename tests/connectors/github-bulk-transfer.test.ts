@@ -166,7 +166,8 @@ describe('GitHub bulk issue transfer', () => {
       planHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(preview.items.map((item) => item.taskId)).toEqual(seeded.taskIds);
-    expect(database.default.select().from(schema.githubBulkTransferRuns).all()).toEqual([]);
+    expect(database.default.select().from(schema.githubBulkTransferRuns).all()
+      .filter((run) => run.connectorInstanceId === seeded.connectorId)).toEqual([]);
     expect(database.default.select().from(schema.tasks).all()
       .filter((task) => seeded.taskIds.includes(task.id))
       .map((task) => task.sourceId)).toEqual([

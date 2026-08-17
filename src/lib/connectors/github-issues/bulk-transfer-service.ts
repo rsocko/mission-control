@@ -200,7 +200,10 @@ export async function previewGitHubBulkTransfer(
     eq(tasks.connectorType, 'github-issues'),
   )).all().filter((row) => (
     parseSourceId(row.sourceId).repo.toLowerCase() === input.sourceRepository.toLowerCase()
-    && selectedIssueNumbers.has(parseSourceId(row.sourceId).issueNumber)
+    && (
+      !approvedIssueNodeIds
+      || selectedIssueNumbers.has(parseSourceId(row.sourceId).issueNumber)
+    )
     && (row.status !== 'cancelled' || !authoritativeDeletedTaskIds.has(row.id))
   ));
   const remoteByNumber = new Map(selectedRemoteIssues.map((issue) => [issue.number, issue]));

@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import {
-  claimInsightsDrilldownHistory,
   getInsightsReturnHref,
   hasInsightsDrilldownHistory,
 } from '@/lib/navigation/insights';
@@ -13,10 +11,6 @@ export function InsightsBackLink() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const href = getInsightsReturnHref(searchParams);
-
-  useEffect(() => {
-    claimInsightsDrilldownHistory();
-  }, []);
 
   if (!href) return null;
 

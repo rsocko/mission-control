@@ -36,6 +36,8 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { cn } from '@/lib/utils';
 import { getMobileTitle, getRouteMetadata } from '@/lib/navigation/route-metadata';
 import { getHealthIndicatorTone } from '@/lib/telemetry/health-indicator';
+import { AppHistoryProvider } from '@/lib/hooks/useAppHistory';
+import { AppHistoryControls } from '@/components/layout/AppHistoryControls';
 import {
   useSystemHealth,
   type SystemHealthData as HealthData,
@@ -59,7 +61,7 @@ function ToolbarRow({
   setShowHealthTooltip: (v: boolean) => void;
 }) {
   const { sidebarMode } = useSidebarExpanded();
-  const widthClass = sidebarMode === 'expanded' ? 'w-80' : 'w-56';
+  const widthClass = sidebarMode === 'expanded' ? 'w-96' : 'w-80';
 
   const healthTone = getHealthIndicatorTone(health);
   const healthDotClass = healthTone === 'healthy'
@@ -72,9 +74,12 @@ function ToolbarRow({
 
   return (
     <div className="bg-[var(--surface-0)] border-b border-[var(--border-subtle)] py-2 flex items-center">
-      {/* Left: Search command (desktop) */}
-      <div className={`${widthClass} flex-shrink-0 pl-4 transition-[width] duration-200`}>
-        <SearchCommand />
+      {/* Left: app navigation and Search command (desktop) */}
+      <div className={`${widthClass} flex flex-shrink-0 items-center gap-2 pl-4 transition-[width] duration-200`}>
+        <AppHistoryControls />
+        <div className="min-w-0 flex-1">
+          <SearchCommand />
+        </div>
       </div>
       {/* Center: QuickAddBar */}
       <div className="flex-1 min-w-0 flex justify-center px-4">
@@ -237,6 +242,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <AppHistoryProvider>
     <ViewModeProvider>
     <SidebarExpandedProvider>
     <QuickAddProvider>
@@ -257,6 +263,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </QuickAddProvider>
     </SidebarExpandedProvider>
     </ViewModeProvider>
+    </AppHistoryProvider>
   );
 }
 

@@ -16,6 +16,7 @@ import { useMyDayData } from '@/lib/hooks/useMyDayData';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
+import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useTodayActions } from '@/lib/hooks/useTodayActions';
 import { formatDateLocal } from '@/lib/utils/date-format';
 import { dashboardKeys } from '@/lib/hooks/useDashboardQueries';
@@ -27,7 +28,7 @@ import type { SuggestionTask } from '@/components/today/types';
 export default function TodayPage() {
   const { progress: syncProgress } = useSyncStream();
   const todayISO = useMemo(() => formatDateLocal(new Date()), []);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [detailSurface, setDetailSurface] = useState<'desktop' | 'mobile'>('desktop');
   const [detailMode, setDetailMode] = useState<'panel' | 'dialog' | 'workspace'>('panel');
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);

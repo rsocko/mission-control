@@ -18,6 +18,7 @@ const domTestFiles = [
   'tests/quick-add-list-typeahead.test.ts',
   'tests/quick-add-preferences.test.ts',
   'tests/settings-search.test.ts',
+  'tests/unit/app-history.test.ts',
   'tests/unit/haptics.test.ts',
 ];
 

@@ -167,6 +167,16 @@ function latestInsightsRequest(): URL {
   return new URL(call[0], 'http://localhost');
 }
 
+function insightsRequestForSection(section: string): URL {
+  const call = fetchSpy.mock.calls.find(([input]) => (
+    typeof input === 'string'
+    && input.startsWith('/api/insights?')
+    && input.includes(`section=${section}`)
+  ));
+  if (!call || typeof call[0] !== 'string') throw new Error(`No ${section} insights request found`);
+  return new URL(call[0], 'http://localhost');
+}
+
 describe('InsightsPage', () => {
   it('replaces each group skeleton as that group finishes loading', async () => {
     let resolveSummary!: (response: Response) => void;
@@ -217,6 +227,19 @@ describe('InsightsPage', () => {
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('requests routine activity in the browser timezone', async () => {
+    const mod = await import('@/app/insights/page');
+    render(<mod.default />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('routine-heatmap')).toBeInTheDocument();
+    });
+
+    expect(insightsRequestForSection('activity').searchParams.get('timezone')).toBe(
+      Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    );
   });
 
   it('reads initial period from the route query', async () => {

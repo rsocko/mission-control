@@ -106,6 +106,7 @@ vi.mock('@/db/schema', () => ({
   taskSchedules: { taskId: 'task_id', estimatedDuration: 'estimated_duration', recurrence: 'recurrence' },
   prioritySyncLog: { taskId: 'task_id' },
   quickSortLog: { taskId: 'task_id' },
+  quickSortOperations: { taskId: 'task_id' },
   projectPhaseItems: { taskId: 'task_id' },
   weeklyOneThing: { taskId: 'task_id' },
   connectorConfigs: { id: 'id', type: 'type', deletedAt: 'deleted_at' },

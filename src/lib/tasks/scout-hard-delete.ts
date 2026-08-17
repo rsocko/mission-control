@@ -13,6 +13,7 @@ import {
   projectAutoIncludeExclusions,
   projectPhaseItems,
   quickSortLog,
+  quickSortOperations,
   scoutReconciliationEvaluations,
   scoutReconciliationSuggestions,
   scoutReconciliationTaskState,
@@ -120,6 +121,7 @@ export function hardDeleteScoutTask(taskId: string): ScoutHardDeleteResult {
     tx.delete(weeklyOneThing).where(inArray(weeklyOneThing.taskId, taskIds)).run();
     tx.delete(prioritySyncLog).where(inArray(prioritySyncLog.taskId, taskIds)).run();
     tx.delete(quickSortLog).where(inArray(quickSortLog.taskId, taskIds)).run();
+    tx.delete(quickSortOperations).where(inArray(quickSortOperations.taskId, taskIds)).run();
     tx.delete(scoutReconciliationSuggestions)
       .where(inArray(scoutReconciliationSuggestions.taskId, taskIds))
       .run();

@@ -35,52 +35,46 @@ const PRESSURE_WIDTHS = {
   high: 30,
 } as const;
 
+const EXPANDED_LINK_WIDTH = 184;
+const INDICATOR_RIGHT_INSET = 10;
+
 const RAIL_MORPH_TRANSITION: Transition = {
-  duration: 0.36,
+  duration: 0.3,
   times: [0, 0.58, 1],
   ease: [0.32, 0.72, 0, 1],
 };
 
 function getRailShapes(pressureWidth: number, badgeWidth: number) {
   const collapsedLeft = 21 - pressureWidth / 2;
-  const collapsedLeftPx = `${collapsedLeft}px`;
-  const pressureWidthPx = `${pressureWidth}px`;
-  const badgeWidthPx = `${badgeWidth}px`;
+  const badgeLeft = EXPANDED_LINK_WIDTH - badgeWidth - INDICATOR_RIGHT_INSET;
+  const extendedWidth = EXPANDED_LINK_WIDTH - collapsedLeft - INDICATOR_RIGHT_INSET;
   const collapsedTarget = {
-    '--rail-left-percent': '0%',
-    '--rail-left-offset': collapsedLeftPx,
-    '--rail-width-percent': '0%',
-    '--rail-width-offset': pressureWidthPx,
-    top: '34px',
-    height: '3px',
+    left: collapsedLeft,
+    top: 34,
+    width: pressureWidth,
+    height: 3,
   };
   const expandedTarget = {
-    '--rail-left-percent': '100%',
-    '--rail-left-offset': `-${badgeWidth + 10}px`,
-    '--rail-width-percent': '0%',
-    '--rail-width-offset': badgeWidthPx,
-    top: '10px',
-    height: '20px',
+    left: badgeLeft,
+    top: 10,
+    width: badgeWidth,
+    height: 20,
   };
 
   return {
     collapsedTarget,
     expandedTarget,
     collapsedKeyframes: {
-      '--rail-left-percent': ['100%', '0%', '0%'],
-      '--rail-left-offset': [`-${badgeWidth + 10}px`, collapsedLeftPx, collapsedLeftPx],
-      '--rail-width-percent': ['0%', '100%', '0%'],
-      '--rail-width-offset': [badgeWidthPx, `-${collapsedLeft + 10}px`, pressureWidthPx],
-      top: ['10px', '34px', '34px'],
-      height: ['20px', '3px', '3px'],
+      left: [badgeLeft, collapsedLeft, collapsedLeft],
+      top: [10, 34, 34],
+      width: [badgeWidth, extendedWidth, pressureWidth],
+      height: [20, 3, 3],
     },
     expandedKeyframes: {
-      '--rail-left-percent': ['0%', '0%', '100%'],
-      '--rail-left-offset': [collapsedLeftPx, collapsedLeftPx, `-${badgeWidth + 10}px`],
-      '--rail-width-percent': ['0%', '100%', '0%'],
-      '--rail-width-offset': [pressureWidthPx, `-${collapsedLeft + 10}px`, badgeWidthPx],
-      top: ['34px', '34px', '10px'],
-      height: ['3px', '3px', '20px'],
+      left: [collapsedLeft, collapsedLeft, badgeLeft],
+      top: [34, 34, 10],
+      width: [pressureWidth, extendedWidth, badgeWidth],
+      height: [3, 3, 20],
     },
   };
 }
@@ -172,7 +166,10 @@ export function NavigationRailIndicator({
 
     previousExpanded.current = expanded;
     void controls.start(
-      expanded ? shapes.expandedKeyframes : shapes.collapsedKeyframes,
+      {
+        ...(expanded ? shapes.expandedKeyframes : shapes.collapsedKeyframes),
+        transition: RAIL_MORPH_TRANSITION,
+      },
     );
   }, [controls, expanded, shapes]);
 
@@ -185,13 +182,8 @@ export function NavigationRailIndicator({
         TONE_CLASSES[tone],
         pulse && 'motion-safe:animate-pulse',
       )}
-      style={{
-        left: 'calc(var(--rail-left-percent) + var(--rail-left-offset))',
-        width: 'calc(var(--rail-width-percent) + var(--rail-width-offset))',
-      }}
       initial={expanded ? shapes.expandedTarget : shapes.collapsedTarget}
       animate={controls}
-      transition={RAIL_MORPH_TRANSITION}
       data-testid="navigation-rail-indicator"
       data-state={expanded ? 'expanded' : 'collapsed'}
       data-pressure-level={level}

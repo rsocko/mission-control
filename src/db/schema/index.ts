@@ -61,6 +61,7 @@ export {
   energyCheckins,
   resets,
   quickSortLog,
+  quickSortOperations,
   taskAttachments,
   taskLinkedSources,
 } from './tasks';

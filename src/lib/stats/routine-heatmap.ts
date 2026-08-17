@@ -1,3 +1,5 @@
+import { dateInTimeZone } from './delivery';
+
 export interface RoutineCadenceConfig {
   days?: number[];
   target?: number;
@@ -14,8 +16,27 @@ interface BuildRoutineHeatmapDaysOptions {
   priorCompletionDate?: string;
 }
 
+export interface RoutineWeekContext {
+  today: string;
+  weekMonday: string;
+}
+
 function formatDate(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+export function getRoutineWeekContext(now: Date, timeZone: string): RoutineWeekContext {
+  const today = dateInTimeZone(now.toISOString(), timeZone);
+  if (!today) {
+    throw new Error(`Unable to resolve routine week in timezone: ${timeZone}`);
+  }
+
+  const todayDate = new Date(today + 'T12:00:00');
+  const dayOfWeek = todayDate.getDay();
+  const monday = new Date(todayDate);
+  monday.setDate(monday.getDate() + (dayOfWeek === 0 ? -6 : 1 - dayOfWeek));
+
+  return { today, weekMonday: formatDate(monday) };
 }
 
 function daysBetween(start: string, end: string): number {

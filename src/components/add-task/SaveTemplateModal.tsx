@@ -310,7 +310,7 @@ export function SaveTemplateModal({ tasks, onClose, onSaved }: SaveTemplateModal
                 ))}
 
                 {/* Add task/step */}
-                <div className="flex items-center gap-2 px-2.5 py-2 border border-dashed border-[var(--border)] rounded-lg">
+                <div className="input-glow flex items-center gap-2 px-2.5 py-2 border border-dashed border-[var(--border)] rounded-lg">
                   <Plus size={12} className="text-[var(--text-muted)] flex-shrink-0" />
                   <input
                     value={newTaskTitle}

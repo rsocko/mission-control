@@ -69,12 +69,11 @@ describe('navigation badges', () => {
 
     rerender(<NavigationPressureBar count={12} tone="amber" morphId="myDay" />);
     expect(screen.getByLabelText('12 items need attention')).toHaveAttribute('data-pressure-level', 'medium');
-    expect(screen.getByLabelText('12 items need attention')).toHaveClass('w-4');
-    expect(screen.getByLabelText('12 items need attention')).not.toHaveClass('origin-bottom');
+    expect(screen.getByLabelText('12 items need attention')).toHaveClass('w-4', 'origin-bottom');
 
-    rerender(<NavigationPressureBar count={99} tone="red" />);
+    rerender(<NavigationPressureBar count={99} tone="red" morphId="notifications" />);
     expect(screen.getByLabelText('99 items need attention')).toHaveAttribute('data-pressure-level', 'high');
-    expect(screen.getByLabelText('99 items need attention')).toHaveClass('w-[30px]');
+    expect(screen.getByLabelText('99 items need attention')).toHaveClass('w-[30px]', 'origin-bottom');
   });
 
   it('can pulse urgent indicators without changing non-urgent defaults', () => {
@@ -86,6 +85,12 @@ describe('navigation badges', () => {
 
     rerender(<NavigationBadge count={4} tone="amber" />);
     expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
+
+    rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
+    expect(screen.getByText('12')).toHaveClass('origin-bottom');
+
+    rerender(<NavigationBadge count={12} tone="amber" morphId="notifications" />);
+    expect(screen.getByText('12')).toHaveClass('origin-bottom');
 
     rerender(<NavigationBadge count={12} tone="amber" />);
     expect(screen.getByText('12')).not.toHaveClass('origin-bottom');

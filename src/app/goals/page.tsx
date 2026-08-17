@@ -200,10 +200,7 @@ function DesktopGoalsPage() {
       <main className="flex-1 overflow-y-auto">
         <div className="bg-[var(--surface-0)] border-b border-[var(--border-subtle)] px-6 py-4">
           <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">Goals & Ideas</h2>
-              <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Capture aspirations, brainstorm freely, develop ideas into projects</p>
-            </div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">Goals & Ideas</h2>
             <GoalsFilterChips filter={filter} counts={counts} totalCount={totalCount} onFilterChange={setFilter} />
           </div>
         </div>

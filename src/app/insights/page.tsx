@@ -359,10 +359,7 @@ function InsightsPageContent() {
       <div className="mx-auto max-w-7xl px-4 py-6 pb-12 sm:px-6">
         {/* Page Header */}
         <div className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-xl font-bold">Insights</h2>
-            <p className="text-sm text-slate-400 mt-1">Patterns and trends across your work</p>
-          </div>
+          <h2 className="text-xl font-bold">Insights</h2>
           <div className="flex flex-col items-start gap-2 sm:items-end">
             <div className="flex items-center gap-1 rounded-lg bg-slate-800/60 p-1">
               {PERIODS.map(p => (

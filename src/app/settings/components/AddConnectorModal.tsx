@@ -278,8 +278,7 @@ function TierOption({
 function ConnectorTypeSelector({ onSelect, onClose }: { onSelect: (type: string) => void; onClose: () => void }) {
   return (
     <>
-      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-1">Add Connector</h3>
-      <p className="text-sm text-[var(--text-tertiary)] mb-4">Choose a data source to connect:</p>
+      <h3 className="text-lg font-semibold text-[var(--text-primary)] mb-4">Add Connector</h3>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="grid grid-cols-2 gap-3">
         {CONNECTOR_TYPES.map(ct => (
             <motion.button

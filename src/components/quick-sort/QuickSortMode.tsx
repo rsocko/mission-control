@@ -813,9 +813,6 @@ export default function QuickSortMode() {
         >
           <div className="px-4 pb-2 pt-4 lg:px-5 lg:pt-5">
             <h1 className="text-xl font-bold text-[var(--text-primary)]">Quick Sort</h1>
-            <p className="mt-1 text-sm text-[var(--text-tertiary)]">
-              Quickly update tasks that need attention
-            </p>
           </div>
           <ScopeFilter filter={scopeFilter} onChange={setScopeFilter} />
           <div className="mt-1">
@@ -838,7 +835,7 @@ export default function QuickSortMode() {
             </div>
             <h2 className="mt-5 text-xl font-semibold text-[var(--text-primary)]">Choose a queue to begin</h2>
             <p className="mt-2 text-sm leading-6 text-[var(--text-tertiary)]">
-              Work through one task at a time without losing the queue, source filters, or session progress.
+              Your queue, filters, and progress stay in place.
             </p>
           </div>
         </section>

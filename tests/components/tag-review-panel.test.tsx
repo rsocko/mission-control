@@ -251,7 +251,6 @@ describe('TagReviewPanel', () => {
     expect(screen.getByRole('button', { name: 'Rename Area: Triage' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Recolor Area: Triage' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Remove Area: Triage' })).toBeInTheDocument();
-    expect(screen.getByText(/select tags to merge, rename, recolor, remove, or view their tasks/i)).toBeInTheDocument();
   });
 
   it('runs rename and recolor as isolated dialog workflows', async () => {

@@ -98,9 +98,6 @@ export default function WordInsightsView() {
       <div className="mx-auto max-w-7xl px-4 py-6 pb-12 sm:px-6">
         <header className="mb-5">
           <h1 className="text-2xl font-bold">Word Insights</h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Explore recurring words and the exact tasks they came from.
-          </p>
         </header>
 
         <section

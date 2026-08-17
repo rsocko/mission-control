@@ -1,8 +1,10 @@
 'use client';
 
 import { FileText, X } from 'lucide-react';
+import { motion } from 'motion/react';
 import { MarkdownEditor } from '@/components/ui/MarkdownEditor';
 import { cn } from '@/lib/utils';
+import { modalContent, modalOverlay } from '@/lib/motion';
 import { TaskDetailMarkdown } from './TaskDetailMarkdown';
 
 export interface TaskNotesDialogProps {
@@ -47,12 +49,23 @@ export function TaskNotesDialog({
   onCheckboxToggle,
 }: TaskNotesDialogProps) {
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm" role="presentation">
-      <section
+    <motion.div
+      className="fixed inset-0 z-[120] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+      role="presentation"
+      variants={modalOverlay}
+      initial="hidden"
+      animate="show"
+      exit="exit"
+    >
+      <motion.section
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="expanded-notes-title"
+        variants={modalContent}
+        initial="hidden"
+        animate="show"
+        exit="exit"
         tabIndex={-1}
         className="flex h-[min(820px,92vh)] w-[min(1120px,96vw)] flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl"
       >
@@ -131,7 +144,7 @@ export function TaskNotesDialog({
             <button type="button" onClick={async () => { if (await onSave()) onEditingChange(false); }} className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-xs font-semibold text-white hover:brightness-110">Save notes</button>
           </footer>
         )}
-      </section>
-    </div>
+      </motion.section>
+    </motion.div>
   );
 }

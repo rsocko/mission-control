@@ -19,6 +19,7 @@ import { NotificationCard, NotificationDetail } from './NotificationCard';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationItem, NotificationLevel } from '@/types';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
+import { panelSlideFromRight } from '@/lib/motion';
 
 interface NotificationsPanelProps {
   hook: UseNotificationsReturn;
@@ -136,10 +137,10 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
         {selectedNotification && (
           <motion.section
             key={selectedNotification.id}
-            initial={{ opacity: 0, x: 16, scale: 0.98 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 16, scale: 0.98 }}
-            transition={{ duration: 0.15 }}
+            variants={panelSlideFromRight}
+            initial="hidden"
+            animate="show"
+            exit="exit"
             aria-label="Notification preview"
             tabIndex={-1}
             className="absolute right-full top-3 z-40 mr-3 h-[min(620px,calc(100vh-6rem))] w-[420px] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-2xl shadow-black/50"

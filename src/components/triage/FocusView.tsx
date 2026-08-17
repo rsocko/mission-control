@@ -9,6 +9,7 @@ import { ACTION_META, SOURCE_META } from '@/components/triage/types';
 import RichPreviewEmbed from '@/components/triage/RichPreviewEmbed';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 // Primary actions shown as large buttons on mobile
 const PRIMARY_ACTIONS: Array<{ type: TriageActionType; label: string; icon: typeof CheckCircle2; classes: string }> = [
@@ -95,6 +96,7 @@ export default function FocusView({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       const tag = (event.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {

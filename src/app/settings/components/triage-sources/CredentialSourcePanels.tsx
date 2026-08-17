@@ -90,7 +90,7 @@ function SecretField({
           value={value}
           onChange={event => onChange(event.target.value)}
           placeholder={placeholder}
-          className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+          className="w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
         />
         <button
           type="button"

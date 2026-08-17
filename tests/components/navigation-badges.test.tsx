@@ -55,6 +55,19 @@ describe('navigation badges', () => {
     expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
   });
 
+  it('keeps the same shared element identity between pressure bar and badge', () => {
+    const { rerender } = render(
+      <NavigationPressureBar count={12} tone="amber" morphId="myDay" />,
+    );
+    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
+      'data-morph-id',
+      'myDay',
+    );
+
+    rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
+    expect(screen.getByText('12')).toHaveAttribute('data-morph-id', 'myDay');
+  });
+
   it('persists master and per-destination visibility choices', () => {
     render(<NavBadgeSettingsCard />);
 

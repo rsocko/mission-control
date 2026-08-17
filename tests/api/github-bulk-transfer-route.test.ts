@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  execute: vi.fn(),
+  inspectBackup: vi.fn(),
+  preview: vi.fn(),
   reconcile: vi.fn(),
   trusted: vi.fn(),
 }));
@@ -11,14 +14,14 @@ vi.mock('@/lib/api/trusted-request', () => ({
 
 vi.mock('@/lib/connectors/github-issues/bulk-transfer-service', () => ({
   abortGitHubBulkTransfer: vi.fn(),
-  executeGitHubBulkTransfer: vi.fn(),
+  executeGitHubBulkTransfer: mocks.execute,
   getGitHubBulkTransferStatus: vi.fn(),
-  previewGitHubBulkTransfer: vi.fn(),
+  previewGitHubBulkTransfer: mocks.preview,
   reconcileGitHubBulkTransferItem: mocks.reconcile,
 }));
 
 vi.mock('@/lib/connectors/github-issues/repoint-service', () => ({
-  inspectGitHubRepointBackup: vi.fn(),
+  inspectGitHubRepointBackup: mocks.inspectBackup,
 }));
 
 import { POST } from '@/app/api/connectors/github-bulk-transfer/route';
@@ -34,8 +37,69 @@ function request(body: unknown): Request {
 describe('GitHub bulk transfer API', () => {
   beforeEach(() => {
     mocks.reconcile.mockReset();
+    mocks.execute.mockReset();
+    mocks.inspectBackup.mockReset();
+    mocks.preview.mockReset();
     mocks.trusted.mockReset();
     mocks.trusted.mockReturnValue(true);
+    mocks.inspectBackup.mockResolvedValue({ sha256: 'b'.repeat(64) });
+  });
+
+  it('requires explicit reviewed-allowlist or all-issues scope', async () => {
+    const response = await POST(request({
+      action: 'preview',
+      connectorInstanceId: 'github',
+      sourceRepository: 'owner/source',
+      targetRepository: 'owner/target',
+      actor: 'operator',
+      backupPath: 'backup.db',
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.preview).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicate reviewed node IDs before preview', async () => {
+    const response = await POST(request({
+      action: 'preview',
+      connectorInstanceId: 'github',
+      sourceRepository: 'owner/source',
+      targetRepository: 'owner/target',
+      actor: 'operator',
+      backupPath: 'backup.db',
+      scope: {
+        mode: 'reviewed-allowlist',
+        sourceRepository: 'owner/source',
+        manifestSha256: 'a'.repeat(64),
+        issueNodeIds: ['I_1', 'I_1'],
+      },
+    }));
+
+    expect(response.status).toBe(400);
+    expect(mocks.preview).not.toHaveBeenCalled();
+  });
+
+  it('passes the reviewed manifest scope to preview', async () => {
+    const scope = {
+      mode: 'reviewed-allowlist',
+      sourceRepository: 'owner/source',
+      manifestSha256: 'a'.repeat(64),
+      issueNodeIds: ['I_1', 'I_2'],
+    };
+    mocks.preview.mockResolvedValue({ go: true, items: [] });
+
+    const response = await POST(request({
+      action: 'preview',
+      connectorInstanceId: 'github',
+      sourceRepository: 'owner/source',
+      targetRepository: 'owner/target',
+      actor: 'operator',
+      backupPath: 'backup.db',
+      scope,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({ scope }));
   });
 
   it('passes reviewed successor authorization to ambiguous-write reconciliation', async () => {

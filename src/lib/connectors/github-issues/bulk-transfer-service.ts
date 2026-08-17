@@ -40,7 +40,17 @@ export interface GitHubBulkTransferInput {
   targetRepository: string;
   actor: string;
   backupProof: GitHubRepointBackupProof;
+  scope: GitHubBulkTransferScope;
 }
+
+export type GitHubBulkTransferScope =
+  | {
+      mode: 'reviewed-allowlist';
+      sourceRepository: string;
+      manifestSha256: string;
+      issueNodeIds: string[];
+    }
+  | { mode: 'all-issues' };
 
 export interface GitHubBulkTransferExecuteInput extends GitHubBulkTransferInput {
   idempotencyKey: string;
@@ -64,6 +74,11 @@ export interface GitHubBulkTransferPreview extends Record<string, unknown> {
   targetRepository: string;
   sourceRepositoryStableIdDigest: string | null;
   targetRepositoryStableIdDigest: string | null;
+  scope: GitHubBulkTransferScope;
+  scopeMode: GitHubBulkTransferScope['mode'];
+  reviewedManifestSha256: string | null;
+  approvedIssueNodeIdCount: number;
+  sourceRepositoryIssueCount: number;
   sourceIssueCount: number;
   destinationIssueCount: number;
   targetIssueStableIds: string[];
@@ -153,10 +168,29 @@ export async function previewGitHubBulkTransfer(
   if (!targetEvidence || targetEvidence.identity.stableId !== targetBinding?.stableId) {
     reasons.push('target_repository_identity_mismatch');
   }
+  const approvedIssueNodeIds = input.scope.mode === 'reviewed-allowlist'
+    ? new Set(input.scope.issueNodeIds)
+    : null;
+  const selectedRemoteIssues = approvedIssueNodeIds
+    ? remoteIssues.filter((issue) => (
+        typeof issue.node_id === 'string' && approvedIssueNodeIds.has(issue.node_id)
+      ))
+    : remoteIssues;
+  if (approvedIssueNodeIds) {
+    const sourceNodeIds = new Set(
+      remoteIssues.map((issue) => issue.node_id).filter((value): value is string => Boolean(value)),
+    );
+    for (const nodeId of approvedIssueNodeIds) {
+      if (!sourceNodeIds.has(nodeId)) {
+        reasons.push(`approved_issue_node_id_not_in_source:${nodeId}`);
+      }
+    }
+  }
 
   const authoritativeDeletedTaskIds = getDurablyAuthoritativeDeletedTaskIds(
     input.connectorInstanceId,
   );
+  const selectedIssueNumbers = new Set(selectedRemoteIssues.map((issue) => issue.number));
   const localRows = db.select({
     id: tasks.id,
     sourceId: tasks.sourceId,
@@ -166,9 +200,10 @@ export async function previewGitHubBulkTransfer(
     eq(tasks.connectorType, 'github-issues'),
   )).all().filter((row) => (
     parseSourceId(row.sourceId).repo.toLowerCase() === input.sourceRepository.toLowerCase()
+    && selectedIssueNumbers.has(parseSourceId(row.sourceId).issueNumber)
     && (row.status !== 'cancelled' || !authoritativeDeletedTaskIds.has(row.id))
   ));
-  const remoteByNumber = new Map(remoteIssues.map((issue) => [issue.number, issue]));
+  const remoteByNumber = new Map(selectedRemoteIssues.map((issue) => [issue.number, issue]));
   const items: GitHubBulkTransferPlanItem[] = [];
   for (const row of localRows) {
     try {
@@ -191,10 +226,13 @@ export async function previewGitHubBulkTransfer(
       reasons.push(`issue_binding_missing_or_ambiguous:${row.id}`);
     }
   }
-  if (remoteIssues.length !== localRows.length || items.length !== remoteIssues.length) {
+  if (
+    selectedRemoteIssues.length !== localRows.length
+    || items.length !== selectedRemoteIssues.length
+  ) {
     reasons.push('source_issue_and_task_counts_do_not_reconcile');
   }
-  for (const issue of remoteIssues) {
+  for (const issue of selectedRemoteIssues) {
     if (!items.some((item) => item.sourceNumber === issue.number)) {
       reasons.push(`source_issue_unbound:${issue.number}`);
     }
@@ -208,6 +246,7 @@ export async function previewGitHubBulkTransfer(
     sourceRepositoryStableId: sourceBinding?.stableId ?? null,
     targetRepositoryStableId: targetBinding?.stableId ?? null,
     backupSha256: input.backupProof.sha256,
+    scope: normalizedScope(input.scope),
     globalBeforeDigest: globalMetadataDigest(input.connectorInstanceId),
     targetIssueStableIds: targetIssues
       .map((issue) => issue.node_id)
@@ -222,11 +261,20 @@ export async function previewGitHubBulkTransfer(
     targetRepository: input.targetRepository,
     sourceRepositoryStableIdDigest: sourceBinding ? digest(sourceBinding.stableId) : null,
     targetRepositoryStableIdDigest: targetBinding ? digest(targetBinding.stableId) : null,
-    sourceIssueCount: remoteIssues.length,
+    scope: planCore.scope,
+    scopeMode: input.scope.mode,
+    reviewedManifestSha256: input.scope.mode === 'reviewed-allowlist'
+      ? input.scope.manifestSha256
+      : null,
+    approvedIssueNodeIdCount: input.scope.mode === 'reviewed-allowlist'
+      ? input.scope.issueNodeIds.length
+      : remoteIssues.length,
+    sourceRepositoryIssueCount: remoteIssues.length,
+    sourceIssueCount: selectedRemoteIssues.length,
     destinationIssueCount: targetIssues.length,
     targetIssueStableIds: planCore.targetIssueStableIds,
-    openIssueCount: remoteIssues.filter((issue) => issue.state === 'open').length,
-    closedIssueCount: remoteIssues.filter((issue) => issue.state === 'closed').length,
+    openIssueCount: selectedRemoteIssues.filter((issue) => issue.state === 'open').length,
+    closedIssueCount: selectedRemoteIssues.filter((issue) => issue.state === 'closed').length,
     localTaskCount: localRows.length,
     globalBeforeDigest: planCore.globalBeforeDigest,
     items,
@@ -1444,6 +1492,7 @@ function assertSameRun(
     run.sourceRepository.toLowerCase() !== input.sourceRepository.toLowerCase()
     || run.targetRepository.toLowerCase() !== input.targetRepository.toLowerCase()
     || run.planHash !== input.planHash
+    || digest(run.plan.scope) !== digest(normalizedScope(input.scope))
   ) {
     throw new Error('Bulk transfer idempotency key belongs to another request');
   }
@@ -1488,6 +1537,47 @@ function validateInput(input: GitHubBulkTransferInput): void {
   ) {
     throw new Error('GitHub issue transfers require repositories under the same owner');
   }
+  validateScope(input);
+}
+
+function validateScope(input: GitHubBulkTransferInput): void {
+  const scope = (input as GitHubBulkTransferInput & {
+    scope?: GitHubBulkTransferScope;
+  }).scope;
+  if (!scope) {
+    throw new Error('Bulk transfer requires explicit reviewed-allowlist or all-issues scope');
+  }
+  if (scope.mode === 'all-issues') return;
+  if (scope.sourceRepository.toLowerCase() !== input.sourceRepository.toLowerCase()) {
+    throw new Error('Bulk transfer allowlist source repository does not match the request');
+  }
+  if (!/^[a-f0-9]{64}$/.test(scope.manifestSha256)) {
+    throw new Error('Bulk transfer allowlist requires a valid manifest SHA-256');
+  }
+  if (scope.issueNodeIds.length === 0) {
+    throw new Error('Bulk transfer allowlist must contain at least one issue node ID');
+  }
+  const normalized = scope.issueNodeIds.map((nodeId) => nodeId.trim());
+  if (normalized.some((nodeId, index) => (
+    nodeId.length === 0
+    || nodeId.length > 200
+    || nodeId !== scope.issueNodeIds[index]
+  ))) {
+    throw new Error('Bulk transfer allowlist contains an invalid issue node ID');
+  }
+  if (new Set(normalized).size !== normalized.length) {
+    throw new Error('Bulk transfer allowlist contains duplicate issue node IDs');
+  }
+}
+
+function normalizedScope(scope: GitHubBulkTransferScope): GitHubBulkTransferScope {
+  if (scope.mode === 'all-issues') return scope;
+  return {
+    mode: scope.mode,
+    sourceRepository: scope.sourceRepository.toLowerCase(),
+    manifestSha256: scope.manifestSha256,
+    issueNodeIds: [...scope.issueNodeIds].map((nodeId) => nodeId.trim()).sort(),
+  };
 }
 
 function validateActor(actor: string): void {

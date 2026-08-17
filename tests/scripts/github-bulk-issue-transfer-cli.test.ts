@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildSuccessorAuthorization,
+  buildTransferScope,
+  parseReviewedAllowlist,
   parseGitHubBulkTransferCommand,
   requireExecutionConfirmation,
   required,
@@ -16,6 +18,46 @@ describe('GitHub bulk issue transfer CLI', () => {
     expect(parseGitHubBulkTransferCommand('abort')).toBe('abort');
     expect(parseGitHubBulkTransferCommand('reconcile')).toBe('reconcile');
     expect(() => parseGitHubBulkTransferCommand('force')).toThrow('Unknown command');
+  });
+
+  it('parses repository-bound reviewed allowlists and rejects unsafe manifests', () => {
+    const raw = JSON.stringify({
+      version: 1,
+      sourceRepository: 'owner/source',
+      issueNodeIds: ['I_1', 'I_2'],
+    });
+
+    expect(parseReviewedAllowlist(raw, 'owner/source')).toMatchObject({
+      mode: 'reviewed-allowlist',
+      sourceRepository: 'owner/source',
+      issueNodeIds: ['I_1', 'I_2'],
+      manifestSha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    expect(() => parseReviewedAllowlist(raw, 'owner/other'))
+      .toThrow('does not match --source');
+    expect(() => parseReviewedAllowlist(JSON.stringify({
+      version: 1,
+      sourceRepository: 'owner/source',
+      issueNodeIds: ['I_1', 'I_1'],
+    }), 'owner/source')).toThrow('duplicate issue node IDs');
+  });
+
+  it('requires an explicit transfer scope and rejects conflicting scope options', () => {
+    expect(buildTransferScope({
+      allowlistPath: undefined,
+      allIssues: true,
+      sourceRepository: 'owner/source',
+    })).toEqual({ mode: 'all-issues' });
+    expect(() => buildTransferScope({
+      allowlistPath: undefined,
+      allIssues: false,
+      sourceRepository: 'owner/source',
+    })).toThrow('--allowlist is required');
+    expect(() => buildTransferScope({
+      allowlistPath: 'reviewed.json',
+      allIssues: true,
+      sourceRepository: 'owner/source',
+    })).toThrow('either --allowlist or --all-issues');
   });
 
   it('requires exact confirmation and non-empty values', () => {

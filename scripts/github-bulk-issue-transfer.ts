@@ -1,6 +1,8 @@
 #!/usr/bin/env tsx
 
 import process from 'node:process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import {
@@ -10,6 +12,7 @@ import {
   previewGitHubBulkTransfer,
   reconcileGitHubBulkTransferItem,
   type GitHubBulkTransferSuccessorAuthorization,
+  type GitHubBulkTransferScope,
 } from '../src/lib/connectors/github-issues/bulk-transfer-service';
 import { inspectGitHubRepointBackup } from '../src/lib/connectors/github-issues/repoint-service';
 
@@ -27,6 +30,8 @@ async function main(): Promise<void> {
       target: { type: 'string' },
       backup: { type: 'string' },
       actor: { type: 'string' },
+      allowlist: { type: 'string' },
+      'all-issues': { type: 'boolean' },
       run: { type: 'string' },
       'plan-hash': { type: 'string' },
       'idempotency-key': { type: 'string' },
@@ -75,12 +80,18 @@ async function main(): Promise<void> {
 
   const sourceRepository = required(values.source, '--source');
   const targetRepository = required(values.target, '--target');
+  const scope = buildTransferScope({
+    allowlistPath: values.allowlist,
+    allIssues: values['all-issues'] ?? false,
+    sourceRepository,
+  });
   const common = {
     connectorInstanceId: required(values.connector, '--connector'),
     sourceRepository,
     targetRepository,
     actor: required(values.actor, '--actor'),
     backupProof: await inspectGitHubRepointBackup(required(values.backup, '--backup')),
+    scope,
   };
   if (command === 'preview') {
     const result = await previewGitHubBulkTransfer(common);
@@ -141,6 +152,66 @@ export function buildSuccessorAuthorization(input: {
     ),
     reason: required(input.reason, '--successor-reason'),
     idempotencyKey: required(input.idempotencyKey, '--successor-key'),
+  };
+}
+
+export function buildTransferScope(input: {
+  allowlistPath: string | undefined;
+  allIssues: boolean;
+  sourceRepository: string;
+}): GitHubBulkTransferScope {
+  if (input.allowlistPath && input.allIssues) {
+    throw new Error('Use either --allowlist or --all-issues, not both');
+  }
+  if (input.allIssues) return { mode: 'all-issues' };
+  const allowlistPath = required(input.allowlistPath, '--allowlist');
+  const raw = readFileSync(allowlistPath, 'utf8');
+  return parseReviewedAllowlist(raw, input.sourceRepository);
+}
+
+export function parseReviewedAllowlist(
+  raw: string,
+  requestedSourceRepository: string,
+): GitHubBulkTransferScope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Allowlist must be valid JSON');
+  }
+  if (
+    !parsed
+    || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || (parsed as Record<string, unknown>).version !== 1
+    || typeof (parsed as Record<string, unknown>).sourceRepository !== 'string'
+    || !Array.isArray((parsed as Record<string, unknown>).issueNodeIds)
+  ) {
+    throw new Error('Allowlist must contain version, sourceRepository, and issueNodeIds');
+  }
+  const manifest = parsed as {
+    version: 1;
+    sourceRepository: string;
+    issueNodeIds: unknown[];
+  };
+  if (manifest.sourceRepository.toLowerCase() !== requestedSourceRepository.toLowerCase()) {
+    throw new Error('Allowlist sourceRepository does not match --source');
+  }
+  if (
+    manifest.issueNodeIds.length === 0
+    || manifest.issueNodeIds.some((nodeId) => typeof nodeId !== 'string')
+  ) {
+    throw new Error('Allowlist issueNodeIds must be a non-empty string array');
+  }
+  const issueNodeIds = manifest.issueNodeIds as string[];
+  if (new Set(issueNodeIds).size !== issueNodeIds.length) {
+    throw new Error('Allowlist contains duplicate issue node IDs');
+  }
+  return {
+    mode: 'reviewed-allowlist',
+    sourceRepository: manifest.sourceRepository,
+    manifestSha256: createHash('sha256').update(raw).digest('hex'),
+    issueNodeIds,
   };
 }
 

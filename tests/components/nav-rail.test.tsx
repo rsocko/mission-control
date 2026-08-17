@@ -79,11 +79,13 @@ describe('NavRail', () => {
     renderNavRail();
     const brandName = screen.getByText('Mission Control');
     const brandIcon = brandName.parentElement?.previousElementSibling?.querySelector('svg');
+    const gradientId = brandIcon?.querySelector('linearGradient')?.getAttribute('id');
 
     expect(screen.queryByRole('link', { name: 'Mission Control' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Mission Control' })).not.toBeInTheDocument();
     expect(brandIcon).toHaveClass('lucide-satellite');
-    expect(brandIcon?.getAttribute('stroke')).toBe('url(#mission-control-brand-gradient)');
+    expect(gradientId).toMatch(/^mission-control-brand-gradient-/);
+    expect(brandIcon?.getAttribute('stroke')).toBe(`url(#${gradientId})`);
     expect(brandName.parentElement).toHaveClass('-ml-1.5', 'opacity-0', 'max-w-0');
     expect(brandName).toHaveClass('text-[14px]', 'font-bold', 'tracking-[-0.015em]');
     expect(screen.getByText('Houston: standing by')).toHaveClass(

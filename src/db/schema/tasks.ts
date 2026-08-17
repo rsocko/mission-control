@@ -1,5 +1,6 @@
 import { sqliteTable, text, integer, real, index, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core';
 import type { LocalDisposition } from '@/types';
+import type { QuickSortBeforeSnapshot, QuickSortTaskSnapshot } from '@/types/quick-sort';
 
 // ─── TASKS ──────────────────────────────────────────────────────────────────
 
@@ -388,12 +389,32 @@ export const resets = sqliteTable('resets', {
 export const quickSortLog = sqliteTable('task_triage_log', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),
+  operationId: text('operation_id'),
   /** 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date' */
   mode: text('mode').notNull(),
   /** 'applied' | 'suggestion_accepted' | 'skipped' */
   action: text('action').notNull(),
   triagedAt: text('triaged_at').notNull(),
+  reversedAt: text('reversed_at'),
 });
+
+export const quickSortOperations = sqliteTable('quick_sort_operations', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  mode: text('mode').notNull(),
+  action: text('action').notNull(),
+  label: text('label').notNull(),
+  contextKey: text('context_key').notNull(),
+  queueIndex: integer('queue_index').notNull(),
+  beforeSnapshot: text('before_snapshot', { mode: 'json' }).$type<QuickSortBeforeSnapshot>().notNull(),
+  afterSnapshot: text('after_snapshot', { mode: 'json' }).$type<QuickSortTaskSnapshot>().notNull(),
+  state: text('state').$type<'applying' | 'applied' | 'undoing' | 'undone'>().notNull(),
+  aiAccepted: integer('ai_accepted', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+  undoneAt: text('undone_at'),
+}, (table) => [
+  index('idx_quick_sort_operations_task_created').on(table.taskId, table.createdAt),
+]);
 
 // ─── TASK LINKED SOURCES (Cross-Connector Provenance) ───────────────────────
 

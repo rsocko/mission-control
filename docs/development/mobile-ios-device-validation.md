@@ -15,6 +15,9 @@ release controller owns macOS runner selection, signing material, provisioning,
 archives, and distribution. Do not add those private concerns to this
 repository.
 
+See [iOS Release Handoff](ios-distribution-operations.md) for the two-repository
+ownership model and the public contract consumed by that controller.
+
 ## Public source validation
 
 On macOS with Xcode 16.4 and Mint installed:
@@ -36,6 +39,12 @@ The checked-in `release-contract.json` is a source-controlled input consumed by
 the private controller. It identifies the public project, scheme, simulator
 destination, and unsigned signing mode; it does not select a runner or contain
 signing or distribution policy.
+
+The controller is pull-based and manually receives a full public Git commit SHA.
+It fetches that exact commit into a temporary detached checkout and validates
+the audited source and toolchain before executing it. There is no submodule,
+automatic synchronization, or public workflow that triggers the private
+controller.
 
 ## Physical-device record
 

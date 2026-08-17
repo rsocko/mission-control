@@ -127,7 +127,16 @@ unsigned simulator inputs in `.xcode-version`, `Mintfile`, `project.yml`, and
 `release-contract.json`. A separate private release controller owns macOS
 runner selection, signing, provisioning, archives, and distribution. See
 `../docs/development/mobile-ios-device-validation.md` for the public validation
-commands and the device-validation boundary.
+commands and `../docs/development/ios-distribution-operations.md` for the
+two-repository handoff boundary.
+
+The controller is pull-based: an operator manually supplies a full public commit
+SHA, and the controller fetches and validates that exact commit in a temporary
+detached checkout. This subtree is not mirrored or included as a submodule, and
+public workflows cannot trigger private controller workflows. Changes to the
+release contract, toolchain pins, project structure, generated project, build
+phases, or audited native source require a corresponding private controller
+review before that commit is eligible to run there.
 
 The router validates universal-link URLs today, but iOS delivery of those links
 is intentionally not claimed by this scaffold. The owner must first select the

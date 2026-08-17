@@ -732,9 +732,10 @@ Extensions share non-secret data through a common App Group container. The
 main app and Share Extension use a separate shared Keychain access group only
 for the revocable, least-privilege capture credential defined by the
 [native security contract](../active/mobile-ios-native-security-contract.md).
-The owner selects the production identifiers using the conventions in the
-[iOS distribution operations runbook](../../development/ios-distribution-operations.md);
-examples here are placeholders, not reserved identifiers:
+The owner selects production identifiers in the private release system. The
+[iOS release handoff](../../development/ios-distribution-operations.md) explains
+why those operational values do not belong in this repository; examples here
+are placeholders, not reserved identifiers:
 
 ```
 App Group: group.<production-bundle-id>
@@ -789,10 +790,18 @@ All native features follow a strict privacy posture:
 - Apple Developer Program enrollment: $99/year
 - Bundle ID: `<owner-selected-reversed-domain>.missioncontrol` (set in Xcode)
 - Provisioning profiles: Development + Distribution
-- Repository conventions, CI secret names, owner actions, and evidence:
+- The public/private repository boundary and public handoff contract:
   [`docs/development/ios-distribution-operations.md`](../../development/ios-distribution-operations.md)
 
 ### 5.2 Build & Release Pipeline
+
+The current private controller implements manual, pull-based unsigned simulator
+validation only. An operator supplies an exact public commit SHA; the controller
+fetches that commit, verifies the audited source contract and pinned toolchain,
+and runs unsigned tests on an approved macOS runner. It does not currently
+archive, sign, export, upload, or distribute the application.
+
+The following is the proposed signed-release design, not current automation:
 
 ```
 protected release workflow
@@ -809,9 +818,11 @@ App Store Connect
   └─ App Store submission (manual review trigger)
 ```
 
-The exact environment variables and encrypted secrets are inventoried in the
-[iOS distribution operations runbook](../../development/ios-distribution-operations.md).
-Apple account passwords and recovery keys are never CI inputs.
+Before implementation, the private controller must define isolated signing,
+protected approval, temporary credential handling, immutable artifact
+promotion, retention, and failure recovery. Secret names and encrypted values
+belong only in that private system. Apple account passwords and recovery keys
+must never be CI inputs.
 
 ### 5.3 TestFlight Beta (Release Phase 4 Gate)
 

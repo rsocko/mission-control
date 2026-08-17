@@ -125,30 +125,21 @@ export type {
 export { maintenanceAgentRuns } from './maintenance-agents';
 export type { MaintenanceAgentRunStatus } from './maintenance-agents';
 
-// Provider-neutral external identities and GitHub Stage 1 migration state
+// Provider-neutral external identities and GitHub NodeID backfill state
 export {
-  GITHUB_IDENTITY_EFFECTIVE_MODES,
-  GITHUB_IDENTITY_COMPARISON_ACTIONS,
-  GITHUB_IDENTITY_COMPARISON_OUTCOMES,
-  GITHUB_IDENTITY_COMPARISON_REASONS,
-  GITHUB_IDENTITY_COMPARISON_RUN_STATES,
-  GITHUB_IDENTITY_COMPARISON_SURFACES,
-  GITHUB_COMPARISON_INTERRUPTION_STATES,
-  GITHUB_COMPARISON_INTERRUPTION_SURFACES,
   GITHUB_TASK_WRITE_OPERATIONS,
   GITHUB_TASK_WRITE_LEASE_STATES,
+  GITHUB_WRITE_CYCLE_RECONCILIATION_STATES,
   GITHUB_IDENTITY_EXCEPTION_ACTIONS,
   GITHUB_IDENTITY_EXCEPTION_CATEGORIES,
   GITHUB_IDENTITY_EXCEPTION_PROOF_TYPES,
+  GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE,
   externalEntities,
   externalEntityBindings,
   externalEntityLocators,
   githubIdentityMigrations,
   githubIdentityControls,
   githubIdentityModeEvents,
-  githubIdentityComparisonRuns,
-  githubIdentityComparisonRecords,
-  githubIdentitySubIssuePopulationMembers,
   taskSourceWriteLeases,
   taskSourceWriteLeaseTargets,
   githubIdentityWriteCycles,
@@ -177,19 +168,13 @@ export {
   GITHUB_BULK_TRANSFER_ITEM_STATES,
 } from './external-identities';
 export type {
-  GitHubIdentityEffectiveMode,
-  GitHubIdentityComparisonAction,
-  GitHubIdentityComparisonOutcome,
-  GitHubIdentityComparisonReason,
-  GitHubIdentityComparisonRunState,
-  GitHubIdentityComparisonSurface,
-  GitHubComparisonInterruptionState,
-  GitHubComparisonInterruptionSurface,
   GitHubTaskWriteOperation,
   GitHubTaskWriteLeaseState,
+  GitHubWriteCycleReconciliationState,
   GitHubIdentityExceptionAction,
   GitHubIdentityExceptionCategory,
   GitHubIdentityExceptionProofType,
+  GitHubIdentityExceptionStoredProofType,
 } from './external-identities';
 export type {
   ExternalEntityType,

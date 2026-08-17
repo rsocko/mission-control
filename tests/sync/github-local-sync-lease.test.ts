@@ -35,12 +35,11 @@ describe('local GitHub sync operation visibility', () => {
     }).run();
     db.insert(schema.githubIdentityMigrations).values({
       connectorInstanceId: 'local-sync-lease',
-      phase: 'comparing',
+      phase: 'complete',
       updatedAt: now,
     }).run();
     db.insert(schema.githubIdentityControls).values({
       connectorInstanceId: 'local-sync-lease',
-      stablePrimaryEnabled: false,
       modeRevision: 1,
       updatedAt: now,
     }).run();
@@ -79,16 +78,11 @@ describe('local GitHub sync operation visibility', () => {
         operationType: 'sync',
       }),
     ]);
-    expect(identity.getGitHubStablePrimaryEligibility(
-      'local-sync-lease',
-      now,
-    ).blockers).toContain('connector_operation_not_idle');
+    expect(identity.getGitHubIdentityStatus('local-sync-lease', { now }))
+      .toMatchObject({ identity: { model: 'github_node_id', permanent: true } });
 
     releaseNotifications([]);
     await expect(running).resolves.toMatchObject({ success: true });
-    expect(db.select().from(schema.githubIdentityComparisonRuns).all()).toEqual([
-      expect.objectContaining({ state: 'succeeded' }),
-    ]);
     expect(db.select().from(schema.connectorOperationLeases).all()).toEqual([]);
   }, 15_000);
 });

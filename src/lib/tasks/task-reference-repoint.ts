@@ -18,8 +18,6 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'github_bulk_transfer_events.task_id': 'history',
   'github_bulk_transfer_items.task_id': 'history',
   'github_bulk_transfer_successions.task_id': 'history',
-  'github_identity_comparison_records.local_task_id': 'history',
-  'github_identity_sub_issue_population_members.local_task_id': 'history',
   'github_identity_task_transfer_reconciliations.source_task_id': 'lineage',
   'github_identity_task_transfer_reconciliations.successor_task_id': 'lineage',
   'github_write_outcome_events.task_id': 'history',

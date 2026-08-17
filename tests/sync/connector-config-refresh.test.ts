@@ -28,10 +28,9 @@ const mocks = vi.hoisted(() => ({
     observation: { childSourceId: task.sourceId, parent: null },
   })),
   reconcileHierarchy: vi.fn(),
-  identityMode: 'legacy' as 'legacy' | 'comparison',
   identityRuntime: {
     markNetworkPage: vi.fn(),
-    markIneligible: vi.fn(),
+    markBlocked: vi.fn(),
     complete: vi.fn(),
   },
 }));
@@ -162,16 +161,28 @@ vi.mock('@/lib/logger', () => ({
 }));
 vi.mock('@/lib/public-demo', () => ({ isPublicDemoMode: vi.fn(() => false) }));
 vi.mock('@/lib/external-identities', () => ({
-  GitHubIdentityComparisonRuntime: class {
+  GITHUB_IDENTITY_MODE: 'stable',
+  GitHubStableIdentityRuntime: class {
+    modeSnapshot = {
+      connectorInstanceId: 'github-1',
+      effectiveMode: 'stable',
+      modeRevision: 1,
+      capturedAt: '2026-08-09T00:00:00.000Z',
+    };
     markNetworkPage = mocks.identityRuntime.markNetworkPage;
-    markIneligible = mocks.identityRuntime.markIneligible;
+    markBlocked = mocks.identityRuntime.markBlocked;
     complete = mocks.identityRuntime.complete;
+    assertCurrentMode() {}
+    assertDecisionsCurrent() {}
+    hasResolvedStableLocalId() { return false; }
+    resolveBatch() { return []; }
+    resolveDeduplicatedBatch() { return []; }
+    applyResolvedBatch() { return []; }
+    resolveLinkedSourceBatch() { return []; }
   },
   getGitHubIdentityModeSnapshot: vi.fn((connectorInstanceId: string) => ({
     connectorInstanceId,
-    phase: 'shadow_write',
-    effectiveMode: mocks.identityMode,
-    stablePrimaryEnabled: false,
+    effectiveMode: 'stable',
     modeRevision: 1,
     capturedAt: '2026-08-09T00:00:00.000Z',
   })),
@@ -325,7 +336,7 @@ function deferred<T>() {
 describe('connector settings refresh before sync', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.identityMode = 'legacy';
+    
     mocks.getConnector.mockReturnValue(mocks.staleConnector);
     mocks.getResumeCandidates.mockResolvedValue([]);
     mocks.recordResumeOutcome.mockResolvedValue(undefined);
@@ -410,8 +421,7 @@ describe('connector settings refresh before sync', () => {
       expect.arrayContaining([
         expect.objectContaining({ sourceId: 'octo/new' }),
       ]),
-      'shadow_write',
-      undefined,
+      expect.anything(),
       expect.any(Set),
       true,
     );
@@ -517,7 +527,6 @@ describe('dependency reconciliation resume scheduling', () => {
       connectorId,
       expect.objectContaining({
         connectorInstanceId: connectorId,
-        stablePrimaryEnabled: false,
       }),
     );
     expect(fetchTasks).toHaveBeenCalledWith(undefined, expect.objectContaining({
@@ -533,12 +542,12 @@ describe('dependency reconciliation resume scheduling', () => {
       new Set(['acme/app']),
       true,
       new Map([['acme/app', 'acme/app']]),
-      { identityComparison: undefined },
+      { identityRuntime: expect.any(Object) },
     );
     expect(mocks.reconcileDependencies).toHaveBeenCalledWith(
       connectorId,
       expect.any(Object),
-      { full: true, identityComparison: undefined },
+      { full: true, identityRuntime: expect.any(Object) },
     );
 
     mocks.getDependencyHealth.mockResolvedValue(new Map([[
@@ -565,7 +574,7 @@ describe('dependency reconciliation resume scheduling', () => {
 
   it('cancels comparison evidence when a relationship generation is revision-fenced', async () => {
     const connectorId = 'github-fenced-poll';
-    mocks.identityMode = 'comparison';
+    
     mocks.dependencyPollConfigs.push({
       ...persistedConfig,
       id: connectorId,
@@ -606,7 +615,7 @@ describe('dependency reconciliation resume scheduling', () => {
 
     await createScheduler().pollDueDependencyRelationships('manual');
 
-    expect(mocks.identityRuntime.markIneligible)
+    expect(mocks.identityRuntime.markBlocked)
       .toHaveBeenCalledWith('dependency_identity_context_changed');
     expect(mocks.identityRuntime.complete).toHaveBeenCalledWith(
       'cancelled',

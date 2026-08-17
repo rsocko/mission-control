@@ -4,6 +4,10 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import type { IConnector } from '@/lib/connectors';
 import type { SourceTaskDependency } from '@/types';
+import {
+  bindGitHubTaskIdentities,
+  githubIssueEvidence,
+} from '../fixtures/github-node-identity';
 
 type DbModule = typeof import('@/db');
 type SchemaModule = typeof import('@/db/schema');
@@ -56,6 +60,30 @@ async function setupConnector(connectorId: string, taskCount: number) {
       lastSyncedAt: now,
     })),
   );
+  bindGitHubTaskIdentities(
+    dbModule.sqlite,
+    connectorId,
+    Array.from({ length: taskCount }, (_, index) => ({
+      taskId: `${connectorId}-task-${index + 1}`,
+      owner: 'acme',
+      repository: connectorId,
+      issueNumber: index + 1,
+      issueStableId: `I_${connectorId}_${index + 1}`,
+      repositoryStableId: `R_${connectorId}`,
+    })),
+    now,
+  );
+}
+
+function evidenceForSourceId(connectorId: string, source: string) {
+  const issueNumber = Number(source.slice(source.lastIndexOf(':') + 1));
+  return githubIssueEvidence({
+    issueStableId: `I_${connectorId}_${issueNumber}`,
+    repositoryStableId: `R_${connectorId}`,
+    owner: 'acme',
+    repository: connectorId,
+    issueNumber,
+  });
 }
 
 function createConnector(
@@ -90,10 +118,31 @@ function createConnector(
       if (state.fail) throw new Error('interrupted');
       return {
         dependencies: state.edges.filter((edge) =>
-          sourceIds.includes(edge.blockedSourceId)),
+          sourceIds.includes(edge.blockedSourceId)).map((edge) => ({
+            ...edge,
+            blockerIdentityEvidence: evidenceForSourceId(connectorId, edge.blockerSourceId),
+            blockerIdentityEvidenceState: 'verified' as const,
+          })),
         completeBlockedSourceIds: [...sourceIds],
+        blockedIdentityEvidence: sourceIds.map((blockedSourceId) => ({
+          sourceId: blockedSourceId,
+          evidence: evidenceForSourceId(connectorId, blockedSourceId),
+          state: 'verified' as const,
+        })),
       };
     },
+    preflightWriteRoute: async (route: { targets: ReadonlyArray<{ role: string; issueNumber: number | null }> }) => ({
+      targets: Object.fromEntries(route.targets.map((target) => [
+        target.role,
+        target.issueNumber === null
+          ? { repositoryStableId: `R_${connectorId}` }
+          : {
+              repositoryStableId: `R_${connectorId}`,
+              issueStableId: `I_${connectorId}_${target.issueNumber}`,
+            },
+      ])),
+    }),
+    runAuthorizedWrite: async <T>(_route: unknown, write: () => Promise<T>) => write(),
     addTaskDependency: async (blockerSourceId, blockedSourceId) => {
       if (!state.edges.some((edge) =>
         edge.blockerSourceId === blockerSourceId
@@ -175,7 +224,9 @@ describe('checkpointed dependency reconciliation', () => {
       status: 'running',
       processed: 4,
     });
-    expect(second.imported).toBe(1);
+    // Edges are only applied once the whole generation resolves through NodeID
+    // bindings, so a mid-generation batch imports nothing.
+    expect(second.imported).toBe(0);
 
     state.fail = true;
     await expect(manager.reconcileTaskDependencies(

@@ -28,9 +28,10 @@ import type { IConnector } from '@/lib/connectors';
 import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import {
+  GITHUB_IDENTITY_MODE,
   getGitHubIdentityModeSnapshot,
   getGitHubIdentityModeSnapshotInTransaction,
-  GitHubIdentityComparisonRuntime,
+  GitHubStableIdentityRuntime,
 } from '@/lib/external-identities';
 import type {
   GitHubIdentityModeSnapshot,
@@ -124,11 +125,10 @@ export interface DependencyReconciliationProgress {
   collectionPageCount: number;
   overflowFetchCount: number;
   edgeCount: number;
-  identityMode: 'legacy' | 'comparison' | 'stable';
+  identityMode: string;
   identityModeRevision: number;
   identityEvidenceSource: 'graphql-node' | 'rest-unavailable' | 'legacy-unavailable';
   identityEvidenceEligible: boolean;
-  identityComparisonRunId: string | null;
   identityEvidenceFailureReason: string | null;
   durationMs: number | null;
   failureReason: string | null;
@@ -153,11 +153,10 @@ export interface DependencyGenerationSummary {
   overflowFetchCount: number;
   edgeCount: number;
   durationMs: number;
-  identityMode: 'legacy' | 'comparison' | 'stable';
+  identityMode: string;
   identityModeRevision: number;
   identityEvidenceSource: 'graphql-node' | 'rest-unavailable' | 'legacy-unavailable';
   identityEvidenceEligible: boolean;
-  identityComparisonRunId: string | null;
   identityEvidenceFailureReason: string | null;
 }
 
@@ -183,7 +182,7 @@ type ReconcileOptions = {
   full?: boolean;
   resumeGenerationId?: string;
   skipPendingRetry?: boolean;
-  identityComparison?: GitHubIdentityComparisonRuntime;
+  identityRuntime?: GitHubStableIdentityRuntime;
 };
 
 const DEFAULT_DEPENDENCY_BATCH_SIZE = 25;
@@ -205,12 +204,10 @@ function dependencyIdentityEvidenceSource(
 }
 
 function dependencyIdentityContextMatches(
-  frozen: Pick<DependencySnapshot, 'identityMode' | 'identityModeRevision'>,
+  frozen: Pick<DependencySnapshot, 'identityModeRevision'>,
   current: GitHubIdentityModeSnapshot,
 ): boolean {
-  return current.effectiveMode === frozen.identityMode
-    && current.modeRevision === frozen.identityModeRevision
-    && current.stablePrimaryEnabled === (frozen.identityMode === 'stable');
+  return current.modeRevision === frozen.identityModeRevision;
 }
 
 function validateDependencySnapshotMutationInTransaction(
@@ -617,7 +614,6 @@ function snapshotProgress(
     identityModeRevision: snapshot.identityModeRevision,
     identityEvidenceSource: snapshot.identityEvidenceSource,
     identityEvidenceEligible: snapshot.identityEvidenceEligible,
-    identityComparisonRunId: snapshot.identityComparisonRunId,
     identityEvidenceFailureReason: snapshot.identityEvidenceFailureReason,
     durationMs: Number.isFinite(completedAt) && Number.isFinite(startedAt)
       ? Math.max(0, completedAt - startedAt)
@@ -659,7 +655,6 @@ function snapshotProgress(
           identityModeRevision: lastCompleted.identityModeRevision,
           identityEvidenceSource: lastCompleted.identityEvidenceSource,
           identityEvidenceEligible: lastCompleted.identityEvidenceEligible,
-          identityComparisonRunId: lastCompleted.identityComparisonRunId,
           identityEvidenceFailureReason: lastCompleted.identityEvidenceFailureReason,
         }
       : null,
@@ -924,12 +919,6 @@ export async function beginDependencySnapshotGeneration(
 ): Promise<SourceTaskDependencyGenerationWriter | undefined> {
   if (frozenIdentityContext.connectorInstanceId !== connectorInstanceId) {
     throw new Error('Dependency identity context belongs to another connector');
-  }
-  if (
-    frozenIdentityContext.stablePrimaryEnabled
-      !== (frozenIdentityContext.effectiveMode === 'stable')
-  ) {
-    throw new Error('Dependency generation identity context has an inconsistent stable flag');
   }
   const active = await loadActiveSnapshot(connectorInstanceId);
   if (active?.phase !== 'collecting') {
@@ -1352,7 +1341,6 @@ interface DependencyIdentityObservation {
   decisionsBySourceId: ReadonlyMap<string, GitHubIdentityResolutionDecision>;
   evidenceEligible: boolean;
   failureReason: string | null;
-  comparisonRunId: string | null;
 }
 
 function mergeDependencyEndpointEvidence(
@@ -1430,44 +1418,21 @@ function dependencyEndpointEvidence(
 function isDependencyDecisionEligible(
   decision: GitHubIdentityResolutionDecision | undefined,
 ): boolean {
-  return Boolean(
-    decision
-    && decision.appliedSource !== 'blocked'
-    && (decision.outcome === 'agreement' || decision.outcome === 'locator_change'),
-  );
+  return decision?.appliedSource === 'stable';
 }
 
-function observeDependencyIdentity(
+function resolveDependencyIdentity(
   connectorInstanceId: string,
   modeSnapshot: GitHubIdentityModeSnapshot,
   remote: SourceTaskDependencySnapshot,
   taskBySourceId: ReadonlyMap<string, DependencyTask>,
-  providedRuntime?: GitHubIdentityComparisonRuntime,
+  providedRuntime?: GitHubStableIdentityRuntime,
 ): DependencyIdentityObservation {
   if (
-    modeSnapshot.effectiveMode !== 'comparison'
-    && modeSnapshot.effectiveMode !== 'stable'
-  ) {
-    return {
-      decisionsBySourceId: new Map(),
-      evidenceEligible: false,
-      failureReason: 'connector_not_in_comparison_mode',
-      comparisonRunId: null,
-    };
-  }
-  if (
-    modeSnapshot.stablePrimaryEnabled !== (modeSnapshot.effectiveMode === 'stable')
-  ) {
-    throw new Error('Dependency identity runtime has an inconsistent stable-primary flag');
-  }
-  if (
     providedRuntime
-    && (
-      providedRuntime.modeSnapshot.effectiveMode !== modeSnapshot.effectiveMode
-      || providedRuntime.modeSnapshot.modeRevision !== modeSnapshot.modeRevision
-    )
+    && providedRuntime.modeSnapshot.modeRevision !== modeSnapshot.modeRevision
   ) {
-    throw new Error('Dependency comparison runtime does not match the frozen generation context');
+    throw new Error('Dependency identity runtime does not match the frozen generation context');
   }
 
   const endpoints = [...dependencyEndpointEvidence(remote).values()]
@@ -1475,7 +1440,7 @@ function observeDependencyIdentity(
   const hasNoEndpointEvidence = endpoints.length === 0;
   const ownedRuntime = providedRuntime
     ? null
-    : new GitHubIdentityComparisonRuntime({
+    : new GitHubStableIdentityRuntime({
         connectorInstanceId,
         modeSnapshot,
         syncKind: 'incremental',
@@ -1497,7 +1462,7 @@ function observeDependencyIdentity(
       const chunk = endpoints.slice(index, index + 500);
       const resolvedCandidates = chunk.filter((endpoint) => endpoint.state !== 'partial');
       if (resolvedCandidates.length > 0) {
-        const decisions = runtime.observeBatch(
+        const decisions = runtime.resolveBatch(
           'dependency',
           'task',
           resolvedCandidates.map((endpoint) => {
@@ -1505,10 +1470,10 @@ function observeDependencyIdentity(
             if (endpoint.state === 'missing') hasMissingEvidence = true;
             return {
               candidateKey: `dependency:endpoint:${endpoint.sourceId}`,
-              legacySelectedLocalIds: local ? [local.id] : [],
-              legacyAction: local ? 'present' as const : 'none' as const,
+              locatorMatchedLocalIds: local ? [local.id] : [],
+              boundAction: 'present' as const,
+              unboundAction: 'none' as const,
               applicableStableLocalIds,
-              unmatchedStableAction: 'none' as const,
               evidence: endpoint.evidence,
               localTaskId: local?.id,
             };
@@ -1524,14 +1489,13 @@ function observeDependencyIdentity(
       const partialCandidates = chunk.filter((endpoint) => endpoint.state === 'partial');
       if (partialCandidates.length > 0) {
         hasPartialEvidence = true;
-        const decisions = runtime.observeResolvedBatch(
+        const decisions = runtime.applyResolvedBatch(
           'dependency',
           partialCandidates.map((endpoint) => {
             const local = taskBySourceId.get(endpoint.sourceId);
             return {
               candidateKey: `dependency:endpoint:${endpoint.sourceId}`,
-              legacySelectedLocalIds: local ? [local.id] : [],
-              legacyAction: local ? 'present' as const : 'none' as const,
+              locatorMatchedLocalIds: local ? [local.id] : [],
               localTaskId: local?.id,
               stable: {
                 selectedLocalIds: [],
@@ -1549,9 +1513,9 @@ function observeDependencyIdentity(
         }
       }
     }
-    if (hasNoEndpointEvidence) runtime.markIneligible('dependency_endpoint_evidence_empty');
-    if (hasMissingEvidence) runtime.markIneligible('dependency_stable_evidence_missing');
-    if (hasPartialEvidence) runtime.markIneligible('dependency_stable_evidence_partial');
+    if (hasNoEndpointEvidence) runtime.markBlocked('dependency_endpoint_evidence_empty');
+    if (hasMissingEvidence) runtime.markBlocked('dependency_stable_evidence_missing');
+    if (hasPartialEvidence) runtime.markBlocked('dependency_stable_evidence_partial');
     runtime.assertDecisionsCurrent(decisionsBySourceId.values());
     const blockingDecision = [...decisionsBySourceId.values()].some(
       (decision) => !isDependencyDecisionEligible(decision),
@@ -1571,9 +1535,8 @@ function observeDependencyIdentity(
           : hasMissingEvidence
             ? 'dependency_stable_evidence_missing'
             : blockingDecision
-              ? 'dependency_identity_comparison_blocked'
+              ? 'dependency_identity_resolution_blocked'
               : null,
-      comparisonRunId: runtime.runId,
     };
   } catch (error) {
     ownedRuntime?.complete('failed', 'dependency_identity_observation_failed');
@@ -1585,7 +1548,7 @@ export async function reconcileTargetedTaskDependencies(
   connectorInstanceId: string,
   remote: SourceTaskDependencySnapshot,
   observedSourceIds: ReadonlySet<string>,
-  identityComparison?: GitHubIdentityComparisonRuntime,
+  identityRuntime?: GitHubStableIdentityRuntime,
 ): Promise<{ imported: number; removed: number }> {
   return withConnectorDependencyLock(connectorInstanceId, async () => {
     const verifiedSourceIds = new Set(
@@ -1606,31 +1569,28 @@ export async function reconcileTargetedTaskDependencies(
     const taskById = new Map(nativeTasks.map((task) => [task.id, task]));
     const taskBySourceId = new Map(nativeTasks.map((task) => [task.sourceId, task]));
     const identityMode = getGitHubIdentityModeSnapshot(connectorInstanceId);
-    const identityObservation = observeDependencyIdentity(
+    const identityObservation = resolveDependencyIdentity(
       connectorInstanceId,
       identityMode,
       remote,
       taskBySourceId,
-      identityComparison,
+      identityRuntime,
     );
-    const deletionEligibleSourceIds = identityMode.effectiveMode !== 'legacy'
-      ? new Set([...verifiedSourceIds].filter((sourceId) =>
-          isDependencyDecisionEligible(
-            identityObservation.decisionsBySourceId.get(sourceId),
-          )))
-      : verifiedSourceIds;
-    const deletionEligibleTaskIds = identityMode.effectiveMode === 'stable'
-      ? new Set([...deletionEligibleSourceIds].flatMap((sourceId) => {
-          const id = identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId;
-          return id ? [id] : [];
-        }))
-      : new Set<string>();
+    const deletionEligibleSourceIds = new Set(
+      [...verifiedSourceIds].filter((sourceId) =>
+        isDependencyDecisionEligible(
+          identityObservation.decisionsBySourceId.get(sourceId),
+        )),
+    );
+    const deletionEligibleTaskIds = new Set(
+      [...deletionEligibleSourceIds].flatMap((sourceId) => {
+        const id = identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId;
+        return id ? [id] : [];
+      }),
+    );
     const blockedTaskIds = [...verifiedSourceIds]
-      .map((sourceId) => (
-        identityMode.effectiveMode === 'stable'
-          ? identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId
-          : taskBySourceId.get(sourceId)?.id
-      ))
+      .map((sourceId) =>
+        identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId)
       .filter((id): id is string => Boolean(id));
     if (blockedTaskIds.length === 0) return { imported: 0, removed: 0 };
 
@@ -1653,18 +1613,12 @@ export async function reconcileTargetedTaskDependencies(
 
     for (const edge of remote.dependencies) {
       if (!verifiedSourceIds.has(edge.blockedSourceId)) continue;
-      const blocker = identityMode.effectiveMode === 'stable'
-        ? taskById.get(
-            identityObservation.decisionsBySourceId.get(edge.blockerSourceId)
-              ?.selectedLocalId ?? '',
-          )
-        : taskBySourceId.get(edge.blockerSourceId);
-      const blocked = identityMode.effectiveMode === 'stable'
-        ? taskById.get(
-            identityObservation.decisionsBySourceId.get(edge.blockedSourceId)
-              ?.selectedLocalId ?? '',
-          )
-        : taskBySourceId.get(edge.blockedSourceId);
+      const blocker = taskById.get(
+        identityObservation.decisionsBySourceId.get(edge.blockerSourceId)?.selectedLocalId ?? '',
+      );
+      const blocked = taskById.get(
+        identityObservation.decisionsBySourceId.get(edge.blockedSourceId)?.selectedLocalId ?? '',
+      );
       if (!blocker || !blocked) {
         unresolvedBlockedSourceIds.add(edge.blockedSourceId);
         if (blocked) unresolvedBlockedTaskIds.add(blocked.id);
@@ -1683,10 +1637,7 @@ export async function reconcileTargetedTaskDependencies(
         tx,
         connectorInstanceId,
       );
-      if (
-        currentIdentityMode.effectiveMode !== identityMode.effectiveMode
-        || currentIdentityMode.modeRevision !== identityMode.modeRevision
-      ) {
+      if (currentIdentityMode.modeRevision !== identityMode.modeRevision) {
         throw new Error('Dependency identity context changed before targeted apply');
       }
       for (const { blocker, blocked, key } of usableEdges) {
@@ -1723,13 +1674,8 @@ export async function reconcileTargetedTaskDependencies(
         const blocked = taskById.get(dependency.taskId);
         if (
           !blocked
-          || (
-            identityMode.effectiveMode === 'stable'
-              ? !deletionEligibleTaskIds.has(blocked.id)
-                || unresolvedBlockedTaskIds.has(blocked.id)
-              : !deletionEligibleSourceIds.has(blocked.sourceId)
-                || unresolvedBlockedSourceIds.has(blocked.sourceId)
-          )
+          || !deletionEligibleTaskIds.has(blocked.id)
+          || unresolvedBlockedTaskIds.has(blocked.id)
           || dependency.connectorInstanceId !== connectorInstanceId
           || dependency.syncStatus !== 'synced'
           || dependency.syncAction
@@ -1975,14 +1921,10 @@ async function applySnapshotBatch(
   )];
   const usableEdges = remoteSnapshot.dependencies.filter((edge) =>
     requestedSourceIds.has(edge.blockedSourceId));
-  const existingByKey = new Map(
-    localDependencies.map((dependency) => [
-      `${dependency.dependsOnTaskId}\u0000${dependency.taskId}`,
-      dependency,
-    ]),
-  );
   const lastSyncedAt = new Date().toISOString();
-  let imported = 0;
+  // Edges are only applied once the whole generation resolves through NodeID
+  // bindings, so a batch stages evidence and imports nothing.
+  const imported = 0;
 
   const applied = runTransaction((tx) => {
     if (!validateDependencySnapshotMutationInTransaction(
@@ -2003,50 +1945,29 @@ async function applySnapshotBatch(
       ).onConflictDoNothing().run();
     }
     if (verifiedSourceIds.length > 0) {
-      tx.update(dependencyReconciliationItems).set({
-        verified: true,
-      }).where(and(
-        eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-        inArray(dependencyReconciliationItems.sourceId, verifiedSourceIds),
-      )).run();
-    }
-
-    for (const remote of usableEdges) {
-      if (snapshot.identityMode === 'stable') continue;
-      const blocker = taskBySourceId.get(remote.blockerSourceId);
-      const blocked = taskBySourceId.get(remote.blockedSourceId);
-      if (!blocker || !blocked) continue;
-
-      const key = `${blocker.id}\u0000${blocked.id}`;
-      const existing = existingByKey.get(key);
-      if (existing) {
-        if (existing.syncAction) continue;
-        tx.update(taskDependencies).set({
-          connectorInstanceId,
-          syncStatus: 'synced',
-          syncError: null,
-          lastSyncedAt,
+      // Blocked endpoints are only usable once their NodeID evidence is staged,
+      // so record it alongside verification.
+      const blockedEvidenceBySourceId = new Map(
+        (remoteSnapshot.blockedIdentityEvidence ?? [])
+          .map((entry) => [entry.sourceId, entry] as const),
+      );
+      for (const sourceId of verifiedSourceIds) {
+        const evidence = blockedEvidenceBySourceId.get(sourceId);
+        tx.update(dependencyReconciliationItems).set({
+          verified: true,
+          ...(evidence
+            ? {
+                identityEvidence: evidence.evidence,
+                identityEvidenceState: evidence.state ?? 'missing',
+              }
+            : {}),
         }).where(and(
-          eq(taskDependencies.id, existing.id),
-          isNull(taskDependencies.syncAction),
+          eq(dependencyReconciliationItems.snapshotId, snapshot.id),
+          eq(dependencyReconciliationItems.sourceId, sourceId),
         )).run();
-        continue;
       }
-
-      const insertResult = tx.insert(taskDependencies).values({
-        id: randomUUID(),
-        taskId: blocked.id,
-        dependsOnTaskId: blocker.id,
-        type: 'blocks',
-        connectorInstanceId,
-        syncStatus: 'synced',
-        syncAction: null,
-        syncError: null,
-        lastSyncedAt,
-        createdAt: lastSyncedAt,
-      }).onConflictDoNothing().run();
-      imported += insertResult.changes;
     }
+
 
     const advanced = tx.update(dependencyReconciliationSnapshots).set({
       status: 'running',
@@ -2092,8 +2013,8 @@ async function finalizeSnapshot(
   connectorInstanceId: string,
   connectorType: string,
   snapshot: DependencySnapshot,
-  identityComparison?: GitHubIdentityComparisonRuntime,
-): Promise<{ snapshot: DependencySnapshot; removed: number }> {
+  identityRuntime?: GitHubStableIdentityRuntime,
+): Promise<{ snapshot: DependencySnapshot; removed: number; imported: number }> {
   const [connectorTasks, stagedEdges, verifiedItems, candidateRows] = await Promise.all([
     db.select({
       id: tasks.id,
@@ -2131,13 +2052,11 @@ async function finalizeSnapshot(
   const unresolvedBlockedSourceIds = new Set<string>();
   const frozenIdentityMode: GitHubIdentityModeSnapshot = {
     connectorInstanceId,
-    phase: null,
-    effectiveMode: snapshot.identityMode,
-    stablePrimaryEnabled: snapshot.identityMode === 'stable',
+    effectiveMode: GITHUB_IDENTITY_MODE,
     modeRevision: snapshot.identityModeRevision,
     capturedAt: snapshot.startedAt,
   };
-  const identityObservation = observeDependencyIdentity(
+  const identityObservation = resolveDependencyIdentity(
     connectorInstanceId,
     frozenIdentityMode,
     {
@@ -2155,44 +2074,38 @@ async function finalizeSnapshot(
       })),
     },
     taskBySourceId,
-    identityComparison,
+    identityRuntime,
   );
   const identityEvidenceEligible = snapshot.identityEvidenceSource === 'graphql-node'
     && identityObservation.evidenceEligible;
   const identityEvidenceFailureReason = identityEvidenceEligible
     ? null
     : snapshot.identityEvidenceFailureReason ?? identityObservation.failureReason;
-  const deletionEligibleSourceIds = snapshot.identityMode !== 'legacy'
-    ? new Set([...verifiedSourceIds].filter((sourceId) =>
-        isDependencyDecisionEligible(
-          identityObservation.decisionsBySourceId.get(sourceId),
-        )))
-    : verifiedSourceIds;
-  const deletionEligibleTaskIds = snapshot.identityMode === 'stable'
-    ? new Set([...deletionEligibleSourceIds].flatMap((sourceId) => {
-        const id = identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId;
-        return id ? [id] : [];
-      }))
-    : new Set<string>();
+  const deletionEligibleSourceIds = new Set(
+    [...verifiedSourceIds].filter((sourceId) =>
+      isDependencyDecisionEligible(
+        identityObservation.decisionsBySourceId.get(sourceId),
+      )),
+  );
+  const deletionEligibleTaskIds = new Set(
+    [...deletionEligibleSourceIds].flatMap((sourceId) => {
+      const id = identityObservation.decisionsBySourceId.get(sourceId)?.selectedLocalId;
+      return id ? [id] : [];
+    }),
+  );
   const stableEdges: Array<{ blocker: DependencyTask; blocked: DependencyTask }> = [];
   const unresolvedBlockedTaskIds = new Set<string>();
 
   for (const edge of stagedEdges) {
-    const blocker = snapshot.identityMode === 'stable'
-      ? taskById.get(
-          identityObservation.decisionsBySourceId.get(edge.blockerSourceId)
-            ?.selectedLocalId ?? '',
-        )
-      : taskBySourceId.get(edge.blockerSourceId);
-    const blocked = snapshot.identityMode === 'stable'
-      ? taskById.get(
-          identityObservation.decisionsBySourceId.get(edge.blockedSourceId)
-            ?.selectedLocalId ?? '',
-        )
-      : taskBySourceId.get(edge.blockedSourceId);
+    const blocker = taskById.get(
+      identityObservation.decisionsBySourceId.get(edge.blockerSourceId)?.selectedLocalId ?? '',
+    );
+    const blocked = taskById.get(
+      identityObservation.decisionsBySourceId.get(edge.blockedSourceId)?.selectedLocalId ?? '',
+    );
     if (blocker && blocked) {
       remoteKeys.add(`${blocker.id}\u0000${blocked.id}`);
-      if (snapshot.identityMode === 'stable') stableEdges.push({ blocker, blocked });
+      stableEdges.push({ blocker, blocked });
     } else {
       unresolvedBlockedSourceIds.add(edge.blockedSourceId);
       if (blocked) unresolvedBlockedTaskIds.add(blocked.id);
@@ -2231,7 +2144,6 @@ async function finalizeSnapshot(
         nextAttemptAt: null,
         failureReason,
         identityEvidenceEligible: false,
-        identityComparisonRunId: identityObservation.comparisonRunId,
         identityEvidenceFailureReason:
           identityEvidenceFailureReason ?? 'dependency_remote_verification_incomplete',
       }).where(and(
@@ -2258,6 +2170,7 @@ async function finalizeSnapshot(
       return {
         snapshot: identityContextFencedSnapshot(snapshot, completedAt),
         removed: 0,
+        imported: 0,
       };
     }
     const partial: DependencySnapshot = {
@@ -2269,7 +2182,6 @@ async function finalizeSnapshot(
       nextAttemptAt: null,
       failureReason,
       identityEvidenceEligible: false,
-      identityComparisonRunId: identityObservation.comparisonRunId,
       identityEvidenceFailureReason:
         identityEvidenceFailureReason ?? 'dependency_remote_verification_incomplete',
     };
@@ -2281,25 +2193,23 @@ async function finalizeSnapshot(
       imported: partial.importedCount,
       prunedSnapshots,
     }, 'Partial dependency reconciliation generation completed without removals');
-    return { snapshot: partial, removed: 0 };
+    return { snapshot: partial, removed: 0, imported: 0 };
   }
 
   // Decide the finalization mutations before acquiring the writer lock so the
   // transaction only executes a bounded number of set-based statements.
-  const insertableEdges = snapshot.identityMode === 'stable'
-    ? stableEdges.map(({ blocker, blocked }) => ({
-      id: randomUUID(),
-      taskId: blocked.id,
-      dependsOnTaskId: blocker.id,
-      type: 'blocks' as const,
-      connectorInstanceId,
-      syncStatus: 'synced' as const,
-      syncAction: null,
-      syncError: null,
-      lastSyncedAt: completedAt,
-      createdAt: completedAt,
-    }))
-    : [];
+  const insertableEdges = stableEdges.map(({ blocker, blocked }) => ({
+    id: randomUUID(),
+    taskId: blocked.id,
+    dependsOnTaskId: blocker.id,
+    type: 'blocks' as const,
+    connectorInstanceId,
+    syncStatus: 'synced' as const,
+    syncAction: null,
+    syncError: null,
+    lastSyncedAt: completedAt,
+    createdAt: completedAt,
+  }));
   const removableDependencyIds = localDependencies.filter((dependency) => {
     if (
       dependency.connectorInstanceId !== connectorInstanceId
@@ -2310,11 +2220,8 @@ async function finalizeSnapshot(
     const blocked = taskById.get(dependency.taskId);
     if (!blocked) return false;
     if (
-      snapshot.identityMode === 'stable'
-        ? !deletionEligibleTaskIds.has(blocked.id)
-          || unresolvedBlockedTaskIds.has(blocked.id)
-        : !deletionEligibleSourceIds.has(blocked.sourceId)
-          || unresolvedBlockedSourceIds.has(blocked.sourceId)
+      !deletionEligibleTaskIds.has(blocked.id)
+      || unresolvedBlockedTaskIds.has(blocked.id)
     ) return false;
     return !remoteKeys.has(`${dependency.dependsOnTaskId}\u0000${dependency.taskId}`);
   }).map((dependency) => dependency.id);
@@ -2357,7 +2264,6 @@ async function finalizeSnapshot(
       status: 'completed',
       phase: 'completed',
       identityEvidenceEligible,
-      identityComparisonRunId: identityObservation.comparisonRunId,
       identityEvidenceFailureReason,
       importedCount: sql`${dependencyReconciliationSnapshots.importedCount} + ${imported}`,
       removedCount: sql`${dependencyReconciliationSnapshots.removedCount} + ${removed}`,
@@ -2390,6 +2296,7 @@ async function finalizeSnapshot(
     return {
       snapshot: identityContextFencedSnapshot(snapshot, completedAt),
       removed: 0,
+      imported: 0,
     };
   }
 
@@ -2405,7 +2312,6 @@ async function finalizeSnapshot(
     nextAttemptAt: null,
     failureReason: null,
     identityEvidenceEligible,
-    identityComparisonRunId: identityObservation.comparisonRunId,
     identityEvidenceFailureReason,
   };
   syncLogger.info({
@@ -2417,7 +2323,7 @@ async function finalizeSnapshot(
     prunedSnapshots,
     completedAt,
   }, 'Dependency reconciliation generation completed');
-  return { snapshot: completed, removed };
+  return { snapshot: completed, removed, imported };
 }
 
 export async function reconcileTaskDependencies(
@@ -2491,10 +2397,10 @@ async function reconcileTaskDependenciesUnlocked(
         connectorInstanceId,
         connector.type,
         emptySnapshot,
-        options.identityComparison,
+        options.identityRuntime,
       );
       return {
-        imported: 0,
+        imported: finalized.imported,
         removed: finalized.removed,
         pushed: 0,
         failed: 0,
@@ -2615,10 +2521,10 @@ async function reconcileTaskDependenciesUnlocked(
       connectorInstanceId,
       connector.type,
       snapshot,
-      options.identityComparison,
+      options.identityRuntime,
     );
     return {
-      imported: 0,
+      imported: finalized.imported,
       removed: finalized.removed,
       pushed: retryResult.pushed,
       failed: retryResult.failed,
@@ -2695,7 +2601,7 @@ async function reconcileTaskDependenciesUnlocked(
   )) as DependencyRecord[];
   localDependencies = localDependencies.filter((dependency) =>
     taskIdSet.has(dependency.dependsOnTaskId));
-  const imported = await applySnapshotBatch(
+  let imported = await applySnapshotBatch(
     connectorInstanceId,
     snapshot,
     snapshot.cursor,
@@ -2721,10 +2627,11 @@ async function reconcileTaskDependenciesUnlocked(
       connectorInstanceId,
       connector.type,
       snapshot,
-      options.identityComparison,
+      options.identityRuntime,
     );
     snapshot = finalized.snapshot;
     removed = finalized.removed;
+    imported += finalized.imported;
   }
 
   if (

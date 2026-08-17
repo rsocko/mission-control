@@ -17,6 +17,22 @@ related:
 
 > Each connector is a self-contained adapter implementing `IConnector`.
 
+## GitHub entity identity (permanent)
+
+The GitHub Issues connector is permanently NodeID-first. Identity is
+`external_entities.stable_id` (the GitHub NodeID), resolved through
+`external_entity_bindings` and `external_entity_locators`.
+
+`tasks.source_id`, `source_lists.source_id`, and `task_linked_sources.source_id`
+are **mutable locators** used for API addressing and display. They change on
+rename and transfer and are never identity, never a matching fallback, and never
+the thing to edit when identity looks wrong. Missing or unverified NodeID
+evidence blocks the affected surface instead of falling back to a locator; every
+GitHub mutation must run inside a NodeID write-fence authorization.
+
+See [GitHub NodeID Identity Operations](../operations/github-nodeid-identity.md)
+and [Stable GitHub Entity Identity](../design/active/github-entity-identity.md).
+
 ---
 
 ## Connector System Overview

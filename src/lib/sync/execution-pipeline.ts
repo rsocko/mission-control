@@ -6,11 +6,10 @@ import type {
   DomainSyncResult,
   SyncResult,
 } from '@/types';
-import type { GitHubIdentityPhase } from '@/db/schema';
 import db, { runTransaction } from '@/db';
 import {
   getGitHubIdentityModeSnapshot,
-  GitHubIdentityComparisonRuntime,
+  GitHubStableIdentityRuntime,
 } from '@/lib/external-identities';
 import type {
   GitHubIdentityModeSnapshot,
@@ -69,7 +68,7 @@ import type { GitHubHierarchyObservation } from './github-hierarchy-reconciliati
 import {
   assertCompleteGitHubProjectAssociations,
   assertUniqueGitHubProjectIdentities,
-  compareGitHubProjectAssociations,
+  resolveGitHubProjectAssociations,
   resolveGitHubProjectIdentityDigest,
 } from './github-project-association-identity';
 import { evaluateRulesForTasks } from '@/lib/rules';
@@ -373,7 +372,7 @@ export class SyncExecutionPipeline {
     let tasksRemoved = 0;
     let notificationsAdded = 0;
     let domainDataResult: DomainSyncResult | undefined;
-    let identityComparison: GitHubIdentityComparisonRuntime | undefined;
+    let identityRuntime: GitHubStableIdentityRuntime | undefined;
     let identitySnapshot: GitHubIdentityModeSnapshot | undefined = queuedIdentitySnapshot;
 
     return withRuntimeOperation({
@@ -396,22 +395,15 @@ export class SyncExecutionPipeline {
       }
       if (connector.type === 'github-issues') {
         identitySnapshot ??= getGitHubIdentityModeSnapshot(connectorId);
-        if (
-          identitySnapshot.effectiveMode === 'comparison'
-          || identitySnapshot.effectiveMode === 'stable'
-        ) {
-          identityComparison = new GitHubIdentityComparisonRuntime({
-            connectorInstanceId: connectorId,
-            jobId: options?.jobId,
-            modeSnapshot: identitySnapshot,
-            syncKind: options?.full ? 'full' : 'incremental',
-          });
-        }
+        identityRuntime = new GitHubStableIdentityRuntime({
+          connectorInstanceId: connectorId,
+          jobId: options?.jobId,
+          modeSnapshot: identitySnapshot,
+          syncKind: options?.full ? 'full' : 'incremental',
+        });
       } else if (identitySnapshot) {
         throw new Error('Frozen GitHub identity context was assigned to a non-GitHub connector');
       }
-      const identityPhase: GitHubIdentityPhase | null = identitySnapshot?.phase ?? null;
-
       syncEventBus.emitSyncEvent({
         type: 'sync:start',
         connectorId,
@@ -425,12 +417,9 @@ export class SyncExecutionPipeline {
         connectorId,
         'push',
         () => pushPendingChanges(connectorId, connector, details, undefined, {
-          identityComparison,
+          identityRuntime,
           identityMode: identitySnapshot
-            ? {
-              effectiveMode: identitySnapshot.effectiveMode,
-              modeRevision: identitySnapshot.modeRevision,
-            }
+            ? { modeRevision: identitySnapshot.modeRevision }
             : undefined,
           jobId: options?.jobId,
           connectorOperationLeaseHeld: true,
@@ -512,8 +501,7 @@ export class SyncExecutionPipeline {
             await upsertSourceLists(
               connectorId,
               sourceLists,
-              identityPhase,
-              identityComparison,
+              identityRuntime,
               deletionProtectedSourceListIds,
               connector.type === 'github-issues',
             );
@@ -550,7 +538,7 @@ export class SyncExecutionPipeline {
         await autoAssignFolderGroups(connector, remoteSourceLists);
       } catch (err) {
         deletionAuthoritative = false;
-        identityComparison?.markIneligible('source_list_observation_failed');
+        identityRuntime?.markBlocked('source_list_observation_failed');
         errors.push(`Source list discovery failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
@@ -573,8 +561,7 @@ export class SyncExecutionPipeline {
           deletionAuthoritative,
           discoveredLists,
           details,
-          identityPhase,
-          identityComparison,
+          identityRuntime,
           deletionProtectedSourceListIds,
         ),
       );
@@ -595,7 +582,7 @@ export class SyncExecutionPipeline {
               connectorId,
               targeted.snapshot,
               remoteSourceIds,
-              identityComparison,
+              identityRuntime,
             ),
           );
         }
@@ -605,18 +592,18 @@ export class SyncExecutionPipeline {
           () => reconcileTaskDependencies(
             connectorId,
             connector,
-            { full: isFullSync, identityComparison },
+            { full: isFullSync, identityRuntime },
           ),
         );
         if (dependencyResult.failed > 0) {
           errors.push(`${dependencyResult.failed} task dependency write(s) failed`);
         }
         if (dependencyResult.resumeSkippedReason === 'identity-context-changed') {
-          identityComparison?.markIneligible('dependency_identity_context_changed');
+          identityRuntime?.markBlocked('dependency_identity_context_changed');
           errors.push('Task dependency generation was fenced after an identity context change');
         }
       } catch (err) {
-        identityComparison?.markIneligible('dependency_identity_observation_failed');
+        identityRuntime?.markBlocked('dependency_identity_observation_failed');
         errors.push(`Task dependency sync failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
@@ -643,35 +630,28 @@ export class SyncExecutionPipeline {
           assertUniqueGitHubProjectIdentities(associations);
           assertCompleteGitHubProjectAssociations(associations);
           let stableProjectIdentity:
-            | ReturnType<typeof compareGitHubProjectAssociations>
+            | ReturnType<typeof resolveGitHubProjectAssociations>
             | undefined;
-          if (identityComparison) {
+          if (identityRuntime) {
             const localRows = await db.select({
               id: tasksTable.id,
               sourceId: tasksTable.sourceId,
             }).from(tasksTable)
               .where(eq(tasksTable.connectorInstanceId, connectorId));
-            stableProjectIdentity = compareGitHubProjectAssociations(
-              identityComparison,
+            stableProjectIdentity = resolveGitHubProjectAssociations(
+              identityRuntime,
               associations,
               localRows,
             );
           }
-          const stableProjectRouting =
-            identityComparison?.modeSnapshot.effectiveMode === 'stable'
-              ? stableProjectIdentity
-              : undefined;
           const stableProjectContext =
-            stableProjectRouting && identityComparison
-              ? { routing: stableProjectRouting, runtime: identityComparison }
+            stableProjectIdentity && identityRuntime
+              ? { routing: stableProjectIdentity, runtime: identityRuntime }
               : undefined;
-          if (
-            identityComparison?.modeSnapshot.effectiveMode === 'stable'
-            && !stableProjectContext
-          ) {
+          if (identityRuntime && !stableProjectContext) {
             throw new Error('Stable GitHub project association routing is unavailable');
           }
-          const projectIdentityRuntime = identityComparison;
+          const projectIdentityRuntime = identityRuntime;
           const assertProjectIdentityCurrent = projectIdentityRuntime
             ? () => projectIdentityRuntime.assertDecisionsCurrent(
                 stableProjectIdentity?.decisions ?? [],
@@ -681,7 +661,7 @@ export class SyncExecutionPipeline {
             connectorId,
             'project-reconciliation',
             () => {
-              identityComparison?.assertDecisionsCurrent(
+              identityRuntime?.assertDecisionsCurrent(
                 stableProjectIdentity?.decisions ?? [],
               );
               return this.syncGitHubProjectsAsHubProjects(
@@ -701,7 +681,7 @@ export class SyncExecutionPipeline {
           );
         }
       } catch (err) {
-        identityComparison?.markIneligible('project_association_observation_failed');
+        identityRuntime?.markBlocked('project_association_observation_failed');
         errors.push(`GitHub Projects sync failed: ${err instanceof Error ? err.message : String(err)}`);
       }
 
@@ -885,8 +865,8 @@ export class SyncExecutionPipeline {
       };
       runTransaction((tx) => {
         tx.insert(syncLog).values(successLog).run();
-        identityComparison?.completeInTransaction(tx, 'succeeded');
       });
+      identityRuntime?.complete('succeeded');
 
       this.lastSyncResults.set(connectorId, result);
       syncEventBus.emitSyncEvent({
@@ -988,21 +968,20 @@ export class SyncExecutionPipeline {
       try {
         runTransaction((tx) => {
           tx.insert(syncLog).values(failureLog).run();
-          identityComparison?.completeInTransaction(
-            tx,
-            options?.signal?.aborted ? 'cancelled' : 'failed',
-            options?.signal?.aborted ? 'sync_cancelled' : 'sync_failed',
-          );
         });
       } catch (finalizationError) {
         syncLogger.error(
           { err: finalizationError, connectorId },
-          'Failed to atomically finalize sync and GitHub identity comparison',
+          'Failed to finalize the sync log for a failed GitHub sync',
         );
         await db.insert(syncLog).values(failureLog).catch((logError) => {
           syncLogger.error({ err: logError, connectorId }, 'Failed to write error to sync_log');
         });
       }
+      identityRuntime?.complete(
+        options?.signal?.aborted ? 'cancelled' : 'failed',
+        options?.signal?.aborted ? 'sync_cancelled' : 'sync_failed',
+      );
 
       // Do NOT update lastSyncResults here. A failed sync should not advance the
       // `since` baseline — otherwise tasks updated during the failed window are
@@ -2229,11 +2208,8 @@ export class SyncExecutionPipeline {
             );
             return;
           }
-          const identityComparison = (
-            identitySnapshot.effectiveMode === 'comparison'
-            || identitySnapshot.effectiveMode === 'stable'
-          )
-            ? new GitHubIdentityComparisonRuntime({
+          const identityRuntime = identitySnapshot
+            ? new GitHubStableIdentityRuntime({
                 connectorInstanceId: config.id,
                 modeSnapshot: identitySnapshot,
                 syncKind: 'incremental',
@@ -2247,19 +2223,19 @@ export class SyncExecutionPipeline {
               signal: this.dependencyRelationshipPollAbortController?.signal,
             });
             for await (const page of relationshipPages) {
-              identityComparison?.markNetworkPage();
+              identityRuntime?.markNetworkPage();
               for (const task of page) {
                 const hierarchyObservation = readGitHubHierarchyObservation(task, config.id);
                 if (hierarchyObservation.kind === 'incomplete') {
                   hierarchyGenerationComplete = false;
-                  identityComparison?.markIneligible(hierarchyObservation.reasonCode);
+                  identityRuntime?.markBlocked(hierarchyObservation.reasonCode);
                 } else if (hierarchyObservation.kind === 'complete') {
                   if (!mergeGitHubHierarchyObservation(
                     hierarchyObservations,
                     hierarchyObservation.observation,
                   )) {
                     hierarchyGenerationComplete = false;
-                    identityComparison?.markIneligible('sub_issue_observation_conflict');
+                    identityRuntime?.markBlocked('sub_issue_observation_conflict');
                   }
                 }
               }
@@ -2291,23 +2267,23 @@ export class SyncExecutionPipeline {
                 alias.sourceId,
                 alias.canonicalSourceId,
               ])),
-              { identityComparison },
+              { identityRuntime },
             );
             const dependencyResult = await reconcileTaskDependencies(config.id, connector, {
               full: true,
-              identityComparison,
+              identityRuntime,
             });
             if (dependencyResult.resumeSkippedReason === 'identity-context-changed') {
-              identityComparison?.markIneligible('dependency_identity_context_changed');
-              identityComparison?.complete(
+              identityRuntime?.markBlocked('dependency_identity_context_changed');
+              identityRuntime?.complete(
                 'cancelled',
                 'dependency_identity_context_changed',
               );
             } else {
-              identityComparison?.complete('succeeded');
+              identityRuntime?.complete('succeeded');
             }
           } catch (error) {
-            identityComparison?.complete(
+            identityRuntime?.complete(
               this.dependencyRelationshipPollAbortController?.signal.aborted
                 ? 'cancelled'
                 : 'failed',

@@ -38,15 +38,41 @@ associates the stable entity with a Mission Control task and connector instance.
 This preserves the existing rule that two connector instances may independently
 mirror the same upstream entity.
 
-The existing `sourceId` remains populated with the legacy
-`owner/repo:issueNumber` locator throughout the migration and its compatibility
-window. Runtime matching changes only in the later work tracked by #2371:
-stable identity first, legacy fallback second. APIs and MCP tools continue to
-expose `sourceId` unchanged in this workstream; a future API version may add a
-structured external identity but must not silently redefine `sourceId`.
+`sourceId` remains populated with the `owner/repo:issueNumber` locator, and it
+stays **mutable by design**: it is an API-addressing and display locator that
+keeps changing on rename or transfer. It is not identity, it is never a
+fallback for identity, and APIs and MCP tools continue to expose it unchanged.
+The same applies to `source_lists.source_id` and `task_linked_sources.source_id`.
 
-This document is the Stage 0 deliverable for epic #2373. It does not change
-matching, write-back, deletion detection, or production data.
+## Cutover status: permanent
+
+**The GitHub NodeID cutover is complete and permanent.** There is no identity
+mode to select, no comparison mode, and no rollback to locator identity:
+
+- every GitHub connector resolves task, source-list, dependency, sub-issue,
+  linked-source, deletion, project-association, and write-route identity through
+  `external_entities.stable_id` (the GitHub NodeID) via
+  `external_entity_bindings` and `external_entity_locators`;
+- missing, unverified, colliding, inaccessible, or partial NodeID evidence
+  **blocks** the affected surface and fails closed; it never falls back to the
+  locator. A local row that matches by locator but has no active NodeID binding
+  is an `unbound_local_row` block, not an adoption and not a duplicate;
+- the comparison runtime, comparison evidence tables, post-cutover attestation,
+  and rollback commands have been removed. Migration
+  `0105_github_nodeid_permanent_cutover` drops
+  `github_identity_comparison_runs`, `github_identity_comparison_records`, and
+  `github_identity_sub_issue_population_members` and removes every
+  `comparison_run_id` dependency from the operational write-fencing tables;
+- task hierarchy is authoritative in `tasks.parent_id`, `tasks.depth`, and
+  `tasks.metadata`. The dropped sub-issue population table was cutover evidence
+  only and its removal cannot change a single parent/child relationship;
+- `github_identity_controls.mode_revision` survives as the durable identity
+  epoch that fences in-flight write cycles, write leases, deletion snapshots,
+  and queued sync jobs. It no longer selects a mode.
+
+This document keeps the historical staged-migration narrative below for
+provenance. Sections describing comparison mode, stage gates, and rollback
+describe how the cutover was reached, not behaviour that still exists.
 
 ## Context
 
@@ -890,31 +916,26 @@ longer depend on rollback.
 - Deletion snapshots created after Stage 1 include the external entity and
   locator revision so recovery can validate the original source.
 
-## Rollback procedure
+## Rollback procedure (removed)
 
-Rollback is a mode change, not a reverse data migration:
+Rollback to locator identity **no longer exists**. GitHub identity is
+permanently NodeID-first, so there is no `rollback_legacy` phase, no
+stable-primary flag to disable, and no locator-primary resolution to restore.
+Historical rollback tooling was removed with the permanent cutover.
 
-1. Disable stable-primary for the connector, moving it to `rollback_legacy`.
-2. Stop new connector jobs and allow the active job to finish or cooperatively
-   cancel at a phase boundary.
-3. Drain active push leases; do not revoke a lease while its remote side effect
-   is unknown.
-4. Restore legacy-primary resolution using the unchanged `tasks.source_id` and
-   `source_lists.source_id`.
-5. Invalidate connector, pull, list, dependency, and UI caches.
-6. Clear or rebuild identity-mode-specific deletion candidates and dependency
-   snapshots; never reinterpret them.
-7. Run a legacy incremental sync, then a dry-run full-sync comparison.
-8. Verify task counts, task IDs, pending writes, relationship counts, and
-   deletion quarantine before resuming schedules.
-9. Retain identity/binding/locator rows and collision evidence for diagnosis.
+Incident response is now forward-only:
 
-No table drop, task rewrite, or whole-database restore is required. If a remote
-write's outcome is unknown, rollback quarantines that task for reconciliation
-rather than retrying blindly.
+1. Stop connector jobs and let active work reach a phase boundary; never revoke
+   a write lease while its remote side effect is unknown.
+2. Reconcile unresolved write cycles and unknown outcomes with
+   `github-identity-operator write-cycle-reconcile` and `write-outcome-resolve`.
+3. Repair identity itself — not routing — with the repoint, bulk-transfer, and
+   `transfer-reconcile` tooling, or by re-running the NodeID backfill.
+4. Retain identity, binding, locator, and collision rows for diagnosis; they are
+   the authoritative record.
 
-The pre-cutover backup remains mandatory defense in depth, but it is not the
-normal rollback mechanism.
+A database backup remains mandatory defense in depth, but it is not a routing
+switch: restoring it restores NodeID identity too.
 
 ## Observability
 

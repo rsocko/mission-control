@@ -123,11 +123,9 @@ function persistIdentityWrites(
     },
     evidence: taskEvidence,
   });
-  const modeSnapshot = getGitHubIdentityModeSnapshot(connectorInstanceId);
   persistExternalIdentityBatch(
     writes,
-    modeSnapshot.phase,
-    modeSnapshot,
+    getGitHubIdentityModeSnapshot(connectorInstanceId),
   );
 }
 

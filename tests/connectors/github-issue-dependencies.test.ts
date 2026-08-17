@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { runFencedGitHubWrite } from '../fixtures/github-write-fence';
 import type {
   ConnectorConfig,
   SourceTaskDependencyGenerationWriter,
@@ -18,8 +19,6 @@ vi.mock('@/lib/external-identities', async (importOriginal) => {
   return {
     ...actual,
     getGitHubIdentityModeSnapshot: () => ({
-      effectiveMode: 'legacy',
-      stablePrimaryEnabled: false,
       revision: 1,
     }),
   };
@@ -983,7 +982,8 @@ describe('GitHub issue dependencies', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
 
-    await connector.addTaskDependency('acme/app:10', 'acme/app:20');
+    await runFencedDependencyWrite(connector, () =>
+      connector.addTaskDependency('acme/app:10', 'acme/app:20'));
 
     const post = calls.find((call) => call.init?.method === 'POST');
     expect(post?.url).toContain('/repos/acme/app/issues/20/dependencies/blocked_by');
@@ -992,7 +992,8 @@ describe('GitHub issue dependencies', () => {
     calls.length = 0;
     fetchMock.mockImplementation(async () =>
       new Response(JSON.stringify([githubIssue('acme/app', 10, 5010)]), { status: 200 }));
-    await connector.addTaskDependency('acme/app:10', 'acme/app:20');
+    await runFencedDependencyWrite(connector, () =>
+      connector.addTaskDependency('acme/app:10', 'acme/app:20'));
     expect(calls.filter((call) => call.init?.method === 'POST')).toHaveLength(0);
   });
 
@@ -1026,14 +1027,16 @@ describe('GitHub issue dependencies', () => {
     const connector = new GitHubIssuesConnector();
     await connector.initialize(config);
 
-    await connector.removeTaskDependency('acme/app:10', 'acme/app:20');
+    await runFencedDependencyWrite(connector, () =>
+      connector.removeTaskDependency('acme/app:10', 'acme/app:20'));
     expect(calls.find((call) => call.init?.method === 'DELETE')?.url)
       .toContain('/issues/20/dependencies/blocked_by/5010');
 
     calls.length = 0;
     fetchMock.mockImplementation(async () =>
       new Response(JSON.stringify([]), { status: 200 }));
-    await connector.removeTaskDependency('acme/app:10', 'acme/app:20');
+    await runFencedDependencyWrite(connector, () =>
+      connector.removeTaskDependency('acme/app:10', 'acme/app:20'));
     expect(calls.filter((call) => call.init?.method === 'DELETE')).toHaveLength(0);
   });
 
@@ -1135,3 +1138,22 @@ describe('GitHub issue dependencies', () => {
     delete process.env.MC_GITHUB_REQUEST_TIMEOUT_MS;
   });
 });
+
+function runFencedDependencyWrite<T>(
+  connector: Parameters<typeof runFencedGitHubWrite>[0],
+  write: () => Promise<T>,
+): Promise<T> {
+  return runFencedGitHubWrite(connector, {
+    connectorInstanceId: 'github-1',
+    taskId: 'task-10',
+    owner: 'acme',
+    repository: 'app',
+    issueNumber: 10,
+    operation: 'dependency',
+    targets: [
+      { role: 'primary_issue', owner: 'acme', repository: 'app', issueNumber: 20 },
+      { role: 'blocker_issue', owner: 'acme', repository: 'app', issueNumber: 10 },
+      { role: 'source_repository', owner: 'acme', repository: 'app', issueNumber: null },
+    ],
+  }, write);
+}

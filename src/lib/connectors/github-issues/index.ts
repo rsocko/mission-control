@@ -959,13 +959,13 @@ export class GitHubIssuesConnector implements IConnector {
     role: GitHubWriteAuthorization['targets'][number]['role'],
   ): { owner: string; repository: string; issueNumber: number | null } {
     if (!this.id) return { owner, repository, issueNumber };
-    const mode = getGitHubIdentityModeSnapshot(this.id);
     const context = githubWriteAuthorization.getStore();
     const authorization = context?.authorization;
-    if (mode.effectiveMode !== 'legacy' && !authorization) {
+    // GitHub identity is permanently NodeID-first: every mutation must carry a
+    // fenced authorization, there is no unfenced locator route.
+    if (!authorization) {
       throw new GitHubWriteFenceError('direct_write_requires_fence');
     }
-    if (!authorization) return { owner, repository, issueNumber };
     if (authorization.connectorInstanceId !== this.id) {
       throw new GitHubWriteFenceError('connector_authorization_mismatch');
     }

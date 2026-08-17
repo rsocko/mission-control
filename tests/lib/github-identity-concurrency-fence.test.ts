@@ -34,12 +34,11 @@ describe('GitHub identity persistence concurrency fences', () => {
     }).run();
     db.insert(schema.githubIdentityMigrations).values({
       connectorInstanceId: 'identity-fence',
-      phase: 'comparing',
+      phase: 'complete',
       updatedAt: now,
     }).run();
     db.insert(schema.githubIdentityControls).values({
       connectorInstanceId: 'identity-fence',
-      stablePrimaryEnabled: false,
       modeRevision: 2,
       updatedAt: now,
     }).run();
@@ -56,7 +55,7 @@ describe('GitHub identity persistence concurrency fences', () => {
       metadata: {},
     }).run();
     const snapshot = identity.getGitHubIdentityModeSnapshot('identity-fence');
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'identity-fence',
       modeSnapshot: snapshot,
       syncKind: 'full',
@@ -98,30 +97,13 @@ describe('GitHub identity persistence concurrency fences', () => {
           observedAt: now,
         },
       },
-    }], snapshot.phase, snapshot)).toThrow('mode changed');
+    }], snapshot)).toThrow('revision changed');
     expect(db.select().from(schema.externalEntities).all()).toEqual([]);
 
-    expect(() => identity.appendGitHubIdentityComparisonRecords(runtime.runId, [{
-      surface: 'task',
-      candidateKey: 'owner/repo:1',
-      localTaskId: 'identity-task',
-      legacySelectedLocalId: 'identity-task',
-      stableSelectedLocalId: 'identity-task',
-      legacyAction: 'update',
-      stableAction: 'update',
-      outcome: 'agreement',
-      reason: 'exact_match',
-      stableIdDigest: 'a'.repeat(64),
-    }])).toThrow('owner token does not match');
-    expect(db.select().from(schema.githubIdentityComparisonRecords).all()).toEqual([]);
-
-    runtime.complete('succeeded');
-    expect(db.select().from(schema.githubIdentityComparisonRuns)
-      .where(eq(schema.githubIdentityComparisonRuns.id, runtime.runId)).get())
-      .toMatchObject({
-        state: 'cancelled',
-        evidenceEligible: false,
-        errorCode: 'identity_context_changed',
-      });
+    // The stable runtime writes no evidence, so the only durable fence is the
+    // identity epoch: a resolution attempt after the bump must fail closed.
+    expect(() => runtime.assertCurrentMode())
+      .toThrow('GitHub identity runtime revision is stale');
+    runtime.complete('cancelled', 'identity_context_changed');
   });
 });

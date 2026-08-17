@@ -7,7 +7,7 @@ import {
   tasks,
 } from '@/db/schema';
 import { runTransaction } from '@/db';
-import { getGitHubIdentityModeSnapshotInTransaction } from './mode-control';
+import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
 import { getCurrentExternalEntityLocatorInTransaction } from './service';
 import type { ExternalIdentityTransaction } from './service';
 import type { ExternalIdentityEvidence } from './types';

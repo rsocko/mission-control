@@ -136,8 +136,10 @@ try {
   );
   if (
     identityOperator.status !== 0
-    || !identityOperator.stdout.includes('stable-enable')
-    || !identityOperator.stdout.includes('stable-rollback')
+    || !identityOperator.stdout.includes('status')
+    || !identityOperator.stdout.includes('write-cycle-reconcile')
+    || identityOperator.stdout.includes('stable-enable')
+    || identityOperator.stdout.includes('stable-rollback')
   ) {
     throw new Error(
       identityOperator.stderr || 'GitHub identity operator was not invocable in staged runtime',

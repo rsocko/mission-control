@@ -168,12 +168,11 @@ function seedTransferPair(connectorInstanceId: string): {
   }).run();
   database.default.insert(schema.githubIdentityMigrations).values({
     connectorInstanceId,
-    phase: 'comparing',
+    phase: 'complete',
     updatedAt: now,
   }).run();
   database.default.insert(schema.githubIdentityControls).values({
     connectorInstanceId,
-    stablePrimaryEnabled: false,
     modeRevision: 4,
     updatedAt: now,
   }).run();
@@ -230,7 +229,7 @@ function seedTransferPair(connectorInstanceId: string): {
         'octo-org/mission-control:2402',
       ),
     },
-  ], 'comparing');
+  ]);
   return { sourceTaskId, successorTaskId };
 }
 

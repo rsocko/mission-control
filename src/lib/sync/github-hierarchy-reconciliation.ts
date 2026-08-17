@@ -9,10 +9,10 @@ import {
   provenSupersededGitHubTaskIds,
 } from '@/lib/external-identities';
 import type {
-  GitHubIdentityComparisonRuntime,
+  GitHubStableIdentityRuntime,
   GitHubIdentityModeSnapshot,
   GitHubIdentityResolutionDecision,
-  GitHubComparisonObservationCandidate,
+  GitHubStableIdentityCandidate,
 } from '@/lib/external-identities';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { TaskItem } from '@/types';
@@ -44,7 +44,7 @@ export interface GitHubHierarchyReconciliationResult {
 }
 
 export interface GitHubHierarchyReconciliationOptions {
-  identityComparison?: GitHubIdentityComparisonRuntime;
+  identityRuntime?: GitHubStableIdentityRuntime;
 }
 
 function isGitHubParentMetadata(value: unknown): value is GitHubParentMetadata {
@@ -139,7 +139,7 @@ export async function reconcileGitHubTaskHierarchy(
   repositoryAliases: ReadonlyMap<string, string> = new Map(),
   options: GitHubHierarchyReconciliationOptions = {},
 ): Promise<GitHubHierarchyReconciliationResult> {
-  const identityComparison = options.identityComparison;
+  const identityRuntime = options.identityRuntime;
   const normalizedObservations = normalizeHierarchyObservations(
     observations,
     repositoryAliases,
@@ -149,7 +149,7 @@ export async function reconcileGitHubTaskHierarchy(
     repositoryAliases,
   );
 
-  const frozenIdentityContext = identityComparison?.modeSnapshot;
+  const frozenIdentityContext = identityRuntime?.modeSnapshot;
   if (
     frozenIdentityContext
     && !hierarchyIdentityContextMatches(
@@ -157,7 +157,7 @@ export async function reconcileGitHubTaskHierarchy(
       getGitHubIdentityModeSnapshot(connectorInstanceId),
     )
   ) {
-    identityComparison.markIneligible('sub_issue_identity_context_changed');
+    identityRuntime.markBlocked('sub_issue_identity_context_changed');
     return { applied: false, updated: 0 };
   }
   const localTasksBeforeApply = await dbTaskIdentityRows(connectorInstanceId);
@@ -220,9 +220,9 @@ export async function reconcileGitHubTaskHierarchy(
       )),
   );
   let hierarchyIdentityDecisions = new Map<string, GitHubIdentityResolutionDecision>();
-  if (identityComparison && generationComplete) {
-    hierarchyIdentityDecisions = observeGitHubHierarchyIdentity(
-      identityComparison,
+  if (identityRuntime && generationComplete) {
+    hierarchyIdentityDecisions = resolveGitHubHierarchyIdentity(
+      identityRuntime,
       populationObservations,
       configuredRepositories,
       repositoryAliases,
@@ -230,33 +230,28 @@ export async function reconcileGitHubTaskHierarchy(
       populationTaskIdByStableIdentity,
       new Set(population.memberByTaskId.keys()),
     );
-    identityComparison.assertDecisionsCurrent(hierarchyIdentityDecisions.values());
+    identityRuntime.assertDecisionsCurrent(hierarchyIdentityDecisions.values());
   }
   const observedTaskIds = new Set<string>();
-  let expectedParentCount = 0;
   let populationComplete = true;
   for (const observation of populationObservations.values()) {
     const childDecision = hierarchyIdentityDecisions.get(
       `sub_issue:${observation.childSourceId}:child`,
     );
-    const child = childDecision?.selectedLocalId
-      ? population.memberByTaskId.get(childDecision.selectedLocalId)
+    // NodeID resolution alone selects the child. When identity is unresolved the
+    // generation is incomplete, so the hierarchy is left untouched rather than
+    // reconciled from the mutable locator.
+    const child = identityRuntime
+      ? (
+          childDecision?.appliedSource === 'stable' && childDecision.selectedLocalId
+            ? population.memberByTaskId.get(childDecision.selectedLocalId)
+            : undefined
+        )
       : population.memberBySourceId.get(observation.childSourceId);
     if (!child) {
       populationComplete = false;
     } else {
       observedTaskIds.add(child.localTaskId);
-    }
-    if (observation.parent && configured.has(observation.parent.repository.toLowerCase())) {
-      const parentDecision = hierarchyIdentityDecisions.get(
-        `sub_issue:${observation.childSourceId}:parent`,
-      );
-      const parent = parentDecision?.selectedLocalId
-        ? population.memberByTaskId.get(parentDecision.selectedLocalId)
-        : population.memberBySourceId.get(observation.parent.sourceId);
-      if (parent) {
-        expectedParentCount++;
-      }
     }
   }
   const observedPopulationMembers = population.members
@@ -267,22 +262,9 @@ export async function reconcileGitHubTaskHierarchy(
     && observedTaskIds.size === populationObservations.size
     && observedTaskIds.size === population.count
     && observedPopulationDigest === population.digest;
-  identityComparison?.recordSubIssueGeneration({
-    complete: generationComplete && populationComplete,
-    expectedChildCount: population.count,
-    expectedParentCount,
-    populationCount: population.count,
-    populationDigest: population.digest,
-    observedChildCount: observedPopulationMembers.length,
-    observedChildDigest: observedPopulationDigest,
-    populationMembers: population.members.map((member) => ({
-      localTaskId: member.localTaskId,
-      sourceIdDigest: member.sourceIdDigest,
-      issueNumber: member.issueNumber,
-      memberDigest: member.memberDigest,
-      observed: observedTaskIds.has(member.localTaskId),
-    })),
-  });
+  if (!populationComplete) {
+    identityRuntime?.markBlocked('sub_issue_population_incomplete');
+  }
   if (!generationComplete || !populationComplete || populationObservations.size === 0) {
     return { applied: false, updated: 0 };
   }
@@ -365,7 +347,7 @@ export async function reconcileGitHubTaskHierarchy(
 
     for (const observation of populationObservations.values()) {
       const { childSourceId, parent } = observation;
-      const stableMode = frozenIdentityContext?.effectiveMode === 'stable';
+      const stableMode = Boolean(frozenIdentityContext);
       const childDecision = hierarchyIdentityDecisions.get(
         `sub_issue:${observation.childSourceId}:child`,
       );
@@ -492,7 +474,7 @@ export async function reconcileGitHubTaskHierarchy(
     return { applied: true, updated, fenced: false };
   });
   if (result.fenced) {
-    identityComparison?.markIneligible('sub_issue_apply_context_changed');
+    identityRuntime?.markBlocked('sub_issue_apply_context_changed');
   }
   return { applied: result.applied, updated: result.updated };
 }
@@ -676,13 +658,11 @@ function hierarchyIdentityContextMatches(
   current: GitHubIdentityModeSnapshot,
 ): boolean {
   return frozen.connectorInstanceId === current.connectorInstanceId
-    && frozen.effectiveMode === current.effectiveMode
-    && frozen.modeRevision === current.modeRevision
-    && frozen.stablePrimaryEnabled === current.stablePrimaryEnabled;
+    && frozen.modeRevision === current.modeRevision;
 }
 
-function observeGitHubHierarchyIdentity(
-  runtime: GitHubIdentityComparisonRuntime,
+function resolveGitHubHierarchyIdentity(
+  runtime: GitHubStableIdentityRuntime,
   observations: ReadonlyMap<string, GitHubHierarchyObservation>,
   configuredRepositories: ReadonlySet<string>,
   repositoryAliases: ReadonlyMap<string, string>,
@@ -694,7 +674,7 @@ function observeGitHubHierarchyIdentity(
     configuredRepositories,
     repositoryAliases,
   );
-  const candidates: GitHubComparisonObservationCandidate[] = [];
+  const candidates: GitHubStableIdentityCandidate[] = [];
   for (const observation of [...observations.values()].sort((left, right) =>
     left.childSourceId.localeCompare(right.childSourceId))) {
     const child = localBySourceId.get(observation.childSourceId.toLowerCase());
@@ -713,20 +693,20 @@ function observeGitHubHierarchyIdentity(
         )
       : false;
     if (!isGitHubIssueEvidence(observation.childIdentityEvidence)) {
-      runtime.markIneligible('sub_issue_child_identity_missing');
+      runtime.markBlocked('sub_issue_child_identity_missing');
     }
     if (
       parentInPopulation
       && parentConfigured
       && !isGitHubIssueEvidence(observation.parentIdentityEvidence)
     ) {
-      runtime.markIneligible('sub_issue_parent_identity_missing');
+      runtime.markBlocked('sub_issue_parent_identity_missing');
     }
     candidates.push({
         candidateKey: `sub_issue:${observation.childSourceId}:child`,
-        legacySelectedLocalIds: child ? [child.id] : [],
-        legacyAction: child ? 'present' as const : 'none' as const,
-        unmatchedStableAction: 'none' as const,
+        locatorMatchedLocalIds: child ? [child.id] : [],
+        boundAction: 'present' as const,
+        unboundAction: 'none' as const,
         applicableStableLocalIds: populationTaskIds,
         evidence: isGitHubIssueEvidence(observation.childIdentityEvidence)
           ? observation.childIdentityEvidence
@@ -736,9 +716,9 @@ function observeGitHubHierarchyIdentity(
     if (observation.parent && parentInPopulation && parentConfigured) {
       candidates.push({
         candidateKey: `sub_issue:${observation.childSourceId}:parent`,
-        legacySelectedLocalIds: parent ? [parent.id] : [],
-        legacyAction: parent ? 'present' as const : 'none' as const,
-        unmatchedStableAction: 'none' as const,
+        locatorMatchedLocalIds: parent ? [parent.id] : [],
+        boundAction: 'present' as const,
+        unboundAction: 'none' as const,
         applicableStableLocalIds: populationTaskIds,
         evidence: isGitHubIssueEvidence(observation.parentIdentityEvidence)
           ? observation.parentIdentityEvidence
@@ -747,17 +727,17 @@ function observeGitHubHierarchyIdentity(
       });
     }
   }
-  const decisions = runtime.observeDeduplicatedBatch('sub_issue', 'task', candidates);
+  const decisions = runtime.resolveDeduplicatedBatch('sub_issue', 'task', candidates);
   if (decisions.some((decision) =>
     decision.candidateKey.endsWith(':child') && !decision.selectedLocalId)) {
-    runtime.markIneligible('sub_issue_child_unresolved');
+    runtime.markBlocked('sub_issue_child_unresolved');
   }
   if (decisions.some((decision) =>
     decision.candidateKey.endsWith(':parent') && !decision.selectedLocalId)) {
-    runtime.markIneligible('sub_issue_parent_unresolved');
+    runtime.markBlocked('sub_issue_parent_unresolved');
   }
-  if (decisions.some((decision) => !isHierarchyDecisionEligible(decision))) {
-    runtime.markIneligible('sub_issue_identity_comparison_blocked');
+  if (decisions.some((decision) => decision.appliedSource !== 'stable')) {
+    runtime.markBlocked('sub_issue_identity_resolution_blocked');
   }
   return new Map(decisions.map((decision) => [decision.candidateKey, decision]));
 }
@@ -773,17 +753,6 @@ function configuredGitHubRepositories(
     configured.add(canonicalRepository.toLowerCase());
   }
   return configured;
-}
-
-function isHierarchyDecisionEligible(
-  decision: GitHubIdentityResolutionDecision,
-): boolean {
-  return decision.appliedSource !== 'blocked'
-    && (decision.outcome === 'agreement' || decision.outcome === 'locator_change')
-    && (
-      decision.appliedSource === 'stable'
-      || decision.legacySelectedLocalId === decision.stableSelectedLocalId
-    );
 }
 
 function isGitHubIssueEvidence(

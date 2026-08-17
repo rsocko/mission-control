@@ -1,8 +1,6 @@
 import { sqlite } from '@/db';
 import type { ExternalBindingType } from '@/db/schema';
-import type {
-  GitHubIdentityStableResolutionAlternative,
-} from './comparison-types';
+import type { GitHubStableResolution } from './stable-identity-types';
 import { digestExternalIdentifier } from './service';
 import type { ExternalIdentityEvidence } from './types';
 
@@ -16,7 +14,7 @@ export interface GitHubStableLookupCandidate {
 }
 
 export interface GitHubStableLookupResult {
-  resolutions: ReadonlyMap<string, GitHubIdentityStableResolutionAlternative>;
+  resolutions: ReadonlyMap<string, GitHubStableResolution>;
   lookupMs: number;
   queryCount: number;
 }
@@ -42,7 +40,7 @@ export function resolveGitHubStableIdentityBatch(
   if (candidates.length > MAX_BATCH_SIZE) {
     throw new Error(`GitHub stable lookup batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
   }
-  const resolutions = new Map<string, GitHubIdentityStableResolutionAlternative>();
+  const resolutions = new Map<string, GitHubStableResolution>();
   const withEvidence = candidates.filter((candidate) => candidate.evidence !== undefined);
   for (const candidate of candidates) {
     if (resolutions.has(candidate.candidateKey)) {

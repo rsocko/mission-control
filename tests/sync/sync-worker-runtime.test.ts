@@ -144,7 +144,6 @@ describe('sync worker runtime', () => {
         signal: expect.any(AbortSignal),
         identityContext: {
           connectorInstanceId: 'github-1',
-          effectiveMode: 'comparison',
           modeRevision: 7,
         },
       }),
@@ -174,7 +173,6 @@ describe('sync worker runtime', () => {
         expect.objectContaining({
           identityContext: {
             connectorInstanceId: 'github-1',
-            effectiveMode: 'legacy',
             modeRevision: 4,
           },
         }),
@@ -199,7 +197,6 @@ describe('sync worker runtime', () => {
       expect.objectContaining({
         identityContext: {
           connectorInstanceId: 'github-1',
-          effectiveMode: 'stable',
           modeRevision: 8,
         },
       }),

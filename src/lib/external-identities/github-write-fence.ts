@@ -11,8 +11,9 @@ import {
   tasks,
   type GitHubTaskWriteOperation,
 } from '@/db/schema';
-import { getGitHubIdentityModeSnapshotInTransaction } from './mode-control';
-import { GitHubIdentityComparisonRuntime } from './comparison-runtime';
+import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import { GitHubStableIdentityRuntime } from './stable-identity-runtime';
+import type { GitHubIdentityResolutionDecision } from './stable-identity-types';
 
 const LEASE_MS = 60_000;
 
@@ -82,8 +83,7 @@ interface IdentityTarget {
 
 export function beginGitHubWriteCycle(options: {
   connectorInstanceId: string;
-  modeSnapshot: { effectiveMode: 'legacy' | 'comparison' | 'stable'; modeRevision: number };
-  comparisonRunId?: string;
+  modeSnapshot: { modeRevision: number };
   jobId?: string;
   pendingCandidateCount: number;
 }): string {
@@ -98,10 +98,7 @@ export function beginGitHubWriteCycle(options: {
       options.connectorInstanceId,
       now,
     );
-    if (
-      currentMode.effectiveMode !== options.modeSnapshot.effectiveMode
-      || currentMode.modeRevision !== options.modeSnapshot.modeRevision
-    ) {
+    if (currentMode.modeRevision !== options.modeSnapshot.modeRevision) {
       throw new GitHubWriteFenceError('stale_write_cycle_mode');
     }
     const running = tx.select().from(githubIdentityWriteCycles).where(and(
@@ -128,7 +125,6 @@ export function beginGitHubWriteCycle(options: {
       }).where(and(
         eq(taskSourceWriteLeases.writeCycleId, running.id),
         eq(taskSourceWriteLeases.connectorInstanceId, running.connectorInstanceId),
-        eq(taskSourceWriteLeases.effectiveMode, running.effectiveMode),
         eq(taskSourceWriteLeases.modeRevision, running.modeRevision),
         inArray(taskSourceWriteLeases.state, ['claimed', 'authorized']),
         isNull(taskSourceWriteLeases.dispatchedAt),
@@ -154,7 +150,7 @@ export function beginGitHubWriteCycle(options: {
       const changed = locallyFinalized
         ? tx.update(githubIdentityWriteCycles).set({
             observedRouteCount: leases.filter((lease) => lease.cycleObservedAt !== null).length,
-            legacyAppliedCount: leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
+            appliedCount: leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
             blockedCount: leases.filter((lease) => lease.cycleOutcome === 'blocked').length,
             failedCount: leases.filter((lease) => lease.cycleOutcome === 'failed').length,
             unknownCount: 0,
@@ -178,9 +174,7 @@ export function beginGitHubWriteCycle(options: {
     tx.insert(githubIdentityWriteCycles).values({
       id,
       connectorInstanceId: options.connectorInstanceId,
-      comparisonRunId: options.comparisonRunId,
       jobId: options.jobId,
-      effectiveMode: options.modeSnapshot.effectiveMode,
       modeRevision: options.modeSnapshot.modeRevision,
       pendingCandidateCount: options.pendingCandidateCount,
       startedAt: now,
@@ -205,15 +199,12 @@ export function finishGitHubWriteCycle(
       cycle.connectorInstanceId,
       now,
     );
-    if (
-      mode.effectiveMode !== cycle.effectiveMode
-      || mode.modeRevision !== cycle.modeRevision
-    ) return { changed: 0, complete: false };
+    if (mode.modeRevision !== cycle.modeRevision) return { changed: 0, complete: false };
     const complete = outcome.observed === cycle.pendingCandidateCount
       && outcome.applied + outcome.blocked + outcome.failed + outcome.unknown === outcome.observed;
     const changed = tx.update(githubIdentityWriteCycles).set({
       observedRouteCount: outcome.observed,
-      legacyAppliedCount: outcome.applied,
+      appliedCount: outcome.applied,
       blockedCount: outcome.blocked,
       failedCount: outcome.failed,
       unknownCount: outcome.unknown,
@@ -222,7 +213,6 @@ export function finishGitHubWriteCycle(
     }).where(and(
       eq(githubIdentityWriteCycles.id, id),
       eq(githubIdentityWriteCycles.connectorInstanceId, cycle.connectorInstanceId),
-      eq(githubIdentityWriteCycles.effectiveMode, cycle.effectiveMode),
       eq(githubIdentityWriteCycles.modeRevision, cycle.modeRevision),
       eq(githubIdentityWriteCycles.state, 'running'),
       eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
@@ -232,27 +222,18 @@ export function finishGitHubWriteCycle(
   return result.changed === 1 && result.complete;
 }
 
-function attachGitHubWriteCycleComparisonRun(
-  cycleId: string,
-  connectorInstanceId: string,
-  modeSnapshot: { effectiveMode: 'legacy' | 'comparison' | 'stable'; modeRevision: number },
-  comparisonRunId: string,
+/**
+ * Durably records that a NodeID route was resolved for one lease. The route
+ * evidence is the lease target rows plus `cycle_observed_at`; nothing depends
+ * on a comparison record any more.
+ */
+function recordGitHubWriteCycleObservation(
+  leaseId: string,
+  decision: GitHubIdentityResolutionDecision,
 ): void {
-  const changed = db.update(githubIdentityWriteCycles).set({
-    comparisonRunId,
-  }).where(and(
-    eq(githubIdentityWriteCycles.id, cycleId),
-    eq(githubIdentityWriteCycles.connectorInstanceId, connectorInstanceId),
-    eq(githubIdentityWriteCycles.effectiveMode, modeSnapshot.effectiveMode),
-    eq(githubIdentityWriteCycles.modeRevision, modeSnapshot.modeRevision),
-    eq(githubIdentityWriteCycles.state, 'running'),
-    eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-    isNull(githubIdentityWriteCycles.comparisonRunId),
-  )).run().changes;
-  if (changed !== 1) throw new GitHubWriteFenceError('stale_write_cycle');
-}
-
-function recordGitHubWriteCycleObservation(leaseId: string): void {
+  if (decision.appliedSource !== 'stable') {
+    throw new GitHubWriteFenceError('write_cycle_observation_missing');
+  }
   runTransaction((tx) => {
     const lease = tx.select().from(taskSourceWriteLeases)
       .where(and(
@@ -266,25 +247,13 @@ function recordGitHubWriteCycleObservation(leaseId: string): void {
       throw new GitHubWriteFenceError('write_cycle_missing');
     }
     if (lease.cycleObservedAt) return;
-    const record = sqlite.prepare(`
-      SELECT 1
-      FROM github_identity_comparison_records
-      WHERE run_id = ?
-        AND surface = 'write_route'
-        AND candidate_key LIKE ?
-      LIMIT 1
-    `).get(lease.comparisonRunId, `%:${lease.id}`);
-    if (!record) throw new GitHubWriteFenceError('write_cycle_observation_missing');
     const now = new Date().toISOString();
     const mode = getGitHubIdentityModeSnapshotInTransaction(
       tx,
       lease.connectorInstanceId,
       now,
     );
-    if (
-      mode.effectiveMode !== lease.effectiveMode
-      || mode.modeRevision !== lease.modeRevision
-    ) {
+    if (mode.modeRevision !== lease.modeRevision) {
       throw new GitHubWriteFenceError('write_cycle_observation_stale_mode');
     }
     const cycleChanged = tx.update(githubIdentityWriteCycles).set({
@@ -292,7 +261,6 @@ function recordGitHubWriteCycleObservation(leaseId: string): void {
     }).where(and(
       eq(githubIdentityWriteCycles.id, lease.writeCycleId),
       eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-      eq(githubIdentityWriteCycles.effectiveMode, lease.effectiveMode),
       eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
       eq(githubIdentityWriteCycles.state, 'running'),
       eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
@@ -323,7 +291,7 @@ export function authorizeGitHubWrite(options: {
   connectorInstanceId: string;
   taskId: string;
   operation: GitHubTaskWriteOperation;
-  comparisonRuntime?: GitHubIdentityComparisonRuntime;
+  identityRuntime?: GitHubStableIdentityRuntime;
   writeCycleId?: string | null;
   targetSourceListId?: string | null;
   expectedTaskVersion?: string;
@@ -364,21 +332,10 @@ export function authorizeGitHubWrite(options: {
           eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
         )).limit(1).get()
       : null;
-    if (
-      mode.effectiveMode !== 'legacy'
-      && (
-        !cycle
-        || cycle.effectiveMode !== mode.effectiveMode
-        || cycle.modeRevision !== mode.modeRevision
-        || cycle.comparisonRunId !== (options.comparisonRuntime?.runId ?? null)
-      )
-    ) {
+    if (!cycle || cycle.modeRevision !== mode.modeRevision) {
       throw new GitHubWriteFenceError('stale_write_cycle');
     }
-    if (
-      mode.effectiveMode === 'stable'
-      && hasBlockingStableEvidence(options.connectorInstanceId, 'task', task.id)
-    ) {
+    if (hasOpenStableIdentityCollision(options.connectorInstanceId, 'task', task.id)) {
       throw new GitHubWriteFenceError('stable_identity_evidence_blocked');
     }
     const targets = loadTargets(
@@ -390,28 +347,19 @@ export function authorizeGitHubWrite(options: {
       options.targetSourceListId,
       options.participantTaskIds,
     );
-    if (
-      mode.effectiveMode === 'stable'
-      && targets?.some((target) => target.bindingState !== 'active')
-    ) {
+    if (!targets) throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
+    if (targets.some((target) => target.bindingState !== 'active')) {
       throw new GitHubWriteFenceError('stable_binding_not_active');
     }
-    if (mode.effectiveMode !== 'legacy' && !targets) {
-      throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
-    }
-    const routesAgree = targets
-      ? taskRoutesAgree(task, targets, options.participantTaskIds)
-      : true;
     const leaseId = randomUUID();
     const { idempotencyKey, intent, initialCreate } = taskWriteIdentity(task, options.operation);
-    const priorSuccess = intent && mode.effectiveMode !== 'legacy'
+    const priorSuccess = intent
       ? tx.select({ id: taskSourceWriteLeases.id })
         .from(taskSourceWriteLeases)
         .where(and(
           eq(taskSourceWriteLeases.connectorInstanceId, options.connectorInstanceId),
           eq(taskSourceWriteLeases.taskId, task.id),
           eq(taskSourceWriteLeases.operation, options.operation),
-          eq(taskSourceWriteLeases.effectiveMode, mode.effectiveMode),
           eq(taskSourceWriteLeases.modeRevision, mode.modeRevision),
           ...(initialCreate
             ? []
@@ -437,11 +385,8 @@ export function authorizeGitHubWrite(options: {
         operation: options.operation,
         taskVersion: task.updatedAt,
         idempotencyKey,
-        effectiveMode: mode.effectiveMode,
         modeRevision: mode.modeRevision,
-        comparisonRunId: options.comparisonRuntime?.runId,
         writeCycleId: options.writeCycleId,
-        route: mode.effectiveMode === 'stable' ? 'stable' : 'legacy',
         intentKind: intent?.kind,
         intentDigest: intent?.digest,
         expiresAt,
@@ -451,68 +396,59 @@ export function authorizeGitHubWrite(options: {
     } catch {
       throw new GitHubWriteFenceError('active_or_unknown_lease');
     }
-    if (targets) {
-      tx.insert(taskSourceWriteLeaseTargets).values(targets.map((target) => ({
-        leaseId,
-        role: target.role,
-        externalEntityId: target.entityId,
-        repositoryEntityId: target.repositoryEntityId,
-        hostKey: target.hostKey,
-        locatorRevision: target.locatorRevision,
-        bindingRevision: target.bindingRevision,
-        legacyLocatorDigest: digestLocator(target.owner, target.repository, target.issueNumber),
-        owner: target.owner,
-        repository: target.repository,
-        issueNumber: target.issueNumber,
-      }))).run();
-    }
-    return { task, mode, leaseId, targets, routesAgree };
+    tx.insert(taskSourceWriteLeaseTargets).values(targets.map((target) => ({
+      leaseId,
+      role: target.role,
+      externalEntityId: target.entityId,
+      repositoryEntityId: target.repositoryEntityId,
+      hostKey: target.hostKey,
+      locatorRevision: target.locatorRevision,
+      bindingRevision: target.bindingRevision,
+      legacyLocatorDigest: digestLocator(target.owner, target.repository, target.issueNumber),
+      owner: target.owner,
+      repository: target.repository,
+      issueNumber: target.issueNumber,
+    }))).run();
+    return { task, mode, leaseId, targets };
   });
 
-  if (result.mode.effectiveMode !== 'legacy') {
-    if (!options.comparisonRuntime) {
-      blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
-      throw new GitHubWriteFenceError('missing_identity_runtime');
-    }
-    const primary = result.targets?.find((target) => target.role === 'primary_issue')
-      ?? result.targets?.find((target) => target.role === 'target_repository')
-      ?? result.targets?.find((target) => target.role === 'source_repository');
-    if (!primary) {
-      blockGitHubWrite(result.leaseId, token, 'missing_or_inaccessible_identity');
-      throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
-    }
-    try {
-      options.comparisonRuntime.observeResolvedBatch('write_route', [{
-        candidateKey: `write:${result.task.id}:${options.operation}:${result.leaseId}`,
-        localTaskId: result.task.id,
-        localSourceListId: result.task.sourceListId ?? undefined,
-        legacySelectedLocalIds: [result.task.id],
-        legacyAction: result.task.sourceId.startsWith('local:') || result.task.sourceId === result.task.id ? 'create' : 'update',
-        stable: {
-          selectedLocalIds: [result.task.id],
-          action: result.task.sourceId.startsWith('local:') || result.task.sourceId === result.task.id ? 'create' : 'update',
-          evidence: 'verified',
-          externalEntityId: primary.entityId,
-          stableIdDigest: digestLocator(primary.hostKey, primary.entityId, null),
-          locatorRevision: primary.locatorRevision,
-          locatorChanged: !result.routesAgree,
-        },
-      }]);
-      recordGitHubWriteCycleObservation(result.leaseId);
-    } catch (error) {
-      blockGitHubWrite(result.leaseId, token, 'comparison_observation_failed');
-      throw error;
-    }
-    if (result.mode.effectiveMode === 'comparison' && !result.routesAgree) {
-      blockGitHubWrite(result.leaseId, token, 'stable_legacy_route_disagreement');
-      throw new GitHubWriteFenceError('stable_legacy_route_disagreement');
-    }
+  if (!options.identityRuntime) {
+    blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
+    throw new GitHubWriteFenceError('missing_identity_runtime');
+  }
+  const primary = result.targets.find((target) => target.role === 'primary_issue')
+    ?? result.targets.find((target) => target.role === 'target_repository')
+    ?? result.targets.find((target) => target.role === 'source_repository');
+  if (!primary) {
+    blockGitHubWrite(result.leaseId, token, 'missing_or_inaccessible_identity');
+    throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
+  }
+  try {
+    const [decision] = options.identityRuntime.applyResolvedBatch('write_route', [{
+      candidateKey: `write:${result.task.id}:${options.operation}:${result.leaseId}`,
+      localTaskId: result.task.id,
+      localSourceListId: result.task.sourceListId ?? undefined,
+      stable: {
+        selectedLocalIds: [result.task.id],
+        action: isLocalOnlySourceId(result.task.sourceId, result.task.id) ? 'create' : 'update',
+        evidence: 'verified',
+        externalEntityId: primary.entityId,
+        stableIdDigest: digestLocator(primary.hostKey, primary.entityId, null),
+        locatorRevision: primary.locatorRevision,
+        bindingRevision: primary.bindingRevision || undefined,
+        bindingState: primary.bindingState as 'shadow' | 'active' | 'collision' | 'retired',
+      },
+    }]);
+    recordGitHubWriteCycleObservation(result.leaseId, decision);
+  } catch (error) {
+    blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
+    throw error;
   }
 
-  const route = result.targets?.find((target) => target.role === 'primary_issue')
-    ?? result.targets?.find((target) => target.role === 'target_repository')
-    ?? result.targets?.find((target) => target.role === 'source_repository');
-  const parsed = parseLegacySourceId(result.task.sourceId);
+  const route = result.targets.find((target) => target.role === 'primary_issue')
+    ?? result.targets.find((target) => target.role === 'target_repository')
+    ?? result.targets.find((target) => target.role === 'source_repository');
+  const parsed = parseLocatorSourceId(result.task.sourceId);
   return Object.freeze({
     leaseId: result.leaseId,
     token,
@@ -526,7 +462,7 @@ export function authorizeGitHubWrite(options: {
     expiresAt,
     expectedTaskVersion: options.expectedTaskVersion,
     taskPushLeaseToken: options.taskPushLeaseToken,
-    targets: Object.freeze((result.targets ?? []).map((target) => Object.freeze({
+    targets: Object.freeze(result.targets.map((target) => Object.freeze({
       role: target.role,
       owner: target.owner,
       repository: target.repository,
@@ -557,14 +493,12 @@ export function hasSucceededGitHubWrite(options: {
     options.connectorInstanceId,
     new Date().toISOString(),
   );
-  if (mode.effectiveMode === 'legacy') return false;
   return db.select({ id: taskSourceWriteLeases.id })
     .from(taskSourceWriteLeases)
     .where(and(
       eq(taskSourceWriteLeases.connectorInstanceId, options.connectorInstanceId),
       eq(taskSourceWriteLeases.taskId, task.id),
       eq(taskSourceWriteLeases.operation, options.operation),
-      eq(taskSourceWriteLeases.effectiveMode, mode.effectiveMode),
       eq(taskSourceWriteLeases.modeRevision, mode.modeRevision),
       ...(initialCreate
         ? []
@@ -585,7 +519,7 @@ export function authorizeGitHubSourceWrite(options: {
   connectorInstanceId: string;
   sourceListId: string;
   operation: 'create' | 'label';
-  comparisonRuntime?: GitHubIdentityComparisonRuntime;
+  identityRuntime?: GitHubStableIdentityRuntime;
   writeCycleId?: string | null;
 }): GitHubWriteAuthorization {
   const now = new Date();
@@ -607,25 +541,14 @@ export function authorizeGitHubSourceWrite(options: {
           eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
         )).limit(1).get()
       : null;
-    if (
-      mode.effectiveMode !== 'legacy'
-      && (
-        !cycle
-        || cycle.effectiveMode !== mode.effectiveMode
-        || cycle.modeRevision !== mode.modeRevision
-        || cycle.comparisonRunId !== (options.comparisonRuntime?.runId ?? null)
-      )
-    ) {
+    if (!cycle || cycle.modeRevision !== mode.modeRevision) {
       throw new GitHubWriteFenceError('stale_write_cycle');
     }
-    if (
-      mode.effectiveMode === 'stable'
-      && hasBlockingStableEvidence(
-        options.connectorInstanceId,
-        'source_list',
-        sourceList.id,
-      )
-    ) {
+    if (hasOpenStableIdentityCollision(
+      options.connectorInstanceId,
+      'source_list',
+      sourceList.id,
+    )) {
       throw new GitHubWriteFenceError('stable_identity_evidence_blocked');
     }
     const target = identityForBinding(
@@ -634,14 +557,10 @@ export function authorizeGitHubSourceWrite(options: {
       sourceList.id,
       'source_repository',
     );
-    if (mode.effectiveMode === 'stable' && target?.bindingState !== 'active') {
+    if (!target) throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
+    if (target.bindingState !== 'active') {
       throw new GitHubWriteFenceError('stable_binding_not_active');
     }
-    if (mode.effectiveMode !== 'legacy' && !target) {
-      throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
-    }
-    const routesAgree = !target
-      || sourceList.sourceId.toLowerCase() === `${target.owner}/${target.repository}`.toLowerCase();
     const leaseId = randomUUID();
     const idempotencyKey = `source-list:${sourceList.id}:${options.operation}:${sourceList.sourceId}`;
     try {
@@ -653,11 +572,8 @@ export function authorizeGitHubSourceWrite(options: {
         operation: options.operation,
         taskVersion: sourceList.sourceId,
         idempotencyKey,
-        effectiveMode: mode.effectiveMode,
         modeRevision: mode.modeRevision,
-        comparisonRunId: options.comparisonRuntime?.runId,
         writeCycleId: options.writeCycleId,
-        route: mode.effectiveMode === 'stable' ? 'stable' : 'legacy',
         expiresAt,
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -665,34 +581,30 @@ export function authorizeGitHubSourceWrite(options: {
     } catch {
       throw new GitHubWriteFenceError('active_or_unknown_lease');
     }
-    if (target) {
-      tx.insert(taskSourceWriteLeaseTargets).values({
-        leaseId,
-        role: target.role,
-        externalEntityId: target.entityId,
-        repositoryEntityId: target.repositoryEntityId,
-        hostKey: target.hostKey,
-        locatorRevision: target.locatorRevision,
-        bindingRevision: target.bindingRevision,
-        legacyLocatorDigest: digestLocator(target.owner, target.repository, null),
-        owner: target.owner,
-        repository: target.repository,
-        issueNumber: null,
-      }).run();
-    }
-    return { sourceList, mode, target, routesAgree, leaseId };
+    tx.insert(taskSourceWriteLeaseTargets).values({
+      leaseId,
+      role: target.role,
+      externalEntityId: target.entityId,
+      repositoryEntityId: target.repositoryEntityId,
+      hostKey: target.hostKey,
+      locatorRevision: target.locatorRevision,
+      bindingRevision: target.bindingRevision,
+      legacyLocatorDigest: digestLocator(target.owner, target.repository, null),
+      owner: target.owner,
+      repository: target.repository,
+      issueNumber: null,
+    }).run();
+    return { sourceList, mode, target, leaseId };
   });
 
-  if (result.mode.effectiveMode !== 'legacy') {
-    if (!options.comparisonRuntime || !result.target) {
-      blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
-      throw new GitHubWriteFenceError('missing_identity_runtime');
-    }
-    options.comparisonRuntime.observeResolvedBatch('write_route', [{
+  if (!options.identityRuntime) {
+    blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
+    throw new GitHubWriteFenceError('missing_identity_runtime');
+  }
+  try {
+    const [decision] = options.identityRuntime.applyResolvedBatch('write_route', [{
       candidateKey: `write:source-list:${result.sourceList.id}:${options.operation}:${result.leaseId}`,
       localSourceListId: result.sourceList.id,
-      legacySelectedLocalIds: [result.sourceList.id],
-      legacyAction: options.operation === 'create' ? 'create' : 'update',
       stable: {
         selectedLocalIds: [result.sourceList.id],
         action: options.operation === 'create' ? 'create' : 'update',
@@ -700,14 +612,14 @@ export function authorizeGitHubSourceWrite(options: {
         externalEntityId: result.target.entityId,
         stableIdDigest: digestLocator(result.target.hostKey, result.target.entityId, null),
         locatorRevision: result.target.locatorRevision,
-        locatorChanged: !result.routesAgree,
+        bindingRevision: result.target.bindingRevision || undefined,
+        bindingState: result.target.bindingState as 'shadow' | 'active' | 'collision' | 'retired',
       },
     }]);
-    recordGitHubWriteCycleObservation(result.leaseId);
-    if (result.mode.effectiveMode === 'comparison' && !result.routesAgree) {
-      blockGitHubWrite(result.leaseId, token, 'stable_legacy_route_disagreement');
-      throw new GitHubWriteFenceError('stable_legacy_route_disagreement');
-    }
+    recordGitHubWriteCycleObservation(result.leaseId, decision);
+  } catch (error) {
+    blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
+    throw error;
   }
 
   return Object.freeze({
@@ -717,16 +629,16 @@ export function authorizeGitHubSourceWrite(options: {
     taskId: `source-list:${result.sourceList.id}`,
     operation: options.operation,
     sourceId: result.sourceList.sourceId,
-    owner: result.target?.owner ?? result.sourceList.sourceId.split('/')[0] ?? '',
-    repository: result.target?.repository ?? result.sourceList.sourceId.split('/')[1] ?? '',
+    owner: result.target.owner,
+    repository: result.target.repository,
     issueNumber: null,
     expiresAt,
-    targets: Object.freeze(result.target ? [Object.freeze({
+    targets: Object.freeze([Object.freeze({
       role: result.target.role,
       owner: result.target.owner,
       repository: result.target.repository,
       issueNumber: null,
-    })] : []),
+    })]),
   });
 }
 
@@ -766,24 +678,18 @@ export function assertGitHubWriteCycleCurrent(
         )
       ) return false;
     }
-    if (lease.effectiveMode === 'legacy') return true;
     if (!lease.writeCycleId) return false;
     const mode = getGitHubIdentityModeSnapshotInTransaction(
       tx,
       authorization.connectorInstanceId,
       now,
     );
-    if (
-      mode.effectiveMode !== lease.effectiveMode
-      || mode.modeRevision !== lease.modeRevision
-      || mode.stablePrimaryEnabled !== (lease.effectiveMode === 'stable')
-    ) return false;
+    if (mode.modeRevision !== lease.modeRevision) return false;
     return Boolean(tx.select({ id: githubIdentityWriteCycles.id })
       .from(githubIdentityWriteCycles)
       .where(and(
         eq(githubIdentityWriteCycles.id, lease.writeCycleId),
         eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-        eq(githubIdentityWriteCycles.effectiveMode, lease.effectiveMode),
         eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
         eq(githubIdentityWriteCycles.state, 'running'),
         eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
@@ -833,19 +739,9 @@ export function confirmGitHubWriteDispatch(authorization: GitHubWriteAuthorizati
       )
       || (sourceListSubject && sourceListSubject.sourceId !== lease.taskVersion)
       || mode.modeRevision !== lease.modeRevision
-      || mode.effectiveMode !== lease.effectiveMode
-      || mode.stablePrimaryEnabled !== (lease.effectiveMode === 'stable')
-      || (
-        lease.effectiveMode !== 'legacy'
-        && (
-          lease.cycleObservedAt === null
-          ||
-          !cycle
-          || cycle.effectiveMode !== lease.effectiveMode
-          || cycle.modeRevision !== lease.modeRevision
-          || cycle.comparisonRunId !== lease.comparisonRunId
-        )
-      )
+      || lease.cycleObservedAt === null
+      || !cycle
+      || cycle.modeRevision !== lease.modeRevision
       || !currentLeaseTargetsMatch(authorization.leaseId)
     ) return 0;
     return tx.update(taskSourceWriteLeases).set({
@@ -916,7 +812,6 @@ export function finalizeGitHubWrite(
         .where(and(
           eq(githubIdentityWriteCycles.id, lease.writeCycleId),
           eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-          eq(githubIdentityWriteCycles.effectiveMode, lease.effectiveMode),
           eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
           eq(githubIdentityWriteCycles.state, 'running'),
           eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
@@ -1003,7 +898,6 @@ export function blockGitHubWrite(leaseId: string, token: string, code: string): 
         .where(and(
           eq(githubIdentityWriteCycles.id, lease.writeCycleId),
           eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-          eq(githubIdentityWriteCycles.effectiveMode, lease.effectiveMode),
           eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
           eq(githubIdentityWriteCycles.state, 'running'),
           eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
@@ -1036,7 +930,7 @@ function incrementGitHubWriteCycleOutcome(
   outcome: 'succeeded' | 'failed' | 'blocked' | 'unknown',
 ): number {
   const column = {
-    succeeded: 'legacy_applied_count',
+    succeeded: 'applied_count',
     failed: 'failed_count',
     blocked: 'blocked_count',
     unknown: 'unknown_count',
@@ -1138,28 +1032,32 @@ function identityForBinding(
   };
 }
 
-function hasBlockingStableEvidence(
+/**
+ * Blocks a write while the connector still has an open, unresolved NodeID
+ * collision for this local row. `github_identity_collisions` is the canonical
+ * durable record; no comparison evidence is consulted.
+ */
+function hasOpenStableIdentityCollision(
   connectorInstanceId: string,
   bindingType: 'task' | 'source_list',
   localId: string,
 ): boolean {
-  const localColumn = bindingType === 'task' ? 'local_task_id' : 'local_source_list_id';
   const row = sqlite.prepare(`
     SELECT 1
-    FROM github_identity_comparison_records AS record
-    WHERE record.run_id = (
-      SELECT run.id
-      FROM github_identity_comparison_runs AS run
-      WHERE run.connector_instance_id = ?
-        AND run.sync_kind = 'full'
-        AND run.state = 'succeeded'
-      ORDER BY run.started_at DESC, run.id DESC
-      LIMIT 1
-    )
-      AND record.${localColumn} = ?
-      AND record.outcome NOT IN ('agreement', 'locator_change')
+    FROM github_identity_collisions AS collision
+    WHERE collision.connector_instance_id = ?
+      AND collision.binding_type = ?
+      AND collision.state = 'open'
+      AND (
+        json_valid(collision.local_ids) = 0
+        OR EXISTS (
+          SELECT 1
+          FROM json_each(collision.local_ids) AS member
+          WHERE member.value = ?
+        )
+      )
     LIMIT 1
-  `).get(connectorInstanceId, localId);
+  `).get(connectorInstanceId, bindingType, localId);
   return row !== undefined;
 }
 
@@ -1209,8 +1107,12 @@ function currentLeaseTargetsMatch(leaseId: string, requireTargets = false): bool
       AND (
         target.external_entity_id IS NULL
         OR locator.id IS NULL
-        OR binding.id IS NULL
-        OR binding.verified_at != target.binding_revision
+        -- A repository target derived from an issue has no binding of its own;
+        -- it is frozen with an empty binding revision and checked by locator.
+        OR (
+          COALESCE(target.binding_revision, '') != ''
+          AND (binding.id IS NULL OR binding.verified_at != target.binding_revision)
+        )
         OR locator.locator_revision != target.locator_revision
         OR lower(locator.owner) != lower(target.owner)
         OR lower(locator.repository) != lower(target.repository)
@@ -1220,59 +1122,19 @@ function currentLeaseTargetsMatch(leaseId: string, requireTargets = false): bool
   return mismatch.value === 0;
 }
 
-function taskRoutesAgree(
-  task: typeof tasks.$inferSelect,
-  targets: IdentityTarget[],
-  participantTaskIds: ReadonlyArray<{
-    role: 'parent_issue' | 'blocker_issue' | 'blocked_issue';
-    taskId: string;
-  }> | undefined,
-): boolean {
-  const primary = targets.find((target) => target.role === 'primary_issue');
-  if (primary) {
-    const legacy = parseLegacySourceId(task.sourceId);
-    if (!legacy || !sameIssueRoute(legacy, primary)) return false;
-  }
-  const sourceRepository = targets.find((target) => target.role === 'source_repository');
-  if (sourceRepository && task.sourceListId) {
-    const sourceList = sqlite.prepare(`
-      SELECT source_id AS sourceId
-      FROM source_lists
-      WHERE connector_instance_id = ? AND (id = ? OR lower(source_id) = lower(?))
-      LIMIT 1
-    `).get(task.connectorInstanceId, task.sourceListId, task.sourceListId) as { sourceId: string } | undefined;
-    if (
-      !sourceList
-      || sourceList.sourceId.toLowerCase()
-        !== `${sourceRepository.owner}/${sourceRepository.repository}`.toLowerCase()
-    ) return false;
-  }
-  for (const participant of participantTaskIds ?? []) {
-    const target = targets.find((candidate) => candidate.role === participant.role);
-    const participantTask = sqlite.prepare(`
-      SELECT source_id AS sourceId
-      FROM tasks
-      WHERE id = ? AND connector_instance_id = ?
-      LIMIT 1
-    `).get(participant.taskId, task.connectorInstanceId) as { sourceId: string } | undefined;
-    const legacy = participantTask ? parseLegacySourceId(participantTask.sourceId) : null;
-    if (!target || !legacy || !sameIssueRoute(legacy, target)) return false;
-  }
-  return true;
-}
-
-function sameIssueRoute(
-  legacy: { owner: string; repository: string; issueNumber: number },
-  target: Pick<IdentityTarget, 'owner' | 'repository' | 'issueNumber'>,
-): boolean {
-  return target.issueNumber === legacy.issueNumber
-    && target.owner.toLowerCase() === legacy.owner.toLowerCase()
-    && target.repository.toLowerCase() === legacy.repository.toLowerCase();
-}
-
-function parseLegacySourceId(sourceId: string): { owner: string; repository: string; issueNumber: number } | null {
+/**
+ * Parses the mutable `owner/repo:number` locator for display and for the
+ * fallback route fields on the authorization. It never establishes identity.
+ */
+function parseLocatorSourceId(
+  sourceId: string,
+): { owner: string; repository: string; issueNumber: number } | null {
   const match = /^([^/:]+)\/([^/:]+):(\d+)$/.exec(sourceId);
   return match ? { owner: match[1], repository: match[2], issueNumber: Number(match[3]) } : null;
+}
+
+function isLocalOnlySourceId(sourceId: string, taskId: string): boolean {
+  return sourceId.startsWith('local:') || sourceId === taskId;
 }
 
 function digestLocator(...values: Array<string | number | null>): string {
@@ -1369,7 +1231,6 @@ export function expireUndispatchedGitHubWriteLeases(now = new Date().toISOString
           FROM github_identity_write_cycles AS cycle
           WHERE cycle.id = lease.write_cycle_id
             AND cycle.connector_instance_id = lease.connector_instance_id
-            AND cycle.effective_mode = lease.effective_mode
             AND cycle.mode_revision = lease.mode_revision
             AND cycle.state = 'running'
             AND cycle.reconciliation_state = 'unresolved'
@@ -1380,8 +1241,8 @@ export function expireUndispatchedGitHubWriteLeases(now = new Date().toISOString
 
 function completeGitHubWriteCycleScope(options: {
   cycleId: string;
-  runtime?: GitHubIdentityComparisonRuntime;
-  runtimeState: Parameters<GitHubIdentityComparisonRuntime['complete']>[0];
+  runtime?: GitHubStableIdentityRuntime;
+  runtimeState: Parameters<GitHubStableIdentityRuntime['complete']>[0];
   runtimeReason: string;
   outcome: { observed: number; applied: number; blocked: number; failed: number; unknown: number };
   primaryFailure: { error: unknown } | null;
@@ -1413,8 +1274,8 @@ function cleanupFailureCode(error: unknown): string {
 
 /**
  * Use this at API and relationship callers that are outside a sync job. It
- * creates a one-candidate comparison cycle when necessary, so direct writes
- * cannot bypass route evidence or the token-qualified dispatch CAS.
+ * creates a one-candidate write cycle so direct writes cannot bypass NodeID
+ * route resolution or the token-qualified dispatch CAS.
  */
 export async function executeFencedGitHubTaskMutation<T>(options: {
   connectorInstanceId: string;
@@ -1433,42 +1294,16 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
     db,
     options.connectorInstanceId,
   );
-  if (snapshot.effectiveMode === 'legacy') return options.write();
   const cycleId = beginGitHubWriteCycle({
     connectorInstanceId: options.connectorInstanceId,
     modeSnapshot: snapshot,
     pendingCandidateCount: 1,
   });
-  let runtime: GitHubIdentityComparisonRuntime | undefined;
-  try {
-    runtime = new GitHubIdentityComparisonRuntime({
-      connectorInstanceId: options.connectorInstanceId,
-      modeSnapshot: snapshot,
-      syncKind: 'incremental',
-    });
-    attachGitHubWriteCycleComparisonRun(
-      cycleId,
-      options.connectorInstanceId,
-      snapshot,
-      runtime.runId,
-    );
-  } catch (error) {
-    completeGitHubWriteCycleScope({
-      cycleId,
-      runtime,
-      runtimeState: 'cancelled',
-      runtimeReason: 'write_cycle_attach_failed',
-      outcome: {
-        observed: 0,
-        applied: 0,
-        blocked: 1,
-        failed: 0,
-        unknown: 0,
-      },
-      primaryFailure: { error },
-    });
-    throw error;
-  }
+  const runtime = new GitHubStableIdentityRuntime({
+    connectorInstanceId: options.connectorInstanceId,
+    modeSnapshot: snapshot,
+    syncKind: 'incremental',
+  });
   let dispatched = false;
   let observed = false;
   let outcome: 'succeeded' | 'failed' | 'unknown' | 'blocked' = 'failed';
@@ -1479,7 +1314,7 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
       connectorInstanceId: options.connectorInstanceId,
       taskId: options.taskId,
       operation: options.operation,
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
       targetSourceListId: options.targetSourceListId,
       participantTaskIds: options.participantTaskIds,
@@ -1554,42 +1389,16 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
 }): Promise<T> {
   if (options.connector.type !== 'github-issues') return options.write();
   const snapshot = getGitHubIdentityModeSnapshotInTransaction(db, options.connectorInstanceId);
-  if (snapshot.effectiveMode === 'legacy') return options.write();
   const cycleId = beginGitHubWriteCycle({
     connectorInstanceId: options.connectorInstanceId,
     modeSnapshot: snapshot,
     pendingCandidateCount: 1,
   });
-  let runtime: GitHubIdentityComparisonRuntime | undefined;
-  try {
-    runtime = new GitHubIdentityComparisonRuntime({
-      connectorInstanceId: options.connectorInstanceId,
-      modeSnapshot: snapshot,
-      syncKind: 'incremental',
-    });
-    attachGitHubWriteCycleComparisonRun(
-      cycleId,
-      options.connectorInstanceId,
-      snapshot,
-      runtime.runId,
-    );
-  } catch (error) {
-    completeGitHubWriteCycleScope({
-      cycleId,
-      runtime,
-      runtimeState: 'cancelled',
-      runtimeReason: 'write_cycle_attach_failed',
-      outcome: {
-        observed: 0,
-        applied: 0,
-        blocked: 1,
-        failed: 0,
-        unknown: 0,
-      },
-      primaryFailure: { error },
-    });
-    throw error;
-  }
+  const runtime = new GitHubStableIdentityRuntime({
+    connectorInstanceId: options.connectorInstanceId,
+    modeSnapshot: snapshot,
+    syncKind: 'incremental',
+  });
   let authorization: GitHubWriteAuthorization | undefined;
   let dispatched = false;
   let observed = false;
@@ -1600,7 +1409,7 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
       connectorInstanceId: options.connectorInstanceId,
       sourceListId: options.sourceListId,
       operation: options.operation,
-      comparisonRuntime: runtime,
+      identityRuntime: runtime,
       writeCycleId: cycleId,
     });
     observed = true;

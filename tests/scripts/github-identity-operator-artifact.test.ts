@@ -43,25 +43,6 @@ beforeAll(async () => {
     phase: 'backfilling',
     updatedAt: now,
   }).run();
-  db.insert(schema.githubIdentityComparisonRuns).values({
-    id: 'artifact-empty-failure',
-    connectorInstanceId: 'operator-artifact',
-    identityMode: 'comparison',
-    identityModeRevision: 4,
-    syncKind: 'incremental',
-    state: 'failed',
-    evidenceEligible: false,
-    ownerId: 'runtime:artifact-owner',
-    ownerTokenDigest: 'a'.repeat(64),
-    ownerHeartbeatAt: '2026-08-10T10:00:00.000Z',
-    ownerLeaseExpiresAt: '2026-08-10T10:15:00.000Z',
-    interruptionState: 'unresolved',
-    interruptionSurface: 'comparison',
-    interruptedAt: now,
-    interruptionReason: 'artifact_test_failure',
-    startedAt: now,
-    completedAt: now,
-  }).run();
   sqlite.close();
   const build = spawnSync(process.execPath, ['scripts/build-github-identity-operator.mjs'], {
     cwd: process.cwd(),
@@ -84,104 +65,59 @@ describe('production GitHub identity operator artifact', () => {
 
     const help = runOperator('--help');
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain('stable-enable');
-    expect(help.stdout).toContain('stable-rollback');
+    expect(help.stdout).toContain('status');
     expect(help.stdout).toContain('write-cycle-reconcile');
     expect(help.stdout).toContain('write-outcome-inspect');
     expect(help.stdout).toContain('write-outcome-resolve');
-    expect(help.stdout).toContain('comparison-cycle-reconcile');
     expect(help.stdout).toContain('transfer-reconcile');
     expect(help.stdout).toContain('--successor-local-id');
     expect(help.stdout).toContain('--confirm-pre-dispatch');
     expect(help.stdout).toContain('--confirm-owner-stopped');
     expect(help.stdout).toContain('--confirm-authoritative-deletion');
-    expect(help.stdout).toContain('--confirm-no-write');
+    // The cutover is permanent: no mode, rollback, or comparison commands exist.
+    expect(help.stdout).not.toContain('stable-enable');
+    expect(help.stdout).not.toContain('stable-rollback');
+    expect(help.stdout).not.toContain('observe-enable');
+    expect(help.stdout).not.toContain('comparison-cycle-reconcile');
 
     const status = runOperator('status', '--connector', 'operator-artifact');
     expect(status.status, status.stderr).toBe(0);
     expect(JSON.parse(status.stdout)).toMatchObject({
-      mode: {
-        effectiveMode: 'legacy',
-        stablePrimaryEnabled: false,
-      },
-      stageTwo: { eligible: false },
+      connectorInstanceId: 'operator-artifact',
+      identity: { model: 'github_node_id', permanent: true, effectiveMode: 'stable' },
     });
     expect(status.stdout).not.toContain('operator-secret');
-
-    const enabled = runOperator(
-      'observe-enable',
-      '--connector', 'operator-artifact',
-      '--revision', '0',
-      '--actor', 'artifact-test',
-      '--reason', 'Stage 1 test gate passed',
-      '--idempotency-key', 'artifact-enable-1',
-      '--stage-one-ready',
-    );
-    expect(enabled.status).toBe(0);
-    expect(JSON.parse(enabled.stdout)).toMatchObject({
-      snapshot: {
-        effectiveMode: 'comparison',
-        stablePrimaryEnabled: false,
-        modeRevision: 1,
-      },
-    });
-    const paused = runOperator(
-      'observe-pause',
-      '--connector', 'operator-artifact',
-      '--revision', '1',
-      '--actor', 'artifact-test',
-      '--reason', 'Pause comparison test',
-      '--idempotency-key', 'artifact-pause-1',
-    );
-    expect(paused.status).toBe(0);
-    expect(JSON.parse(paused.stdout)).toMatchObject({
-      snapshot: { effectiveMode: 'legacy', modeRevision: 2 },
-    });
-    const resumed = runOperator(
-      'observe-enable',
-      '--connector', 'operator-artifact',
-      '--revision', '2',
-      '--actor', 'artifact-test',
-      '--reason', 'Resume comparison test',
-      '--idempotency-key', 'artifact-enable-2',
-      '--stage-one-ready',
-    );
-    expect(resumed.status).toBe(0);
-    expect(JSON.parse(resumed.stdout)).toMatchObject({
-      snapshot: {
-        effectiveMode: 'comparison',
-        stablePrimaryEnabled: false,
-        modeRevision: 4,
-      },
-    });
   });
 
-  it('exposes stable-primary only through the authoritative eligibility command', () => {
-    const result = runOperator(
+  it('rejects removed mode and rollback commands', () => {
+    for (const command of [
       'stable-enable',
-      '--connector', 'operator-artifact',
-      '--revision', '4',
-      '--actor', 'artifact-test',
-      '--reason', 'Attempt without Stage 2 evidence',
-      '--idempotency-key', 'artifact-stable-blocked',
-    );
-    expect(result.status).toBe(3);
-    expect(result.stderr).toContain('gate_failed');
+      'stable-rollback',
+      'rollback-reenter',
+      'observe-enable',
+      'observe-pause',
+      'comparison-cycle-reconcile',
+      'evidence',
+    ]) {
+      const result = runOperator(command, '--connector', 'operator-artifact');
+      expect(result.status, command).toBe(2);
+      expect(result.stderr).toContain('Unsupported command');
+    }
   });
 
-  it('requires paired post-backfill proof options before mutation', () => {
+  it('rejects authoritative-deletion confirmation when revoking an exception', () => {
     const result = runOperator(
-      'exception-accept',
+      'exception-revoke',
       '--connector', 'operator-artifact',
       '--local-id', 'task-1',
       '--actor', 'artifact-test',
       '--reason', 'Unconfirmed deletion',
       '--idempotency-key', 'artifact-exception-1',
-      '--comparison-run', 'comparison-run-1',
+      '--confirm-authoritative-deletion',
     );
     expect(result.status).toBe(2);
     expect(result.stderr).toContain(
-      'both --comparison-run and --confirm-authoritative-deletion',
+      '--confirm-authoritative-deletion is valid only for exception-accept',
     );
   });
 
@@ -260,42 +196,8 @@ describe('production GitHub identity operator artifact', () => {
     );
     expect(result.status).toBe(2);
     expect(result.stderr).toContain(
-      '--confirm-owner-stopped is not valid for write-outcome-inspect',
+      'Confirmation flags are not valid for write-outcome-inspect',
     );
-  });
-
-  it('requires an explicit comparison-cycle reconciliation action', () => {
-    const result = runOperator(
-      'comparison-cycle-reconcile',
-      '--connector', 'operator-artifact',
-      '--run', 'interrupted-run',
-      '--revision', '4',
-      '--actor', 'artifact-test',
-      '--reason', 'Review interrupted comparison lineage',
-      '--idempotency-key', 'artifact-comparison-reconciliation',
-    );
-    expect(result.status).toBe(3);
-    expect(result.stderr).toContain('requires exactly one reconciliation confirmation');
-  });
-
-  it('ships the audited current-revision no-write reconciliation path', () => {
-    const result = runOperator(
-      'comparison-cycle-reconcile',
-      '--connector', 'operator-artifact',
-      '--run', 'artifact-empty-failure',
-      '--revision', '4',
-      '--actor', 'artifact-test',
-      '--reason', 'Confirmed empty interrupted artifact run after owner expiry',
-      '--idempotency-key', 'artifact-empty-failure-resolution',
-      '--confirm-no-write',
-    );
-    expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toEqual({
-      changed: true,
-      runId: 'artifact-empty-failure',
-      state: 'resolved',
-      successorRunId: null,
-    });
   });
 });
 

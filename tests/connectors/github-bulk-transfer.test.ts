@@ -69,19 +69,7 @@ describe('GitHub bulk issue transfer', () => {
   it('excludes a cancelled task with durable authoritative deletion evidence', async () => {
     const seeded = seedConnector('bulk-authoritative-deletion');
     const deletedTaskId = addBoundTask(seeded, 1996, 'cancelled');
-    const proofRunId = addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
-
-    database.default.insert(schema.githubIdentityComparisonRuns).values({
-      id: `${proofRunId}-soak`,
-      connectorInstanceId: seeded.connectorId,
-      identityMode: 'stable',
-      identityModeRevision: 5,
-      syncKind: 'full',
-      state: 'succeeded',
-      evidenceEligible: true,
-      startedAt: now.toISOString(),
-      completedAt: now.toISOString(),
-    }).run();
+    addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
 
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
       remote: createRemote(seeded),
@@ -100,7 +88,6 @@ describe('GitHub bulk issue transfer', () => {
     const seeded = seedConnector('bulk-unproven-deletions');
     const cancelledTaskId = addBoundTask(seeded, 1996, 'cancelled');
     const liveTaskId = addBoundTask(seeded, 1997, 'todo');
-    addAuthoritativeDeletionProof(seeded.connectorId, cancelledTaskId);
 
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
       remote: createRemote(seeded),
@@ -119,21 +106,20 @@ describe('GitHub bulk issue transfer', () => {
     ]));
   });
 
-  it('rejects a soak started before deletion acceptance even if it completed afterward', async () => {
-    const seeded = seedConnector('bulk-pre-acceptance-soak');
+  it('rejects a revoked deletion exception as authoritative evidence', async () => {
+    const seeded = seedConnector('bulk-revoked-deletion');
     const deletedTaskId = addBoundTask(seeded, 1996, 'cancelled');
-    const proofRunId = addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
-
-    database.default.insert(schema.githubIdentityComparisonRuns).values({
-      id: `${proofRunId}-pre-acceptance-soak`,
+    addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
+    database.default.insert(schema.githubIdentityExceptionEvents).values({
       connectorInstanceId: seeded.connectorId,
-      identityMode: 'stable',
-      identityModeRevision: 5,
-      syncKind: 'full',
-      state: 'succeeded',
-      evidenceEligible: true,
-      startedAt: new Date(now.getTime() - 60_000).toISOString(),
-      completedAt: new Date(now.getTime() + 60_000).toISOString(),
+      bindingType: 'task',
+      localId: deletedTaskId,
+      category: 'terminal_inaccessible',
+      action: 'revoke',
+      idempotencyKey: `${deletedTaskId}-revoked`,
+      actor: 'test-operator',
+      reason: 'Deletion could not be independently confirmed',
+      createdAt: new Date(now.getTime() + 60_000).toISOString(),
     }).run();
 
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
@@ -157,11 +143,10 @@ describe('GitHub bulk issue transfer', () => {
     database.default.insert(schema.githubIdentityWriteCycles).values({
       id: 'bulk-completed-write-cycle-evidence',
       connectorInstanceId: seeded.connectorId,
-      effectiveMode: 'comparison',
       modeRevision: 4,
       pendingCandidateCount: 1,
       observedRouteCount: 1,
-      legacyAppliedCount: 1,
+      appliedCount: 1,
       state: 'completed',
       startedAt: now.toISOString(),
       completedAt: now.toISOString(),
@@ -712,25 +697,6 @@ describe('GitHub bulk issue transfer', () => {
       targetNumber: 101,
       actor: 'incident-operator',
     }, { remote, now: () => now })).rejects.toThrow('explicit successor authorization');
-    database.default.update(schema.githubIdentityControls).set({
-      stablePrimaryEnabled: false,
-    }).where(eq(
-      schema.githubIdentityControls.connectorInstanceId,
-      seeded.connectorId,
-    )).run();
-    await expect(service.reconcileGitHubBulkTransferItem({
-      runId: run.id,
-      taskId: seeded.taskIds[0],
-      targetNumber: 101,
-      actor: 'incident-operator',
-      successorAuthorization: authorization,
-    }, { remote, now: () => now })).rejects.toThrow('requires stable-primary mode');
-    database.default.update(schema.githubIdentityControls).set({
-      stablePrimaryEnabled: true,
-    }).where(eq(
-      schema.githubIdentityControls.connectorInstanceId,
-      seeded.connectorId,
-    )).run();
     const dispatchAccepted = database.default.select()
       .from(schema.githubBulkTransferEvents).where(eq(
         schema.githubBulkTransferEvents.eventType,
@@ -894,7 +860,7 @@ describe('GitHub bulk issue transfer', () => {
         101,
         `S_I_${seeded.connectorId}_1`,
       ),
-    }], 'stable_primary');
+    }]);
 
     await expect(service.executeGitHubBulkTransfer({
       ...common,
@@ -1073,12 +1039,11 @@ function seedConnector(connectorId: string) {
   }).run();
   database.default.insert(schema.githubIdentityMigrations).values({
     connectorInstanceId: connectorId,
-    phase: 'stable_primary',
+    phase: 'complete',
     updatedAt: now.toISOString(),
   }).run();
   database.default.insert(schema.githubIdentityControls).values({
     connectorInstanceId: connectorId,
-    stablePrimaryEnabled: true,
     modeRevision: 5,
     updatedAt: now.toISOString(),
   }).run();
@@ -1141,7 +1106,7 @@ function seedConnector(connectorId: string) {
       },
       evidence: issueEvidence(connectorId, 'source', index + 1, `I_${connectorId}_${index + 1}`),
     })),
-  ], 'stable_primary');
+  ]);
   return { connectorId, taskIds };
 }
 
@@ -1179,36 +1144,19 @@ function addBoundTask(
       issueNumber,
       `I_${seeded.connectorId}_${issueNumber}`,
     ),
-  }], 'stable_primary');
+  }]);
   return taskId;
 }
 
 function addAuthoritativeDeletionProof(connectorId: string, taskId: string): string {
-  const proofRunId = `${taskId}-proof`;
-  database.default.insert(schema.githubIdentityComparisonRuns).values({
-    id: proofRunId,
+  database.default.insert(schema.githubIdentityBackfillItems).values({
     connectorInstanceId: connectorId,
-    identityMode: 'stable',
-    identityModeRevision: 5,
-    syncKind: 'full',
-    state: 'succeeded',
-    evidenceEligible: false,
-    startedAt: now.toISOString(),
-    completedAt: now.toISOString(),
-  }).run();
-  database.default.insert(schema.githubIdentityComparisonRecords).values({
-    id: `${proofRunId}-record`,
-    runId: proofRunId,
-    surface: 'deletion',
-    candidateKey: `${proofRunId}-candidate`,
-    localTaskId: taskId,
-    legacySelectedLocalId: taskId,
-    legacyAction: 'delete_candidate',
-    stableAction: 'none',
-    outcome: 'inaccessible',
-    reason: 'access_denied',
-    createdAt: now.toISOString(),
-  }).run();
+    bindingType: 'task',
+    localId: taskId,
+    state: 'bound',
+    observedAt: now.toISOString(),
+    updatedAt: now.toISOString(),
+  }).onConflictDoNothing().run();
   database.default.insert(schema.githubIdentityExceptionEvents).values({
     connectorInstanceId: connectorId,
     bindingType: 'task',
@@ -1219,10 +1167,9 @@ function addAuthoritativeDeletionProof(connectorId: string, taskId: string): str
     actor: 'test-operator',
     reason: 'Independently verified authoritative GitHub deletion',
     proofType: 'post_backfill_authoritative_deletion',
-    comparisonRunId: proofRunId,
     createdAt: now.toISOString(),
   }).run();
-  return proofRunId;
+  return `${taskId}-proof`;
 }
 
 function createRemote(

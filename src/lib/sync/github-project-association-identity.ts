@@ -1,6 +1,6 @@
 import type {
   ExternalIdentityEvidence,
-  GitHubIdentityComparisonRuntime,
+  GitHubStableIdentityRuntime,
   GitHubIdentityResolutionDecision,
 } from '@/lib/external-identities';
 import { digestExternalIdentifier } from '@/lib/external-identities/identifier-digest';
@@ -26,8 +26,8 @@ export interface GitHubProjectAssociationIdentityResult {
   blockedStableProjects: ReadonlySet<number>;
 }
 
-export function compareGitHubProjectAssociations(
-  runtime: GitHubIdentityComparisonRuntime,
+export function resolveGitHubProjectAssociations(
+  runtime: GitHubStableIdentityRuntime,
   associations: readonly GitHubProjectAssociationIdentityInput[],
   localTasks: readonly GitHubProjectAssociationLocalTask[],
 ): GitHubProjectAssociationIdentityResult {
@@ -49,16 +49,16 @@ export function compareGitHubProjectAssociations(
       projectByCandidateKey.set(candidateKey, association.project.number);
       return {
         candidateKey,
-        legacySelectedLocalIds: localId ? [localId] : [],
-        legacyAction: localId ? 'present' as const : 'none' as const,
+        locatorMatchedLocalIds: localId ? [localId] : [],
+        boundAction: 'present' as const,
+        unboundAction: 'none' as const,
         applicableStableLocalIds,
-        unmatchedStableAction: 'none' as const,
         evidence: associationEvidenceBySourceId.get(sourceId),
         localTaskId: localId,
       };
     });
   });
-  const decisions = runtime.observeDeduplicatedBatch(
+  const decisions = runtime.resolveDeduplicatedBatch(
     'project_association',
     'task',
     candidates,
@@ -66,22 +66,20 @@ export function compareGitHubProjectAssociations(
   const stableProjectTaskIds = new Map<number, Set<string>>();
   const blockedStableProjects = new Set<number>();
 
-  if (runtime.modeSnapshot.effectiveMode === 'stable') {
-    for (const decision of decisions) {
-      const projectNumber = projectByCandidateKey.get(decision.candidateKey);
-      if (projectNumber === undefined) {
-        throw new Error(`GitHub project association decision has no project scope: ${
-          decision.candidateKey
-        }`);
-      }
-      if (decision.appliedSource !== 'stable' || !decision.selectedLocalId) {
-        blockedStableProjects.add(projectNumber);
-        continue;
-      }
-      const selected = stableProjectTaskIds.get(projectNumber) ?? new Set<string>();
-      selected.add(decision.selectedLocalId);
-      stableProjectTaskIds.set(projectNumber, selected);
+  for (const decision of decisions) {
+    const projectNumber = projectByCandidateKey.get(decision.candidateKey);
+    if (projectNumber === undefined) {
+      throw new Error(`GitHub project association decision has no project scope: ${
+        decision.candidateKey
+      }`);
     }
+    if (decision.appliedSource !== 'stable' || !decision.selectedLocalId) {
+      blockedStableProjects.add(projectNumber);
+      continue;
+    }
+    const selected = stableProjectTaskIds.get(projectNumber) ?? new Set<string>();
+    selected.add(decision.selectedLocalId);
+    stableProjectTaskIds.set(projectNumber, selected);
   }
 
   return {

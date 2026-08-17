@@ -537,11 +537,7 @@ function validateGitHubRecoveryFence(
     return 'missing_snapshot_identity';
   }
   const mode = getGitHubIdentityModeSnapshotInTransaction(tx, snapshot.connectorId);
-  if (
-    mode.effectiveMode !== snapshot.identityMode
-    || mode.modeRevision !== snapshot.identityModeRevision
-    || mode.stablePrimaryEnabled !== (snapshot.identityMode === 'stable')
-  ) return 'stale_mode_revision';
+  if (mode.modeRevision !== snapshot.identityModeRevision) return 'stale_mode_revision';
   const binding = tx.select().from(externalEntityBindings).where(and(
     eq(externalEntityBindings.connectorInstanceId, snapshot.connectorId),
     eq(externalEntityBindings.bindingType, 'task'),
@@ -574,10 +570,9 @@ function validateGitHubRecoveryFence(
   return activeLease ? 'active_or_unknown_write_lease' : null;
 }
 
-function isFencedGitHubRecovery(
-  mode: string | null,
-): mode is 'comparison' | 'stable' {
-  return mode === 'comparison' || mode === 'stable';
+/** Snapshots captured before the permanent cutover may carry historical modes. */
+function isFencedGitHubRecovery(mode: string | null): boolean {
+  return mode !== null && mode !== 'legacy';
 }
 
 function quarantineSnapshot(snapshotId: string, reason: string): void {

@@ -367,7 +367,7 @@ describe('pull-manager bulk import detection', () => {
       expect.any(Array),
       expect.any(Array),
       expect.objectContaining({
-        identityComparison: undefined,
+        identityRuntime: undefined,
         inaccessibleSourceListIds: expect.any(Set),
       }),
     );

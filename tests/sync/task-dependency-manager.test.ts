@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
 import type { SourceTaskDependency } from '@/types';
+import { bindGitHubTaskIdentities, githubIssueEvidence, mirrorFenceTargets } from '../fixtures/github-node-identity';
 
 describe('task dependency reconciliation', () => {
   beforeAll(() => {
@@ -11,7 +12,7 @@ describe('task dependency reconciliation', () => {
   });
 
   it('imports, retries, removes, and preserves dependencies by provenance', async () => {
-    const [{ default: db }, schema, manager, { eq }] = await Promise.all([
+    const [{ default: db, sqlite }, schema, manager, { eq }] = await Promise.all([
       import('@/db'),
       import('@/db/schema'),
       import('@/lib/sync/task-dependency-manager'),
@@ -53,6 +54,16 @@ describe('task dependency reconciliation', () => {
       lastSyncedAt: '2026-07-30T00:00:00.000Z',
     }));
     await db.insert(tasks).values(taskRows);
+    // GitHub identity is permanently NodeID-only: without bound stable identity
+    // nothing here resolves, and `source_id` alone is never sufficient.
+    bindGitHubTaskIdentities(sqlite, 'github-1', taskRows.map((task, index) => ({
+      taskId: task.id,
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: index + 1,
+      issueStableId: `I_kwDOissue${index + 1}`,
+      repositoryStableId: 'R_kgDOacmeapp',
+    })));
     const connectorTaskQuery = db.select({ id: tasks.id }).from(tasks).where(
       eq(tasks.connectorInstanceId, 'github-1'),
     );
@@ -62,9 +73,17 @@ describe('task dependency reconciliation', () => {
       blockerSourceId: 'acme/app:1',
       blockedSourceId: 'acme/app:2',
     }];
+    // `source_id` is only a locator, so every endpoint must also carry NodeID
+    // evidence for the stable-only resolver to accept it.
+    const evidenceFor = (sourceId: string) => githubIssueEvidence({
+      issueStableId: `I_kwDOissue${sourceId.split(':')[1]}`,
+      repositoryStableId: 'R_kgDOacmeapp',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: Number(sourceId.split(':')[1]),
+    });
     let completeBlockedSourceIds = taskRows.map((task) => task.sourceId);
-    let failAdds = false;
-    let failRemoves = false;
+    let failWrites = false;
     let failSnapshot = false;
     let snapshotCalls = 0;
     const connector: IConnector = {
@@ -95,20 +114,32 @@ describe('task dependency reconciliation', () => {
         snapshotCalls++;
         if (failSnapshot) throw new Error('snapshot failed');
         return {
-          dependencies: [...remoteEdges],
+          dependencies: remoteEdges.map((edge) => ({
+            ...edge,
+            blockerIdentityEvidence: evidenceFor(edge.blockerSourceId),
+            blockerIdentityEvidenceState: 'verified' as const,
+          })),
           completeBlockedSourceIds: [...completeBlockedSourceIds],
+          blockedIdentityEvidence: completeBlockedSourceIds.map((sourceId) => ({
+            sourceId,
+            evidence: evidenceFor(sourceId),
+            state: 'verified' as const,
+          })),
         };
       },
       addTaskDependency: async (blockerSourceId, blockedSourceId) => {
-        if (failAdds) throw new Error('add denied');
         remoteEdges.push({ blockerSourceId, blockedSourceId });
       },
       removeTaskDependency: async (blockerSourceId, blockedSourceId) => {
-        if (failRemoves) throw new Error('remove denied');
         remoteEdges = remoteEdges.filter((edge) =>
           edge.blockerSourceId !== blockerSourceId
           || edge.blockedSourceId !== blockedSourceId);
       },
+      preflightWriteRoute: async (route) => {
+        if (failWrites) throw new Error('write denied');
+        return { targets: mirrorFenceTargets(sqlite, route.leaseId) };
+      },
+      runAuthorizedWrite: async (_route, write) => write(),
     };
 
     const imported = await manager.reconcileTaskDependencies(
@@ -197,16 +228,14 @@ describe('task dependency reconciliation', () => {
       blockerSourceId: 'acme/app:2',
       blockedSourceId: 'acme/app:3',
     }];
-    failAdds = true;
-    failRemoves = true;
+    failWrites = true;
     const failed = await manager.reconcileTaskDependencies('github-1', connector);
     expect(failed.failed).toBe(2);
     expect(await db.select().from(taskDependencies).where(
       eq(taskDependencies.syncStatus, 'failed'),
     )).toHaveLength(2);
 
-    failAdds = false;
-    failRemoves = false;
+    failWrites = false;
     const retried = await manager.reconcileTaskDependencies('github-1', connector);
     expect(retried.pushed).toBe(2);
     const [created] = await db.select().from(taskDependencies).where(
@@ -336,6 +365,10 @@ describe('task dependency reconciliation', () => {
     registeredConnector.addTaskDependency = async () => {
       addCalls++;
     };
+    registeredConnector.preflightWriteRoute = async (route) => ({
+      targets: mirrorFenceTargets(sqlite, route.leaseId),
+    });
+    registeredConnector.runAuthorizedWrite = async (_route, write) => write();
     await db.insert(taskDependencies).values({
       id: 'create-delete-race',
       taskId: 'task-2',

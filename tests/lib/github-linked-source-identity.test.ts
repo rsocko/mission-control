@@ -26,8 +26,8 @@ beforeAll(async () => {
     connector('github-b'),
   ]).run();
   database.default.insert(schema.githubIdentityMigrations).values([
-    { connectorInstanceId: 'github-a', phase: 'comparing', updatedAt: now },
-    { connectorInstanceId: 'github-b', phase: 'comparing', updatedAt: now },
+    { connectorInstanceId: 'github-a', phase: 'complete', updatedAt: now },
+    { connectorInstanceId: 'github-b', phase: 'complete', updatedAt: now },
   ]).run();
   database.default.insert(schema.githubIdentityControls).values([
     control('github-a'),
@@ -52,7 +52,7 @@ describe('GitHub linked-source stable identity', () => {
       linkedSourceId: 'linked-1',
       sourceId: 'owner/repo:1',
       evidence,
-    }], 'comparing')).toEqual([{
+    }])).toEqual([{
       linkedSourceId: 'linked-1',
       state: 'associated',
     }]);
@@ -60,7 +60,7 @@ describe('GitHub linked-source stable identity', () => {
       linkedSourceId: 'linked-1',
       sourceId: 'owner/repo:1',
       evidence,
-    }], 'comparing')).toEqual([{
+    }])).toEqual([{
       linkedSourceId: 'linked-1',
       state: 'associated',
     }]);
@@ -103,12 +103,12 @@ describe('GitHub linked-source stable identity', () => {
       linkedSourceId: 'linked-2',
       sourceId: 'owner/repo:1',
       evidence: githubEvidence,
-    }], 'comparing')[0].state).toBe('associated');
+    }])[0].state).toBe('associated');
     expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-3',
       sourceId: 'owner/repo:101',
       evidence: enterpriseEvidence,
-    }], 'comparing')[0].state).toBe('associated');
+    }])[0].state).toBe('associated');
 
     addTask('github-primary-duplicate', 'github-a', 'owner/duplicate:2');
     addTask('local-task-duplicate-a', 'local', 'local:duplicate-a');
@@ -132,12 +132,12 @@ describe('GitHub linked-source stable identity', () => {
       linkedSourceId: 'linked-duplicate-a',
       sourceId: 'owner/duplicate:2',
       evidence: duplicateEvidence,
-    }], 'comparing')[0].state).toBe('associated');
+    }])[0].state).toBe('associated');
     expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-4',
       sourceId: 'Owner/Duplicate:2',
       evidence: duplicateEvidence,
-    }], 'comparing')[0].state).toBe('collision');
+    }])[0].state).toBe('collision');
     expect(database.default.select().from(schema.taskLinkedSourceEntities).where(and(
       eq(schema.taskLinkedSourceEntities.connectorInstanceId, 'github-a'),
       eq(schema.taskLinkedSourceEntities.linkedSourceId, 'linked-4'),
@@ -145,16 +145,16 @@ describe('GitHub linked-source stable identity', () => {
   });
 
   it.each([
-    ['missing', 'legacy_fallback'],
+    ['missing', 'missing_stable_id'],
     ['partial', 'partial_fetch'],
     ['inaccessible', 'inaccessible'],
-  ] as const)('classifies %s evidence without mutating the legacy relationship', (state, outcome) => {
-    const runtime = new identity.GitHubIdentityComparisonRuntime({
+  ] as const)('blocks on %s evidence without mutating the linked-source locator', (state, outcome) => {
+    const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    const decision = runtime.observeLinkedSourceBatch([{
+    const decision = runtime.resolveLinkedSourceBatch([{
       candidateKey: `linked:${state}`,
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
@@ -165,28 +165,25 @@ describe('GitHub linked-source stable identity', () => {
 
     expect(decision).toMatchObject({
       outcome,
-      appliedSource: 'legacy',
-      selectedLocalId: 'local-task-1',
-      selectedAction: 'present',
+      appliedSource: 'blocked',
+      selectedLocalId: null,
+      selectedAction: 'none',
     });
     expect(database.default.select().from(schema.taskLinkedSources)
       .where(eq(schema.taskLinkedSources.id, 'linked-1')).get()).toMatchObject({
       taskId: 'local-task-1',
       sourceId: 'owner/repo:1',
     });
-    expect(database.default.select().from(schema.githubIdentityComparisonRuns)
-      .where(eq(schema.githubIdentityComparisonRuns.id, runtime.runId)).get())
-      .toMatchObject({ evidenceEligible: false });
   });
 
   it('detects locator change and path replacement without rebinding', () => {
     const renamedEvidence = issueEvidence('I_1', 'R_1', 'new-owner', 'new-repo', 1);
-    const locatorRuntime = new identity.GitHubIdentityComparisonRuntime({
+    const locatorRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    expect(locatorRuntime.observeLinkedSourceBatch([{
+    expect(locatorRuntime.resolveLinkedSourceBatch([{
       candidateKey: 'linked:locator-change',
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
@@ -207,12 +204,12 @@ describe('GitHub linked-source stable identity', () => {
       },
       observedAt: now,
     });
-    const replacementRuntime = new identity.GitHubIdentityComparisonRuntime({
+    const replacementRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    expect(replacementRuntime.observeLinkedSourceBatch([{
+    expect(replacementRuntime.resolveLinkedSourceBatch([{
       candidateKey: 'linked:path-reuse',
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
@@ -220,8 +217,8 @@ describe('GitHub linked-source stable identity', () => {
       evidence: issueEvidence('I_replacement', 'R_1', 'owner', 'repo', 1),
     }])[0]).toMatchObject({
       outcome: 'path_reuse',
-      appliedSource: 'legacy',
-      selectedLocalId: 'local-task-1',
+      appliedSource: 'blocked',
+      selectedLocalId: null,
     });
     replacementRuntime.complete('succeeded');
     expect(database.default.select().from(schema.taskLinkedSourceEntities)
@@ -280,7 +277,6 @@ function connector(id: string) {
 function control(connectorInstanceId: string) {
   return {
     connectorInstanceId,
-    stablePrimaryEnabled: false,
     modeRevision: 1,
     updatedAt: now,
   };
@@ -333,7 +329,7 @@ function persistPrimary(
       legacyIdentity: `${evidence.entity.locator.owner}/${evidence.entity.locator.repository}:${evidence.entity.locator.issueNumber}`,
     },
     evidence,
-  }], 'comparing');
+  }]);
 }
 
 function issueEvidence(

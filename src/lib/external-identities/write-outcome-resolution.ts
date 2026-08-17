@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'crypto';
 import db, { runTransaction, sqlite } from '@/db';
-import { getGitHubIdentityModeSnapshotInTransaction } from './mode-control';
+import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
 
 const DEFAULT_INSPECTION_LIMIT = 20;
 const MAX_INSPECTION_LIMIT = 50;
@@ -81,9 +81,7 @@ interface PreparedResolution {
   operation: string;
   taskVersion: string;
   idempotencyKey: string;
-  effectiveMode: string;
   modeRevision: number;
-  comparisonRunId: string | null;
   leaseState: string;
   cycleOutcome: string | null;
   dispatchedAt: string | null;
@@ -107,9 +105,7 @@ interface CycleLeaseRow {
   cycleState: string;
   reconciliationState: string;
   jobId: string | null;
-  effectiveMode: string;
   modeRevision: number;
-  comparisonRunId: string | null;
   leaseId: string;
   taskId: string;
   operation: string;
@@ -143,7 +139,6 @@ export function inspectGitHubWriteOutcomes(options: {
   const rows = sqlite.prepare(`
     SELECT cycle.id AS cycleId,
       cycle.state AS cycleState,
-      cycle.effective_mode AS effectiveMode,
       cycle.mode_revision AS modeRevision,
       cycle.reconciliation_state AS reconciliationState,
       cycle.reconciliation_code AS reconciliationCode,
@@ -195,20 +190,6 @@ export function inspectGitHubWriteOutcomes(options: {
         ORDER BY role
         LIMIT 12
       `).all(row.leaseId) as Array<Record<string, unknown>>;
-      const comparisons = sqlite.prepare(`
-        SELECT record.id,
-          record.outcome,
-          record.reason,
-          record.created_at AS createdAt
-        FROM github_identity_comparison_records AS record
-        JOIN task_source_write_leases AS lease
-          ON lease.comparison_run_id = record.run_id
-        WHERE lease.id = ?
-          AND record.surface = 'write_route'
-          AND record.candidate_key LIKE '%:' || lease.id
-        ORDER BY record.created_at, record.id
-        LIMIT 4
-      `).all(row.leaseId) as Array<Record<string, unknown>>;
       const event = sqlite.prepare(`
         SELECT outcome,
           proof_kind AS proofKind,
@@ -235,7 +216,6 @@ export function inspectGitHubWriteOutcomes(options: {
         cycle: {
           id: row.cycleId,
           state: row.cycleState,
-          effectiveMode: row.effectiveMode,
           modeRevision: row.modeRevision,
           reconciliationState: row.reconciliationState,
           reconciliationCode: row.reconciliationCode,
@@ -263,10 +243,6 @@ export function inspectGitHubWriteOutcomes(options: {
           updatedAt: row.leaseUpdatedAt,
         },
         frozenTargets: targets,
-        comparisonEvidence: {
-          count: comparisons.length,
-          records: comparisons,
-        },
         resolutionSupport: support,
         resolution: event
           ? {
@@ -437,9 +413,7 @@ function prepareResolution(
         operation: row.operation,
         taskVersion: row.taskVersion,
         idempotencyKey: row.idempotencyKey,
-        effectiveMode: row.effectiveMode,
         modeRevision: row.modeRevision,
-        comparisonRunId: row.comparisonRunId,
         leaseState: row.leaseState,
         cycleOutcome: row.cycleOutcome,
         dispatchedAt: row.dispatchedAt,
@@ -535,9 +509,7 @@ function commitResolution(
       || row.operation !== prepared.operation
       || row.taskVersion !== prepared.taskVersion
       || row.idempotencyKey !== prepared.idempotencyKey
-      || row.effectiveMode !== prepared.effectiveMode
       || row.modeRevision !== prepared.modeRevision
-      || row.comparisonRunId !== prepared.comparisonRunId
       || row.leaseState !== prepared.leaseState
       || row.cycleOutcome !== prepared.cycleOutcome
     ) {
@@ -659,13 +631,11 @@ function finalizeCycleAfterResolution(
   state: 'resolved' | 'post_dispatch_retryable' | 'quarantined';
 } {
   const cycle = sqlite.prepare(`
-    SELECT pending_candidate_count AS pendingCandidateCount,
-      comparison_run_id AS comparisonRunId
+    SELECT pending_candidate_count AS pendingCandidateCount
     FROM github_identity_write_cycles
     WHERE connector_instance_id = ? AND id = ?
   `).get(command.connectorInstanceId, command.cycleId) as {
     pendingCandidateCount: number;
-    comparisonRunId: string | null;
   };
   const leases = sqlite.prepare(`
     SELECT id, state, cycle_outcome AS cycleOutcome, cycle_observed_at AS cycleObservedAt
@@ -678,13 +648,9 @@ function finalizeCycleAfterResolution(
     cycleOutcome: string | null;
     cycleObservedAt: string | null;
   }>;
-  const comparisonRecords = cycle.comparisonRunId
-    ? sqlite.prepare(`
-        SELECT candidate_key AS candidateKey
-        FROM github_identity_comparison_records
-        WHERE run_id = ? AND surface = 'write_route'
-      `).all(cycle.comparisonRunId) as Array<{ candidateKey: string }>
-    : [];
+  // Every lease that received a NodeID route carries `cycle_observed_at`, so
+  // the lease rows alone prove the cycle is durably accounted for.
+  const observedLeases = leases.filter((lease) => lease.cycleObservedAt !== null);
   const durable = leases.length <= cycle.pendingCandidateCount
     && leases.every((lease) =>
       ['succeeded', 'failed', 'blocked', 'expired'].includes(lease.state)
@@ -692,12 +658,7 @@ function finalizeCycleAfterResolution(
         lease.state === 'expired'
         || lease.cycleOutcome === lease.state
       ))
-    && comparisonRecords.length === leases.length
-    && comparisonRecords.every((record) =>
-      leases.some((lease) => record.candidateKey.endsWith(`:${lease.id}`)))
-    && leases.every((lease) =>
-      comparisonRecords.filter((record) =>
-        record.candidateKey.endsWith(`:${lease.id}`)).length === 1);
+    && observedLeases.length === leases.length;
   if (!durable) {
     sqlite.prepare(`
       UPDATE github_identity_write_cycles
@@ -715,7 +676,7 @@ function finalizeCycleAfterResolution(
   sqlite.prepare(`
     UPDATE github_identity_write_cycles
     SET observed_route_count = ?,
-        legacy_applied_count = ?,
+        applied_count = ?,
         blocked_count = ?,
         failed_count = ?,
         unknown_count = 0,
@@ -725,7 +686,7 @@ function finalizeCycleAfterResolution(
         completed_at = COALESCE(completed_at, ?)
     WHERE connector_instance_id = ? AND id = ?
   `).run(
-    comparisonRecords.length,
+    observedLeases.length,
     leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
     leases.filter((lease) => lease.cycleOutcome === 'blocked').length,
     failedCount,
@@ -754,11 +715,7 @@ function validateCurrentContext(
   if (mode.modeRevision !== command.expectedRevision) {
     return failure(command, 'revision_conflict', 'Connector mode revision changed');
   }
-  if (
-    row.modeRevision !== mode.modeRevision
-    || row.effectiveMode !== mode.effectiveMode
-    || mode.stablePrimaryEnabled !== (row.effectiveMode === 'stable')
-  ) {
+  if (row.modeRevision !== mode.modeRevision) {
     return failure(command, 'stale_cycle_context', 'Write cycle belongs to a different identity context');
   }
   if (immutableLocalSuccess) return null;
@@ -796,9 +753,7 @@ function loadCycleLease(
       cycle.state AS cycleState,
       cycle.reconciliation_state AS reconciliationState,
       cycle.job_id AS jobId,
-      cycle.effective_mode AS effectiveMode,
       cycle.mode_revision AS modeRevision,
-      cycle.comparison_run_id AS comparisonRunId,
       lease.id AS leaseId,
       lease.task_id AS taskId,
       lease.operation,
@@ -889,7 +844,6 @@ function interruptStoppedOwnerCycle(
     WHERE connector_instance_id = ?
       AND id = ?
       AND state = 'running'
-      AND effective_mode = ?
       AND mode_revision = ?
   `).run(
     now,
@@ -899,7 +853,6 @@ function interruptStoppedOwnerCycle(
     command.idempotencyKey,
     command.connectorInstanceId,
     command.cycleId,
-    row.effectiveMode,
     row.modeRevision,
   ).changes;
   if (changed !== 1) {

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { LayoutGroup } from 'motion/react';
 import * as Popover from '@radix-ui/react-popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
@@ -44,7 +45,10 @@ import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 
 import type { ComponentType } from 'react';
-import { NavigationRailIndicator } from '@/components/layout/NavigationBadge';
+import {
+  NavigationBadge,
+  NavigationPressureBar,
+} from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
 import {
   EMPTY_NAVIGATION_COUNTS,
@@ -249,65 +253,77 @@ export function NavRail({
 
       {/* Nav groups */}
       <div className="flex-1 flex flex-col py-2 gap-0.5">
-        {navGroups.map((group, groupIdx) => (
-          <div key={group.label} role="group" aria-label={group.label}>
-            {groupIdx > 0 && (
-              <div className="h-px bg-[var(--text-tertiary)]/20 my-2.5 mx-3" />
-            )}
-            {group.items.filter(isVisible).map((item) => {
-              const active = isActive(item.href);
-              const Icon = item.icon;
-              const badgeCount = item.badgeKey ? counts[item.badgeKey] : 0;
-              const badgeTone = item.badgeKey === 'notifications'
-                ? counts.notificationTone
-                : item.badgeTone;
-              const pulseBadge = item.badgeKey === 'notifications'
-                && counts.notificationTone === 'red';
-              return (
-                <Tooltip key={item.href} content={item.label} placement="right" disabled={expanded}>
-                  <Link
-                    href={item.href}
-                    aria-current={active ? 'page' : undefined}
-                    className={cn(
-                      'relative flex items-center h-10 mx-2 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]',
-                      active
-                        ? 'text-[var(--text-primary)] bg-[var(--surface-2)]'
-                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-                    )}
-                  >
-                    {/* Active indicator bar */}
-                    {active && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-sm bg-[var(--accent)]" />
-                    )}
-                    <span className="relative w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
-                      <Icon size={item.iconSize ?? 22} className={cn('flex-shrink-0', item.iconColor && (active ? item.iconColor.replace('400', '300') : item.iconColor))} />
-                    </span>
-                    <span className={cn(
-                      'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-                      expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
-                    )}>
-                      {item.label}
-                    </span>
-                    {preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
-                      <NavigationRailIndicator
-                        count={badgeCount}
-                        tone={badgeTone}
-                        expanded={expanded}
-                        pulse={pulseBadge}
-                      />
-                    )}
-                    {item.href === '/ai' && isAiActive && (
+        <LayoutGroup id="nav-rail-attention">
+          {navGroups.map((group, groupIdx) => (
+            <div key={group.label} role="group" aria-label={group.label}>
+              {groupIdx > 0 && (
+                <div className="h-px bg-[var(--text-tertiary)]/20 my-2.5 mx-3" />
+              )}
+              {group.items.filter(isVisible).map((item) => {
+                const active = isActive(item.href);
+                const Icon = item.icon;
+                const badgeCount = item.badgeKey ? counts[item.badgeKey] : 0;
+                const badgeTone = item.badgeKey === 'notifications'
+                  ? counts.notificationTone
+                  : item.badgeTone;
+                const pulseBadge = item.badgeKey === 'notifications'
+                  && counts.notificationTone === 'red';
+                return (
+                  <Tooltip key={item.href} content={item.label} placement="right" disabled={expanded}>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? 'page' : undefined}
+                      className={cn(
+                        'relative flex items-center h-10 mx-2 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]',
+                        active
+                          ? 'text-[var(--text-primary)] bg-[var(--surface-2)]'
+                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
+                      )}
+                    >
+                      {/* Active indicator bar */}
+                      {active && (
+                        <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-4 rounded-r-sm bg-[var(--accent)]" />
+                      )}
+                      <span className="relative w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
+                        <Icon size={item.iconSize ?? 22} className={cn('flex-shrink-0', item.iconColor && (active ? item.iconColor.replace('400', '300') : item.iconColor))} />
+                        {!expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                          <NavigationPressureBar
+                            count={badgeCount}
+                            tone={badgeTone}
+                            pulse={pulseBadge}
+                            morphId={item.badgeKey}
+                          />
+                        )}
+                      </span>
                       <span className={cn(
-                        'w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0',
-                        expanded ? 'ml-auto' : 'absolute -top-0.5 -right-0.5'
-                      )} />
-                    )}
-                  </Link>
-                </Tooltip>
-              );
-            })}
-          </div>
-        ))}
+                        'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                        expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
+                      )}>
+                        {item.label}
+                      </span>
+                      {expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                        <span className="ml-auto">
+                          <NavigationBadge
+                            count={badgeCount}
+                            tone={badgeTone}
+                            pulse={pulseBadge}
+                            morphId={item.badgeKey}
+                          />
+                        </span>
+                      )}
+                      {item.href === '/ai' && isAiActive && (
+                        <span className={cn(
+                          'w-2 h-2 rounded-full bg-blue-400 animate-pulse flex-shrink-0',
+                          expanded ? 'ml-auto' : 'absolute -top-0.5 -right-0.5'
+                        )} />
+                      )}
+                    </Link>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          ))}
+        </LayoutGroup>
       </div>
 
       {/* Bottom section: pin toggle + settings */}

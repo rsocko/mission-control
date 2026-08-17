@@ -12,6 +12,7 @@ import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edi
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { formatDueDate } from '@/lib/utils/date-format';
 
 interface CalmTask {
   id: string;
@@ -293,7 +294,7 @@ export function CalmMode() {
                         {task.dueDate && (
                           <span className="flex items-center gap-1 text-xs text-slate-600 flex-shrink-0">
                             <Calendar size={11} />
-                            {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            {formatDueDate(task.dueDate)}
                           </span>
                         )}
 

@@ -6,13 +6,18 @@ import {
   parseStoredTimestamp,
 } from '@/lib/utils/date';
 
+const mocks = vi.hoisted(() => ({
+  timezone: 'America/New_York',
+}));
+
 vi.mock('@/lib/mode', () => ({
-  getTimezone: () => 'America/New_York',
+  getTimezone: () => mocks.timezone,
 }));
 
 describe('configured timezone date helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.timezone = 'America/New_York';
   });
 
   it('formats UTC timestamps as dates in the configured timezone', () => {
@@ -23,6 +28,15 @@ describe('configured timezone date helpers', () => {
     expect(getLocalDateBoundsISO('2026-03-08')).toEqual({
       dayStart: '2026-03-08T05:00:00.000Z',
       nextDayStart: '2026-03-09T04:00:00.000Z',
+    });
+  });
+
+  it('supports local days longer than 25 hours during a DST rollback', () => {
+    mocks.timezone = 'Antarctica/Troll';
+
+    expect(getLocalDateBoundsISO('2026-10-25')).toEqual({
+      dayStart: '2026-10-24T22:00:00.000Z',
+      nextDayStart: '2026-10-26T00:00:00.000Z',
     });
   });
 

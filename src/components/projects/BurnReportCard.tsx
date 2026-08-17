@@ -22,6 +22,7 @@ import type {
   BurnReport,
   BurnReportMode,
 } from '@/lib/reports/burn-types';
+import { getLocalToday } from '@/lib/utils/client-date';
 
 type ReportView = 'burnup' | 'burndown' | 'status';
 type RangePreset = '30' | '90' | 'all' | 'custom';
@@ -120,7 +121,7 @@ export function BurnReportCard({
 }: BurnReportCardProps) {
   const titleId = useId();
   const descriptionId = useId();
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const today = useMemo(() => getLocalToday(), []);
   const [view, setView] = useState<ReportView>('burnup');
   const [mode, setMode] = useState<BurnReportMode>('count');
   const [lastBurnMode, setLastBurnMode] = useState<BurnReportMode>('count');

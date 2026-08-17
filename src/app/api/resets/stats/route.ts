@@ -1,10 +1,16 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, routines, routineCompletions, focusItems, energyCheckins } from '@/db/schema';
-import { sql, and, gte, lte, eq, not, inArray } from 'drizzle-orm';
-import { getLocalToday } from '@/lib/utils/date';
+import { and, gte, lte, eq, not, inArray } from 'drizzle-orm';
+import {
+  formatDateInLocalTimezone,
+  getLocalDateBoundsISO,
+  getLocalToday,
+  parseStoredTimestamp,
+} from '@/lib/utils/date';
 import logger from '@/lib/logger';
 import { resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
+import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 function formatDateLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -37,6 +43,12 @@ function getMonthEnd(dateStr: string): string {
 
 const STALE_THRESHOLD_DAYS = 14;
 
+function calendarDaysBetween(start: string, end: string): number {
+  const startDate = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
+}
+
 /**
  * GET /api/resets/stats — Compute stats for a weekly or monthly reset
  * Query params:
@@ -60,6 +72,9 @@ export async function GET(request: Request) {
   }
 
   try {
+    const { dayStart: periodStartIso } = getLocalDateBoundsISO(periodStart);
+    const { nextDayStart: periodEndExclusiveIso } = getLocalDateBoundsISO(periodEnd);
+
     // 1. Tasks completed in period
     const completedTasks = await db.select({
       id: tasks.id,
@@ -69,16 +84,16 @@ export async function GET(request: Request) {
       .from(tasks)
       .where(and(
         eq(tasks.status, 'done'),
-        gte(tasks.completedAt, periodStart),
-        lte(tasks.completedAt, periodEnd + 'T23:59:59'),
+        timestampGte(tasks.completedAt, periodStartIso),
+        timestampLt(tasks.completedAt, periodEndExclusiveIso),
       ));
 
     // 2. Tasks created in period
     const createdTasks = await db.select({ id: tasks.id })
       .from(tasks)
       .where(and(
-        gte(tasks.createdAt, periodStart),
-        lte(tasks.createdAt, periodEnd + 'T23:59:59'),
+        timestampGte(tasks.createdAt, periodStartIso),
+        timestampLt(tasks.createdAt, periodEndExclusiveIso),
       ));
 
     // 3. Carried forward (open tasks that existed before period end)
@@ -86,7 +101,7 @@ export async function GET(request: Request) {
       .from(tasks)
       .where(and(
         not(inArray(tasks.status, ['done', 'cancelled'])),
-        lte(tasks.createdAt, periodEnd + 'T23:59:59'),
+        timestampLt(tasks.createdAt, periodEndExclusiveIso),
       ));
 
     // 4. Routine completion rate
@@ -148,6 +163,7 @@ export async function GET(request: Request) {
     const staleThreshold = new Date(today + 'T12:00:00');
     staleThreshold.setDate(staleThreshold.getDate() - STALE_THRESHOLD_DAYS);
     const staleThresholdStr = formatDateLocal(staleThreshold);
+    const { nextDayStart: staleThresholdExclusiveIso } = getLocalDateBoundsISO(staleThresholdStr);
 
     const staleTasks = await db.select({
       id: tasks.id,
@@ -162,7 +178,7 @@ export async function GET(request: Request) {
       .from(tasks)
       .where(and(
         not(inArray(tasks.status, ['done', 'cancelled'])),
-        lte(tasks.updatedAt, staleThresholdStr + 'T23:59:59'),
+        timestampLt(tasks.updatedAt, staleThresholdExclusiveIso),
       ))
       .limit(50);
     const staleTaskPolicies = await resolveTaskEditPolicies(staleTasks);
@@ -222,9 +238,15 @@ export async function GET(request: Request) {
         const wEndDate = new Date(weekCursor);
         wEndDate.setDate(wEndDate.getDate() + 6);
         const wEnd = formatDateLocal(wEndDate);
+        const boundedWeekStart = wStart < periodStart ? periodStart : wStart;
+        const boundedWeekEnd = wEnd > periodEnd ? periodEnd : wEnd;
+        const { dayStart: weekStartIso } = getLocalDateBoundsISO(boundedWeekStart);
+        const { nextDayStart: weekEndExclusiveIso } = getLocalDateBoundsISO(boundedWeekEnd);
 
         const wCompleted = completedTasks.filter(t =>
-          t.completedAt && t.completedAt >= wStart && t.completedAt <= wEnd + 'T23:59:59',
+          t.completedAt
+          && parseStoredTimestamp(t.completedAt) >= Date.parse(weekStartIso)
+          && parseStoredTimestamp(t.completedAt) < Date.parse(weekEndExclusiveIso),
         ).length;
 
         const wRoutineCompletions = periodCompletions.filter(c =>
@@ -259,7 +281,10 @@ export async function GET(request: Request) {
       staleTasks: staleTasks.map(t => ({
         id: t.id,
         title: t.title,
-        daysSinceUpdate: Math.floor((new Date(today + 'T12:00:00').getTime() - new Date(t.updatedAt).getTime()) / 86400000),
+        daysSinceUpdate: calendarDaysBetween(
+          formatDateInLocalTimezone(new Date(parseStoredTimestamp(t.updatedAt))),
+          today,
+        ),
         status: t.status,
         priority: t.priority,
         editPolicy: staleTaskPolicies.get(t.id),

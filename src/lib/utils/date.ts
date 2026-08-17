@@ -51,8 +51,10 @@ function localDateToMidnightUTC(localDateStr: string, tz: string): Date {
 export function getLocalDateBoundsISO(localDateStr: string): { dayStart: string; nextDayStart: string } {
   const tz = getTimezone();
   const dayStart = localDateToMidnightUTC(localDateStr, tz);
-  const nextDayRef = new Date(dayStart.getTime() + 25 * 3600 * 1000);
-  const nextDayStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(nextDayRef);
+  const [year, month, day] = localDateStr.split('-').map(Number);
+  const nextDayStr = new Date(Date.UTC(year, month - 1, day + 1))
+    .toISOString()
+    .slice(0, 10);
   const nextDayStart = localDateToMidnightUTC(nextDayStr, tz);
 
   return {

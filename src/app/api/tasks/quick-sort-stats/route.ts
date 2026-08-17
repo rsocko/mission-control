@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
 import db from '@/db';
 import { quickSortLog } from '@/db/schema';
-import { gte, sql } from 'drizzle-orm';
+import { and, gte, isNull, ne, sql } from 'drizzle-orm';
 
 /**
  * GET /api/tasks/quick-sort-stats
@@ -28,7 +28,11 @@ export async function GET() {
       count: sql<number>`count(*)`.as('count'),
     })
     .from(quickSortLog)
-    .where(gte(quickSortLog.triagedAt, weekStartIso))
+    .where(and(
+      gte(quickSortLog.triagedAt, weekStartIso),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    ))
     .groupBy(quickSortLog.mode);
 
   const byMode: Record<string, number> = {};
@@ -49,7 +53,11 @@ export async function GET() {
       day: sql<string>`substr(${quickSortLog.triagedAt}, 1, 10)`.as('day'),
     })
     .from(quickSortLog)
-    .where(gte(quickSortLog.triagedAt, ninetyDaysAgoIso))
+    .where(and(
+      gte(quickSortLog.triagedAt, ninetyDaysAgoIso),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    ))
     .orderBy(sql`substr(${quickSortLog.triagedAt}, 1, 10) DESC`);
 
   const todayStr = now.toISOString().slice(0, 10);

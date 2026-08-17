@@ -5,6 +5,7 @@ import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
+  restoreTask: vi.fn(),
   refreshCounts: vi.fn(),
   refreshQueue: vi.fn(),
   reloadQueue: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
     suggestions: mocks.suggestions,
     recentTagIds: [],
     dismiss: mocks.dismiss,
+    restoreTask: mocks.restoreTask,
     updateTask: mocks.updateTask,
     refreshQueue: mocks.refreshQueue,
     reloadQueue: mocks.useAlternateReload ? mocks.alternateReloadQueue : mocks.reloadQueue,
@@ -216,8 +218,8 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/tasks/task-1',
-      expect.objectContaining({ method: 'PATCH' }),
+      '/api/tasks/quick-sort/operations',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 
@@ -257,8 +259,8 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.keyDown(document, { key: '2' });
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
-    const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/task-1');
-    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({ priority: 'high' });
+    const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
+    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({ priority: 'high' });
   });
 
   it('leaves global navigation chords to the app shortcut handler', () => {
@@ -279,8 +281,8 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.dismiss).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/tasks/task-1',
-      expect.objectContaining({ method: 'PATCH' }),
+      '/api/tasks/quick-sort/operations',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 
@@ -302,8 +304,8 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.dismiss).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/tasks/task-1',
-      expect.objectContaining({ method: 'PATCH' }),
+      '/api/tasks/quick-sort/operations',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 
@@ -324,8 +326,8 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.dismiss).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalledWith(
-      '/api/tasks/task-1',
-      expect.objectContaining({ method: 'PATCH' }),
+      '/api/tasks/quick-sort/operations',
+      expect.objectContaining({ method: 'POST' }),
     );
   });
 
@@ -413,10 +415,10 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
-    const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/task-1');
+    const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
     if (!patchCall) throw new Error('Expected task snooze request');
     const body = JSON.parse(String(patchCall[1]?.body));
-    const snoozedUntil = new Date(body.snoozedUntil).getTime();
+    const snoozedUntil = new Date(body.patch.snoozedUntil).getTime();
     expect(snoozedUntil).toBeGreaterThanOrEqual(now + 30 * 60 * 1000);
     expect(snoozedUntil).toBeLessThanOrEqual(Date.now() + 30 * 60 * 1000);
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
@@ -433,5 +435,38 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to skip task'));
     expect(mocks.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('undoes the latest operation with Ctrl+Z and restores its queue position', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/undo')) {
+        return new Response(JSON.stringify({ undone: true }));
+      }
+      return new Response(JSON.stringify({ operation: { state: 'applied' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.keyDown(document, { key: '2' });
+    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+
+    const globalUndo = vi.fn();
+    window.addEventListener('keydown', globalUndo);
+    fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+
+    await waitFor(() => expect(mocks.restoreTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1' }),
+      0,
+    ));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/undo'))).toBe(true);
+    expect(globalUndo).not.toHaveBeenCalled();
+    window.removeEventListener('keydown', globalUndo);
   });
 });

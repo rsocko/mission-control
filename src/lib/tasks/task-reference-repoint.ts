@@ -29,6 +29,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'priority_sync_log.task_id': 'repoint',
   'project_auto_include_exclusions.task_id': 'repoint',
   'project_phase_items.task_id': 'repoint',
+  'quick_sort_operations.task_id': 'repoint',
   'scout_reconciliation_evaluations.task_id': 'history',
   'scout_reconciliation_suggestions.task_id': 'repoint',
   'scout_reconciliation_task_state.task_id': 'repoint',
@@ -66,6 +67,7 @@ export function repointTaskReferences(
   tx.run(sql`UPDATE weekly_one_thing SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE priority_sync_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE task_triage_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
+  tx.run(sql`UPDATE quick_sort_operations SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE project_auto_include_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   rebuildProjectPlacements(tx, sourceTaskId, successorTaskId);
   tx.run(sql`UPDATE task_linked_sources SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);

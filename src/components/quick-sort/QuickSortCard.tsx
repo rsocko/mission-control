@@ -2,7 +2,7 @@
 
 import { useCallback, useRef } from 'react';
 import { animate, motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
-import { Check, FileText, FolderOpen, SkipForward, Sparkles, Tag } from 'lucide-react';
+import { Check, FileText, FolderOpen, RotateCcw, SkipForward, Sparkles, Tag } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { triggerHaptic } from '@/lib/utils/haptics';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
@@ -12,7 +12,7 @@ import { getMissingFields } from '@/lib/hooks/useQuickSortData';
 const SWIPE_THRESHOLD_X = 100;
 const SWIPE_THRESHOLD_Y = 100;
 
-type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'snapBack';
+type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'undo' | 'snapBack';
 
 export function getQuickSortSwipeAction({
   axis,
@@ -22,6 +22,7 @@ export function getQuickSortSwipeAction({
   velocityY,
   hasSuggestions,
   hasFocusedSuggestion,
+  hasUndo = false,
 }: {
   axis: 'x' | 'y' | null;
   offsetX: number;
@@ -30,6 +31,7 @@ export function getQuickSortSwipeAction({
   velocityY: number;
   hasSuggestions: boolean;
   hasFocusedSuggestion: boolean;
+  hasUndo?: boolean;
 }): QuickSortSwipeAction {
   if (
     axis === 'x' &&
@@ -52,6 +54,14 @@ export function getQuickSortSwipeAction({
     (offsetY < -SWIPE_THRESHOLD_Y || velocityY < -500)
   ) {
     return 'skip';
+  }
+
+  if (
+    axis === 'y'
+    && hasUndo
+    && (offsetY > SWIPE_THRESHOLD_Y || velocityY > 500)
+  ) {
+    return 'undo';
   }
 
   return 'snapBack';
@@ -98,6 +108,9 @@ interface QuickSortCardProps {
   onAcceptFocused: (taskId: string) => void;
   /** Swipe up: skip this task */
   onSkip: (taskId: string) => void | Promise<void>;
+  /** Swipe down: undo the previous Quick Sort operation */
+  onUndo?: () => void | Promise<void>;
+  undoLabel?: string;
 }
 
 export default function QuickSortCard({
@@ -108,6 +121,8 @@ export default function QuickSortCard({
   onAcceptSuggestions,
   onAcceptFocused,
   onSkip,
+  onUndo,
+  undoLabel,
 }: QuickSortCardProps) {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -129,6 +144,7 @@ export default function QuickSortCard({
   const focusedRevealWidth = useTransform(x, [0, 200], [0, 160]);
   const focusedRevealOpacity = useTransform(x, [0, 40, SWIPE_THRESHOLD_X], [0, 0.6, 1]);
   const skipRevealOpacity = useTransform(y, [-SWIPE_THRESHOLD_Y, -40, 0], [1, 0.6, 0]);
+  const undoRevealOpacity = useTransform(y, [0, 40, SWIPE_THRESHOLD_Y], [0, 0.6, 1]);
 
   const handleDragStart = useCallback(() => {
     dragAxis.current = null;
@@ -151,10 +167,12 @@ export default function QuickSortCard({
           x.set(hasFocusedSuggestion ? info.offset.x : Math.min(30, info.offset.x));
         }
       } else if (dragAxis.current === 'y') {
-        y.set(info.offset.y < 0 ? info.offset.y : Math.min(30, info.offset.y));
+        y.set(info.offset.y < 0
+          ? info.offset.y
+          : onUndo ? info.offset.y : Math.min(30, info.offset.y));
       }
     },
-    [x, y, hasSuggestions, hasFocusedSuggestion]
+    [x, y, hasSuggestions, hasFocusedSuggestion, onUndo]
   );
 
   const handleDragEnd = useCallback(
@@ -170,6 +188,7 @@ export default function QuickSortCard({
         velocityY: info.velocity.y,
         hasSuggestions,
         hasFocusedSuggestion,
+        hasUndo: !!onUndo,
       });
 
       if (action === 'acceptSuggestions') {
@@ -192,13 +211,18 @@ export default function QuickSortCard({
             animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
           }
         });
+      } else if (action === 'undo' && onUndo) {
+        triggerHaptic('medium');
+        void Promise.resolve(onUndo()).finally(() => {
+          animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
+        });
       } else {
         // Snap back with spring animation
         animate(x, 0, { type: 'spring', stiffness: 400, damping: 30 });
         animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
       }
     },
-    [onAcceptSuggestions, onAcceptFocused, onSkip, task.id, x, y, hasSuggestions, hasFocusedSuggestion]
+    [onAcceptSuggestions, onAcceptFocused, onSkip, onUndo, task.id, x, y, hasSuggestions, hasFocusedSuggestion]
   );
 
   // Build the list of suggestions to show in the reveal area (swipe left)
@@ -317,6 +341,19 @@ export default function QuickSortCard({
         </div>
       </motion.div>
 
+      {onUndo && (
+        <motion.div
+          className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-center gap-2 pt-4"
+          style={{ opacity: undoRevealOpacity }}
+          aria-hidden="true"
+        >
+          <span className="inline-flex items-center gap-2 rounded-full bg-sky-500 px-4 py-2 text-sm font-semibold text-white shadow-lg">
+            <RotateCcw size={15} />
+            Undo {undoLabel}
+          </span>
+        </motion.div>
+      )}
+
       {/* Reveal area on the LEFT (shown when swiping RIGHT — focused apply) */}
       {hasFocusedSuggestion && (
         <motion.div
@@ -339,6 +376,9 @@ export default function QuickSortCard({
 
       {/* The card itself — fills available height for a larger swipe target */}
       <motion.div
+        data-quick-sort-card-task-id={task.id}
+        tabIndex={-1}
+        aria-label={`Task: ${task.title}`}
         className="relative flex h-full min-h-0 touch-none cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
         style={{ x, y }}
         onPanStart={handleDragStart}

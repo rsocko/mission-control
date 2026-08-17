@@ -202,10 +202,7 @@ function TagReviewPanel() {
 
   return (
     <div className="h-full min-h-0 flex flex-col">
-      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2 flex-shrink-0">Tags</h2>
-      <p className="text-sm text-[var(--text-tertiary)] mb-4 flex-shrink-0">
-        Filter by source, then select tags to merge, rename, recolor, remove, or view their tasks.
-      </p>
+      <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-4 flex-shrink-0">Tags</h2>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="flex-1 min-h-0 flex flex-col gap-4">
         <MergeSuggestions
           expanded={suggestionsExpanded}

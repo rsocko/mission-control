@@ -223,7 +223,7 @@ function TagsSection() {
     <>
       <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">Tags</h2>
       <p className="text-sm text-[var(--text-tertiary)] mb-6">
-        Source tags are synced from connectors. Hub tags are yours to create and manage.
+        Hub tags are yours to create and manage.
       </p>
 
       {loading ? (

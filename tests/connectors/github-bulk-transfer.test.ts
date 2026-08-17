@@ -39,6 +39,115 @@ afterAll(() => {
 });
 
 describe('GitHub bulk issue transfer', () => {
+  it('selects only reviewed stable issue node IDs and binds the manifest into the plan', async () => {
+    const seeded = seedConnector('bulk-reviewed-allowlist');
+    const common = {
+      ...input(seeded.connectorId),
+      scope: reviewedScope(seeded.connectorId, [1]),
+    };
+    const preview = await service.previewGitHubBulkTransfer(common, {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+
+    expect(preview).toMatchObject({
+      go: true,
+      scopeMode: 'reviewed-allowlist',
+      sourceRepositoryIssueCount: 2,
+      sourceIssueCount: 1,
+      approvedIssueNodeIdCount: 1,
+      localTaskCount: 1,
+      reviewedManifestSha256: 'b'.repeat(64),
+    });
+    expect(preview.items.map((item) => item.taskId)).toEqual([seeded.taskIds[0]]);
+
+    const changedManifestPreview = await service.previewGitHubBulkTransfer({
+      ...common,
+      scope: {
+        ...common.scope,
+        manifestSha256: 'c'.repeat(64),
+      },
+    }, {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+    expect(changedManifestPreview.planHash).not.toBe(preview.planHash);
+
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      scope: {
+        ...common.scope,
+        manifestSha256: 'c'.repeat(64),
+      },
+      idempotencyKey: 'changed-reviewed-manifest',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote: createRemote(seeded),
+      now: () => now,
+    })).rejects.toThrow('plan hash is stale');
+
+    await expect(service.executeGitHubBulkTransfer({
+      ...common,
+      idempotencyKey: 'reviewed-allowlist-execute',
+      planHash: preview.planHash,
+      confirmation: 'owner/source=>owner/target',
+    }, {
+      remote: createRemote(seeded),
+      now: () => now,
+      sleep: async () => undefined,
+    })).resolves.toMatchObject({
+      phase: 'completed',
+      totalCount: 1,
+      transferredCount: 1,
+    });
+    expect(database.default.select().from(schema.tasks)
+      .where(eq(schema.tasks.connectorInstanceId, seeded.connectorId)).all()
+      .map((task) => task.sourceId)).toEqual([
+      'owner/target:101',
+      'owner/source:2',
+    ]);
+  });
+
+  it('fails closed for duplicate or non-source allowlist node IDs', async () => {
+    const seeded = seedConnector('bulk-invalid-allowlist');
+    const duplicate = reviewedScope(seeded.connectorId, [1, 1]);
+    await expect(service.previewGitHubBulkTransfer({
+      ...input(seeded.connectorId),
+      scope: duplicate,
+    }, {
+      remote: createRemote(seeded),
+      now: () => now,
+    })).rejects.toThrow('duplicate issue node IDs');
+
+    const preview = await service.previewGitHubBulkTransfer({
+      ...input(seeded.connectorId),
+      scope: {
+        ...reviewedScope(seeded.connectorId, [1]),
+        issueNodeIds: ['I_from_another_repository_or_pull_request'],
+      },
+    }, {
+      remote: createRemote(seeded),
+      now: () => now,
+    });
+    expect(preview.go).toBe(false);
+    expect(preview.reasons).toContain(
+      'approved_issue_node_id_not_in_source:I_from_another_repository_or_pull_request',
+    );
+    expect(preview.items).toEqual([]);
+  });
+
+  it('requires repository-wide transfers to opt into all-issues scope', async () => {
+    const seeded = seedConnector('bulk-explicit-all-issues');
+    await expect(service.previewGitHubBulkTransfer({
+      ...input(seeded.connectorId),
+      scope: undefined,
+    } as unknown as Parameters<typeof service.previewGitHubBulkTransfer>[0], {
+      remote: createRemote(seeded),
+      now: () => now,
+    })).rejects.toThrow('requires explicit reviewed-allowlist or all-issues scope');
+  });
+
   it('previews every open and closed issue without mutating state', async () => {
     const seeded = seedConnector('bulk-preview');
     const remote = createRemote(seeded);
@@ -57,7 +166,8 @@ describe('GitHub bulk issue transfer', () => {
       planHash: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(preview.items.map((item) => item.taskId)).toEqual(seeded.taskIds);
-    expect(database.default.select().from(schema.githubBulkTransferRuns).all()).toEqual([]);
+    expect(database.default.select().from(schema.githubBulkTransferRuns).all()
+      .filter((run) => run.connectorInstanceId === seeded.connectorId)).toEqual([]);
     expect(database.default.select().from(schema.tasks).all()
       .filter((task) => seeded.taskIds.includes(task.id))
       .map((task) => task.sourceId)).toEqual([
@@ -1011,6 +1121,7 @@ function input(connectorInstanceId: string) {
     sourceRepository: 'owner/source',
     targetRepository: 'owner/target',
     actor: 'test-operator',
+    scope: { mode: 'all-issues' as const },
     backupProof: {
       path: join(directory, `${connectorInstanceId}.backup.db`),
       sha256: 'a'.repeat(64),
@@ -1019,6 +1130,15 @@ function input(connectorInstanceId: string) {
       integrityCheck: 'ok' as const,
       verifiedAt: now.toISOString(),
     },
+  };
+}
+
+function reviewedScope(connectorInstanceId: string, issueNumbers: number[]) {
+  return {
+    mode: 'reviewed-allowlist' as const,
+    sourceRepository: 'owner/source',
+    manifestSha256: 'b'.repeat(64),
+    issueNodeIds: issueNumbers.map((number) => `I_${connectorInstanceId}_${number}`),
   };
 }
 

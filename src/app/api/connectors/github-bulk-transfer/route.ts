@@ -11,12 +11,36 @@ import {
 import { inspectGitHubRepointBackup } from '@/lib/connectors/github-issues/repoint-service';
 
 const repository = z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/);
+const sha256Digest = z.string().regex(/^[a-f0-9]{64}$/);
+const transferScope = z.discriminatedUnion('mode', [
+  z.object({
+    mode: z.literal('reviewed-allowlist'),
+    sourceRepository: repository,
+    manifestSha256: sha256Digest,
+    issueNodeIds: z.array(z.string().min(1).max(200)).min(1).max(10_000),
+  }).strict(),
+  z.object({ mode: z.literal('all-issues') }).strict(),
+]).superRefine((scope, context) => {
+  if (scope.mode === 'reviewed-allowlist') {
+    if (
+      new Set(scope.issueNodeIds.map((nodeId) => nodeId.trim())).size
+      !== scope.issueNodeIds.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['issueNodeIds'],
+        message: 'Duplicate issue node IDs are not allowed',
+      });
+    }
+  }
+});
 const common = z.object({
   connectorInstanceId: z.string().min(1).max(100),
   sourceRepository: repository,
   targetRepository: repository,
   actor: z.string().min(1).max(80),
   backupPath: z.string().min(1).max(2_048),
+  scope: transferScope,
 });
 const requestSchema = z.discriminatedUnion('action', [
   common.extend({ action: z.literal('preview') }).strict(),
@@ -44,6 +68,12 @@ const requestSchema = z.discriminatedUnion('action', [
     targetNumber: z.number().int().positive(),
     actor: z.string().min(1).max(80),
     confirmation: z.literal('reconcile'),
+    successorAuthorization: z.object({
+      expectedSourceStableIdDigest: sha256Digest,
+      expectedSuccessorStableIdDigest: sha256Digest,
+      reason: z.string().min(3).max(500),
+      idempotencyKey: z.string().min(8).max(192),
+    }).strict().optional(),
   }).strict(),
 ]);
 
@@ -73,6 +103,7 @@ export async function POST(request: Request) {
       targetRepository: input.targetRepository,
       actor: input.actor,
       backupProof,
+      scope: input.scope,
     };
     if (input.action === 'preview') {
       return NextResponse.json(await previewGitHubBulkTransfer(commonInput));

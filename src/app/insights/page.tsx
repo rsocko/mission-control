@@ -228,7 +228,7 @@ function InsightsPageContent() {
   }, [setObservations, setObservationsError, setObservationsLoading, setObservationsPeriod]);
 
   useEffect(() => {
-    const filters = { start: customStart, end: customEnd };
+    const filters = { start: customStart, end: customEnd, timeZone };
     fetchSection('summary', period, filters);
     fetchSection('activity', period, filters);
     const summaryController = sectionControllers.current.summary;
@@ -237,7 +237,7 @@ function InsightsPageContent() {
       summaryController?.abort();
       activityController?.abort();
     };
-  }, [period, customStart, customEnd, fetchSection]);
+  }, [period, customStart, customEnd, timeZone, fetchSection]);
 
   useEffect(() => {
     fetchSection('delivery', period, {

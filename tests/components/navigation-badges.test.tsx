@@ -5,6 +5,7 @@ import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library
 import {
   NavigationBadge,
   NavigationPressureBar,
+  NavigationRailIndicator,
 } from '@/components/layout/NavigationBadge';
 import { NavBadgeSettingsCard } from '@/app/settings/components/NavBadgeSettingsCard';
 import {
@@ -80,17 +81,18 @@ describe('navigation badges', () => {
     expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
   });
 
-  it('keeps the same shared element identity between pressure bar and badge', () => {
+  it('stages the rail indicator between a pressure line and numeric badge', () => {
     const { rerender } = render(
-      <NavigationPressureBar count={12} tone="amber" morphId="myDay" />,
+      <NavigationRailIndicator count={12} tone="amber" expanded={false} />,
     );
     expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
-      'data-morph-id',
-      'myDay',
+      'data-state',
+      'collapsed',
     );
+    expect(screen.queryByText('12')).not.toBeInTheDocument();
 
-    rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
-    expect(screen.getByText('12')).toHaveAttribute('data-morph-id', 'myDay');
+    rerender(<NavigationRailIndicator count={12} tone="amber" expanded />);
+    expect(screen.getByText('12').parentElement).toHaveAttribute('data-state', 'expanded');
   });
 
   it('requests navigation counts for the browser-local date', async () => {

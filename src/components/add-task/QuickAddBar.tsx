@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Plus, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
 import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
-import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE } from '@/lib/constants/task-formatting';
+import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE, getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { dropdownVariants } from '@/lib/motion';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { parseTaskInput, parseTaskInputForSubmission, ParsedTask } from '@/lib/parse-task-input';
@@ -1524,12 +1524,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               </button>
             )}
             {parsed.priority && (
-              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${
-                parsed.priority === 'critical' ? 'bg-rose-900/40 text-rose-300 border-rose-700/30'
-                : parsed.priority === 'high' ? 'bg-orange-900/30 text-orange-300 border-orange-800/30'
-                : parsed.priority === 'medium' ? 'bg-amber-900/25 text-amber-300 border-amber-700/30'
-                : 'bg-sky-900/25 text-sky-300 border-sky-700/30'
-              }`}>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border ${getTaskPriorityVisual(parsed.priority).badgeClass}`}>
                 {parsed.priority === 'critical' ? <Flame size={11} /> : parsed.priority === 'high' ? <AlertCircle size={11} /> : <AlertCircle size={11} />} {parsed.priority}
               </span>
             )}

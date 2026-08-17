@@ -10,6 +10,7 @@ import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 interface CalmTask {
@@ -19,13 +20,6 @@ interface CalmTask {
   dueDate: string | null;
   editPolicy: TaskEditPolicy;
 }
-
-const PRIORITY_DOTS: Record<string, string> = {
-  critical: 'bg-rose-500',
-  high: 'bg-orange-400',
-  medium: 'bg-amber-400',
-  low: 'bg-sky-400',
-};
 
 const ENCOURAGEMENTS = [
   'That counts.',
@@ -289,7 +283,7 @@ export function CalmMode() {
 
                         {/* Priority dot + title */}
                         {task.priority !== 'none' && (
-                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${PRIORITY_DOTS[task.priority] || ''}`} />
+                          <span className={`w-2 h-2 rounded-full flex-shrink-0 ${getTaskPriorityVisual(task.priority).dotClass}`} />
                         )}
                         <p className="flex-1 text-[15px] text-slate-300 font-medium leading-snug">
                           {task.title}

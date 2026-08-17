@@ -7,6 +7,7 @@ import { kanbanLogger } from '@/lib/client-logger';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import type { HubProject, KanbanColumn as KanbanColumnType, SwimlaneMode, Task } from '../components';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
+import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
 
 type ColumnResolver = KanbanColumnType[] | (() => KanbanColumnType[]);
 type BooleanResolver = boolean | (() => boolean);
@@ -37,11 +38,12 @@ export interface SwimlaneGroup {
 }
 
 const PRIORITY_SWIMLANES: SwimlaneGroup[] = [
-  { key: 'critical', label: 'Critical', color: '#ef4444' },
-  { key: 'high', label: 'High', color: '#f59e0b' },
-  { key: 'medium', label: 'Medium', color: '#3b82f6' },
-  { key: 'low', label: 'Low', color: '#64748b' },
-  { key: 'none', label: 'No Priority', color: '#374151' },
+  ...(['critical', 'high', 'medium', 'low'] as const).map((key) => ({
+    key,
+    label: TASK_PRIORITY_VISUALS[key].label,
+    color: TASK_PRIORITY_VISUALS[key].color,
+  })),
+  { key: 'none', label: 'No Priority', color: TASK_PRIORITY_VISUALS.none.color },
 ];
 
 export function useKanbanTasks({

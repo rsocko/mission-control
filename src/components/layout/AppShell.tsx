@@ -40,6 +40,8 @@ import {
   useSystemHealth,
   type SystemHealthData as HealthData,
 } from '@/lib/hooks/useSystemHealth';
+import { useNavigationCounts } from '@/lib/hooks/useNavigationBadges';
+import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
 
 interface FeatureFlags {
   taskCreation: boolean;
@@ -290,6 +292,16 @@ function AppShellInner({
     </main>
   );
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const navigationCounts = useNavigationCounts();
+  const [badgeMode] = useBadgeMode();
+  const appBadgeCount = badgeMode === 'unread_notifications'
+    ? navigationCounts.unreadNotifications
+    : badgeMode === 'myday_incomplete'
+      ? navigationCounts.myDay
+      : badgeMode === 'overdue'
+        ? navigationCounts.overdue
+        : 0;
+  useAppBadge(appBadgeCount);
 
   return (
     <div className="flex h-screen bg-[var(--background)]">
@@ -302,6 +314,7 @@ function AppShellInner({
         features={features}
         isAiActive={isAiActive}
         isSyncing={syncProgress.isSyncing}
+        counts={navigationCounts}
         syncStatus={health?.connectors ?? []}
       />
 
@@ -315,6 +328,7 @@ function AppShellInner({
           onMenuPress={openDrawer}
           menuButtonRef={mobileMenuButtonRef}
           isDrawerOpen={isDrawerOpen}
+          navigationCounts={navigationCounts}
         />
 
         {/* Toolbar: Search + Quick Add + Actions (desktop only) */}
@@ -341,7 +355,7 @@ function AppShellInner({
         )}
 
         {/* Mobile Bottom Navigation */}
-        <MobileBottomNav />
+        <MobileBottomNav counts={navigationCounts} />
 
       </div>
 
@@ -351,6 +365,7 @@ function AppShellInner({
         onClose={closeDrawer}
         returnFocusRef={mobileMenuButtonRef}
         features={features}
+        counts={navigationCounts}
       />
 
       {/* Zen & Calm Mode Overlays */}

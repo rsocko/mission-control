@@ -13,6 +13,7 @@ import { fadeSlideUp, scaleIn, oneThingCelebration, oneThingConfetti, oneThingGl
 import { uiLogger } from '@/lib/client-logger';
 import { usePrefersReducedMotion } from '@/lib/hooks/usePrefersReducedMotion';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 interface OneThingTask {
   id: string;
@@ -48,14 +49,6 @@ const CONNECTOR_ICONS: Record<string, string> = {
   'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'document-intelligence': '/icons/agents/owl.svg',
-};
-
-const PRIORITY_COLORS: Record<string, string> = {
-  critical: 'text-rose-400',
-  high: 'text-orange-400',
-  medium: 'text-amber-300',
-  low: 'text-sky-400',
-  none: 'text-[var(--text-muted)]',
 };
 
 const CONFETTI_EMOJIS = ['🎉', '⭐', '🔥', '✨', '💪', '🏆'];
@@ -290,8 +283,8 @@ export function OneThingBanner({
                   {oneThing.title}
                 </span>
                 {oneThing.priority && oneThing.priority !== 'none' && (
-                  <span className={`text-[12px] font-semibold ${PRIORITY_COLORS[oneThing.priority]}`}>
-                    {oneThing.priority === 'critical' ? 'P0' : oneThing.priority === 'high' ? 'P1' : 'P2'}
+                  <span className={`text-[12px] font-semibold ${getTaskPriorityVisual(oneThing.priority).textClass}`}>
+                    {getTaskPriorityVisual(oneThing.priority).shortLabel}
                   </span>
                 )}
                 {oneThing.dueDate && !isCompleted && (
@@ -400,11 +393,7 @@ export function OneThingBanner({
                   >
                     <ConnectorIcon type={task.connectorType} size={12} />
                     {task.priority && task.priority !== 'none' && (
-                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                        task.priority === 'critical' ? 'bg-rose-500' :
-                        task.priority === 'high' ? 'bg-orange-400' :
-                        task.priority === 'medium' ? 'bg-amber-400' : 'bg-sky-400'
-                      }`} />
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${getTaskPriorityVisual(task.priority).dotClass}`} />
                     )}
                     <span className="text-xs text-[var(--text-primary)] truncate flex-1">{task.title}</span>
                     <ChevronDown size={10} className="text-[var(--text-muted)] opacity-0 group-hover/swap:opacity-100 transition-opacity rotate-[-90deg]" />

@@ -26,6 +26,10 @@ colors:
   danger-muted: "#991b1b"
   info: "#06b6d4"
   info-muted: "#155e75"
+  priority-critical: "#f43f5e"
+  priority-high: "#fb923c"
+  priority-medium: "#fbbf24"
+  priority-low: "#38bdf8"
   source-todo: "#3b82f6"
   source-github: "#a855f7"
   source-calendar: "#f59e0b"
@@ -147,6 +151,28 @@ The palette is a cool slate stack with one blue action voice and a small set of 
 **The Solid Signal Rule.** Operational cards, recommendations, schedule blocks, insights, and progress bars use a solid neutral or semantic fill. Do not use purple/indigo gradients to manufacture importance.
 
 **The Semantic Evidence Rule.** Color must correspond to an action, state, priority, project, or source and must be reinforced by text, iconography, or position.
+
+### Task Visual Standards
+
+Task priority and task status have one application-wide semantic palette. Badges, dots, menu items, charts, graphs, desktop views, and mobile views must use the definitions exported from `src/lib/constants/task-formatting.ts`; do not recreate these maps in components.
+
+| Task priority | Label | Color | Meaning |
+| --- | --- | --- | --- |
+| `critical` | P0 / Critical | Rose | Immediate intervention |
+| `high` | P1 / High | Orange | Elevated urgency |
+| `medium` | P2 / Medium | Amber | Normal planned priority |
+| `low` | P3 / Low | Sky | De-emphasized priority |
+| `none` | None | Slate | No priority assigned |
+
+| Task status | Color | Meaning |
+| --- | --- | --- |
+| `todo` | Slate | Active but not started |
+| `in_progress` | Action blue | Work is underway |
+| `blocked` | Danger red | Work cannot proceed |
+| `done` | Success green | Work completed |
+| `cancelled` | Slate | Intentionally inactive, not an error |
+
+These mappings apply only to task priority and task status. Project lifecycle, triage state, connector health, notification severity, source identity, effort, energy, and micro-status are separate domains and must not borrow task colors merely because their labels are similar.
 
 ## Typography
 

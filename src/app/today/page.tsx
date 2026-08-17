@@ -245,73 +245,74 @@ export default function TodayPage() {
 
       {/* Desktop: full-featured main panel */}
       <TodayMainPanel
-        items={items}
-        scheduled={scheduled}
-        calendarEvents={calendarEvents}
-        loading={loading}
-        energyLevel={energyLevel}
-        setItems={setItems}
-        onSetEnergyLevel={setEnergyLevel}
-        fetchData={fetchData}
-        todayISO={todayISO}
-        selectedTaskId={selectedTaskId}
-        onSelectTask={(taskId) => {
-          setSelectedSuggestionContext(null);
-          if (taskId === null) setSelectedTaskId(null);
-          else taskSelection.handleTaskClick(taskId);
+        data={{
+          items, scheduled, calendarEvents, loading, energyLevel, todayISO, sourceLists,
+          listGroups, projects, completingIds: actions.completingIds, suggestions,
         }}
-        onDoubleClickTask={taskSelection.handleTaskDoubleClick}
-        onCancelPendingTaskSelection={taskSelection.cancelPendingDeselect}
-        showTimer={actions.showTimer}
-        onSetShowTimer={actions.setShowTimer}
-        focusTask={actions.focusTask}
-        onSetFocusTask={actions.setFocusTask}
-        onCompleteTask={actions.completeTask}
-        onStartFocus={actions.startFocus}
-        onOpenScheduleModal={actions.setShowScheduleModal}
-        onRemoveFromDay={actions.removeFromDay}
-        onSetTaskPriority={actions.setTaskPriority}
-        onSetTaskStatus={actions.setTaskStatus}
-        onSetTaskDueDate={actions.setTaskDueDate}
-        onSetTaskLocalDisposition={(taskId, disposition) => actions.setTaskLocalDisposition(
-          taskId,
-          disposition,
-          items.find((item) => item.taskId === taskId),
-        )}
-        onOpenTaskNotes={(taskId, mode) => {
-          setDetailSurface('desktop');
-          setSelectedTaskId(taskId);
-          setNotesOpenRequest((current) => ({
-            requestId: (current?.requestId ?? 0) + 1,
+        taskActions={{
+          setItems,
+          fetchData,
+          completeTask: actions.completeTask,
+          removeFromDay: actions.removeFromDay,
+          setPriority: actions.setTaskPriority,
+          setStatus: actions.setTaskStatus,
+          setDueDate: actions.setTaskDueDate,
+          setLocalDisposition: (taskId, disposition) => actions.setTaskLocalDisposition(
             taskId,
-            mode,
-          }));
+            disposition,
+            items.find((item) => item.taskId === taskId),
+          ),
+          openNotes: (taskId, mode) => {
+            setDetailSurface('desktop');
+            setSelectedTaskId(taskId);
+            setNotesOpenRequest((current) => ({
+              requestId: (current?.requestId ?? 0) + 1,
+              taskId,
+              mode,
+            }));
+          },
+          moveToList: actions.moveTaskToList,
+          deleteTask: actions.deleteTask,
+          addToProject: addTaskToProject,
+          saveTemplateTask: actions.setSaveTemplateTask,
+          addToDay: actions.addToDay,
+          moveToSource: (taskId) => {
+            setPendingMoveDialogTaskId(taskId);
+            setSelectedTaskId(taskId);
+          },
         }}
-        onMoveTaskToList={actions.moveTaskToList}
-        onDeleteTask={actions.deleteTask}
-        onAddTaskToProject={addTaskToProject}
-        onSaveTemplateTask={actions.setSaveTemplateTask}
-        sourceLists={sourceLists}
-        listGroups={listGroups}
-        projects={projects}
-        completingIds={actions.completingIds}
-        whatsNextResult={actions.whatsNextResult}
-        onSetWhatsNextResult={actions.setWhatsNextResult}
-        onGetWhatsNext={actions.getWhatsNext}
-        dayPlan={actions.dayPlan}
-        onSetDayPlan={actions.setDayPlan}
-        planningDay={actions.planningDay}
-        onPlanMyDay={actions.planMyDay}
-        onScheduleAtTime={actions.scheduleTaskAtTime}
-        onUnscheduleTask={actions.unscheduleTask}
-        onResizeScheduledTask={actions.resizeScheduledTask}
-        onSetConfirmDialog={actions.setConfirmDialog}
-        suggestions={suggestions}
-        onAddToDay={actions.addToDay}
-        onMoveToSource={(taskId) => {
-          setPendingMoveDialogTaskId(taskId);
-          setSelectedTaskId(taskId);
+        selection={{
+          selectedTaskId,
+          selectTask: (taskId) => {
+            setSelectedSuggestionContext(null);
+            if (taskId === null) setSelectedTaskId(null);
+            else taskSelection.handleTaskClick(taskId);
+          },
+          doubleClickTask: taskSelection.handleTaskDoubleClick,
+          cancelPendingTaskSelection: taskSelection.cancelPendingDeselect,
         }}
+        focus={{
+          showTimer: actions.showTimer,
+          setShowTimer: actions.setShowTimer,
+          focusTask: actions.focusTask,
+          setFocusTask: actions.setFocusTask,
+          startFocus: actions.startFocus,
+        }}
+        planning={{
+          openScheduleModal: actions.setShowScheduleModal,
+          whatsNextResult: actions.whatsNextResult,
+          setWhatsNextResult: actions.setWhatsNextResult,
+          getWhatsNext: actions.getWhatsNext,
+          dayPlan: actions.dayPlan,
+          setDayPlan: actions.setDayPlan,
+          planningDay: actions.planningDay,
+          planMyDay: actions.planMyDay,
+          scheduleAtTime: actions.scheduleTaskAtTime,
+          unscheduleTask: actions.unscheduleTask,
+          resizeScheduledTask: actions.resizeScheduledTask,
+          setConfirmDialog: actions.setConfirmDialog,
+        }}
+        setEnergyLevel={setEnergyLevel}
       />
 
       {selectedTaskId && detailSurface === 'desktop' && detailMode === 'panel' && (

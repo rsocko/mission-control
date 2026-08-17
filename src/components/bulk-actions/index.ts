@@ -8,4 +8,8 @@ export { BulkPriorityDropdown } from './BulkPriorityDropdown';
 export { BulkStatusDropdown } from './BulkStatusDropdown';
 export { BulkDispositionButtons } from './BulkDispositionButtons';
 export { resolveSelectionAnchorIndex, useBulkSelection } from './useBulkSelection';
-export { executeBulkOperation } from './executeBulkOperation';
+export {
+  executeBulkOperation,
+  type BulkOperationOptions,
+  type BulkOperationResult,
+} from './executeBulkOperation';

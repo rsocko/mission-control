@@ -95,7 +95,7 @@ describe('TaskRowActions', () => {
     const onSetStatus = vi.fn();
     renderActions({ onSetStatus });
     fireEvent.click(screen.getByRole('button', { name: 'Set status' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'In Progress' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'In progress' }));
     await waitFor(() => expect(onSetStatus).toHaveBeenCalledWith('in_progress'));
   });
 
@@ -123,8 +123,8 @@ describe('TaskRowActions', () => {
       'hover:text-blue-300',
     );
     expect(screen.getByRole('button', { name: 'Set status' })).toHaveClass(
-      'text-purple-400',
-      'hover:text-purple-300',
+      'text-[var(--accent-400)]',
+      'hover:text-[var(--accent-300)]',
     );
     expect(screen.getByRole('button', { name: 'Set priority' })).toHaveClass(
       'text-orange-400',
@@ -185,7 +185,7 @@ describe('TaskRowActions', () => {
       onSnoozeUntil: undefined,
     });
 
-    expect(screen.getByRole('button', { name: 'Status: In Progress' }).parentElement).toHaveClass('flex');
+    expect(screen.getByRole('button', { name: 'Status: In progress' }).parentElement).toHaveClass('flex');
     expect(screen.getByRole('button', { name: 'Priority: High' }).parentElement).toHaveClass('flex');
   });
 

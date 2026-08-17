@@ -183,15 +183,15 @@ describe('getProjectTabCount', () => {
 // ─── getPriorityDotColor ────────────────────────────────────────────
 describe('getPriorityDotColor', () => {
   it('maps critical to danger', () => {
-    expect(getPriorityDotColor('critical')).toBe('var(--danger)');
+    expect(getPriorityDotColor('critical')).toBe('#f43f5e');
   });
 
   it('maps high to warning', () => {
-    expect(getPriorityDotColor('high')).toBe('var(--warning)');
+    expect(getPriorityDotColor('high')).toBe('#fb923c');
   });
 
   it('maps none to border-strong', () => {
-    expect(getPriorityDotColor('none')).toBe('var(--border-strong)');
+    expect(getPriorityDotColor('none')).toBe('#64748b');
   });
 });
 

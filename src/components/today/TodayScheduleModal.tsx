@@ -1,5 +1,7 @@
 'use client';
 
+import { Modal } from '@/components/ui/Modal';
+
 interface TodayScheduleModalProps {
   taskId: string | null;
   scheduleTime: string;
@@ -19,11 +21,15 @@ export function TodayScheduleModal({
   onSetScheduleDuration,
   onSchedule,
 }: TodayScheduleModalProps) {
-  if (!taskId) return null;
-
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="schedule-modal-title">
-      <div className="bg-[var(--surface-1)] rounded-xl shadow-xl p-5 w-80" onClick={(e) => e.stopPropagation()}>
+    <Modal
+      isOpen={taskId !== null}
+      onClose={onClose}
+      ariaLabel="Time Block"
+      size="sm"
+      className="w-80 rounded-xl p-5"
+      overlayClassName="items-center pt-0"
+    >
         <h3 id="schedule-modal-title" className="font-semibold text-[var(--text-primary)] mb-4">Time Block</h3>
         <div className="space-y-3">
           <div>
@@ -45,11 +51,17 @@ export function TodayScheduleModal({
             </div>
           </div>
           <div className="flex gap-2 pt-2">
-            <button onClick={() => onSchedule(taskId)} className="flex-1 px-3 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 font-medium">Block Time</button>
+            <button
+              onClick={() => {
+                if (taskId) onSchedule(taskId);
+              }}
+              className="flex-1 px-3 py-2 bg-purple-600 text-white text-sm rounded-md hover:bg-purple-700 font-medium"
+            >
+              Block Time
+            </button>
             <button onClick={onClose} className="px-3 py-2 border border-[var(--border)] text-[var(--text-secondary)] text-sm rounded-md hover:bg-[var(--surface-0)]">Cancel</button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Loader2, Sparkles, X } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { ACTION_META } from '@/components/triage/types';
+import { Modal } from '@/components/ui/Modal';
 import type { TriageActionType, TriageItem } from '@/types';
 
 interface AutoTriagePlan {
@@ -46,8 +47,6 @@ export default function AutoTriageModal({ open, onClose, items, onExecute }: Aut
   const [threshold, setThreshold] = useState(DEFAULT_THRESHOLD);
   const [executing, setExecuting] = useState(false);
 
-  if (!open) return null;
-
   const plan = buildPlan(items, threshold);
   const totalItems = plan.reduce((sum, group) => sum + group.items.length, 0);
 
@@ -62,9 +61,14 @@ export default function AutoTriageModal({ open, onClose, items, onExecute }: Aut
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true" aria-labelledby="auto-triage-title">
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full max-w-lg rounded-[18px] border border-[var(--border)] bg-[var(--surface-1)] p-6 shadow-2xl">
+    <Modal
+      isOpen={open}
+      onClose={onClose}
+      ariaLabel="Auto-Triage"
+      size="md"
+      className="w-full max-w-lg rounded-[18px] p-6"
+      overlayClassName="items-center px-4 pt-0"
+    >
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -163,7 +167,6 @@ export default function AutoTriageModal({ open, onClose, items, onExecute }: Aut
             </button>
           </div>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }

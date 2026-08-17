@@ -264,7 +264,7 @@ describe('project phase navigation', () => {
     const getPlanToolbar = () => screen.getByRole('heading', { name: 'Plan' }).parentElement?.parentElement;
     expect(getPlanToolbar()).toHaveClass('sticky');
     expect(getPlanToolbar()).toHaveStyle({ top: '72px' });
-    expect(screen.getByPlaceholderText('Filter tasks…')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Filter tasks…').parentElement).toHaveClass('input-glow');
 
     fireEvent.click(screen.getByRole('button', { name: /^graph$/i }));
     expect(getPlanToolbar()).toHaveClass('relative');
@@ -276,7 +276,7 @@ describe('project phase navigation', () => {
     fireEvent.click(screen.getByRole('button', { name: /^gantt$/i }));
     expect(getPlanToolbar()).toHaveClass('sticky');
     expect(getPlanToolbar()).toHaveStyle({ top: '72px' });
-    expect(screen.getByPlaceholderText('Filter tasks…')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Filter tasks…').parentElement).toHaveClass('input-glow');
 
     fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
     expect(getPlanToolbar()).toHaveClass('sticky');

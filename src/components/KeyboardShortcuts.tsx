@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useSidebarExpanded } from '@/lib/hooks/useSidebarExpanded';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 /**
  * Global keyboard shortcuts for Mission Control.
@@ -38,6 +39,12 @@ export function useKeyboardShortcuts() {
     let gTimeout: NodeJS.Timeout | null = null;
 
     const handler = (e: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(e)) {
+        gPending = false;
+        if (gTimeout) clearTimeout(gTimeout);
+        return;
+      }
+
       const target = e.target as HTMLElement;
       const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 

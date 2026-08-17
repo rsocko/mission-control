@@ -173,7 +173,7 @@ export function DestinationPicker({
           exit="exit"
         >
           <div className="px-2.5 pt-2.5 pb-1.5">
-            <div className="flex items-center gap-2 px-2.5 py-1.5 bg-[var(--surface-0)] border border-[var(--border)] rounded-lg">
+            <div className="input-glow flex items-center gap-2 px-2.5 py-1.5 bg-[var(--surface-0)] border border-[var(--border)] rounded-lg">
               <Search size={13} className="text-[var(--text-muted)] flex-shrink-0" />
               <input
                 ref={searchRef}

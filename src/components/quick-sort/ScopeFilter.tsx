@@ -170,7 +170,7 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
       {expanded && (
         <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] overflow-hidden flex flex-col max-h-[60vh]">
           {/* Search input */}
-          <div className="flex items-center gap-2 px-3 py-3 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--surface-2)]">
+          <div className="input-glow flex items-center gap-2 px-3 py-3 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--surface-2)]">
             <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
             <input
               ref={searchInputRef}

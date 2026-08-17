@@ -183,7 +183,7 @@ export function IntakePreviewStep({
               <textarea
                 value={editBuffer}
                 onChange={(e) => setEditBuffer(e.target.value)}
-                className="w-full h-[40vh] bg-[var(--surface-1)] border border-[var(--border)] rounded-md p-4 text-sm font-mono text-[var(--text-secondary)] resize-none focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+                className="w-full h-[40vh] bg-[var(--surface-1)] border border-[var(--border)] rounded-md p-4 text-sm font-mono text-[var(--text-secondary)] resize-none outline-none"
                 placeholder="Edit document content..."
               />
               <div className="flex items-center gap-2">
@@ -414,7 +414,7 @@ export function IntakePreviewStep({
                   e.preventDefault();
                   addTag(newTag);
                 }}
-                className="w-full max-w-sm bg-[var(--surface-1)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-500)]/50"
+                className="w-full max-w-sm bg-[var(--surface-1)] border border-[var(--border)] rounded px-2 py-1.5 text-xs text-[var(--text-primary)] outline-none"
                 placeholder="Add tag and press Enter"
               />
               <button

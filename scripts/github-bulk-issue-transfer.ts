@@ -9,6 +9,7 @@ import {
   getGitHubBulkTransferStatus,
   previewGitHubBulkTransfer,
   reconcileGitHubBulkTransferItem,
+  type GitHubBulkTransferSuccessorAuthorization,
 } from '../src/lib/connectors/github-issues/bulk-transfer-service';
 import { inspectGitHubRepointBackup } from '../src/lib/connectors/github-issues/repoint-service';
 
@@ -32,6 +33,10 @@ async function main(): Promise<void> {
       concurrency: { type: 'string' },
       task: { type: 'string' },
       'target-number': { type: 'string' },
+      'source-node-digest': { type: 'string' },
+      'successor-node-digest': { type: 'string' },
+      'successor-reason': { type: 'string' },
+      'successor-key': { type: 'string' },
       confirm: { type: 'string' },
     },
     strict: true,
@@ -58,6 +63,12 @@ async function main(): Promise<void> {
       taskId: required(values.task, '--task'),
       targetNumber: positiveInteger(values['target-number'], '--target-number'),
       actor: required(values.actor, '--actor'),
+      successorAuthorization: buildSuccessorAuthorization({
+        expectedSourceStableIdDigest: values['source-node-digest'],
+        expectedSuccessorStableIdDigest: values['successor-node-digest'],
+        reason: values['successor-reason'],
+        idempotencyKey: values['successor-key'],
+      }),
     }));
     return;
   }
@@ -110,6 +121,27 @@ export function required(value: string | undefined, option: string): string {
   const normalized = value?.trim();
   if (!normalized) throw new Error(`${option} is required`);
   return normalized;
+}
+
+export function buildSuccessorAuthorization(input: {
+  expectedSourceStableIdDigest: string | undefined;
+  expectedSuccessorStableIdDigest: string | undefined;
+  reason: string | undefined;
+  idempotencyKey: string | undefined;
+}): GitHubBulkTransferSuccessorAuthorization | undefined {
+  if (Object.values(input).every((value) => value === undefined)) return undefined;
+  return {
+    expectedSourceStableIdDigest: required(
+      input.expectedSourceStableIdDigest,
+      '--source-node-digest',
+    ),
+    expectedSuccessorStableIdDigest: required(
+      input.expectedSuccessorStableIdDigest,
+      '--successor-node-digest',
+    ),
+    reason: required(input.reason, '--successor-reason'),
+    idempotencyKey: required(input.idempotencyKey, '--successor-key'),
+  };
 }
 
 function optionalConcurrency(value: string | undefined): number | undefined {

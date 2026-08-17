@@ -11,6 +11,7 @@ import {
 import { inspectGitHubRepointBackup } from '@/lib/connectors/github-issues/repoint-service';
 
 const repository = z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/);
+const sha256Digest = z.string().regex(/^[a-f0-9]{64}$/);
 const common = z.object({
   connectorInstanceId: z.string().min(1).max(100),
   sourceRepository: repository,
@@ -44,6 +45,12 @@ const requestSchema = z.discriminatedUnion('action', [
     targetNumber: z.number().int().positive(),
     actor: z.string().min(1).max(80),
     confirmation: z.literal('reconcile'),
+    successorAuthorization: z.object({
+      expectedSourceStableIdDigest: sha256Digest,
+      expectedSuccessorStableIdDigest: sha256Digest,
+      reason: z.string().min(3).max(500),
+      idempotencyKey: z.string().min(8).max(192),
+    }).strict().optional(),
   }).strict(),
 ]);
 

@@ -85,6 +85,25 @@ npm run github:bulk-transfer -- reconcile \
   --actor <operator> --confirm reconcile
 ```
 
+If GitHub assigned a successor node ID during the native transfer, the first
+reconcile attempt fails closed with `explicit successor authorization is
+required`. Independently verify the source node ID from the archived preview
+and the successor node ID from the target issue, SHA-256 hash both raw node ID
+strings, and repeat reconciliation with the reviewed authorization:
+
+```bash
+npm run github:bulk-transfer -- reconcile \
+  --run <run-id> --task <task-id> --target-number <number> \
+  --actor <operator> --confirm reconcile \
+  --source-node-digest <source-node-id-sha256> \
+  --successor-node-digest <successor-node-id-sha256> \
+  --successor-reason '<reviewed reason>' \
+  --successor-key <unique-idempotency-key>
+```
+
+All four successor options are required together. Archive the evidence and
+command output; do not put raw node IDs into logs when digests are sufficient.
+
 Never retry or repair an ambiguous item directly through GitHub or SQL. After
 all ambiguous items are reconciled, resume the original run.
 

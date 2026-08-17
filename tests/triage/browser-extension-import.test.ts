@@ -25,6 +25,8 @@ type ImportProgressListener = (message: {
 describe('browser extension imports', () => {
   it('waits for the page relay to load before dispatching the first fetch', async () => {
     const window = new Window({ url: 'https://www.instagram.com/test/saved/all-posts/' });
+    const appendRelay = vi.spyOn(window.document.head, 'appendChild')
+      .mockImplementation((node) => node);
     const requestListener = vi.fn((event: Event) => {
       const detail = (event as CustomEvent).detail;
       window.dispatchEvent(new window.CustomEvent('mc-fetch-response', {
@@ -63,7 +65,7 @@ describe('browser extension imports', () => {
     );
 
     expect(requestListener).not.toHaveBeenCalled();
-    const relayScript = window.document.querySelector('script');
+    const relayScript = appendRelay.mock.calls[0]?.[0] as HTMLScriptElement | undefined;
     expect(relayScript?.src).toBe('chrome-extension://test/page-fetch-relay.js');
 
     relayScript?.dispatchEvent(new window.Event('load'));
@@ -121,6 +123,7 @@ describe('browser extension imports', () => {
       document: window.document,
       chrome,
       URL: window.URL,
+      URLSearchParams: window.URLSearchParams,
       console,
       fetch: vi.fn(),
       setTimeout,

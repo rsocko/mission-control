@@ -117,7 +117,7 @@ function ConnectorsSection({
         <div>
           <h2 className="text-xl font-semibold text-[var(--text-primary)]">Connectors</h2>
           <p className="text-sm text-[var(--text-tertiary)] mt-1">
-            Manage data source connections. Each connector syncs tasks and/or alerts.
+            Each connector syncs tasks and/or alerts.
           </p>
         </div>
         <motion.button

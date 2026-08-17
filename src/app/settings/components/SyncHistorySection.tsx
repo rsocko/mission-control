@@ -1051,7 +1051,7 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
     <>
       <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">Sync History</h2>
       <p className="text-sm text-[var(--text-tertiary)] mb-6">
-        Completed syncs, how they started, and whether automatic scheduling needs your attention.
+        Recent sync runs and automatic-scheduling health.
       </p>
 
       {scheduleHealth && (

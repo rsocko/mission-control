@@ -143,7 +143,7 @@ export function StorageSection() {
       <div>
         <h3 className="text-lg font-semibold text-[var(--text-primary)]">Storage & Cache</h3>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Manage thumbnail cache, data retention, and cleanup for the triage queue.
+          Thumbnail cache, retention, and cleanup for triage.
         </p>
       </div>
 

@@ -148,7 +148,7 @@ export function BoardControls({
               onChange={e => onNewColumnNameChange(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && onAddColumn()}
               placeholder="Column name"
-              className="text-xs px-2 py-1 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded text-[var(--text-primary)] placeholder:text-[var(--text-muted)] w-28 focus:outline-none focus:ring-1 focus:ring-blue-500/50"
+              className="text-xs px-2 py-1 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded text-[var(--text-primary)] placeholder:text-[var(--text-muted)] w-28 outline-none"
             />
             <button
               onClick={onAddColumn}

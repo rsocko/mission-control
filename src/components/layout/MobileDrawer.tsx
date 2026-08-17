@@ -206,7 +206,7 @@ export function MobileDrawer({ isOpen, onClose, returnFocusRef, features }: Mobi
             {/* Search bar */}
             <div className="px-4 pb-3">
               <form onSubmit={handleSearchSubmit}>
-                <div className="flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
+                <div className="input-glow flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
                   <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
                   <input
                     ref={searchInputRef}

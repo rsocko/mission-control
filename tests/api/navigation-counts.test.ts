@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => {
   return {
     terminals,
     select: vi.fn(() => chainable(terminals.shift() ?? [])),
+    getServerToday: vi.fn(() => '2026-08-16'),
   };
 });
 
@@ -60,13 +61,14 @@ vi.mock('@/lib/notifications/lifecycle-sql', () => ({
 }));
 
 vi.mock('@/lib/utils/date', () => ({
-  getLocalToday: vi.fn(() => '2026-08-16'),
+  getLocalToday: mocks.getServerToday,
 }));
 
 describe('GET /api/navigation/counts', () => {
   beforeEach(() => {
     mocks.terminals.length = 0;
     mocks.select.mockClear();
+    mocks.getServerToday.mockClear();
   });
 
   it('returns all actionable queue counts and notification severity', async () => {
@@ -80,9 +82,12 @@ describe('GET /api/navigation/counts', () => {
     );
 
     const { GET } = await import('@/app/api/navigation/counts/route');
-    const response = await GET();
+    const response = await GET(new Request(
+      'http://localhost/api/navigation/counts?date=2026-08-16',
+    ));
 
     expect(response.status).toBe(200);
+    expect(mocks.getServerToday).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual({
       myDay: 4,
       notifications: 7,
@@ -93,5 +98,15 @@ describe('GET /api/navigation/counts', () => {
       unreadNotifications: 9,
       notificationTone: 'amber',
     });
+  });
+
+  it('rejects invalid browser-local dates', async () => {
+    const { GET } = await import('@/app/api/navigation/counts/route');
+    const response = await GET(new Request(
+      'http://localhost/api/navigation/counts?date=2026-02-30',
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.select).not.toHaveBeenCalled();
   });
 });

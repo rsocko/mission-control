@@ -1,5 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import {
   NavigationBadge,
   NavigationPressureBar,
@@ -8,12 +10,18 @@ import { NavBadgeSettingsCard } from '@/app/settings/components/NavBadgeSettings
 import {
   DEFAULT_NAVIGATION_BADGE_PREFERENCES,
   type NavigationBadgePreferences,
+  useNavigationCounts,
 } from '@/lib/hooks/useNavigationBadges';
 import { getNotificationBadgeTone } from '@/lib/navigation/badges';
+import { getLocalToday } from '@/lib/utils/client-date';
 
 describe('navigation badges', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('uses the highest notification severity for the badge tone', () => {
@@ -66,6 +74,36 @@ describe('navigation badges', () => {
 
     rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
     expect(screen.getByText('12')).toHaveAttribute('data-morph-id', 'myDay');
+  });
+
+  it('requests navigation counts for the browser-local date', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        myDay: 2,
+        notifications: 0,
+        triage: 0,
+        quickSort: 0,
+        reconciliation: 0,
+        overdue: 0,
+        unreadNotifications: 0,
+        notificationTone: 'blue',
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+
+    const { result } = renderHook(() => useNavigationCounts(), { wrapper });
+
+    await waitFor(() => expect(result.current.myDay).toBe(2));
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/navigation/counts?date=${getLocalToday()}`,
+    );
   });
 
   it('persists master and per-destination visibility choices', () => {

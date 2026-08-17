@@ -11,6 +11,7 @@ import {
   useState,
 } from 'react';
 import { useRouter } from 'next/navigation';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import {
   Tree,
   type DragPreviewProps,
@@ -1117,6 +1118,7 @@ function PropertyPanel() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       const target = event.target;
       if (
         !selected

@@ -63,7 +63,9 @@ export function Modal({
   contentTestId,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
   const titleId = useId();
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -75,7 +77,7 @@ export function Modal({
 
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (!e.defaultPrevented) onClose();
+        if (!e.defaultPrevented) onCloseRef.current();
         return;
       }
       if (e.key !== 'Tab' || !dialog) return;
@@ -107,7 +109,7 @@ export function Modal({
       document.removeEventListener('keydown', handler);
       previouslyFocused?.focus();
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   const shouldShowClose = showClose ?? !!title;
 

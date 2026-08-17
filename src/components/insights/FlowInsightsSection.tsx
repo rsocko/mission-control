@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import type { FlowInsightsResult } from '@/lib/stats/flow-query';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 
 export interface FlowFilterValues {
   projectId: string;
@@ -31,10 +32,10 @@ interface Props {
 }
 
 const STATUS_COLORS = {
-  todo: '#60a5fa',
-  inProgress: '#f59e0b',
-  done: '#34d399',
-  cancelled: '#94a3b8',
+  todo: TASK_STATUS_VISUALS.todo.color,
+  inProgress: TASK_STATUS_VISUALS.in_progress.color,
+  done: TASK_STATUS_VISUALS.done.color,
+  cancelled: TASK_STATUS_VISUALS.cancelled.color,
 };
 const ALL_FILTER_VALUE = '__all__';
 

@@ -408,16 +408,16 @@ describe('getPhaseStatusColor', () => {
 // ─── getTaskStatusColor ─────────────────────────────────────────────
 describe('getTaskStatusColor', () => {
   it('returns success for done', () => {
-    expect(getTaskStatusColor('done')).toBe('var(--success)');
+    expect(getTaskStatusColor('done')).toBe('#10b981');
   });
   it('returns accent for in_progress', () => {
-    expect(getTaskStatusColor('in_progress')).toBe('var(--accent-500)');
+    expect(getTaskStatusColor('in_progress')).toBe('#3b82f6');
   });
   it('returns warning for cancelled', () => {
-    expect(getTaskStatusColor('cancelled')).toBe('var(--warning)');
+    expect(getTaskStatusColor('cancelled')).toBe('#64748b');
   });
   it('returns muted for todo', () => {
-    expect(getTaskStatusColor('todo')).toBe('var(--text-muted)');
+    expect(getTaskStatusColor('todo')).toBe('#94a3b8');
   });
 });
 

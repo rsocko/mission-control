@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { sortableKeyboardCoordinates } from '@dnd-kit/sortable';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { getTaskPriorityVisual, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -85,14 +85,6 @@ const TOTAL_SLOTS = (END_HOUR - START_HOUR) * SLOTS_PER_HOUR;
 const MIN_DURATION = 15;
 const MAX_DURATION = 240;
 const DEFAULT_DURATION = 30;
-
-const PRIORITY_BORDER: Record<string, string> = {
-  critical: 'border-red-500/60',
-  high: 'border-orange-500/60',
-  medium: 'border-yellow-500/60',
-  low: 'border-[var(--border)]',
-  none: 'border-[var(--border)]',
-};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -348,7 +340,7 @@ function ScheduledBlock({
     if (!isResizing) setResizeDuration(duration);
   }, [duration, isResizing]);
 
-  const priorityBorder = PRIORITY_BORDER[task.priority] || PRIORITY_BORDER.none;
+  const priorityBorder = getTaskPriorityVisual(task.priority).borderClass;
 
   return (
     <div

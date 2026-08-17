@@ -18,6 +18,7 @@ import { triggerHapticFeedback } from '@/lib/utils/haptics';
 import type { TaskContextMenuActions, HubProject, TaskProjectPhaseMembership } from './TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import type { LocalDisposition, TaskEditPolicy, TaskField, TaskSourceModel } from '@/types';
+import { TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 import {
   canEditTaskField,
   canRemoveTask,
@@ -70,18 +71,15 @@ const ITEM_CLASS = 'flex items-center gap-3 px-4 py-3 text-sm text-[var(--text-p
 const SEPARATOR_CLASS = 'h-px bg-[var(--border-subtle)] my-1 mx-4';
 
 const PRIORITY_OPTIONS = [
-  { value: 'critical', label: 'Critical', color: 'text-rose-400' },
-  { value: 'high', label: 'High', color: 'text-orange-400' },
-  { value: 'medium', label: 'Medium', color: 'text-amber-300' },
-  { value: 'low', label: 'Low', color: 'text-sky-400' },
-  { value: 'none', label: 'None', color: 'text-[var(--text-muted)]' },
+  ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({ value, label: visual.label, color: visual.textClass })),
 ];
 
 const STATUS_OPTIONS = [
-  { value: 'todo', label: 'To Do', color: 'text-[var(--text-muted)]' },
-  { value: 'in_progress', label: 'In Progress', color: 'text-purple-400' },
-  { value: 'done', label: 'Done', color: 'text-green-400' },
-  { value: 'cancelled', label: 'Cancelled', color: 'text-rose-400' },
+  ...(['todo', 'in_progress', 'done', 'cancelled'] as const).map((value) => ({
+    value,
+    label: TASK_STATUS_VISUALS[value].label,
+    color: TASK_STATUS_VISUALS[value].textClass,
+  })),
 ];
 
 /**

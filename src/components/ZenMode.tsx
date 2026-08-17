@@ -12,6 +12,7 @@ import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 interface ZenTask {
   id: string;
@@ -227,11 +228,7 @@ export function ZenMode() {
                           </p>
                         </button>
                         {task.priority !== 'none' && (
-                          <span className={`text-xs font-semibold uppercase tracking-wider ${
-                           task.priority === 'critical' ? 'text-rose-400' :
-                           task.priority === 'high' ? 'text-orange-400' :
-                           task.priority === 'medium' ? 'text-amber-300' : 'text-sky-400'
-                          }`}>
+                          <span className={`text-xs font-semibold uppercase tracking-wider ${getTaskPriorityVisual(task.priority).textClass}`}>
                             {task.priority}
                           </span>
                         )}

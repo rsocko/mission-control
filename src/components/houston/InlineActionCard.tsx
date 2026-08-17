@@ -4,6 +4,7 @@ import { memo, useState, useCallback } from 'react';
 import { motion } from 'motion/react';
 import { CalendarDays, CheckCircle2, ListPlus, Loader2, TrendingUp } from 'lucide-react';
 import { scaleIn } from '@/lib/motion';
+import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -30,13 +31,6 @@ type ActionCardData = {
 type ActionPriority = NonNullable<ActionCardData['priority']>;
 
 // ─── Priority config ────────────────────────────────────────────────────────
-
-const priorityColors: Record<string, string> = {
-  critical: 'bg-red-500/20 text-red-300 border-red-500/30',
-  high: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  medium: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  low: 'bg-gray-500/20 text-gray-300 border-gray-500/30',
-};
 
 const priorityOptions = ['critical', 'high', 'medium', 'low'] as const;
 
@@ -154,7 +148,7 @@ function CreateTaskContent({
             type="button"
             onClick={() => onPriorityChange(p)}
             className={`px-2.5 py-1 text-xs rounded-lg border capitalize min-h-[32px] transition-all
-              ${selectedPriority === p ? priorityColors[p] : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border)]'}`}
+              ${selectedPriority === p ? getTaskPriorityVisual(p).badgeClass : 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:border-[var(--border)]'}`}
           >
             {p}
           </button>

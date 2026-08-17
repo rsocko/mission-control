@@ -8,6 +8,7 @@
  */
 
 const $ = (id) => document.getElementById(id);
+const isSidePanel = new URLSearchParams(window.location.search).get('surface') === 'sidepanel';
 
 const SOURCES = [
   { id: 'reddit', name: 'Reddit', icon: 'icons/sources/reddit.svg', url: 'https://www.reddit.com/user/me/saved/', hostMatch: 'reddit.com', importable: true, readyPattern: /\/(?:user|u)\/[^/]+\/saved/i },
@@ -33,19 +34,25 @@ const SOURCES = [
 ];
 
 let currentTab = null;
+let initRequestId = 0;
+let panelWindowId = null;
 
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 async function init() {
+  const requestId = ++initRequestId;
   const { apiUrl, captureKey } = await chrome.storage.sync.get(['apiUrl', 'captureKey']);
 
+  if (requestId !== initRequestId) return;
   if (!apiUrl || !captureKey) {
     showSetup(apiUrl, captureKey);
     return;
   }
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (requestId !== initRequestId) return;
   currentTab = tab;
+  if (isSidePanel && panelWindowId == null) panelWindowId = tab?.windowId ?? null;
 
   const isInternal = tab?.url && (
     tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') ||
@@ -240,8 +247,8 @@ function bindEvents(matchedSource) {
         if (needsRedirect) {
           // Navigate to the correct page — import will be available there
           const targetUrl = await resolveRedirectUrl(matchedSource, currentTab?.url);
-          chrome.tabs.update(currentTab.id, { url: targetUrl });
-          window.close();
+          await chrome.tabs.update(currentTab.id, { url: targetUrl });
+          closeTransientUi();
         } else if (matchedSource.livePassive && importBtn.dataset.capturing === 'true') {
           finishCapture(matchedSource);
         } else {
@@ -457,7 +464,7 @@ async function savePage() {
       const data = await response.json();
       statusEl.textContent = `Saved! Relevance score: ${data.item?.aiRelevanceScore ?? '?'}`;
       statusEl.className = 'status success';
-      setTimeout(() => window.close(), 1500);
+      setTimeout(closeTransientUi, 1500);
     } else {
       const err = await response.json().catch(() => ({}));
       statusEl.textContent = `Error: ${err.error || response.statusText}`;
@@ -512,11 +519,24 @@ $('settingsBtn').addEventListener('click', async () => {
   showSetup(apiUrl, captureKey);
 });
 
+$('openSidePanelBtn').addEventListener('click', async () => {
+  const statusEl = $('status');
+  try {
+    const tab = currentTab || (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+    if (!Number.isInteger(tab?.windowId)) throw new Error('No active browser window');
+    await chrome.sidePanel.open({ windowId: tab.windowId });
+    closeTransientUi();
+  } catch (err) {
+    statusEl.textContent = `Could not open side panel: ${err.message || 'Unsupported browser'}`;
+    statusEl.className = 'status error';
+  }
+});
+
 $('openMcBtn').addEventListener('click', async () => {
   const { apiUrl } = await chrome.storage.sync.get(['apiUrl']);
   if (apiUrl) {
     chrome.tabs.create({ url: apiUrl });
-    window.close();
+    closeTransientUi();
   }
 });
 
@@ -717,7 +737,7 @@ async function sendTabsToTriage(allTabs) {
 
     // If we closed tabs, close the popup after a brief moment
     if (closeTabs && closed > 0) {
-      setTimeout(() => window.close(), 2000);
+      setTimeout(closeTransientUi, 2000);
     }
   } catch (err) {
     statusEl.textContent = `Error: ${err.message || 'Failed to send tabs'}`;
@@ -729,5 +749,27 @@ async function sendTabsToTriage(allTabs) {
 }
 
 // ─── Start ───────────────────────────────────────────────────────────────────
+
+function closeTransientUi() {
+  if (!isSidePanel) window.close();
+}
+
+if (isSidePanel) {
+  $('openSidePanelBtn').style.display = 'none';
+  chrome.tabs.onActivated.addListener(({ windowId }) => {
+    if (panelWindowId == null || windowId === panelWindowId) init();
+  });
+  chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+    if (
+      tab.active &&
+      (panelWindowId == null || tab.windowId === panelWindowId) &&
+      (changeInfo.url || changeInfo.status === 'complete')
+    ) {
+      init();
+    }
+  });
+} else if (!chrome.sidePanel?.open) {
+  $('openSidePanelBtn').style.display = 'none';
+}
 
 init();

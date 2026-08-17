@@ -41,17 +41,16 @@ permissions prompt on install.
 | Action | How |
 |--------|-----|
 | **Popup capture** | Click extension icon → review page info → **Save to Triage** |
+| **Persistent imports** | Click extension icon → **Keep open in side panel** → choose an import source |
 | **Keyboard shortcut** | Press `Ctrl+Shift+S` (`⌘+Shift+S` on Mac) — captures instantly, no popup |
 | **Right-click capture** | Right-click a page or link → **Save to Mission Control Triage** |
 | **Add a note** | Type in the note field before saving (popup only) |
 
 ### Sources dashboard
 
-The popup also lists supported platforms (Reddit, Instagram, Facebook, YouTube,
-TikTok, Pinterest). Each entry has a **Go →** button that opens that
-platform's saved/library page in a new tab. Bulk import from these platforms
-is not implemented yet — this is a preview of the foundation (see
-`page-fetch-relay.js` and `content-scripts/capture.js`) for that future work.
+The popup and persistent side panel list supported import platforms. The side
+panel stays visible while navigating to a platform's saved-items page, then
+refreshes its import action when that page is ready.
 
 > **Shortcut conflict:** `Ctrl+Shift+S` may conflict with "Save As" on some
 > browsers. You can rebind it at `chrome://extensions/shortcuts`.

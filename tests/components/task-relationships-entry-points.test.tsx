@@ -80,8 +80,12 @@ vi.mock('@/components/ui/MobileSheet', () => ({
 }));
 
 vi.mock('@/components/today/TodayMainPanel', () => ({
-  TodayMainPanel: ({ onSelectTask }: { onSelectTask: (taskId: string) => void }) => (
-    <button onClick={() => onSelectTask('today-task')}>Open Today desktop task</button>
+  TodayMainPanel: ({
+    selection,
+  }: {
+    selection: { selectTask: (taskId: string | null) => void };
+  }) => (
+    <button onClick={() => selection.selectTask('today-task')}>Open Today desktop task</button>
   ),
 }));
 vi.mock('@/components/today/TodayScheduleModal', () => ({ TodayScheduleModal: () => null }));

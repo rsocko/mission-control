@@ -44,7 +44,10 @@ import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 
 import type { ComponentType } from 'react';
-import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import {
+  NavigationBadge,
+  NavigationPressureBar,
+} from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
 import {
   EMPTY_NAVIGATION_COUNTS,
@@ -261,6 +264,8 @@ export function NavRail({
               const badgeTone = item.badgeKey === 'notifications'
                 ? counts.notificationTone
                 : item.badgeTone;
+              const pulseBadge = item.badgeKey === 'notifications'
+                && counts.notificationTone === 'red';
               return (
                 <Tooltip key={item.href} content={item.label} placement="right" disabled={expanded}>
                   <Link
@@ -280,7 +285,11 @@ export function NavRail({
                     <span className="relative w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
                       <Icon size={item.iconSize ?? 22} className={cn('flex-shrink-0', item.iconColor && (active ? item.iconColor.replace('400', '300') : item.iconColor))} />
                       {!expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
-                        <NavigationBadge count={badgeCount} tone={badgeTone} overlay />
+                        <NavigationPressureBar
+                          count={badgeCount}
+                          tone={badgeTone}
+                          pulse={pulseBadge}
+                        />
                       )}
                     </span>
                     <span className={cn(
@@ -291,7 +300,11 @@ export function NavRail({
                     </span>
                     {expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
                       <span className="ml-auto">
-                        <NavigationBadge count={badgeCount} tone={badgeTone} />
+                        <NavigationBadge
+                          count={badgeCount}
+                          tone={badgeTone}
+                          pulse={pulseBadge}
+                        />
                       </span>
                     )}
                     {item.href === '/ai' && isAiActive && (

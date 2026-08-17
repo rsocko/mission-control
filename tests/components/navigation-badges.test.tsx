@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import {
+  NavigationBadge,
+  NavigationPressureBar,
+} from '@/components/layout/NavigationBadge';
 import { NavBadgeSettingsCard } from '@/app/settings/components/NavBadgeSettingsCard';
 import {
   DEFAULT_NAVIGATION_BADGE_PREFERENCES,
@@ -25,6 +28,31 @@ describe('navigation badges', () => {
 
     rerender(<NavigationBadge count={125} tone="red" />);
     expect(screen.getByText('99+')).toHaveAttribute('aria-label', '125 items need attention');
+  });
+
+  it('uses discrete centered pressure lengths for collapsed navigation', () => {
+    const { rerender } = render(<NavigationPressureBar count={7} tone="amber" />);
+    expect(screen.getByLabelText('7 items need attention')).toHaveAttribute('data-pressure-level', 'low');
+    expect(screen.getByLabelText('7 items need attention')).toHaveClass('left-1/2', '-translate-x-1/2', 'w-2');
+
+    rerender(<NavigationPressureBar count={12} tone="amber" />);
+    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute('data-pressure-level', 'medium');
+    expect(screen.getByLabelText('12 items need attention')).toHaveClass('w-4');
+
+    rerender(<NavigationPressureBar count={99} tone="red" />);
+    expect(screen.getByLabelText('99 items need attention')).toHaveAttribute('data-pressure-level', 'high');
+    expect(screen.getByLabelText('99 items need attention')).toHaveClass('w-[30px]');
+  });
+
+  it('can pulse urgent indicators without changing non-urgent defaults', () => {
+    const { rerender } = render(<NavigationPressureBar count={4} tone="red" pulse />);
+    expect(screen.getByLabelText('4 items need attention')).toHaveClass('motion-safe:animate-pulse');
+
+    rerender(<NavigationBadge count={4} tone="red" pulse />);
+    expect(screen.getByText('4')).toHaveClass('motion-safe:animate-pulse');
+
+    rerender(<NavigationBadge count={4} tone="amber" />);
+    expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
   });
 
   it('persists master and per-destination visibility choices', () => {

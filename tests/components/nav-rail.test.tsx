@@ -1,18 +1,21 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
+import type { NavigationCounts } from '@/lib/navigation/badges';
 
 function renderNavRail({
   isAiActive = false,
   isSyncing = false,
   syncStatus = [],
+  counts,
 }: {
   isAiActive?: boolean;
   isSyncing?: boolean;
   syncStatus?: ConnectorHealthInfo[];
+  counts?: NavigationCounts;
 } = {}) {
   return render(
     <TooltipProvider>
@@ -21,6 +24,7 @@ function renderNavRail({
         isAiActive={isAiActive}
         isSyncing={isSyncing}
         syncStatus={syncStatus}
+        counts={counts}
       />
     </TooltipProvider>
   );
@@ -223,6 +227,62 @@ describe('NavRail', () => {
     expect(screen.getByRole('group', { name: 'Assistant' })).toHaveTextContent(
       'Houston'
     );
+  });
+
+  it('shows pressure bars when collapsed and numeric badges when expanded', () => {
+    renderNavRail({
+      counts: {
+        myDay: 12,
+        notifications: 0,
+        triage: 0,
+        quickSort: 0,
+        reconciliation: 0,
+        overdue: 0,
+        unreadNotifications: 0,
+        notificationTone: 'blue',
+      },
+    });
+
+    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
+      'data-pressure-level',
+      'medium',
+    );
+    expect(screen.queryByText('12')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    expect(screen.getByText('12')).toHaveAttribute('aria-label', '12 items need attention');
+    expect(screen.queryByTestId('navigation-pressure-bar')).not.toBeInTheDocument();
+  });
+
+  it('pulses only urgent notification indicators', () => {
+    renderNavRail({
+      counts: {
+        myDay: 0,
+        notifications: 4,
+        triage: 4,
+        quickSort: 0,
+        reconciliation: 0,
+        overdue: 0,
+        unreadNotifications: 4,
+        notificationTone: 'red',
+      },
+    });
+
+    const urgentNotification = screen.getAllByLabelText('4 items need attention')[0];
+    const triage = screen.getAllByLabelText('4 items need attention')[1];
+    expect(urgentNotification).toHaveClass('bg-red-500', 'motion-safe:animate-pulse');
+    expect(triage).toHaveClass('bg-red-500');
+    expect(triage).not.toHaveClass('motion-safe:animate-pulse');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    const notificationLink = screen.getByRole('link', { name: /^Notifications/ });
+    expect(within(notificationLink).getByText('4')).toHaveClass(
+      'bg-red-500',
+      'motion-safe:animate-pulse',
+    );
+    expect(screen.queryAllByTestId('navigation-pressure-bar')).toHaveLength(0);
   });
 
   it('uses distinct colors for adjacent Routines and Triage icons', () => {

@@ -14,11 +14,25 @@ import { notificationIsInInbox, notificationNeedsAttention } from '@/lib/notific
 import { getNotificationBadgeTone, type NavigationCounts } from '@/lib/navigation/badges';
 import { getLocalToday } from '@/lib/utils/date';
 
-export async function GET() {
+function isValidDateParameter(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return parsed.getUTCFullYear() === year
+    && parsed.getUTCMonth() === month - 1
+    && parsed.getUTCDate() === day;
+}
+
+export async function GET(request: Request) {
+  const requestedDate = new URL(request.url).searchParams.get('date');
+  if (requestedDate && !isValidDateParameter(requestedDate)) {
+    return ApiErrors.badRequest('date must be a valid YYYY-MM-DD date');
+  }
+
   try {
     const nowDate = new Date();
     const now = nowDate.toISOString();
-    const today = getLocalToday();
+    const today = requestedDate || getLocalToday();
     const visibleTask = and(
       sql`${tasks.connectorInstanceId} NOT IN (
         SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL

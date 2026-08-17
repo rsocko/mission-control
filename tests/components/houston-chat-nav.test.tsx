@@ -3,7 +3,7 @@
  * Covers: home screen composer, back button, new chat button
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 
 // Mock motion/react to avoid animation issues in tests
@@ -32,6 +32,21 @@ describe('HoustonHomeScreen', () => {
 
   beforeEach(() => {
     onStartChat = vi.fn();
+    vi.mocked(fetch).mockClear();
+  });
+
+  it('requests top-level task counts for Houston summaries', async () => {
+    const { HoustonHomeScreen } = await import('@/components/houston/HoustonHomeScreen');
+    render(React.createElement(HoustonHomeScreen, { onStartChat }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/tasks?status=todo&openOnly=true&parentOnly=true&countsOnly=true',
+      );
+      expect(fetch).toHaveBeenCalledWith(
+        '/api/tasks?openOnly=true&parentOnly=true&countsOnly=true',
+      );
+    });
   });
 
   it('renders a composer input for free-form chat', async () => {

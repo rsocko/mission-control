@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { listGroups, sourceLists, tasks } from '@/db/schema';
-import { asc, sql, ne, and, eq } from 'drizzle-orm';
+import { asc, sql, and, eq, isNull, notInArray } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { validateNameForGraphApi } from '@/lib/validation/emoji-safety';
 import { ApiErrors, apiError } from '@/lib/api-error';
@@ -19,7 +19,11 @@ export async function GET() {
           count: sql<number>`count(*)`.as('count'),
         })
         .from(tasks)
-        .where(and(ne(tasks.status, 'done'), eq(tasks.isChecklistItem, false)))
+        .where(and(
+          notInArray(tasks.status, ['done', 'cancelled']),
+          isNull(tasks.parentId),
+          eq(tasks.isChecklistItem, false),
+        ))
         .groupBy(tasks.sourceListId, tasks.connectorInstanceId),
     ]);
 

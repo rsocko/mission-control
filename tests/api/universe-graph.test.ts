@@ -22,7 +22,7 @@ describe('GET /api/graph/universe', () => {
     }));
     const filters = getUniverseSubgraph.mock.calls[0][0];
     expect(filters.taskQuery.toString()).toBe(
-      'filterQuery=assignee%3Agraph&priorities=high&statuses=todo&sources=local&listIds=local%3Ainbox',
+      'parentOnly=true&filterQuery=assignee%3Agraph&priorities=high&statuses=todo&sources=local&listIds=local%3Ainbox',
     );
   });
 

@@ -87,7 +87,6 @@ export async function GET(request: Request) {
 
   const noProject = searchParams.get('noProject') === 'true';
   const tagIds = normalizedCsv(searchParams, 'tagIds');
-  const parentOnly = searchParams.get('parentOnly') === 'true';
   const sortBy = searchParams.get('sortBy') || 'priority';
   const sortDirection = searchParams.get('sortDirection') || 'asc';
   const { limit, offset } = pagination;
@@ -123,8 +122,6 @@ export async function GET(request: Request) {
     } = await buildCanonicalTaskFilterConditions(searchParams);
     const effort = searchParams.get('effort');
     if (effort) conditions.push(eq(tasks.effort, parseInt(effort, 10)));
-    if (parentOnly) conditions.push(sql`${tasks.parentId} IS NULL`);
-
     // Text search: match title, sourceId, assignee, sourceListName, metadata, or tag names
     if (search) {
       // Strip leading '#' for numeric issue searches

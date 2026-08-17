@@ -3,22 +3,36 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => {
   const inboxCondition = { type: 'inbox' };
   const genericCondition = { type: 'generic' };
+  const parentOnlyCondition = { type: 'parent-only' };
+  const listCondition = { type: 'list' };
   const select = vi.fn();
   const where = vi.fn();
   const eq = vi.fn();
+  const and = vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions }));
+  const sql = vi.fn((strings: TemplateStringsArray) => (
+    strings.join('').includes('IS NULL')
+      ? parentOnlyCondition
+      : { type: 'sql', as: vi.fn(() => 'group') }
+  ));
   const getInboxFilterCondition = vi.fn(async () => inboxCondition);
   const getQuickFilterCondition = vi.fn(() => genericCondition);
   const withCondition = vi.fn((baseWhere, condition) => ({ baseWhere, condition }));
+  const getSourceListIdsCondition = vi.fn(() => listCondition);
 
   return {
     genericCondition,
     inboxCondition,
+    parentOnlyCondition,
+    listCondition,
     select,
     where,
     eq,
+    and,
+    sql,
     getInboxFilterCondition,
     getQuickFilterCondition,
     withCondition,
+    getSourceListIdsCondition,
   };
 });
 
@@ -47,20 +61,25 @@ vi.mock('@/db', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
-  and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
+  and: mocks.and,
   count: vi.fn(() => ({ as: vi.fn(() => 'count') })),
   eq: mocks.eq,
   inArray: vi.fn(),
+  isNull: vi.fn(() => mocks.parentOnlyCondition),
   notInArray: vi.fn(),
-  sql: vi.fn(() => ({ as: vi.fn(() => 'group') })),
+  sql: mocks.sql,
 }));
 
 vi.mock('@/db/schema', () => ({
   tasks: {
     connectorInstanceId: 'connectorInstanceId',
     connectorType: 'connectorType',
+    dueDate: 'dueDate',
+    id: 'id',
     localDisposition: 'localDisposition',
     parentId: 'parentId',
+    priority: 'priority',
+    sourceListName: 'sourceListName',
     status: 'status',
   },
   myDayItems: {
@@ -93,7 +112,7 @@ vi.mock('@/app/api/tasks/filter-factory', () => ({
 vi.mock('@/app/api/tasks/filter-query', () => ({
   getFilterQueryConditions: vi.fn(),
   getSourceListGroupCondition: vi.fn(),
-  getSourceListIdsCondition: vi.fn(),
+  getSourceListIdsCondition: mocks.getSourceListIdsCondition,
 }));
 
 describe('GET /api/tasks/group-counts', () => {
@@ -106,9 +125,12 @@ describe('GET /api/tasks/group-counts', () => {
     ));
     mocks.where.mockClear();
     mocks.eq.mockClear();
+    mocks.and.mockClear();
+    mocks.sql.mockClear();
     mocks.getInboxFilterCondition.mockClear();
     mocks.getQuickFilterCondition.mockClear();
     mocks.withCondition.mockClear();
+    mocks.getSourceListIdsCondition.mockClear();
   });
 
   it('applies the Inbox condition to grouped totals', async () => {
@@ -147,6 +169,26 @@ describe('GET /api/tasks/group-counts', () => {
     );
     expect(mocks.where).toHaveBeenCalledWith(
       expect.objectContaining({ condition: mocks.genericCondition }),
+    );
+  });
+
+  it('excludes subtasks from filtered grouped totals when parentOnly is requested', async () => {
+    const { GET } = await import('@/app/api/tasks/group-counts/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/group-counts?groupBy=status&parentOnly=true'
+        + '&source=microsoft-todo&listId=phone-and-tech',
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.getSourceListIdsCondition).toHaveBeenCalledWith(['phone-and-tech']);
+    expect(mocks.and.mock.calls.some(
+      (conditions) => conditions.includes(mocks.parentOnlyCondition),
+    )).toBe(true);
+    expect(mocks.withCondition).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conditions: expect.arrayContaining([mocks.parentOnlyCondition]),
+      }),
+      mocks.genericCondition,
     );
   });
 

@@ -1,4 +1,4 @@
-import { and, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import db from '@/db';
 import { myDayItems, tasks } from '@/db/schema';
 import {
@@ -99,6 +99,9 @@ export async function buildCanonicalTaskFilterConditions(
     && quickFilter !== 'recentlyClosed';
   if (openOnly && !statuses.length && !status) {
     conditions.push(notInArray(tasks.status, ['done', 'cancelled']));
+  }
+  if (searchParams.get('parentOnly') === 'true') {
+    conditions.push(isNull(tasks.parentId));
   }
 
   const listIds = normalizedCsv(searchParams, 'listIds', VALID_VALUE);

@@ -58,7 +58,7 @@ export async function GET(request: Request) {
       db.select({ count: sql<number>`COUNT(*)` })
         .from(myDayItems)
         .innerJoin(tasks, eq(tasks.id, myDayItems.taskId))
-        .where(and(eq(myDayItems.date, today), visibleTask, openTask)),
+        .where(and(eq(myDayItems.date, today), visibleTask, openTask, isNull(tasks.parentId))),
       db.select({
         attention: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} THEN 1 ELSE 0 END), 0)`,
         unread: sql<number>`COALESCE(SUM(CASE WHEN ${inboxCondition} AND ${notifications.readState} = 'unread' THEN 1 ELSE 0 END), 0)`,
@@ -89,7 +89,7 @@ export async function GET(request: Request) {
         )),
       db.select({ count: sql<number>`COUNT(*)` })
         .from(tasks)
-        .where(and(visibleTask, openTask, sql`${tasks.dueDate} < ${today}`)),
+        .where(and(visibleTask, openTask, isNull(tasks.parentId), sql`${tasks.dueDate} < ${today}`)),
     ]);
 
     const notificationsCount = Number(notificationRows[0]?.attention ?? 0);

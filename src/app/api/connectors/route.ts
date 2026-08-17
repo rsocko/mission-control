@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db, { runTransaction } from '@/db';
 import { connectorConfigs, financeAccounts, financeAttributionAudit, financeAttributionExceptions, financeAttributionSubjects, financeBudgetSnapshots, financeCategories, financeCategoryGroups, financeDatasetSyncState, financeInsightCutovers, financeInsightOccurrenceCacheState, financeInsightOccurrences, financeInsightPublicationFacts, financeInsightPublications, financeInsightPublicationState, financeInsightTransactionBackfillPlans, financeInsightTransactionProjectionFacts, financeInsightTransactionProjectionState, financeInsightTransactionProjectionWindows, financeInsightTransactionWindowProofs, financeMutationAudit, financeRecurringObligations, financeSyncState, financeTags, financeTransactions, focusItems, hubProjects, myDayItems, notificationPushRules, projectAutoIncludeExclusions, projectPhaseItems, sourceLists, syncLog, taskProjects, taskSchedules, taskTags, tasks, workTodoBridgeState, workTodoListDeltaState, workTodoOutboundChanges } from '@/db/schema';
-import { eq, sql, ne, and, isNull, inArray } from 'drizzle-orm';
+import { eq, sql, and, isNull, inArray, notInArray } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { dbLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       }
     }
 
-    // Compute task counts per sourceListId from DB (open tasks only, exclude checklist items)
+    // Compute top-level open task counts per source list.
     const taskCounts = await db
       .select({
         sourceListId: tasks.sourceListId,
@@ -77,7 +77,11 @@ export async function GET(request: Request) {
         count: sql<number>`count(*)`.as('count'),
       })
       .from(tasks)
-      .where(and(ne(tasks.status, 'done'), eq(tasks.isChecklistItem, false)))
+      .where(and(
+        notInArray(tasks.status, ['done', 'cancelled']),
+        isNull(tasks.parentId),
+        eq(tasks.isChecklistItem, false),
+      ))
       .groupBy(tasks.sourceListId, tasks.connectorInstanceId);
 
     const countMap = new Map(

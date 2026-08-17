@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, triageItems } from '@/db/schema';
-import { and, eq, lt, sql, notInArray } from 'drizzle-orm';
+import { and, eq, isNull, lt, sql, notInArray } from 'drizzle-orm';
 import { getLocalToday, getLocalDayBoundsISO } from '@/lib/utils/date';
 import logger from '@/lib/logger';
 import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
@@ -51,19 +51,31 @@ async function computeTodayStats(today: string) {
 
   const [totalOpenRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(notInArray(tasks.status, ['done', 'cancelled']));
+    .where(and(
+      notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
+    ));
 
   const [completedTodayRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(and(eq(tasks.status, 'done'), timestampGte(tasks.completedAt, todayStart), timestampLt(tasks.completedAt, tomorrowStart)));
+    .where(and(
+      eq(tasks.status, 'done'),
+      isNull(tasks.parentId),
+      timestampGte(tasks.completedAt, todayStart),
+      timestampLt(tasks.completedAt, tomorrowStart),
+    ));
 
   const [inProgressRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(eq(tasks.status, 'in_progress'));
+    .where(and(eq(tasks.status, 'in_progress'), isNull(tasks.parentId)));
 
   const [overdueRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(and(notInArray(tasks.status, ['done', 'cancelled']), lt(tasks.dueDate, today)));
+    .where(and(
+      notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
+      lt(tasks.dueDate, today),
+    ));
 
   const totalOpen = Number(totalOpenRow?.count ?? 0);
   const completedToday = Number(completedTodayRow?.count ?? 0);
@@ -86,13 +98,18 @@ async function computeQueueCounts() {
     .from(tasks)
     .where(and(
       notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
       sql`(${tasks.priority} IS NULL OR ${tasks.priority} = '' OR ${tasks.priority} = 'none')`,
     ));
 
   const today = getLocalToday();
   const [overdueRow] = await db.select({ count: sql<number>`count(*)` })
     .from(tasks)
-    .where(and(notInArray(tasks.status, ['done', 'cancelled']), lt(tasks.dueDate, today)));
+    .where(and(
+      notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
+      lt(tasks.dueDate, today),
+    ));
 
   return {
     triage: Number(triageRow?.count ?? 0),
@@ -111,7 +128,7 @@ async function computeRecentActivity() {
     completedAt: tasks.completedAt,
   })
     .from(tasks)
-    .where(eq(tasks.status, 'done'))
+    .where(and(eq(tasks.status, 'done'), isNull(tasks.parentId)))
     .orderBy(sql`${tasks.completedAt} DESC`)
     .limit(5);
 

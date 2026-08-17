@@ -41,6 +41,8 @@ vi.mock('motion/react', () => {
     initial?: unknown;
     animate?: unknown;
     exit?: unknown;
+    layoutId?: string;
+    transition?: unknown;
     onAnimationComplete?: (definition: unknown) => void;
   };
 
@@ -60,8 +62,13 @@ vi.mock('motion/react', () => {
       return <nav ref={ref} {...rest}>{children}</nav>;
     }
   );
+  const MotionSpan = React.forwardRef<HTMLSpanElement, MotionProps<HTMLSpanElement>>(
+    function MotionSpan({ children, layoutId, transition, ...props }, ref) {
+      return <span ref={ref} {...props}>{children}</span>;
+    }
+  );
   return {
-    motion: { div: MotionDiv, nav: MotionNav },
+    motion: { div: MotionDiv, nav: MotionNav, span: MotionSpan },
     AnimatePresence: ({
       children,
       onExitComplete,

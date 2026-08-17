@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 type TypeFilter = 'all' | 'tasks' | 'notifications';
 
@@ -206,6 +207,7 @@ export function SearchCommand() {
     const openSearch = () => setOpen(true);
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!open && shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         setOpen((current) => !current);
@@ -219,7 +221,7 @@ export function SearchCommand() {
       window.removeEventListener('mission-control:open-search', openSearch as EventListener);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {

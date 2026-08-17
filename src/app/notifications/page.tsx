@@ -26,6 +26,7 @@ import {
 } from '@/lib/notifications/query';
 import type { NotificationView } from '@/lib/notifications/views';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type {
   NotificationRestoreSnapshot,
 } from '@/lib/hooks/useNotifications';
@@ -183,6 +184,7 @@ function DesktopNotificationsPage() {
   // Keyboard shortcuts
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if (shouldBlockGlobalShortcut(e)) return;
       if (
         e.target instanceof HTMLElement
         && (e.target.isContentEditable || e.target.closest('input, textarea, select, button'))

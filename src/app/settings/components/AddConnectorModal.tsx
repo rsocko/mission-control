@@ -20,6 +20,7 @@ import {
 import { ConnectorBrandIcon } from './ConnectorBrandIcon';
 import { useConnectorCreation } from './useConnectorCreation';
 import { useOAuthConnectorInstanceId } from './useOAuthConnectorInstanceId';
+import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -32,6 +33,7 @@ type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' 
 function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
   const [selectedType, setSelectedType] = useState<string | null>(null);
+  useCloseOnEscape(onClose);
 
   function handleSelectType(type: string) {
     setSelectedType(type);
@@ -70,6 +72,9 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         initial="hidden"
         animate="show"
         exit="exit"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add connector"
         className="bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-[var(--border)]"
         onClick={e => e.stopPropagation()}
       >

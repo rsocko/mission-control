@@ -1198,7 +1198,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     fireEvent.keyDown(document, { key: 'Escape' });
 
-    expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(expandButton).toHaveFocus());
   });

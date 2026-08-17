@@ -24,6 +24,7 @@ import { TaskDetailPanel, type TaskFieldUpdate } from '@/components/task-detail/
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useQuickSortData } from '@/lib/hooks/useQuickSortData';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -525,6 +526,7 @@ export default function QuickSortMode() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       if (!window.matchMedia('(min-width: 1024px)').matches) return;
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 

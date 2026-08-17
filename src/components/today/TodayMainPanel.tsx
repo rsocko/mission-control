@@ -63,6 +63,7 @@ import { useViewMode } from '@/lib/hooks/useViewMode';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
 import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
 import { buildGraphUniverseHref } from '@/lib/graph/graph-navigation';
+import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import {
   EMPTY_TASK_FILTER_CONTEXT,
   taskFilterContextForToday,
@@ -275,6 +276,7 @@ export function TodayMainPanel({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
+      if (shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'T') {
         event.preventDefault();
         onSetShowTimer((current) => !current);

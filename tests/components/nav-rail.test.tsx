@@ -184,10 +184,24 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
 
-    expect(screen.getByRole('heading', { name: 'Sync Status' })).toBeInTheDocument();
+    const heading = screen.getByRole('heading', { name: 'Sync Status' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(heading);
     expect(screen.getAllByText('Syncing…').length).toBeGreaterThan(0);
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Never')).toBeInTheDocument();
+  });
+
+  it('only shows inline sync details when the navigation is pinned', () => {
+    renderNavRail({ isSyncing: true });
+    const inlineStatus = screen.getByRole('button', { name: 'Sync status' }).querySelector('span:last-child');
+
+    expect(inlineStatus).toHaveClass('opacity-0', 'max-w-0');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
+
+    expect(inlineStatus).toHaveClass('opacity-100', 'max-w-[150px]');
+    expect(inlineStatus).toHaveTextContent('Syncing…');
   });
 
   it('groups navigation by purpose', () => {

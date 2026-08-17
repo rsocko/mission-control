@@ -55,3 +55,23 @@ export function getNotificationBadgeTone(urgent: number, actionNeeded: number): 
   if (actionNeeded > 0) return 'amber';
   return 'blue';
 }
+
+export function getNotificationBadgeState({
+  attention,
+  urgent,
+  actionNeeded,
+  headsUp,
+  fyi,
+}: {
+  attention: number;
+  urgent: number;
+  actionNeeded: number;
+  headsUp: number;
+  fyi: number;
+}): { count: number; tone: NavBadgeTone } {
+  if (urgent > 0) return { count: urgent, tone: 'red' };
+  if (actionNeeded > 0) return { count: actionNeeded, tone: 'amber' };
+  if (headsUp > 0) return { count: headsUp, tone: 'blue' };
+  if (fyi > 0) return { count: fyi, tone: 'blue' };
+  return { count: attention, tone: 'blue' };
+}

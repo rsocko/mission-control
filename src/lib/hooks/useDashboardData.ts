@@ -43,6 +43,7 @@ import type {
 } from '@/types/dashboard';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
+import { getTaskStatusGroupLabel } from '@/lib/tasks/task-status-groups';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -745,8 +746,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       const existingCount = taskResponse.tasks.filter((task) => {
         if (activeGroupBy === 'list') return (task.sourceListName || 'No List') === groupLabel;
         if (activeGroupBy === 'status') {
-          const mapped = task.status === 'done' ? 'Completed' : task.status === 'cancelled' ? 'Cancelled' : task.status === 'in_progress' ? 'In Progress' : 'To Do';
-          return mapped === groupLabel;
+          return getTaskStatusGroupLabel(task.status) === groupLabel;
         }
         if (activeGroupBy === 'priority') return (task.priority || 'none') === groupLabel;
         if (activeGroupBy === 'dueDate') {
@@ -784,6 +784,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       params.set('limit', String(PAGE_SIZE));
 
       const res = await fetch(`/api/tasks?${params.toString()}`);
+      if (!res.ok) throw new Error(`Failed to load more tasks for group (${res.status})`);
       const data = await res.json();
 
       if (data.tasks?.length) {

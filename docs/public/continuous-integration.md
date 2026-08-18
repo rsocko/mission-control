@@ -38,37 +38,25 @@ promoted tag resolves to the attested digest.
 
 ## Build cache policy
 
-Container publication imports and exports a BuildKit GitHub Actions cache under
-the application-only scope `mission-control-app-v1`. The reserved scope for any
-future Copilot Adapter image is `mission-control-copilot-adapter-v1`; the two
-images must never share a scope.
+Container publication intentionally does not use a BuildKit GitHub Actions
+cache. If caching is reconsidered, use the application-only scope
+`mission-control-app-v1` and reserve `mission-control-copilot-adapter-v1` for a
+future Copilot Adapter image; the two images must never share a scope.
 
-The application uses `mode=max`. `mode=min` retains only layers in the final
-runtime image, but the expensive dependency installation and application
-compilation occur in the intermediate builder stage. Exporting intermediate
-layers therefore provides the useful reuse. Cache export uses
-`ignore-error=true`. If cache import or another cache-backed invocation failure
-prevents a build, publication retries once through the same pinned build action
-without either cache option. A missing, evicted, or unavailable cache can slow
-a publication but cannot make cached state a correctness requirement.
-
-The operational ceiling is **8 GiB** across all repository Actions caches,
-leaving headroom below GitHub's 10 GiB repository allowance. npm caches should
-normally remain below **2 GiB**, leaving up to **6 GiB** for the application
-BuildKit scope. The publication summary records build duration, cache status,
-entry count, and total usage after every build. Investigate usage above the
-ceiling and remove stale entries with `gh cache list` and `gh cache delete`;
-never delete an active cache solely to make a publication succeed.
+Repository Actions cache usage should remain below **8 GiB**, leaving headroom
+below GitHub's 10 GiB repository allowance. The main-only npm cache should
+normally remain below **2 GiB**. Investigate usage above the ceiling and remove
+stale entries with `gh cache list` and `gh cache delete`.
 
 The pre-change baseline recorded on 2026-08-18 was a 173-179 second image build
 and 9.69 GiB of npm caches, including 6.26 GiB attached to pull-request merge
-refs. The first corrected `mode=max` export took 387 seconds because it uploaded
-the initial layer set. The immediately following warm build took 109 seconds,
-reused seven major layers, and improved on the old baseline by 64-70 seconds.
-Repository cache usage settled at 2.30 GiB after that run. These measurements
-meet the 30-second material-improvement threshold and the 8 GiB ceiling, so
-`mode=max` remains selected. Reevaluate it if later warm builds or cache usage
-cross either threshold.
+refs. A `mode=max` experiment took 387 seconds for the initial export. Rebuilding
+the identical commit took 109 seconds, but a realistic subsequent commit took
+243 seconds: only two early layers were reused and cache export itself consumed
+54 seconds. Although the experiment stayed under the cache ceiling at 2.30 GiB,
+it failed the 30-second material-improvement threshold for normal publications.
+The BuildKit cache was therefore removed; cold-build correctness remains the
+only publication path.
 
 Active-development deployments should use:
 
@@ -82,10 +70,9 @@ Use `sha-<7-character-commit>`, a semantic-version tag, or the full
 ## Repository configuration
 
 Keep **Allow select actions and reusable workflows** configured with GitHub-owned
-actions enabled, verified creator actions disabled, the single additional
-pattern `docker/build-push-action@*`, and full-length commit SHA pinning
-required. The pinned Docker build action exposes GitHub's cache runtime
-credentials to BuildKit; raw inline `docker buildx build` commands do not.
+actions enabled, verified creator actions disabled, no additional patterns, and
+full-length commit SHA pinning required. Publication uses native Docker commands
+rather than Docker-maintained actions.
 
 Connect the GHCR package to this repository and set the package visibility to
 **Public** so anonymous pulls work. Keep package write access inherited from the

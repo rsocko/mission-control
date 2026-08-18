@@ -83,6 +83,7 @@ export interface UseDashboardTaskActionsOptions {
   completionScopeKey: string;
   runTaskCompletion: DashboardTaskCompletionRunner;
   fetchData: DashboardFetchData;
+  updateTaskGroupCounts: (previousTask: Task | null, nextTask: Task | null) => void;
 }
 
 export interface DashboardTaskActions {
@@ -155,6 +156,7 @@ export function useDashboardTaskActions(
           removedFromVisibleResponse = current.tasks.some((candidate) => candidate.id === taskId);
           return removeTaskFromResponse(current, taskId, task);
         });
+        if (removedFromVisibleResponse) dependencies.updateTaskGroupCounts(task, null);
         dependencies.setMyDayItemStatuses((current) => {
           if (!current.has(taskId)) return current;
           const next = new Map(current);
@@ -173,11 +175,13 @@ export function useDashboardTaskActions(
       },
       rollback: () => {
         if (!removedFromVisibleResponse || optionsRef.current.completionScopeKey !== scopeKey) return;
-        dependencies.setTaskResponse((current) => (
-          current.tasks.some((candidate) => candidate.id === taskId)
-            ? current
-            : restoreTaskToResponse(current, task, taskIndex)
-        ));
+        let restoredToVisibleResponse = false;
+        dependencies.setTaskResponse((current) => {
+          if (current.tasks.some((candidate) => candidate.id === taskId)) return current;
+          restoredToVisibleResponse = true;
+          return restoreTaskToResponse(current, task, taskIndex);
+        });
+        if (restoredToVisibleResponse) dependencies.updateTaskGroupCounts(null, task);
         dependencies.setMyDayItemStatuses((current) => {
           if (previousMyDayStatus === undefined || current !== optimisticMyDayStatuses) return current;
           const next = new Map(current);

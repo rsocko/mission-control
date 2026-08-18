@@ -40,6 +40,7 @@ const task = {
   editPolicy: {
     fields: {
       priority: { mutation: 'local' },
+      status: { mutation: 'local' },
     },
     removalMode: 'local-delete',
   } as Task['editPolicy'],
@@ -65,7 +66,11 @@ const initialResponse: TaskResponse = {
   },
 };
 
-function useHarness(quickFilter: string | null = null) {
+function useHarness(
+  quickFilter: string | null = null,
+  runTaskCompletion = vi.fn(),
+  updateTaskGroupCounts = vi.fn(),
+) {
   const [taskResponse, setTaskResponse] = useState(initialResponse);
   const [, setMyDayTaskIds] = useState(new Set<string>());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState(new Map<string, string>());
@@ -93,8 +98,9 @@ function useHarness(quickFilter: string | null = null) {
     setConfirmDialog,
     listRef,
     completionScopeKey: 'all-tasks',
-    runTaskCompletion: vi.fn(),
+    runTaskCompletion,
     fetchData: vi.fn(),
+    updateTaskGroupCounts,
   });
 
   return { actions, taskResponse };
@@ -164,5 +170,32 @@ describe('useDashboardTaskActions', () => {
 
     expect(refreshListener).toHaveBeenCalledTimes(1);
     window.removeEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, refreshListener);
+  });
+
+  it('updates grouped totals with the optimistic completion', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const updateTaskGroupCounts = vi.fn();
+    const runTaskCompletion = vi.fn(async (
+      _taskId: string,
+      options: {
+        optimisticUpdate: () => void;
+        request: () => Promise<void>;
+      },
+    ) => {
+      options.optimisticUpdate();
+      await options.request();
+      return 'completed' as const;
+    });
+    const { result } = renderHook(() => useHarness(
+      null,
+      runTaskCompletion,
+      updateTaskGroupCounts,
+    ));
+
+    await act(async () => {
+      await result.current.actions.completeTask('task-1');
+    });
+
+    expect(updateTaskGroupCounts).toHaveBeenCalledWith(task, null);
   });
 });

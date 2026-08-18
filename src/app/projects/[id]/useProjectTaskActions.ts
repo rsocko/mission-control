@@ -38,6 +38,7 @@ import type {
   ProjectPhaseViewModel as ProjectPhase,
   ProjectTaskViewModel as ProjectTask,
 } from './types';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 
 export type RunProjectHierarchyCommand = (
   command: ProjectHierarchyCommand,
@@ -115,6 +116,7 @@ export function useProjectTaskActions({
           body: JSON.stringify({ status: 'done' }),
         });
         if (!response.ok) throw new Error('Failed to complete task');
+        notifyTaskChanged(taskId);
       },
       rollback: () => {
         setTasks((current) => current.map((candidate) => (
@@ -144,6 +146,7 @@ export function useProjectTaskActions({
         body: JSON.stringify({ priority }),
       });
       if (!response.ok) throw new Error('Failed to set priority');
+      notifyTaskChanged(taskId);
       setTasks((current) => current.map((task) => (
         task.id === taskId
           ? { ...task, priority: priority as TaskPriority }
@@ -166,6 +169,7 @@ export function useProjectTaskActions({
         body: JSON.stringify({ status }),
       });
       if (!response.ok) throw new Error('Failed to set status');
+      notifyTaskChanged(taskId);
       setTasks((current) => current.map((task) => (
         task.id === taskId
           ? { ...task, status: status as TaskStatus }
@@ -188,6 +192,7 @@ export function useProjectTaskActions({
         body: JSON.stringify({ dueDate: date || null }),
       });
       if (!response.ok) throw new Error('Failed to set due date');
+      notifyTaskChanged(taskId);
       setTasks((current) => current.map((task) => (
         task.id === taskId ? { ...task, dueDate: date || null } : task
       )));
@@ -235,6 +240,7 @@ export function useProjectTaskActions({
       ) {
         throw new Error(payload.error || 'Mission Control state was not saved');
       }
+      notifyTaskChanged(taskId);
       setTasks((current) => disposition === 'active'
         ? current.map((candidate) => candidate.id === taskId
           ? { ...candidate, localDisposition: disposition }
@@ -302,6 +308,7 @@ export function useProjectTaskActions({
           return;
         }
         await refreshProjectHierarchy();
+        notifyTaskChanged(taskId);
       } catch {
         rollback();
         toast.error('Failed to remove task from project');
@@ -365,6 +372,7 @@ export function useProjectTaskActions({
         },
       );
       if (!response.ok) throw new Error('Failed to add to project');
+      notifyTaskChanged(taskId);
 
       const phaseName = phaseId
         ? targetProject?.phases?.find((phase) => phase.id === phaseId)?.name
@@ -411,6 +419,7 @@ export function useProjectTaskActions({
         body: JSON.stringify({ taskId }),
       });
       if (!response.ok) throw new Error('Failed to add to My Day');
+      notifyTaskChanged(taskId);
       setMyDayTaskIds((current) => new Set(current).add(taskId));
       toast.success('Added to My Day');
     } catch {
@@ -424,6 +433,7 @@ export function useProjectTaskActions({
         method: 'DELETE',
       });
       if (!response.ok) throw new Error('Failed to remove from My Day');
+      notifyTaskChanged(taskId);
       setMyDayTaskIds((current) => {
         const next = new Set(current);
         next.delete(taskId);

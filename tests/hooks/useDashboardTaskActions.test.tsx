@@ -11,6 +11,7 @@ import type {
   DashboardTaskViewModel as Task,
 } from '@/types/dashboard';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -153,6 +154,21 @@ describe('useDashboardTaskActions', () => {
 
     expect(result.current.taskResponse.tasks[0].priority).toBe('none');
     expect(toast.error).toHaveBeenCalledWith('Failed to update priority');
+  });
+
+  it('reports successful list mutations so an open detail panel can refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const taskChanged = vi.fn();
+    window.addEventListener(TASK_CHANGED_EVENT, taskChanged);
+    const { result } = renderHook(() => useHarness());
+
+    await act(async () => {
+      await result.current.actions.setTaskStatus('task-1', 'in_progress');
+    });
+
+    expect(taskChanged).toHaveBeenCalledOnce();
+    expect((taskChanged.mock.calls[0][0] as CustomEvent).detail).toEqual({ taskId: 'task-1' });
+    window.removeEventListener(TASK_CHANGED_EVENT, taskChanged);
   });
 
   it('refreshes navigation counts when My Day membership changes', async () => {

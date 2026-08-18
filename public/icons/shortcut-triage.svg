@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
-  <circle cx="48" cy="48" r="44" fill="#2563eb"/>
+  <circle cx="48" cy="48" r="44" fill="#c084fc"/>
   <!-- Inbox icon (Lucide-style) -->
   <polyline points="30,52 38,52 42,58 54,58 58,52 66,52" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <path d="M33.6 36 30 52v10a4 4 0 0 0 4 4h28a4 4 0 0 0 4-4V52l-3.6-16a2 2 0 0 0-2-1.6H35.6a2 2 0 0 0-2 1.6Z" stroke="white" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>

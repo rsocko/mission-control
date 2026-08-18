@@ -12,8 +12,17 @@
   "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
-      "name": "Today",
-      "short_name": "Today",
+      "name": "Icon Finder",
+      "short_name": "Icons",
+      "url": "/icons",
+      "description": "Search and copy icons",
+      "icons": [
+        { "src": "/icons/shortcut-icon-finder.svg", "sizes": "96x96", "type": "image/svg+xml" }
+      ]
+    },
+    {
+      "name": "My Day",
+      "short_name": "My Day",
       "url": "/today",
       "description": "View today's tasks",
       "icons": [

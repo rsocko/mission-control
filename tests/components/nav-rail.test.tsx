@@ -70,6 +70,22 @@ describe('NavRail', () => {
     expect(nav).toHaveClass('w-16');
   });
 
+  it('uses the shared shortcut icon and color for quick-access destinations', () => {
+    renderNavRail();
+
+    const cases = [
+      ['My Day', 'lucide-sun', 'text-amber-400'],
+      ['Triage', 'lucide-inbox', 'text-purple-400'],
+      ['Projects', 'lucide-chart-network', 'text-violet-400'],
+      ['Icon Finder', 'lucide-search', 'text-indigo-400'],
+    ];
+
+    for (const [name, iconClass, colorClass] of cases) {
+      const icon = screen.getByRole('link', { name }).querySelector('svg');
+      expect(icon).toHaveClass(iconClass, colorClass);
+    }
+  });
+
   it('expands immediately when explicitly pinned', () => {
     renderNavRail();
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });

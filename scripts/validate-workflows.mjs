@@ -18,6 +18,7 @@ const allowedActions = new Set([
   'actions/cache/save',
   'actions/checkout',
   'actions/setup-node',
+  'docker/build-push-action',
 ]);
 let hasPullRequestWorkflow = false;
 
@@ -264,8 +265,9 @@ for (const file of workflowFiles) {
       'require_absent "${IMAGE}:${VERSION_TAG}"',
       'require_absent "${IMAGE}:${SHA_TAG}"',
       'docker buildx imagetools create',
-      '--cache-from "type=gha,scope=${BUILDKIT_CACHE_SCOPE}"',
-      '--cache-to "type=gha,scope=${BUILDKIT_CACHE_SCOPE},mode=max,ignore-error=true"',
+      'cache-from: type=gha,scope=${{ env.BUILDKIT_CACHE_SCOPE }}',
+      'cache-to: type=gha,scope=${{ env.BUILDKIT_CACHE_SCOPE }},mode=max,ignore-error=true',
+      "steps.publish-cached.outcome == 'failure'",
       'cache_status="cold-fallback"',
       'repos/${GITHUB_REPOSITORY}/actions/cache/usage',
       'verification_refs+=("${sha_ref}")',
@@ -279,6 +281,20 @@ for (const file of workflowFiles) {
       publish.env?.BUILDKIT_CACHE_SCOPE,
       'mission-control-app-v1',
       `${file} must isolate application BuildKit layers in a stable scope`,
+    );
+    const buildSteps =
+      publish.steps?.filter((step) => step.uses?.startsWith('docker/build-push-action@')) ?? [];
+    assert.equal(buildSteps.length, 2, `${file} must provide cached and cold build paths`);
+    assert.equal(
+      buildSteps[0].uses,
+      'docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a',
+      `${file} must pin the approved Docker build action`,
+    );
+    assert.equal(buildSteps[0]['continue-on-error'], true, `${file} must permit a cold retry`);
+    assert.equal(
+      buildSteps[1].if,
+      "steps.publish-cached.outcome == 'failure'",
+      `${file} must retry only after the cache-backed build fails`,
     );
     const attestationSteps =
       publish.steps?.filter((step) => step.uses?.startsWith('actions/attest@')) ?? [];

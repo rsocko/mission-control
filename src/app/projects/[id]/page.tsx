@@ -50,8 +50,12 @@ import {
   type ProjectTaskTarget,
   type RequestConfirmation,
 } from './tabs';
-import type { ProjectTab, ProjectTask } from './types';
-import { getProjectStatus, getProjectTabCount } from './utils';
+import type { ProjectTab } from './types';
+import {
+  applyProjectTaskFieldUpdate,
+  getProjectStatus,
+  getProjectTabCount,
+} from './utils';
 
 type AddTaskDest = { id: string; label: string; connectorType: string; account: 'personal' | 'work' | null; color: string; listSelectionMode?: 'required' | 'optional' | 'not-applicable' };
 const LOCAL_DESTINATION: AddTaskDest = { id: 'local', label: 'Local', connectorType: 'local', account: null, color: 'var(--text-muted)' };
@@ -635,7 +639,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
               if (fields && selectedTaskId) {
                 setTasks((current) =>
                   current.map((t) =>
-                    t.id === selectedTaskId ? { ...t, ...fields } as ProjectTask : t
+                    t.id === selectedTaskId
+                      ? applyProjectTaskFieldUpdate(t, fields)
+                      : t
                   )
                 );
               }

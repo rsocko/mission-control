@@ -12,7 +12,13 @@ import {
   startOfWeek,
   subDays,
 } from 'date-fns';
-import type { ProjectHealth, TaskStatus } from '@/types';
+import type {
+  LocalDisposition,
+  ProjectHealth,
+  TaskPriority,
+  TaskStatus,
+} from '@/types';
+import type { TaskFieldUpdate } from '@/components/task-detail/task-detail-types';
 import type { TaskFilterContext } from '@/lib/task-filter-context';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
@@ -28,12 +34,74 @@ import type {
   HealthSummary,
   PhaseTaskEntry,
   ProgressSummary,
-  ProjectPhase,
-  ProjectRecord,
+  ProjectDetailViewModel as ProjectRecord,
+  ProjectPhaseViewModel as ProjectPhase,
   ProjectTab,
-  ProjectTask,
+  ProjectTaskViewModel as ProjectTask,
   TimelineSegment,
 } from './types';
+
+const PROJECT_TASK_STATUSES: readonly TaskStatus[] = [
+  'todo',
+  'in_progress',
+  'done',
+  'cancelled',
+];
+const PROJECT_TASK_PRIORITIES: readonly TaskPriority[] = [
+  'critical',
+  'high',
+  'medium',
+  'low',
+  'none',
+];
+const PROJECT_TASK_DISPOSITIONS: readonly LocalDisposition[] = [
+  'active',
+  'handled',
+  'dismissed',
+];
+
+function includesValue<T extends string>(
+  values: readonly T[],
+  value: string | number | null | undefined,
+): value is T {
+  return typeof value === 'string' && values.some((candidate) => candidate === value);
+}
+
+export function applyProjectTaskFieldUpdate(
+  task: ProjectTask,
+  fields: TaskFieldUpdate,
+): ProjectTask {
+  let updated = task;
+  if (typeof fields.title === 'string') updated = { ...updated, title: fields.title };
+  if (includesValue(PROJECT_TASK_STATUSES, fields.status)) {
+    updated = { ...updated, status: fields.status };
+  }
+  if (includesValue(PROJECT_TASK_PRIORITIES, fields.priority)) {
+    updated = { ...updated, priority: fields.priority };
+  }
+  if (includesValue(PROJECT_TASK_DISPOSITIONS, fields.localDisposition)) {
+    updated = { ...updated, localDisposition: fields.localDisposition };
+  }
+  if (typeof fields.statusReason === 'string' || fields.statusReason === null) {
+    updated = { ...updated, statusReason: fields.statusReason };
+  }
+  if (typeof fields.dueDate === 'string' || fields.dueDate === null) {
+    updated = { ...updated, dueDate: fields.dueDate };
+  }
+  if (typeof fields.assignee === 'string' || fields.assignee === null) {
+    updated = { ...updated, assignee: fields.assignee };
+  }
+  if (typeof fields.effort === 'number' || fields.effort === null) {
+    updated = { ...updated, effort: fields.effort };
+  }
+  if (
+    typeof fields.estimatedDuration === 'number'
+    || fields.estimatedDuration === null
+  ) {
+    updated = { ...updated, estimatedDuration: fields.estimatedDuration };
+  }
+  return updated;
+}
 
 export function syncTaskPhaseMemberships(
   tasks: ProjectTask[],

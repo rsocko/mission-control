@@ -34,9 +34,9 @@ import type {
   TaskStatus,
 } from '@/types';
 import type {
-  PhaseItem,
-  ProjectPhase,
-  ProjectTask,
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTaskViewModel as ProjectTask,
 } from './types';
 
 export type RunProjectHierarchyCommand = (

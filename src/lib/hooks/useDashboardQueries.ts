@@ -5,15 +5,18 @@ import { useCallback } from 'react';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { uiLogger } from '@/lib/client-logger';
 import type {
-  TaskResponse,
-  HubProject,
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskTagViewModel as TaskTag,
   EnabledSource,
   SourceList,
   ListGroup,
   SyncStatusEntry,
-  TaskTag,
 } from '@/types/dashboard';
 import { EMPTY_TASK_RESPONSE, PAGE_SIZE } from '@/types/dashboard';
+import type {
+  HubProjectListResponseDto,
+  TaskListResponseDto,
+} from '@/types/api';
 
 // ─── Fetcher helpers ────────────────────────────────────────────────────────
 
@@ -115,7 +118,7 @@ export function useDashboardQueries(taskParams: string) {
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams(normalizedTaskParams);
       params.set('offset', String(pageParam));
-      return fetchJson<TaskResponse>(`/api/tasks?${params.toString()}`);
+      return fetchJson<TaskListResponseDto>(`/api/tasks?${params.toString()}`);
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, pages, lastPageParam) => {
@@ -133,7 +136,8 @@ export function useDashboardQueries(taskParams: string) {
 
   const projectsQuery = useQuery({
     queryKey: dashboardKeys.projects(),
-    queryFn: () => fetchJson<{ projects: HubProject[] }>('/api/hub-projects?includePhases=true').then(d => d.projects || []),
+    queryFn: () => fetchJson<HubProjectListResponseDto>('/api/hub-projects?includePhases=true')
+      .then(d => d.projects || []),
     staleTime: 60 * 1000, // projects rarely change
   });
 

@@ -1,20 +1,23 @@
 import type {
-  LocalDisposition,
+  HubProject,
+  ProjectPhase as CanonicalProjectPhase,
+  ProjectPhaseItem as CanonicalProjectPhaseItem,
   ProjectHealth,
   ProjectStatus,
   SourceBinding,
-  TaskEditPolicy,
   TaskPriority,
-  TaskSourceModel,
   TaskStatus,
 } from '@/types';
-import type { TaskTag } from '@/types/dashboard';
+import type { DashboardTaskTagViewModel as TaskTag } from '@/types/dashboard';
+import type { TaskListItemDto } from '@/types/api';
 
-export interface ProjectRecord {
-  id: string;
-  name: string;
+type ProjectDetailDomainFields = Pick<
+  HubProject,
+  'id' | 'name' | 'color' | 'sortOrder' | 'metadata' | 'createdAt' | 'updatedAt'
+>;
+
+export type ProjectDetailViewModel = ProjectDetailDomainFields & {
   description: string | null;
-  color: string;
   icon: string | null;
   iconColor: string | null;
   sourceBindings: SourceBinding[];
@@ -27,43 +30,24 @@ export interface ProjectRecord {
   targetDate: string | null;
   startedAt: string | null;
   completedAt: string | null;
-  sortOrder: number;
-  metadata: Record<string, unknown>;
-  createdAt: string;
-  updatedAt: string;
-}
+};
 
-export interface ProjectPhase {
-  id: string;
-  projectId: string | null;
-  name: string;
-  description: string | null;
-  status: 'pending' | 'in_progress' | 'completed';
-  color: string | null;
-  estimatedDays: number | null;
-  targetStart: string | null;
-  targetEnd: string | null;
-  startAfterPhaseId: string | null;
-  sortOrder: number;
-  completedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type ProjectPhaseViewModel = CanonicalProjectPhase;
 
-export interface PhaseItem {
-  id: string;
-  phaseId: string;
-  taskId: string;
-  sortOrder: number;
-  estimatedEffortHours: number | null;
-  isProposed: boolean;
-  proposalType: string | null;
-  createdAt: string;
-}
+export type ProjectPhaseItemViewModel = CanonicalProjectPhaseItem;
 
-export interface ProjectTask {
-  id: string;
-  title: string;
+type ProjectTaskDtoFields = Pick<
+  TaskListItemDto,
+  | 'id'
+  | 'title'
+  | 'connectorType'
+  | 'connectorInstanceId'
+  | 'localDisposition'
+  | 'taskSourceModel'
+  | 'editPolicy'
+>;
+
+export type ProjectTaskViewModel = ProjectTaskDtoFields & {
   description?: string | null;
   status: TaskStatus;
   statusReason?: string | null;
@@ -71,8 +55,6 @@ export interface ProjectTask {
   dueDate?: string | null;
   completedAt?: string | null;
   updatedAt: string;
-  connectorType: string;
-  connectorInstanceId: string;
   sourceListId?: string | null;
   sourceListName?: string | null;
   assignee?: string | null;
@@ -90,10 +72,7 @@ export interface ProjectTask {
     phaseId: string | null;
     phaseName: string | null;
   }>;
-  localDisposition: LocalDisposition;
-  taskSourceModel: TaskSourceModel;
-  editPolicy: TaskEditPolicy;
-}
+};
 
 export interface ProjectRuleMatch {
   taskId: string;
@@ -120,19 +99,19 @@ export interface HealthSummary {
 }
 
 export interface PhaseTaskEntry {
-  item: PhaseItem;
-  task: ProjectTask;
+  item: ProjectPhaseItemViewModel;
+  task: ProjectTaskViewModel;
 }
 
 export interface GanttTaskBar {
-  item: PhaseItem;
-  task: ProjectTask;
+  item: ProjectPhaseItemViewModel;
+  task: ProjectTaskViewModel;
   start: Date;
   end: Date;
 }
 
 export interface GanttPhaseRow {
-  phase: ProjectPhase;
+  phase: ProjectPhaseViewModel;
   start: Date;
   end: Date;
   durationDays: number;

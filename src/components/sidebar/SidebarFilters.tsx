@@ -6,7 +6,15 @@ import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, Chev
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import type { TaskTag, TaskResponse, HubProject, ListGroup, SourceList, EnabledSource, SavedView } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskTagViewModel as TaskTag,
+  EnabledSource,
+  ListGroup,
+  SavedView,
+  SourceList,
+} from '@/types/dashboard';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import type { SidebarMode } from '@/lib/hooks/useSidebarExpanded';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';

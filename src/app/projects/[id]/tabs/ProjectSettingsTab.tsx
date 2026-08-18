@@ -41,7 +41,10 @@ import {
   useProjectPageMutations,
 } from '../context';
 import { ProjectActionsCard } from '../ProjectActionsCard';
-import type { ProjectRuleMatch, ProjectTask } from '../types';
+import type {
+  ProjectRuleMatch,
+  ProjectTaskViewModel as ProjectTask,
+} from '../types';
 import { formatRelativeTime, getProjectStatus } from '../utils';
 import type { RequestConfirmation } from './contracts';
 

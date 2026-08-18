@@ -27,12 +27,12 @@ import {
   type FilterTokenType,
 } from '@/lib/utils/parseFilterQuery';
 import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskTagViewModel as TaskTag,
   EnabledSource,
-  HubProject,
   ListGroup,
   SavedView,
   SourceList,
-  TaskTag,
 } from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
 

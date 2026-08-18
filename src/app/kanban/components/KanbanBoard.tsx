@@ -33,7 +33,10 @@ import { ColumnHeader } from './ColumnHeader';
 import { KanbanCard } from './KanbanCard';
 import { QuickAddInput } from './QuickAddInput';
 import { VISIBLE_LIMIT } from './constants';
-import type { KanbanColumn as KanbanColumnType, Task } from './types';
+import type {
+  KanbanColumnViewModel as KanbanColumnType,
+  KanbanTaskViewModel,
+} from './types';
 
 interface BulkBoardState {
   bulkMode: boolean;
@@ -43,7 +46,7 @@ interface BulkBoardState {
 
 interface KanbanBoardProps {
   loading: boolean;
-  tasks: Task[];
+  tasks: KanbanTaskViewModel[];
   columns: KanbanColumnType[];
   globalColumns: KanbanColumnType[];
   unmappedColumns: KanbanColumnType[];
@@ -61,14 +64,14 @@ interface KanbanBoardProps {
   showScores: boolean;
   dragging: string | null;
   bulk: BulkBoardState;
-  getTasksForColumn: (column: KanbanColumnType) => Task[];
+  getTasksForColumn: (column: KanbanColumnType) => KanbanTaskViewModel[];
   getSwimlaneGroups: (swimlaneMode: SwimlaneMode) => Array<{ key: string; label: string; color?: string }>;
-  getTasksForSwimlane: (columnTasks: Task[], swimlaneMode: SwimlaneMode, groupKey: string) => Task[];
-  taskMatchesSearch: (task: Task, searchQuery: string) => boolean;
+  getTasksForSwimlane: (columnTasks: KanbanTaskViewModel[], swimlaneMode: SwimlaneMode, groupKey: string) => KanbanTaskViewModel[];
+  taskMatchesSearch: (task: KanbanTaskViewModel, searchQuery: string) => boolean;
   onFixMappings: () => void;
   onDragStart: (taskId: string) => void;
   onDrop: (columnId: string) => void;
-  onTaskClick: (task: Task) => void;
+  onTaskClick: (task: KanbanTaskViewModel) => void;
   onStartRename: (id: string, name: string) => void;
   onRenameChange: (value: string) => void;
   onConfirmRename: (columnId: string) => void;
@@ -89,14 +92,14 @@ interface KanbanBoardProps {
 // ─── Sortable Card Wrapper ──────────────────────────────────────────────────
 
 interface SortableCardProps {
-  task: Task;
+  task: KanbanTaskViewModel;
   searchQuery: string;
-  taskMatchesSearch: (task: Task, searchQuery: string) => boolean;
+  taskMatchesSearch: (task: KanbanTaskViewModel, searchQuery: string) => boolean;
   bulk: BulkBoardState;
   showSources: boolean;
   showDueDates: boolean;
   showScores: boolean;
-  onTaskClick: (task: Task) => void;
+  onTaskClick: (task: KanbanTaskViewModel) => void;
   onSnooze: (taskId: string, until: string) => Promise<void>;
   compact?: boolean;
 }
@@ -295,7 +298,7 @@ export function KanbanBoard({
     onDrop('');
   }, [onDrop]);
 
-  function renderTaskList(columnTasks: Task[], columnId: string, compact = false) {
+  function renderTaskList(columnTasks: KanbanTaskViewModel[], columnId: string, compact = false) {
     const taskIds = columnTasks.map(t => t.id);
 
     return (

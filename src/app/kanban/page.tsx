@@ -7,7 +7,11 @@ import { BulkActionBar, BulkDispositionButtons, BulkPriorityDropdown, BulkStatus
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { BoardControls, DEFAULT_COLUMNS, KanbanBoard, KanbanPageHeader, TaskDetailPanel } from './components';
-import type { KanbanColumn as KanbanColumnType, SwimlaneMode, Task } from './components';
+import type {
+  KanbanColumnViewModel as KanbanColumnType,
+  KanbanTaskViewModel,
+  SwimlaneMode,
+} from './components';
 import { useKanbanColumns, useKanbanSources, useKanbanTasks, type KanbanConfirmDialogState } from './hooks';
 import {
   selectedTaskFieldBlockedReason,
@@ -98,7 +102,7 @@ function KanbanPageInner() {
     }
   }
 
-  function handleTaskUpdate(taskId: string, fields: Partial<Task>) {
+  function handleTaskUpdate(taskId: string, fields: Partial<KanbanTaskViewModel>) {
     tasksState.setTasks(prev => prev.map(task => task.id === taskId ? { ...task, ...fields } : task));
   }
 

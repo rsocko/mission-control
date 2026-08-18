@@ -9,11 +9,12 @@ const mocks = vi.hoisted(() => {
   const where = vi.fn();
   const eq = vi.fn();
   const and = vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions }));
-  const sql = vi.fn((strings: TemplateStringsArray) => (
-    strings.join('').includes('IS NULL')
-      ? parentOnlyCondition
-      : { type: 'sql', as: vi.fn(() => 'group') }
-  ));
+  // The parentOnly filter is built with the real `isNull()` export (mocked below), not
+  // with a `sql` template, so this stub always returns an aliasable SQL-like object.
+  // (A previous version matched on template text containing "IS NULL", which broke as
+  // soon as a groupExpr's own CASE/WHEN clause legitimately contained that text, e.g.
+  // the effort and dueDate groupings.)
+  const sql = vi.fn(() => ({ type: 'sql', as: vi.fn(() => 'group') }));
   const getInboxFilterCondition = vi.fn(async () => inboxCondition);
   const getQuickFilterCondition = vi.fn(() => genericCondition);
   const withCondition = vi.fn((baseWhere, condition) => ({ baseWhere, condition }));
@@ -63,6 +64,7 @@ vi.mock('@/db', () => ({
 vi.mock('drizzle-orm', () => ({
   and: mocks.and,
   count: vi.fn(() => ({ as: vi.fn(() => 'count') })),
+  countDistinct: vi.fn(() => ({ as: vi.fn(() => 'count') })),
   eq: mocks.eq,
   inArray: vi.fn(),
   isNull: vi.fn(() => mocks.parentOnlyCondition),
@@ -75,6 +77,7 @@ vi.mock('@/db/schema', () => ({
     connectorInstanceId: 'connectorInstanceId',
     connectorType: 'connectorType',
     dueDate: 'dueDate',
+    effort: 'effort',
     id: 'id',
     localDisposition: 'localDisposition',
     parentId: 'parentId',
@@ -170,6 +173,43 @@ describe('GET /api/tasks/group-counts', () => {
     expect(mocks.where).toHaveBeenCalledWith(
       expect.objectContaining({ condition: mocks.genericCondition }),
     );
+  });
+
+  it('builds source totals from the connector type', async () => {
+    const { GET } = await import('@/app/api/tasks/group-counts/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/group-counts?groupBy=source',
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ counts: { 'To Do': 2 } });
+    expect(mocks.sql.mock.calls.some(
+      ([strings, ...values]) => strings.join('').includes('COALESCE(NULLIF')
+        && values.includes('connectorType'),
+    )).toBe(true);
+  });
+
+  it('builds effort totals with a text group key', async () => {
+    const { GET } = await import('@/app/api/tasks/group-counts/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/group-counts?groupBy=effort',
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ counts: { 'To Do': 2 } });
+    expect(mocks.sql.mock.calls.some(
+      ([strings, ...values]) => strings.join('').includes('CAST(')
+        && values.includes('effort'),
+    )).toBe(true);
+  });
+
+  it('rejects unsupported groupings instead of returning misleading empty totals', async () => {
+    const { GET } = await import('@/app/api/tasks/group-counts/route');
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/group-counts?groupBy=unknown',
+    ));
+
+    expect(response.status).toBe(400);
   });
 
   it('excludes subtasks from filtered grouped totals when parentOnly is requested', async () => {

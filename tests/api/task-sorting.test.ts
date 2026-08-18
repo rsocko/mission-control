@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 type ChainableProxy = Record<PropertyKey, unknown>;
 const queryLimits: number[] = [];
+const queryOrderings: unknown[][] = [];
 
 function chainable<T>(terminal: T) {
   const chain: ChainableProxy = new Proxy({}, {
@@ -20,6 +21,12 @@ function chainable<T>(terminal: T) {
       if (prop === 'limit') {
         return vi.fn((value: number) => {
           queryLimits.push(value);
+          return chain;
+        });
+      }
+      if (prop === 'orderBy') {
+        return vi.fn((...values: unknown[]) => {
+          queryOrderings.push(values);
           return chain;
         });
       }
@@ -111,6 +118,7 @@ const BASE = 'http://localhost:3099';
 
 beforeEach(() => {
   queryLimits.length = 0;
+  queryOrderings.length = 0;
   mockDb.select.mockImplementation(() => chainable([]));
 });
 
@@ -216,6 +224,14 @@ describe('GET /api/tasks — sort updates task list (PR #295)', () => {
     const request = new Request(`${BASE}/api/tasks?sortBy=createdAt&limit=10&offset=20`);
     const response = await GET(request);
     expect(response.status).toBe(200);
+  });
+
+  it('uses a stable task ID tie-breaker for offset pagination', async () => {
+    const { GET } = await import('@/app/api/tasks/route');
+    const response = await GET(new Request(`${BASE}/api/tasks?sortBy=priority&groupBy=status`));
+
+    expect(response.status).toBe(200);
+    expect(queryOrderings.some((ordering) => ordering.length === 2)).toBe(true);
   });
 });
 

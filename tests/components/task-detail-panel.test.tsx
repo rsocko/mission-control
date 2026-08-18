@@ -1929,7 +1929,9 @@ describe('TaskDetailPanel redesigned presentations', () => {
       return inputs;
     });
 
-    fireEvent.click(checkboxes[0]);
+    await act(async () => {
+      fireEvent.click(checkboxes[0]);
+    });
 
     await waitFor(() => expect(update).toHaveBeenCalledWith({
       description: '<input type="checkbox" checked />\n\n- [x] Verify persistence',

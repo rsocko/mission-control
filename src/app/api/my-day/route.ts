@@ -196,6 +196,7 @@ export async function GET(request: Request) {
       statusReason: tasks.statusReason,
       priority: tasks.priority,
       dueDate: tasks.dueDate,
+      pushCount: tasks.pushCount,
       connectorType: tasks.connectorType,
       connectorInstanceId: tasks.connectorInstanceId,
       sourceId: tasks.sourceId,
@@ -369,6 +370,7 @@ export async function GET(request: Request) {
         status: task.status,
         priority: task.priority,
         dueDate: task.dueDate,
+        pushCount: task.pushCount,
         connectorType: task.connectorType,
         connectorInstanceId: task.connectorInstanceId,
         sourceId: task.sourceId,
@@ -389,6 +391,7 @@ export async function GET(request: Request) {
       highPriorityRows,
       aiRows,
       recentlyAddedRows,
+      repeatedlyRescheduledRows,
     ] = await Promise.all([
       // 1. Yesterday's Incomplete
       db.select({
@@ -397,6 +400,7 @@ export async function GET(request: Request) {
         sourceId: tasks.sourceId,
         priority: tasks.priority,
         dueDate: tasks.dueDate,
+        pushCount: tasks.pushCount,
         connectorType: tasks.connectorType,
         connectorInstanceId: tasks.connectorInstanceId,
         sourceListId: tasks.sourceListId,
@@ -493,6 +497,20 @@ export async function GET(request: Request) {
           )
         )
         .limit(SUGGESTION_LIMIT),
+      // 8. Repeatedly rescheduled
+      db.select()
+        .from(tasks)
+        .where(
+          and(
+            gte(tasks.pushCount, 2),
+            ne(tasks.status, 'done'),
+            ne(tasks.status, 'cancelled'),
+            isTopLevelTask,
+            ...taskVisibilityConditions,
+          )
+        )
+        .orderBy(sql`${tasks.pushCount} DESC`, tasks.dueDate)
+        .limit(SUGGESTION_LIMIT),
     ]);
 
     const yesterdaySuggestions = yesterdayItems
@@ -503,6 +521,7 @@ export async function GET(request: Request) {
         status: t.status,
         priority: t.priority,
         dueDate: t.dueDate,
+        pushCount: t.pushCount,
         connectorType: t.connectorType,
         connectorInstanceId: t.connectorInstanceId,
         sourceId: t.sourceId,
@@ -538,7 +557,11 @@ export async function GET(request: Request) {
       .filter(t => !myDayTaskIds.includes(t.id))
       .map(pickSuggestionFields);
 
-    // ─── 8. Carried Forward (in My Day 3+ times, still incomplete) ───────────
+    const repeatedlyRescheduledSuggestions = repeatedlyRescheduledRows
+      .filter(t => !myDayTaskIds.includes(t.id))
+      .map(pickSuggestionFields);
+
+    // ─── 9. Carried Forward (in My Day 3+ times, still incomplete) ───────────
     const carriedForwardRows = await db.select({
       taskId: myDayItems.taskId,
       count: sql<number>`COUNT(*)`.as('count'),
@@ -577,6 +600,7 @@ export async function GET(request: Request) {
       aiRecommended: aiRecommendedSuggestions,
       recentlyAdded: recentlyAddedSuggestions,
       carriedForward: carriedForwardSuggestions,
+      repeatedlyRescheduled: repeatedlyRescheduledSuggestions,
     };
     const policyTasks = [
       ...itemsWithTags.map((item) => ({

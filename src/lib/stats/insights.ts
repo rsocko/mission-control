@@ -11,7 +11,15 @@
  */
 
 import db from '@/db';
-import { tasks, routines, routineCompletions, taskProjects } from '@/db/schema';
+import {
+  tasks,
+  routines,
+  routineCompletions,
+  taskHistoryEvents,
+  taskProjects,
+  taskTags,
+  tags,
+} from '@/db/schema';
 import { and, eq, gte, lt, lte, sql, notInArray, isNotNull } from 'drizzle-orm';
 import { hubProjects } from '@/db/schema';
 import {
@@ -41,6 +49,7 @@ import {
   parseStoredTimestamp,
 } from '@/lib/utils/date';
 import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
+import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { computeFlowInsights, type FlowInsightsResult } from '@/lib/stats/flow-query';
 import type { FlowFilters } from '@/lib/stats/flow';
 import { buildTaskAgeDistribution, type TaskAgeBucket } from './task-age';
@@ -111,6 +120,30 @@ export interface ActivityHeatmapEntry {
   routineCompletions: number;
 }
 
+export interface PlanningFrictionCategory {
+  label: string;
+  count: number;
+}
+
+export interface PlanningFrictionTask {
+  id: string;
+  title: string;
+  dueDate: string | null;
+  pushCount: number;
+  pushesInPeriod: number;
+  daysDeferredInPeriod: number;
+}
+
+export interface PlanningFrictionInsights {
+  pushesInPeriod: number;
+  pushedTaskCount: number;
+  totalDaysDeferred: number;
+  averageDaysPerPush: number;
+  topTasks: PlanningFrictionTask[];
+  topLists: PlanningFrictionCategory[];
+  topTags: PlanningFrictionCategory[];
+}
+
 export interface InsightsSnapshot {
   period: InsightsPeriod;
   periodStart: string;
@@ -125,6 +158,7 @@ export interface InsightsSnapshot {
   trends: TrendDataPoint[];
   sourceBreakdown: SourceBreakdownItem[];
   taskAge: TaskAgeBucket[];
+  planningFriction: PlanningFrictionInsights;
   projectActivity: ProjectActivityItem[];
   routineHeatmap: RoutineHeatmapEntry[];
   delivery: DeliveryMetrics;
@@ -158,6 +192,7 @@ export interface InsightsSummarySection {
   trends: TrendDataPoint[];
   sourceBreakdown: SourceBreakdownItem[];
   taskAge: TaskAgeBucket[];
+  planningFriction: PlanningFrictionInsights;
 }
 
 export interface InsightsDeliverySection {
@@ -336,6 +371,109 @@ async function getTaskAgeDistribution(): Promise<TaskAgeBucket[]> {
       today,
     )),
   );
+}
+
+async function getPlanningFriction(
+  start: string,
+  end: string,
+): Promise<PlanningFrictionInsights> {
+  const { dayStart, nextDayStart } = getRangeBounds(start, end);
+  const eventRows = await db.select({
+    taskId: taskHistoryEvents.taskId,
+    previousValue: taskHistoryEvents.previousValue,
+    newValue: taskHistoryEvents.newValue,
+    title: tasks.title,
+    dueDate: tasks.dueDate,
+    pushCount: tasks.pushCount,
+    sourceListName: tasks.sourceListName,
+  })
+    .from(taskHistoryEvents)
+    .innerJoin(tasks, eq(taskHistoryEvents.taskId, tasks.id))
+    .where(and(
+      eq(taskHistoryEvents.eventType, 'due_date_pushed'),
+      timestampGte(taskHistoryEvents.occurredAt, dayStart),
+      timestampLt(taskHistoryEvents.occurredAt, nextDayStart),
+      eq(tasks.depth, 0),
+      eq(tasks.isChecklistItem, false),
+    ));
+
+  const perTask = new Map<string, PlanningFrictionTask>();
+  const listCounts = new Map<string, number>();
+  let totalDaysDeferred = 0;
+
+  for (const event of eventRows) {
+    const previousDate = event.previousValue?.slice(0, 10);
+    const nextDate = event.newValue?.slice(0, 10);
+    const deferredDays = previousDate && nextDate
+      ? Math.max(0, daysBetween(previousDate, nextDate))
+      : 0;
+    totalDaysDeferred += deferredDays;
+
+    const current = perTask.get(event.taskId);
+    if (current) {
+      current.pushesInPeriod += 1;
+      current.daysDeferredInPeriod += deferredDays;
+    } else {
+      perTask.set(event.taskId, {
+        id: event.taskId,
+        title: event.title,
+        dueDate: event.dueDate,
+        pushCount: event.pushCount,
+        pushesInPeriod: 1,
+        daysDeferredInPeriod: deferredDays,
+      });
+    }
+
+    if (event.sourceListName) {
+      listCounts.set(
+        event.sourceListName,
+        (listCounts.get(event.sourceListName) ?? 0) + 1,
+      );
+    }
+  }
+
+  const taskIds = [...perTask.keys()];
+  const tagCounts = new Map<string, number>();
+  if (taskIds.length > 0) {
+    const tagRows = await db.select({
+      taskId: taskTags.taskId,
+      name: tags.name,
+    })
+      .from(taskTags)
+      .innerJoin(tags, eq(taskTags.tagId, tags.id))
+      .where(inArray(taskTags.taskId, taskIds));
+
+    for (const tag of tagRows) {
+      if (isSyntheticTag(tag.name)) continue;
+      const taskPushes = perTask.get(tag.taskId)?.pushesInPeriod ?? 0;
+      tagCounts.set(tag.name, (tagCounts.get(tag.name) ?? 0) + taskPushes);
+    }
+  }
+
+  const topCategories = (counts: Map<string, number>): PlanningFrictionCategory[] => (
+    [...counts.entries()]
+      .map(([label, count]) => ({ label, count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .slice(0, 5)
+  );
+
+  return {
+    pushesInPeriod: eventRows.length,
+    pushedTaskCount: perTask.size,
+    totalDaysDeferred,
+    averageDaysPerPush: eventRows.length > 0
+      ? Math.round((totalDaysDeferred / eventRows.length) * 10) / 10
+      : 0,
+    topTasks: [...perTask.values()]
+      .sort((a, b) => (
+        b.pushesInPeriod - a.pushesInPeriod
+        || b.daysDeferredInPeriod - a.daysDeferredInPeriod
+        || a.title.localeCompare(b.title)
+      ))
+      .slice(0, 5),
+    topLists: topCategories(listCounts),
+    topTags: topCategories(tagCounts),
+  };
 }
 
 async function getProjectActivity(start: string, end: string): Promise<ProjectActivityItem[]> {
@@ -710,6 +848,7 @@ export async function computeInsightsSection(
       trends,
       sourceBreakdown,
       taskAge,
+      planningFriction,
     ] = await Promise.all([
       getCompletedInRange(periodStart, periodEnd),
       getCreatedInRange(periodStart, periodEnd),
@@ -721,6 +860,7 @@ export async function computeInsightsSection(
       getCompletionTrends(periodStart, periodEnd),
       getSourceBreakdown(periodStart, periodEnd),
       getTaskAgeDistribution(),
+      getPlanningFriction(periodStart, periodEnd),
     ]);
 
     return {
@@ -764,6 +904,7 @@ export async function computeInsightsSection(
       trends,
       sourceBreakdown,
       taskAge,
+      planningFriction,
     };
   }
 
@@ -866,6 +1007,7 @@ export async function computeInsights(
     trends: summary.trends,
     sourceBreakdown: summary.sourceBreakdown,
     taskAge: summary.taskAge,
+    planningFriction: summary.planningFriction,
     projectActivity: activity.projectActivity,
     routineHeatmap: activity.routineHeatmap,
     delivery: delivery.delivery,

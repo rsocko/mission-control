@@ -100,6 +100,7 @@ export interface TaskItem {
   priority: TaskPriority;
 
   dueDate?: string;
+  pushCount?: number;
   createdAt: string;
   updatedAt: string;
   completedAt?: string;

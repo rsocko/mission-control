@@ -30,6 +30,9 @@ vi.mock('@/db/schema', () => ({
   routines: new Proxy({}, { get: (_, property) => String(property) }),
   routineCompletions: new Proxy({}, { get: (_, property) => String(property) }),
   taskProjects: new Proxy({}, { get: (_, property) => String(property) }),
+  taskHistoryEvents: new Proxy({}, { get: (_, property) => String(property) }),
+  taskTags: new Proxy({}, { get: (_, property) => String(property) }),
+  tags: new Proxy({}, { get: (_, property) => String(property) }),
   hubProjects: new Proxy({}, { get: (_, property) => String(property) }),
 }));
 
@@ -73,6 +76,7 @@ describe('insights configured-timezone bucketing', () => {
       [],
       [],
       [],
+      [],
     );
     const { computeInsightsSection } = await import('@/lib/stats/insights');
 
@@ -83,5 +87,62 @@ describe('insights configured-timezone bucketing', () => {
       completed: 1,
     });
     expect(result.kpis.streak.value).toBe(1);
+  });
+
+  it('summarizes later due-date moves into task, list, and tag patterns', async () => {
+    mocks.terminals.push(
+      [{ count: 0 }],
+      [{ count: 0 }],
+      [{ count: 0 }],
+      [{ count: 0 }],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [
+        {
+          taskId: 'task-1',
+          previousValue: '2026-08-10',
+          newValue: '2026-08-14',
+          title: 'Plan launch',
+          dueDate: '2026-08-20',
+          pushCount: 3,
+          sourceListName: 'Work',
+        },
+        {
+          taskId: 'task-1',
+          previousValue: '2026-08-14',
+          newValue: '2026-08-20',
+          title: 'Plan launch',
+          dueDate: '2026-08-20',
+          pushCount: 3,
+          sourceListName: 'Work',
+        },
+      ],
+      [
+        { taskId: 'task-1', name: 'planning' },
+        { taskId: 'task-1', name: 'priority:high' },
+      ],
+    );
+    const { computeInsightsSection } = await import('@/lib/stats/insights');
+
+    const result = await computeInsightsSection('summary', 7);
+
+    expect(result.planningFriction).toMatchObject({
+      pushesInPeriod: 2,
+      pushedTaskCount: 1,
+      totalDaysDeferred: 10,
+      averageDaysPerPush: 5,
+      topTasks: [expect.objectContaining({
+        id: 'task-1',
+        pushesInPeriod: 2,
+        daysDeferredInPeriod: 10,
+      })],
+      topLists: [{ label: 'Work', count: 2 }],
+      topTags: [{ label: 'planning', count: 2 }],
+    });
   });
 });

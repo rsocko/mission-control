@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
-import { ArrowDown, ArrowUp, Flame, Lightbulb } from 'lucide-react';
+import { ArrowDown, ArrowUp, Flame, Lightbulb, RotateCcw } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { fadeSlideUp } from '@/lib/motion';
@@ -453,6 +453,15 @@ function InsightsPageContent() {
               </motion.div>
             ) : null}
 
+            {sectionLoading.summary ? (
+              <GroupSkeleton label="Loading planning friction insights" className="mb-6 h-64" />
+            ) : summary ? (
+              <PlanningFrictionSection
+                data={summary.planningFriction}
+                onOpenTask={taskId => router.push(`/today?taskId=${encodeURIComponent(taskId)}`)}
+              />
+            ) : null}
+
             {/* Delivery reporting */}
             {sectionLoading.delivery ? (
               <GroupSkeleton label="Loading delivery insights" className="mb-6 h-80" />
@@ -708,6 +717,116 @@ function GroupSkeleton({
         <Skeleton className="h-full bg-slate-800" />
         <Skeleton className="h-1/2 bg-slate-800" />
       </div>
+    </div>
+  );
+}
+
+function PlanningFrictionSection({
+  data,
+  onOpenTask,
+}: {
+  data: InsightsSummarySection['planningFriction'];
+  onOpenTask: (taskId: string) => void;
+}) {
+  return (
+    <motion.section
+      variants={fadeSlideUp}
+      className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+      aria-labelledby="planning-friction-heading"
+    >
+      <div className="mb-4 flex items-start gap-3">
+        <span className="rounded-lg bg-amber-500/10 p-2 text-amber-400">
+          <RotateCcw className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div>
+          <h3 id="planning-friction-heading" className="text-sm font-semibold">Planning friction</h3>
+          <p className="mt-1 text-xs text-slate-400">
+            Later due-date moves reveal where plans repeatedly need more room. Initial scheduling and earlier moves are excluded.
+          </p>
+        </div>
+      </div>
+      {data.pushesInPeriod === 0 ? (
+        <p className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-500">
+          No later due-date moves in this period.
+        </p>
+      ) : (
+        <>
+          <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <FrictionMetric label="Later moves" value={data.pushesInPeriod} />
+            <FrictionMetric label="Tasks affected" value={data.pushedTaskCount} />
+            <FrictionMetric label="Days deferred" value={data.totalDaysDeferred} />
+            <FrictionMetric label="Average move" value={data.averageDaysPerPush} suffix=" days" />
+          </div>
+          <div className="grid gap-5 lg:grid-cols-2">
+            <div>
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Most shifted tasks</h4>
+              <div className="space-y-2">
+                {data.topTasks.map(task => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => onOpenTask(task.id)}
+                    className="flex w-full items-center justify-between gap-3 rounded-lg bg-slate-950/50 px-3 py-2 text-left transition-colors hover:bg-slate-800/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400"
+                    aria-label={`Open ${task.title}`}
+                  >
+                    <span className="min-w-0 truncate text-sm text-slate-200">{task.title}</span>
+                    <span className="shrink-0 text-xs tabular-nums text-amber-400">
+                      {task.pushesInPeriod} moves / {task.daysDeferredInPeriod} days
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <FrictionRanking title="Lists" items={data.topLists} />
+              <FrictionRanking title="Tags" items={data.topTags} />
+            </div>
+          </div>
+        </>
+      )}
+    </motion.section>
+  );
+}
+
+function FrictionMetric({
+  label,
+  value,
+  suffix = '',
+}: {
+  label: string;
+  value: number;
+  suffix?: string;
+}) {
+  return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+      <div className="text-lg font-semibold tabular-nums text-amber-300">{value}{suffix}</div>
+      <div className="mt-1 text-xs text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function FrictionRanking({
+  title,
+  items,
+}: {
+  title: string;
+  items: InsightsSummarySection['planningFriction']['topLists'];
+}) {
+  return (
+    <div>
+      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
+      {items.length > 0 ? (
+        <ol className="space-y-2">
+          {items.map(item => (
+            <li key={item.label} className="flex items-center justify-between gap-2 text-sm">
+              <span className="truncate text-slate-300">{item.label}</span>
+              <span className="text-xs tabular-nums text-slate-500">{item.count}</span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="text-xs text-slate-600">No pattern yet</p>
+      )}
     </div>
   );
 }

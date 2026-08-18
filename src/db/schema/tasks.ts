@@ -1,4 +1,5 @@
 import { sqliteTable, text, integer, real, index, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
 import type { LocalDisposition } from '@/types';
 import type { QuickSortBeforeSnapshot, QuickSortTaskSnapshot } from '@/types/quick-sort';
 
@@ -20,6 +21,7 @@ export const tasks = sqliteTable('tasks', {
   priority: text('priority').notNull().default('none'),
 
   dueDate: text('due_date'),
+  pushCount: integer('push_count').notNull().default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
@@ -66,6 +68,9 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_local_disposition').on(table.localDisposition),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
+  index('idx_tasks_push_count')
+    .on(table.pushCount)
+    .where(sql`${table.pushCount} >= 2`),
 ]);
 
 // ─── TASK SCHEDULES (Focus & Planning) ──────────────────────────────────────

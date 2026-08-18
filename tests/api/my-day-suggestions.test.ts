@@ -47,6 +47,7 @@ describe('GET /api/my-day suggestions', () => {
         connectorType?: string;
         status?: string;
         completedAt?: string;
+        pushCount?: number;
       } = {},
     ) => ({
       id,
@@ -58,6 +59,7 @@ describe('GET /api/my-day suggestions', () => {
       localDisposition: options.localDisposition ?? 'active',
       priority: options.priority ?? 'none',
       dueDate: options.dueDate,
+      pushCount: options.pushCount ?? 0,
       parentId: options.parentId,
       depth: options.depth ?? 0,
       metadata: {},
@@ -97,6 +99,7 @@ describe('GET /api/my-day suggestions', () => {
         timestamp: old,
       }),
       task('top-carried', { timestamp: old }),
+      task('top-rescheduled', { dueDate: '2026-08-09', timestamp: old, pushCount: 4 }),
       task('child-carried', {
         parentId: 'top-carried',
         depth: 1,
@@ -199,6 +202,10 @@ describe('GET /api/my-day suggestions', () => {
     expect(body.suggestions.aiRecommended.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.recentlyAdded.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.carriedForward.map(({ id }) => id)).toContain('top-carried');
+    expect(body.suggestions.repeatedlyRescheduled).toContainEqual(expect.objectContaining({
+      id: 'top-rescheduled',
+      pushCount: 4,
+    }));
 
     const suggestedIds = Object.values(body.suggestions)
       .flat()

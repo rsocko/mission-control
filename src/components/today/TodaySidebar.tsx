@@ -66,6 +66,7 @@ export function TodaySidebar({
           <SuggestionGroup title="AI Recommended" icon={<Brain size={12} />} tasks={suggestions.aiRecommended} color="purple" {...interactionProps} />
           <SuggestionGroup title="Recently Added" icon={<Plus size={12} />} tasks={suggestions.recentlyAdded} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Carried Forward" icon={<RotateCcw size={12} />} tasks={suggestions.carriedForward} color="rose" {...interactionProps} />
+          <SuggestionGroup title="Repeatedly Rescheduled" icon={<CalendarClock size={12} />} tasks={suggestions.repeatedlyRescheduled} color="amber" {...interactionProps} />
           {Object.values(suggestions).every((group) => group.length === 0) && (
             <div className="border border-[var(--border)] rounded-md p-3 text-center">
               <p className="text-xs text-[var(--text-muted)]">You&apos;re all caught up   nice work! ??</p>

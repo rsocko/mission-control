@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react';
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -217,7 +217,17 @@ function SuggestionRow({
           <ConnectorIcon type={task.connectorType} size={12} />
           <span className="min-w-0 flex-1">
             <span className="text-xs text-[var(--text-primary)] truncate block">{task.title}</span>
-            {task.dueDate && <span className={`text-xs ${styles.header}`}>due {formatDueDate(task.dueDate)}</span>}
+            <span className="flex items-center gap-2">
+              {task.dueDate && <span className={`text-xs ${styles.header}`}>due {formatDueDate(task.dueDate)}</span>}
+              {(task.pushCount ?? 0) >= 2 && (
+                <span
+                  className="inline-flex items-center gap-0.5 text-xs text-amber-400"
+                  title={`Rescheduled ${task.pushCount ?? 0} times`}
+                >
+                  <RotateCcw size={9} aria-hidden="true" /> {task.pushCount ?? 0}
+                </span>
+              )}
+            </span>
           </span>
         </button>
         <Tooltip content="Add to My Day">

@@ -37,13 +37,13 @@ export async function runSourceListRenameRequest(
 
 export async function settleSourceListRename(
   response: Response | undefined,
-  clearPending: () => void,
+  clearPending: () => void | Promise<void>,
   refresh: () => Promise<void>,
 ): Promise<void> {
-  if (!response?.ok) clearPending();
+  if (!response?.ok) await clearPending();
   try {
     await refresh();
   } finally {
-    if (response?.ok) clearPending();
+    if (response?.ok) await clearPending();
   }
 }

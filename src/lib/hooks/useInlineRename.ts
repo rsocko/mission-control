@@ -58,35 +58,58 @@ export function useInlineRename({
   const cancelledRef = useRef(false);
   const pickerOpenRef = useRef(false);
   const mountedRef = useRef(true);
+  const editingRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const editBaseRef = useRef<InlineRenameSnapshot>(source);
   const saveSequenceRef = useRef(0);
   const activeRequestRef = useRef<RenameRequest | null>(null);
   const queuedRequestRef = useRef<RenameRequest | null>(null);
   const lastSuccessfulSnapshotRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    sourceRef.current = {
+    const nextSource = {
       name: sourceName,
       icon: sourceIcon || '',
       iconColor: sourceIconColor || '',
     };
+    sourceRef.current = nextSource;
+    if (!editingRef.current || !dirtyRef.current) {
+      editBaseRef.current = nextSource;
+      draftRef.current = nextSource;
+      setNameState(nextSource.name);
+      setIconState(nextSource.icon);
+      setIconColorState(nextSource.iconColor);
+    }
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
   }, [onError, onSave, sourceIcon, sourceIconColor, sourceName]);
 
-  const setName = useCallback((value: string) => {
-    draftRef.current = { ...draftRef.current, name: value };
-    setNameState(value);
+  const updateDraft = useCallback((nextDraft: InlineRenameSnapshot) => {
+    const isDirty = snapshotKey(nextDraft) !== snapshotKey(editBaseRef.current);
+    const currentSource = sourceRef.current;
+    const resolvedDraft = !isDirty && snapshotKey(editBaseRef.current) !== snapshotKey(currentSource)
+      ? currentSource
+      : nextDraft;
+
+    if (resolvedDraft === currentSource) editBaseRef.current = currentSource;
+    draftRef.current = resolvedDraft;
+    dirtyRef.current = snapshotKey(resolvedDraft) !== snapshotKey(editBaseRef.current);
+    setNameState(resolvedDraft.name);
+    setIconState(resolvedDraft.icon);
+    setIconColorState(resolvedDraft.iconColor);
   }, []);
+
+  const setName = useCallback((value: string) => {
+    updateDraft({ ...draftRef.current, name: value });
+  }, [updateDraft]);
 
   const setIcon = useCallback((value: string) => {
-    draftRef.current = { ...draftRef.current, icon: value };
-    setIconState(value);
-  }, []);
+    updateDraft({ ...draftRef.current, icon: value });
+  }, [updateDraft]);
 
   const setIconColor = useCallback((value: string) => {
-    draftRef.current = { ...draftRef.current, iconColor: value };
-    setIconColorState(value);
-  }, []);
+    updateDraft({ ...draftRef.current, iconColor: value });
+  }, [updateDraft]);
 
   const clearBlur = useCallback(() => {
     if (blurTimeoutRef.current) {
@@ -100,7 +123,8 @@ export function useInlineRename({
     const finalName = snapshot.name.trim();
     return Boolean(
       (finalName && finalName !== currentSource.name)
-      || snapshot.icon !== currentSource.icon,
+      || snapshot.icon !== currentSource.icon
+      || snapshot.iconColor !== currentSource.iconColor,
     );
   }, []);
 
@@ -132,7 +156,11 @@ export function useInlineRename({
 
       activeRequestRef.current = null;
       if (mountedRef.current && request.sequence === saveSequenceRef.current) {
-        if (succeeded) setEditing(false);
+        if (succeeded) {
+          editingRef.current = false;
+          dirtyRef.current = false;
+          setEditing(false);
+        }
         setSaving(false);
       }
       return;
@@ -177,6 +205,8 @@ export function useInlineRename({
     };
 
     if (!hasChanges(snapshot)) {
+      editingRef.current = false;
+      dirtyRef.current = false;
       if (mountedRef.current) setEditing(false);
       return;
     }
@@ -198,10 +228,13 @@ export function useInlineRename({
     clearBlur();
     cancelledRef.current = false;
     const currentSource = sourceRef.current;
+    editBaseRef.current = currentSource;
     draftRef.current = currentSource;
+    dirtyRef.current = false;
     setNameState(currentSource.name);
     setIconState(currentSource.icon);
     setIconColorState(currentSource.iconColor);
+    editingRef.current = true;
     setEditing(true);
   }, [clearBlur]);
 
@@ -210,11 +243,14 @@ export function useInlineRename({
     clearBlur();
     saveSequenceRef.current += 1;
     const currentSource = sourceRef.current;
+    editBaseRef.current = currentSource;
     draftRef.current = currentSource;
+    dirtyRef.current = false;
     setNameState(currentSource.name);
     setIconState(currentSource.icon);
     setIconColorState(currentSource.iconColor);
     setSaving(false);
+    editingRef.current = false;
     setEditing(false);
   }, [clearBlur]);
 
@@ -232,7 +268,9 @@ export function useInlineRename({
       const snapshot = draftRef.current;
       const key = snapshotKey(snapshot);
       if (
-        cancelledRef.current
+        !editingRef.current
+        || !dirtyRef.current
+        || cancelledRef.current
         || !hasChanges(snapshot)
         || activeRequestRef.current?.key === key
         || queuedRequestRef.current?.key === key

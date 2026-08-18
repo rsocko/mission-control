@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packageSyncWorkerRuntime } from './package-sync-worker-runtime.mjs';
 import { removeTemporaryRuntime } from './remove-temporary-runtime.mjs';
+import { stageSyncWorkerRuntime } from './lib/stage-sync-worker-runtime.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'mc-worker-runtime-'));
@@ -61,13 +61,7 @@ function waitForExit(child, timeoutMs) {
 }
 
 try {
-  await Promise.all([
-    cp(path.join(root, 'dist'), path.join(runtimeRoot, 'dist'), { recursive: true }),
-    cp(path.join(root, 'drizzle'), path.join(runtimeRoot, 'drizzle'), { recursive: true }),
-    packagedRuntime
-      ? cp(packagedRuntime, runtimeRoot, { recursive: true, dereference: true })
-      : packageSyncWorkerRuntime(runtimeRoot),
-  ]);
+  await stageSyncWorkerRuntime({ root, runtimeRoot, packagedRuntime });
 
   const prettySmokePath = path.join(runtimeRoot, 'pino-pretty-smoke.cjs');
   await writeFile(

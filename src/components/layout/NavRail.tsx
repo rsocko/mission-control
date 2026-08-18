@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { LayoutGroup } from 'motion/react';
 import * as Popover from '@radix-ui/react-popover';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
@@ -48,8 +47,7 @@ import { getShortcutPage } from '@/lib/navigation/shortcut-catalog';
 
 import type { ComponentType } from 'react';
 import {
-  NavigationBadge,
-  NavigationPressureBar,
+  NavigationRailMorph,
 } from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
 import {
@@ -295,8 +293,7 @@ export function NavRail({
 
       {/* Nav groups */}
       <div className="flex-1 flex flex-col py-2 gap-0.5">
-        <LayoutGroup id="nav-rail-attention">
-          {navGroups.map((group, groupIdx) => (
+        {navGroups.map((group, groupIdx) => (
             <div key={group.label} role="group" aria-label={group.label}>
               {groupIdx > 0 && (
                 <div className="h-px bg-[var(--text-tertiary)]/20 my-2.5 mx-3" />
@@ -328,14 +325,6 @@ export function NavRail({
                       )}
                       <span className="relative w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
                         <Icon size={item.iconSize ?? 22} className={cn('flex-shrink-0', item.iconColor && (active ? item.iconColor.replace('400', '300') : item.iconColor))} />
-                        {!expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
-                          <NavigationPressureBar
-                            count={badgeCount}
-                            tone={badgeTone}
-                            pulse={pulseBadge}
-                            morphId={item.badgeKey}
-                          />
-                        )}
                       </span>
                       <span className={cn(
                         'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
@@ -343,15 +332,14 @@ export function NavRail({
                       )}>
                         {item.label}
                       </span>
-                      {expanded && preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
-                        <span className="ml-auto">
-                          <NavigationBadge
-                            count={badgeCount}
-                            tone={badgeTone}
-                            pulse={pulseBadge}
-                            morphId={item.badgeKey}
-                          />
-                        </span>
+                      {preferences.enabled && item.badgeKey && preferences.items[item.badgeKey] && badgeTone && (
+                        <NavigationRailMorph
+                          count={badgeCount}
+                          tone={badgeTone}
+                          expanded={expanded}
+                          pulse={pulseBadge}
+                          morphId={item.badgeKey}
+                        />
                       )}
                       {item.href === '/ai' && isAiActive && (
                         <span className={cn(
@@ -365,7 +353,6 @@ export function NavRail({
               })}
             </div>
           ))}
-        </LayoutGroup>
       </div>
 
       {/* Bottom section: pin toggle + settings */}

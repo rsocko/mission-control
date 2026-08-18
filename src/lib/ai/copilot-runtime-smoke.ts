@@ -14,11 +14,20 @@ import {
   CopilotSmokeError,
   type CopilotSmokePhase,
 } from './copilot-runtime-errors';
+import {
+  COPILOT_CLI_PACKAGE_VERSION,
+  COPILOT_CLI_RUNTIME_VERSIONS,
+  COPILOT_SDK_PROTOCOL_VERSION,
+  COPILOT_SDK_VERSION,
+} from './copilot-runtime-contract';
 
-export const COPILOT_SDK_VERSION = '1.0.8';
-export const COPILOT_CLI_PACKAGE_VERSION = '1.0.76-0';
-export const COPILOT_CLI_RUNTIME_VERSIONS: readonly string[] = ['1.0.75', '1.0.76-0'];
-export const COPILOT_SDK_PROTOCOL_VERSION = 3;
+export {
+  COPILOT_CLI_PACKAGE_VERSION,
+  COPILOT_CLI_RUNTIME_VERSIONS,
+  COPILOT_SDK_PROTOCOL_VERSION,
+  COPILOT_SDK_VERSION,
+} from './copilot-runtime-contract';
+
 export const COPILOT_SMOKE_MARKER = 'MC_COPILOT_SMOKE_OK';
 export const COPILOT_SMOKE_MAX_AI_CREDITS = 30;
 export type CopilotSmokeAuthMode = 'token' | 'device';

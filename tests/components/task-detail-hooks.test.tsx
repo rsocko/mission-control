@@ -11,6 +11,7 @@ import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { DuplicateCandidate } from '@/components/task-detail/DuplicateTaskPreview';
 import type { TaskDetail, TaskTag } from '@/components/task-detail/task-detail-types';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
 vi.mock('sonner', () => ({
@@ -181,6 +182,29 @@ describe('useTaskDetailData', () => {
     await waitFor(() => expect(result.current.writableConnectors).toHaveLength(1));
     await waitFor(() => expect(result.current.potentialDuplicates).toHaveLength(1));
     await waitFor(() => expect(result.current.projectHierarchies['project-1']).toBe(hierarchy));
+  });
+
+  it('refreshes the open task when another task surface reports a change', async () => {
+    let status = 'todo';
+    let taskFetches = 0;
+    stubFetch((input) => {
+      if (input === '/api/tasks/task-1') {
+        taskFetches += 1;
+        return jsonResponse({ task: { ...baseTask, status } });
+      }
+      return jsonResponse({});
+    });
+
+    const { result } = renderHook(() => useTaskDetailData({ taskId: 'task-1' }));
+    await waitFor(() => expect(result.current.task?.status).toBe('todo'));
+
+    status = 'in_progress';
+    act(() => notifyTaskChanged('another-task'));
+    expect(taskFetches).toBe(1);
+
+    act(() => notifyTaskChanged('task-1'));
+    await waitFor(() => expect(result.current.task?.status).toBe('in_progress'));
+    expect(taskFetches).toBe(2);
   });
 
   it('resets editors and keeps loading resilient when the task fetch fails', async () => {

@@ -34,7 +34,7 @@ import {
 } from './types';
 import { getConnectorDisplayName } from '@/lib/connectors/display-name';
 import { useInlineRename } from '@/lib/hooks/useInlineRename';
-import { runSourceListRenameRequest } from '../source-list-renames';
+import { runSourceListRenameRequest, settleSourceListRename } from '../source-list-renames';
 
 import { IconPickerButton as EmojiPickerButton, IconRenderer } from '@/components/ui/icon-picker';
 
@@ -224,10 +224,7 @@ function ListGroupsSection({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: sourceListId, name: newName, icon, iconColor }),
         }),
-        async () => {
-          clearPending();
-          await onRefresh();
-        },
+        (response) => settleSourceListRename(response, clearPending, onRefresh),
       );
     } catch (error) {
       toast.error('Rename failed. Check your connection and try again.');

@@ -186,7 +186,7 @@ describe('GitHub connector settings', () => {
         onDeleteGroup={vi.fn()}
         onAssignList={vi.fn()}
         onRefresh={vi.fn()}
-        onRenameList={vi.fn(() => vi.fn())}
+        onRenameList={vi.fn(() => vi.fn().mockResolvedValue(undefined))}
       />,
     );
 

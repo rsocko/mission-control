@@ -34,6 +34,7 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
+  Search,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavRailPrefs } from '@/lib/hooks/useNavRailPrefs';
@@ -43,6 +44,7 @@ import {
 } from '@/lib/hooks/useSyncIconPreference';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
+import { getShortcutPage } from '@/lib/navigation/shortcut-catalog';
 
 import type { ComponentType } from 'react';
 import {
@@ -73,6 +75,22 @@ interface NavRailGroup {
   items: NavRailItem[];
 }
 
+function shortcutNavItem(
+  href: string,
+  icon: NavRailItem['icon'],
+  extra: Omit<NavRailItem, 'href' | 'label' | 'icon' | 'iconColor'> = {},
+): NavRailItem {
+  const page = getShortcutPage(href);
+  if (!page) throw new Error(`Missing shortcut catalog entry for ${href}`);
+  return {
+    href,
+    label: page.name,
+    icon,
+    iconColor: page.iconColor,
+    ...extra,
+  };
+}
+
 function PhosphorGraphIcon({ size = 22, className }: { size?: number; className?: string }) {
   const maskImage = 'url(https://api.iconify.design/ph/graph.svg)';
 
@@ -96,29 +114,30 @@ const navGroups: NavRailGroup[] = [
   {
     label: 'Plan',
     items: [
-      { href: '/', label: 'Dashboard', icon: LayoutDashboard, iconColor: 'text-blue-400' },
-      { href: '/today', label: 'My Day', icon: Sun, iconColor: 'text-amber-400', badgeKey: 'myDay', badgeTone: 'amber' },
-      { href: '/projects', label: 'Projects', icon: ChartNetwork, iconColor: 'text-violet-400' },
-      { href: '/kanban', label: 'Kanban', icon: Columns3, iconColor: 'text-cyan-400' },
-      { href: '/goals', label: 'Goals', icon: Target, iconColor: 'text-rose-400' },
-      { href: '/timeline', label: 'Timeline', icon: CalendarDays, iconColor: 'text-sky-400' },
+      shortcutNavItem('/', LayoutDashboard),
+      shortcutNavItem('/today', Sun, { badgeKey: 'myDay', badgeTone: 'amber' }),
+      shortcutNavItem('/projects', ChartNetwork),
+      shortcutNavItem('/kanban', Columns3),
+      shortcutNavItem('/goals', Target),
+      shortcutNavItem('/timeline', CalendarDays),
     ],
   },
   {
     label: 'Operate',
     items: [
-      { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400', badgeKey: 'notifications', badgeTone: 'blue' },
-      { href: '/routines', label: 'Routines', icon: Repeat, iconColor: 'text-emerald-400' },
-      { href: '/triage', label: 'Triage', icon: Inbox, iconColor: 'text-purple-400', badgeKey: 'triage', badgeTone: 'red' },
-      { href: '/quick-sort', label: 'Quick Sort', icon: Zap, iconColor: 'text-amber-400', badgeKey: 'quickSort', badgeTone: 'amber' },
+      shortcutNavItem('/notifications', Bell, { badgeKey: 'notifications', badgeTone: 'blue' }),
+      shortcutNavItem('/routines', Repeat),
+      shortcutNavItem('/triage', Inbox, { badgeKey: 'triage', badgeTone: 'red' }),
+      shortcutNavItem('/quick-sort', Zap, { badgeKey: 'quickSort', badgeTone: 'amber' }),
       { href: '/scout/reconciliation', label: 'Reconciliation', icon: ShieldCheck, iconColor: 'text-emerald-400', badgeKey: 'reconciliation', badgeTone: 'amber' },
     ],
   },
   {
     label: 'Understand',
     items: [
-      { href: '/insights', label: 'Insights', icon: Activity, iconColor: 'text-pink-400' },
+      shortcutNavItem('/insights', Activity),
       { href: '/graph', label: 'Graph', icon: PhosphorGraphIcon, iconColor: 'text-indigo-400' },
+      shortcutNavItem('/icons', Search),
     ],
   },
   {
@@ -131,13 +150,13 @@ const navGroups: NavRailGroup[] = [
   {
     label: 'Assistant',
     items: [
-      { href: '/ai', label: 'Houston', icon: HoustonIcon, iconSize: 26, requiresFeature: 'aiEnabled' },
+      shortcutNavItem('/ai', HoustonIcon, { iconSize: 26, requiresFeature: 'aiEnabled' }),
     ],
   },
 ];
 
 const bottomItems: NavRailItem[] = [
-  { href: '/settings', label: 'Settings', icon: Settings, iconColor: 'text-slate-400' },
+  shortcutNavItem('/settings', Settings),
 ];
 
 interface NavRailProps {

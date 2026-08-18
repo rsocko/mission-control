@@ -5,10 +5,15 @@ import { motion } from 'motion/react';
 import {
   GripVertical, Plus, Trash2, RotateCcw, Loader2, Check, Eye, EyeOff,
   Sun, Inbox, ChartNetwork, LayoutDashboard, Columns3, Target, Repeat,
-  CalendarDays, Settings, AppWindow, ExternalLink,
+  CalendarDays, Settings, AppWindow, ExternalLink, Bell, Zap, Activity, Search,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
+import {
+  SHORTCUT_PAGES,
+  TASKBAR_SHORTCUT_LIMIT,
+  type ShortcutIconKey,
+} from '@/lib/navigation/shortcut-catalog';
 
 interface ShortcutConfig {
   id: string;
@@ -22,23 +27,26 @@ interface ShortcutConfig {
 
 type LaunchMode = 'navigate-existing' | 'navigate-new';
 
-const MAX_ENABLED_SHORTCUTS = 4;
+const MAX_ENABLED_SHORTCUTS = TASKBAR_SHORTCUT_LIMIT;
 
-// All available pages that can be added as shortcuts
 import type { ComponentType } from 'react';
 
-const AVAILABLE_PAGES: Array<{ url: string; name: string; description: string; icon: ComponentType<{ size?: number; className?: string }>; svgIcon: string }> = [
-  { url: '/today', name: 'Today', description: 'View today\'s tasks', icon: Sun, svgIcon: 'shortcut-today.svg' },
-  { url: '/triage', name: 'Triage', description: 'Triage incoming alerts', icon: Inbox, svgIcon: 'shortcut-triage.svg' },
-  { url: '/projects', name: 'Projects', description: 'View all projects', icon: ChartNetwork, svgIcon: 'shortcut-projects.svg' },
-  { url: '/', name: 'Dashboard', description: 'Main dashboard', icon: LayoutDashboard, svgIcon: 'shortcut-dashboard.svg' },
-  { url: '/kanban', name: 'Kanban', description: 'Kanban board view', icon: Columns3, svgIcon: 'shortcut-kanban.svg' },
-  { url: '/goals', name: 'Goals', description: 'Track your goals', icon: Target, svgIcon: 'shortcut-goals.svg' },
-  { url: '/routines', name: 'Routines', description: 'Daily routines', icon: Repeat, svgIcon: 'shortcut-routines.svg' },
-  { url: '/timeline', name: 'Timeline', description: 'Calendar timeline', icon: CalendarDays, svgIcon: 'shortcut-timeline.svg' },
-  { url: '/ai', name: 'Houston', description: 'AI chat assistant', icon: HoustonIcon, svgIcon: 'shortcut-ai.svg' },
-  { url: '/settings', name: 'Settings', description: 'App settings', icon: Settings, svgIcon: 'shortcut-settings.svg' },
-];
+const SHORTCUT_ICONS: Record<ShortcutIconKey, ComponentType<{ size?: number; className?: string }>> = {
+  dashboard: LayoutDashboard,
+  today: Sun,
+  projects: ChartNetwork,
+  kanban: Columns3,
+  goals: Target,
+  timeline: CalendarDays,
+  notifications: Bell,
+  routines: Repeat,
+  triage: Inbox,
+  'quick-sort': Zap,
+  insights: Activity,
+  'icon-finder': Search,
+  houston: HoustonIcon,
+  settings: Settings,
+};
 
 export function ShortcutsSection() {
   const [shortcuts, setShortcuts] = useState<ShortcutConfig[]>([]);
@@ -130,17 +138,17 @@ export function ShortcutsSection() {
     setDirty(true);
   }
 
-  function addShortcut(page: typeof AVAILABLE_PAGES[0]) {
+  function addShortcut(page: typeof SHORTCUT_PAGES[number]) {
     // New shortcuts are added enabled; check limit
     if (atLimit) {
       toast.error(`Maximum ${MAX_ENABLED_SHORTCUTS} enabled shortcuts. Disable one first or add as hidden.`);
     }
     const newShortcut: ShortcutConfig = {
-      id: page.url.replace('/', '') || 'dashboard',
+      id: page.id,
       name: page.name,
       url: page.url,
       description: page.description,
-      icon: page.svgIcon,
+      icon: page.icon,
       enabled: !atLimit, // Auto-disable if at limit
     };
     setShortcuts(prev => [...prev, newShortcut]);
@@ -169,7 +177,7 @@ export function ShortcutsSection() {
   }
 
   const usedUrls = new Set(shortcuts.map(s => s.url));
-  const availableToAdd = AVAILABLE_PAGES.filter(p => !usedUrls.has(p.url));
+  const availableToAdd = SHORTCUT_PAGES.filter(p => !usedUrls.has(p.url));
 
   if (loading) {
     return (
@@ -219,8 +227,8 @@ export function ShortcutsSection() {
       {/* Current shortcuts */}
       <div className="space-y-2 mb-6">
         {shortcuts.map((shortcut, idx) => {
-          const page = AVAILABLE_PAGES.find(p => p.url === shortcut.url);
-          const Icon = page?.icon || LayoutDashboard;
+          const page = SHORTCUT_PAGES.find(p => p.url === shortcut.url);
+          const Icon = page ? SHORTCUT_ICONS[page.iconKey] : LayoutDashboard;
           return (
             <motion.div
               key={shortcut.id}
@@ -234,8 +242,8 @@ export function ShortcutsSection() {
               } ${dragIdx === idx ? 'ring-2 ring-blue-500/40' : ''}`}
             >
               <GripVertical size={14} className="text-[var(--text-muted)] flex-shrink-0" />
-              <div className="w-8 h-8 rounded-md bg-blue-600/20 flex items-center justify-center flex-shrink-0">
-                <Icon size={16} className="text-blue-400" />
+              <div className={`w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0 ${page?.iconBackground ?? 'bg-blue-400/15'}`}>
+                <Icon size={16} className={page?.iconColor ?? 'text-blue-400'} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-[var(--text-primary)] truncate">
@@ -282,14 +290,16 @@ export function ShortcutsSection() {
           </h3>
           <div className="grid grid-cols-2 gap-2">
             {availableToAdd.map(page => {
-              const Icon = page.icon;
+              const Icon = SHORTCUT_ICONS[page.iconKey];
               return (
                 <button
                   key={page.url}
                   onClick={() => addShortcut(page)}
                   className="flex items-center gap-2.5 px-3 py-2.5 text-left bg-[var(--surface-1)] border border-[var(--border)] rounded-lg hover:border-blue-500/40 hover:bg-[var(--surface-2)] transition-colors"
                 >
-                  <Icon size={14} className="text-[var(--text-muted)] flex-shrink-0" />
+                  <div className={`w-7 h-7 rounded-md flex items-center justify-center flex-shrink-0 ${page.iconBackground}`}>
+                    <Icon size={14} className={page.iconColor} />
+                  </div>
                   <div className="min-w-0">
                     <div className="text-sm text-[var(--text-primary)] truncate">{page.name}</div>
                     <div className="text-xs text-[var(--text-tertiary)] truncate">{page.url}</div>

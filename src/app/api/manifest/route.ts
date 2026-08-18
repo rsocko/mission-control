@@ -41,18 +41,7 @@ export async function GET() {
     launch_handler: {
       client_mode: launchMode,
     },
-    shortcuts: [
-      {
-        name: 'Icon Finder',
-        short_name: 'Icons',
-        url: '/icons',
-        description: 'Search and copy icons from multiple sources',
-        icons: [
-          { src: '/icon-v3-192.png', sizes: '192x192', type: 'image/png' },
-        ],
-      },
-      ...enabledShortcuts,
-    ],
+    shortcuts: enabledShortcuts,
     icons: [
       { src: '/icon-v3-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
       { src: '/icon-v3-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

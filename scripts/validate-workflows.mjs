@@ -318,7 +318,7 @@ for (const file of workflowFiles) {
     assert.equal(typeof uses, 'string', `${file} contains a non-string uses value`);
     assert.match(
       uses,
-      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/u,
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}$/u,
       `${file} action references must use a full commit SHA`,
     );
     const action = uses.slice(0, uses.indexOf('@'));

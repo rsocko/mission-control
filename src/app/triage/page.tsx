@@ -276,12 +276,20 @@ export default function TriagePage() {
   }, [loadItems, setSelectedId]);
 
   const handleBatchAction = useCallback(async (itemIds: string[], actionType: TriageActionType) => {
-    const promises = itemIds.map((id) =>
-      fetch(`/api/triage/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionType }) })
+    const label = ACTION_META[actionType].label;
+    const { succeeded } = await executeBulkOperation(
+      itemIds,
+      (id) => fetch(`/api/triage/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actionType }),
+      }),
+      `Routed ${itemIds.length} item${itemIds.length === 1 ? '' : 's'} to ${label}`,
+      { onRefresh: loadItems },
     );
-    await Promise.all(promises);
-    toast.success(`Applied "${ACTION_META[actionType].label}" to ${itemIds.length} item${itemIds.length !== 1 ? 's' : ''}`);
-    await loadItems();
+    if (succeeded.length > 0) {
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+    }
   }, [loadItems]);
 
   const handleAutoTriageExecute = useCallback(async (plan: Array<{ actionType: TriageActionType; itemIds: string[] }>) => {

@@ -4,6 +4,7 @@ interface SubtaskPillProps {
   done: number;
   total: number;
   className?: string;
+  onClick?: () => void;
 }
 
 /**
@@ -11,7 +12,7 @@ interface SubtaskPillProps {
  * Shows a filled pie wedge snapped to 10% increments (capped at 80% until complete)
  * plus "done/total" text. Accent blue while in-progress, green at 100%.
  */
-export function SubtaskPill({ done, total, className = '' }: SubtaskPillProps) {
+export function SubtaskPill({ done, total, className = '', onClick }: SubtaskPillProps) {
   if (total <= 0) return null;
 
   const rawPct = Math.min(done / total, 1);
@@ -44,11 +45,8 @@ export function SubtaskPill({ done, total, className = '' }: SubtaskPillProps) {
   const bgClass = isComplete ? 'bg-green-400/10' : 'bg-blue-400/10';
   const textClass = isComplete ? 'text-green-400' : 'text-blue-400';
 
-  return (
-    <span
-      className={`inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium tabular-nums ${bgClass} ${textClass} ${className}`}
-      title={`${done} of ${total} subtasks complete`}
-    >
+  const content = (
+    <>
       <svg
         width="14"
         height="14"
@@ -63,6 +61,31 @@ export function SubtaskPill({ done, total, className = '' }: SubtaskPillProps) {
         )}
       </svg>
       {done}/{total}
+    </>
+  );
+  const classes = `inline-flex items-center gap-1 shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium tabular-nums ${bgClass} ${textClass} ${className}`;
+  const label = `${done} of ${total} subtasks complete`;
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`${classes} cursor-pointer transition-opacity hover:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]`}
+        title={label}
+        aria-label={`Open subtasks, ${label}`}
+        onClick={(event) => {
+          event.stopPropagation();
+          onClick();
+        }}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <span className={classes} title={label}>
+      {content}
     </span>
   );
 }

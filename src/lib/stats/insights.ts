@@ -20,7 +20,7 @@ import {
   taskTags,
   tags,
 } from '@/db/schema';
-import { and, eq, gte, lt, lte, sql, notInArray, isNotNull } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, lte, sql, notInArray, isNotNull } from 'drizzle-orm';
 import { hubProjects } from '@/db/schema';
 import {
   addCalendarDays,

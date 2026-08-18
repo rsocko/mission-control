@@ -217,7 +217,7 @@ function normalizeRedditChild(child) {
 }
 
 async function runRedditImport() {
-  const { reportProgress, sendBatch } = window.MCImportCommon;
+  const { reportProgress, runPagedImport } = window.MCImportCommon;
   const username = await extractRedditUsername();
 
   if (!username) {
@@ -225,54 +225,27 @@ async function runRedditImport() {
     return;
   }
 
-  let after;
-  let page = 0;
-  let totalImported = 0;
-  let totalSkipped = 0;
-  const errors = [];
-
-  while (page < REDDIT_MAX_PAGES) {
+  await runPagedImport({
+    platform: 'reddit',
+    batchSize: REDDIT_BATCH_SIZE,
+    maxPages: REDDIT_MAX_PAGES,
+    async fetchPage(after) {
     const url = new URL(`https://www.reddit.com/user/${username}/saved.json`);
     url.searchParams.set('raw_json', '1');
     url.searchParams.set('limit', String(REDDIT_PAGE_SIZE));
     if (after) url.searchParams.set('after', after);
-
-    let response;
-    try {
-      response = await fetch(url.toString(), { credentials: 'include' });
-    } catch (err) {
-      errors.push(err.message || 'Network error fetching Reddit saved items');
-      break;
-    }
-
+    const response = await fetch(url.toString(), { credentials: 'include' });
     if (!response.ok) {
-      errors.push(`Reddit saved.json request failed: ${response.status} ${response.statusText}`);
-      break;
+      throw new Error(`Reddit saved.json request failed: ${response.status} ${response.statusText}`);
     }
-
     const payload = await response.json();
-    const children = Array.isArray(payload?.data?.children) ? payload.data.children : [];
-    const normalized = children.map(normalizeRedditChild).filter(Boolean);
-
-    for (let i = 0; i < normalized.length; i += REDDIT_BATCH_SIZE) {
-      const batch = normalized.slice(i, i + REDDIT_BATCH_SIZE);
-      try {
-        const result = await sendBatch('reddit', batch);
-        totalImported += result.imported;
-        totalSkipped += result.skipped;
-        if (result.errors?.length) errors.push(...result.errors);
-      } catch (err) {
-        errors.push(err.message || 'Failed to submit batch');
-      }
-      reportProgress('reddit', { imported: totalImported, skipped: totalSkipped, done: false });
-    }
-
-    page += 1;
-    after = payload?.data?.after || null;
-    if (!after) break;
-  }
-
-  reportProgress('reddit', { imported: totalImported, skipped: totalSkipped, errors: errors.slice(0, 10), done: true });
+    return {
+      items: Array.isArray(payload?.data?.children) ? payload.data.children : [],
+      nextCursor: payload?.data?.after || null,
+    };
+    },
+    normalizeItems: (children) => children.map(normalizeRedditChild),
+  });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

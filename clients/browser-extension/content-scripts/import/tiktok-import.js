@@ -64,58 +64,42 @@ function extractTikTokUsername() {
  * Fetch the user's collection list from TikTok API.
  */
 async function fetchCollections(secUid) {
-  const { relayFetch } = window.MCImportCommon;
-  const collections = [];
-  let cursor = 0;
-  let pages = 0;
-
-  while (pages < TIKTOK_MAX_PAGES) {
-    const url = `https://www.tiktok.com/api/user/collection_list/?aid=1988&count=${TIKTOK_COLLECTION_PAGE_SIZE}&cursor=${cursor}&secUid=${encodeURIComponent(secUid)}`;
-
-    const response = await relayFetch(url, { credentials: 'include' });
-    if (!response.ok) {
-      throw new Error(`TikTok collection_list failed: ${response.status}`);
-    }
-
-    const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-    const items = Array.isArray(data?.collectionList) ? data.collectionList : [];
-    collections.push(...items);
-
-    pages++;
-    if (!data?.hasMore) break;
-    cursor = data.cursor || cursor + TIKTOK_COLLECTION_PAGE_SIZE;
-  }
-
-  return collections;
+  const { collectPages, relayFetch } = window.MCImportCommon;
+  return collectPages({
+    maxPages: TIKTOK_MAX_PAGES,
+    initialCursor: 0,
+    async fetchPage(cursor) {
+      const url = `https://www.tiktok.com/api/user/collection_list/?aid=1988&count=${TIKTOK_COLLECTION_PAGE_SIZE}&cursor=${cursor}&secUid=${encodeURIComponent(secUid)}`;
+      const response = await relayFetch(url, { credentials: 'include' });
+      if (!response.ok) throw new Error(`TikTok collection_list failed: ${response.status}`);
+      const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      return {
+        items: Array.isArray(data?.collectionList) ? data.collectionList : [],
+        nextCursor: data?.hasMore ? data.cursor || cursor + TIKTOK_COLLECTION_PAGE_SIZE : null,
+      };
+    },
+  });
 }
 
 /**
  * Fetch items from a single collection.
  */
 async function fetchCollectionItems(collectionId) {
-  const { relayFetch } = window.MCImportCommon;
-  const items = [];
-  let cursor = 0;
-  let pages = 0;
-
-  while (pages < TIKTOK_MAX_PAGES) {
-    const url = `https://www.tiktok.com/api/collection/item_list/?aid=1988&count=${TIKTOK_ITEM_PAGE_SIZE}&cursor=${cursor}&collectionId=${collectionId}&sourceType=113`;
-
-    const response = await relayFetch(url, { credentials: 'include' });
-    if (!response.ok) {
-      throw new Error(`TikTok item_list failed: ${response.status}`);
-    }
-
-    const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-    const pageItems = Array.isArray(data?.itemList) ? data.itemList : [];
-    items.push(...pageItems);
-
-    pages++;
-    if (!data?.hasMore) break;
-    cursor = data.cursor || cursor + TIKTOK_ITEM_PAGE_SIZE;
-  }
-
-  return items;
+  const { collectPages, relayFetch } = window.MCImportCommon;
+  return collectPages({
+    maxPages: TIKTOK_MAX_PAGES,
+    initialCursor: 0,
+    async fetchPage(cursor) {
+      const url = `https://www.tiktok.com/api/collection/item_list/?aid=1988&count=${TIKTOK_ITEM_PAGE_SIZE}&cursor=${cursor}&collectionId=${collectionId}&sourceType=113`;
+      const response = await relayFetch(url, { credentials: 'include' });
+      if (!response.ok) throw new Error(`TikTok item_list failed: ${response.status}`);
+      const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      return {
+        items: Array.isArray(data?.itemList) ? data.itemList : [],
+        nextCursor: data?.hasMore ? data.cursor || cursor + TIKTOK_ITEM_PAGE_SIZE : null,
+      };
+    },
+  });
 }
 
 /**
@@ -144,7 +128,7 @@ function normalizeTikTokItem(item, username, collectionName, collectionId) {
 }
 
 async function runTikTokImport() {
-  const { reportProgress, sendBatch } = window.MCImportCommon;
+  const { createImportSession, reportProgress } = window.MCImportCommon;
   const username = extractTikTokUsername();
 
   if (!username) {
@@ -158,11 +142,8 @@ async function runTikTokImport() {
     return;
   }
 
-  let totalImported = 0;
-  let totalSkipped = 0;
-  const errors = [];
-
   reportProgress('tiktok', { imported: 0, skipped: 0, done: false });
+  const session = createImportSession('tiktok', TIKTOK_BATCH_SIZE);
 
   // Fetch all collections
   let collections;
@@ -187,27 +168,15 @@ async function runTikTokImport() {
     try {
       items = await fetchCollectionItems(collectionId);
     } catch (err) {
-      errors.push(`Collection "${collectionName}": ${err.message}`);
+      session.addError(new Error(`Collection "${collectionName}": ${err.message}`));
       continue;
     }
 
     const normalized = items.map((item) => normalizeTikTokItem(item, username, collectionName, collectionId)).filter(Boolean);
-
-    for (let i = 0; i < normalized.length; i += TIKTOK_BATCH_SIZE) {
-      const batch = normalized.slice(i, i + TIKTOK_BATCH_SIZE);
-      try {
-        const result = await sendBatch('tiktok', batch);
-        totalImported += result.imported;
-        totalSkipped += result.skipped;
-        if (result.errors?.length) errors.push(...result.errors);
-      } catch (err) {
-        errors.push(err.message || 'Failed to submit batch');
-      }
-      reportProgress('tiktok', { imported: totalImported, skipped: totalSkipped, done: false });
-    }
+    await session.submit(normalized);
   }
 
-  reportProgress('tiktok', { imported: totalImported, skipped: totalSkipped, errors: errors.slice(0, 10), done: true });
+  session.finish();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

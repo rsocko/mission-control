@@ -24,10 +24,9 @@ const TWITTER_BATCH_SIZE = 25;
 
 let stopObserving = null;
 let sentIds = new Set();
-let totalImported = 0;
-let totalSkipped = 0;
 let consecutiveHighSkipBatches = 0;
-const errors = [];
+let importSession = null;
+let processing = Promise.resolve();
 
 /**
  * Recursively walks an arbitrary JSON tree looking for GraphQL "Tweet"
@@ -158,7 +157,9 @@ function detectSourceContext(url) {
 }
 
 async function handleObservedResponse(url, body) {
-  const { sendBatch, reportProgress } = window.MCImportCommon;
+  const { reportProgress } = window.MCImportCommon;
+  const session = importSession;
+  if (!session) return;
   const sourceContext = detectSourceContext(url);
   const tweets = extractTweets(body);
   if (!tweets.length) return;
@@ -172,21 +173,10 @@ async function handleObservedResponse(url, body) {
   }
   if (!fresh.length) return;
 
-  let batchImported = 0;
-  let batchSkipped = 0;
-  for (let i = 0; i < fresh.length; i += TWITTER_BATCH_SIZE) {
-    const batch = fresh.slice(i, i + TWITTER_BATCH_SIZE);
-    try {
-      const result = await sendBatch('twitter', batch);
-      batchImported += result.imported;
-      batchSkipped += result.skipped;
-      if (result.errors?.length) errors.push(...result.errors);
-    } catch (err) {
-      errors.push(err.message || 'Failed to submit batch');
-    }
-  }
-  totalImported += batchImported;
-  totalSkipped += batchSkipped;
+  const before = session.snapshot();
+  const after = await session.submit(fresh);
+  const batchImported = after.imported - before.imported;
+  const batchSkipped = after.skipped - before.skipped;
 
   // Track (but never act on) a run of mostly-duplicate batches — the user
   // may be revisiting a partial prior session rather than doing a fresh
@@ -201,8 +191,8 @@ async function handleObservedResponse(url, body) {
 
   reportProgress('twitter', {
     live: true,
-    imported: totalImported,
-    skipped: totalSkipped,
+    imported: after.imported,
+    skipped: after.skipped,
     done: false,
     hint: caughtUp
       ? 'Mostly seeing already-saved tweets — you may have reached where you left off. Keep scrolling if you want to go further back, or click Finish.'
@@ -211,7 +201,7 @@ async function handleObservedResponse(url, body) {
 }
 
 function startTwitterCapture() {
-  const { reportProgress, observeFetch } = window.MCImportCommon;
+  const { createImportSession, reportProgress, observeFetch } = window.MCImportCommon;
 
   // Content scripts persist across in-app (SPA) navigation on x.com/twitter.com
   // but not across a full page reload. So capture should be started *before*
@@ -219,18 +209,20 @@ function startTwitterCapture() {
   // GraphQL request triggered by that in-app navigation is already observed,
   // rather than missed because the observer wasn't installed yet.
   if (stopObserving) {
-    reportProgress('twitter', { live: true, imported: totalImported, skipped: totalSkipped, done: false, error: 'Capture already running.' });
+    const state = importSession.snapshot();
+    reportProgress('twitter', { live: true, imported: state.imported, skipped: state.skipped, done: false, error: 'Capture already running.' });
     return;
   }
 
   sentIds = new Set();
-  totalImported = 0;
-  totalSkipped = 0;
   consecutiveHighSkipBatches = 0;
-  errors.length = 0;
+  importSession = createImportSession('twitter', TWITTER_BATCH_SIZE);
+  processing = Promise.resolve();
 
   stopObserving = observeFetch(TWITTER_GRAPHQL_PATTERNS, (url, body) => {
-    handleObservedResponse(url, body);
+    processing = processing
+      .then(() => handleObservedResponse(url, body))
+      .catch((error) => importSession?.addError(error));
   });
 
   reportProgress('twitter', {
@@ -242,18 +234,14 @@ function startTwitterCapture() {
   });
 }
 
-function finishTwitterCapture() {
-  const { reportProgress } = window.MCImportCommon;
+async function finishTwitterCapture() {
   if (stopObserving) {
     stopObserving();
     stopObserving = null;
   }
-  reportProgress('twitter', {
-    imported: totalImported,
-    skipped: totalSkipped,
-    errors: errors.slice(0, 10),
-    done: true,
-  });
+  await processing;
+  importSession?.finish();
+  importSession = null;
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -263,8 +251,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     startTwitterCapture();
     sendResponse({ started: true });
   } else if (message.type === 'mc-stop-import') {
-    finishTwitterCapture();
-    sendResponse({ stopped: true });
+    finishTwitterCapture().then(() => sendResponse({ stopped: true }));
+    return true;
   }
   return undefined;
 });

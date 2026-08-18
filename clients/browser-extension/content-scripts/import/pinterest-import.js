@@ -64,77 +64,57 @@ function buildPinterestHeaders(csrfToken, username) {
  * Fetch user's boards list from Pinterest resource API.
  */
 async function fetchPinterestBoards(csrfToken, username) {
-  const { relayFetch } = window.MCImportCommon;
-  const boards = [];
-  let bookmark = null;
-  let pages = 0;
-
-  while (pages < PINTEREST_MAX_PAGES) {
-    const options = { username, field_set_key: 'profile_grid_item' };
-    if (bookmark) options.bookmarks = [bookmark];
-
-    const dataParam = encodeURIComponent(JSON.stringify({ options, context: {} }));
-    const url = `https://www.pinterest.com/resource/BoardsResource/get/?data=${dataParam}&source_url=/${username}/`;
-
-    const response = await relayFetch(url, {
-      credentials: 'include',
-      headers: buildPinterestHeaders(csrfToken, username),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Pinterest BoardsResource failed: ${response.status}`);
-    }
-
-    const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-    const resourceData = data?.resource_response?.data;
-    const items = Array.isArray(resourceData) ? resourceData : [];
-    boards.push(...items);
-
-    pages++;
-    bookmark = data?.resource_response?.bookmark;
-    if (!bookmark || bookmark === '-end-') break;
-  }
-
-  return boards;
+  const { collectPages, relayFetch } = window.MCImportCommon;
+  return collectPages({
+    maxPages: PINTEREST_MAX_PAGES,
+    initialCursor: null,
+    async fetchPage(bookmark) {
+      const options = { username, field_set_key: 'profile_grid_item' };
+      if (bookmark) options.bookmarks = [bookmark];
+      const dataParam = encodeURIComponent(JSON.stringify({ options, context: {} }));
+      const url = `https://www.pinterest.com/resource/BoardsResource/get/?data=${dataParam}&source_url=/${username}/`;
+      const response = await relayFetch(url, {
+        credentials: 'include',
+        headers: buildPinterestHeaders(csrfToken, username),
+      });
+      if (!response.ok) throw new Error(`Pinterest BoardsResource failed: ${response.status}`);
+      const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      const next = data?.resource_response?.bookmark;
+      return {
+        items: Array.isArray(data?.resource_response?.data) ? data.resource_response.data : [],
+        nextCursor: next && next !== '-end-' ? next : null,
+      };
+    },
+  });
 }
 
 /**
  * Fetch pins from a single board.
  */
 async function fetchBoardPins(csrfToken, username, boardId, boardSlug) {
-  const { relayFetch } = window.MCImportCommon;
-  const pins = [];
-  let bookmark = null;
-  let pages = 0;
-
-  while (pages < PINTEREST_MAX_PAGES) {
-    const options = { board_id: boardId, field_set_key: 'partner_react_grid_pin' };
-    if (bookmark) options.bookmarks = [bookmark];
-
-    const dataParam = encodeURIComponent(JSON.stringify({ options, context: {} }));
-    const sourceUrl = `/${username}/${boardSlug}/`;
-    const url = `https://www.pinterest.com/resource/BoardFeedResource/get/?data=${dataParam}&source_url=${encodeURIComponent(sourceUrl)}`;
-
-    const response = await relayFetch(url, {
-      credentials: 'include',
-      headers: buildPinterestHeaders(csrfToken, username),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Pinterest BoardFeedResource failed: ${response.status}`);
-    }
-
-    const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
-    const resourceData = data?.resource_response?.data;
-    const items = Array.isArray(resourceData) ? resourceData : [];
-    pins.push(...items);
-
-    pages++;
-    bookmark = data?.resource_response?.bookmark;
-    if (!bookmark || bookmark === '-end-') break;
-  }
-
-  return pins;
+  const { collectPages, relayFetch } = window.MCImportCommon;
+  return collectPages({
+    maxPages: PINTEREST_MAX_PAGES,
+    initialCursor: null,
+    async fetchPage(bookmark) {
+      const options = { board_id: boardId, field_set_key: 'partner_react_grid_pin' };
+      if (bookmark) options.bookmarks = [bookmark];
+      const dataParam = encodeURIComponent(JSON.stringify({ options, context: {} }));
+      const sourceUrl = `/${username}/${boardSlug}/`;
+      const url = `https://www.pinterest.com/resource/BoardFeedResource/get/?data=${dataParam}&source_url=${encodeURIComponent(sourceUrl)}`;
+      const response = await relayFetch(url, {
+        credentials: 'include',
+        headers: buildPinterestHeaders(csrfToken, username),
+      });
+      if (!response.ok) throw new Error(`Pinterest BoardFeedResource failed: ${response.status}`);
+      const data = typeof response.body === 'string' ? JSON.parse(response.body) : response.body;
+      const next = data?.resource_response?.bookmark;
+      return {
+        items: Array.isArray(data?.resource_response?.data) ? data.resource_response.data : [],
+        nextCursor: next && next !== '-end-' ? next : null,
+      };
+    },
+  });
 }
 
 /**
@@ -163,7 +143,7 @@ function normalizePinterestPin(pin, boardName, boardId) {
 }
 
 async function runPinterestImport() {
-  const { reportProgress, sendBatch } = window.MCImportCommon;
+  const { createImportSession, reportProgress } = window.MCImportCommon;
   const username = extractPinterestUsername();
 
   if (!username) {
@@ -177,11 +157,8 @@ async function runPinterestImport() {
     return;
   }
 
-  let totalImported = 0;
-  let totalSkipped = 0;
-  const errors = [];
-
   reportProgress('pinterest', { imported: 0, skipped: 0, done: false });
+  const session = createImportSession('pinterest', PINTEREST_BATCH_SIZE);
 
   // Check if we're on a specific board page
   const boardInfo = extractPinterestBoard();
@@ -200,7 +177,7 @@ async function runPinterestImport() {
         boardsToProcess = [{ id: null, name: boardInfo.board, url: `/${boardInfo.username}/${boardInfo.board}/` }];
       }
     } catch (err) {
-      errors.push(`Failed to find board: ${err.message}`);
+      session.addError(new Error(`Failed to find board: ${err.message}`));
     }
   } else {
     // Import all boards for this user
@@ -225,7 +202,7 @@ async function runPinterestImport() {
     const boardSlug = board.url ? board.url.split('/').filter(Boolean).pop() : boardName.toLowerCase().replace(/\s+/g, '-');
 
     if (!boardId) {
-      errors.push(`Board "${boardName}": missing board ID, skipping`);
+      session.addError(new Error(`Board "${boardName}": missing board ID, skipping`));
       continue;
     }
 
@@ -233,27 +210,16 @@ async function runPinterestImport() {
     try {
       pins = await fetchBoardPins(csrfToken, username, boardId, boardSlug);
     } catch (err) {
-      errors.push(`Board "${boardName}": ${err.message}`);
+      session.addError(new Error(`Board "${boardName}": ${err.message}`));
       continue;
     }
 
     const normalized = pins.map((pin) => normalizePinterestPin(pin, boardName, boardId)).filter(Boolean);
 
-    for (let i = 0; i < normalized.length; i += PINTEREST_BATCH_SIZE) {
-      const batch = normalized.slice(i, i + PINTEREST_BATCH_SIZE);
-      try {
-        const result = await sendBatch('pinterest', batch);
-        totalImported += result.imported;
-        totalSkipped += result.skipped;
-        if (result.errors?.length) errors.push(...result.errors);
-      } catch (err) {
-        errors.push(err.message || 'Failed to submit batch');
-      }
-      reportProgress('pinterest', { imported: totalImported, skipped: totalSkipped, done: false });
-    }
+    await session.submit(normalized);
   }
 
-  reportProgress('pinterest', { imported: totalImported, skipped: totalSkipped, errors: errors.slice(0, 10), done: true });
+  session.finish();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

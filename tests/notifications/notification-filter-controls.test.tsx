@@ -14,7 +14,7 @@ import {
 const merchant = `merchant-v1_${'A'.repeat(43)}`;
 const facets: NotificationFacets = {
   level: { heads_up: 3 },
-  category: { finance: 3, tasks: 2 },
+  category: { development: 4, finance: 3, tasks: 2 },
   source: { 'finance-manager': 3, 'github-issues': 2 },
   state: { unread: 5 },
   merchant: [{ key: merchant, label: 'Invented Market', count: 2 }],
@@ -56,6 +56,7 @@ describe('shared notification filter controls', () => {
     expect(desktop.getByRole('dialog', { name: 'Add a notification filter' })).toBeInTheDocument();
     expect(desktop.queryByRole('button', { name: 'Source' })).not.toBeInTheDocument();
     fireEvent.click(desktop.getByRole('button', { name: 'Category' }));
+    expect(desktop.getByRole('button', { name: /Development\s+4/ })).toBeInTheDocument();
     expect(desktop.getByRole('button', { name: /Finance\s+3/ })).toBeInTheDocument();
     expect(desktop.getByRole('button', { name: /Tasks\s+2/ })).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -67,7 +68,7 @@ describe('shared notification filter controls', () => {
     expect(activeNotificationFilters(query, facets).map(filter => filter.label)).toEqual([
       'Category: Finance',
       'Merchant: Invented Market',
-      'Source: Finance Manager',
+      'Source: Tyrion',
     ]);
   });
 

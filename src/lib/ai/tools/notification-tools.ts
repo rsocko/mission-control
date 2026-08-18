@@ -11,7 +11,7 @@ export const notificationTools = {
     inputSchema: zodSchema(z.object({
       unreadOnly: z.boolean().optional().default(true),
       level: z.enum(['urgent', 'action_needed', 'heads_up', 'fyi', 'digest']).optional(),
-      category: z.string().optional().describe('Filter by category like system, tasks, finance, home, social, ai_insights, packages'),
+      category: z.string().optional().describe('Filter by category like system, tasks, development, finance, home, social, ai_insights, packages'),
     })),
     execute: async ({ unreadOnly, level, category }) => {
       const conditions = [];

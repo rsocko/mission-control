@@ -117,7 +117,7 @@ function input(overrides: Partial<import('@/lib/notifications/service').CreateNo
     title: 'Review requested',
     body: 'token=super-secret review this pull request',
     level: 'action_needed',
-    category: 'tasks',
+    category: 'development',
     templateKey: 'pr_review_requested',
     navigationTarget: '/notifications?filter=reviews',
     metadata: {

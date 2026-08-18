@@ -81,7 +81,7 @@ describe('Finance notification filtering contract', () => {
       merchantLabel: 'Invented Market',
     });
     insertNotification({ id: 'finance-alias-source', connectorType: 'finance' });
-    insertNotification({ id: 'non-finance', connectorType: 'github-issues', category: 'tasks' });
+    insertNotification({ id: 'non-finance', connectorType: 'github-issues', category: 'development' });
     insertNotification({
       id: 'invalid-merchant-key',
       merchantKey: 'merchant-v1_not-normalized',

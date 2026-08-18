@@ -46,7 +46,7 @@ export interface AIEnrichmentResult {
  */
 export function shouldEnrichWithAI(input: AIEnrichmentInput): boolean {
   // Always enrich actionable categories
-  const enrichableCategories = ['social', 'security', 'tasks'];
+  const enrichableCategories = ['development', 'social', 'security', 'tasks'];
   if (enrichableCategories.includes(input.category)) return true;
 
   // Enrich if it's a PR review (complex enough to benefit from summary)

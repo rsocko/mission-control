@@ -71,7 +71,7 @@ function makeNotification(overrides: Partial<NotificationItem>): NotificationIte
     body: 'A pull request is waiting for review.',
     level: 'action_needed',
     levelRank: 1,
-    category: 'pr_review',
+    category: 'development',
     state: 'unread',
     readState: 'unread',
     disposition: 'inbox',
@@ -158,7 +158,7 @@ function Harness({
     },
     facets: {
       level: { action_needed: 1, digest: 1 },
-      category: { pr_review: 1, finance: 1 },
+      category: { development: 1, finance: 1 },
       source: { github: 2 },
       state: { unread: 2 },
       merchant: [],

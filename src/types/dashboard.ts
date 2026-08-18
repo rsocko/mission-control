@@ -182,6 +182,7 @@ export const NOTIFICATION_LEVELS: Record<string, NotificationLevelConfig> = {
 export const NOTIFICATION_CATEGORY_ICONS: Record<string, string> = {
   system: 'server',
   tasks: 'check-square',
+  development: 'git-pull-request',
   finance: 'dollar-sign',
   home: 'home',
   social: 'at-sign',

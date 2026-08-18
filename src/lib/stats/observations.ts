@@ -199,6 +199,24 @@ function detectWorkloadImbalance(snapshot: InsightsSnapshot): AIObservation | nu
   return null;
 }
 
+function detectPlanningFriction(snapshot: InsightsSnapshot): AIObservation | null {
+  const friction = snapshot.planningFriction;
+  if (friction.pushesInPeriod < 3) return null;
+
+  const strongestPattern = friction.topTags[0] ?? friction.topLists[0];
+  const patternHint = strongestPattern
+    ? ` ${strongestPattern.label.slice(0, 40)} appears most often; consider smaller milestones there.`
+    : ' Consider smaller milestones or more realistic first dates for the most-shifted work.';
+
+  return {
+    id: 'obs-planning-friction',
+    type: 'pattern',
+    title: `Plans shifted ${friction.pushesInPeriod} times`,
+    description: `${friction.pushedTaskCount} tasks moved a total of ${friction.totalDaysDeferred} days.${patternHint}`,
+    severity: 'warning',
+  };
+}
+
 // ─── Source name formatting ─────────────────────────────────────────────────
 
 function formatSourceName(source: string): string {
@@ -230,6 +248,9 @@ export function detectObservations(options: DetectObservationsOptions): AIObserv
 
   const dayPattern = detectDayOfWeekPattern(snapshot.trends);
   if (dayPattern) results.push(dayPattern);
+
+  const planningFriction = detectPlanningFriction(snapshot);
+  if (planningFriction) results.push(planningFriction);
 
   const stale = detectStaleWork(snapshot);
   if (stale) results.push(stale);

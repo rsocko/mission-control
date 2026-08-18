@@ -36,6 +36,7 @@ const GROUPS: GroupConfig[] = [
   { key: 'aiRecommended', title: 'AI Recommended', icon: <Brain size={16} />, color: 'purple' },
   { key: 'recentlyAdded', title: 'Recently Added', icon: <Plus size={16} />, color: 'emerald' },
   { key: 'carriedForward', title: 'Carried Forward', icon: <RotateCcw size={16} />, color: 'rose' },
+  { key: 'repeatedlyRescheduled', title: 'Repeatedly Rescheduled', icon: <CalendarClock size={16} />, color: 'amber' },
 ];
 
 const COLOR_STYLES: Record<string, { header: string; border: string; bg: string }> = {
@@ -249,6 +250,11 @@ function MobileSuggestionAccordion({
                       {task.dueDate && (
                         <span className={`block text-xs mt-0.5 ${task.dueDate < getLocalToday() ? 'text-red-400' : 'text-[var(--text-muted)]'}`}>
                           {formatDueDate(task.dueDate)}
+                        </span>
+                      )}
+                      {(task.pushCount ?? 0) >= 2 && (
+                        <span className="mt-0.5 block text-xs text-amber-400">
+                          Rescheduled {task.pushCount ?? 0} times
                         </span>
                       )}
                     </span>

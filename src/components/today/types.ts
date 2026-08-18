@@ -23,6 +23,7 @@ export interface MyDayItem {
   statusReason?: TaskItem['statusReason'] | null;
   priority: string;
   dueDate: string | null;
+  pushCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceId?: string;
@@ -69,6 +70,7 @@ export interface SuggestionTask {
   status: string;
   priority: string;
   dueDate: string | null;
+  pushCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceId?: string | null;
@@ -88,6 +90,7 @@ export interface SuggestionGroups {
   aiRecommended: SuggestionTask[];
   recentlyAdded: SuggestionTask[];
   carriedForward: SuggestionTask[];
+  repeatedlyRescheduled: SuggestionTask[];
 }
 
 export interface CalendarEvent {
@@ -148,4 +151,5 @@ export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
   aiRecommended: [],
   recentlyAdded: [],
   carriedForward: [],
+  repeatedlyRescheduled: [],
 };

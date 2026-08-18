@@ -56,7 +56,8 @@ function testDatabase() {
       last_synced_at TEXT NOT NULL, push_retry_count INTEGER DEFAULT 0 NOT NULL,
       kanban_column TEXT, kanban_order REAL, snoozed_until TEXT, reminder_at TEXT,
       effort INTEGER, is_bulk_import INTEGER DEFAULT 0 NOT NULL,
-      local_disposition TEXT DEFAULT 'active' NOT NULL
+      local_disposition TEXT DEFAULT 'active' NOT NULL,
+      push_count INTEGER DEFAULT 0 NOT NULL
     );
     CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
     CREATE TABLE task_history_events (

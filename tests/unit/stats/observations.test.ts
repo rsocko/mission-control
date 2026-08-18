@@ -24,6 +24,15 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       { label: '61–90 days', count: 0, minDays: 61, maxDays: 90 },
       { label: '> 90 days', count: 0, minDays: 91, maxDays: null },
     ],
+    planningFriction: {
+      pushesInPeriod: 0,
+      pushedTaskCount: 0,
+      totalDaysDeferred: 0,
+      averageDaysPerPush: 0,
+      topTasks: [],
+      topLists: [],
+      topTags: [],
+    },
     projectActivity: [],
     routineHeatmap: [],
     delivery: {
@@ -196,6 +205,30 @@ describe('detectObservations', () => {
     const streak = result.find(o => o.type === 'streak');
     expect(streak).toBeDefined();
     expect(streak!.title).toContain('10-day');
+  });
+
+  it('turns repeated due-date pushes into an actionable observation', () => {
+    const snapshot = makeSnapshot({
+      planningFriction: {
+        pushesInPeriod: 5,
+        pushedTaskCount: 2,
+        totalDaysDeferred: 18,
+        averageDaysPerPush: 3.6,
+        topTasks: [],
+        topLists: [{ label: 'Work', count: 3 }],
+        topTags: [{ label: 'planning', count: 4 }],
+      },
+    });
+
+    const result = detectObservations({ snapshot });
+    const observation = result.find(item => item.id === 'obs-planning-friction');
+
+    expect(observation).toMatchObject({
+      title: 'Plans shifted 5 times',
+      severity: 'warning',
+    });
+    expect(observation?.description).toContain('planning');
+    expect(observation?.description).toContain('18 days');
   });
 
   it('returns max 3 observations', () => {

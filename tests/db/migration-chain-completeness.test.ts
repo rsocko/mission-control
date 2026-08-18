@@ -39,7 +39,9 @@ describe('migration chain completeness', () => {
     vi.resetModules();
     const { _runMigrationsIndividually } = await import('@/db');
     const journal = readJournal();
-    const cutover = journal.entries.at(-1);
+    const cutover = journal.entries.find(
+      entry => entry.tag === '0105_github_nodeid_permanent_cutover',
+    );
     const sqlite = new Database(':memory:');
 
     try {

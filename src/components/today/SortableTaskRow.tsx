@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Image from 'next/image';
-import { Clock, GripVertical, Repeat, Square, Sun, Target } from 'lucide-react';
+import { Clock, GripVertical, Repeat, RotateCcw, Square, Sun, Target } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
@@ -232,6 +232,14 @@ export function SortableTaskRow({
         <span className={`hidden text-xs px-1.5 py-0.5 rounded border font-semibold flex-shrink-0 @min-[640px]:inline ${EFFORT_BADGE_COLORS[item.effort]}`}
               title={`Effort: ${EFFORT_LABELS[item.effort]}`}>
           {EFFORT_LABELS[item.effort]}
+        </span>
+      )}
+      {(item.pushCount ?? 0) >= 2 && (
+        <span
+          className="hidden flex-shrink-0 items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-xs text-amber-400 @min-[640px]:flex"
+          title={`Rescheduled ${item.pushCount ?? 0} times`}
+        >
+          <RotateCcw size={10} aria-hidden="true" /> {item.pushCount ?? 0}
         </span>
       )}
       {item.estimatedDuration && !taskSchedule?.scheduledTime && (

@@ -25,6 +25,7 @@ export interface Task {
   microStatus: string | null;
   priority: string;
   dueDate: string | null;
+  pushCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceListId?: string | null;

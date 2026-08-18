@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { ArrowLeftRight, Bell, Check, ChartNetwork, Clock, Globe, Repeat, Timer } from 'lucide-react';
+import { ArrowLeftRight, Bell, Check, ChartNetwork, Clock, Globe, Repeat, RotateCcw, Timer } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
@@ -331,6 +331,15 @@ export function TaskRow({
       {recurrence && (
         <span className={`text-xs flex-shrink-0 ${ATTR_P1} items-center gap-0.5 text-blue-400`} title={`Repeats: ${recurrence}`}>
           <Repeat size={10} />
+        </span>
+      )}
+
+      {(task.pushCount ?? 0) >= 2 && (
+        <span
+          className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-amber-400`}
+          title={`Rescheduled ${task.pushCount ?? 0} times`}
+        >
+          <RotateCcw size={10} aria-hidden="true" /> {task.pushCount ?? 0}
         </span>
       )}
 

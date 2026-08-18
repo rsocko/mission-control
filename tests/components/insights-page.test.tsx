@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import React from 'react';
 
-const { replaceSpy, setSearchParams, getSearchParams } = vi.hoisted(() => {
+const { pushSpy, replaceSpy, setSearchParams, getSearchParams } = vi.hoisted(() => {
   let searchParams = '';
   return {
+    pushSpy: vi.fn(),
     replaceSpy: vi.fn(),
     setSearchParams: (value: string) => { searchParams = value; },
     getSearchParams: () => searchParams,
@@ -13,7 +14,7 @@ const { replaceSpy, setSearchParams, getSearchParams } = vi.hoisted(() => {
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({
-    push: vi.fn(),
+    push: pushSpy,
     replace: replaceSpy,
     back: vi.fn(),
     forward: vi.fn(),
@@ -43,6 +44,7 @@ vi.mock('lucide-react', () => ({
   ChevronUp: () => <span>up</span>,
   Flame: () => <span>🔥</span>,
   Lightbulb: () => <span>💡</span>,
+  RotateCcw: () => <span>rescheduled</span>,
 }));
 
 vi.mock('@/components/insights/CompletionTrendChart', () => ({
@@ -93,6 +95,22 @@ const insightsPayload = {
   trends: [],
   sourceBreakdown: [],
   taskAge: [],
+  planningFriction: {
+    pushesInPeriod: 3,
+    pushedTaskCount: 2,
+    totalDaysDeferred: 12,
+    averageDaysPerPush: 4,
+    topTasks: [{
+      id: 'task-1',
+      title: 'Clarify launch plan',
+      dueDate: '2026-08-20',
+      pushCount: 5,
+      pushesInPeriod: 2,
+      daysDeferredInPeriod: 9,
+    }],
+    topLists: [{ label: 'Work', count: 3 }],
+    topTags: [{ label: 'planning', count: 2 }],
+  },
   projectActivity: [],
   routineHeatmap: [],
   delivery: {
@@ -140,6 +158,7 @@ let fetchSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   setSearchParams('');
+  pushSpy.mockReset();
   replaceSpy.mockReset();
   fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: string | URL | Request) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
@@ -227,6 +246,10 @@ describe('InsightsPage', () => {
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Planning friction')).toBeInTheDocument();
+    expect(screen.getByText('Clarify launch plan')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open Clarify launch plan' }));
+    expect(pushSpy).toHaveBeenCalledWith('/today?taskId=task-1');
   });
 
   it('requests routine activity in the browser timezone', async () => {

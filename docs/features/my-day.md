@@ -60,6 +60,12 @@ Cancelled tasks already associated with the day appear in a separate collapsed s
 - **Plan My Day** — AI generates a full day plan with time allocations and ordering
 - **Day Plan** — Rendered as an actionable plan you can accept or modify
 
+### Planning Friction
+- **Repeatedly Rescheduled** surfaces open tasks whose due date has moved later at least twice
+- A compact reschedule count appears on affected task rows
+- Initial due-date assignment, removing a date, and moving a date earlier do not count
+- This stays in the planning surface rather than creating interruptive notifications
+
 ### Focus Mode
 - **Start Focus** — Select a task to enter focus mode with timer
 - **Focus Timer** — Countdown timer for the active task
@@ -81,6 +87,7 @@ When on My Day, the global quick-add bar automatically sets `addToMyDay: true` s
 - Tasks: Filtered from all connected sources (due today + manually added)
 - Calendar events: Microsoft Graph calendar connector
 - Suggestions: AI engine using priority, due date, energy, and behavioral patterns
+- Planning friction: lifetime `pushCount` plus immutable later-date events in task history
 
 ## Related
 

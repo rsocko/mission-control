@@ -297,15 +297,71 @@ describe('TaskDetailPanel redesigned presentations', () => {
     const panel = container.querySelector('aside')!;
     const heading = screen.getByRole('heading', { name: 'Subtasks (0/1)' });
     const section = heading.closest('section')!;
+    const header = heading.closest('aside')!.querySelector('header')!;
     const panelScroll = vi.fn();
     Object.defineProperty(panel, 'scrollTo', { value: panelScroll });
     Object.defineProperty(section, 'offsetTop', { value: 640 });
+    Object.defineProperty(header, 'offsetHeight', { value: 120 });
 
     fireEvent.click(jumpButton);
 
-    expect(panelScroll).toHaveBeenCalledWith({ top: 640, behavior: 'smooth' });
+    expect(panelScroll).toHaveBeenCalledWith({ top: 520, behavior: 'smooth' });
     expect(heading).toHaveFocus();
     expect(windowScroll).not.toHaveBeenCalled();
+  });
+
+  it('scrolls to subtasks when the panel is opened from a list badge', async () => {
+    const taskWithSubtasks = {
+      ...task,
+      subtasks: [{ id: 'subtask-1', title: 'First', status: 'todo' }],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/tasks/task-1') return json({ task: taskWithSubtasks });
+      return json({});
+    }));
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false })));
+
+    const { container, rerender } = renderPanel({
+      taskId: 'task-1',
+      mode: 'panel',
+      onClose: vi.fn(),
+    });
+    await screen.findByRole('heading', { name: 'Subtasks (0/1)' });
+    const panel = container.querySelector('aside')!;
+    const section = screen.getByRole('heading', { name: 'Subtasks (0/1)' }).closest('section')!;
+    const header = panel.querySelector('header')!;
+    const panelScroll = vi.fn();
+    Object.defineProperty(panel, 'scrollTo', { value: panelScroll });
+    Object.defineProperty(section, 'offsetTop', { value: 640 });
+    Object.defineProperty(header, 'offsetHeight', { value: 120 });
+
+    rerender(
+      <TooltipProvider>
+        <TaskDetailPanel
+          taskId="task-1"
+          mode="panel"
+          onClose={vi.fn()}
+          subtasksOpenRequest={{ requestId: 1, taskId: 'task-1' }}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(panelScroll).toHaveBeenCalledWith({ top: 520, behavior: 'smooth' });
+    });
+    expect(screen.getByRole('heading', { name: 'Subtasks (0/1)' })).toHaveFocus();
+  });
+
+  it('keeps the task title header fixed while panel content scrolls', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    expect((await screen.findByRole('heading', { name: task.title })).closest('header'))
+      .toHaveClass('sticky', 'top-0');
   });
 
   it('avoids smooth panel scrolling when reduced motion is preferred', async () => {

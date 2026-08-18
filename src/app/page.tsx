@@ -7,7 +7,11 @@ import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { toast } from 'sonner';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
-import { TaskDetailPanel, type TaskNotesOpenRequest } from '@/components/task-detail/TaskDetailPanel';
+import {
+  TaskDetailPanel,
+  type TaskNotesOpenRequest,
+  type TaskSubtasksOpenRequest,
+} from '@/components/task-detail/TaskDetailPanel';
 import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { OneThingBanner } from '@/components/OneThingBanner';
@@ -85,6 +89,7 @@ function DashboardPageInner() {
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
+  const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
   const getTaskContextMenuActions = useTaskContextMenuActionFactory({
     complete: actions.completeTask,
     addToMyDay: actions.addToMyDay,
@@ -106,6 +111,7 @@ function DashboardPageInner() {
     selectedTaskId: state.selectedTaskId,
     onSelectionChange: (taskId) => {
       setNotesOpenRequest(null);
+      setSubtasksOpenRequest(null);
       actions.setDetailMode('panel');
       actions.setSelectedTaskId(taskId);
     },
@@ -606,6 +612,15 @@ function DashboardPageInner() {
                             mode,
                           }));
                         }}
+                        onOpenSubtasks={() => {
+                          setNotesOpenRequest(null);
+                          actions.setDetailMode('panel');
+                          actions.setSelectedTaskId(task.id);
+                          setSubtasksOpenRequest((current) => ({
+                            requestId: (current?.requestId ?? 0) + 1,
+                            taskId: task.id,
+                          }));
+                        }}
                         onAddToMyDay={() => actions.addToMyDay(task.id)}
                         onRemoveFromMyDay={() => actions.removeFromMyDay(task.id)}
                         isInMyDay={state.myDayTaskIds.has(task.id)}
@@ -672,6 +687,7 @@ function DashboardPageInner() {
                 actions.setSelectedTaskId(null);
                 setPendingMoveDialogTaskId(null);
                 setNotesOpenRequest(null);
+                setSubtasksOpenRequest(null);
               }}
               onUpdate={(fields) => {
                 if (fields && state.selectedTaskId) {
@@ -693,6 +709,7 @@ function DashboardPageInner() {
               portalDialog
               minPanelWidth={320}
               notesOpenRequest={notesOpenRequest}
+              subtasksOpenRequest={subtasksOpenRequest}
             />
           </motion.div>
           )}

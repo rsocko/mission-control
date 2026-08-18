@@ -62,6 +62,7 @@ export type {
   TaskDetailPanelProps,
   TaskFieldUpdate,
   TaskNotesOpenRequest,
+  TaskSubtasksOpenRequest,
   TaskTag,
 } from './task-detail-types';
 
@@ -102,6 +103,7 @@ export function TaskDetailPanel({
   minPanelWidth = 280,
   focusPanelOnMount = false,
   notesOpenRequest = null,
+  subtasksOpenRequest = null,
 }: TaskDetailPanelProps) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [editingDesc, setEditingDesc] = useState(false);
@@ -134,6 +136,7 @@ export function TaskDetailPanel({
   const notesExpandButtonRef = useRef<HTMLButtonElement>(null);
   const expandedDescRef = useRef<HTMLTextAreaElement>(null);
   const handledNotesRequestRef = useRef<number | null>(null);
+  const handledSubtasksRequestRef = useRef<number | null>(null);
   const recurrenceFocusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTransientStateRef = useRef<() => void>(() => {});
 
@@ -514,12 +517,21 @@ export function TaskDetailPanel({
     if (!panel || !section || !heading) return;
 
     const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    const stickyHeaderHeight = panel.querySelector('header')?.offsetHeight ?? 0;
     panel.scrollTo({
-      top: section.offsetTop,
+      top: Math.max(0, section.offsetTop - stickyHeaderHeight),
       behavior: reduceMotion ? 'auto' : 'smooth',
     });
     heading.focus({ preventScroll: true });
   }, []);
+
+  useEffect(() => {
+    if (!task || !subtasksOpenRequest || mode !== 'panel') return;
+    if (task.id !== subtasksOpenRequest.taskId) return;
+    if (handledSubtasksRequestRef.current === subtasksOpenRequest.requestId) return;
+    handledSubtasksRequestRef.current = subtasksOpenRequest.requestId;
+    jumpToSubtasks();
+  }, [jumpToSubtasks, mode, subtasksOpenRequest, task]);
 
   const jumpToRecurrence = useCallback(() => {
     const section = recurrenceSectionRef.current;

@@ -122,6 +122,7 @@ interface TaskRowProps {
   onSetStatus: (status: string) => void | Promise<void>;
   onSetLocalDisposition: (disposition: LocalDisposition) => void | Promise<void>;
   onOpenNotes: (mode: 'read' | 'edit') => void;
+  onOpenSubtasks?: () => void;
   onAddToMyDay: () => void;
   onRemoveFromMyDay: () => void;
   isInMyDay?: boolean;
@@ -145,6 +146,7 @@ export function TaskRow({
   onSetStatus,
   onSetLocalDisposition,
   onOpenNotes,
+  onOpenSubtasks,
   onAddToMyDay,
   onRemoveFromMyDay,
   isInMyDay = false,
@@ -235,7 +237,11 @@ export function TaskRow({
               {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].emoji} {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].label}
             </span>
           )}
-          <SubtaskPill done={task.subtaskDone ?? 0} total={task.subtaskTotal ?? 0} />
+          <SubtaskPill
+            done={task.subtaskDone ?? 0}
+            total={task.subtaskTotal ?? 0}
+            onClick={onOpenSubtasks}
+          />
         </div>
         {!compact && (
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">

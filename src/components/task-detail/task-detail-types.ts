@@ -100,6 +100,12 @@ export interface TaskNotesOpenRequest {
   mode: 'read' | 'edit';
 }
 
+/** Host request to reveal the Subtasks section after a task loads. */
+export interface TaskSubtasksOpenRequest {
+  requestId: number;
+  taskId: string;
+}
+
 /** State backing the shared confirmation dialog. */
 export interface TaskConfirmDialogState {
   open: boolean;
@@ -158,6 +164,8 @@ export interface TaskDetailPanelProps {
   focusPanelOnMount?: boolean;
   /** Open the existing expanded Notes dialog after the requested task loads. */
   notesOpenRequest?: TaskNotesOpenRequest | null;
+  /** Scroll the side panel to Subtasks after the requested task loads. */
+  subtasksOpenRequest?: TaskSubtasksOpenRequest | null;
 }
 
 /** Parse a task's metadata blob, tolerating absent or malformed JSON. */

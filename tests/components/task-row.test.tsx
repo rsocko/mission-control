@@ -2,7 +2,7 @@
  * TaskRow component tests — project badge and responsive attribute rendering
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 import type { Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
@@ -42,7 +42,9 @@ vi.mock('@/components/ui/CompletionBurst', () => ({
 }));
 
 vi.mock('@/components/ui/SubtaskPill', () => ({
-  SubtaskPill: () => null,
+  SubtaskPill: ({ onClick }: { onClick?: () => void }) => (
+    onClick ? <button type="button" onClick={onClick}>Subtasks</button> : null
+  ),
 }));
 
 vi.mock('@/components/ui/icon-picker', () => ({
@@ -205,6 +207,26 @@ describe('TaskRow', () => {
         />
       );
       expect(screen.queryByLabelText(/Filter by project/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('subtask navigation', () => {
+    it('opens subtasks directly from the subtask badge', () => {
+      const onOpenSubtasks = vi.fn();
+      render(
+        <TaskRow
+          task={{ ...baseTask, subtaskDone: 1, subtaskTotal: 2 }}
+          onComplete={noop}
+          {...actionProps}
+          onOpenSubtasks={onOpenSubtasks}
+          onAddToMyDay={noop}
+          onRemoveFromMyDay={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Subtasks' }));
+
+      expect(onOpenSubtasks).toHaveBeenCalledOnce();
     });
   });
 

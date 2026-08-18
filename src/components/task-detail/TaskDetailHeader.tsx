@@ -58,7 +58,7 @@ export function TaskDetailHeader({
   return (
     <header className={cn(
       'border-b border-[var(--border-subtle)] bg-gradient-to-b from-[var(--surface-2)]/45 to-transparent',
-      mode === 'panel' && '-mx-5 -mt-5 px-5 pb-4 pt-4',
+      mode === 'panel' && 'sticky top-0 z-20 -mx-5 -mt-5 bg-[var(--surface-1)]/95 px-5 pb-4 pt-4 backdrop-blur-xl',
       mode === 'mobile' && 'sticky top-0 z-20 -mx-4 bg-[var(--surface-1)]/95 px-4 pb-4 pt-6 backdrop-blur-xl',
       mode === 'dialog' && 'col-span-full row-start-1 -mx-6 -mt-6 px-6 pb-4 pt-5',
       mode === 'workspace' && 'col-span-full row-start-1 -mx-7 -mt-7 px-7 pb-4 pt-5',

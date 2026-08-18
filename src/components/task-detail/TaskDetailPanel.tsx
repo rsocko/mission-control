@@ -460,12 +460,21 @@ export function TaskDetailPanel({
 
   const handleCheckboxToggle = useCallback(async (index: number, checked: boolean) => {
     if (!task?.description) return;
-    const newDesc = toggleMarkdownCheckbox(task.description, index, checked);
+    const taskIdAtSave = task.id;
+    const previousDesc = task.description;
+    const newDesc = toggleMarkdownCheckbox(previousDesc, index, checked);
     const saved = await saveField('description', newDesc);
-    if (!saved) return;
+    if (!saved) {
+      setTask((prev) => (
+        prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
+      ));
+      return;
+    }
     setDescValue(newDesc);
-    setTask((prev) => prev ? { ...prev, description: newDesc } : prev);
-  }, [saveField, setTask, task?.description]);
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
+    ));
+  }, [saveField, setTask, task?.description, task?.id]);
 
   const startDescriptionEdit = useCallback(() => {
     setEditingDesc(true);

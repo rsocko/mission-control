@@ -9,11 +9,12 @@ const mocks = vi.hoisted(() => {
   const where = vi.fn();
   const eq = vi.fn();
   const and = vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions }));
-  const sql = vi.fn((strings: TemplateStringsArray) => (
-    strings.join('').includes('IS NULL')
-      ? parentOnlyCondition
-      : { type: 'sql', as: vi.fn(() => 'group') }
-  ));
+  // The parentOnly filter is built with the real `isNull()` export (mocked below), not
+  // with a `sql` template, so this stub always returns an aliasable SQL-like object.
+  // (A previous version matched on template text containing "IS NULL", which broke as
+  // soon as a groupExpr's own CASE/WHEN clause legitimately contained that text, e.g.
+  // the effort and dueDate groupings.)
+  const sql = vi.fn(() => ({ type: 'sql', as: vi.fn(() => 'group') }));
   const getInboxFilterCondition = vi.fn(async () => inboxCondition);
   const getQuickFilterCondition = vi.fn(() => genericCondition);
   const withCondition = vi.fn((baseWhere, condition) => ({ baseWhere, condition }));

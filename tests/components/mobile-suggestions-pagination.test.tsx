@@ -51,6 +51,7 @@ function suggestionGroups(overdue: SuggestionTask[]): SuggestionGroups {
     aiRecommended: [],
     recentlyAdded: [],
     carriedForward: [],
+    repeatedlyRescheduled: [],
   };
 }
 

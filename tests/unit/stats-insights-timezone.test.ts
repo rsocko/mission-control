@@ -101,7 +101,6 @@ describe('insights configured-timezone bucketing', () => {
       [],
       [],
       [],
-      [],
       [
         {
           taskId: 'task-1',
@@ -122,6 +121,7 @@ describe('insights configured-timezone bucketing', () => {
           sourceListName: 'Work',
         },
       ],
+      [],
       [
         { taskId: 'task-1', name: 'planning' },
         { taskId: 'task-1', name: 'priority:high' },

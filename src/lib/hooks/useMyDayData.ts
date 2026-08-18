@@ -40,6 +40,7 @@ export function useMyDayData(todayISO: string) {
         aiRecommended: (sugg?.aiRecommended as MyDayItem[]) || [],
         recentlyAdded: (sugg?.recentlyAdded as MyDayItem[]) || [],
         carriedForward: (sugg?.carriedForward as MyDayItem[]) || [],
+        repeatedlyRescheduled: (sugg?.repeatedlyRescheduled as MyDayItem[]) || [],
       });
       setLoading(false);
     }

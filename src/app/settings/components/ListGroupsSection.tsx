@@ -59,7 +59,7 @@ function ListGroupsSection({
   onDeleteGroup: (id: string) => Promise<void>;
   onAssignList: (id: string, groupId: string | null) => Promise<void>;
   onRefresh: () => Promise<void>;
-  onRenameList: (sourceListId: string, newName: string) => (() => void);
+  onRenameList: (sourceListId: string, newName: string) => (() => Promise<void>);
 }) {
   const [newName, setNewName] = useState('');
   const [newIcon, setNewIcon] = useState('');

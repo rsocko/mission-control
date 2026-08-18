@@ -70,10 +70,13 @@ describe('mergePendingSourceListRenames', () => {
 
   it('keeps the pending name active until a successful refresh completes', async () => {
     let pending = true;
+    const settlementOrder: string[] = [];
     const clearPending = vi.fn(() => {
+      settlementOrder.push('invalidate caches');
       pending = false;
     });
     const refresh = vi.fn(async () => {
+      settlementOrder.push('refresh settings');
       expect(pending).toBe(true);
     });
 
@@ -86,6 +89,7 @@ describe('mergePendingSourceListRenames', () => {
     expect(refresh).toHaveBeenCalledOnce();
     expect(clearPending).toHaveBeenCalledOnce();
     expect(pending).toBe(false);
+    expect(settlementOrder).toEqual(['refresh settings', 'invalidate caches']);
   });
 
   it('clears a failed rename before refreshing so the server name is restored', async () => {

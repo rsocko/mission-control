@@ -60,12 +60,15 @@ entry count, and total usage after every build. Investigate usage above the
 ceiling and remove stale entries with `gh cache list` and `gh cache delete`;
 never delete an active cache solely to make a publication succeed.
 
-The baseline recorded on 2026-08-18 was a 173-179 second image build and
-9.69 GiB of npm caches, including 6.26 GiB attached to pull-request merge refs.
-Compare later cold and warm publication summaries against that baseline. Keep
-`mode=max` only while warm builds provide a material improvement (at least 30
-seconds) and total cache usage remains within the ceiling; otherwise remove the
-BuildKit import/export options rather than expanding the allowance.
+The pre-change baseline recorded on 2026-08-18 was a 173-179 second image build
+and 9.69 GiB of npm caches, including 6.26 GiB attached to pull-request merge
+refs. The first corrected `mode=max` export took 387 seconds because it uploaded
+the initial layer set. The immediately following warm build took 109 seconds,
+reused seven major layers, and improved on the old baseline by 64-70 seconds.
+Repository cache usage settled at 2.30 GiB after that run. These measurements
+meet the 30-second material-improvement threshold and the 8 GiB ceiling, so
+`mode=max` remains selected. Reevaluate it if later warm builds or cache usage
+cross either threshold.
 
 Active-development deployments should use:
 

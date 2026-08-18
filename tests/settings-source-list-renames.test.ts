@@ -3,6 +3,7 @@ import {
   mergePendingSourceListRenames,
   resolveSourceListRefresh,
   runSourceListRenameRequest,
+  settleSourceListRename,
 } from '@/app/settings/source-list-renames';
 
 describe('mergePendingSourceListRenames', () => {
@@ -64,5 +65,45 @@ describe('mergePendingSourceListRenames', () => {
     )).rejects.toBe(networkError);
 
     expect(onSettled).toHaveBeenCalledOnce();
+    expect(onSettled).toHaveBeenCalledWith(undefined);
+  });
+
+  it('keeps the pending name active until a successful refresh completes', async () => {
+    let pending = true;
+    const clearPending = vi.fn(() => {
+      pending = false;
+    });
+    const refresh = vi.fn(async () => {
+      expect(pending).toBe(true);
+    });
+
+    await settleSourceListRename(
+      new Response(null, { status: 200 }),
+      clearPending,
+      refresh,
+    );
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(clearPending).toHaveBeenCalledOnce();
+    expect(pending).toBe(false);
+  });
+
+  it('clears a failed rename before refreshing so the server name is restored', async () => {
+    let pending = true;
+    const clearPending = vi.fn(() => {
+      pending = false;
+    });
+    const refresh = vi.fn(async () => {
+      expect(pending).toBe(false);
+    });
+
+    await settleSourceListRename(
+      new Response(null, { status: 500 }),
+      clearPending,
+      refresh,
+    );
+
+    expect(refresh).toHaveBeenCalledOnce();
+    expect(clearPending).toHaveBeenCalledOnce();
   });
 });

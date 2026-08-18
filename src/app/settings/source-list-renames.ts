@@ -24,11 +24,26 @@ export function resolveSourceListRefresh<T extends { id: string; name: string }>
 
 export async function runSourceListRenameRequest(
   request: () => Promise<Response>,
-  onSettled: () => Promise<void>,
+  onSettled: (response: Response | undefined) => Promise<void>,
 ): Promise<Response> {
+  let response: Response | undefined;
   try {
-    return await request();
+    response = await request();
+    return response;
   } finally {
-    await onSettled();
+    await onSettled(response);
+  }
+}
+
+export async function settleSourceListRename(
+  response: Response | undefined,
+  clearPending: () => void,
+  refresh: () => Promise<void>,
+): Promise<void> {
+  if (!response?.ok) clearPending();
+  try {
+    await refresh();
+  } finally {
+    if (response?.ok) clearPending();
   }
 }

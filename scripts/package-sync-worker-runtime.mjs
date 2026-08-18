@@ -3,39 +3,20 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nodeFileTrace } from '@vercel/nft';
+import {
+  syncWorkerRequiredArtifacts,
+  syncWorkerRequiredNativeArtifacts,
+  syncWorkerSupplementalPackages,
+} from './lib/sync-worker-dependencies.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const workerEntry = path.join(root, 'dist', 'sync-worker.cjs');
 const identityOperatorEntry = path.join(root, 'dist', 'github-identity-operator.cjs');
 const defaultStandaloneDir = path.join(root, '.next', 'standalone');
-const supplementalEntries = [
-  path.relative(root, require.resolve('pino-pretty')),
-];
-
-const requiredArtifacts = [
-  'node_modules/better-sqlite3/package.json',
-  'node_modules/metascraper/package.json',
-  'node_modules/metascraper-author/package.json',
-  'node_modules/metascraper-description/package.json',
-  'node_modules/metascraper-iframe/package.json',
-  'node_modules/metascraper-image/package.json',
-  'node_modules/metascraper-logo/package.json',
-  'node_modules/metascraper-publisher/package.json',
-  'node_modules/metascraper-title/package.json',
-  'node_modules/metascraper-url/package.json',
-  'node_modules/metascraper-video/package.json',
-  'node_modules/node-cron/package.json',
-  'node_modules/node-cron/dist/tasks/background-scheduled-task/daemon.cjs',
-  'node_modules/pino/package.json',
-  'node_modules/pino-pretty/package.json',
-  'node_modules/re2/package.json',
-];
-
-const requiredNativeArtifacts = [
-  /node_modules\/better-sqlite3\/.*better_sqlite3\.node$/,
-  /node_modules\/re2\/.*re2\.node$/,
-];
+const supplementalEntries = syncWorkerSupplementalPackages.map((packageName) =>
+  path.relative(root, require.resolve(packageName)),
+);
 
 function normalize(file) {
   return file.split(path.sep).join('/');
@@ -43,8 +24,8 @@ function normalize(file) {
 
 function validateTrace(fileList, warnings) {
   const files = new Set([...fileList].map(normalize));
-  const missing = requiredArtifacts.filter((file) => !files.has(file));
-  for (const pattern of requiredNativeArtifacts) {
+  const missing = syncWorkerRequiredArtifacts.filter((file) => !files.has(file));
+  for (const pattern of syncWorkerRequiredNativeArtifacts) {
     if (![...files].some((file) => pattern.test(file))) missing.push(pattern.toString());
   }
   if (missing.length > 0) {

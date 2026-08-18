@@ -1,10 +1,12 @@
 import type { InfiniteData } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import {
+  buildTaskRequestRanges,
   DASHBOARD_TASK_ENTITY_LIMIT,
   DASHBOARD_TASK_PAGE_LIMIT,
   dashboardKeys,
   flattenTaskPages,
+  getRetainedTaskRequestCount,
   normalizeTaskParams,
 } from '@/lib/hooks/useDashboardQueries';
 import {
@@ -80,5 +82,33 @@ describe('dashboard task query retention', () => {
 
     expect(flattenTaskPages(data).hasMore).toBe(false);
     expect(flattenTaskPages(data).tasks).toHaveLength(DASHBOARD_TASK_ENTITY_LIMIT);
+  });
+
+  it('retains the visible task count when a background refresh replaces one enriched page', () => {
+    const data: InfiniteData<TaskResponse, number> = {
+      pages: [page(Array.from({ length: 278 }, (_, index) => `task-${index}`))],
+      pageParams: [0],
+    };
+
+    expect(getRetainedTaskRequestCount(data, 50)).toBe(278);
+  });
+
+  it('uses normal pagination when multiple server pages are already cached', () => {
+    const data: InfiniteData<TaskResponse, number> = {
+      pages: [
+        page(Array.from({ length: 50 }, (_, index) => `task-${index}`)),
+        page(Array.from({ length: 50 }, (_, index) => `task-${index + 50}`)),
+      ],
+      pageParams: [0, 50],
+    };
+
+    expect(getRetainedTaskRequestCount(data, 50)).toBe(50);
+  });
+
+  it('splits a retained refresh across the API page limit', () => {
+    expect(buildTaskRequestRanges(0, 278)).toEqual([
+      { offset: 0, limit: 200 },
+      { offset: 200, limit: 78 },
+    ]);
   });
 });

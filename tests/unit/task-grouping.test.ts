@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { countLoadedTasksForGroup, getTaskGroupLabels } from '@/lib/tasks/task-grouping';
+import {
+  countLoadedTasksForGroup,
+  getTaskGroupLabels,
+  resolveGroupLoadOffset,
+  updateGroupCountsForTaskChange,
+} from '@/lib/tasks/task-grouping';
 import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -88,5 +93,110 @@ describe('task grouping', () => {
       '',
       new Set(['shared']),
     )).toBe(0);
+  });
+
+  it('decrements a group total when a visible task is completed', () => {
+    expect(updateGroupCountsForTaskChange(
+      { 'To Do': 29, 'In Progress': 12 },
+      'status',
+      '',
+      task({ status: 'todo' }),
+      null,
+    )).toEqual({
+      'To Do': 28,
+      'In Progress': 12,
+    });
+  });
+
+  it('moves group totals when a grouped field changes', () => {
+    expect(updateGroupCountsForTaskChange(
+      { 'To Do': 29, Completed: 4 },
+      'status',
+      '',
+      task({ status: 'todo' }),
+      task({ status: 'done' }),
+    )).toEqual({
+      'To Do': 28,
+      Completed: 5,
+    });
+  });
+
+  it('resets a stale group offset when a refresh removes group-loaded tasks', () => {
+    const tasks = Array.from({ length: 6 }, (_, index) => task({
+      id: `initial-${index}`,
+      status: 'in_progress',
+    }));
+
+    expect(resolveGroupLoadOffset({
+      tasks,
+      groupBy: 'status',
+      groupLabel: 'In Progress',
+      today: '',
+      loadedTaskGroups: new Map([['previously-loaded', 'In Progress']]),
+      savedOffset: 28,
+    })).toEqual({
+      offset: 6,
+      staleTaskIds: ['previously-loaded'],
+      staleGroupLabels: ['In Progress'],
+    });
+  });
+
+  it('retains a valid group offset while group-loaded tasks remain visible', () => {
+    const tasks = [
+      task({ id: 'initial', status: 'in_progress' }),
+      task({ id: 'group-loaded', status: 'in_progress' }),
+    ];
+
+    expect(resolveGroupLoadOffset({
+      tasks,
+      groupBy: 'status',
+      groupLabel: 'In Progress',
+      today: '',
+      loadedTaskGroups: new Map([['group-loaded', 'In Progress']]),
+      savedOffset: 12,
+    })).toEqual({
+      offset: 12,
+      staleTaskIds: [],
+      staleGroupLabels: [],
+    });
+  });
+
+  it('keeps unaffected group offsets when another group loses a loaded task', () => {
+    const tasks = [
+      task({ id: 'urgent-loaded', tags: [
+        { id: 'urgent', name: 'Urgent', slug: 'urgent', type: 'hub', color: null },
+      ] }),
+    ];
+
+    expect(resolveGroupLoadOffset({
+      tasks,
+      groupBy: 'tag',
+      groupLabel: 'Urgent',
+      today: '',
+      loadedTaskGroups: new Map([
+        ['work-loaded', 'Work'],
+        ['urgent-loaded', 'Urgent'],
+      ]),
+      savedOffset: 12,
+    })).toEqual({
+      offset: 12,
+      staleTaskIds: ['work-loaded'],
+      staleGroupLabels: ['Work'],
+    });
+  });
+
+  it('resets the source group offset when a loaded task moves to another group', () => {
+    expect(resolveGroupLoadOffset({
+      tasks: [task({ id: 'moved-task', status: 'done' })],
+      groupBy: 'status',
+      groupLabel: 'In Progress',
+      today: '',
+      loadedTaskGroups: new Map([['moved-task', 'In Progress']]),
+      savedOffset: 12,
+    })).toEqual({
+      offset: 0,
+      staleTaskIds: ['moved-task'],
+      staleGroupLabels: ['In Progress'],
+    });
   });
 });

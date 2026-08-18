@@ -18,7 +18,12 @@ import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
 import type { ProjectHealth, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
 import { getPriorityDotColor } from './utils';
 import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, HEALTH_LABELS, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
-import type { GanttPhaseRow, HealthSummary, ProgressSummary, ProjectTask } from './types';
+import type {
+  GanttPhaseRow,
+  HealthSummary,
+  ProgressSummary,
+  ProjectTaskViewModel as ProjectTask,
+} from './types';
 
 // ─── DependencyArrows (Gantt) ───────────────────────────────────────
 

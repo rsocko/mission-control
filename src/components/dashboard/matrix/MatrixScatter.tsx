@@ -30,7 +30,10 @@ import {
 import { cn } from '@/lib/utils';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getTaskPriorityVisual, getTaskStatusVisual } from '@/lib/constants/task-formatting';
-import type { HubProject, Task } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 
 interface MatrixScatterProps {
   tasks: Task[];

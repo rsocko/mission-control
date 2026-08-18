@@ -15,7 +15,13 @@ import {
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
 import { parseFilterQuery, type FilterToken, type FilterTokenType } from '@/lib/utils/parseFilterQuery';
-import type { EnabledSource, HubProject, ListGroup, SourceList, TaskTag } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskTagViewModel as TaskTag,
+  EnabledSource,
+  ListGroup,
+  SourceList,
+} from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 

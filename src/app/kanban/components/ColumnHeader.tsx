@@ -2,7 +2,7 @@
 
 import { AlertTriangle, Plus, X, ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
-import type { KanbanColumn } from './types';
+import type { KanbanColumnViewModel as KanbanColumn } from './types';
 
 interface ColumnHeaderProps {
   column: KanbanColumn;

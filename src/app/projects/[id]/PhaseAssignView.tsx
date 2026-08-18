@@ -35,7 +35,11 @@ import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { DraggableTaskItem, PhaseAddTaskMenu, PriorityDot, TaskDisplayId, TaskInfoBadges, TaskStatusBadge } from './components';
 import { BUTTON_TRANSITION } from './constants';
 import { getConnectorIcon, getPhaseColor } from './utils';
-import type { PhaseTaskEntry, ProjectPhase, ProjectTask } from './types';
+import type {
+  PhaseTaskEntry,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTaskViewModel as ProjectTask,
+} from './types';
 
 // ─── Droppable phase card with visible highlight ────────────────────
 

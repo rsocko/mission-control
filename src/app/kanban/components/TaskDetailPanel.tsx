@@ -5,12 +5,12 @@ import {
   TaskDetailPanel as SharedTaskDetailPanel,
   type TaskFieldUpdate,
 } from '@/components/task-detail/TaskDetailPanel';
-import type { Task } from './types';
+import type { KanbanTaskViewModel } from './types';
 
 interface TaskDetailPanelProps {
-  task: Task | null;
+  task: KanbanTaskViewModel | null;
   onClose: () => void;
-  onTaskUpdate?: (taskId: string, fields: Partial<Task>) => void;
+  onTaskUpdate?: (taskId: string, fields: Partial<KanbanTaskViewModel>) => void;
   onRefresh?: () => void | Promise<void>;
 }
 
@@ -27,7 +27,7 @@ export function TaskDetailPanel({
       return;
     }
 
-    const updates: Partial<Task> = {};
+    const updates: Partial<KanbanTaskViewModel> = {};
     if (typeof fields.title === 'string') updates.title = fields.title;
     if (typeof fields.description === 'string' || fields.description === null) {
       updates.description = fields.description;

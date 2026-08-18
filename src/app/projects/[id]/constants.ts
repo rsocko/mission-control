@@ -1,5 +1,9 @@
 import type { ProjectHealth, ProjectStatus, TaskStatus } from '@/types';
-import type { GanttZoom, ProjectPhase, ProjectTab } from './types';
+import type {
+  GanttZoom,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTab,
+} from './types';
 export { PROJECT_TASK_PRIORITY_LABELS as PRIORITY_LABELS } from '@/lib/projects/task-visuals';
 
 export const TABS: Array<{ id: ProjectTab; label: string }> = [

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getShortcuts, getLaunchMode, MAX_ENABLED_SHORTCUTS } from '@/lib/mode';
 import { APP_DARK_BACKGROUND, APP_DARK_CHROME } from '@/lib/brand';
+import { TASKBAR_ICON_VERSION } from '@/lib/navigation/shortcut-catalog';
 
 /**
  * GET /api/manifest — Dynamic Web App Manifest
@@ -21,7 +22,7 @@ export async function GET() {
         url: isNewWindow ? `/new-window?target=${encodeURIComponent(s.url)}` : s.url,
         description: isNewWindow ? `${s.description} (new window)` : s.description,
         icons: [
-          { src: `/icons/${s.icon}`, sizes: '96x96', type: 'image/svg+xml' },
+          { src: `/icons/${s.icon}?v=${TASKBAR_ICON_VERSION}`, sizes: '96x96', type: 'image/svg+xml' },
         ],
       };
     });

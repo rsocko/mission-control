@@ -26,7 +26,12 @@ import {
   taskRemovalConfirmation,
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition, TaskField } from '@/types';
-import type { HubProject, SourceList, Task, TaskResponse } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskViewModel as Task,
+  SourceList,
+} from '@/types/dashboard';
 import type { TaskCompletionOutcome } from '@/lib/hooks/useTaskCompletion';
 
 export interface DashboardTaskExit {

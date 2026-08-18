@@ -10,14 +10,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { SourcesDropdown } from './SourcesDropdown';
-import type { HubProject, SourceItem } from './types';
+import type { KanbanProjectViewModel, SourceItem } from './types';
 
 interface KanbanPageHeaderProps {
   availableSources: SourceItem[];
   selectedSources: string[];
   showSourceDropdown: boolean;
   selectedProject: string;
-  projects: HubProject[];
+  projects: KanbanProjectViewModel[];
   bulkMode: boolean;
   onToggleSourceDropdown: () => void;
   onCloseSourceDropdown: () => void;

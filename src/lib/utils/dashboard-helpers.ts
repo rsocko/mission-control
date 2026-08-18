@@ -1,6 +1,9 @@
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
-import type { Task, TaskResponse } from '@/types/dashboard';
+import type {
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 
 export function removeTaskFromResponse(response: TaskResponse, taskId: string, task: Task): TaskResponse {
   if (!response.tasks.some((candidate) => candidate.id === taskId)) return response;

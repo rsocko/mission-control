@@ -126,7 +126,12 @@ import {
   useProjectPageTaskInteractions,
 } from '../context';
 import { PhaseAssignView } from '../PhaseAssignView';
-import type { GanttZoom, PhaseItem, PhaseViewMode, ProjectPhase } from '../types';
+import type {
+  GanttZoom,
+  PhaseViewMode,
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
+} from '../types';
 import {
   buildGanttRows,
   buildTimelineSegments,

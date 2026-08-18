@@ -19,7 +19,12 @@ import {
 } from 'lucide-react';
 import { Dropdown } from '@/components/ui/Dropdown';
 import type { FilterToken, FilterTokenType } from '@/lib/utils/parseFilterQuery';
-import type { EnabledSource, HubProject, SourceList, TaskTag } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskTagViewModel as TaskTag,
+  EnabledSource,
+  SourceList,
+} from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
 
 export type TaskFilterBuilderCategory = Exclude<FilterTokenType, 'title' | 'text' | 'listid'>;

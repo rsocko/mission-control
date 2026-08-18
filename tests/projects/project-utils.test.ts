@@ -17,10 +17,57 @@ import {
   filterProjectTasks,
   sortTasks,
   buildGanttRows,
+  applyProjectTaskFieldUpdate,
 } from '@/app/projects/[id]/utils';
-import type { ProjectPhase, ProjectRecord, PhaseTaskEntry, ProjectTask, PhaseItem } from '@/app/projects/[id]/types';
+import type {
+  PhaseTaskEntry,
+  ProjectDetailViewModel as ProjectRecord,
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTaskViewModel as ProjectTask,
+} from '@/app/projects/[id]/types';
 import { EMPTY_TASK_FILTER_CONTEXT, type TaskFilterContext } from '@/lib/task-filter-context';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
+
+const projectTask: ProjectTask = {
+  id: 'task-1',
+  title: 'Original',
+  status: 'todo',
+  priority: 'none',
+  connectorType: 'local',
+  connectorInstanceId: 'local',
+  localDisposition: 'active',
+  taskSourceModel: 'mc-owned',
+  editPolicy: editableTaskPolicy,
+  updatedAt: '2024-01-01T00:00:00Z',
+};
+
+describe('applyProjectTaskFieldUpdate', () => {
+  it('applies supported task detail fields without widening domain values', () => {
+    expect(applyProjectTaskFieldUpdate(projectTask, {
+      title: 'Updated',
+      status: 'done',
+      priority: 'high',
+      effort: 3,
+      estimatedDuration: 45,
+      localDisposition: 'handled',
+    })).toMatchObject({
+      title: 'Updated',
+      status: 'done',
+      priority: 'high',
+      effort: 3,
+      estimatedDuration: 45,
+      localDisposition: 'handled',
+    });
+  });
+
+  it('ignores unsupported enum values at the view-model boundary', () => {
+    expect(applyProjectTaskFieldUpdate(projectTask, {
+      status: 'legacy-status',
+      priority: 'urgent-ish',
+    })).toEqual(projectTask);
+  });
+});
 
 function makeProjectPhase(color: string | null): ProjectPhase {
   return {

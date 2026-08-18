@@ -1,5 +1,5 @@
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 function makeTask(overrides: Partial<Task> = {}): Task {

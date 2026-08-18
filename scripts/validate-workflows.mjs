@@ -14,6 +14,8 @@ const hostedRunners = new Set(['ubuntu-24.04', 'ubuntu-22.04']);
 const permissionValues = new Set(['read', 'write', 'none']);
 const allowedActions = new Set([
   'actions/attest',
+  'actions/cache/restore',
+  'actions/cache/save',
   'actions/checkout',
   'actions/setup-node',
 ]);
@@ -111,6 +113,39 @@ for (const file of workflowFiles) {
       'aggregate unit-test check must depend on every shard',
     );
     assert.equal(aggregate.if, 'always()', 'aggregate unit-test check must report shard failures');
+    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+      if (jobName === 'unit-tests') continue;
+      const cacheRestores =
+        job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
+      assert.equal(cacheRestores.length, 1, `${jobName} must restore the shared npm cache`);
+      assert.equal(
+        cacheRestores[0].with?.path,
+        '~/.npm',
+        `${jobName} must cache npm downloads rather than node_modules`,
+      );
+    }
+    const cacheSaves =
+      workflow.jobs?.validate?.steps?.filter((step) =>
+        step.uses?.startsWith('actions/cache/save@')
+      ) ?? [];
+    assert.equal(cacheSaves.length, 1, 'ci.yml must use one designated npm cache writer');
+    for (const invariant of [
+      "github.ref == 'refs/heads/main'",
+      "matrix.name == 'Workflow policy'",
+      "steps.npm-cache.outputs.cache-hit != 'true'",
+    ]) {
+      assert.ok(
+        cacheSaves[0].if.includes(invariant),
+        `npm cache saves must enforce ${invariant}`,
+      );
+    }
+    assert.equal(
+      workflow.jobs?.['unit-test-shards']?.steps?.some((step) =>
+        step.uses?.startsWith('actions/cache/save@')
+      ),
+      false,
+      'unit-test shards must not race to save the npm cache',
+    );
   }
 
   if (hasWritePermissions) {
@@ -178,6 +213,7 @@ for (const file of workflowFiles) {
     assert.deepEqual(
       publish.permissions,
       {
+        actions: 'read',
         attestations: 'write',
         contents: 'read',
         'id-token': 'write',
@@ -228,6 +264,10 @@ for (const file of workflowFiles) {
       'require_absent "${IMAGE}:${VERSION_TAG}"',
       'require_absent "${IMAGE}:${SHA_TAG}"',
       'docker buildx imagetools create',
+      '--cache-from "type=gha,scope=${BUILDKIT_CACHE_SCOPE}"',
+      '--cache-to "type=gha,scope=${BUILDKIT_CACHE_SCOPE},mode=max,ignore-error=true"',
+      'cache_status="cold-fallback"',
+      'repos/${GITHUB_REPOSITORY}/actions/cache/usage',
       'verification_refs+=("${sha_ref}")',
       'verification_refs+=("${latest_ref}")',
       "--format '{{.Manifest.Digest}}'",
@@ -235,6 +275,11 @@ for (const file of workflowFiles) {
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
     }
+    assert.equal(
+      publish.env?.BUILDKIT_CACHE_SCOPE,
+      'mission-control-app-v1',
+      `${file} must isolate application BuildKit layers in a stable scope`,
+    );
     const attestationSteps =
       publish.steps?.filter((step) => step.uses?.startsWith('actions/attest@')) ?? [];
     assert.equal(attestationSteps.length, 1, `${file} publish job must have exactly one attestation`);

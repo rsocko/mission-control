@@ -58,17 +58,25 @@ export function useInlineRename({
   const cancelledRef = useRef(false);
   const pickerOpenRef = useRef(false);
   const mountedRef = useRef(true);
+  const editingRef = useRef(false);
   const saveSequenceRef = useRef(0);
   const activeRequestRef = useRef<RenameRequest | null>(null);
   const queuedRequestRef = useRef<RenameRequest | null>(null);
   const lastSuccessfulSnapshotRef = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    sourceRef.current = {
+    const nextSource = {
       name: sourceName,
       icon: sourceIcon || '',
       iconColor: sourceIconColor || '',
     };
+    sourceRef.current = nextSource;
+    if (!editingRef.current) {
+      draftRef.current = nextSource;
+      setNameState(nextSource.name);
+      setIconState(nextSource.icon);
+      setIconColorState(nextSource.iconColor);
+    }
     onSaveRef.current = onSave;
     onErrorRef.current = onError;
   }, [onError, onSave, sourceIcon, sourceIconColor, sourceName]);
@@ -132,7 +140,10 @@ export function useInlineRename({
 
       activeRequestRef.current = null;
       if (mountedRef.current && request.sequence === saveSequenceRef.current) {
-        if (succeeded) setEditing(false);
+        if (succeeded) {
+          editingRef.current = false;
+          setEditing(false);
+        }
         setSaving(false);
       }
       return;
@@ -177,6 +188,7 @@ export function useInlineRename({
     };
 
     if (!hasChanges(snapshot)) {
+      editingRef.current = false;
       if (mountedRef.current) setEditing(false);
       return;
     }
@@ -202,6 +214,7 @@ export function useInlineRename({
     setNameState(currentSource.name);
     setIconState(currentSource.icon);
     setIconColorState(currentSource.iconColor);
+    editingRef.current = true;
     setEditing(true);
   }, [clearBlur]);
 
@@ -215,6 +228,7 @@ export function useInlineRename({
     setIconState(currentSource.icon);
     setIconColorState(currentSource.iconColor);
     setSaving(false);
+    editingRef.current = false;
     setEditing(false);
   }, [clearBlur]);
 
@@ -232,7 +246,8 @@ export function useInlineRename({
       const snapshot = draftRef.current;
       const key = snapshotKey(snapshot);
       if (
-        cancelledRef.current
+        !editingRef.current
+        || cancelledRef.current
         || !hasChanges(snapshot)
         || activeRequestRef.current?.key === key
         || queuedRequestRef.current?.key === key

@@ -79,6 +79,39 @@ describe('useInlineRename', () => {
     expect(onSave).toHaveBeenCalledWith('Later', '📥', undefined);
   });
 
+  it('does not restore a stale draft when another row updates the source name', () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    rerender({ name: 'Tyrion' });
+    unmount();
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('does not restore a stale draft after an unchanged edit closes', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    act(() => {
+      result.current.startEditing();
+      result.current.scheduleBlur();
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+
+    expect(result.current.editing).toBe(false);
+    rerender({ name: 'Tyrion' });
+    unmount();
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('cancel resets the draft and prevents blur and unmount saves', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useInlineRename({

@@ -12,6 +12,7 @@ import {
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationLevel, NotificationState } from '@/types';
 import { NOTIFICATION_SOURCE_ICONS } from '@/types/dashboard';
+import { formatNotificationSourceLabel } from '@/lib/notifications/categories';
 
 // ─── Sidebar item (mirrors dashboard SidebarItem) ────────────────────────────
 
@@ -112,15 +113,6 @@ const DATE_RANGE_ITEMS: { value: 'today' | 'week' | 'month' | null; label: strin
   { value: 'week', label: 'Last 7 Days' },
   { value: 'month', label: 'Last 30 Days' },
 ];
-
-// ─── Source label helper ─────────────────────────────────────────────────────
-
-function formatSourceLabel(source: string): string {
-  return source
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
@@ -284,7 +276,7 @@ export function NotificationsSidebar({
                         <Globe size={14} />
                       )
                     }
-                    label={formatSourceLabel(source)}
+                    label={formatNotificationSourceLabel(source)}
                     count={count}
                     active={filters.source === source}
                     onClick={() =>

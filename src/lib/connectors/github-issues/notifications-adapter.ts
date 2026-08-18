@@ -122,7 +122,7 @@ export class GitHubNotificationsAdapter {
       title: `[${notification.subject.type}] ${notification.subject.title}`,
       body: `${notification.reason} in ${notification.repository.full_name}`,
       level: this.mapGitHubLevel(notification.reason),
-      category: this.mapGitHubCategory(notification.reason, notification.subject.type),
+      category: 'development',
       isRead: !notification.unread,
       isActionable: ['review_requested', 'assign', 'mention', 'security_alert'].includes(notification.reason),
       actionUrl: this.buildGitHubWebUrl(notification),
@@ -473,17 +473,6 @@ export class GitHubNotificationsAdapter {
       case 'mention':
       case 'ci_activity': return 'heads_up';
       default: return 'fyi';
-    }
-  }
-
-  private mapGitHubCategory(reason: string, subjectType: string): string {
-    switch (reason) {
-      case 'review_requested': return 'pr_review';
-      case 'mention': return 'mention';
-      case 'assign': return 'assignment';
-      case 'ci_activity': return 'ci_cd';
-      case 'security_alert': return 'security';
-      default: return subjectType === 'Release' ? 'release' : 'github';
     }
   }
 

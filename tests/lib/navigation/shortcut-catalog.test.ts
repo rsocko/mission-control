@@ -31,4 +31,18 @@ describe('shortcut catalog', () => {
       }
     }
   });
+
+  it('uses high-contrast, small-size-safe glyphs', () => {
+    for (const page of SHORTCUT_PAGES) {
+      const iconPath = path.join(process.cwd(), 'public', 'icons', page.icon);
+      const icon = fs.readFileSync(iconPath, 'utf8');
+
+      if (page.iconKey === 'houston') {
+        expect(icon).toContain('stroke="white"');
+      } else {
+        expect(icon, page.name).toContain('#0f172a');
+      }
+      expect(icon, page.name).toMatch(/stroke-width="[6-9]"/);
+    }
+  });
 });

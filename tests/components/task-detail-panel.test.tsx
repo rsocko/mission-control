@@ -835,6 +835,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     await waitFor(() => {
       expect(checkbox).not.toBeChecked();
+      expect(screen.getByText('Verify persistence')).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/tasks/task-1',
         expect.objectContaining({

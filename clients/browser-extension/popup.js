@@ -7,7 +7,8 @@
  * - On internal pages: shows quick-link pills only
  */
 
-const $ = (id) => document.getElementById(id);
+const $ = MCPopupDom.byId;
+const escapeHtml = MCPopupDom.escapeHtml;
 const isSidePanel = new URLSearchParams(window.location.search).get('surface') === 'sidepanel';
 
 const SOURCES = [
@@ -37,6 +38,20 @@ let currentTab = null;
 let initRequestId = 0;
 let panelWindowId = null;
 
+function closeTransientUi() {
+  if (!isSidePanel) window.close();
+}
+
+const captureController = MCPopupCapture.createCaptureController({
+  byId: $,
+  getCurrentTab: () => currentTab,
+  closeTransientUi,
+});
+const sendTabsController = MCPopupSendTabs.createSendTabsController({
+  byId: $,
+  closeTransientUi,
+});
+
 // ─── Init ────────────────────────────────────────────────────────────────────
 
 async function init() {
@@ -54,10 +69,7 @@ async function init() {
   currentTab = tab;
   if (isSidePanel && panelWindowId == null) panelWindowId = tab?.windowId ?? null;
 
-  const isInternal = tab?.url && (
-    tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') ||
-    tab.url.startsWith('edge://') || tab.url.startsWith('about:')
-  );
+  const isInternal = MCCapture.isInternalUrl(tab?.url);
 
   let activeHost = '';
   try { activeHost = tab?.url ? new URL(tab.url).hostname : ''; } catch { activeHost = ''; }
@@ -197,13 +209,7 @@ function renderDynamicContent({ tab, isInternal, matchedSource }) {
   bindEvents(matchedSource);
 
   // Add "Send All Tabs" trigger button (always shown in main view)
-  renderSendTabsTrigger(container);
-}
-
-function escapeHtml(str) {
-  const el = document.createElement('span');
-  el.textContent = str;
-  return el.innerHTML;
+  sendTabsController.renderTrigger(container);
 }
 
 /**
@@ -261,7 +267,7 @@ function bindEvents(matchedSource) {
   // Save button
   const saveBtn = $('saveBtn');
   if (saveBtn) {
-    saveBtn.addEventListener('click', savePage);
+    saveBtn.addEventListener('click', captureController.savePage);
   }
 
   // Enter in note field
@@ -270,7 +276,7 @@ function bindEvents(matchedSource) {
     noteField.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        savePage();
+        captureController.savePage();
       }
     });
   }
@@ -402,84 +408,6 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// ─── Save page ───────────────────────────────────────────────────────────────
-
-async function savePage() {
-  if (!currentTab?.url) return;
-
-  const saveBtn = $('saveBtn');
-  const statusEl = $('status');
-  const noteField = $('noteField');
-
-  saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving...';
-  statusEl.style.display = 'none';
-  statusEl.className = 'status';
-
-  const { apiUrl, captureKey } = await chrome.storage.sync.get(['apiUrl', 'captureKey']);
-
-  // Request rich metadata from the content script (OG tags, platform-specific data)
-  let pageMeta = {};
-  try {
-    pageMeta = await chrome.tabs.sendMessage(currentTab.id, { type: 'mc-extract-page-metadata' }) || {};
-  } catch { /* content script may not be injected yet — proceed with basic data */ }
-
-  // Use the detected platform if available (groups item with the real source)
-  const detectedPlatform = pageMeta.detectedPlatform || null;
-  const captureMeta = pageMeta.platformMeta && typeof pageMeta.platformMeta === 'object'
-    ? pageMeta.platformMeta
-    : undefined;
-
-  // Build the thumbnail URL from OG image or twitter:image
-  const thumbnailUrl = pageMeta.thumbnailUrl || pageMeta.ogImage || pageMeta.twitterImage || captureMeta?.thumbnailUrl || undefined;
-
-  // Prefer OG title over tab title; use note or OG description as description
-  const title = pageMeta.ogTitle || pageMeta.twitterTitle || currentTab.title || undefined;
-  const userNote = noteField?.value.trim();
-  const description = userNote || pageMeta.ogDescription || pageMeta.twitterDescription || pageMeta.metaDescription || undefined;
-
-  try {
-    const response = await fetch(`${apiUrl}/api/triage/capture`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-triage-capture-key': captureKey,
-      },
-      body: JSON.stringify({
-        url: currentTab.url,
-        title,
-        description,
-        thumbnailUrl,
-        client: 'browser',
-        // Send the real platform if detected, so the server groups correctly.
-        // For unknown sites, send 'browser_extension' as before — the server
-        // will confirm via its own detection.
-        sourcePlatform: detectedPlatform || 'browser_extension',
-        // Pass platform-specific metadata so the server can store it
-        ...(captureMeta && { platformMeta: captureMeta }),
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      statusEl.textContent = `Saved! Relevance score: ${data.item?.aiRelevanceScore ?? '?'}`;
-      statusEl.className = 'status success';
-      setTimeout(closeTransientUi, 1500);
-    } else {
-      const err = await response.json().catch(() => ({}));
-      statusEl.textContent = `Error: ${err.error || response.statusText}`;
-      statusEl.className = 'status error';
-      saveBtn.disabled = false;
-      saveBtn.textContent = 'Save to Triage';
-    }
-  } catch (err) {
-    statusEl.textContent = `Network error: ${err.message || 'Could not reach server'}`;
-    statusEl.className = 'status error';
-    saveBtn.disabled = false;
-    saveBtn.textContent = 'Save to Triage';
-  }
-}
-
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 function showConfigError(msg) {
@@ -559,200 +487,7 @@ async function setImportState(platform, state) {
   }
 }
 
-// ─── Send Tabs to Triage ─────────────────────────────────────────────────────
-
-function renderSendTabsTrigger(container) {
-  const trigger = document.createElement('button');
-  trigger.className = 'send-tabs-trigger';
-  trigger.type = 'button';
-  trigger.id = 'sendTabsTrigger';
-  trigger.innerHTML = `
-    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-      <line x1="8" y1="21" x2="16" y2="21"/>
-      <line x1="12" y1="17" x2="12" y2="21"/>
-    </svg>
-    Send Tabs to Triage
-  `;
-  trigger.addEventListener('click', openSendTabsView);
-  container.appendChild(trigger);
-}
-
-function isInternalUrl(url) {
-  return !url || url.startsWith('chrome://') || url.startsWith('chrome-extension://') ||
-    url.startsWith('edge://') || url.startsWith('about:') || url.startsWith('devtools://');
-}
-
-let sendTabsCurrentTabs = [];
-
-async function openSendTabsView() {
-  $('main').classList.remove('visible');
-  $('sendTabsView').classList.add('visible');
-
-  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const tabs = await chrome.tabs.query({ currentWindow: true });
-  const validTabs = tabs.filter(t => !isInternalUrl(t.url));
-
-  sendTabsCurrentTabs = validTabs;
-  renderTabList(validTabs, activeTab?.id);
-  updateTabsCount();
-}
-
-function renderTabList(tabs, activeTabId) {
-  const list = $('tabsList');
-  const countEl = $('tabsCount');
-
-  if (tabs.length === 0) {
-    list.innerHTML = '<div style="padding:12px;text-align:center;color:#64748b;font-size:11px;">No capturable tabs open.</div>';
-    countEl.textContent = '0 tabs';
-    return;
-  }
-
-  countEl.textContent = `${tabs.length} tab${tabs.length !== 1 ? 's' : ''}`;
-
-  // Build tab list using DOM APIs to avoid innerHTML injection risks
-  list.innerHTML = '';
-  for (const tab of tabs) {
-    const label = document.createElement('label');
-    label.className = 'tab-item';
-    label.dataset.tabId = String(tab.id);
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.className = 'tab-checkbox';
-    checkbox.dataset.tabId = String(tab.id);
-    // Deselect the active tab by default (closing it would dismiss the popup)
-    checkbox.checked = tab.id !== activeTabId;
-
-    const favicon = document.createElement('img');
-    favicon.className = 'tab-item-favicon';
-    favicon.src = tab.favIconUrl || 'icons/icon-16.png';
-    favicon.alt = '';
-    favicon.addEventListener('error', () => { favicon.src = 'icons/icon-16.png'; });
-
-    const info = document.createElement('div');
-    info.className = 'tab-item-info';
-
-    const titleEl = document.createElement('div');
-    titleEl.className = 'tab-item-title';
-    titleEl.textContent = tab.title || 'Untitled';
-
-    const urlEl = document.createElement('div');
-    urlEl.className = 'tab-item-url';
-    urlEl.textContent = tab.url;
-
-    info.appendChild(titleEl);
-    info.appendChild(urlEl);
-    label.appendChild(checkbox);
-    label.appendChild(favicon);
-    label.appendChild(info);
-    list.appendChild(label);
-  }
-}
-
-// Bind send-tabs events once (uses onclick to avoid listener accumulation)
-(function bindSendTabsEventsOnce() {
-  $('tabsBackBtn').onclick = () => {
-    $('sendTabsView').classList.remove('visible');
-    $('main').classList.add('visible');
-  };
-
-  const selectAll = $('tabsSelectAll');
-  selectAll.onchange = () => {
-    document.querySelectorAll('.tab-checkbox').forEach(cb => { cb.checked = selectAll.checked; });
-    updateTabsCount();
-  };
-
-  $('tabsList').onchange = (e) => {
-    if (e.target.classList.contains('tab-checkbox')) {
-      updateTabsCount();
-      const allBoxes = [...document.querySelectorAll('.tab-checkbox')];
-      selectAll.checked = allBoxes.every(cb => cb.checked);
-      selectAll.indeterminate = !selectAll.checked && allBoxes.some(cb => cb.checked);
-    }
-  };
-
-  $('tabsSendBtn').onclick = () => sendTabsToTriage(sendTabsCurrentTabs);
-})();
-
-function updateTabsCount() {
-  const checked = document.querySelectorAll('.tab-checkbox:checked').length;
-  const total = document.querySelectorAll('.tab-checkbox').length;
-  $('tabsCount').textContent = `${checked}/${total} selected`;
-  const btn = $('tabsSendBtn');
-  if (btn) btn.disabled = checked === 0;
-}
-
-async function sendTabsToTriage(allTabs) {
-  const sendBtn = $('tabsSendBtn');
-  const statusEl = $('tabsStatus');
-  const closeTabs = $('tabsCloseThem').checked;
-  const batchNote = $('tabsBatchNote').value.trim();
-
-  // Get selected tab IDs
-  const selectedIds = [...document.querySelectorAll('.tab-checkbox:checked')]
-    .map(cb => parseInt(cb.dataset.tabId, 10));
-
-  if (selectedIds.length === 0) return;
-
-  const selectedTabs = allTabs.filter(t => selectedIds.includes(t.id));
-
-  sendBtn.disabled = true;
-  sendBtn.textContent = 'Sending...';
-  statusEl.style.display = 'none';
-  statusEl.className = 'tabs-status';
-
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'mc-send-tabs-batch',
-      tabs: selectedTabs.map(t => ({ id: t.id, url: t.url, title: t.title, favIconUrl: t.favIconUrl })),
-      batchNote,
-      closeTabs,
-    });
-
-    if (response?.error) {
-      statusEl.textContent = response.error;
-      statusEl.className = 'tabs-status error';
-      statusEl.style.display = 'block';
-      sendBtn.disabled = false;
-      sendBtn.textContent = 'Send to Triage';
-      return;
-    }
-
-    const imported = response?.imported ?? 0;
-    const skipped = response?.skipped ?? 0;
-    const closed = response?.closed ?? 0;
-    const hasErrors = (response?.errors?.length ?? 0) > 0;
-
-    let msg = `Done! ${imported} saved`;
-    if (skipped) msg += `, ${skipped} skipped`;
-    if (closeTabs && closed > 0) msg += `, ${closed} tabs closed`;
-    if (hasErrors) msg += ` (some items had errors)`;
-
-    statusEl.textContent = msg;
-    statusEl.className = hasErrors ? 'tabs-status error' : 'tabs-status success';
-    statusEl.style.display = 'block';
-    sendBtn.disabled = false;
-    sendBtn.textContent = 'Send to Triage';
-
-    // If we closed tabs, close the popup after a brief moment
-    if (closeTabs && closed > 0) {
-      setTimeout(closeTransientUi, 2000);
-    }
-  } catch (err) {
-    statusEl.textContent = `Error: ${err.message || 'Failed to send tabs'}`;
-    statusEl.className = 'tabs-status error';
-    statusEl.style.display = 'block';
-    sendBtn.disabled = false;
-    sendBtn.textContent = 'Send to Triage';
-  }
-}
-
 // ─── Start ───────────────────────────────────────────────────────────────────
-
-function closeTransientUi() {
-  if (!isSidePanel) window.close();
-}
 
 if (isSidePanel) {
   $('openSidePanelBtn').style.display = 'none';

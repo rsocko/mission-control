@@ -31,8 +31,10 @@ describe('browser extension persistent import panel', () => {
     expect(sidePanelHtml).toContain('<script src="sidepanel-loader.js"></script>');
     expect(sidePanelLoader).toContain("popup.html?surface=sidepanel");
     const popupHtml = fs.readFileSync(path.join(extensionDir, 'popup.html'), 'utf8');
-    expect(popupHtml).toContain('<script src="shared/capture-client.js"></script>');
-    expect(popupHtml.indexOf('shared/capture-client.js')).toBeLessThan(popupHtml.indexOf('popup.js'));
+    const captureClientTag = '<script src="shared/capture-client.js"></script>';
+    const popupTag = '<script src="popup.js"></script>';
+    expect(popupHtml).toContain(captureClientTag);
+    expect(popupHtml.indexOf(captureClientTag)).toBeLessThan(popupHtml.indexOf(popupTag));
   });
 
   it('keeps the side panel open and refreshes it after active-tab navigation', () => {

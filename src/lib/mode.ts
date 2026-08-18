@@ -9,6 +9,11 @@
  */
 import fs from 'fs';
 import path from 'path';
+import {
+  getShortcutPage,
+  TASKBAR_SHORTCUT_LIMIT,
+  type ShortcutPage,
+} from '@/lib/navigation/shortcut-catalog';
 
 const SETTINGS_FILE = path.resolve(process.cwd(), 'data/settings.json');
 
@@ -25,7 +30,8 @@ export interface ShortcutConfig {
 }
 
 /** Maximum number of enabled shortcuts browsers reliably support */
-export const MAX_ENABLED_SHORTCUTS = 4;
+export const MAX_ENABLED_SHORTCUTS = TASKBAR_SHORTCUT_LIMIT;
+export const SHORTCUT_CONFIG_VERSION = 2;
 
 /**
  * Controls PWA launch behavior when a shortcut is clicked and the app is already open.
@@ -34,17 +40,39 @@ export const MAX_ENABLED_SHORTCUTS = 4;
  */
 export type LaunchMode = 'navigate-existing' | 'navigate-new';
 
-export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
-  { id: 'today', name: 'Today', url: '/today', description: 'View today\'s tasks', icon: 'shortcut-today.svg', enabled: true },
-  { id: 'triage', name: 'Triage', url: '/triage', description: 'Triage incoming alerts', icon: 'shortcut-triage.svg', enabled: true },
-  { id: 'projects', name: 'Projects', url: '/projects', description: 'View all projects', icon: 'shortcut-projects.svg', enabled: true },
-];
+function createShortcutConfig(
+  page: ShortcutPage,
+  enabled: boolean,
+  openInNewWindow?: boolean,
+): ShortcutConfig {
+  return {
+    id: page.id,
+    name: page.name,
+    url: page.url,
+    description: page.description,
+    icon: page.icon,
+    enabled,
+    ...(openInNewWindow !== undefined && { openInNewWindow }),
+  };
+}
 
-interface AppSettings {
+export const DEFAULT_SHORTCUTS: ShortcutConfig[] = [
+  '/icons',
+  '/today',
+  '/triage',
+  '/projects',
+].map(url => {
+  const page = getShortcutPage(url);
+  if (!page) throw new Error(`Missing shortcut catalog entry for ${url}`);
+  return createShortcutConfig(page, true);
+});
+
+export interface AppSettings {
   mode: AppMode;
   demoSeededAt?: string;
   timezone?: string; // IANA timezone, e.g. "America/New_York"
   shortcuts?: ShortcutConfig[];
+  shortcutConfigVersion?: number;
   launchMode?: LaunchMode; // PWA launch behavior, defaults to 'navigate-existing'
 }
 
@@ -111,7 +139,37 @@ export function getTimezone(): string {
  */
 export function getShortcuts(): ShortcutConfig[] {
   const settings = readSettings();
-  return settings.shortcuts || DEFAULT_SHORTCUTS;
+  if (!settings.shortcuts) return DEFAULT_SHORTCUTS;
+
+  const canonicalShortcuts = settings.shortcuts.flatMap(shortcut => {
+    const page = getShortcutPage(shortcut.url);
+    if (!page) return [];
+    return [createShortcutConfig(page, shortcut.enabled, shortcut.openInNewWindow)];
+  });
+
+  if (settings.shortcutConfigVersion === SHORTCUT_CONFIG_VERSION) {
+    return canonicalShortcuts;
+  }
+
+  const iconFinder = getShortcutPage('/icons');
+  const hasIconFinder = canonicalShortcuts.some(shortcut => shortcut.url === '/icons');
+  let remainingEnabledSlots = hasIconFinder
+    ? MAX_ENABLED_SHORTCUTS
+    : MAX_ENABLED_SHORTCUTS - 1;
+  const cappedShortcuts = canonicalShortcuts.map(shortcut => {
+    if (!shortcut.enabled) return shortcut;
+    if (remainingEnabledSlots === 0) return { ...shortcut, enabled: false };
+    remainingEnabledSlots -= 1;
+    return shortcut;
+  });
+  const migratedShortcuts = iconFinder && !hasIconFinder
+    ? [createShortcutConfig(iconFinder, true), ...cappedShortcuts]
+    : cappedShortcuts;
+
+  settings.shortcuts = migratedShortcuts;
+  settings.shortcutConfigVersion = SHORTCUT_CONFIG_VERSION;
+  writeSettings(settings);
+  return migratedShortcuts;
 }
 
 /**

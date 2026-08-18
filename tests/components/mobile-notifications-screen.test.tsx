@@ -451,8 +451,8 @@ describe('MobileNotificationsScreen', () => {
         expect(screen.getByText('Monarch alias')).toBeInTheDocument();
         expect(screen.queryByText('GitHub source')).not.toBeInTheDocument();
         expect(screen.getByRole('button', {
-          name: 'Clear Source: Finance Manager filter',
-        })).toHaveTextContent('Source: Finance Manager');
+          name: 'Clear Source: Tyrion filter',
+        })).toHaveTextContent('Source: Tyrion');
         await waitFor(() => {
           expect(mockFetch).toHaveBeenCalledWith(
             '/api/notifications?source=finance-manager',

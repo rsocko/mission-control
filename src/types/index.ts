@@ -43,6 +43,7 @@ export type NotificationActionVariant = 'primary' | 'secondary' | 'ghost' | 'dan
 export type NotificationCategory =
   | 'system'
   | 'tasks'
+  | 'development'
   | 'finance'
   | 'home'
   | 'social'

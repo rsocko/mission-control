@@ -122,7 +122,7 @@ describe('useNotifications — sync refresh', () => {
       title: 'Review requested',
       body: '',
       level: 'action_needed',
-      category: 'social',
+      category: 'development',
       state: 'unread',
       receivedAt: '2026-08-11T21:35:48Z',
       connectorType: 'github-issues',

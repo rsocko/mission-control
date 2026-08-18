@@ -92,14 +92,14 @@ describe('NotificationCard — DI Rich Cards', () => {
     it('shows a human-friendly source name and accessible brand identity', () => {
       const notification = makeNotification({
         connectorType: 'github-issues',
-        category: 'pr_review',
+        category: 'development',
       });
 
       const { container } = render(<NotificationCard notification={notification} />);
 
       expect(screen.getByText('GitHub')).toBeDefined();
       expect(container.querySelector('img[src="/icons/connectors/github.svg"]')).not.toBeNull();
-      expect(screen.getByText('PR Review')).toBeDefined();
+      expect(screen.getByText('Development')).toBeDefined();
     });
 
     it('attributes document and money alerts to their owning agents', () => {

@@ -464,7 +464,7 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
 
   it('handles open_url action', async () => {
     mockDb.select.mockImplementationOnce(() => chainable([{
-      id: 'n1', title: 'Test', body: null, connectorType: 'github', category: 'social', metadata: '{}',
+      id: 'n1', title: 'Test', body: null, connectorType: 'github', category: 'development', metadata: '{}',
     }]));
     mockDb.select.mockImplementationOnce(() => chainable([{
       id: 'a1', notificationId: 'n1', actionType: 'open_url', label: 'Open', payload: '{"url":"https://example.com"}',

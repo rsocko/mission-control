@@ -1,13 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
   <circle cx="48" cy="48" r="44" fill="#fbbf24"/>
   <!-- Sun icon (Lucide-style) -->
-  <circle cx="48" cy="48" r="10" stroke="white" stroke-width="3" fill="none"/>
-  <line x1="48" y1="24" x2="48" y2="30" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="48" y1="66" x2="48" y2="72" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="24" y1="48" x2="30" y2="48" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="66" y1="48" x2="72" y2="48" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="31" y1="31" x2="35.2" y2="35.2" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="60.8" y1="60.8" x2="65" y2="65" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="65" y1="31" x2="60.8" y2="35.2" stroke="white" stroke-width="3" stroke-linecap="round"/>
-  <line x1="35.2" y1="60.8" x2="31" y2="65" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="48" cy="48" r="11" stroke="#0f172a" stroke-width="6" fill="none"/>
+  <path d="M48 22v8m0 36v8M22 48h8m36 0h8M29.6 29.6l5.7 5.7m25.4 25.4 5.7 5.7m0-36.8-5.7 5.7M35.3 60.7l-5.7 5.7" stroke="#0f172a" stroke-width="6" stroke-linecap="round"/>
 </svg>

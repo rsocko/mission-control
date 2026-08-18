@@ -56,6 +56,8 @@ import {
   validateTaskQueryParams,
 } from './query-input';
 import { getTaskStatusGroupFilter } from '@/lib/tasks/task-status-groups';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
+import { getTaskListGroupExpression } from './grouping';
 
 const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
@@ -175,19 +177,32 @@ export async function GET(request: Request) {
         }
         case 'priority':
           conditions.push(groupValue === 'none'
-            ? sql`(${tasks.priority} IS NULL OR ${tasks.priority} = 'none')`
+            ? sql`(${tasks.priority} IS NULL OR ${tasks.priority} = '' OR ${tasks.priority} = 'none')`
             : eq(tasks.priority, groupValue));
           break;
-        case 'list':
-          conditions.push(groupValue === 'No List'
-            ? isNull(tasks.sourceListName)
-            : eq(tasks.sourceListName, groupValue));
+        case 'source':
+          conditions.push(groupValue === 'local'
+            ? sql`(${tasks.connectorType} IS NULL OR ${tasks.connectorType} = '' OR ${tasks.connectorType} = 'local')`
+            : eq(tasks.connectorType, groupValue));
           break;
+        case 'list':
+          conditions.push(sql`${getTaskListGroupExpression()} = ${groupValue}`);
+          break;
+        case 'effort': {
+          if (groupValue === NO_EFFORT_GROUP_LABEL) {
+            conditions.push(isNull(tasks.effort));
+            break;
+          }
+          const effort = Number(groupValue);
+          if (!Number.isInteger(effort)) return NextResponse.json(emptyResponse());
+          conditions.push(eq(tasks.effort, effort));
+          break;
+        }
         case 'dueDate':
           if (groupValue === 'No Due Date') {
-            conditions.push(isNull(tasks.dueDate));
+            conditions.push(sql`(${tasks.dueDate} IS NULL OR ${tasks.dueDate} = '')`);
           } else if (groupValue === 'Overdue') {
-            conditions.push(sql`${tasks.dueDate} < ${todayStr}`);
+            conditions.push(sql`${tasks.dueDate} IS NOT NULL AND ${tasks.dueDate} <> '' AND ${tasks.dueDate} < ${todayStr}`);
           } else if (groupValue === 'Today') {
             conditions.push(eq(tasks.dueDate, todayStr));
           } else {
@@ -402,7 +417,13 @@ export async function GET(request: Request) {
           return [];
         }
 
-        return db.select().from(tasks).where(taskWhere).orderBy(orderBy).limit(limit).offset(offset);
+        return db
+          .select()
+          .from(tasks)
+          .where(taskWhere)
+          .orderBy(orderBy, asc(tasks.id))
+          .limit(limit)
+          .offset(offset);
       })(),
     ]);
 

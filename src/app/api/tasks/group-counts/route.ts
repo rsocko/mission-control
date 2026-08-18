@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, taskTags, tags, taskProjects, hubProjects, projectPhaseItems, projectPhases } from '@/db/schema';
-import { eq, and, inArray, sql, count } from 'drizzle-orm';
+import { eq, and, inArray, sql, count, countDistinct } from 'drizzle-orm';
 import {
   TaskQueryValidationError,
   validateTaskQueryParams,
@@ -9,6 +9,8 @@ import {
 import { ApiErrors } from '@/lib/api-error';
 import logger from '@/lib/logger';
 import { getCanonicalTaskFilterWhere } from '../canonical-filter';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
+import { getTaskListGroupExpression } from '../grouping';
 
 /**
  * GET /api/tasks/group-counts?groupBy=status&...filters
@@ -53,14 +55,23 @@ export async function GET(request: Request) {
         END`;
         break;
       case 'priority':
-        groupExpr = sql`COALESCE(${tasks.priority}, 'none')`;
+        groupExpr = sql`COALESCE(NULLIF(${tasks.priority}, ''), 'none')`;
+        break;
+      case 'source':
+        groupExpr = sql`COALESCE(NULLIF(${tasks.connectorType}, ''), 'local')`;
         break;
       case 'list':
-        groupExpr = sql`COALESCE(${tasks.sourceListName}, 'No List')`;
+        groupExpr = getTaskListGroupExpression();
+        break;
+      case 'effort':
+        groupExpr = sql`CASE
+          WHEN ${tasks.effort} IS NULL THEN ${NO_EFFORT_GROUP_LABEL}
+          ELSE CAST(${tasks.effort} AS TEXT)
+        END`;
         break;
       case 'dueDate':
         groupExpr = sql`CASE
-          WHEN ${tasks.dueDate} IS NULL THEN 'No Due Date'
+          WHEN ${tasks.dueDate} IS NULL OR ${tasks.dueDate} = '' THEN 'No Due Date'
           WHEN ${tasks.dueDate} < ${todayStr} THEN 'Overdue'
           WHEN ${tasks.dueDate} = ${todayStr} THEN 'Today'
           ELSE ${tasks.dueDate}
@@ -72,7 +83,7 @@ export async function GET(request: Request) {
         const taggedResult = await db
           .select({
             group: sql<string>`${tags.name}`.as('group_key'),
-            count: count().as('count'),
+            count: countDistinct(tasks.id).as('count'),
           })
           .from(tasks)
           .innerJoin(taskTags, eq(taskTags.taskId, tasks.id))
@@ -137,19 +148,24 @@ export async function GET(request: Request) {
           }
         }
 
-        const counts: Record<string, number> = {};
+        const taskIdsByGroup = new Map<string, Set<string>>();
         for (const row of projectResult) {
           const phaseNames = phaseLookup.get(`${row.taskId}:${row.projectId}`);
           if (phaseNames && phaseNames.length > 0) {
             for (const phaseName of phaseNames) {
               const groupKey = `${row.projectName} › ${phaseName}`;
-              counts[groupKey] = (counts[groupKey] || 0) + 1;
+              if (!taskIdsByGroup.has(groupKey)) taskIdsByGroup.set(groupKey, new Set());
+              taskIdsByGroup.get(groupKey)!.add(row.taskId);
             }
           } else {
             const groupKey = `${row.projectName} › Unphased`;
-            counts[groupKey] = (counts[groupKey] || 0) + 1;
+            if (!taskIdsByGroup.has(groupKey)) taskIdsByGroup.set(groupKey, new Set());
+            taskIdsByGroup.get(groupKey)!.add(row.taskId);
           }
         }
+        const counts = Object.fromEntries(
+          [...taskIdsByGroup].map(([groupKey, taskIds]) => [groupKey, taskIds.size]),
+        );
 
         // Count tasks with no project
         const unprojectResult = await db
@@ -165,7 +181,7 @@ export async function GET(request: Request) {
         return NextResponse.json({ counts });
       }
       default:
-        return NextResponse.json({ counts: {} });
+        return NextResponse.json({ error: 'Unsupported groupBy value' }, { status: 400 });
     }
 
     const result = await db

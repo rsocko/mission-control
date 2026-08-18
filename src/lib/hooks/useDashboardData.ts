@@ -42,7 +42,10 @@ import type {
 } from '@/types/dashboard';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
-import { countLoadedTasksForGroup } from '@/lib/tasks/task-grouping';
+import {
+  resolveGroupLoadOffset,
+  updateGroupCountsForTaskChange,
+} from '@/lib/tasks/task-grouping';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -251,7 +254,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const [projects, setProjects] = useState<HubProject[]>([]);
   const [loadingMoreGroups, setLoadingMoreGroups] = useState<Set<string>>(new Set());
   const groupLoadOffsetsRef = useRef(new Map<string, number>());
-  const groupLoadedTaskIdsRef = useRef(new Set<string>());
+  const groupLoadedTaskGroupsRef = useRef(new Map<string, string>());
 
   const { state: filterState, actions: filterActions } = useDashboardFilterState();
   const {
@@ -302,6 +305,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     scope: string;
     counts: Record<string, number>;
   }>({ scope: '', counts: EMPTY_GROUP_TOTAL_COUNTS });
+  const [groupCountsRefreshTrigger, setGroupCountsRefreshTrigger] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [myDayTaskIds, setMyDayTaskIds] = useState<Set<string>>(new Set());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState<Map<string, string>>(new Map());
@@ -533,7 +537,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
 
   useEffect(() => {
     groupLoadOffsetsRef.current.clear();
-    groupLoadedTaskIdsRef.current.clear();
+    groupLoadedTaskGroupsRef.current.clear();
   }, [completionScopeKey]);
 
   // Initial data fetch (features, connectors, list-groups, source counts)
@@ -731,6 +735,12 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [refreshTrigger]);
 
   useEffect(() => {
+    const refreshGroupCounts = () => setGroupCountsRefreshTrigger((value) => value + 1);
+    window.addEventListener('mc:task-completed', refreshGroupCounts);
+    return () => window.removeEventListener('mc:task-completed', refreshGroupCounts);
+  }, []);
+
+  useEffect(() => {
     const activeGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
     if (!activeGroupBy || activeGroupBy === 'none') {
       setGroupTotalsState({ scope: groupCountScopeKey, counts: EMPTY_GROUP_TOTAL_COUNTS });
@@ -753,7 +763,37 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         uiLogger.error('Failed to fetch task group counts', { error });
       });
     return () => controller.abort();
-  }, [groupBy, groupCountScopeKey, quickFilter, taskFilterContext]);
+  }, [
+    groupBy,
+    groupCountsRefreshTrigger,
+    groupCountScopeKey,
+    quickFilter,
+    refreshTrigger,
+    syncProgress.refetchKey,
+    taskFilterContext,
+  ]);
+
+  const updateTaskGroupCounts = useCallback((
+    previousTask: TaskResponse['tasks'][number] | null,
+    nextTask: TaskResponse['tasks'][number] | null,
+  ) => {
+    if (!effectiveGroupBy || effectiveGroupBy === 'none') return;
+    const today = effectiveGroupBy === 'dueDate' ? getClientToday() : '';
+    setGroupTotalsState((current) => (
+      current.scope === groupCountScopeKey
+        ? {
+            ...current,
+            counts: updateGroupCountsForTaskChange(
+              current.counts,
+              effectiveGroupBy,
+              today,
+              previousTask,
+              nextTask,
+            ),
+          }
+        : current
+    ));
+  }, [effectiveGroupBy, groupCountScopeKey]);
 
   // ─── Load More For Group ────────────────────────────────────────────────────
 
@@ -765,14 +805,21 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
 
     try {
       const today = activeGroupBy === 'dueDate' ? getClientToday() : '';
-      const initialGroupOffset = countLoadedTasksForGroup(
-        taskResponse.tasks,
-        activeGroupBy,
+      const resolvedOffset = resolveGroupLoadOffset({
+        tasks: taskResponse.tasks,
+        groupBy: activeGroupBy,
         groupLabel,
         today,
-        groupLoadedTaskIdsRef.current,
-      );
-      let nextOffset = groupLoadOffsetsRef.current.get(groupLabel) ?? initialGroupOffset;
+        loadedTaskGroups: groupLoadedTaskGroupsRef.current,
+        savedOffset: groupLoadOffsetsRef.current.get(groupLabel),
+      });
+      for (const taskId of resolvedOffset.staleTaskIds) {
+        groupLoadedTaskGroupsRef.current.delete(taskId);
+      }
+      for (const staleGroupLabel of resolvedOffset.staleGroupLabels) {
+        groupLoadOffsetsRef.current.delete(staleGroupLabel);
+      }
+      let nextOffset = resolvedOffset.offset;
       const remainingCapacity = DASHBOARD_TASK_ENTITY_LIMIT - taskResponse.tasks.length;
       if (remainingCapacity <= 0) {
         return;
@@ -814,7 +861,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       ));
 
       if (newTasks.length) {
-        for (const task of newTasks) groupLoadedTaskIdsRef.current.add(task.id);
+        for (const task of newTasks) groupLoadedTaskGroupsRef.current.set(task.id, groupLabel);
         setTaskResponse((current) => {
           const existingIds = new Set(current.tasks.map((t) => t.id));
           const uniqueNewTasks = newTasks
@@ -859,6 +906,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     completionScopeKey,
     runTaskCompletion,
     fetchData,
+    updateTaskGroupCounts,
   });
   const {
     completeTask,

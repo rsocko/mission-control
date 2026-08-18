@@ -49,3 +49,83 @@ export function countLoadedTasksForGroup(
       && getTaskGroupLabels(task, groupBy, today).includes(groupLabel),
   ).length;
 }
+
+export function updateGroupCountsForTaskChange(
+  counts: Record<string, number>,
+  groupBy: string,
+  today: string,
+  previousTask: Task | null,
+  nextTask: Task | null,
+): Record<string, number> {
+  const previousLabels = new Set(
+    previousTask ? getTaskGroupLabels(previousTask, groupBy, today) : [],
+  );
+  const nextLabels = new Set(
+    nextTask ? getTaskGroupLabels(nextTask, groupBy, today) : [],
+  );
+  const nextCounts = { ...counts };
+
+  for (const label of previousLabels) {
+    if (!nextLabels.has(label) && label in nextCounts) {
+      nextCounts[label] = Math.max(0, nextCounts[label] - 1);
+    }
+  }
+  for (const label of nextLabels) {
+    if (!previousLabels.has(label)) {
+      nextCounts[label] = (nextCounts[label] ?? 0) + 1;
+    }
+  }
+
+  return nextCounts;
+}
+
+interface ResolveGroupLoadOffsetOptions {
+  tasks: Task[];
+  groupBy: string;
+  groupLabel: string;
+  today: string;
+  loadedTaskGroups: ReadonlyMap<string, string>;
+  savedOffset?: number;
+}
+
+export function resolveGroupLoadOffset({
+  tasks,
+  groupBy,
+  groupLabel,
+  today,
+  loadedTaskGroups,
+  savedOffset,
+}: ResolveGroupLoadOffsetOptions): {
+  offset: number;
+  staleTaskIds: string[];
+  staleGroupLabels: string[];
+} {
+  const visibleTasks = new Map<string, Task>();
+  for (const task of tasks) visibleTasks.set(task.id, task);
+  const staleTaskIds: string[] = [];
+  const staleGroupLabels = new Set<string>();
+  for (const [taskId, loadedFromGroup] of loadedTaskGroups) {
+    const visibleTask = visibleTasks.get(taskId);
+    if (
+      !visibleTask
+      || !getTaskGroupLabels(visibleTask, groupBy, today).includes(loadedFromGroup)
+    ) {
+      staleTaskIds.push(taskId);
+      staleGroupLabels.add(loadedFromGroup);
+    }
+  }
+  const reset = staleGroupLabels.has(groupLabel);
+  const initialOffset = countLoadedTasksForGroup(
+    tasks,
+    groupBy,
+    groupLabel,
+    today,
+    new Set(loadedTaskGroups.keys()),
+  );
+
+  return {
+    offset: reset ? initialOffset : savedOffset ?? initialOffset,
+    staleTaskIds,
+    staleGroupLabels: [...staleGroupLabels],
+  };
+}

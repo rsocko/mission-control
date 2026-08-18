@@ -37,12 +37,8 @@ export function Tooltip({
   children,
   disabled = false,
 }: TooltipProps) {
-  if (disabled) {
-    return <>{children}</>;
-  }
-
   return (
-    <RadixTooltip.Root delayDuration={delay}>
+    <RadixTooltip.Root delayDuration={delay} {...(disabled ? { open: false } : {})}>
       <RadixTooltip.Trigger asChild>
         {children}
       </RadixTooltip.Trigger>

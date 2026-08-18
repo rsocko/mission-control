@@ -9,35 +9,34 @@ const appDir = path.join(root, 'src', 'app');
 const gradientStart = '#60a5fa';
 const gradientEnd = '#a855f7';
 const iconBackground = '#020617';
-const iconBorder = '#1e293b';
+const iconBorder = '#475569';
 // Chromium and Windows cache installed-app icons by URL; bump this when the artwork changes.
-const iconVersion = 'v3';
+const iconVersion = 'v4';
 
 function satelliteSvg(size, maskable = false) {
-  const transform = 'translate(56 56) scale(16.64)';
+  // Keep the tile nearly full-bleed while shifting the mark away from Windows' upper-right badge.
+  const transform = 'translate(46 60) scale(16.64)';
   const background = maskable
-    ? `<rect width="512" height="512" fill="${iconBackground}" />`
-    : `<rect x="20" y="20" width="472" height="472" rx="104" fill="${iconBackground}"
-             stroke="${iconBorder}" stroke-width="8" />`;
+    ? `  <rect width="512" height="512" fill="${iconBackground}"/>`
+    : `  <rect x="16" y="16" width="480" height="480" rx="112" fill="${iconBackground}" stroke="${iconBorder}" stroke-width="16"/>`;
 
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
-      <defs>
-        <linearGradient id="brand-gradient" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="${gradientStart}" />
-          <stop offset="1" stop-color="${gradientEnd}" />
-        </linearGradient>
-      </defs>
-      ${background}
-      <g transform="${transform}" fill="none" stroke="url(#brand-gradient)" stroke-width="2.65"
-         stroke-linecap="round" stroke-linejoin="round">
-        <path d="m13.5 6.5-3.148-3.148a1.205 1.205 0 0 0-1.704 0L6.352 5.648a1.205 1.205 0 0 0 0 1.704L9.5 10.5"/>
-        <path d="M16.5 7.5 19 5"/>
-        <path d="m17.5 10.5 3.148 3.148a1.205 1.205 0 0 1 0 1.704l-2.296 2.296a1.205 1.205 0 0 1-1.704 0L13.5 14.5"/>
-        <path d="M9 21a6 6 0 0 0-6-6"/>
-        <path d="M9.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l4.296-4.296a1.205 1.205 0 0 0 0-1.704l-2.296-2.296a1.205 1.205 0 0 0-1.704 0z"/>
-      </g>
-    </svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="brand-gradient" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="${gradientStart}"/>
+      <stop offset="1" stop-color="${gradientEnd}"/>
+    </linearGradient>
+  </defs>
+${background}
+  <g transform="${transform}" fill="none" stroke="url(#brand-gradient)" stroke-width="2.65" stroke-linecap="round" stroke-linejoin="round">
+    <path d="m13.5 6.5-3.148-3.148a1.205 1.205 0 0 0-1.704 0L6.352 5.648a1.205 1.205 0 0 0 0 1.704L9.5 10.5"/>
+    <path d="M16.5 7.5 19 5"/>
+    <path d="m17.5 10.5 3.148 3.148a1.205 1.205 0 0 1 0 1.704l-2.296 2.296a1.205 1.205 0 0 1-1.704 0L13.5 14.5"/>
+    <path d="M9 21a6 6 0 0 0-6-6"/>
+    <path d="M9.352 10.648a1.205 1.205 0 0 0 0 1.704l2.296 2.296a1.205 1.205 0 0 0 1.704 0l4.296-4.296a1.205 1.205 0 0 0 0-1.704l-2.296-2.296a1.205 1.205 0 0 0-1.704 0z"/>
+  </g>
+</svg>
+`;
 }
 
 async function renderIcon(page, size, outputPath, maskable = false) {
@@ -91,6 +90,7 @@ try {
   }
 
   const ico = createIco(faviconImages);
+  await writeFile(path.join(publicDir, 'favicon.svg'), satelliteSvg(32));
   await writeFile(path.join(publicDir, 'favicon.ico'), ico);
   await writeFile(path.join(appDir, 'favicon.ico'), ico);
 } finally {

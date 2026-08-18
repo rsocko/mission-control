@@ -8,6 +8,7 @@ export type { SwimlaneMode } from './BoardControls';
 export { ColumnHeader } from './ColumnHeader';
 export { TaskDetailPanel } from './TaskDetailPanel';
 export { QuickAddInput } from './QuickAddInput';
+export { toKanbanProjectViewModel } from './types';
 export { DEFAULT_COLUMNS, CONNECTOR_BRAND_ICONS, PRIORITY_DOTS, PRIORITY_LABELS, VISIBLE_LIMIT } from './constants';
 export type {
   KanbanTaskViewModel,

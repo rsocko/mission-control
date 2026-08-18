@@ -50,5 +50,16 @@ export type KanbanColumnViewModel = KanbanColumnDto;
 
 export type KanbanProjectViewModel = Pick<
   HubProjectSummaryDto,
-  'id' | 'name' | 'color' | 'icon' | 'kanbanColumns'
->;
+  'id' | 'name' | 'color' | 'icon'
+> & {
+  kanbanColumns: KanbanColumnViewModel[];
+};
+
+export function toKanbanProjectViewModel(
+  project: HubProjectSummaryDto,
+): KanbanProjectViewModel {
+  return {
+    ...project,
+    kanbanColumns: project.kanbanColumns ?? [],
+  };
+}

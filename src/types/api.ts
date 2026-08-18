@@ -103,7 +103,7 @@ export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &
 /** Serialized project summary returned by GET /api/hub-projects. */
 export type HubProjectSummaryDto = HubProjectSummaryFields & {
   icon: string | null;
-  kanbanColumns: KanbanColumnDto[];
+  kanbanColumns?: KanbanColumnDto[];
   hidden?: boolean;
   category?: string | null;
   metadata?: Record<string, unknown>;

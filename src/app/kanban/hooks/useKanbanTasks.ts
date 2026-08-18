@@ -11,6 +11,7 @@ import type {
   KanbanTaskViewModel,
   SwimlaneMode,
 } from '../components';
+import { toKanbanProjectViewModel } from '../components';
 import type {
   HubProjectListResponseDto,
   TaskListResponseDto,
@@ -108,7 +109,7 @@ export function useKanbanTasks({
       }
 
       setTasks(filteredTasks);
-      setProjects(projectsData.projects || []);
+      setProjects((projectsData.projects || []).map(toKanbanProjectViewModel));
       setScoreRefetchKey(prev => prev + 1);
     } catch (err) {
       kanbanLogger.error('Failed to fetch kanban data', { err });

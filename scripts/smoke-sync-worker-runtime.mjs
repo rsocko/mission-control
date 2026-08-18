@@ -1,9 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { packageSyncWorkerRuntime } from './package-sync-worker-runtime.mjs';
+import { removeTemporaryRuntime } from './remove-temporary-runtime.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'mc-worker-runtime-'));
@@ -279,6 +280,6 @@ try {
       await waitForExit(worker, 5_000);
     }
   } finally {
-    await rm(runtimeRoot, { recursive: true, force: true });
+    await removeTemporaryRuntime(runtimeRoot);
   }
 }

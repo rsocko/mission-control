@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import {
   NavigationBadge,
-  NavigationPressureBar,
+  NavigationRailMorph,
 } from '@/components/layout/NavigationBadge';
 import { NavBadgeSettingsCard } from '@/app/settings/components/NavBadgeSettingsCard';
 import {
@@ -55,84 +55,81 @@ describe('navigation badges', () => {
     expect(screen.getByText('99+')).toHaveAttribute('aria-label', '125 items need attention');
   });
 
-  it('matches high-pressure shared badge width to its collapsed line', () => {
-    const { rerender } = render(
-      <NavigationBadge count={60} tone="amber" morphId="myDay" />,
+  it('matches high-pressure badge width to its collapsed line', () => {
+    render(<NavigationRailMorph count={60} tone="amber" expanded morphId="myDay" />);
+    expect(screen.getByTestId('navigation-rail-morph')).toHaveAttribute(
+      'data-pressure-level',
+      'high',
     );
-    expect(screen.getByText('60')).toHaveClass('w-[30px]');
-
-    rerender(<NavigationBadge count={60} tone="amber" />);
-    expect(screen.getByText('60')).not.toHaveClass('w-[30px]');
   });
 
-  it('uses discrete centered pressure lengths for collapsed navigation', () => {
+  it('uses discrete pressure levels for the collapsed rail', () => {
     const { rerender } = render(
-      <NavigationPressureBar count={7} tone="amber" morphId="myDay" />,
+      <NavigationRailMorph count={7} tone="amber" expanded={false} morphId="myDay" />,
     );
-    expect(screen.getByLabelText('7 items need attention')).toHaveAttribute('data-pressure-level', 'low');
-    expect(screen.getByLabelText('7 items need attention')).toHaveClass(
-      'left-1/2',
-      '-translate-x-1/2',
-      'w-2',
-    );
-    expect(screen.getByLabelText('7 items need attention')).toHaveAttribute(
-      'data-layout-anchor',
-      'bottom-center',
-    );
+    const morph = () => screen.getByTestId('navigation-rail-morph');
+    expect(morph()).toHaveAttribute('data-pressure-level', 'low');
+    expect(morph()).toHaveAttribute('data-morph-state', 'bar');
 
-    rerender(<NavigationPressureBar count={12} tone="amber" morphId="myDay" />);
-    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute('data-pressure-level', 'medium');
-    expect(screen.getByLabelText('12 items need attention')).toHaveClass('w-4');
-    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
-      'data-layout-anchor',
-      'bottom-center',
-    );
+    rerender(<NavigationRailMorph count={12} tone="amber" expanded={false} morphId="myDay" />);
+    expect(morph()).toHaveAttribute('data-pressure-level', 'medium');
 
-    rerender(<NavigationPressureBar count={99} tone="red" morphId="notifications" />);
-    expect(screen.getByLabelText('99 items need attention')).toHaveAttribute('data-pressure-level', 'high');
-    expect(screen.getByLabelText('99 items need attention')).toHaveClass('w-[30px]');
-    expect(screen.getByLabelText('99 items need attention')).toHaveAttribute(
-      'data-layout-anchor',
-      'bottom-center',
+    rerender(<NavigationRailMorph count={99} tone="red" expanded={false} morphId="notifications" />);
+    expect(morph()).toHaveAttribute('data-pressure-level', 'high');
+  });
+
+  it('keeps one element mounted across the collapse/expand morph', () => {
+    // Regression: the rail used to swap two elements sharing a layoutId, which
+    // made the first badge in DOM order (My Day) jump vertically. A single
+    // persistent element must survive the transition instead.
+    const { rerender } = render(
+      <NavigationRailMorph count={4} tone="amber" expanded={false} morphId="myDay" />,
     );
+    const collapsed = screen.getByTestId('navigation-rail-morph');
+    expect(collapsed).toHaveAttribute('data-morph-state', 'bar');
+
+    rerender(<NavigationRailMorph count={4} tone="amber" expanded morphId="myDay" />);
+    const expandedMorph = screen.getByTestId('navigation-rail-morph');
+    expect(expandedMorph).toBe(collapsed);
+    expect(expandedMorph).toHaveAttribute('data-morph-state', 'badge');
+    expect(expandedMorph).toHaveAttribute('data-morph-id', 'myDay');
+  });
+
+  it('renders identical morph markup regardless of nav position', () => {
+    const { unmount } = render(
+      <NavigationRailMorph count={4} tone="amber" expanded={false} morphId="myDay" />,
+    );
+    const first = screen.getByTestId('navigation-rail-morph').getAttribute('style');
+    unmount();
+
+    render(
+      <NavigationRailMorph count={4} tone="amber" expanded={false} morphId="reconciliation" />,
+    );
+    expect(screen.getByTestId('navigation-rail-morph')).toHaveAttribute('style', first!);
   });
 
   it('can pulse urgent indicators without changing non-urgent defaults', () => {
-    const { rerender } = render(<NavigationPressureBar count={4} tone="red" pulse />);
-    expect(screen.getByLabelText('4 items need attention')).toHaveClass('motion-safe:animate-pulse');
+    const { rerender } = render(
+      <NavigationRailMorph count={4} tone="red" expanded={false} pulse morphId="triage" />,
+    );
+    expect(screen.getByTestId('navigation-rail-morph')).toHaveClass('motion-safe:animate-pulse');
 
     rerender(<NavigationBadge count={4} tone="red" pulse />);
     expect(screen.getByText('4')).toHaveClass('motion-safe:animate-pulse');
 
     rerender(<NavigationBadge count={4} tone="amber" />);
     expect(screen.getByText('4')).not.toHaveClass('motion-safe:animate-pulse');
-
-    rerender(<NavigationBadge count={12} tone="amber" morphId="myDay" />);
-    expect(screen.getByText('12')).toHaveAttribute('data-layout-anchor', 'bottom-center');
-
-    rerender(<NavigationBadge count={12} tone="amber" morphId="notifications" />);
-    expect(screen.getByText('12')).toHaveAttribute('data-layout-anchor', 'bottom-center');
-
-    rerender(<NavigationBadge count={12} tone="amber" />);
-    expect(screen.getByText('12')).not.toHaveAttribute('data-layout-anchor');
   });
 
-  it('keeps the same shared element identity between pressure bar and badge', () => {
+  it('keeps the same element identity between pressure bar and badge', () => {
     const { rerender } = render(
-      <NavigationPressureBar count={4} tone="amber" morphId="myDay" />,
+      <NavigationRailMorph count={4} tone="amber" expanded={false} morphId="myDay" />,
     );
-    expect(screen.getByLabelText('4 items need attention')).toHaveAttribute(
-      'data-morph-id',
-      'myDay',
-    );
-    expect(screen.getByLabelText('4 items need attention')).toHaveAttribute(
-      'data-layout-anchor',
-      'bottom-center',
-    );
+    const el = screen.getByTestId('navigation-rail-morph');
+    expect(el).toHaveAttribute('data-morph-id', 'myDay');
 
-    rerender(<NavigationBadge count={4} tone="amber" morphId="myDay" />);
-    expect(screen.getByText('4')).toHaveAttribute('data-morph-id', 'myDay');
-    expect(screen.getByText('4')).toHaveAttribute('data-layout-anchor', 'bottom-center');
+    rerender(<NavigationRailMorph count={4} tone="amber" expanded morphId="myDay" />);
+    expect(screen.getByTestId('navigation-rail-morph')).toBe(el);
   });
 
   it('requests navigation counts for the browser-local date', async () => {

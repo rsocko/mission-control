@@ -159,18 +159,16 @@ export function useSettingsAdministration() {
     setSourceLists(previous => previous.map(sourceList => (
       sourceList.id === sourceListId ? { ...sourceList, name: newName } : sourceList
     )));
-    for (const queryKey of [
-      ['dashboard', 'connectors'],
-      ['dashboard', 'listGroups'],
-      ['dashboard', 'tasks'],
-      ['myDay', 'connectors'],
-      ['myDay', 'items'],
-    ]) {
-      void queryClient.invalidateQueries({ queryKey });
-    }
-    return () => {
+    return async () => {
       sourceListVersionRef.current += 1;
       pendingRenamesRef.current.delete(sourceListId);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'connectors'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'listGroups'] }),
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['myDay', 'connectors'] }),
+        queryClient.invalidateQueries({ queryKey: ['myDay', 'items'] }),
+      ]);
     };
   }, [queryClient]);
 

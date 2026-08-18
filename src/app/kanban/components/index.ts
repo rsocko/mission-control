@@ -9,4 +9,10 @@ export { ColumnHeader } from './ColumnHeader';
 export { TaskDetailPanel } from './TaskDetailPanel';
 export { QuickAddInput } from './QuickAddInput';
 export { DEFAULT_COLUMNS, CONNECTOR_BRAND_ICONS, PRIORITY_DOTS, PRIORITY_LABELS, VISIBLE_LIMIT } from './constants';
-export type { Task, TaskTag, KanbanColumn, HubProject, SourceItem } from './types';
+export type {
+  KanbanTaskViewModel,
+  KanbanTaskTagViewModel,
+  KanbanColumnViewModel,
+  KanbanProjectViewModel,
+  SourceItem,
+} from './types';

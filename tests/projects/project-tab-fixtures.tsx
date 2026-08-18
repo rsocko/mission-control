@@ -9,11 +9,11 @@ import React from 'react';
 import { act, configure, render, screen, type RenderResult } from '@testing-library/react';
 import { vi } from 'vitest';
 import type {
-  PhaseItem,
-  ProjectPhase,
-  ProjectRecord,
+  ProjectDetailViewModel as ProjectRecord,
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
   ProjectRuleMatch,
-  ProjectTask,
+  ProjectTaskViewModel as ProjectTask,
 } from '@/app/projects/[id]/types';
 import type {
   ProjectHierarchyCommand,

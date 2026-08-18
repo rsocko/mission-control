@@ -48,7 +48,13 @@ import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { GroupByDropdown } from '@/components/toolbar/GroupByDropdown';
 import { DEFAULT_SORT_OPTIONS, SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import { ViewDensityToggle, type ViewDensity } from '@/components/toolbar/ViewDensityToggle';
-import { CONNECTOR_ICONS, type EnabledSource, type HubProject, type ListGroup, type TaskTag } from '@/types/dashboard';
+import {
+  CONNECTOR_ICONS,
+  type DashboardProjectViewModel as HubProject,
+  type DashboardTaskTagViewModel as TaskTag,
+  type EnabledSource,
+  type ListGroup,
+} from '@/types/dashboard';
 import { AIRecommendation } from '@/components/today/AIRecommendation';
 import { EnergyCheckIn, EnergyIndicator } from '@/components/today/EnergyCheckIn';
 import { Focus3Panel } from '@/components/today/Focus3Panel';

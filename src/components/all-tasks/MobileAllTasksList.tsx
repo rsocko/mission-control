@@ -11,7 +11,12 @@ import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import { cn } from '@/lib/utils';
-import type { EnabledSource, SourceList, SyncStatusEntry, Task } from '@/types/dashboard';
+import type {
+  DashboardTaskViewModel as Task,
+  EnabledSource,
+  SourceList,
+  SyncStatusEntry,
+} from '@/types/dashboard';
 import type { MyDayItem } from '@/components/today/types';
 
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };

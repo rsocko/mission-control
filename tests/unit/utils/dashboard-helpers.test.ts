@@ -4,7 +4,10 @@ import {
   replaceTaskInKeywordFilteredResponse,
   restoreTaskToResponse,
 } from '@/lib/utils/dashboard-helpers';
-import type { Task, TaskResponse } from '@/types/dashboard';
+import type {
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 import { editableTaskPolicy } from '../../fixtures/task-edit-policy';
 
 const task = (id: string): Task => ({

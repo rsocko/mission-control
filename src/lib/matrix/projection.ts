@@ -1,4 +1,4 @@
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import {
   effortPosition,
   markerDensityScale,

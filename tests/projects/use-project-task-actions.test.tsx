@@ -2,7 +2,11 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectTaskActions } from '@/app/projects/[id]/useProjectTaskActions';
-import type { PhaseItem, ProjectPhase, ProjectTask } from '@/app/projects/[id]/types';
+import type {
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTaskViewModel as ProjectTask,
+} from '@/app/projects/[id]/types';
 import type { HubProject } from '@/components/task-list/TaskContextMenu';
 import type {
   ProjectHierarchyCommand,

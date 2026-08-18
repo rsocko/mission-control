@@ -11,7 +11,7 @@ import { CONNECTOR_BRAND_ICONS, PRIORITY_DOTS, PRIORITY_LABELS } from './constan
 import { getLocalToday } from '@/lib/utils/client-date';
 import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { SnoozePopover } from './SnoozePopover';
-import type { Task } from './types';
+import type { KanbanTaskViewModel } from './types';
 
 function formatSnoozeLabel(isoDate: string): string {
   const date = new Date(isoDate);
@@ -26,7 +26,7 @@ function formatSnoozeLabel(isoDate: string): string {
 }
 
 interface KanbanCardProps {
-  task: Task;
+  task: KanbanTaskViewModel;
   /** Props spread onto the card root to make it a drag handle (from @dnd-kit useSortable) */
   dragHandleProps?: Record<string, unknown>;
   onClick?: () => void;

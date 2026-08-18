@@ -5,7 +5,16 @@ import { toast } from 'sonner';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { kanbanLogger } from '@/lib/client-logger';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
-import type { HubProject, KanbanColumn as KanbanColumnType, SwimlaneMode, Task } from '../components';
+import type {
+  KanbanColumnViewModel as KanbanColumnType,
+  KanbanProjectViewModel,
+  KanbanTaskViewModel,
+  SwimlaneMode,
+} from '../components';
+import type {
+  HubProjectListResponseDto,
+  TaskListResponseDto,
+} from '@/types/api';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
 
@@ -53,9 +62,9 @@ export function useKanbanTasks({
   isProjectView = false,
 }: UseKanbanTasksOptions) {
   const { progress: syncProgress } = useSyncStream();
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const [tasks, setTasks] = useState<KanbanTaskViewModel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [projects, setProjects] = useState<HubProject[]>([]);
+  const [projects, setProjects] = useState<KanbanProjectViewModel[]>([]);
   const [scores, setScores] = useState<Map<string, number>>(new Map());
   const [scoreSortEnabled, setScoreSortEnabled] = useState(true);
   const [scoreRefetchKey, setScoreRefetchKey] = useState(0);
@@ -79,9 +88,9 @@ export function useKanbanTasks({
         fetch(`/api/tasks?${params}`),
         fetch('/api/hub-projects'),
       ]);
-      const tasksData = await tasksRes.json();
-      const projectsData = await projectsRes.json();
-      let filteredTasks = (tasksData.tasks || []) as Task[];
+      const tasksData: TaskListResponseDto = await tasksRes.json();
+      const projectsData: HubProjectListResponseDto = await projectsRes.json();
+      let filteredTasks: KanbanTaskViewModel[] = tasksData.tasks || [];
 
       if (selectedSources.length > 0) {
         const connectorFilters = selectedSources
@@ -165,7 +174,7 @@ export function useKanbanTasks({
       .map(task => scoreSortEnabled ? { ...task, smartScore: scores.get(task.id) ?? null } : task);
   }, [resolveColumns, scoreSortEnabled, scores, tasks]);
 
-  const taskMatchesSearch = useCallback((task: Task, searchQuery: string) => {
+  const taskMatchesSearch = useCallback((task: KanbanTaskViewModel, searchQuery: string) => {
     if (!searchQuery.trim()) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -184,7 +193,7 @@ export function useKanbanTasks({
     ];
   }, [projects]);
 
-  const getTasksForSwimlane = useCallback((columnTasks: Task[], swimlaneMode: SwimlaneMode, groupKey: string) => {
+  const getTasksForSwimlane = useCallback((columnTasks: KanbanTaskViewModel[], swimlaneMode: SwimlaneMode, groupKey: string) => {
     if (swimlaneMode === 'none') return columnTasks;
     if (swimlaneMode === 'priority') return columnTasks.filter(task => task.priority === groupKey);
     if (groupKey === '__none') return columnTasks;

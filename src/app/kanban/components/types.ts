@@ -1,34 +1,39 @@
-export interface TaskTag {
-  id: string;
-  name: string;
-  color: string | null;
-}
+import type {
+  HubProjectSummaryDto,
+  KanbanColumnDto,
+  TaskListItemDto,
+  TaskTagDto,
+} from '@/types/api';
 
-export interface Task {
-  id: string;
-  title: string;
+export type KanbanTaskTagViewModel = Pick<TaskTagDto, 'id' | 'name' | 'color'>;
+
+export type KanbanTaskViewModel = Pick<
+  TaskListItemDto,
+  | 'id'
+  | 'title'
+  | 'status'
+  | 'priority'
+  | 'dueDate'
+  | 'connectorType'
+  | 'sourceListName'
+  | 'localDisposition'
+  | 'taskSourceModel'
+  | 'editPolicy'
+> & {
   description?: string | null;
-  status: string;
-  priority: string;
-  dueDate: string | null;
-  connectorType: string;
   connectorInstanceId?: string | null;
   sourceId?: string | null;
-  sourceListId: string | null;
-  sourceListName: string | null;
-  kanbanColumn: string | null;
-  kanbanOrder: number | null;
-  tags: TaskTag[];
+  sourceListId?: string | null;
+  kanbanColumn?: string | null;
+  kanbanOrder?: number | null;
+  tags: KanbanTaskTagViewModel[];
   metadata?: string | null;
   estimatedDuration?: number | null;
   subtaskTotal?: number;
   subtaskDone?: number;
   smartScore?: number | null;
   snoozedUntil?: string | null;
-  localDisposition: import('@/types').LocalDisposition;
-  taskSourceModel: import('@/types').TaskSourceModel;
-  editPolicy: TaskEditPolicy;
-}
+};
 
 export interface SourceItem {
   id: string;
@@ -41,21 +46,9 @@ export interface SourceItem {
   selectedForSync?: boolean;
 }
 
-export interface KanbanColumn {
-  id: string;
-  name: string;
-  color: string;
-  order?: number;
-  statusMapping?: string[];
-  globalColumnMapping?: string;
-  wipLimit?: number;
-}
+export type KanbanColumnViewModel = KanbanColumnDto;
 
-export interface HubProject {
-  id: string;
-  name: string;
-  color: string;
-  icon: string | null;
-  kanbanColumns: KanbanColumn[];
-}
-import type { TaskEditPolicy } from '@/types';
+export type KanbanProjectViewModel = Pick<
+  HubProjectSummaryDto,
+  'id' | 'name' | 'color' | 'icon' | 'kanbanColumns'
+>;

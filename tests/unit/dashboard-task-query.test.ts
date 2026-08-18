@@ -7,7 +7,11 @@ import {
   flattenTaskPages,
   normalizeTaskParams,
 } from '@/lib/hooks/useDashboardQueries';
-import { EMPTY_TASK_RESPONSE, type Task, type TaskResponse } from '@/types/dashboard';
+import {
+  EMPTY_TASK_RESPONSE,
+  type DashboardTaskResponseViewModel as TaskResponse,
+  type DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 
 function task(id: string): Task {
   return { id, title: id } as Task;

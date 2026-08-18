@@ -8,7 +8,7 @@ import {
   urgencyScore,
 } from '@/lib/matrix/scales';
 import { createMatrixMarks, projectTasks } from '@/lib/matrix/projection';
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 const TODAY = '2026-07-31';

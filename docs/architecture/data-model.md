@@ -285,6 +285,25 @@ The schema is split into domain files under `src/db/schema/`:
 - **Push Subscriptions** → Web Push (VAPID) endpoints for browser notifications
 - **Push Preferences** → per-user notification timing (morning, triage nudge, carry-forward)
 
+## Type ownership and transport boundaries
+
+- `src/types/index.ts` owns canonical domain models used by connectors and domain
+  services, including `TaskItem`, `HubProject`, `ProjectPhase`, and
+  `ProjectPhaseItem`.
+- `src/types/api.ts` owns serialized HTTP DTOs. DTO names end in `Dto`, preserve
+  wire-level nullability, and use `Pick` from canonical models for fields whose
+  meaning is shared.
+- `src/types/dashboard.ts` owns dashboard view models. View-model names end in
+  `ViewModel`; the current task and project view models are explicit projections
+  of their API DTOs rather than independent domain definitions.
+- Feature-local presentation types follow the same convention, for example
+  `KanbanTaskViewModel` and `ProjectTaskViewModel`.
+
+API routes construct DTOs from database/domain records. Client fetch functions
+name the DTO they deserialize, then feature code converts or projects that DTO
+into its view model. Domain services must not import dashboard or feature-local
+view models.
+
 The connector relationships for `sync_log`, `sync_jobs`, and `sync_schedules`
 are logical relationships through `connector_id`; only
 `sync_job_events.job_id` has a database foreign key. A partial unique index on

@@ -105,13 +105,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
-      actions: read
       attestations: write
       contents: read
       id-token: write
       packages: write
     env:
-      BUILDKIT_CACHE_SCOPE: mission-control-app-v1
       SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
@@ -219,96 +217,34 @@ jobs:
         shell: bash
         run: docker buildx create --driver docker-container --use
 
-      - name: Record build start
-        id: build-start
-        shell: bash
-        run: echo "epoch=$(date +%s)" >> "$GITHUB_OUTPUT"
-
       - name: Build and publish digest-oriented image
-        id: publish-cached
-        continue-on-error: true
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          build-args: |
-            MC_BUILD_SHA=${{ env.SOURCE_SHA }}
-            MC_DEPLOYMENT_REVISION=${{ steps.tags.outputs.resolved_tag }}
-          labels: |
-            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          sbom: true
-          provenance: false
-          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=${{ env.BUILDKIT_CACHE_SCOPE }}
-          cache-to: type=gha,scope=${{ env.BUILDKIT_CACHE_SCOPE }},mode=max,ignore-error=true
-
-      - name: Retry publication without cache
-        id: publish-cold
-        if: steps.publish-cached.outcome == 'failure'
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          build-args: |
-            MC_BUILD_SHA=${{ env.SOURCE_SHA }}
-            MC_DEPLOYMENT_REVISION=${{ steps.tags.outputs.resolved_tag }}
-          labels: |
-            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          sbom: true
-          provenance: false
-          outputs: type=image,name=${{ steps.image.outputs.name }},push-by-digest=true,name-canonical=true,push=true
-
-      - name: Resolve published digest
         id: publish
-        if: >-
-          always() &&
-          (steps.publish-cached.outcome == 'success' || steps.publish-cold.outcome == 'success')
         env:
-          CACHED_DIGEST: ${{ steps.publish-cached.outputs.digest }}
-          CACHED_OUTCOME: ${{ steps.publish-cached.outcome }}
-          COLD_DIGEST: ${{ steps.publish-cold.outputs.digest }}
           IMAGE: ${{ steps.image.outputs.name }}
-          START_EPOCH: ${{ steps.build-start.outputs.epoch }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${CACHED_OUTCOME}" == "success" ]]; then
-            digest="${CACHED_DIGEST}"
-            cache_status="gha-enabled"
-          else
-            echo "::warning::BuildKit cache was unavailable; publication used a cold build"
-            digest="${COLD_DIGEST}"
-            cache_status="cold-fallback"
-          fi
-          if [[ ! "${digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::Build action returned an invalid digest"
-            exit 1
-          fi
-          build_duration="$(($(date +%s) - START_EPOCH))"
+          metadata_file="${RUNNER_TEMP}/build-metadata.json"
+          build_started_at="${SECONDS}"
+
+          docker buildx build \
+            --file Dockerfile \
+            --platform linux/amd64 \
+            --build-arg "MC_BUILD_SHA=${SOURCE_SHA}" \
+            --build-arg "MC_DEPLOYMENT_REVISION=${{ steps.tags.outputs.resolved_tag }}" \
+            --label "org.opencontainers.image.revision=${SOURCE_SHA}" \
+            --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+            --attest type=sbom \
+            --provenance=false \
+            --metadata-file "${metadata_file}" \
+            --output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true" \
+            .
+
+          digest="$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "${metadata_file}")"
+          build_duration="$((SECONDS - build_started_at))"
           echo "Published ${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
           echo "build_duration_seconds=${build_duration}" >> "$GITHUB_OUTPUT"
-          echo "cache_status=${cache_status}" >> "$GITHUB_OUTPUT"
-
-      - name: Measure Actions cache usage
-        id: cache-usage
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          usage="$(gh api "repos/${GITHUB_REPOSITORY}/actions/cache/usage")"
-          bytes="$(jq -er '.active_caches_size_in_bytes' <<<"${usage}")"
-          count="$(jq -er '.active_caches_count' <<<"${usage}")"
-          gib="$(awk -v bytes="${bytes}" 'BEGIN { printf "%.2f", bytes / 1073741824 }')"
-          echo "count=${count}" >> "$GITHUB_OUTPUT"
-          echo "gib=${gib}" >> "$GITHUB_OUTPUT"
-          echo "Actions cache usage after build: ${gib} GiB across ${count} entries"
 
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
@@ -386,9 +322,6 @@ jobs:
       - name: Publish image summary
         env:
           BUILD_DURATION_SECONDS: ${{ steps.publish.outputs.build_duration_seconds }}
-          CACHE_COUNT: ${{ steps.cache-usage.outputs.count }}
-          CACHE_STATUS: ${{ steps.publish.outputs.cache_status }}
-          CACHE_USAGE_GIB: ${{ steps.cache-usage.outputs.gib }}
           DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ${{ steps.image.outputs.name }}
           PUSH_LATEST: ${{ steps.tags.outputs.push_latest }}
@@ -404,13 +337,7 @@ jobs:
             echo
             echo "Immutable version: \`${IMAGE}:${VERSION_TAG}\`"
             echo
-            echo "Build cache: \`${BUILDKIT_CACHE_SCOPE}\` (\`mode=max\`, ${CACHE_STATUS})"
-            echo
             echo "Build duration: ${BUILD_DURATION_SECONDS} seconds"
-            if [[ -n "${CACHE_USAGE_GIB}" ]]; then
-              echo
-              echo "Actions cache usage: ${CACHE_USAGE_GIB} GiB across ${CACHE_COUNT} entries"
-            fi
             if [[ -n "${SHA_TAG}" ]]; then
               echo
               echo "Immutable source: \`${IMAGE}:${SHA_TAG}\`"

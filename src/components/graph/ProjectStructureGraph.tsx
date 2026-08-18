@@ -23,37 +23,24 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import {
-  AlertTriangle,
   Boxes,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleDot,
-  Cloud,
-  CloudOff,
   Flag,
-  Link2,
-  LoaderCircle,
-  Trash2,
-  X,
 } from 'lucide-react';
-import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { GRAPH_NODE_DIMENSIONS, type GraphLayoutDirection } from '@/lib/graph/layout';
 import {
-  GRAPH_NODE_DIMENSIONS,
-  layoutProjectHierarchy,
-  type GraphLayoutDirection,
-} from '@/lib/graph/layout';
+  createProjectStructureFlowModel,
+  type ProjectGraphDisplayOptions,
+  type ProjectGraphLineStyle,
+  type ProjectGraphNodeVisibility,
+} from '@/lib/graph/project-structure-layout';
 import { getConnectedFocus, getSelectionFocus } from '@/lib/graph/focus';
 import type {
   GraphEdge,
@@ -69,6 +56,15 @@ import {
   TASK_RELATIONSHIPS_CHANGED_EVENT,
   type TaskRelationshipsChangedDetail,
 } from '@/lib/task-relationships-events';
+import {
+  GraphLoadingState,
+  ProjectGraphDependencyCreator,
+  ProjectGraphDependencyDetails,
+  ProjectGraphDisplayControls,
+  ProjectGraphPhaseDetails,
+  ProjectGraphRemovalDialog,
+} from './ProjectStructureGraphParts';
+import { useProjectStructureGraphData } from './useProjectStructureGraphData';
 
 interface ProjectStructureGraphProps {
   projectId: string;
@@ -98,21 +94,9 @@ type FlowEdge = Edge<{
   syncAction?: GraphEdge['syncAction'];
   syncError?: GraphEdge['syncError'];
 }>;
-type GraphLineStyle = 'orthogonal' | 'curved';
-type NodeKindVisibility = Record<GraphNodeKind, boolean>;
-type GraphLoadingStage = 'fetching' | 'layout';
-interface GraphLoadingState {
-  projectId: string;
-  stage: GraphLoadingStage;
-}
-
-interface GraphDisplayOptions {
-  direction: GraphLayoutDirection;
-  lineStyle: GraphLineStyle;
-  showDependencies: boolean;
-  visibleKinds: NodeKindVisibility;
-  collapsedPhaseIds: Set<string>;
-}
+type GraphLineStyle = ProjectGraphLineStyle;
+type NodeKindVisibility = ProjectGraphNodeVisibility;
+type GraphDisplayOptions = ProjectGraphDisplayOptions;
 
 interface DependencyRemovalTarget {
   edgeId: string;
@@ -141,16 +125,6 @@ const STATUS_STYLES: Record<GraphNodeStatus, {
     label: 'Blocked',
   },
 };
-
-const EDGE_SYNC_LABELS = {
-  local: 'Local only',
-  pending: 'Sync pending',
-  synced: 'Synced with source',
-  failed: 'Source sync failed',
-} as const;
-
-// React Flow renders active connection lines at z-index 1001.
-const GRAPH_MENU_CLASS = 'z-[1100]';
 
 interface StatusNodeStyle extends CSSProperties {
   '--node-status-color': string;
@@ -286,154 +260,28 @@ export function layoutGraph(
   onToggleCollapse: (phaseId: string) => void,
   options: GraphDisplayOptions,
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
-  const collapsedTaskIds = new Set(
-    graph.edges
-      .filter((edge) => edge.type === 'contains' && options.collapsedPhaseIds.has(edge.source))
-      .map((edge) => edge.target),
-  );
-  const taskNodeIds = new Set(
-    graph.nodes.filter((node) => node.kind === 'task').map((node) => node.id),
-  );
-  const phasesWithTasks = new Set(
-    graph.edges
-      .filter((edge) => (
-        edge.type === 'contains'
-        && taskNodeIds.has(edge.target)
-      ))
-      .map((edge) => edge.source),
-  );
-  const layoutNodes = graph.nodes.filter((node) => (
-    node.kind !== 'task'
-    || (options.visibleKinds.task && !collapsedTaskIds.has(node.id))
-  ));
-  const layoutNodeIds = new Set(layoutNodes.map((node) => node.id));
-  const layoutGraphData: ProjectSubgraph = {
-    ...graph,
-    nodes: layoutNodes,
-    edges: graph.edges.filter((edge) => (
-      layoutNodeIds.has(edge.source) && layoutNodeIds.has(edge.target)
-    )),
-  };
-  const positions = layoutProjectHierarchy(layoutGraphData, options.direction);
-  const visibleNodes = layoutNodes.filter((node) => options.visibleKinds[node.kind]);
-  const visibleNodeIds = new Set(visibleNodes.map((node) => node.id));
-  const nodeLabels = new Map(layoutNodes.map((node) => [node.id, node.label]));
-
-  const nodes = visibleNodes.map<FlowNode>((node) => {
-    return {
+  const model = createProjectStructureFlowModel(graph, options);
+  return {
+    nodes: model.nodes.map<FlowNode>((node) => ({
       id: node.id,
-      type: node.kind,
-      position: positions.get(node.id) ?? { x: 0, y: 0 },
+      type: node.type,
+      position: node.position,
       data: {
-        graphNode: node,
+        graphNode: node.graphNode,
         direction: options.direction,
-        canCollapse: options.visibleKinds.task && phasesWithTasks.has(node.id),
-        isCollapsed: options.collapsedPhaseIds.has(node.id),
+        canCollapse: node.canCollapse,
+        isCollapsed: node.isCollapsed,
         onSelect,
         onToggleCollapse,
       },
-    };
-  });
-
-  return {
-    nodes,
-    edges: layoutGraphData.edges
-      .filter((edge) => (
-        visibleNodeIds.has(edge.source)
-        && visibleNodeIds.has(edge.target)
-        && (edge.type === 'contains' || options.showDependencies)
-      ))
-      .map((edge) => toFlowEdge(edge, options.lineStyle, nodeLabels)),
+    })),
+    edges: model.edges.map((edge) => ({
+      ...edge,
+      markerEnd: edge.markerEnd
+        ? { ...edge.markerEnd, type: MarkerType.ArrowClosed }
+        : undefined,
+    })),
   };
-}
-
-function toFlowEdge(
-  edge: GraphEdge,
-  lineStyle: GraphLineStyle,
-  nodeLabels: ReadonlyMap<string, string>,
-): FlowEdge {
-  const isDependency = edge.type !== 'contains';
-  const syncStatus = edge.syncStatus;
-  const sourceLabel = nodeLabels.get(edge.source) ?? 'Unknown source';
-  const targetLabel = nodeLabels.get(edge.target) ?? 'Unknown target';
-  const dependencyStroke = syncStatus === 'failed'
-    ? 'var(--danger)'
-    : syncStatus === 'pending'
-      ? 'var(--warning)'
-      : 'var(--accent-400)';
-  return {
-    id: edge.id,
-    source: edge.source,
-    target: edge.target,
-    type: lineStyle === 'curved' ? 'bezier' : 'smoothstep',
-    animated: edge.type === 'blocks' && syncStatus !== 'failed',
-    style: {
-      stroke: edge.type === 'related'
-        ? 'var(--warning)'
-        : isDependency
-          ? dependencyStroke
-          : 'var(--border-strong)',
-      strokeWidth: isDependency ? 2 : 1.25,
-      strokeDasharray: edge.type === 'related' || syncStatus === 'local' ? '6 4' : undefined,
-      opacity: isDependency ? 0.9 : 0.65,
-    },
-    markerEnd: edge.type === 'blocks'
-      ? {
-          type: MarkerType.ArrowClosed,
-          color: dependencyStroke,
-        }
-      : undefined,
-    ariaLabel: isDependency
-      ? edge.type === 'blocks'
-        ? `${sourceLabel} blocks ${targetLabel}, ${EDGE_SYNC_LABELS[syncStatus ?? 'local']}`
-        : `${sourceLabel} is related to ${targetLabel}, ${EDGE_SYNC_LABELS[syncStatus ?? 'local']}`
-      : undefined,
-    data: {
-      relationshipType: edge.type,
-      syncStatus,
-      syncAction: edge.syncAction,
-      syncError: edge.syncError,
-    },
-  };
-}
-
-function GraphLoadingState({ stage }: { stage: GraphLoadingStage }) {
-  const message = stage === 'fetching' ? 'Loading project data...' : 'Arranging project graph...';
-
-  return (
-    <div
-      className="relative h-full min-h-0 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-0)]"
-      aria-busy="true"
-    >
-      <div className="absolute inset-0 animate-pulse p-10 opacity-45 motion-reduce:animate-none" aria-hidden="true">
-        <div className="mx-auto mt-14 h-16 w-44 rounded-xl bg-[var(--surface-2)]" />
-        <div className="mx-auto mt-14 flex max-w-3xl justify-around gap-10">
-          <div className="h-20 w-52 rounded-xl bg-[var(--surface-2)]" />
-          <div className="h-20 w-52 rounded-xl bg-[var(--surface-2)]" />
-          <div className="h-20 w-52 rounded-xl bg-[var(--surface-2)]" />
-        </div>
-        <div className="mx-auto mt-14 flex max-w-4xl justify-around gap-6">
-          {Array.from({ length: 5 }, (_, index) => (
-            <div key={index} className="h-16 w-36 rounded-xl bg-[var(--surface-1)]" />
-          ))}
-        </div>
-      </div>
-
-      <div className="absolute inset-x-0 top-1/2 mx-auto w-72 -translate-y-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)]/95 p-5 shadow-lg">
-        <div className="flex items-center gap-3 text-sm font-medium text-[var(--text-primary)]">
-          <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent-400)] motion-reduce:animate-none" aria-hidden="true" />
-          <span role="status">{message}</span>
-        </div>
-        <div
-          className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]"
-          role="progressbar"
-          aria-label="Project graph loading progress"
-        >
-          <div className={cn(styles.loadingProgress, 'h-full w-2/5 rounded-full bg-[var(--accent-400)]')} />
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export default function ProjectStructureGraph({
@@ -447,15 +295,16 @@ export default function ProjectStructureGraph({
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const relationshipEventSource = useId();
   const [relationshipRefreshKey, setRelationshipRefreshKey] = useState(0);
-  const [loadingState, setLoadingState] = useState<GraphLoadingState | null>({
-    projectId,
-    stage: 'fetching',
-  });
   const [renderedProjectId, setRenderedProjectId] = useState<string | null>(null);
-  const [error, setError] = useState<{ projectId: string; message: string } | null>(null);
-  const [truncated, setTruncated] = useState(false);
-  const [graph, setGraph] = useState<ProjectSubgraph | null>(null);
-  const [graphProjectId, setGraphProjectId] = useState<string | null>(null);
+  const {
+    graph,
+    graphProjectId,
+    loadingStage: dataLoadingStage,
+    error: currentError,
+    truncated,
+    setGraph,
+    completeLayout,
+  } = useProjectStructureGraphData(projectId, `${refreshKey ?? ''}:${relationshipRefreshKey}`);
   const [direction, setDirection] = useState<GraphLayoutDirection>('horizontal');
   const [lineStyle, setLineStyle] = useState<GraphLineStyle>('orthogonal');
   const [showDependencies, setShowDependencies] = useState(true);
@@ -566,43 +415,19 @@ export default function ProjectStructureGraph({
   }, [cancelPendingResizeFit, projectId]);
 
   useEffect(() => {
-    const controller = new AbortController();
-
-    fetch(`/api/projects/${projectId}/graph`, { signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json() as { graph?: ProjectSubgraph; error?: string };
-        if (!response.ok || !payload.graph) {
-          throw new Error(payload.error || 'Failed to load project graph');
-        }
-        if (controller.signal.aborted) return;
-        setError(null);
-        setLoadingState({ projectId, stage: 'layout' });
-        setGraph(payload.graph);
-        setGraphProjectId(projectId);
-        setTruncated(payload.graph.truncated);
-        const currentNodeIds = new Set(payload.graph.nodes.map((node) => node.id));
-        setFocusedNodeId((current) => {
-          const nextFocusedNodeId = current && currentNodeIds.has(current) ? current : null;
-          focusedNodeIdRef.current = nextFocusedNodeId;
-          return nextFocusedNodeId;
-        });
-        setHoveredNodeId((current) => current && currentNodeIds.has(current) ? current : null);
-        setSelectedPhase((current) => {
-          if (!current) return null;
-          return payload.graph?.nodes.find((node) => node.id === current.id && node.kind === 'phase') ?? null;
-        });
-      })
-      .catch((caughtError: unknown) => {
-        if (caughtError instanceof DOMException && caughtError.name === 'AbortError') return;
-        setError({
-          projectId,
-          message: caughtError instanceof Error ? caughtError.message : 'Failed to load project graph',
-        });
-        setLoadingState(null);
-      });
-
-    return () => controller.abort();
-  }, [projectId, refreshKey, relationshipRefreshKey]);
+    if (!graph || graphProjectId !== projectId) return;
+    const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
+    setFocusedNodeId((current) => {
+      const nextFocusedNodeId = current && currentNodeIds.has(current) ? current : null;
+      focusedNodeIdRef.current = nextFocusedNodeId;
+      return nextFocusedNodeId;
+    });
+    setHoveredNodeId((current) => current && currentNodeIds.has(current) ? current : null);
+    setSelectedPhase((current) => {
+      if (!current) return null;
+      return graph.nodes.find((node) => node.id === current.id && node.kind === 'phase') ?? null;
+    });
+  }, [graph, graphProjectId, projectId]);
 
   useEffect(() => {
     if (selectedTaskId === undefined || !graph) return;
@@ -656,7 +481,7 @@ export default function ProjectStructureGraph({
         selected: edge.id === selectedDependencyIdRef.current,
       })));
       setRenderedProjectId(projectId);
-      setLoadingState((current) => current?.projectId === projectId ? null : current);
+      completeLayout(projectId);
 
       fitViewFrame = requestAnimationFrame(() => {
         if (userAdjustedViewportRef.current) return;
@@ -671,6 +496,7 @@ export default function ProjectStructureGraph({
   }, [
     collapsedPhaseIds,
     cancelPendingResizeFit,
+    completeLayout,
     direction,
     fitGraphView,
     graph,
@@ -1034,9 +860,8 @@ export default function ProjectStructureGraph({
     () => `Project structure graph with ${nodes.length} nodes and ${edges.length} edges`,
     [edges.length, nodes.length],
   );
-  const currentError = error?.projectId === projectId ? error.message : null;
-  const loadingStage = loadingState?.projectId === projectId
-    ? loadingState.stage
+  const loadingStage = dataLoadingStage
+    ? dataLoadingStage
     : renderedProjectId === projectId
       ? null
       : 'fetching';
@@ -1116,268 +941,50 @@ export default function ProjectStructureGraph({
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-10 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
-      <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]/95 p-1.5 shadow-[var(--shadow-md)]">
-        <button
-          type="button"
-          aria-expanded={dependencyCreatorOpen}
-          aria-controls="graph-dependency-creator"
-          onClick={() => setDependencyCreatorOpen((current) => !current)}
-          className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-        >
-          <Link2 size={12} />
-          {dependencyCreatorOpen ? 'Hide dependency controls' : 'Add dependency'}
-          <ChevronDown
-            size={12}
-            className={cn('transition-transform', dependencyCreatorOpen && 'rotate-180')}
-          />
-        </button>
-        {!dependencyCreatorOpen ? (
-          <span className="pr-1 text-xs text-[var(--text-tertiary)]">
-            Select a dependency line to manage it.
-          </span>
-        ) : null}
-        {dependencyCreatorOpen ? (
-          <div id="graph-dependency-creator" className="flex max-w-full flex-wrap items-center gap-2">
-            <span className="h-5 w-px bg-[var(--border)]" aria-hidden="true" />
-            <label htmlFor="graph-dependency-type" className="pl-1 text-xs text-[var(--text-secondary)]">
-              Connect as
-            </label>
-            <Select
-              value={dependencyType}
-              onValueChange={(value) => setDependencyType(value as 'blocks' | 'related')}
-            >
-              <SelectTrigger
-                id="graph-dependency-type"
-                variant="inline"
-                className="h-7 min-w-20 border-[var(--border)] bg-[var(--surface-2)] px-2 text-[var(--text-primary)]"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className={GRAPH_MENU_CLASS}>
-                <SelectItem value="blocks">Blocks</SelectItem>
-                <SelectItem value="related">Related</SelectItem>
-              </SelectContent>
-            </Select>
-            <label htmlFor="graph-source-task" className="sr-only">Dependency source task</label>
-            <Select
-              value={keyboardSourceId}
-              onValueChange={setKeyboardSourceId}
-            >
-              <SelectTrigger
-                id="graph-source-task"
-                variant="inline"
-                className="h-7 w-40 border-[var(--border)] bg-[var(--surface-2)] px-2 text-[var(--text-primary)]"
-              >
-                <SelectValue placeholder="From task…" />
-              </SelectTrigger>
-              <SelectContent className={GRAPH_MENU_CLASS}>
-                {taskNodes.map((node) => (
-                  <SelectItem key={node.id} value={node.id}>{node.data.graphNode.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <label htmlFor="graph-target-task" className="sr-only">Dependency target task</label>
-            <Select
-              value={keyboardTargetId}
-              onValueChange={setKeyboardTargetId}
-            >
-              <SelectTrigger
-                id="graph-target-task"
-                variant="inline"
-                className="h-7 w-40 border-[var(--border)] bg-[var(--surface-2)] px-2 text-[var(--text-primary)]"
-              >
-                <SelectValue placeholder="To task…" />
-              </SelectTrigger>
-              <SelectContent className={GRAPH_MENU_CLASS}>
-                {taskNodes.map((node) => (
-                  <SelectItem key={node.id} value={node.id}>{node.data.graphNode.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <button
-              type="button"
-              disabled={
-                !keyboardSourceId
-                || !keyboardTargetId
-                || keyboardSourceId === keyboardTargetId
-              }
-              onClick={() => void createDependency(keyboardSourceId, keyboardTargetId)}
-              className="inline-flex h-7 items-center gap-1 rounded-md bg-[var(--accent-600)] px-2 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:pointer-events-none disabled:opacity-40"
-            >
-              <Link2 size={12} />
-              Connect
-            </button>
-            <span className="h-5 w-px bg-[var(--border)]" aria-hidden="true" />
-            <span className="px-1 text-xs text-[var(--text-secondary)]">
-              {dependencyType === 'blocks'
-                ? direction === 'horizontal'
-                  ? "Drag from the predecessor's right handle to the successor's left handle."
-                  : "Drag from the predecessor's bottom handle to the successor's top handle."
-                : direction === 'horizontal'
-                  ? "Drag a right handle to another task's left handle."
-                  : "Drag a bottom handle to another task's top handle."}
-              {' '}Select a dependency line to manage it.
-            </span>
-          </div>
-        ) : null}
-      </div>
+      <ProjectGraphDependencyCreator
+        open={dependencyCreatorOpen}
+        type={dependencyType}
+        direction={direction}
+        sourceId={keyboardSourceId}
+        targetId={keyboardTargetId}
+        tasks={taskNodes.map((node) => ({ id: node.id, label: node.data.graphNode.label }))}
+        onOpenChange={setDependencyCreatorOpen}
+        onTypeChange={setDependencyType}
+        onSourceChange={setKeyboardSourceId}
+        onTargetChange={setKeyboardTargetId}
+        onCreate={() => void createDependency(keyboardSourceId, keyboardTargetId)}
+      />
 
-      <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-end gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]/95 p-1.5 shadow-[var(--shadow-md)]">
-        <span
-          className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-[var(--text-secondary)]"
-          title="Dragging a node only adjusts this temporary graph layout. Reorder phases and tasks in Plan list or assign view."
-        >
-          Node drag: layout only
-        </span>
-        <span className="h-5 w-px bg-[var(--border)]" aria-hidden="true" />
-        <label htmlFor="graph-layout-direction" className="sr-only">Graph layout direction</label>
-        <Select
-          value={direction}
-          onValueChange={(value) => changeDirection(value as GraphLayoutDirection)}
-        >
-          <SelectTrigger
-            id="graph-layout-direction"
-            variant="inline"
-            className="h-7 min-w-24 border-[var(--border)] bg-[var(--surface-2)] px-2 text-[var(--text-primary)]"
-            title="Graph layout direction"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className={GRAPH_MENU_CLASS}>
-            <SelectItem value="horizontal">Horizontal</SelectItem>
-            <SelectItem value="vertical">Vertical</SelectItem>
-          </SelectContent>
-        </Select>
-        <label htmlFor="graph-line-style" className="sr-only">Connection line style</label>
-        <Select
-          value={lineStyle}
-          onValueChange={(value) => setLineStyle(value as GraphLineStyle)}
-        >
-          <SelectTrigger
-            id="graph-line-style"
-            variant="inline"
-            className="h-7 min-w-28 border-[var(--border)] bg-[var(--surface-2)] px-2 text-[var(--text-primary)]"
-            title="Connection line style"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className={GRAPH_MENU_CLASS}>
-            <SelectItem value="orthogonal">Elbow lines</SelectItem>
-            <SelectItem value="curved">Curved lines</SelectItem>
-          </SelectContent>
-        </Select>
-        <span className="h-5 w-px bg-[var(--border)]" aria-hidden="true" />
-        <button
-          type="button"
-          aria-pressed={showDependencies}
-          onClick={() => setShowDependencies((current) => !current)}
-          className={cn(
-            'h-7 rounded-md border px-2 text-xs font-medium transition-colors',
-            showDependencies
-              ? 'border-[var(--accent-400)]/60 bg-[var(--accent-500)]/15 text-[var(--accent-300)]'
-              : 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-tertiary)]',
-          )}
-          title="Show or hide blocking and related-task lines"
-        >
-          Dependencies
-        </button>
-        {(['project', 'phase', 'task'] as const).map((kind) => (
-          <button
-            key={kind}
-            type="button"
-            aria-pressed={visibleKinds[kind]}
-            onClick={() => toggleNodeKind(kind)}
-            className={cn(
-              'h-7 rounded-md border px-2 text-xs font-medium capitalize transition-colors',
-              visibleKinds[kind]
-                ? 'border-[var(--border-strong)] bg-[var(--surface-2)] text-[var(--text-primary)]'
-                : 'border-[var(--border)] bg-transparent text-[var(--text-muted)] line-through',
-            )}
-            title={`${visibleKinds[kind] ? 'Hide' : 'Show'} ${kind} nodes`}
-          >
-            {kind}
-          </button>
-        ))}
-      </div>
+      <ProjectGraphDisplayControls
+        direction={direction}
+        lineStyle={lineStyle}
+        showDependencies={showDependencies}
+        visibleKinds={visibleKinds}
+        onDirectionChange={changeDirection}
+        onLineStyleChange={setLineStyle}
+        onToggleDependencies={() => setShowDependencies((current) => !current)}
+        onToggleNodeKind={toggleNodeKind}
+      />
       </div>
 
       {selectedPhase ? (
-        <aside className="pointer-events-auto relative ml-auto w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[var(--shadow-lg)]">
-          <button
-            type="button"
-            onClick={clearFocus}
-            className="absolute right-2 top-2 rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-            aria-label="Close phase details"
-          >
-            <X size={14} />
-          </button>
-          <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">Phase</p>
-          <h3 className="mt-1 pr-7 text-base font-semibold text-[var(--text-primary)]">{selectedPhase.label}</h3>
-          {selectedPhase.description ? (
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">{selectedPhase.description}</p>
-          ) : null}
-
-          <p className="mt-3 text-xs text-[var(--text-tertiary)]">
-            {selectedPhase.taskCount ?? 0} task{selectedPhase.taskCount === 1 ? '' : 's'} · {STATUS_STYLES[selectedPhase.status].label}
-          </p>
-        </aside>
+        <ProjectGraphPhaseDetails
+          phase={selectedPhase}
+          statusLabel={STATUS_STYLES[selectedPhase.status].label}
+          onClose={clearFocus}
+        />
       ) : null}
       {selectedDependency ? (
-        <aside className="pointer-events-auto relative ml-auto w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-[var(--shadow-lg)]">
-          <button
-            type="button"
-            onClick={clearFocus}
-            className="absolute right-2 top-2 rounded-md p-1.5 text-[var(--text-tertiary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
-            aria-label="Close dependency details"
-          >
-            <X size={14} />
-          </button>
-          <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">Dependency</p>
-          <h3 className="mt-1 pr-7 text-base font-semibold text-[var(--text-primary)]">
-            {selectedDependency.type === 'blocks' ? 'Blocks' : 'Related tasks'}
-          </h3>
-          <dl className="mt-3 space-y-3 text-sm">
-            <div>
-              <dt className="text-xs text-[var(--text-tertiary)]">
-                {selectedDependency.type === 'blocks'
-                  ? `Blocking ${selectedDependency.source.kind}`
-                  : selectedDependency.source.kind === 'phase' ? 'Phase' : 'Task'}
-              </dt>
-              <dd className="mt-0.5 text-[var(--text-primary)]">{selectedDependency.source.label}</dd>
-            </div>
-            <div>
-              <dt className="text-xs text-[var(--text-tertiary)]">
-                {selectedDependency.type === 'blocks'
-                  ? `Blocked ${selectedDependency.target.kind}`
-                  : 'Related to'}
-              </dt>
-              <dd className="mt-0.5 text-[var(--text-primary)]">{selectedDependency.target.label}</dd>
-            </div>
-          </dl>
-          <div className="mt-3 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-          {selectedDependency.edge.data?.syncStatus === 'synced' ? <Cloud size={15} /> : null}
-          {selectedDependency.edge.data?.syncStatus === 'local' ? <CloudOff size={15} /> : null}
-          {selectedDependency.edge.data?.syncStatus === 'pending' ? <LoaderCircle size={15} className="animate-spin" /> : null}
-          {selectedDependency.edge.data?.syncStatus === 'failed' ? <AlertTriangle size={15} className="text-[var(--danger)]" /> : null}
-          {EDGE_SYNC_LABELS[selectedDependency.edge.data?.syncStatus ?? 'local']}
-          </div>
-          {selectedDependency.edge.data?.syncError ? (
-          <p className="mt-2 text-xs text-[var(--danger)]">{selectedDependency.edge.data.syncError}</p>
-          ) : null}
-          <button
-            type="button"
-            disabled={removingDependency}
-            onClick={() => setDependencyToRemove({
-              edgeId: selectedDependency.edge.id,
-              targetEntityId: selectedDependency.target.entityId,
-              targetKind: selectedDependency.target.kind,
-            })}
-            className="mt-4 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-red-500/40 text-xs font-medium text-red-400 hover:bg-red-500/10 disabled:pointer-events-none disabled:opacity-50"
-          >
-            <Trash2 size={13} />
-            Remove dependency
-          </button>
-        </aside>
+        <ProjectGraphDependencyDetails
+          dependency={selectedDependency}
+          removing={removingDependency}
+          onClose={clearFocus}
+          onRemove={() => setDependencyToRemove({
+            edgeId: selectedDependency.edge.id,
+            targetEntityId: selectedDependency.target.entityId,
+            targetKind: selectedDependency.target.kind,
+          })}
+        />
       ) : null}
       </div>
 
@@ -1387,14 +994,10 @@ export default function ProjectStructureGraph({
         </div>
       ) : null}
 
-      <ConfirmDialog
+      <ProjectGraphRemovalDialog
         open={dependencyToRemove !== null}
-        title="Remove dependency?"
-        message={dependencyToRemove?.targetKind === 'phase'
-          ? 'This disconnects the phases but does not delete either phase.'
-          : 'This disconnects the tasks but does not delete either task.'}
-        confirmLabel={removingDependency ? 'Removing…' : 'Remove dependency'}
-        confirmVariant="danger"
+        targetKind={dependencyToRemove?.targetKind}
+        removing={removingDependency}
         onConfirm={() => void removeDependency()}
         onCancel={() => {
           if (!removingDependency) setDependencyToRemove(null);

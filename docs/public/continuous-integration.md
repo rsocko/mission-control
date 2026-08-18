@@ -48,9 +48,9 @@ runtime image, but the expensive dependency installation and application
 compilation occur in the intermediate builder stage. Exporting intermediate
 layers therefore provides the useful reuse. Cache export uses
 `ignore-error=true`. If cache import or another cache-backed invocation failure
-prevents a build, publication removes its partial metadata and retries once
-without either cache option. A missing, evicted, or unavailable cache can slow a
-publication but cannot make cached state a correctness requirement.
+prevents a build, publication retries once through the same pinned build action
+without either cache option. A missing, evicted, or unavailable cache can slow
+a publication but cannot make cached state a correctness requirement.
 
 The operational ceiling is **8 GiB** across all repository Actions caches,
 leaving headroom below GitHub's 10 GiB repository allowance. npm caches should
@@ -78,11 +78,11 @@ Use `sha-<7-character-commit>`, a semantic-version tag, or the full
 
 ## Repository configuration
 
-No Actions allowlist change is required. Keep **Allow select actions and
-reusable workflows** configured with GitHub-owned actions enabled, verified
-creator actions disabled, no additional patterns, and full-length commit SHA
-pinning required. The workflows intentionally use native Docker commands rather
-than Docker-maintained actions.
+Keep **Allow select actions and reusable workflows** configured with GitHub-owned
+actions enabled, verified creator actions disabled, the single additional
+pattern `docker/build-push-action@*`, and full-length commit SHA pinning
+required. The pinned Docker build action exposes GitHub's cache runtime
+credentials to BuildKit; raw inline `docker buildx build` commands do not.
 
 Connect the GHCR package to this repository and set the package visibility to
 **Public** so anonymous pulls work. Keep package write access inherited from the

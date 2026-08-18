@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
   <circle cx="48" cy="48" r="44" fill="#94a3b8"/>
   <!-- Settings/gear icon -->
-  <circle cx="48" cy="48" r="8" stroke="white" stroke-width="3" fill="none"/>
-  <path d="M48 30v4M48 62v4M30 48h4M62 48h4M35.3 35.3l2.8 2.8M57.9 57.9l2.8 2.8M60.7 35.3l-2.8 2.8M38.1 57.9l-2.8 2.8" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="48" cy="48" r="10" stroke="#0f172a" stroke-width="6" fill="none"/>
+  <path d="M48 22v10m0 32v10M22 48h10m32 0h10M29.6 29.6l7.1 7.1m22.6 22.6 7.1 7.1m0-36.8-7.1 7.1M36.7 59.3l-7.1 7.1" stroke="#0f172a" stroke-width="6" stroke-linecap="round"/>
 </svg>

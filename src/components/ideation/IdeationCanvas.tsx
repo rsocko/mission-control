@@ -10,8 +10,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { useRouter } from 'next/navigation';
-import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import {
   Tree,
   type DragPreviewProps,
@@ -31,7 +29,6 @@ import {
   type OnNodeDrag,
 } from '@xyflow/react';
 import * as ContextMenu from '@radix-ui/react-context-menu';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Check,
   ChevronDown,
@@ -49,7 +46,6 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -58,16 +54,12 @@ import {
   isIdeationDescendant,
   type IdeationNode,
   type IdeationNodeKind,
-  type IdeationPropertyKey,
   type IdeationTreeNode,
 } from '@/lib/graph/ideation-types';
 import {
-  IDEATION_EXPAND_MIN_PROPOSALS,
-  getBoundedIdeationContext,
-  getIdeationContextVersion,
-  normalizeIdeationLabel,
   type IdeationExpansionProposal,
 } from '@/lib/graph/ideation-expand';
+import { layoutIdeationMindMap } from '@/lib/graph/ideation-layout';
 import { getIdeationRelationshipTargetLabels } from '@/lib/ideation/property-parser';
 import {
   indentOutlineSelection,
@@ -75,7 +67,11 @@ import {
 } from '@/lib/ideation/text-outline';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
 import { InlinePropertyEditor } from './InlinePropertyEditor';
+import { IdeationConvertDialog } from './IdeationConvertDialog';
+import { IdeationPropertyPanel } from './IdeationPropertyPanel';
 import { IdeationWorkspaceBar } from './IdeationWorkspaceBar';
+import { IDEATION_KIND_OPTION_LABELS } from './ideation-config';
+import { useIdeationExpansion } from './useIdeationExpansion';
 import '@xyflow/react/dist/style.css';
 import styles from './IdeationCanvas.module.css';
 
@@ -87,25 +83,6 @@ const KIND_CONFIG: Record<IdeationNodeKind, {
   idea: { label: 'Idea', color: '#facc15', icon: Lightbulb },
   phase: { label: 'Phase', color: '#a78bfa', icon: Flag },
   task: { label: 'Task', color: '#34d399', icon: Check },
-};
-
-const KIND_OPTION_LABELS: Record<IdeationNodeKind, string> = {
-  idea: 'Idea (untyped)',
-  phase: 'Phase',
-  task: 'Task',
-};
-
-const SHORTCUT_PROPERTIES: Record<string, {
-  key: IdeationPropertyKey;
-  prefix: string;
-  values?: string[];
-}> = {
-  p: { key: 'priority', prefix: 'priority:: ', values: ['critical', 'high', 'medium', 'low', 'none'] },
-  s: { key: 'status', prefix: 'status:: ', values: ['todo', 'in_progress', 'done', 'blocked'] },
-  d: { key: 'due', prefix: 'due:: ' },
-  l: { key: 'tags', prefix: 'tags:: ' },
-  e: { key: 'effort', prefix: 'effort:: ', values: ['1', '2', '3', '4', '5'] },
-  a: { key: 'assignee', prefix: 'assignee:: ', values: ['me'] },
 };
 
 type IdeationCanvasNode = IdeationNode & {
@@ -129,22 +106,6 @@ function useOutlineFocus() {
   if (!context) throw new Error('Outline rows must be rendered inside IdeationOutline');
   return context;
 }
-
-interface ExpansionState {
-  status: 'idle' | 'loading' | 'ready' | 'error';
-  parentId: string | null;
-  contextVersion: string;
-  proposals: IdeationExpansionProposal[];
-  error: string | null;
-}
-
-const EMPTY_EXPANSION: ExpansionState = {
-  status: 'idle',
-  parentId: null,
-  contextVersion: '',
-  proposals: [],
-  error: null,
-};
 
 const OUTLINE_INDENT = 18;
 const OUTLINE_TOGGLE_CENTER = 12;
@@ -272,7 +233,7 @@ function TypeMenu({
                 className="flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--text-secondary)] outline-none data-[highlighted]:bg-[var(--surface-2)] data-[highlighted]:text-[var(--text-primary)]"
               >
                 <config.icon size={13} style={{ color: config.color }} />
-                {KIND_OPTION_LABELS[kind]}
+                {IDEATION_KIND_OPTION_LABELS[kind]}
                 {node.kind === kind ? <Check size={12} className="ml-auto" /> : null}
               </ContextMenu.Item>
             );
@@ -1006,45 +967,39 @@ export function layoutMindMap(nodes: IdeationCanvasNode[], onSelect: (id: string
   nodes: MindMapNode[];
   edges: Edge[];
 } {
-  const ordered = [...nodes].sort((a, b) => a.sortOrder - b.sortOrder);
-  const byParent = new Map<string | null, IdeationCanvasNode[]>();
-  for (const node of ordered) {
-    byParent.set(node.parentId, [...(byParent.get(node.parentId) ?? []), node]);
-  }
-
-  const positions = new Map<string, { x: number; y: number }>();
-  let leafIndex = 0;
-  const place = (node: IdeationCanvasNode, depth: number): number => {
-    const children = byParent.get(node.id) ?? [];
-    const childYs = children.map((child) => place(child, depth + 1));
-    const y = childYs.length
-      ? (Math.min(...childYs) + Math.max(...childYs)) / 2
-      : leafIndex++ * 104;
-    positions.set(node.id, { x: depth * 250 + 30, y: y + 30 });
-    return y;
-  };
-  for (const root of byParent.get(null) ?? []) place(root, 0);
+  const layout = layoutIdeationMindMap(nodes.map((node) => ({
+    id: node.id,
+    parentId: node.parentId,
+    sortOrder: node.sortOrder,
+    kind: node.kind,
+    proposal: Boolean(node.proposal),
+  })));
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
 
   return {
-    nodes: ordered.map((node) => ({
+    nodes: layout.orderedNodeIds.flatMap((nodeId) => {
+      const node = nodesById.get(nodeId);
+      if (!node) return [];
+      return [{
       id: node.id,
       type: 'ideation',
-      position: positions.get(node.id) ?? { x: 0, y: 0 },
+      position: layout.positions.get(node.id) ?? { x: 0, y: 0 },
       data: { node, onSelect },
       selected: false,
       draggable: !node.proposal,
       selectable: !node.proposal,
-    })),
-    edges: ordered.flatMap((node) => node.parentId ? [{
-      id: `hierarchy:${node.parentId}:${node.id}`,
-      source: node.parentId,
-      target: node.id,
+      }];
+    }),
+    edges: layout.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
       type: 'smoothstep',
-      animated: !node.proposal && node.kind === 'idea',
-      style: node.proposal
+      animated: !edge.proposal && edge.kind === 'idea',
+      style: edge.proposal
         ? { stroke: '#a78bfa', strokeOpacity: 0.7, strokeDasharray: '5 5' }
-        : { stroke: KIND_CONFIG[node.kind].color, strokeOpacity: 0.5 },
-    }] : []),
+        : { stroke: KIND_CONFIG[edge.kind].color, strokeOpacity: 0.5 },
+    })),
   };
 }
 
@@ -1103,407 +1058,24 @@ function IdeationMindMap({ sourceNodes }: { sourceNodes: IdeationCanvasNode[] })
   );
 }
 
-function PropertyPanel() {
-  const nodes = useIdeationStore((state) => state.nodes);
-  const selectedNodeId = useIdeationStore((state) => state.selectedNodeId);
-  const updateLabel = useIdeationStore((state) => state.updateLabel);
-  const updateKind = useIdeationStore((state) => state.updateKind);
-  const setProperty = useIdeationStore((state) => state.setProperty);
-  const removeProperty = useIdeationStore((state) => state.removeProperty);
-  const selectNode = useIdeationStore((state) => state.selectNode);
-  const [draft, setDraft] = useState('');
-  const [draftKey, setDraftKey] = useState(0);
-  const [shortcut, setShortcut] = useState<IdeationPropertyKey | null>(null);
-  const selected = nodes.find((node) => node.id === selectedNodeId) ?? null;
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (shouldBlockGlobalShortcut(event)) return;
-      const target = event.target;
-      if (
-        !selected
-        || (target instanceof HTMLElement
-          && target.matches('input, textarea, select, [contenteditable="true"]'))
-      ) return;
-      const config = SHORTCUT_PROPERTIES[event.key.toLowerCase()];
-      if (!config) return;
-      event.preventDefault();
-      event.stopPropagation();
-      setShortcut(config.key);
-      setDraft(config.prefix);
-      setDraftKey((key) => key + 1);
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [selected]);
-
-  if (!selected) {
-    return (
-      <aside className="hidden w-72 shrink-0 items-center justify-center border-l border-[var(--border)] bg-[var(--surface-1)] p-6 text-center text-xs text-[var(--text-tertiary)] xl:flex">
-        Select a node to edit properties. Shortcuts: P priority, S status, A assignee, D due, L tags, E effort.
-      </aside>
-    );
-  }
-
-  const shortcutConfig = Object.values(SHORTCUT_PROPERTIES).find((config) => config.key === shortcut);
-  const chooseShortcutValue = (value: string) => {
-    setDraft(`${shortcutConfig?.prefix ?? ''}${value}`);
-    setDraftKey((key) => key + 1);
-  };
-
-  return (
-    <aside className="absolute inset-y-0 right-0 z-20 w-72 overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-2xl xl:static xl:z-auto xl:shadow-none">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Node properties</h2>
-        <button type="button" onClick={() => selectNode(null)} aria-label="Close properties" className="rounded-md p-1 text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]">
-          <X size={14} />
-        </button>
-      </div>
-      <div className="space-y-4">
-        <label className="block space-y-1">
-          <span className="text-[10px] font-medium uppercase text-[var(--text-tertiary)]">Title</span>
-          <input
-            value={selected.label}
-            onChange={(event) => updateLabel(selected.id, event.target.value)}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-500)]"
-          />
-        </label>
-        <label className="block space-y-1">
-          <span className="text-[10px] font-medium uppercase text-[var(--text-tertiary)]">Type</span>
-          <Select
-            value={selected.kind}
-            onValueChange={(value) => updateKind(selected.id, value as IdeationNodeKind)}
-          >
-            <SelectTrigger aria-label="Node type" className="h-9 min-h-0 w-full text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {IDEATION_KIND_ORDER.map((kind) => (
-                <SelectItem key={kind} value={kind}>{KIND_OPTION_LABELS[kind]}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </label>
-        {shortcutConfig?.values?.length ? (
-          <div className="rounded-lg border border-[var(--accent-500)]/30 bg-[var(--accent-500)]/5 p-2">
-            <p className="mb-2 text-[10px] font-semibold uppercase text-[var(--accent-300)]">
-              {shortcutConfig.key} shortcut
-            </p>
-            <div className="flex flex-wrap gap-1">
-              {shortcutConfig.values.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => chooseShortcutValue(value)}
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1 text-[10px] text-[var(--text-secondary)] hover:border-[var(--accent-500)]"
-                >
-                  {value.replaceAll('_', ' ')}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <InlinePropertyEditor
-          key={`${selected.id}:${draftKey}`}
-          draft={draft}
-          draftKey={draftKey}
-          nodeLabels={getIdeationRelationshipTargetLabels(nodes, selected.id)}
-          onSubmit={(property) => {
-            setProperty(selected.id, property);
-            setShortcut(null);
-            setDraft('');
-          }}
-        />
-        <div className="space-y-2">
-          {Object.values(selected.properties).filter(Boolean).map((property) => (
-            <div key={property.key} className="flex items-start gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase text-[var(--text-tertiary)]">{property.key}</p>
-                <p className="truncate text-xs text-[var(--text-secondary)]">
-                  {Array.isArray(property.value) ? property.value.join(', ') : String(property.value)}
-                </p>
-              </div>
-              <button type="button" onClick={() => removeProperty(selected.id, property.key)} aria-label={`Remove ${property.key}`} className="text-[var(--text-tertiary)] hover:text-red-400">
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-function ConvertDialog({ onClose }: { onClose: () => void }) {
-  const router = useRouter();
-  const nodes = useIdeationStore((state) => state.nodes);
-  const flushWorkspace = useIdeationStore((state) => state.flushWorkspace);
-  const root = nodes.find((node) => node.parentId === null);
-  const [name, setName] = useState(root?.label ?? 'New Project');
-  const [color, setColor] = useState('#6366f1');
-  const [converting, setConverting] = useState(false);
-
-  const phaseCount = nodes.filter((node) => node.kind === 'phase').length;
-  const taskCount = nodes.filter((node) => node.kind === 'task').length;
-
-  const convert = async () => {
-    setConverting(true);
-    try {
-      if (flushWorkspace && !await flushWorkspace()) {
-        throw new Error('Resolve the workspace save issue before converting.');
-      }
-      const workspace = useIdeationStore.getState();
-      const response = await fetch('/api/ideation/convert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name,
-          color,
-          nodes,
-          sourceWorkspace: workspace.workspaceId && workspace.workspaceRevision
-            ? { id: workspace.workspaceId, revision: workspace.workspaceRevision }
-            : undefined,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? 'Conversion failed');
-      toast.success('Project created from ideation');
-      router.push(`/projects/${result.projectId}`);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Conversion failed');
-    } finally {
-      setConverting(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4" role="presentation" onMouseDown={onClose}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="convert-title"
-        className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5 shadow-2xl"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex items-start gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-400"><Rocket size={18} /></span>
-          <div>
-            <h2 id="convert-title" className="font-semibold text-[var(--text-primary)]">Convert to project</h2>
-            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
-              Creates {phaseCount} phase{phaseCount === 1 ? '' : 's'} and {taskCount} task{taskCount === 1 ? '' : 's'} in one transaction.
-            </p>
-          </div>
-        </div>
-        <div className="mt-5 space-y-4">
-          <label className="block space-y-1">
-            <span className="text-xs text-[var(--text-secondary)]">Project name</span>
-            <input value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]" />
-          </label>
-          <label className="flex items-center justify-between rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2">
-            <span className="text-xs text-[var(--text-secondary)]">Project color</span>
-            <input type="color" value={color} onChange={(event) => setColor(event.target.value)} className="h-7 w-10 bg-transparent" />
-          </label>
-        </div>
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={convert} disabled={!name.trim() || converting}>
-            {converting ? <LoaderCircle className="animate-spin" /> : <Rocket />}
-            Create project
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function IdeationCanvas() {
   const nodes = useIdeationStore((state) => state.nodes);
   const selectedNodeId = useIdeationStore((state) => state.selectedNodeId);
   const addNode = useIdeationStore((state) => state.addNode);
-  const acceptProposals = useIdeationStore((state) => state.acceptProposals);
   const undo = useIdeationStore((state) => state.undo);
   const past = useIdeationStore((state) => state.past);
   const [convertOpen, setConvertOpen] = useState(false);
   const [outlineMode, setOutlineMode] = useState<'visual' | 'text'>('visual');
-  const [expansion, setExpansion] = useState<ExpansionState>(EMPTY_EXPANSION);
-  const requestRef = useRef<{ controller: AbortController; id: number } | null>(null);
-  const requestIdRef = useRef(0);
   const root = nodes.find((node) => node.parentId === null);
   const selected = nodes.find((node) => node.id === selectedNodeId) ?? null;
-  const currentContextVersion = selected
-    ? getIdeationContextVersion(nodes, selected.id)
-    : '';
-
-  const clearExpansion = useCallback(() => {
-    requestRef.current?.controller.abort();
-    requestRef.current = null;
-    requestIdRef.current += 1;
-    setExpansion(EMPTY_EXPANSION);
-  }, []);
-
-  const expandSelected = useCallback(async () => {
-    if (!selected) return;
-
-    requestRef.current?.controller.abort();
-    const controller = new AbortController();
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    requestRef.current = { controller, id: requestId };
-    const contextVersion = getIdeationContextVersion(nodes, selected.id);
-    const expansionRequest = {
-      selectedNode: {
-        id: selected.id,
-        label: selected.label.slice(0, 160),
-        kind: selected.kind,
-        parentId: selected.parentId,
-      },
-      contextNodes: getBoundedIdeationContext(nodes, selected.id).map((node) => ({
-        ...node,
-        label: node.label.slice(0, 160),
-      })),
-      contextVersion,
-    };
-    setExpansion({
-      status: 'loading',
-      parentId: selected.id,
-      contextVersion,
-      proposals: [],
-      error: null,
-    });
-
-    try {
-      const response = await fetch('/api/ideation/expand', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(expansionRequest),
-        signal: controller.signal,
-      });
-      const result = await response.json().catch(() => ({})) as {
-        error?: string;
-        proposals?: IdeationExpansionProposal[];
-        contextVersion?: string;
-        selectedNodeId?: string;
-      };
-      if (!response.ok) {
-        throw new Error(
-          response.status === 401
-            ? 'AI Expand is unavailable while API-key protection is enabled.'
-            : result.error ?? 'AI expansion failed',
-        );
-      }
-      if (
-        requestIdRef.current !== requestId
-        || result.contextVersion !== contextVersion
-        || result.selectedNodeId !== selected.id
-      ) return;
-
-      const latest = useIdeationStore.getState();
-      if (
-        latest.selectedNodeId !== selected.id
-        || getIdeationContextVersion(latest.nodes, selected.id) !== contextVersion
-      ) return;
-      if (!result.proposals?.length) throw new Error('AI returned no suggestions');
-      const childLabels = new Set(
-        latest.nodes
-          .filter((node) => node.parentId === selected.id)
-          .map((node) => normalizeIdeationLabel(node.label)),
-      );
-      const proposals = result.proposals.filter(
-        (proposal) => !childLabels.has(normalizeIdeationLabel(proposal.label)),
-      );
-      if (proposals.length < IDEATION_EXPAND_MIN_PROPOSALS) {
-        throw new Error('AI returned too many duplicate suggestions. Retry to generate a fresh set.');
-      }
-
-      setExpansion({
-        status: 'ready',
-        parentId: selected.id,
-        contextVersion,
-        proposals,
-        error: null,
-      });
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') return;
-      if (requestIdRef.current !== requestId) return;
-      setExpansion({
-        status: 'error',
-        parentId: selected.id,
-        contextVersion,
-        proposals: [],
-        error: error instanceof Error ? error.message : 'AI expansion failed',
-      });
-    } finally {
-      if (requestRef.current?.id === requestId) requestRef.current = null;
-    }
-  }, [nodes, selected]);
-
-  const acceptOne = useCallback((proposalId: string) => {
-    if (
-      expansion.status !== 'ready'
-      || !expansion.parentId
-      || expansion.contextVersion !== currentContextVersion
-    ) return;
-    const proposal = expansion.proposals.find((candidate) => candidate.id === proposalId);
-    if (!proposal) return;
-    const accepted = acceptProposals(expansion.parentId, [{ label: proposal.label }]);
-    if (!accepted.length) {
-      setExpansion((state) => {
-        const proposals = state.proposals.filter((candidate) => candidate.id !== proposalId);
-        return proposals.length ? {
-          ...state,
-          proposals,
-          error: 'That suggestion already exists and was dismissed.',
-        } : {
-          ...EMPTY_EXPANSION,
-          status: 'error',
-          parentId: state.parentId,
-          contextVersion: state.contextVersion,
-          error: 'That suggestion already exists and was dismissed.',
-        };
-      });
-      return;
-    }
-    const remaining = expansion.proposals.filter((candidate) => candidate.id !== proposalId);
-    const latest = useIdeationStore.getState();
-    setExpansion(remaining.length ? {
-      ...expansion,
-      contextVersion: getIdeationContextVersion(latest.nodes, expansion.parentId),
-      proposals: remaining,
-    } : EMPTY_EXPANSION);
-  }, [acceptProposals, currentContextVersion, expansion]);
-
-  const acceptAll = useCallback(() => {
-    if (
-      expansion.status !== 'ready'
-      || !expansion.parentId
-      || expansion.contextVersion !== currentContextVersion
-    ) return;
-    const existingLabels = new Set(
-      useIdeationStore.getState().nodes
-        .filter((node) => node.parentId === expansion.parentId)
-        .map((node) => normalizeIdeationLabel(node.label)),
-    );
-    const accepted = acceptProposals(
-      expansion.parentId,
-      expansion.proposals.map((proposal) => ({ label: proposal.label })),
-    );
-    if (accepted.length !== expansion.proposals.length) {
-      const rejected = expansion.proposals.filter(
-        (proposal) => existingLabels.has(normalizeIdeationLabel(proposal.label)),
-      );
-      toast.error(`${rejected.length || expansion.proposals.length - accepted.length} suggestion(s) already existed and were skipped.`);
-      setExpansion(EMPTY_EXPANSION);
-      return;
-    }
-    setExpansion(EMPTY_EXPANSION);
-  }, [acceptProposals, currentContextVersion, expansion]);
-
-  const dismissOne = useCallback((proposalId: string) => {
-    setExpansion((state) => {
-      const proposals = state.proposals.filter((proposal) => proposal.id !== proposalId);
-      return proposals.length ? { ...state, proposals } : EMPTY_EXPANSION;
-    });
-  }, []);
+  const {
+    expansion,
+    clearExpansion,
+    expandSelected,
+    acceptOne,
+    acceptAll,
+    dismissOne,
+  } = useIdeationExpansion(nodes, selected);
 
   const canvasNodes = useMemo<IdeationCanvasNode[]>(() => {
     const interactiveNodes = nodes.map((node) => ({
@@ -1533,22 +1105,6 @@ export default function IdeationCanvas() {
     return () => {
       delete document.body.dataset.ideationActive;
     };
-  }, []);
-
-  useEffect(() => {
-    if (
-      expansion.status !== 'idle'
-      && expansion.contextVersion
-      && expansion.contextVersion !== currentContextVersion
-    ) {
-      const timeout = window.setTimeout(clearExpansion, 0);
-      return () => window.clearTimeout(timeout);
-    }
-  }, [clearExpansion, currentContextVersion, expansion.contextVersion, expansion.status]);
-
-  useEffect(() => () => {
-    requestRef.current?.controller.abort();
-    requestRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -1659,9 +1215,9 @@ export default function IdeationCanvas() {
         <section className="relative min-h-[500px]" aria-label="Mind map panel">
           <ReactFlowProvider><IdeationMindMap sourceNodes={canvasNodes} /></ReactFlowProvider>
         </section>
-        <PropertyPanel />
+        <IdeationPropertyPanel />
       </div>
-      {convertOpen ? <ConvertDialog onClose={() => setConvertOpen(false)} /> : null}
+      {convertOpen ? <IdeationConvertDialog onClose={() => setConvertOpen(false)} /> : null}
     </div>
   );
 }

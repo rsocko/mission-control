@@ -26,6 +26,7 @@ export interface ShortcutPage {
 }
 
 export const TASKBAR_SHORTCUT_LIMIT = 4;
+export const TASKBAR_ICON_VERSION = 2;
 
 export const SHORTCUT_PAGES: readonly ShortcutPage[] = [
   {

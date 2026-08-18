@@ -46,8 +46,13 @@ if (!fs.existsSync(outputDir)) {
 const includes = [
   'manifest.json',
   'background.js',
+  'background',
   'popup.html',
   'popup.js',
+  'popup',
+  'shared',
+  'sidepanel.html',
+  'sidepanel-loader.js',
   'page-fetch-relay.js',
   'icons',
   'content-scripts',

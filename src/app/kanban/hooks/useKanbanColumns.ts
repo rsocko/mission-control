@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { kanbanLogger } from '@/lib/client-logger';
 import { DEFAULT_COLUMNS } from '../components';
-import type { HubProject, KanbanColumn as KanbanColumnType } from '../components';
+import type {
+  KanbanColumnViewModel as KanbanColumnType,
+  KanbanProjectViewModel,
+} from '../components';
 
 export interface KanbanConfirmDialogState {
   open: boolean;
@@ -17,8 +20,8 @@ export interface KanbanConfirmDialogState {
 
 interface UseKanbanColumnsOptions {
   selectedProject: string;
-  projects: HubProject[];
-  setProjects: React.Dispatch<React.SetStateAction<HubProject[]>>;
+  projects: KanbanProjectViewModel[];
+  setProjects: React.Dispatch<React.SetStateAction<KanbanProjectViewModel[]>>;
   setConfirmDialog: React.Dispatch<React.SetStateAction<KanbanConfirmDialogState>>;
 }
 

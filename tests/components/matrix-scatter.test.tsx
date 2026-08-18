@@ -9,7 +9,7 @@ import { MatrixScatter } from '@/components/dashboard/matrix/MatrixScatter';
 import { TaskViewSwitcher } from '@/components/dashboard/TaskViewSwitcher';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { normalizeTaskFilterContext } from '@/lib/task-filter-context';
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 function matrixTask(overrides: Partial<Task>): Task {

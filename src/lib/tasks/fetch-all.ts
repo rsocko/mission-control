@@ -15,10 +15,11 @@ export async function fetchAllTasks<T>(path: string, init?: RequestInit): Promis
     url.searchParams.set('offset', String(offset));
     const response = await fetch(`${url.pathname}${url.search}`, init);
     if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      const payload: { error?: string } | null =
+        await response.json().catch(() => null);
       throw new Error(payload?.error || 'Failed to load tasks');
     }
-    const page = (await response.json()) as TaskPage<T>;
+    const page: TaskPage<T> = await response.json();
     const pageTasks = page.tasks ?? [];
     tasks.push(...pageTasks);
     offset += pageTasks.length;

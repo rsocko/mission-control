@@ -4,7 +4,10 @@ import { useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { getTaskStatusGroupLabel } from '@/lib/tasks/task-status-groups';
-import type { Task, TaskResponse } from '@/types/dashboard';
+import type {
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 
 export type VirtualRow =
   | { type: 'task'; task: Task }

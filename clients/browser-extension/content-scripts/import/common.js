@@ -97,6 +97,89 @@
     chrome.runtime.sendMessage({ type: 'mc-import-progress', platform, ...patch }).catch(() => {});
   }
 
+  function errorMessage(error, fallback) {
+    return error?.message || fallback;
+  }
+
+  function createImportSession(platform, batchSize = 25) {
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+
+    function addError(error, fallback = 'Import failed') {
+      errors.push(errorMessage(error, fallback));
+    }
+
+    async function submit(items) {
+      for (let index = 0; index < items.length; index += batchSize) {
+        try {
+          const result = await sendBatch(platform, items.slice(index, index + batchSize));
+          imported += result.imported ?? 0;
+          skipped += result.skipped ?? 0;
+          if (Array.isArray(result.errors)) errors.push(...result.errors);
+        } catch (error) {
+          addError(error, 'Failed to submit batch');
+        }
+        reportProgress(platform, { imported, skipped, done: false });
+      }
+      return snapshot();
+    }
+
+    function snapshot() {
+      return { imported, skipped, errors };
+    }
+
+    function finish(patch = {}) {
+      reportProgress(platform, {
+        imported,
+        skipped,
+        errors: errors.slice(0, 10),
+        done: true,
+        ...patch,
+      });
+      return snapshot();
+    }
+
+    return { addError, finish, snapshot, submit };
+  }
+
+  async function collectPages({ maxPages, initialCursor, fetchPage }) {
+    const items = [];
+    let cursor = initialCursor;
+    for (let page = 0; page < maxPages; page += 1) {
+      const result = await fetchPage(cursor, page);
+      if (Array.isArray(result.items)) items.push(...result.items);
+      if (result.nextCursor == null) break;
+      cursor = result.nextCursor;
+    }
+    return items;
+  }
+
+  async function runPagedImport({
+    platform,
+    batchSize = 25,
+    maxPages,
+    initialCursor,
+    fetchPage,
+    normalizeItems = (items) => items,
+  }) {
+    const session = createImportSession(platform, batchSize);
+    let cursor = initialCursor;
+
+    try {
+      for (let page = 0; page < maxPages; page += 1) {
+        const result = await fetchPage(cursor, page);
+        await session.submit(normalizeItems(result.items || [], result, page).filter(Boolean));
+        if (result.nextCursor == null) break;
+        cursor = result.nextCursor;
+      }
+    } catch (error) {
+      session.addError(error);
+    }
+
+    return session.finish();
+  }
+
   /**
    * Passively observes fetch responses the page makes on its own (rather than
    * synthesizing requests ourselves). Used by the Twitter/X importer, whose
@@ -133,5 +216,13 @@
     };
   }
 
-  window.MCImportCommon = { relayFetch, sendBatch, reportProgress, observeFetch };
+  window.MCImportCommon = {
+    collectPages,
+    createImportSession,
+    observeFetch,
+    relayFetch,
+    reportProgress,
+    runPagedImport,
+    sendBatch,
+  };
 })();

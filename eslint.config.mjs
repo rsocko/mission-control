@@ -33,8 +33,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Archived documentation — not part of the active build
     "docs/**",
-    // One-off migration scripts
-    "scripts/**",
+    // One-off operator scripts; maintained build and packaging scripts are linted.
+    "scripts/github-bulk-issue-transfer.ts",
     // Reviewed third-party provider build; validated separately by impeccable:validate
     ".github/skills/impeccable/**",
     // Docs screenshot suite — uses separate Playwright config, not part of main build

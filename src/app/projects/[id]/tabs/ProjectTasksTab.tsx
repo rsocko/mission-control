@@ -36,10 +36,10 @@ import {
 } from '@/lib/task-filter-context';
 import { cn } from '@/lib/utils';
 import type {
+  DashboardProjectViewModel as FilterHubProject,
+  DashboardTaskTagViewModel as TaskTag,
   EnabledSource,
-  HubProject as FilterHubProject,
   SourceList,
-  TaskTag,
 } from '@/types/dashboard';
 import {
   PhaseAddTaskMenu,

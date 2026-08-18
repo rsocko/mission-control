@@ -65,12 +65,12 @@ describe('PWA manifest branding', () => {
       expect.objectContaining({
         name: 'Icon Finder',
         url: '/icons',
-        icons: [{ src: '/icons/shortcut-icon-finder.svg', sizes: '96x96', type: 'image/svg+xml' }],
+        icons: [{ src: '/icons/shortcut-icon-finder.svg?v=2', sizes: '96x96', type: 'image/svg+xml' }],
       }),
       expect.objectContaining({
         name: 'My Day',
         url: '/today',
-        icons: [{ src: '/icons/shortcut-today.svg', sizes: '96x96', type: 'image/svg+xml' }],
+        icons: [{ src: '/icons/shortcut-today.svg?v=2', sizes: '96x96', type: 'image/svg+xml' }],
       }),
     ]);
   });

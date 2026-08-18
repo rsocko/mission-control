@@ -113,7 +113,7 @@ function detectCollectionId() {
 }
 
 async function runInstagramImport(options) {
-  const { relayFetch, sendBatch, reportProgress } = window.MCImportCommon;
+  const { relayFetch, reportProgress, runPagedImport } = window.MCImportCommon;
   const auth = detectInstagramAuth();
 
   if (!auth) {
@@ -124,21 +124,16 @@ async function runInstagramImport(options) {
   // Determine which feed to fetch: a specific collection or all saved posts
   const collectionId = options?.collectionId || detectCollectionId();
 
-  let maxId;
-  let page = 0;
-  let totalImported = 0;
-  let totalSkipped = 0;
-  const errors = [];
-
-  while (page < IG_MAX_PAGES) {
-    const url = collectionId
-      ? new URL(`https://www.instagram.com/api/v1/feed/saved/collection/${collectionId}/`)
-      : new URL('https://www.instagram.com/api/v1/feed/saved/posts/');
-    if (maxId) url.searchParams.set('max_id', maxId);
-
-    let response;
-    try {
-      response = await relayFetch(url.toString(), {
+  await runPagedImport({
+    platform: 'instagram',
+    batchSize: IG_BATCH_SIZE,
+    maxPages: IG_MAX_PAGES,
+    async fetchPage(maxId) {
+      const url = collectionId
+        ? new URL(`https://www.instagram.com/api/v1/feed/saved/collection/${collectionId}/`)
+        : new URL('https://www.instagram.com/api/v1/feed/saved/posts/');
+      if (maxId) url.searchParams.set('max_id', maxId);
+      const response = await relayFetch(url.toString(), {
         method: 'GET',
         credentials: 'include',
         headers: {
@@ -147,46 +142,22 @@ async function runInstagramImport(options) {
           'x-requested-with': 'XMLHttpRequest',
         },
       });
-    } catch (err) {
-      errors.push(err.message || 'Network error fetching Instagram saved posts');
-      break;
-    }
-
-    if (!response.ok) {
-      errors.push(`Instagram saved posts request failed: ${response.status}`);
-      break;
-    }
-
-    let payload;
-    try {
-      payload = JSON.parse(response.body);
-    } catch {
-      errors.push('Instagram saved posts response was not valid JSON');
-      break;
-    }
-
-    const items = Array.isArray(payload.items) ? payload.items : [];
-    const normalized = items.map(normalizeInstagramItem).filter(Boolean);
-
-    for (let i = 0; i < normalized.length; i += IG_BATCH_SIZE) {
-      const batch = normalized.slice(i, i + IG_BATCH_SIZE);
-      try {
-        const result = await sendBatch('instagram', batch);
-        totalImported += result.imported;
-        totalSkipped += result.skipped;
-        if (result.errors?.length) errors.push(...result.errors);
-      } catch (err) {
-        errors.push(err.message || 'Failed to submit batch');
+      if (!response.ok) {
+        throw new Error(`Instagram saved posts request failed: ${response.status}`);
       }
-      reportProgress('instagram', { imported: totalImported, skipped: totalSkipped, done: false });
-    }
-
-    page += 1;
-    if (!payload.more_available || !payload.next_max_id) break;
-    maxId = payload.next_max_id;
-  }
-
-  reportProgress('instagram', { imported: totalImported, skipped: totalSkipped, errors: errors.slice(0, 10), done: true });
+      let payload;
+      try {
+        payload = JSON.parse(response.body);
+      } catch {
+        throw new Error('Instagram saved posts response was not valid JSON');
+      }
+      return {
+        items: Array.isArray(payload.items) ? payload.items : [],
+        nextCursor: payload.more_available ? payload.next_max_id || null : null,
+      };
+    },
+    normalizeItems: (items) => items.map(normalizeInstagramItem),
+  });
 }
 
 function getLoggedInUsername() {

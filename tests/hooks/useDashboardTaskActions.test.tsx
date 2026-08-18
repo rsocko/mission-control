@@ -6,7 +6,10 @@ import {
   type DashboardTaskConfirmDialog,
   type DashboardTaskExit,
 } from '@/lib/hooks/useDashboardTaskActions';
-import type { Task, TaskResponse } from '@/types/dashboard';
+import type {
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 
 const toast = vi.hoisted(() => ({

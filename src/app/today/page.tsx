@@ -21,7 +21,7 @@ import { useTodayActions } from '@/lib/hooks/useTodayActions';
 import { formatDateLocal } from '@/lib/utils/date-format';
 import { dashboardKeys } from '@/lib/hooks/useDashboardQueries';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
-import type { HubProject, ListGroup } from '@/types/dashboard';
+import type { DashboardProjectViewModel as HubProject, ListGroup } from '@/types/dashboard';
 import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
 import type { SuggestionTask } from '@/components/today/types';
 

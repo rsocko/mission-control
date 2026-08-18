@@ -31,10 +31,9 @@ import {
   taskFilterContextToTaskQuery,
 } from '@/lib/task-filter-context';
 import type {
-  Task,
-  TaskTag,
-  TaskResponse,
-  HubProject,
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskResponseViewModel as TaskResponse,
+  DashboardTaskTagViewModel as TaskTag,
   ListGroup,
   SourceList,
   EnabledSource,
@@ -661,7 +660,8 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
                 )));
                 const response = await fetch(`/api/tasks?${params.toString()}`);
                 if (!response.ok) throw new Error(`Failed to refresh tasks (${response.status})`);
-                return response.json() as Promise<TaskResponse>;
+                const payload: TaskResponse = await response.json();
+                return payload;
               },
             )).then((pages) => flattenTaskPages({
               pages,
@@ -785,13 +785,13 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
 
       const res = await fetch(`/api/tasks?${params.toString()}`);
       if (!res.ok) throw new Error(`Failed to load more tasks for group (${res.status})`);
-      const data = await res.json();
+      const data: TaskResponse = await res.json();
 
       if (data.tasks?.length) {
         setTaskResponse((current) => {
           // Deduplicate: only add tasks not already in the list
           const existingIds = new Set(current.tasks.map((t) => t.id));
-          const newTasks = (data.tasks as Task[])
+          const newTasks = data.tasks
             .filter((t) => !existingIds.has(t.id))
             .slice(0, remainingCapacity);
           return { ...current, tasks: [...current.tasks, ...newTasks] };

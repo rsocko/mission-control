@@ -1,4 +1,4 @@
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 
 export type MatrixAxisMode = 'priority-urgency' | 'priority-effort';
 export type MatrixSizeMode = 'smart-score' | 'effort' | 'urgency' | 'uniform';

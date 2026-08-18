@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PhaseAssignView } from '@/app/projects/[id]/PhaseAssignView';
-import type { ProjectPhase } from '@/app/projects/[id]/types';
+import type { ProjectPhaseViewModel as ProjectPhase } from '@/app/projects/[id]/types';
 
 vi.mock('@dnd-kit/core', () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,

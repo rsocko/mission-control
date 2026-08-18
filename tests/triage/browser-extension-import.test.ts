@@ -8,10 +8,16 @@ const commonScript = fs.readFileSync(
   path.resolve(process.cwd(), 'clients/browser-extension/content-scripts/import/common.js'),
   'utf8',
 );
-const popupScript = fs.readFileSync(
-  path.resolve(process.cwd(), 'clients/browser-extension/popup.js'),
+const popupScripts = [
+  'shared/capture-client.js',
+  'popup/dom.js',
+  'popup/capture.js',
+  'popup/send-tabs.js',
+  'popup.js',
+].map((file) => fs.readFileSync(
+  path.resolve(process.cwd(), 'clients/browser-extension', file),
   'utf8',
-);
+));
 
 type ImportProgressListener = (message: {
   type: string;
@@ -141,7 +147,7 @@ describe('browser extension imports', () => {
       setTimeout,
       clearTimeout,
     });
-    vm.runInContext(popupScript, context);
+    for (const script of popupScripts) vm.runInContext(script, context);
     await vi.waitFor(() => expect(window.document.getElementById('importStatus')).not.toBeNull());
 
     expect(progressListener).toBeDefined();
@@ -158,5 +164,70 @@ describe('browser extension imports', () => {
     expect(status?.textContent).toContain('Finished with errors');
     expect(status?.textContent).toContain('Relay fetch timed out');
     expect(status?.className).toBe('import-status error');
+  });
+
+  it('shares pagination, batching, progress, and bounded terminal errors', async () => {
+    const window = new Window({ url: 'https://www.reddit.com/user/test/saved' });
+    const sendMessage = vi.fn(async (message) => {
+      if (message.type === 'mc-bulk-import-batch') {
+        return {
+          imported: message.items.length,
+          skipped: 0,
+          errors: message.items[0]?.id === 3 ? ['item warning'] : [],
+        };
+      }
+      return {};
+    });
+    const context = vm.createContext({
+      window,
+      document: window.document,
+      chrome: {
+        runtime: {
+          getURL: (file: string) => `chrome-extension://test/${file}`,
+          sendMessage,
+        },
+      },
+      CustomEvent: window.CustomEvent,
+      console,
+      setTimeout,
+      clearTimeout,
+    });
+    vm.runInContext(commonScript, context);
+
+    const common = (window as unknown as {
+      MCImportCommon: {
+        runPagedImport: (options: Record<string, unknown>) => Promise<{
+          imported: number;
+          skipped: number;
+          errors: string[];
+        }>;
+      };
+    }).MCImportCommon;
+    const result = await common.runPagedImport({
+      platform: 'reddit',
+      batchSize: 2,
+      maxPages: 5,
+      initialCursor: 0,
+      fetchPage: async (cursor: number) => ({
+        items: cursor === 0 ? [{ id: 1 }, { id: 2 }, { id: 3 }] : [{ id: 4 }],
+        nextCursor: cursor === 0 ? 1 : null,
+      }),
+    });
+
+    expect(result).toMatchObject({ imported: 4, skipped: 0, errors: ['item warning'] });
+    const batches = sendMessage.mock.calls
+      .map(([message]) => message)
+      .filter((message) => message.type === 'mc-bulk-import-batch');
+    expect(batches.map((message) => message.items.map((item: { id: number }) => item.id))).toEqual([
+      [1, 2],
+      [3],
+      [4],
+    ]);
+    expect(sendMessage).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'mc-import-progress',
+      imported: 4,
+      errors: ['item warning'],
+      done: true,
+    }));
   });
 });

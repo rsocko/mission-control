@@ -4,7 +4,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
-import type { Task } from '@/types/dashboard';
+import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 // Mock lucide-react icons

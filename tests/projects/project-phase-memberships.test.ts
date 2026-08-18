@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { syncTaskPhaseMemberships } from '@/app/projects/[id]/utils';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
-import type { ProjectTask } from '@/app/projects/[id]/types';
+import type { ProjectTaskViewModel as ProjectTask } from '@/app/projects/[id]/types';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 const task: ProjectTask = {

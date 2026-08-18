@@ -32,13 +32,14 @@ import type {
 import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
 import type {
-  PhaseItem,
   PhaseTaskEntry,
   ProgressSummary,
-  ProjectPhase,
-  ProjectRecord,
-  ProjectTask,
+  ProjectDetailViewModel as ProjectRecord,
+  ProjectPhaseItemViewModel as PhaseItem,
+  ProjectPhaseViewModel as ProjectPhase,
+  ProjectTaskViewModel as ProjectTask,
 } from '../types';
+import type { ProjectDetailResponseDto } from '@/types/api';
 import {
   getProgressSummary,
   syncTaskPhaseMemberships,
@@ -275,7 +276,8 @@ export function ProjectPageProvider({
         } | null;
         throw new Error(payload?.error || 'Failed to load project');
       }
-      const projectPayload = (await projectResponse.json()) as { project: ProjectRecord };
+      const projectPayload: ProjectDetailResponseDto<ProjectRecord> =
+        await projectResponse.json();
       if (
         requestId !== loadRequestIdRef.current
         || projectId !== currentProjectIdRef.current

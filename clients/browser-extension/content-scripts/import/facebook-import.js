@@ -94,7 +94,7 @@ function wait(ms) {
 }
 
 async function runFacebookImport() {
-  const { sendBatch, reportProgress } = window.MCImportCommon;
+  const { createImportSession, reportProgress } = window.MCImportCommon;
 
   if (!isFacebookSavedPage()) {
     reportProgress('facebook', { done: true, error: 'Open your Saved items page (facebook.com/saved) first, then try importing again.' });
@@ -102,10 +102,8 @@ async function runFacebookImport() {
   }
 
   const seen = new Set();
-  let totalImported = 0;
-  let totalSkipped = 0;
   let stallRounds = 0;
-  const errors = [];
+  const session = createImportSession('facebook', FB_BATCH_SIZE);
 
   for (let round = 0; round < FB_MAX_SCROLL_ROUNDS; round += 1) {
     const items = scrapeVisibleSavedItems().filter((item) => !seen.has(item.sourceUrl));
@@ -116,18 +114,7 @@ async function runFacebookImport() {
       stallRounds = 0;
       for (const item of items) seen.add(item.sourceUrl);
 
-      for (let i = 0; i < items.length; i += FB_BATCH_SIZE) {
-        const batch = items.slice(i, i + FB_BATCH_SIZE);
-        try {
-          const result = await sendBatch('facebook', batch);
-          totalImported += result.imported;
-          totalSkipped += result.skipped;
-          if (result.errors?.length) errors.push(...result.errors);
-        } catch (err) {
-          errors.push(err.message || 'Failed to submit batch');
-        }
-      }
-      reportProgress('facebook', { imported: totalImported, skipped: totalSkipped, done: false });
+      await session.submit(items);
     }
 
     if (stallRounds >= FB_STALL_ROUNDS_LIMIT) break;
@@ -136,7 +123,7 @@ async function runFacebookImport() {
     await wait(FB_SCROLL_WAIT_MS);
   }
 
-  reportProgress('facebook', { imported: totalImported, skipped: totalSkipped, errors: errors.slice(0, 10), done: true });
+  session.finish();
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

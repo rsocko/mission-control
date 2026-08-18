@@ -1,91 +1,19 @@
-import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskFilterContext } from '@/lib/task-filter-context';
-import type { LocalDisposition, TaskSourceModel } from '@/types';
+import type {
+  HubProjectSummaryDto,
+  TaskListItemDto,
+  TaskListResponseDto,
+  TaskListStatsDto,
+  TaskTagDto,
+} from '@/types/api';
 import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import { PRIORITY_BADGE_COLORS, PRIORITY_LABELS as TASK_PRIORITY_LABELS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
-import type { TaskEditPolicy } from '@/types';
 
-export interface TaskTag {
-  id: string;
-  name: string;
-  slug: string;
-  type: string;
-  source?: string | null;
-  sources?: string[];
-  color: string | null;
-  count?: number;
-}
-
-export interface Task {
-  id: string;
-  title: string;
-  status: string;
-  localDisposition: LocalDisposition;
-  taskSourceModel: TaskSourceModel;
-  microStatus: string | null;
-  priority: string;
-  dueDate: string | null;
-  pushCount?: number;
-  connectorType: string;
-  connectorInstanceId: string;
-  sourceListId?: string | null;
-  sourceListName: string | null;
-  assignee: string | null;
-  tags: TaskTag[];
-  metadata: string | null;
-  sourceId: string | null;
-  effort?: number | null;
-  estimatedDuration?: number | null;
-  subtaskTotal?: number;
-  subtaskDone?: number;
-  smartScore?: number | null;
-  scoreBreakdown?: ScoreBreakdown | null;
-  snoozedUntil?: string | null;
-  reminderAt?: string | null;
-  hubProjectIds?: string[];
-  projectPhaseMemberships?: Array<{
-    projectId: string;
-    projectName: string;
-    phaseId: string | null;
-    phaseName: string | null;
-  }>;
-  linkedSourceCount?: number;
-  hasDescription: boolean;
-  editPolicy: TaskEditPolicy;
-}
-
-export interface TaskStats {
-  totalOpen: number;
-  overdue: number;
-  dueThisWeek: number;
-  highPriority: number;
-  assignedToMe: number;
-  myDay: number;
-  recentlyCreated: number;
-  recentlyClosed: number;
-  waiting: number;
-  inbox: number;
-}
-
-export interface TaskResponse {
-  tasks: Task[];
-  total: number;
-  stats: TaskStats;
-  hasMore: boolean;
-  sourceCounts: Record<string, number>;
-  availableTags: TaskTag[];
-}
-
-export interface HubProject {
-  id: string;
-  name: string;
-  color: string;
-  icon: string | null;
-  hidden?: boolean;
-  category?: string | null;
-  metadata?: Record<string, unknown>;
-  phases?: { id: string; name: string }[];
-}
+export type DashboardTaskTagViewModel = TaskTagDto;
+export type DashboardTaskViewModel = TaskListItemDto;
+export type DashboardTaskStatsViewModel = TaskListStatsDto;
+export type DashboardTaskResponseViewModel = TaskListResponseDto;
+export type DashboardProjectViewModel = HubProjectSummaryDto;
 
 export interface ListGroup {
   id: string;
@@ -143,7 +71,7 @@ export interface ConnectorCaps {
 
 export const PAGE_SIZE = 50;
 
-export const EMPTY_TASK_RESPONSE: TaskResponse = {
+export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   tasks: [],
   total: 0,
   stats: {

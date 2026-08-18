@@ -12,7 +12,10 @@ import type { MicroStatus } from '@/types';
 import type { LocalDisposition } from '@/types';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import type { Task, HubProject } from '@/types/dashboard';
+import type {
+  DashboardProjectViewModel as HubProject,
+  DashboardTaskViewModel as Task,
+} from '@/types/dashboard';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';

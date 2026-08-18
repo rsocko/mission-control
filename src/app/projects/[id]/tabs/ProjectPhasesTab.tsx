@@ -36,6 +36,7 @@ import {
   ChartNoAxesCombined,
   Check,
   CheckCircle2,
+  CircleAlert,
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
@@ -70,6 +71,7 @@ import {
 } from '@/components/bulk-actions';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
 import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
+import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
@@ -84,6 +86,11 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import { ProjectHierarchyClientError } from '@/lib/projects/hierarchy-client';
+import {
+  filterCompletedTasks,
+  getPhaseTaskStatusSummary,
+  shouldCompactCompletedPhase,
+} from '@/lib/projects/phase-task-status';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -232,9 +239,11 @@ export function ProjectPhasesTab({
   const [addTaskMenuPhaseId, setAddTaskMenuPhaseId] = useState<string | null>(null);
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
   const [phaseTaskSearch, setPhaseTaskSearch] = useState('');
+  const [showCompletedTasks, setShowCompletedTasks] = useState(true);
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
   const bulk = useBulkSelection();
   const visiblePhaseViewMode = revealPhaseId ? 'list' : phaseViewMode;
+  const normalizedPhaseTaskSearch = phaseTaskSearch.trim().toLowerCase();
 
   useEffect(() => { setPortalContainer(document.body); }, []);
 
@@ -252,6 +261,7 @@ export function ProjectPhasesTab({
   useEffect(() => {
     if (!revealPhaseId) return;
     setPhaseViewMode('list');
+    setShowCompletedTasks(true);
     setCollapsedPhaseIds((current) => {
       const next = current.filter((entry) => entry !== revealPhaseId);
       persistCollapsedPhaseIds(next);
@@ -328,16 +338,33 @@ export function ProjectPhasesTab({
     return tasks.filter((t) => !taskToPhase.has(t.id));
   }, [tasks, taskToPhase, phases]);
 
+  const visibleUnassignedTasks = useMemo(() => {
+    const completionFiltered = filterCompletedTasks(
+      unassignedTasks,
+      showCompletedTasks,
+      (task) => task.status,
+    );
+    return normalizedPhaseTaskSearch
+      ? completionFiltered.filter((task) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
+      : completionFiltered;
+  }, [normalizedPhaseTaskSearch, showCompletedTasks, unassignedTasks]);
+
   // Flat ordered list of all task IDs shown in the Plan list view (for shift-click range selection)
   const planListTaskIds = useMemo(() => {
     const ids: string[] = [];
     for (const phase of phases) {
-      const entries = phaseEntries[phase.id] ?? [];
+      const entries = filterCompletedTasks(
+        phaseEntries[phase.id] ?? [],
+        showCompletedTasks,
+        ({ task }) => task.status,
+      ).filter(({ task }) => (
+        !normalizedPhaseTaskSearch || task.title.toLowerCase().includes(normalizedPhaseTaskSearch)
+      ));
       for (const { task } of entries) ids.push(task.id);
     }
-    for (const task of unassignedTasks) ids.push(task.id);
+    for (const task of visibleUnassignedTasks) ids.push(task.id);
     return ids;
-  }, [phases, phaseEntries, unassignedTasks]);
+  }, [normalizedPhaseTaskSearch, phaseEntries, phases, showCompletedTasks, visibleUnassignedTasks]);
 
   const handleBulkModifierClick = useCallback((taskId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const clickedIndex = planListTaskIds.indexOf(taskId);
@@ -862,6 +889,12 @@ export function ProjectPhasesTab({
                 </Tooltip>
               </div>
             )}
+            {visiblePhaseViewMode === 'list' && !bulk.bulkMode && tasks.some((task) => task.status === 'done') && (
+              <ShowCompletedToggle
+                showCompleted={showCompletedTasks}
+                onShowCompletedChange={setShowCompletedTasks}
+              />
+            )}
             {visiblePhaseViewMode === 'list' && tasks.length > 0 && !bulk.bulkMode && (
               <button
                 type="button"
@@ -1170,9 +1203,14 @@ export function ProjectPhasesTab({
                 <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-4">
                   {phases.map((phase) => {
                     const allEntries = phaseEntries[phase.id] ?? [];
-                    const entries = phaseTaskSearch
-                      ? allEntries.filter(({ task }) => task.title.toLowerCase().includes(phaseTaskSearch.toLowerCase()))
-                      : allEntries;
+                    const completionFilteredEntries = filterCompletedTasks(
+                      allEntries,
+                      showCompletedTasks,
+                      ({ task }) => task.status,
+                    );
+                    const entries = normalizedPhaseTaskSearch
+                      ? completionFilteredEntries.filter(({ task }) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
+                      : completionFilteredEntries;
                     const isCollapsed = collapsedPhaseIds.includes(phase.id);
                     const isEditing = editingPhaseId === phase.id;
                     const isSaving = savingPhaseIds.has(phase.id);
@@ -1180,9 +1218,71 @@ export function ProjectPhasesTab({
                     const phaseColor = getPhaseColor(phase, project);
 
                     // Progress for this phase
-                    const doneCount = allEntries.filter(({ task }) => task.status === 'done').length;
-                    const totalCount = allEntries.length;
+                    const statusSummary = getPhaseTaskStatusSummary(
+                      phase.status,
+                      allEntries.map(({ task }) => task.status),
+                    );
+                    const { doneCount, totalCount } = statusSummary;
                     const pctComplete = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+                    const compactCompletedPhase = shouldCompactCompletedPhase(
+                      phase.status,
+                      completionFilteredEntries.length,
+                      showCompletedTasks,
+                    );
+
+                    if (compactCompletedPhase) {
+                      return (
+                        <SortablePhaseItem key={phase.id} phaseId={phase.id}>
+                          {(dragHandleProps) => (
+                            <div
+                              ref={(node) => {
+                                if (node) phaseCardRefs.current.set(phase.id, node);
+                                else phaseCardRefs.current.delete(phase.id);
+                              }}
+                              tabIndex={-1}
+                              role="region"
+                              aria-label={`${phase.name} phase`}
+                              className="flex flex-wrap items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+                              style={{ scrollMarginTop: stickyHeaderHeight + 24 }}
+                            >
+                              <button
+                                type="button"
+                                {...dragHandleProps}
+                                className="inline-flex min-h-8 min-w-8 cursor-grab items-center justify-center rounded-md text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]"
+                                aria-label="Drag to reorder phase"
+                              >
+                                <GripVertical size={14} />
+                              </button>
+                              <CheckCircle2 size={16} className="shrink-0 text-[var(--success)]" />
+                              <span className="min-w-0 truncate text-sm font-medium text-[var(--text-secondary)]">
+                                {phase.name}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => void handleCyclePhaseStatus(phase)}
+                                disabled={isPhaseMutationDisabled}
+                                title="Click to cycle status"
+                              >
+                                <PhaseStatusBadge status={phase.status} />
+                              </button>
+                              <span className="text-xs text-[var(--text-tertiary)]">
+                                {totalCount === 0
+                                  ? 'No tasks'
+                                  : `${doneCount} ${doneCount === 1 ? 'task' : 'tasks'} complete`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setShowCompletedTasks(true)}
+                                className="ml-auto text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
+                              >
+                                Show tasks
+                              </button>
+                            </div>
+                          )}
+                        </SortablePhaseItem>
+                      );
+                    }
+
                     return (
                       <SortablePhaseItem key={phase.id} phaseId={phase.id} isMenuOpen={addTaskMenuPhaseId === phase.id}>
                         {(dragHandleProps) => (
@@ -1258,7 +1358,7 @@ export function ProjectPhasesTab({
                                       {/* Task count — read-only pill, visually distinct */}
                                       <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
                                         <Layers3 size={11} />
-                                        {phaseTaskSearch ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {normalizedPhaseTaskSearch || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
                                       </span>
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
@@ -1267,12 +1367,21 @@ export function ProjectPhasesTab({
                                           <span className="relative h-1.5 w-16 overflow-hidden rounded-full bg-[var(--surface-2)]">
                                             <span
                                               className="absolute inset-y-0 left-0 rounded-full transition-all duration-300"
-                                              style={{ width: `${pctComplete}%`, backgroundColor: pctComplete === 100 ? 'var(--success, #22c55e)' : phaseColor }}
+                                              style={{ width: `${pctComplete}%`, backgroundColor: pctComplete === 100 ? 'var(--success)' : phaseColor }}
                                             />
                                           </span>
                                           <span className="tabular-nums">{pctComplete}%</span>
                                         </span>
                                       )}
+                                      {statusSummary.mismatchMessage ? (
+                                        <span
+                                          role="status"
+                                          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2 py-1 text-xs font-medium text-[var(--warning)]"
+                                        >
+                                          <CircleAlert size={12} />
+                                          {statusSummary.mismatchMessage}
+                                        </span>
+                                      ) : null}
                                       {/* Description icon when no description exists */}
                                       {!phase.description && editingPhaseDescId !== phase.id && (
                                         <Tooltip content="Add description">
@@ -1436,7 +1545,22 @@ export function ProjectPhasesTab({
                                   {entries.length === 0 ? (
                                     <DroppablePhaseZone phaseId={phase.id}>
                                       <div className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-0)] p-6 text-center">
-                                        <p className="text-sm text-[var(--text-tertiary)]">No tasks in this phase yet.</p>
+                                        <p className="text-sm text-[var(--text-tertiary)]">
+                                          {!showCompletedTasks && allEntries.length > 0 && completionFilteredEntries.length === 0
+                                            ? 'Completed tasks are hidden.'
+                                            : normalizedPhaseTaskSearch && completionFilteredEntries.length > 0
+                                              ? 'No tasks match this filter.'
+                                              : 'No tasks in this phase yet.'}
+                                        </p>
+                                        {!showCompletedTasks && completionFilteredEntries.length === 0 && allEntries.length > 0 ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => setShowCompletedTasks(true)}
+                                            className="mt-2 text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
+                                          >
+                                            Show completed tasks
+                                          </button>
+                                        ) : null}
                                         <div className="relative mt-3 inline-flex" data-phase-add-menu>
                                           <button
                                             type="button"
@@ -1615,7 +1739,7 @@ export function ProjectPhasesTab({
               </SortableContext>
 
               {/* ── Unassigned project tasks ────────────────────────── */}
-              {unassignedTasks.length > 0 && (
+              {visibleUnassignedTasks.length > 0 && (
                 <div className="mt-6 rounded-[var(--radius-lg)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-0)] shadow-[0_1px_0_rgba(255,255,255,0.04)]">
                   <button
                     type="button"
@@ -1626,16 +1750,16 @@ export function ProjectPhasesTab({
                     <div className="flex items-center gap-2">
                       <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Unassigned Tasks</h3>
                       <span className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-1)] px-2 py-0.5 text-xs text-[var(--text-tertiary)]">
-                        {unassignedTasks.length}
+                        {visibleUnassignedTasks.length}
                       </span>
                     </div>
                     <span className="ml-auto text-xs text-[var(--text-tertiary)]">Drag into a phase above</span>
                   </button>
                   {!unassignedCollapsed && (
                     <div className="border-t border-[var(--border)] p-4">
-                      <SortableContext items={unassignedTasks.map((t) => `task:${t.id}`)} strategy={verticalListSortingStrategy}>
+                      <SortableContext items={visibleUnassignedTasks.map((t) => `task:${t.id}`)} strategy={verticalListSortingStrategy}>
                         <div className="space-y-2">
-                          {unassignedTasks.map((task) => {
+                          {visibleUnassignedTasks.map((task) => {
                             const ConnectorIcon = getConnectorIcon(task.connectorType);
                             const isDone = task.status === 'done' || completingIds.has(task.id);
                             const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);

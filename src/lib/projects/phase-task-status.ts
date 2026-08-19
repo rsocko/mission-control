@@ -17,11 +17,13 @@ export function getPhaseTaskStatusSummary(
 ): PhaseTaskStatusSummary {
   const totalCount = taskStatuses.length;
   const doneCount = taskStatuses.filter((status) => status === 'done').length;
+  const cancelledCount = taskStatuses.filter((status) => status === 'cancelled').length;
   const inProgressCount = taskStatuses.filter((status) => status === 'in_progress').length;
-  const remainingCount = totalCount - doneCount;
-  const derivedStatus = totalCount === 0
+  const relevantCount = totalCount - cancelledCount;
+  const remainingCount = relevantCount - doneCount;
+  const derivedStatus = relevantCount === 0
     ? null
-    : doneCount === totalCount
+    : doneCount === relevantCount
       ? 'completed'
       : inProgressCount > 0 || doneCount > 0
         ? 'in_progress'
@@ -32,13 +34,19 @@ export function getPhaseTaskStatusSummary(
     mismatchMessage = `${remainingCount} ${remainingCount === 1 ? 'task is' : 'tasks are'} not complete`;
   } else if (phaseStatus === 'in_progress' && totalCount === 0) {
     mismatchMessage = 'Phase is in progress but has no tasks';
-  } else if (phaseStatus === 'in_progress' && doneCount === totalCount) {
-    mismatchMessage = 'All tasks are complete but the phase is still in progress';
-  } else if (phaseStatus === 'in_progress' && inProgressCount === 0) {
-    mismatchMessage = 'No tasks are currently in progress';
-  } else if (phaseStatus === 'pending' && doneCount === totalCount && totalCount > 0) {
-    mismatchMessage = 'All tasks are complete but the phase is still pending';
-  } else if (phaseStatus === 'pending' && (inProgressCount > 0 || doneCount > 0)) {
+  } else if (phaseStatus === 'in_progress' && relevantCount === 0) {
+    mismatchMessage = 'Phase is in progress but has no active tasks';
+  } else if (phaseStatus === 'in_progress' && derivedStatus === 'completed') {
+    mismatchMessage = cancelledCount === 0
+      ? 'All tasks are complete but the phase is still in progress'
+      : 'All tasks are resolved but the phase is still in progress';
+  } else if (phaseStatus === 'in_progress' && derivedStatus === 'pending') {
+    mismatchMessage = 'No task work has started';
+  } else if (phaseStatus === 'pending' && derivedStatus === 'completed') {
+    mismatchMessage = cancelledCount === 0
+      ? 'All tasks are complete but the phase is still pending'
+      : 'All tasks are resolved but the phase is still pending';
+  } else if (phaseStatus === 'pending' && derivedStatus === 'in_progress') {
     mismatchMessage = 'Task work has started but the phase is still pending';
   }
 

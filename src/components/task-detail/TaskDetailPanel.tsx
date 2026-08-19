@@ -463,6 +463,9 @@ export function TaskDetailPanel({
     const taskIdAtSave = task.id;
     const previousDesc = task.description;
     const newDesc = toggleMarkdownCheckbox(previousDesc, index, checked);
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
+    ));
     const saved = await saveField('description', newDesc);
     if (!saved) {
       setTask((prev) => (

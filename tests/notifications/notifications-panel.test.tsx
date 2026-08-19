@@ -251,12 +251,12 @@ describe('NotificationsPanel V2', () => {
     expect(screen.queryByText('8')).not.toBeInTheDocument();
   });
 
-  it('shows unread counts by level with complementary attribute filters', () => {
+  it('distinguishes outstanding action counts from unread informational counts', () => {
     render(<Harness />);
 
     expect(screen.getByText('1 need attention · 1 with actions')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'All: 2 unread' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: 'Action: 1 unread' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Action: 1 outstanding' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Unread only' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByRole('button', { name: 'Actionable only' })).toHaveAttribute('aria-pressed', 'false');
   });
@@ -266,7 +266,7 @@ describe('NotificationsPanel V2', () => {
 
     expect(within(screen.getByRole('button', { name: 'All: 2 unread' })).getByText('2'))
       .toHaveClass('-right-3.5');
-    expect(within(screen.getByRole('button', { name: 'Action: 1 unread' })).getByText('1'))
+    expect(within(screen.getByRole('button', { name: 'Action: 1 outstanding' })).getByText('1'))
       .toHaveClass('-right-3.5');
 
     rerender(<Harness statsOverride={{ unread: 42 }} />);
@@ -326,13 +326,13 @@ describe('NotificationsPanel V2', () => {
   it('combines level, unread, and actionable filters and carries them to the full center', () => {
     render(<Harness />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Action: 1 unread' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Action: 1 outstanding' }));
     fireEvent.click(screen.getByRole('button', { name: 'Unread only' }));
     fireEvent.click(screen.getByRole('button', { name: 'Actionable only' }));
 
     expect(screen.getByText('Review requested')).toBeInTheDocument();
     expect(screen.queryByText('Weekly finance summary')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Action: 1 unread' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Action: 1 outstanding' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Unread only' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: 'Actionable only' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('link', { name: /open notification center/i }))

@@ -2,7 +2,7 @@ import 'server-only';
 
 import { sqlite } from '@/db';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
-import { NOTIFICATION_NEEDS_ATTENTION_SQL } from '@/lib/notifications/lifecycle-sql';
+import { NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL } from '@/lib/notifications/lifecycle-sql';
 import { resolveFinanceExternalLinks } from './external-links';
 
 type ConnectorRow = {
@@ -72,7 +72,7 @@ export function getFinanceOperationsOverview(requestedConnectorId?: string | nul
     SELECT count(*) AS count
     FROM notifications
     WHERE connector_instance_id = ? AND category = 'finance'
-      AND ${NOTIFICATION_NEEDS_ATTENTION_SQL}
+      AND ${NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL}
       AND level IN ('urgent', 'action_needed', 'heads_up')
   `, selected.id, new Date().toISOString());
 
@@ -80,7 +80,7 @@ export function getFinanceOperationsOverview(requestedConnectorId?: string | nul
     SELECT title, body, level, received_at AS receivedAt
     FROM notifications
     WHERE connector_instance_id = ? AND category = 'finance'
-      AND ${NOTIFICATION_NEEDS_ATTENTION_SQL}
+      AND ${NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL}
       AND level IN ('urgent', 'action_needed', 'heads_up')
     ORDER BY level_rank, sort_at DESC
     LIMIT 5

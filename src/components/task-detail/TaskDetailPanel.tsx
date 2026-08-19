@@ -139,6 +139,7 @@ export function TaskDetailPanel({
   const handledSubtasksRequestRef = useRef<number | null>(null);
   const recurrenceFocusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTransientStateRef = useRef<() => void>(() => {});
+  const activeTaskIdRef = useRef<string | null>(taskId);
 
   const {
     task,
@@ -169,6 +170,12 @@ export function TaskDetailPanel({
       setDescValue(loaded.description || '');
     },
   });
+  useEffect(() => {
+    activeTaskIdRef.current = taskId;
+    return () => {
+      activeTaskIdRef.current = null;
+    };
+  }, [taskId]);
 
   const effectiveIsInMyDay = isInMyDay ?? task?.isInMyDay ?? false;
 
@@ -463,20 +470,20 @@ export function TaskDetailPanel({
     const taskIdAtSave = task.id;
     const previousDesc = task.description;
     const newDesc = toggleMarkdownCheckbox(previousDesc, index, checked);
+    setDescValue(newDesc);
     setTask((prev) => (
       prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
     ));
     const saved = await saveField('description', newDesc);
     if (!saved) {
+      if (activeTaskIdRef.current === taskIdAtSave) {
+        setDescValue(previousDesc);
+      }
       setTask((prev) => (
         prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
       ));
       return;
     }
-    setDescValue(newDesc);
-    setTask((prev) => (
-      prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
-    ));
   }, [saveField, setTask, task?.description, task?.id]);
 
   const startDescriptionEdit = useCallback(() => {

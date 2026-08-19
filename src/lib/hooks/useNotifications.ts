@@ -394,7 +394,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       if (data.success && data.result) {
         if (data.result.url) {
           if (data.result.target === '_blank' || data.result.type === 'open_url') {
-            completeExternalNavigation(externalWindow, data.result.url);
+            await completeExternalNavigation(externalWindow, data.result.url);
           } else {
             cancelExternalNavigation(externalWindow);
             window.location.href = data.result.url;
@@ -410,8 +410,9 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       }
 
       return data;
-    } catch {
+    } catch (error) {
       cancelExternalNavigation(externalWindow);
+      console.error('Notification action failed:', error);
       return { success: false };
     }
   }, [notifications]);

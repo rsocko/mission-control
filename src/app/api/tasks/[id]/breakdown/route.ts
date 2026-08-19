@@ -4,7 +4,8 @@ import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import db from '@/db';
 import { hubProjects, tags, taskProjects, tasks, taskTags } from '@/db/schema';
-import { getAIModel, getAIRouteOutcome, getResolvedAIConfig } from '@/lib/ai';
+import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import {
   aiBreakdownOutputSchema,
   buildBreakdownPrompt,

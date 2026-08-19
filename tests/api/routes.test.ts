@@ -146,9 +146,15 @@ vi.mock('@/lib/triage/lifecycle', () => ({
   hardDeleteTriageItem: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/provider-factory', () => ({
   getAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
+}));
+
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+}));
+
+vi.mock('@/lib/ai/features/chat', () => ({
   streamChat: vi.fn(() => Promise.resolve({
     result: {
       toUIMessageStreamResponse: () => new Response('streamed', { status: 200 }),
@@ -456,7 +462,7 @@ describe('POST /api/ai', () => {
   });
 
   it('should return 503 when AI provider is not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai');
+    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
     vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
 
     const { POST } = await import('@/app/api/ai/route');

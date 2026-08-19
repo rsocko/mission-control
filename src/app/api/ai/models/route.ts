@@ -1,8 +1,8 @@
 import {
   AIProviderEndpointValidationError,
-  getResolvedAIConfig,
   validateProviderEndpoint,
-} from '@/lib/ai';
+} from '@/lib/ai/sensitivity-policy';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 
 const OPENAI_MODELS = [
   'gpt-4o',

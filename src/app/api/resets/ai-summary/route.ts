@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { getAIModel, getAIRouteOutcome, getResolvedAIConfig } from '@/lib/ai';
+import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import { aiLogger } from '@/lib/logger';
 import db from '@/db';
 import { tasks } from '@/db/schema';

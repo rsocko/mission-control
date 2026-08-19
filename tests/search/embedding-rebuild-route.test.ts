@@ -12,8 +12,7 @@ describe('embedding index rebuild routing', () => {
     process.env.AI_EMBEDDING_MODEL = 'ollama/nomic-embed-text:latest';
     routeOutcomes = [];
 
-    vi.doMock('@/lib/ai', () => ({
-      AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
+    vi.doMock('@/lib/ai/config-resolver', () => ({
       getResolvedAIConfig: vi.fn(() => ({
         provider: 'bifrost',
         configured: true,
@@ -23,6 +22,9 @@ describe('embedding index rebuild routing', () => {
         embeddingModel: 'ollama/nomic-embed-text:latest',
         semanticSearchEnabled: true,
       })),
+    }));
+    vi.doMock('@/lib/ai/provider-factory', () => ({
+      AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
       getAIRequestContext: vi.fn(() => ({
         featureId: 'semantic-embedding',
         sensitivity: 'restricted',

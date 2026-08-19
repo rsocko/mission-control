@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import { getResolvedAIConfig } from '@/lib/ai';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import {
   generateIdeationExpansion,
   ideationExpansionRequestSchema,

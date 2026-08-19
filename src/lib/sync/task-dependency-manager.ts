@@ -40,6 +40,10 @@ import type {
 } from '@/lib/external-identities';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import { syncLogger } from '@/lib/logger';
+import {
+  runResumableReconciliation,
+  type ReconciliationFailure,
+} from '@/lib/reconciliation';
 import { executeFencedGitHubTaskMutation } from '@/lib/external-identities';
 import { isConnectorNativeTask } from './github-native-task';
 import type {
@@ -178,6 +182,16 @@ export interface DependencyReconciliationResumeCandidate {
 }
 
 type DependencySnapshot = typeof dependencyReconciliationSnapshots.$inferSelect;
+interface DependencyReconciliationBatch {
+  sourceIds: string[];
+  usesStagedGeneration: boolean;
+}
+
+interface DependencyReconciliationBatchResult extends DependencyReconciliationBatch {
+  remoteSnapshot: Awaited<ReturnType<typeof fetchDependencySnapshot>>;
+  imported: number;
+}
+
 type ReconcileOptions = {
   full?: boolean;
   resumeGenerationId?: string;
@@ -1790,14 +1804,11 @@ async function createSnapshot(
 async function markSnapshotFailed(
   snapshot: DependencySnapshot,
   error: unknown,
+  failure: ReconciliationFailure,
 ): Promise<DependencySnapshot> {
-  const failureCount = snapshot.failureCount + 1;
-  const retryDelayMs = Math.min(
-    getDependencyRetryBaseMs() * (2 ** Math.max(0, failureCount - 1)),
-    MAX_RETRY_BACKOFF_MS,
-  );
-  const failedAt = new Date().toISOString();
-  const nextAttemptAt = new Date(Date.now() + retryDelayMs).toISOString();
+  const failureCount = failure.failureCount;
+  const failedAt = failure.failedAt;
+  const nextAttemptAt = failure.nextAttemptAt;
   const failureReason = dependencyError(error);
 
   const updated = runTransaction((tx) => {
@@ -2495,173 +2506,158 @@ async function reconcileTaskDependenciesUnlocked(
     };
   }
 
-  if (
-    snapshot.status === 'failed'
-    && snapshot.nextAttemptAt
-    && snapshot.nextAttemptAt > new Date().toISOString()
-  ) {
+  const activeSnapshot = snapshot;
+  const engineResult = await runResumableReconciliation({
+    createSnapshot: async () => activeSnapshot,
+    loadBatch: async (current, window): Promise<DependencyReconciliationBatch> => {
+      const batchItems = await db.select().from(dependencyReconciliationItems)
+        .where(and(
+          eq(dependencyReconciliationItems.snapshotId, current.id),
+          gte(dependencyReconciliationItems.position, window.start),
+          lt(dependencyReconciliationItems.position, window.end),
+        ))
+        .orderBy(asc(dependencyReconciliationItems.position));
+      const sourceIds = batchItems.map((item) => item.sourceId);
+      if (sourceIds.length !== window.end - window.start) {
+        throw new Error(
+          `Dependency snapshot ${current.id} is missing persisted source items`,
+        );
+      }
+      return {
+        sourceIds,
+        usesStagedGeneration: current.readMode === 'graphql-bulk'
+          || current.readMode === 'rest-fallback',
+      };
+    },
+    executeBatch: async (
+      current,
+      batch,
+    ): Promise<DependencyReconciliationBatchResult> => {
+      if (!batch.usesStagedGeneration) {
+        return {
+          ...batch,
+          remoteSnapshot: await fetchDependencySnapshot(connector, batch.sourceIds),
+          imported: 0,
+        };
+      }
+
+      const [stagedEdges, verifiedItems] = await Promise.all([
+        db.select({
+          blockerSourceId: dependencyReconciliationEdges.blockerSourceId,
+          blockedSourceId: dependencyReconciliationEdges.blockedSourceId,
+          blockerIdentityEvidence: dependencyReconciliationEdges.blockerIdentityEvidence,
+          blockerIdentityEvidenceState:
+            dependencyReconciliationEdges.blockerIdentityEvidenceState,
+        }).from(dependencyReconciliationEdges).where(and(
+          eq(dependencyReconciliationEdges.snapshotId, current.id),
+          inArray(dependencyReconciliationEdges.blockedSourceId, batch.sourceIds),
+        )),
+        db.select({
+          sourceId: dependencyReconciliationItems.sourceId,
+          evidence: dependencyReconciliationItems.identityEvidence,
+          state: dependencyReconciliationItems.identityEvidenceState,
+        }).from(dependencyReconciliationItems).where(and(
+          eq(dependencyReconciliationItems.snapshotId, current.id),
+          inArray(dependencyReconciliationItems.sourceId, batch.sourceIds),
+          eq(dependencyReconciliationItems.verified, true),
+        )),
+      ]);
+      return {
+        ...batch,
+        remoteSnapshot: {
+          dependencies: stagedEdges.map((edge) => ({
+            ...edge,
+            blockerIdentityEvidence: edge.blockerIdentityEvidence ?? undefined,
+          })),
+          completeBlockedSourceIds: verifiedItems.map(({ sourceId }) => sourceId),
+          blockedIdentityEvidence: verifiedItems.map(({ sourceId, evidence, state }) => ({
+            sourceId,
+            evidence: evidence ?? undefined,
+            state,
+          })),
+        },
+        imported: 0,
+      };
+    },
+    advanceCursor: async (current, batchResult, window) => {
+      let currentDependencies = await db.select().from(taskDependencies).where(and(
+        inArray(taskDependencies.taskId, taskIds),
+        eq(taskDependencies.type, 'blocks'),
+      )) as DependencyRecord[];
+      currentDependencies = currentDependencies.filter((dependency) =>
+        taskIdSet.has(dependency.dependsOnTaskId));
+      batchResult.imported = await applySnapshotBatch(
+        connectorInstanceId,
+        current,
+        window.start,
+        window.end,
+        batchResult.sourceIds,
+        batchResult.remoteSnapshot,
+        taskBySourceId,
+        currentDependencies,
+        !batchResult.usesStagedGeneration,
+      );
+      const [refreshed] = await db.select().from(dependencyReconciliationSnapshots)
+        .where(eq(dependencyReconciliationSnapshots.id, current.id))
+        .limit(1);
+      return refreshed ?? {
+        ...current,
+        cursor: window.end,
+        importedCount: current.importedCount + batchResult.imported,
+      };
+    },
+    classifyRetry: () => ({ retryable: true }),
+    recordFailure: (current, failure) =>
+      markSnapshotFailed(current, failure.error, failure),
+    reportProgress: (current) => snapshotProgress(
+      current,
+      current.status === 'completed' ? current : lastCompletedSnapshot,
+    ),
+    complete: async (current) => {
+      const finalized = await finalizeSnapshot(
+        connectorInstanceId,
+        connector.type,
+        current,
+        options.identityRuntime,
+      );
+      return {
+        snapshot: finalized.snapshot,
+        result: {
+          imported: finalized.imported,
+          removed: finalized.removed,
+        },
+      };
+    },
+    shouldContinue: (current) => (
+      (current.readMode === 'graphql-bulk' || current.readMode === 'rest-fallback')
+      && current.status === 'running'
+      && current.cursor < current.total
+    ),
+  }, {
+    snapshot: activeSnapshot,
+    retryBaseMs: getDependencyRetryBaseMs(),
+    retryMaxMs: MAX_RETRY_BACKOFF_MS,
+  });
+
+  if (engineResult.outcome === 'deferred') {
     syncLogger.info({
       connectorId: connectorInstanceId,
-      dependencySnapshotId: snapshot.id,
-      processed: snapshot.cursor,
-      total: snapshot.total,
-      nextAttemptAt: snapshot.nextAttemptAt,
+      dependencySnapshotId: engineResult.snapshot.id,
+      processed: engineResult.snapshot.cursor,
+      total: engineResult.snapshot.total,
+      nextAttemptAt: engineResult.snapshot.nextAttemptAt,
     }, 'Dependency reconciliation retry deferred by backoff');
-    return {
-      imported: 0,
-      removed: 0,
-      pushed: retryResult.pushed,
-      failed: retryResult.failed,
-      snapshot: snapshotProgress(snapshot, lastCompletedSnapshot),
-    };
   }
 
-  if (snapshot.cursor >= snapshot.total) {
-    const finalized = await finalizeSnapshot(
-      connectorInstanceId,
-      connector.type,
-      snapshot,
-      options.identityRuntime,
-    );
-    return {
-      imported: finalized.imported,
-      removed: finalized.removed,
-      pushed: retryResult.pushed,
-      failed: retryResult.failed,
-      snapshot: snapshotProgress(finalized.snapshot, finalized.snapshot),
-    };
-  }
-
-  const batchEnd = Math.min(snapshot.cursor + snapshot.batchSize, snapshot.total);
-  const batchItems = await db.select().from(dependencyReconciliationItems)
-    .where(and(
-      eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-      gte(dependencyReconciliationItems.position, snapshot.cursor),
-      lt(dependencyReconciliationItems.position, batchEnd),
-    ))
-    .orderBy(asc(dependencyReconciliationItems.position));
-  const batchSourceIds = batchItems.map((item) => item.sourceId);
-  if (batchSourceIds.length !== batchEnd - snapshot.cursor) {
-    const error = new Error(
-      `Dependency snapshot ${snapshot.id} is missing persisted source items`,
-    );
-    snapshot = await markSnapshotFailed(snapshot, error);
-    throw error;
-  }
-
-  const usesStagedGeneration = snapshot.readMode === 'graphql-bulk'
-    || snapshot.readMode === 'rest-fallback';
-  let remoteSnapshot: Awaited<ReturnType<typeof fetchDependencySnapshot>>;
-  if (usesStagedGeneration) {
-    const [stagedEdges, verifiedItems] = await Promise.all([
-      db.select({
-        blockerSourceId: dependencyReconciliationEdges.blockerSourceId,
-        blockedSourceId: dependencyReconciliationEdges.blockedSourceId,
-        blockerIdentityEvidence: dependencyReconciliationEdges.blockerIdentityEvidence,
-        blockerIdentityEvidenceState:
-          dependencyReconciliationEdges.blockerIdentityEvidenceState,
-      }).from(dependencyReconciliationEdges).where(and(
-        eq(dependencyReconciliationEdges.snapshotId, snapshot.id),
-        inArray(dependencyReconciliationEdges.blockedSourceId, batchSourceIds),
-      )),
-      db.select({
-        sourceId: dependencyReconciliationItems.sourceId,
-        evidence: dependencyReconciliationItems.identityEvidence,
-        state: dependencyReconciliationItems.identityEvidenceState,
-      }).from(dependencyReconciliationItems).where(and(
-        eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-        inArray(dependencyReconciliationItems.sourceId, batchSourceIds),
-        eq(dependencyReconciliationItems.verified, true),
-      )),
-    ]);
-    remoteSnapshot = {
-      dependencies: stagedEdges.map((edge) => ({
-        ...edge,
-        blockerIdentityEvidence: edge.blockerIdentityEvidence ?? undefined,
-      })),
-      completeBlockedSourceIds: verifiedItems.map(({ sourceId }) => sourceId),
-      blockedIdentityEvidence: verifiedItems.map(({ sourceId, evidence, state }) => ({
-        sourceId,
-        evidence: evidence ?? undefined,
-        state,
-      })),
-    };
-  } else {
-    try {
-      remoteSnapshot = await fetchDependencySnapshot(connector, batchSourceIds);
-    } catch (error) {
-      await markSnapshotFailed(snapshot, error);
-      throw error;
-    }
-  }
-
-  localDependencies = await db.select().from(taskDependencies).where(and(
-    inArray(taskDependencies.taskId, taskIds),
-    eq(taskDependencies.type, 'blocks'),
-  )) as DependencyRecord[];
-  localDependencies = localDependencies.filter((dependency) =>
-    taskIdSet.has(dependency.dependsOnTaskId));
-  let imported = await applySnapshotBatch(
-    connectorInstanceId,
-    snapshot,
-    snapshot.cursor,
-    batchEnd,
-    batchSourceIds,
-    remoteSnapshot,
-    taskBySourceId,
-    localDependencies,
-    !usesStagedGeneration,
-  );
-
-  const refreshed = await db.select().from(dependencyReconciliationSnapshots)
-    .where(eq(dependencyReconciliationSnapshots.id, snapshot.id))
-    .limit(1);
-  snapshot = refreshed[0] ?? {
-    ...snapshot,
-    cursor: batchEnd,
-    importedCount: snapshot.importedCount + imported,
-  };
-  let removed = 0;
-  if (snapshot.cursor >= snapshot.total && snapshot.status !== 'completed') {
-    const finalized = await finalizeSnapshot(
-      connectorInstanceId,
-      connector.type,
-      snapshot,
-      options.identityRuntime,
-    );
-    snapshot = finalized.snapshot;
-    removed = finalized.removed;
-    imported += finalized.imported;
-  }
-
-  if (
-    usesStagedGeneration
-    && snapshot.status === 'running'
-    && snapshot.cursor < snapshot.total
-  ) {
-    const continued = await reconcileTaskDependenciesUnlocked(
-      connectorInstanceId,
-      connector,
-      { ...options, skipPendingRetry: true },
-    );
-    return {
-      imported: imported + continued.imported,
-      removed: removed + continued.removed,
-      pushed: retryResult.pushed + continued.pushed,
-      failed: retryResult.failed + continued.failed,
-      snapshot: continued.snapshot,
-      resumeSkippedReason: continued.resumeSkippedReason,
-    };
-  }
-
+  const imported = engineResult.batchResults.reduce(
+    (total, batch) => total + batch.imported,
+    0,
+  ) + (engineResult.completion?.imported ?? 0);
   return {
     imported,
-    removed,
+    removed: engineResult.completion?.removed ?? 0,
     pushed: retryResult.pushed,
     failed: retryResult.failed,
-    snapshot: snapshotProgress(
-      snapshot,
-      snapshot.status === 'completed' ? snapshot : lastCompletedSnapshot,
-    ),
+    snapshot: engineResult.progress,
   };
 }

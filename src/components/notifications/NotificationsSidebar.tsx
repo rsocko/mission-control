@@ -22,14 +22,12 @@ function SidebarItem({
   count,
   active,
   onClick,
-  color,
 }: {
   icon: React.ReactNode;
   label: string;
   count: number;
   active?: boolean;
   onClick?: () => void;
-  color?: string;
 }) {
   return (
     <button
@@ -49,9 +47,6 @@ function SidebarItem({
         >
           {count}
         </span>
-      )}
-      {color && (
-        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
       )}
     </button>
   );
@@ -89,12 +84,12 @@ function SectionHeader({
 
 // ─── Level config ────────────────────────────────────────────────────────────
 
-const LEVEL_ITEMS: { value: NotificationLevel; label: string; icon: LucideIcon; dotColor: string }[] = [
-  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, dotColor: '#ef4444' },
-  { value: 'action_needed', label: 'Action Needed', icon: ClipboardCheck, dotColor: '#f59e0b' },
-  { value: 'heads_up', label: 'Heads Up', icon: BellRing, dotColor: '#3b82f6' },
-  { value: 'fyi', label: 'FYI', icon: Info, dotColor: '#64748b' },
-  { value: 'digest', label: 'Digest', icon: Newspaper, dotColor: '#a855f7' },
+const LEVEL_ITEMS: { value: NotificationLevel; label: string; icon: LucideIcon; color: string }[] = [
+  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, color: '#ef4444' },
+  { value: 'action_needed', label: 'Action Needed', icon: ClipboardCheck, color: '#f59e0b' },
+  { value: 'heads_up', label: 'Heads Up', icon: BellRing, color: '#3b82f6' },
+  { value: 'fyi', label: 'FYI', icon: Info, color: '#64748b' },
+  { value: 'digest', label: 'Digest', icon: Newspaper, color: '#a855f7' },
 ];
 
 // ─── State config ────────────────────────────────────────────────────────────
@@ -117,7 +112,15 @@ const DATE_RANGE_ITEMS: { value: 'today' | 'week' | 'month' | null; label: strin
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface NotificationsSidebarProps {
-  hook: UseNotificationsReturn;
+  hook: Pick<
+    UseNotificationsReturn,
+    | 'facets'
+    | 'filters'
+    | 'setLevelFilter'
+    | 'setSourceFilter'
+    | 'setStateFilter'
+    | 'setDateRangeFilter'
+  >;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   savedViews?: React.ReactNode;
@@ -173,7 +176,7 @@ export function NotificationsSidebar({
         >
           <Inbox size={16} />
         </button>
-        {LEVEL_ITEMS.slice(0, 4).map(({ value, label, icon: Icon }) => (
+        {LEVEL_ITEMS.slice(0, 4).map(({ value, label, icon: Icon, color }) => (
           <button
             key={value}
             onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
@@ -185,7 +188,7 @@ export function NotificationsSidebar({
             title={label}
             aria-label={`Filter by ${label}`}
           >
-            <Icon size={16} />
+            <Icon size={16} style={{ color }} />
           </button>
         ))}
       </aside>
@@ -226,15 +229,14 @@ export function NotificationsSidebar({
               active={!filters.level}
               onClick={() => hook.setLevelFilter(null)}
             />
-            {LEVEL_ITEMS.map(({ value, label, icon: Icon, dotColor }) => (
+            {LEVEL_ITEMS.map(({ value, label, icon: Icon, color }) => (
               <SidebarItem
                 key={value}
-                icon={<Icon size={14} />}
+                icon={<Icon size={14} style={{ color }} />}
                 label={label}
                 count={facets.level[value] || 0}
                 active={filters.level === value}
                 onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
-                color={dotColor}
               />
             ))}
           </div>

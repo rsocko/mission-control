@@ -10,7 +10,10 @@ import {
 } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
-import { notificationIsInInbox, notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
+import {
+  notificationCountsTowardAttention,
+  notificationIsInInbox,
+} from '@/lib/notifications/lifecycle-sql';
 import { getNotificationBadgeState, type NavigationCounts } from '@/lib/navigation/badges';
 import { getLocalToday } from '@/lib/utils/date';
 
@@ -45,7 +48,7 @@ export async function GET(request: Request) {
       SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
     )`;
     const inboxCondition = notificationIsInInbox(nowDate);
-    const attentionCondition = notificationNeedsAttention(nowDate);
+    const attentionCondition = notificationCountsTowardAttention(nowDate);
 
     const [
       myDayRows,

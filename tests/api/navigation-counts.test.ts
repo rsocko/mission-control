@@ -56,8 +56,8 @@ vi.mock('@/lib/connectors/task-source-profiles', () => ({
 }));
 
 vi.mock('@/lib/notifications/lifecycle-sql', () => ({
+  notificationCountsTowardAttention: vi.fn(() => ({ type: 'attention' })),
   notificationIsInInbox: vi.fn(() => ({ type: 'inbox' })),
-  notificationNeedsAttention: vi.fn(() => ({ type: 'attention' })),
 }));
 
 vi.mock('@/lib/utils/date', () => ({

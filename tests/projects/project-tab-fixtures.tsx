@@ -110,6 +110,7 @@ export function makeTask(id: string, overrides: Partial<ProjectTask> = {}): Proj
     hubProjectIds: [PROJECT_ID],
     projectPhaseMemberships: [],
     localDisposition: 'active',
+    microStatus: null,
     taskSourceModel: 'mc-owned',
     editPolicy: editableTaskPolicy,
     ...overrides,

@@ -160,6 +160,7 @@ describe('project phases (Plan) tab', () => {
     await renderProjectTab('Plan');
 
     expect(await screen.findByText('No phases yet')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'AI Plan' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Add first phase' }));
 
     await waitFor(() => {
@@ -170,7 +171,33 @@ describe('project phases (Plan) tab', () => {
         sortOrder: 0,
       });
     });
+
     expect(await screen.findByDisplayValue('Phase 1')).toBeInTheDocument();
+  });
+
+  it('collects guidance when generating the first plan', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Plan Project' },
+      phases: [],
+      tasks: [makeTask('task-alpha', { title: 'Alpha migration' })],
+    });
+    await renderProjectTab('Plan');
+
+    fireEvent.pointerDown(await screen.findByRole('button', { name: 'AI Plan' }));
+    fireEvent.click(await screen.findByText('Generate plan'));
+
+    const guidanceDialog = await screen.findByRole('dialog', { name: 'Generate plan from tasks' });
+    fireEvent.change(within(guidanceDialog).getByLabelText(/What should this plan optimize for/), {
+      target: { value: 'Prioritize the launch path.' },
+    });
+    fireEvent.click(within(guidanceDialog).getByRole('button', { name: 'Generate proposal' }));
+
+    await waitFor(() => {
+      expect(harness.requestsFor(`${PHASE_ENDPOINT}/ai-suggest`, 'POST')[0]?.body).toEqual({
+        projectId: 'project-1',
+        context: 'Prioritize the launch path.',
+      });
+    });
   });
 
   it('renames a phase inline and abandons the edit on Escape', async () => {
@@ -481,23 +508,18 @@ describe('project phases (Plan) tab', () => {
     });
   });
 
-  it('requests an AI phase proposal and a refinement of the existing plan', async () => {
+  it('collects guidance for improving the current plan or starting over', async () => {
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'AI Suggest Phases' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'AI Plan' }));
+    fireEvent.click(await screen.findByText('Improve current plan'));
 
-    const proposal = await screen.findByRole('dialog', { name: 'Phase proposal' });
-    expect(within(proposal).getByText('Suggested plan reasoning')).toBeInTheDocument();
-    expect(harness.requestsFor(`${PHASE_ENDPOINT}/ai-suggest`, 'POST')[0]?.body)
-      .toEqual({ projectId: 'project-1' });
-
-    fireEvent.click(within(proposal).getByRole('button', { name: 'Dismiss proposal' }));
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Phase proposal' })).not.toBeInTheDocument();
+    const guidanceDialog = await screen.findByRole('dialog', { name: 'Improve current plan' });
+    fireEvent.change(within(guidanceDialog).getByLabelText(/What should change or improve/), {
+      target: { value: 'Keep Discovery and target a two-week launch.' },
     });
-
-    fireEvent.click(screen.getByRole('button', { name: 'Refine Plan' }));
+    fireEvent.click(within(guidanceDialog).getByRole('button', { name: 'Generate proposal' }));
 
     await waitFor(() => {
       expect(harness.requestsFor(`${PHASE_ENDPOINT}/ai-refine`, 'POST')[0]?.body).toEqual({
@@ -506,9 +528,28 @@ describe('project phases (Plan) tab', () => {
           { name: 'Discovery', taskIds: ['task-alpha'] },
           { name: 'Build', taskIds: ['task-beta'] },
         ],
+        instruction: 'Keep Discovery and target a two-week launch.',
       });
     });
-    expect(await screen.findByText('Refined plan reasoning')).toBeInTheDocument();
+    const refinedProposal = await screen.findByRole('dialog', { name: 'Phase proposal' });
+    expect(within(refinedProposal).getByText('Refined plan reasoning')).toBeInTheDocument();
+    fireEvent.click(within(refinedProposal).getByRole('button', { name: 'Dismiss proposal' }));
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'AI Plan' }));
+    fireEvent.click(await screen.findByText('Start over from tasks'));
+    const startOverDialog = await screen.findByRole('dialog', { name: 'Generate plan from tasks' });
+    fireEvent.change(within(startOverDialog).getByLabelText(/What should this plan optimize for/), {
+      target: { value: 'Separate frontend and backend work.' },
+    });
+    fireEvent.click(within(startOverDialog).getByRole('button', { name: 'Generate proposal' }));
+
+    await waitFor(() => {
+      expect(harness.requestsFor(`${PHASE_ENDPOINT}/ai-suggest`, 'POST')[0]?.body).toEqual({
+        projectId: 'project-1',
+        context: 'Separate frontend and backend work.',
+      });
+    });
+    expect(await screen.findByText('Suggested plan reasoning')).toBeInTheDocument();
   });
 
   it('creates and links tasks straight into a phase', async () => {

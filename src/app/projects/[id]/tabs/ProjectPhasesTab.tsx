@@ -51,9 +51,7 @@ import {
   NotepadText,
   PencilLine,
   Plus,
-  RefreshCw,
   Search,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -148,6 +146,7 @@ import type {
   ProjectTaskOverlayActions,
   RequestConfirmation,
 } from './contracts';
+import { AIPlanControl } from './AIPlanControl';
 
 const ProjectStructureGraph = dynamic(
   () => import('@/components/graph/ProjectStructureGraph'),
@@ -909,15 +908,8 @@ export function ProjectPhasesTab({
                 Select
               </button>
             )}
-            <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating || proposalActions.isRefining}>
-              {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-              AI Suggest Phases
-            </Button>
             {phases.length > 0 ? (
-              <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.refine()} disabled={proposalActions.isRefining || proposalActions.isGenerating}>
-                {proposalActions.isRefining ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                Refine Plan
-              </Button>
+              <AIPlanControl hasPhases proposalActions={proposalActions} />
             ) : null}
             <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
               {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
@@ -1184,10 +1176,11 @@ export function ProjectPhasesTab({
               <p className="text-sm font-medium text-[var(--text-primary)]">No phases yet</p>
               <p className="mt-2 text-sm text-[var(--text-tertiary)]">Create the first phase to start shaping delivery.</p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <Button variant="secondary" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating}>
-                  {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-                  AI Suggest Phases
-                </Button>
+                <AIPlanControl
+                  hasPhases={false}
+                  proposalActions={proposalActions}
+                  variant="secondary"
+                />
                 <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
                   <Plus />
                   Add first phase

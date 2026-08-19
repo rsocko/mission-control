@@ -29,6 +29,7 @@ X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import { TaskContextMenu, type TaskContextMenuActions, type HubProject } from '@/components/task-list/TaskContextMenu';
 import { cn } from '@/lib/utils';
 import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
@@ -222,21 +223,22 @@ function AssignPhaseTarget({
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); void onCompleteTask(task.id); }}
                                   disabled={completingIds.has(task.id)}
-                                  className={cn(
-                                    'flex-shrink-0 h-[14px] w-[14px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                    isDone
-                                      ? 'bg-green-400 border-green-400 text-white'
-                                      : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                  )}
+                                  className="group/status flex h-[14px] w-[14px] shrink-0 items-center justify-center"
                                   aria-label={isDone ? 'Completed' : 'Mark complete'}
                                 >
-                                  {isDone && <CheckCircle2 size={10} />}
+                                  <TaskStatusIndicator
+                                    status={task.status}
+                                    microStatus={task.microStatus}
+                                    isCompleting={completingIds.has(task.id)}
+                                    size="sm"
+                                  />
                                 </button>
                               </CompletionBurst>
                               <PriorityDot priority={task.priority} />
                               <ConnectorIcon size={11} className="text-[var(--text-tertiary)]" />
                               <span className={cn('truncate text-xs text-[var(--text-secondary)]', isDone && 'line-through')}>{task.title}</span>
                               <TaskDisplayId task={task} />
+                              <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                             </div>
                           </TaskContextMenu>
                         )}
@@ -509,15 +511,15 @@ export function PhaseAssignView({
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); void onCompleteTask(task.id); }}
                                   disabled={completingIds.has(task.id)}
-                                  className={cn(
-                                    'flex-shrink-0 h-[16px] w-[16px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                    isDone
-                                      ? 'bg-green-400 border-green-400 text-white'
-                                      : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                  )}
+                                  className="group/status flex h-[16px] w-[16px] shrink-0 items-center justify-center"
                                   aria-label={isDone ? 'Completed' : 'Mark complete'}
                                 >
-                                  {isDone && <CheckCircle2 size={12} />}
+                                  <TaskStatusIndicator
+                                    status={task.status}
+                                    microStatus={task.microStatus}
+                                    isCompleting={completingIds.has(task.id)}
+                                    size="sm"
+                                  />
                                 </button>
                               </CompletionBurst>
                               <div className="min-w-0 flex-1">
@@ -527,6 +529,7 @@ export function PhaseAssignView({
                                   <p className={cn('truncate text-sm text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                                   <TaskDisplayId task={task} />
                                   <TaskInfoBadges task={task} />
+                                  <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                                 </div>
                               </div>
                               <TaskStatusBadge status={task.status} statusReason={task.statusReason} />

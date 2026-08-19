@@ -93,6 +93,7 @@ export async function GET(request: Request) {
           id: task.id,
           title: task.title,
           status: task.status,
+          microStatus: task.microStatus,
           priority: task.priority,
           dueDate: task.dueDate,
           effort: task.effort,

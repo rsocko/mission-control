@@ -73,6 +73,7 @@ import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import {
   Select,
   SelectContent,
@@ -1659,15 +1660,16 @@ export function ProjectPhasesTab({
                                                         type="button"
                                                         onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
                                                         disabled={completingIds.has(task.id)}
-                                                        className={cn(
-                                                          'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                                          isDone
-                                                            ? 'bg-green-400 border-green-400 text-white'
-                                                            : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                                        )}
+                                                        className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
                                                         aria-label={isDone ? 'Completed' : 'Mark complete'}
                                                       >
-                                                        {isDone && <CheckCircle2 size={14} />}
+                                                        <TaskStatusIndicator
+                                                          status={task.status}
+                                                          microStatus={task.microStatus}
+                                                          isCompleting={completingIds.has(task.id)}
+                                                          size="md"
+                                                          className="scale-90"
+                                                        />
                                                       </button>
                                                     </CompletionBurst>
                                                     <div className="min-w-0">
@@ -1677,6 +1679,7 @@ export function ProjectPhasesTab({
                                                         <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                                                         <TaskDisplayId task={task} />
                                                         <TaskInfoBadges task={task} />
+                                                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                                                       </div>
                                                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                                         <span>{PRIORITY_LABELS[task.priority]}</span>
@@ -1824,15 +1827,16 @@ export function ProjectPhasesTab({
                                           type="button"
                                           onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
                                           disabled={completingIds.has(task.id)}
-                                          className={cn(
-                                            'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                            isDone
-                                              ? 'bg-green-400 border-green-400 text-white'
-                                              : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                          )}
+                                          className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
                                           aria-label={isDone ? 'Completed' : 'Mark complete'}
                                         >
-                                          {isDone && <CheckCircle2 size={14} />}
+                                          <TaskStatusIndicator
+                                            status={task.status}
+                                            microStatus={task.microStatus}
+                                            isCompleting={completingIds.has(task.id)}
+                                            size="md"
+                                            className="scale-90"
+                                          />
                                         </button>
                                       </CompletionBurst>
                                       <div className="min-w-0">
@@ -1842,6 +1846,7 @@ export function ProjectPhasesTab({
                                           <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                                           <TaskDisplayId task={task} />
                                           <TaskInfoBadges task={task} />
+                                          <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                           <span>{PRIORITY_LABELS[task.priority]}</span>

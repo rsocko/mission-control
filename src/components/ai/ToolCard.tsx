@@ -623,6 +623,7 @@ function renderNativeTaskBody(part: ToolPart, toolName: string) {
             id: result.taskId,
             title: result.title,
             status: result.status,
+            microStatus: result.microStatus,
             priority: result.priority,
             dueDate: result.dueDate,
             source: result.source,

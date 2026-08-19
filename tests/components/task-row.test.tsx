@@ -22,8 +22,10 @@ vi.mock('lucide-react', () => {
     Check: Stub,
     Clock: Stub,
     Globe: Stub,
+    Pause: Stub,
     Repeat: Stub,
     Timer: Stub,
+    X: Stub,
   };
 });
 
@@ -60,7 +62,14 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
 }));
 
 vi.mock('@/types', () => ({
-  MICRO_STATUS_CONFIG: {},
+  MICRO_STATUS_CONFIG: {
+    waiting_on_someone: {
+      label: 'Waiting on someone',
+      emoji: 'hourglass',
+      color: '#f59e0b',
+      description: 'Waiting for another person',
+    },
+  },
 }));
 
 vi.mock('@/lib/utils/client-date', () => ({
@@ -294,6 +303,38 @@ describe('TaskRow', () => {
 
       expect(container.firstElementChild?.className).toContain('opacity-50');
       expect(screen.getByText('Test task')).toHaveClass('line-through');
+    });
+
+    describe('status indicator', () => {
+      it('uses the blue status ring for in-progress work', () => {
+        const { container } = render(
+          <TaskRow
+            task={{ ...baseTask, status: 'in_progress' }}
+            onComplete={noop}
+            {...actionProps}
+            onAddToMyDay={noop}
+            onRemoveFromMyDay={noop}
+          />
+        );
+
+        expect(container.querySelector('[data-task-status="in_progress"] > span'))
+          .toHaveClass('border-blue-500');
+      });
+
+      it('shows the amber blocked treatment and refined waiting label', () => {
+        const { container } = render(
+          <TaskRow
+            task={{ ...baseTask, status: 'in_progress', microStatus: 'waiting_on_someone' }}
+            onComplete={noop}
+            {...actionProps}
+            onAddToMyDay={noop}
+            onRemoveFromMyDay={noop}
+          />
+        );
+
+        expect(container.querySelector('[data-task-blocked="true"]')).toBeInTheDocument();
+        expect(screen.getByText('Waiting on someone')).toBeInTheDocument();
+      });
     });
   });
 });

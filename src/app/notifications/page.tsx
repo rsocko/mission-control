@@ -387,16 +387,16 @@ function DesktopNotificationsPage() {
     {
       key: 'urgent',
       label: 'Urgent',
-      detail: 'Unread',
+      detail: 'Until cleared',
       count: hook.stats.urgent,
       icon: AlertTriangle,
-      active: hook.filters.level === 'urgent' && hook.filters.state === 'unread',
+      active: hook.filters.level === 'urgent' && hook.filters.state === null,
       onClick: () => {
-        const active = hook.filters.level === 'urgent' && hook.filters.state === 'unread';
+        const active = hook.filters.level === 'urgent' && hook.filters.state === null;
         hook.replaceFilters({
           ...hook.filters,
           level: active ? null : 'urgent',
-          state: active ? null : 'unread',
+          state: null,
         });
       },
       accent: 'text-red-300',
@@ -404,17 +404,17 @@ function DesktopNotificationsPage() {
     {
       key: 'action-needed',
       label: 'Action needed',
-      detail: 'Unread',
+      detail: 'Until cleared',
       count: hook.stats.actionNeeded,
       icon: ClipboardCheck,
-      active: hook.filters.level === 'action_needed' && hook.filters.state === 'unread',
+      active: hook.filters.level === 'action_needed' && hook.filters.state === null,
       onClick: () => {
         const active = hook.filters.level === 'action_needed'
-          && hook.filters.state === 'unread';
+          && hook.filters.state === null;
         hook.replaceFilters({
           ...hook.filters,
           level: active ? null : 'action_needed',
-          state: active ? null : 'unread',
+          state: null,
         });
       },
       accent: 'text-amber-300',

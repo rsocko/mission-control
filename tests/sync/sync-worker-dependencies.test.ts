@@ -22,6 +22,9 @@ describe('sync worker dependency metadata', () => {
       );
     }
     expect(syncWorkerSupplementalPackages).toEqual(['pino-pretty']);
+    expect(syncWorkerRequiredArtifacts).toContain(
+      'node_modules/node-cron/dist/tasks/background-scheduled-task/daemon.js',
+    );
   });
 
   it('requires native binaries for every external native package', () => {

@@ -24,7 +24,7 @@ export const syncWorkerRequiredArtifacts = [
   'node_modules/metascraper-url/package.json',
   'node_modules/metascraper-video/package.json',
   'node_modules/node-cron/package.json',
-  'node_modules/node-cron/dist/tasks/background-scheduled-task/daemon.cjs',
+  'node_modules/node-cron/dist/tasks/background-scheduled-task/daemon.js',
   'node_modules/pino/package.json',
   'node_modules/pino-pretty/package.json',
   'node_modules/re2/package.json',

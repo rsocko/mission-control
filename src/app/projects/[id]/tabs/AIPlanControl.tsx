@@ -27,7 +27,8 @@ export function AIPlanControl({
 
   function openGuidance(mode: PlanningMode) {
     setGuidance('');
-    setPlanningMode(mode);
+    // Let Radix dismiss the dropdown before mounting another focus-managed layer.
+    setTimeout(() => setPlanningMode(mode), 0);
   }
 
   function submit() {
@@ -163,7 +164,7 @@ export function AIPlanControl({
               placeholder={isRefining
                 ? 'For example: preserve Discovery, reduce handoffs, and target a two-week launch.'
                 : 'For example: prioritize the launch path and separate frontend from backend work.'}
-              className="mt-2 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20"
+              className="mt-2 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-purple-500 focus:shadow-[var(--shadow-focus-glow)]"
             />
             <p className="mt-1 text-right text-xs text-[var(--text-muted)]">
               {guidance.length}/4000

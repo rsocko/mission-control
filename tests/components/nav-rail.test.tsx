@@ -119,7 +119,10 @@ describe('NavRail', () => {
 
     const projectsLink = screen.getByRole('link', { name: 'Projects' });
     expect(projectsLink).toHaveAttribute('href', '/projects');
-    fireEvent.click(screen.getByRole('button', { name: 'Open recent projects' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Open recent projects' }), {
+      button: 0,
+      pointerType: 'mouse',
+    });
 
     const menu = await screen.findByRole('menu', { name: 'Recent projects' });
     await within(menu).findByRole('link', { name: 'Second project' });
@@ -171,7 +174,10 @@ describe('NavRail', () => {
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });
     fireEvent.mouseEnter(nav);
     await waitFor(() => expect(nav).toHaveClass('w-[200px]'));
-    fireEvent.click(screen.getByRole('button', { name: 'Open recent projects' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Open recent projects' }), {
+      button: 0,
+      pointerType: 'mouse',
+    });
 
     const menu = await screen.findByRole('menu', { name: 'Recent projects' });
     expect(await within(menu).findByText('Projects you visit will appear here.')).toBeInTheDocument();

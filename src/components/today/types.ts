@@ -68,6 +68,7 @@ export interface SuggestionTask {
   id: string;
   title: string;
   status: string;
+  microStatus?: string | null;
   priority: string;
   dueDate: string | null;
   pushCount?: number;

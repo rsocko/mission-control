@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { ArrowLeftRight, Bell, Check, ChartNetwork, Clock, Globe, Repeat, RotateCcw, Timer } from 'lucide-react';
+import { ArrowLeftRight, Bell, ChartNetwork, Clock, Globe, Repeat, RotateCcw, Timer } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
@@ -20,6 +20,7 @@ import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATU
 import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
+import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 
 const EFFORT_LABELS = EFFORT_MEASURE_LABELS[DEFAULT_EFFORT_MEASURE];
@@ -190,12 +191,14 @@ export function TaskRow({
             <button
               onClick={(e) => { e.stopPropagation(); onComplete(); }}
               disabled={isCompleting || !canComplete}
-              aria-label={canComplete ? 'Mark task complete' : completionBlockedReason}
-              className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-[border-color,background-color,color,transform] duration-200 flex items-center justify-center ${
-                isCompleting ? 'border-green-400 bg-green-400 text-white' : isDone ? 'border-green-400 bg-green-400 text-white' : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30'
-              }`}
+              aria-label={canComplete ? (isDone ? 'Completed' : 'Mark task complete') : completionBlockedReason}
+              className="group/status flex h-5 w-5 shrink-0 items-center justify-center"
             >
-              {(isDone || isCompleting) && <Check size={12} />}
+              <TaskStatusIndicator
+                status={task.status}
+                microStatus={task.microStatus}
+                isCompleting={isCompleting}
+              />
             </button>
           </Tooltip>
         </CompletionBurst>
@@ -228,7 +231,9 @@ export function TaskRow({
               <span className="text-xs text-[var(--text-muted)] flex-shrink-0 font-mono tabular-nums">{displayId}</span>
             ) : null;
           })()}
-          {task.microStatus && MICRO_STATUS_CONFIG[task.microStatus as MicroStatus] && (
+          {task.microStatus && isTaskBlocked(task.status, task.microStatus) ? (
+            <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="hidden @md:inline-flex" />
+          ) : task.microStatus && MICRO_STATUS_CONFIG[task.microStatus as MicroStatus] && (
             <span
               className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap hidden @md:inline`}
               style={{

@@ -11,6 +11,7 @@ import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
+import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
@@ -165,10 +166,15 @@ export function SortableTaskRow({
         <button
           onClick={(e) => { e.stopPropagation(); onComplete(item.taskId); }}
           disabled={isCompleting}
-          className={`w-6 h-6 md:w-5 md:h-5 rounded-full border-2 flex-shrink-0 transition-[border-color,background-color,color,transform] duration-200 flex items-center justify-center p-3 md:p-0 ${isCompleting ? 'border-green-400 bg-green-400 text-white' : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30'}`}
+          className="group/status flex h-6 w-6 shrink-0 items-center justify-center md:h-5 md:w-5"
           aria-label={`Complete ${item.title}`}
         >
-          {isCompleting && <span className="text-xs">✓</span>}
+          <TaskStatusIndicator
+            status={item.status}
+            microStatus={item.microStatus}
+            isCompleting={isCompleting}
+            size={isMobile ? 'lg' : 'md'}
+          />
         </button>
       </CompletionBurst>
       <span className="flex-shrink-0"><ConnectorIcon type={item.connectorType} size={isMobile ? 16 : 14} /></span>
@@ -181,7 +187,9 @@ export function SortableTaskRow({
               <span className="text-xs text-[var(--text-muted)] flex-shrink-0 font-mono tabular-nums">{displayId}</span>
             ) : null;
           })()}
-          {item.microStatus && MICRO_STATUS_CONFIG[item.microStatus as MicroStatus] && (
+          {item.microStatus && isTaskBlocked(item.status, item.microStatus) ? (
+            <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
+          ) : item.microStatus && MICRO_STATUS_CONFIG[item.microStatus as MicroStatus] && (
             <span
               className="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap"
               style={{

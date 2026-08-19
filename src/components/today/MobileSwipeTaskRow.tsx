@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform, useReducedMotion, type PanInfo } from 'motion/react';
 import {
-  Archive, Calendar, CalendarClock, Check, CircleCheck, Clock, Moon, Sun, X,
+  Archive, Calendar, CalendarClock, CircleCheck, Clock, Moon, Sun, X,
 } from 'lucide-react';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import Image from 'next/image';
@@ -21,6 +21,7 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition } from '@/types';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 
 const SWIPE_THRESHOLD = 80;
 const FULL_SWIPE_THRESHOLD = 160;
@@ -300,17 +301,14 @@ export function MobileSwipeTaskRow({
             )}
             aria-label={`Complete ${item.title}`}
           >
-            <span
-              data-testid="completion-indicator"
-              className={cn(
-                'w-6 h-6 rounded-full border-2 flex items-center justify-center transition-[border-color,background-color,color,transform] duration-200',
-                isCompleting
-                  ? 'border-green-400 bg-green-400 text-white'
-                  : 'border-[var(--border-strong)] active:border-green-500 active:bg-green-900/30'
-              )}
-              aria-hidden="true"
-            >
-              {isCompleting && <Check size={14} />}
+            <span className="group/status flex h-6 w-6 items-center justify-center" aria-hidden="true">
+              <TaskStatusIndicator
+                status={item.status}
+                microStatus={item.microStatus}
+                isCompleting={isCompleting}
+                size="lg"
+                testId="completion-indicator"
+              />
             </span>
           </button>
         </CompletionBurst>
@@ -334,6 +332,7 @@ export function MobileSwipeTaskRow({
             </p>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
             {/* Project tag (hub project name) */}
             {item.hubProjectIds && item.hubProjectIds.length > 0 && projects.length > 0 && (() => {
               const matched = projects.filter((p) => item.hubProjectIds!.includes(p.id));

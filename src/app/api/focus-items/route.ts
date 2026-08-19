@@ -46,6 +46,7 @@ export async function GET(request: Request) {
       // Task fields
       title: tasks.title,
       status: tasks.status,
+      microStatus: tasks.microStatus,
       priority: tasks.priority,
       dueDate: tasks.dueDate,
       connectorType: tasks.connectorType,
@@ -71,6 +72,7 @@ export async function GET(request: Request) {
       // Task fields
       title: tasks.title,
       status: tasks.status,
+      microStatus: tasks.microStatus,
       priority: tasks.priority,
       dueDate: tasks.dueDate,
       connectorType: tasks.connectorType,

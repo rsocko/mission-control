@@ -11,6 +11,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { ConnectorIcon } from './SortableTaskRow';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import type { SourceList, SuggestionTask } from './types';
 
 const PAGE_SIZE = 5;
@@ -214,11 +215,13 @@ function SuggestionRow({
           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
           onClick={() => onSelect(task.id)}
         >
+          <TaskStatusIndicator status={task.status} microStatus={task.microStatus} size="sm" />
           <ConnectorIcon type={task.connectorType} size={12} />
           <span className="min-w-0 flex-1">
             <span className="text-xs text-[var(--text-primary)] truncate block">{task.title}</span>
             <span className="flex items-center gap-2">
               {task.dueDate && <span className={`text-xs ${styles.header}`}>due {formatDueDate(task.dueDate)}</span>}
+              <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
               {(task.pushCount ?? 0) >= 2 && (
                 <span
                   className="inline-flex items-center gap-0.5 text-xs text-amber-400"

@@ -11,6 +11,7 @@ import { ConnectorIcon } from './SortableTaskRow';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import type { SuggestionGroups, SuggestionTask } from './types';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 
 interface MobileSuggestionsProps {
   suggestions: SuggestionGroups;
@@ -244,6 +245,7 @@ function MobileSuggestionAccordion({
                     className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left"
                     onClick={() => onSelect(task.id)}
                   >
+                    <TaskStatusIndicator status={task.status} microStatus={task.microStatus} />
                     <ConnectorIcon type={task.connectorType} size={14} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-[var(--text-primary)] truncate">{task.title}</span>
@@ -252,6 +254,7 @@ function MobileSuggestionAccordion({
                           {formatDueDate(task.dueDate)}
                         </span>
                       )}
+                      <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="mt-1" />
                       {(task.pushCount ?? 0) >= 2 && (
                         <span className="mt-0.5 block text-xs text-amber-400">
                           Rescheduled {task.pushCount ?? 0} times

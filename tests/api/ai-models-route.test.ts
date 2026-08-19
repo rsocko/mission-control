@@ -10,13 +10,9 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/lib/ai', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/ai')>('@/lib/ai');
-  return {
-    ...actual,
-    getResolvedAIConfig: () => state.config,
-  };
-});
+vi.mock('@/lib/ai/config-resolver', () => ({
+  getResolvedAIConfig: () => state.config,
+}));
 
 describe('AI model discovery', () => {
   beforeEach(() => {

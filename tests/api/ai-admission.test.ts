@@ -9,8 +9,11 @@ const mocks = vi.hoisted(() => ({
   streamChat: vi.fn(),
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/provider-factory', () => ({
   getAIRouteOutcome: vi.fn(),
+}));
+
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: () => ({
     provider: 'ollama',
     model: 'llama3.1:8b',
@@ -18,6 +21,9 @@ vi.mock('@/lib/ai', () => ({
     apiKey: '',
     configured: true,
   }),
+}));
+
+vi.mock('@/lib/ai/features/chat', () => ({
   streamChat: mocks.streamChat,
 }));
 

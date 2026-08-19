@@ -1,20 +1,24 @@
 import db from '@/db';
 import { appSettings } from '@/db/schema';
 import {
-  AIProviderEndpointValidationError,
-  AIRoutingPolicyValidationError,
-  extractBifrostRoutingMetadata,
   getAIRequestContext,
   getAIRouteOutcome,
   getAIRoutingHeaders,
-  getAIRoutingPolicy,
   getProviderInfo,
+} from '@/lib/ai/provider-factory';
+import {
+  getAIRoutingPolicy,
   getResolvedAIConfig,
   invalidateAIConfigCache,
+} from '@/lib/ai/config-resolver';
+import {
+  AIProviderEndpointValidationError,
+  AIRoutingPolicyValidationError,
+  extractBifrostRoutingMetadata,
   parseBifrostModelId,
   validateProviderEndpoint,
   validateAIRoutingPolicy,
-} from '@/lib/ai';
+} from '@/lib/ai/sensitivity-policy';
 import { ApiErrors } from '@/lib/api-error';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';

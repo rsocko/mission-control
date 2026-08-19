@@ -1,4 +1,4 @@
-import { triageNotifications } from '@/lib/ai';
+import { classifyNotifications } from '@/lib/ai/features/notification-classification';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 
@@ -7,7 +7,7 @@ import { ApiErrors } from '@/lib/api-error';
  */
 export async function GET() {
   try {
-    const result = await triageNotifications();
+    const result = await classifyNotifications();
     return Response.json(result);
   } catch (error) {
     aiLogger.error({ err: error }, 'Notification triage request failed');

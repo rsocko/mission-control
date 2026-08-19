@@ -44,8 +44,11 @@ vi.mock('@/db/schema', () => ({
   connectorConfigs: { deletedAt: 'deletedAt' },
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/provider-factory', () => ({
   getProviderInfo: () => ({ provider: 'test', model: 'test', baseUrl: 'http://test' }),
+}));
+
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: () => ({ configured: false }),
 }));
 

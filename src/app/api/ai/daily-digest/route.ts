@@ -1,4 +1,4 @@
-import { generateDailyDigest } from '@/lib/ai';
+import { generateDailyDigest } from '@/lib/ai/features/daily-digest';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 

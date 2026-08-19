@@ -1,4 +1,4 @@
-import { suggestEnergyTags } from '@/lib/ai';
+import { suggestEnergyTags } from '@/lib/ai/features/energy-tag-suggestions';
 import { aiLogger } from '@/lib/logger';
 import db, { runTransaction } from '@/db';
 import { tags, taskTags } from '@/db/schema';

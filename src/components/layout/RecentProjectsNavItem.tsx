@@ -198,6 +198,7 @@ export function RecentProjectsNavItem({
           sideOffset={8}
           collisionPadding={12}
           aria-label="Recent projects"
+          aria-labelledby={undefined}
           className="z-50 w-72 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl"
         >
           <DropdownMenu.Label className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">

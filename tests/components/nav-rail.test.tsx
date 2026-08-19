@@ -124,14 +124,14 @@ describe('NavRail', () => {
     });
 
     const menu = await screen.findByRole('menu', { name: 'Recent projects' });
-    await within(menu).findByRole('link', { name: 'Second project' });
-    const recentLinks = within(menu).getAllByRole('link').slice(0, 2);
+    await within(menu).findByRole('menuitem', { name: 'Second project' });
+    const recentLinks = within(menu).getAllByRole('menuitem').slice(0, 2);
     expect(recentLinks.map((link) => link.textContent)).toEqual([
       'Second project',
       'First project',
     ]);
     expect(recentLinks[0]).toHaveAttribute('href', '/projects/proj-second');
-    expect(within(menu).getByRole('link', { name: 'View all projects' })).toHaveAttribute(
+    expect(within(menu).getByRole('menuitem', { name: 'View all projects' })).toHaveAttribute(
       'href',
       '/projects',
     );

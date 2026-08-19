@@ -110,7 +110,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
-    "serwist": "^9.5.11",
+    "serwist": "^9.5.12",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "web-push": "^3.6.7",

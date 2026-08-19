@@ -29,8 +29,7 @@ vi.mock('@/db/schema', () => ({
   notifications: 'notifications',
 }));
 
-vi.mock('@/lib/ai', () => ({
-  AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: vi.fn().mockReturnValue({
     provider: 'ollama',
     configured: true,
@@ -39,6 +38,10 @@ vi.mock('@/lib/ai', () => ({
     embeddingModel: 'nomic-embed-text',
     semanticSearchEnabled: true,
   }),
+}));
+
+vi.mock('@/lib/ai/provider-factory', () => ({
+  AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
   getAIRequestContext: vi.fn(() => ({
     featureId: 'semantic-embedding',
     sensitivity: 'restricted',
@@ -97,7 +100,7 @@ describe('Semantic search — unit tests (mocked)', () => {
   });
 
   it('keeps shared embedding infrastructure available when search enrichment is disabled', async () => {
-    const ai = await import('@/lib/ai');
+    const ai = await import('@/lib/ai/config-resolver');
     vi.mocked(ai.getResolvedAIConfig).mockReturnValueOnce({
       provider: 'ollama',
       configured: true,
@@ -122,7 +125,7 @@ describe('Semantic search — unit tests (mocked)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding() }] }), { status: 200 }),
     );
-    const ai = await import('@/lib/ai');
+    const ai = await import('@/lib/ai/provider-factory');
     const { generateEmbedding } = await import('@/lib/search/semantic');
 
     await generateEmbedding('private message', { sources: ['rymessage'] });

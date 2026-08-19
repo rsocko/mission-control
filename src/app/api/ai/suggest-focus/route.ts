@@ -3,7 +3,7 @@ import db from '@/db';
 import { tasks, focusItems, myDayItems, energyCheckins } from '@/db/schema';
 import { eq, and, ne } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
-import { getEnergyTagsForTasks } from '@/lib/ai';
+import { getEnergyTagsForTasks } from '@/lib/ai/features/energy-tag-queries';
 import { ApiErrors } from '@/lib/api-error';
 
 /**

@@ -1,5 +1,5 @@
 import { generateText } from 'ai';
-import { getAIModel } from '@/lib/ai';
+import { getAIModel } from '../provider-factory';
 import db from '@/db';
 import { tasks, notifications } from '@/db/schema';
 import { eq } from 'drizzle-orm';

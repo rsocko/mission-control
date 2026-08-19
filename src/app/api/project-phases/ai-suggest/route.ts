@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
 import { tasks, hubProjects, taskProjects, tags, taskTags } from '@/db/schema';
-import { getAIModel, getAIRouteOutcome, getResolvedAIConfig } from '@/lib/ai';
+import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import { generateText } from 'ai';
 import { eq, inArray, notInArray } from 'drizzle-orm';
 import { z } from 'zod';

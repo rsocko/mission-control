@@ -1,12 +1,12 @@
 import { sqlite } from '@/db';
 import {
-  AIRoutingDeniedError,
   getAIRequestContext,
   getAIRouteOutcome,
   getAIRoutingHeaders,
-  getResolvedAIConfig,
-  type AIRequestContext,
-} from '@/lib/ai';
+  AIRoutingDeniedError,
+} from '@/lib/ai/provider-factory';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import type { AIRequestContext } from '@/lib/ai/types';
 import { aiLogger } from '@/lib/logger';
 import type {
   SearchResult,

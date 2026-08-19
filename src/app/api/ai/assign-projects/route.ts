@@ -1,4 +1,4 @@
-import { autoAssignProjects } from '@/lib/ai';
+import { autoAssignProjects } from '@/lib/ai/features/project-assignment';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { resolveTaskEditPoliciesByIds } from '@/lib/tasks/edit-policy';

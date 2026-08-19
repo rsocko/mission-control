@@ -1,10 +1,13 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import type { NavigationCounts } from '@/lib/navigation/badges';
+import { RECENT_PROJECT_IDS_STORAGE_KEY } from '@/lib/navigation/recent-projects';
+import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
+import { ChartNetwork } from 'lucide-react';
 
 function renderNavRail({
   isAiActive = false,
@@ -70,6 +73,16 @@ describe('NavRail', () => {
     expect(nav).toHaveClass('w-16');
   });
 
+  it('expands for keyboard focus so secondary navigation controls are reachable', () => {
+    renderNavRail();
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+
+    fireEvent.focus(screen.getByRole('link', { name: 'Projects' }));
+
+    expect(nav).toHaveClass('w-[200px]');
+    expect(screen.getByRole('button', { name: 'Open recent projects' })).toBeInTheDocument();
+  });
+
   it('uses the shared shortcut icon and color for quick-access destinations', () => {
     renderNavRail();
 
@@ -84,6 +97,85 @@ describe('NavRail', () => {
       const icon = screen.getByRole('link', { name }).querySelector('svg');
       expect(icon).toHaveClass(iconClass, colorClass);
     }
+  });
+
+  it('opens recently viewed projects without changing the Projects destination', async () => {
+    vi.useRealTimers();
+    localStorage.setItem(
+      RECENT_PROJECT_IDS_STORAGE_KEY,
+      JSON.stringify(['proj-second', 'proj-first']),
+    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      projects: [
+        { id: 'proj-first', name: 'First project', color: '#3b82f6', icon: null },
+        { id: 'proj-second', name: 'Second project', color: '#a855f7', icon: null },
+      ],
+    }), { status: 200 }));
+    renderNavRail();
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    fireEvent.mouseEnter(nav);
+    await waitFor(() => expect(nav).toHaveClass('w-[200px]'));
+
+    const projectsLink = screen.getByRole('link', { name: 'Projects' });
+    expect(projectsLink).toHaveAttribute('href', '/projects');
+    fireEvent.click(screen.getByRole('button', { name: 'Open recent projects' }));
+
+    const menu = await screen.findByRole('menu', { name: 'Recent projects' });
+    await within(menu).findByRole('link', { name: 'Second project' });
+    const recentLinks = within(menu).getAllByRole('link').slice(0, 2);
+    expect(recentLinks.map((link) => link.textContent)).toEqual([
+      'Second project',
+      'First project',
+    ]);
+    expect(recentLinks[0]).toHaveAttribute('href', '/projects/proj-second');
+    expect(within(menu).getByRole('link', { name: 'View all projects' })).toHaveAttribute(
+      'href',
+      '/projects',
+    );
+  });
+
+  it('records project detail visits as recently viewed', async () => {
+    vi.useRealTimers();
+    localStorage.setItem(
+      RECENT_PROJECT_IDS_STORAGE_KEY,
+      JSON.stringify(['proj-older', 'proj-current']),
+    );
+
+    render(
+      <TooltipProvider>
+        <RecentProjectsNavItem
+          active
+          expanded
+          icon={ChartNetwork}
+          open={false}
+          pathname="/projects/proj-current"
+          onOpenChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(RECENT_PROJECT_IDS_STORAGE_KEY) || '[]')).toEqual([
+        'proj-current',
+        'proj-older',
+      ]);
+    });
+  });
+
+  it('shows an empty recent-project state without fetching', async () => {
+    vi.useRealTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    renderNavRail();
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    fireEvent.mouseEnter(nav);
+    await waitFor(() => expect(nav).toHaveClass('w-[200px]'));
+    fireEvent.click(screen.getByRole('button', { name: 'Open recent projects' }));
+
+    const menu = await screen.findByRole('menu', { name: 'Recent projects' });
+    expect(await within(menu).findByText('Projects you visit will appear here.')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('expands immediately when explicitly pinned', () => {

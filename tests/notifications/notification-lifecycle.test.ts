@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countsTowardAttention,
   isInInbox,
   isNotificationUnread,
   legacyStateFromLifecycle,
@@ -56,6 +57,40 @@ describe('notification lifecycle contract', () => {
     expect(needsAttention({ ...base, snoozedUntil: '2026-08-02T12:01:00.000Z' }, now)).toBe(false);
     expect(needsAttention({ ...base, level: 'digest' }, now)).toBe(false);
     expect(needsAttention({ ...base, snoozedUntil: '2026-08-02T11:59:00.000Z' }, now)).toBe(true);
+  });
+
+  it('keeps read urgent and action-needed items counted until their lifecycle clears them', () => {
+    const now = new Date('2026-08-02T12:00:00.000Z');
+    const readInboxItem = {
+      readState: 'read',
+      disposition: 'inbox',
+      sourceState: 'active',
+    };
+
+    expect(countsTowardAttention({ ...readInboxItem, level: 'urgent' }, now)).toBe(true);
+    expect(countsTowardAttention({ ...readInboxItem, level: 'action_needed' }, now)).toBe(true);
+    expect(countsTowardAttention({ ...readInboxItem, level: 'heads_up' }, now)).toBe(false);
+    expect(countsTowardAttention({ ...readInboxItem, level: 'fyi' }, now)).toBe(false);
+    expect(countsTowardAttention({
+      ...readInboxItem,
+      readState: 'unread',
+      level: 'heads_up',
+    }, now)).toBe(true);
+    expect(countsTowardAttention({
+      ...readInboxItem,
+      level: 'urgent',
+      disposition: 'handled',
+    }, now)).toBe(false);
+    expect(countsTowardAttention({
+      ...readInboxItem,
+      level: 'action_needed',
+      sourceState: 'resolved',
+    }, now)).toBe(false);
+    expect(countsTowardAttention({
+      ...readInboxItem,
+      level: 'urgent',
+      snoozedUntil: '2026-08-02T12:01:00.000Z',
+    }, now)).toBe(false);
   });
 
   it('adapts legacy-only notification objects at runtime', () => {

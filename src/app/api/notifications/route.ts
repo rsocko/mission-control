@@ -19,8 +19,8 @@ import {
   legacyStateMutationPatch,
 } from '@/lib/notifications/lifecycle';
 import {
+  notificationCountsTowardAttention,
   notificationIsInInbox,
-  notificationNeedsAttention,
 } from '@/lib/notifications/lifecycle-sql';
 import type { NotificationState } from '@/types';
 import { normalizeFinanceProviderFacets } from '@/lib/finance-insights/provider';
@@ -131,14 +131,14 @@ export async function GET(request: Request) {
       notificationIsInInbox(),
       sql`${notifications.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
     );
-    const attentionCondition = notificationNeedsAttention();
+    const attentionCondition = notificationCountsTowardAttention();
 
     const stats = await db.select({
       total: sql<number>`COUNT(*)`,
       unread: sql<number>`COALESCE(SUM(CASE WHEN read_state = 'unread' THEN 1 ELSE 0 END), 0)`,
       attention: sql<number>`COALESCE(SUM(CASE WHEN ${attentionCondition} THEN 1 ELSE 0 END), 0)`,
-      urgent: sql<number>`COALESCE(SUM(CASE WHEN level = 'urgent' AND read_state = 'unread' THEN 1 ELSE 0 END), 0)`,
-      actionNeeded: sql<number>`COALESCE(SUM(CASE WHEN level = 'action_needed' AND read_state = 'unread' THEN 1 ELSE 0 END), 0)`,
+      urgent: sql<number>`COALESCE(SUM(CASE WHEN level = 'urgent' THEN 1 ELSE 0 END), 0)`,
+      actionNeeded: sql<number>`COALESCE(SUM(CASE WHEN level = 'action_needed' THEN 1 ELSE 0 END), 0)`,
       headsUp: sql<number>`COALESCE(SUM(CASE WHEN level = 'heads_up' AND read_state = 'unread' THEN 1 ELSE 0 END), 0)`,
       fyi: sql<number>`COALESCE(SUM(CASE WHEN level = 'fyi' AND read_state = 'unread' THEN 1 ELSE 0 END), 0)`,
       digest: sql<number>`COALESCE(SUM(CASE WHEN level = 'digest' AND read_state = 'unread' THEN 1 ELSE 0 END), 0)`,

@@ -1,4 +1,4 @@
-import { suggestMicroStatuses } from '@/lib/ai';
+import { suggestMicroStatuses } from '@/lib/ai/features/micro-status-suggestions';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 

@@ -51,22 +51,18 @@ vi.mock('@/db', () => {
   };
 });
 
-vi.mock('@/lib/ai', async () => {
+vi.mock('@/lib/ai/sensitivity-policy', async () => {
   const actual = await vi.importActual<
     typeof import('@/lib/ai/sensitivity-policy')
   >('@/lib/ai/sensitivity-policy');
   return {
-  AIProviderEndpointValidationError: actual.AIProviderEndpointValidationError,
-  AIRoutingPolicyValidationError: actual.AIRoutingPolicyValidationError,
+    ...actual,
+    validateAIRoutingPolicy: (value: unknown) => value,
+  };
+});
+
+vi.mock('@/lib/ai/config-resolver', () => ({
   getAIRoutingPolicy: () => routingPolicy,
-  getProviderInfo: () => ({
-    provider: 'bifrost',
-    model: 'azure/gpt-4o-mini',
-    baseUrl: 'https://bifrost.test/v1',
-    configured: true,
-    embeddingModel: 'ollama/nomic-embed-text:latest',
-    semanticSearchEnabled: false,
-  }),
   getResolvedAIConfig: () => ({
     provider: 'bifrost',
     model: 'azure/gpt-4o-mini',
@@ -77,14 +73,21 @@ vi.mock('@/lib/ai', async () => {
     configured: true,
   }),
   invalidateAIConfigCache: vi.fn(),
-  validateAIRoutingPolicy: (value: unknown) => value,
-  validateProviderEndpoint: actual.validateProviderEndpoint,
-  parseBifrostModelId: actual.parseBifrostModelId,
+}));
+
+vi.mock('@/lib/ai/provider-factory', () => ({
+  getProviderInfo: () => ({
+    provider: 'bifrost',
+    model: 'azure/gpt-4o-mini',
+    baseUrl: 'https://bifrost.test/v1',
+    configured: true,
+    embeddingModel: 'ollama/nomic-embed-text:latest',
+    semanticSearchEnabled: false,
+  }),
   getAIRequestContext: vi.fn(),
   getAIRouteOutcome: vi.fn(),
   getAIRoutingHeaders: vi.fn(),
-  };
-});
+}));
 
 describe('AI provider routing settings', () => {
   beforeEach(() => {

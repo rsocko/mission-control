@@ -71,8 +71,11 @@ vi.mock('@/lib/logger', () => ({
   requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+}));
+
+vi.mock('@/lib/ai/provider-factory', () => ({
   getAIModel: vi.fn(() => ({
     model: 'mock-model',
     context: {
@@ -212,7 +215,7 @@ describe('POST /api/goals/develop', () => {
   });
 
   it('should return 503 when AI not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai');
+    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
     vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
 
     const { POST } = await import('@/app/api/goals/develop/route');

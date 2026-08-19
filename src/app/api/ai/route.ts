@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { getAIRouteOutcome, getResolvedAIConfig, streamChat } from '@/lib/ai';
+import { getAIRouteOutcome } from '@/lib/ai/provider-factory';
+import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { streamChat } from '@/lib/ai/features/chat';
 import { aiLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
 import { startRuntimeOperation } from '@/lib/runtime/lifecycle';

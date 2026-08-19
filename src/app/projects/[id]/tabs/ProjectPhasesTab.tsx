@@ -1353,6 +1353,19 @@ export function ProjectPhasesTab({
                                       <button type="button" onClick={() => void handleCyclePhaseStatus(phase)} disabled={isPhaseMutationDisabled} title="Click to cycle status">
                                         <PhaseStatusBadge status={phase.status} />
                                       </button>
+                                      {statusSummary.mismatchMessage ? (
+                                        <Tooltip content={statusSummary.mismatchMessage} placement="bottom">
+                                          <span
+                                            role="img"
+                                            tabIndex={0}
+                                            title={statusSummary.mismatchMessage}
+                                            aria-label={`Phase status warning: ${statusSummary.mismatchMessage}`}
+                                            className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 text-[var(--warning)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--warning)]/60"
+                                          >
+                                            <CircleAlert size={13} />
+                                          </span>
+                                        </Tooltip>
+                                      ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
                                       <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
                                         <Layers3 size={11} />
@@ -1371,15 +1384,6 @@ export function ProjectPhasesTab({
                                           <span className="tabular-nums">{pctComplete}%</span>
                                         </span>
                                       )}
-                                      {statusSummary.mismatchMessage ? (
-                                        <span
-                                          role="status"
-                                          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2 py-1 text-xs font-medium text-[var(--warning)]"
-                                        >
-                                          <CircleAlert size={12} />
-                                          {statusSummary.mismatchMessage}
-                                        </span>
-                                      ) : null}
                                       {/* Description icon when no description exists */}
                                       {!phase.description && editingPhaseDescId !== phase.id && (
                                         <Tooltip content="Add description">

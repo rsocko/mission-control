@@ -23,7 +23,7 @@ describe('sync worker dependency metadata', () => {
     }
     expect(syncWorkerSupplementalPackages).toEqual(['pino-pretty']);
     expect(syncWorkerRequiredArtifacts).toContain(
-      'node_modules/node-cron/dist/tasks/background-scheduled-task/daemon.js',
+      'node_modules/node-cron/dist/daemon.cjs',
     );
   });
 

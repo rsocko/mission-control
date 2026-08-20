@@ -277,7 +277,7 @@ export function NavRail({
       }}
     >
       {/* Brand */}
-      <div className="flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
+      <div className="relative flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
           {isSyncing ? (
             <ActiveSyncIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
@@ -287,7 +287,7 @@ export function NavRail({
         </span>
         <span className={cn(
           '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-          expanded ? 'opacity-100 max-w-[128px]' : 'opacity-0 max-w-0'
+          expanded ? 'opacity-100 max-w-[100px]' : 'opacity-0 max-w-0'
         )}>
           <span className="text-[14px] leading-4 font-bold tracking-[-0.015em] text-[var(--text-primary)]">
             Mission Control
@@ -299,6 +299,20 @@ export function NavRail({
             {brandSubtitle}
           </span>
         </span>
+        <Tooltip content={pinned ? 'Unpin sidebar' : 'Pin sidebar'} placement="bottom">
+          <button
+            type="button"
+            onClick={togglePinned}
+            aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
+            className={cn(
+              'absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+              expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
+              pinned && 'text-[var(--accent-400)]'
+            )}
+          >
+            {pinned ? <PinOff size={16} /> : <Pin size={16} />}
+          </button>
+        </Tooltip>
       </div>
 
       {/* Nav groups */}
@@ -379,7 +393,7 @@ export function NavRail({
           ))}
       </div>
 
-      {/* Bottom section: pin toggle + settings */}
+      {/* Bottom section: status + settings */}
       <div className="flex flex-col gap-0.5 pb-2 mt-auto">
         <div className="h-px bg-[var(--text-tertiary)]/20 mb-2.5 mx-3" />
 
@@ -468,28 +482,6 @@ export function NavRail({
             </Popover.Portal>
           </Popover.Root>
         )}
-
-        {/* Pin toggle */}
-        <Tooltip content={pinned ? 'Unpin sidebar' : 'Pin sidebar'} placement="right" disabled={expanded}>
-          <button
-            onClick={togglePinned}
-            aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
-            className={cn(
-              'flex items-center h-10 mx-2 px-2.5 gap-2.5 rounded-lg text-[13px] font-medium transition-colors duration-200 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)]',
-              pinned && 'text-[var(--accent-400)]'
-            )}
-          >
-            <span className="w-[22px] h-[22px] flex items-center justify-center flex-shrink-0">
-              {pinned ? <PinOff size={20} /> : <Pin size={20} />}
-            </span>
-            <span className={cn(
-              'whitespace-nowrap overflow-hidden text-ellipsis transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-              expanded ? 'opacity-100 max-w-[150px]' : 'opacity-0 max-w-0'
-            )}>
-              {pinned ? 'Unpin sidebar' : 'Pin sidebar'}
-            </span>
-          </button>
-        </Tooltip>
 
         {/* Bottom nav items (Settings) */}
         {bottomItems.map((item) => {

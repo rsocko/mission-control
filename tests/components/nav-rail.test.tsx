@@ -203,6 +203,20 @@ describe('NavRail', () => {
     expect(nav).toHaveClass('w-[200px]');
   });
 
+  it('presents pinning as a compact header utility instead of a nav item', () => {
+    renderNavRail();
+    const pinButton = screen.getByRole('button', { name: 'Pin navigation open' });
+
+    expect(pinButton).toHaveClass('absolute', 'h-7', 'w-7', 'opacity-0');
+    expect(pinButton.querySelector('svg')).toHaveAttribute('width', '16');
+    expect(screen.queryByText('Pin sidebar')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(screen.getByRole('navigation', { name: 'Main navigation' }));
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(pinButton).toHaveClass('opacity-100');
+  });
+
   it('renders a static brand mark and reveals its name when expanded', () => {
     renderNavRail();
     const brandName = screen.getByText('Mission Control');
@@ -224,7 +238,7 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[128px]');
+    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[100px]');
   });
 
   it('reflects active Houston work in the brand subtitle', () => {

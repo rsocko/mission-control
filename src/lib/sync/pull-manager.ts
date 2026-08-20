@@ -34,6 +34,11 @@ import {
   persistGitHubLinkedSourceIdentityBatch,
   persistExternalIdentityBatch,
 } from '@/lib/external-identities';
+import { getTimezone } from '@/lib/mode';
+import {
+  isReminderRelativeRule,
+  resolveRelativeReminderMutation,
+} from '@/lib/tasks/relative-reminder';
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import type {
   GitHubStableIdentityRuntime,
@@ -1108,6 +1113,21 @@ async function applyRemoteUpdate(
     syncStatus: 'synced',
     lastSyncedAt: now,
   };
+  if (
+    resolvedDueDate !== existingTask.dueDate
+    && isReminderRelativeRule(existingTask.reminderRelative ?? '')
+  ) {
+    const reminderMutation = resolveRelativeReminderMutation({
+      current: existingTask,
+      input: { dueDate: resolvedDueDate },
+      timezone: getTimezone(),
+      now: new Date(now),
+    });
+    Object.assign(
+      taskUpdate,
+      reminderMutation.success ? reminderMutation.updates : { reminderAt: null },
+    );
+  }
   if (!githubHierarchyManaged) {
     taskUpdate.parentId = remote.parentId || existingTask.parentId || null;
     taskUpdate.depth = remote.depth ?? existingTask.depth;

@@ -23,7 +23,11 @@ import {
 } from '@/db/schema';
 import { indexTaskSearch } from '@/lib/search';
 import { connectorLogger } from '@/lib/logger';
-import { windowsToIanaTimezone } from '@/lib/mode';
+import { getTimezone, windowsToIanaTimezone } from '@/lib/mode';
+import {
+  isReminderRelativeRule,
+  resolveRelativeReminderMutation,
+} from '@/lib/tasks/relative-reminder';
 import type { TaskPriority, TaskStatus } from '@/types';
 import type { WorkTodoAck, WorkTodoIngest } from './contracts';
 
@@ -284,6 +288,22 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
             ? normalizeWorkTodoReminderAt(remoteTask.reminderDateTime)
             : null,
         };
+        if (existing && isReminderRelativeRule(existing.reminderRelative ?? '')) {
+          if (remoteValues.dueDate === existing.dueDate) {
+            remoteValues.reminderAt = existing.reminderAt;
+          } else {
+            const reminderMutation = resolveRelativeReminderMutation({
+              current: existing,
+              input: { dueDate: remoteValues.dueDate ?? null },
+              timezone: getTimezone(),
+              now: new Date(payload.syncTimestamp),
+            });
+            Object.assign(
+              remoteValues,
+              reminderMutation.success ? reminderMutation.updates : { reminderAt: null },
+            );
+          }
+        }
 
         if (existing) {
           const pending = existing.syncStatus === 'pending_push';

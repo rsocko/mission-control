@@ -151,6 +151,7 @@ vi.mock('@/lib/priority', () => ({
 }));
 
 vi.mock('@/lib/mode', () => ({
+  getTimezone: vi.fn(() => 'America/New_York'),
   isDemoMode: vi.fn(() => false),
 }));
 

@@ -14,7 +14,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import db, { runTransaction } from '@/db';
-import { taskReminderOccurrences, tasks } from '@/db/schema';
+import { taskReminderOccurrences, taskSchedules, tasks } from '@/db/schema';
 import {
   createNotificationsInTransaction,
   wakeNotificationDeliveryDispatcher,
@@ -222,8 +222,13 @@ function fireClaim(claimed: ClaimedReminder, now: Date): 'fired' | 'cancelled' {
       throw new Error(`Reminder occurrence "${claimed.occurrence.id}" lost its claim`);
     }
 
+    const recurrence = tx.select({ recurrence: taskSchedules.recurrence })
+      .from(taskSchedules)
+      .where(eq(taskSchedules.taskId, task.id))
+      .get()?.recurrence;
     tx.update(tasks).set({
       reminderAt: null,
+      ...(!recurrence ? { reminderRelative: null, reminderDueTime: null } : {}),
       updatedAt: nowIso,
     }).where(and(
       eq(tasks.id, task.id),

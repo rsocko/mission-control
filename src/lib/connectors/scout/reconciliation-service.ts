@@ -502,6 +502,8 @@ function persistEvaluation(
       microStatus: null,
       snoozedUntil: null,
       reminderAt: null,
+      reminderRelative: null,
+      reminderDueTime: null,
       updatedAt: nowIso,
     };
     const completion = database.update(tasks).set(updates).where(and(
@@ -979,6 +981,8 @@ export async function actOnReconciliationSuggestion(
         microStatus: null,
         snoozedUntil: null,
         reminderAt: null,
+        reminderRelative: null,
+        reminderDueTime: null,
         updatedAt: nowIso,
       }).where(and(
         eq(tasks.id, task.id),

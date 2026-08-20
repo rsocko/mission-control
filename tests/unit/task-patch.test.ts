@@ -37,4 +37,19 @@ describe('parseTaskPatchInput', () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) expect(parsed.error).toContain('Invalid effort');
   });
+
+  it('maps relative reminder configuration to reminder edit policy', () => {
+    const parsed = parseTaskPatchInput({
+      reminderRelative: '1_day_before',
+      reminderDueTime: '09:00',
+    });
+    expect(parsed).toMatchObject({ success: true, fields: ['reminderAt'] });
+  });
+
+  it('rejects unsupported relative reminder rules and due times', () => {
+    expect(parseTaskPatchInput({
+      reminderRelative: '2_days_before',
+      reminderDueTime: '25:00',
+    }).success).toBe(false);
+  });
 });

@@ -21,6 +21,7 @@ beforeEach(() => {
   db.delete(schema.notificationDeliveryEvents).run();
   db.delete(schema.taskReminderOccurrences).run();
   db.delete(schema.notifications).run();
+  db.delete(schema.taskSchedules).run();
   db.delete(schema.tasks).run();
   db.delete(schema.pushPreferences).run();
   db.delete(schema.appSettings).run();
@@ -76,6 +77,32 @@ describe('durable task reminder delivery', () => {
     expect(db.select({ reminderAt: schema.tasks.reminderAt }).from(schema.tasks).where(
       eq(schema.tasks.id, 'missed'),
     ).get()?.reminderAt).toBeNull();
+  });
+
+  it('preserves relative intent after firing a recurring task reminder', async () => {
+    const scheduledAt = '2026-08-20T11:55:00.000Z';
+    addTask('recurring-relative', scheduledAt, {
+      reminderRelative: '1_day_before',
+      reminderDueTime: '09:00',
+    });
+    db.insert(schema.taskSchedules).values({
+      taskId: 'recurring-relative',
+      scheduledDate: '2026-08-21',
+      recurrence: 'daily',
+      isTimeBlocked: false,
+    }).run();
+
+    await runDueTaskReminders({ now: NOW });
+
+    expect(db.select({
+      reminderAt: schema.tasks.reminderAt,
+      reminderRelative: schema.tasks.reminderRelative,
+      reminderDueTime: schema.tasks.reminderDueTime,
+    }).from(schema.tasks).where(eq(schema.tasks.id, 'recurring-relative')).get()).toEqual({
+      reminderAt: null,
+      reminderRelative: '1_day_before',
+      reminderDueTime: '09:00',
+    });
   });
 
   it('recovers an expired processing lease after a restart', async () => {

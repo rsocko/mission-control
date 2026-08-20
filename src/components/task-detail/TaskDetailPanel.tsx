@@ -190,6 +190,13 @@ export function TaskDetailPanel({
         setConfirmDialog((dialog) => ({ ...dialog, open: false }));
         request.onConfirm();
       },
+      alternateLabel: request.alternateLabel,
+      onAlternate: request.onAlternate
+        ? () => {
+            setConfirmDialog((dialog) => ({ ...dialog, open: false }));
+            request.onAlternate?.();
+          }
+        : undefined,
     });
   }, []);
 
@@ -611,6 +618,8 @@ export function TaskDetailPanel({
       confirmLabel={confirmDialog.confirmLabel}
       confirmVariant={confirmDialog.variant}
       onConfirm={confirmDialog.onConfirm}
+      alternateLabel={confirmDialog.alternateLabel}
+      onAlternate={confirmDialog.onAlternate}
       onCancel={() => setConfirmDialog((dialog) => ({ ...dialog, open: false }))}
     />
   );
@@ -845,6 +854,11 @@ export function TaskDetailPanel({
           headingRef={recurrenceHeadingRef}
           highlighted={recurrenceFocused}
           reminderAt={task.reminderAt ?? null}
+          reminderRelative={task.reminderRelative ?? null}
+          reminderDueTime={task.reminderDueTime ?? null}
+          reminderTimezone={task.reminderTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
+          dueDate={taskDueDateOnly}
+          reminderSaving={mutations.reminderSaving}
           canEditReminder={canEditReminder}
           reminderBlockedReason={blockedReason('reminderAt')}
           reminderSaveLabel={saveLabel('reminderAt')}

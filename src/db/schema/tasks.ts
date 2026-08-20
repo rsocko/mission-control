@@ -55,8 +55,10 @@ export const tasks = sqliteTable('tasks', {
   // Snooze
   snoozedUntil: text('snoozed_until'),
 
-  // Reminder (ISO datetime — fires a notification at this time)
+  // Reminder (computed ISO datetime plus optional due-date-relative intent)
   reminderAt: text('reminder_at'),
+  reminderRelative: text('reminder_relative'),
+  reminderDueTime: text('reminder_due_time'),
 
   // Effort level (1–5, nullable — purely optional)
   effort: integer('effort'),

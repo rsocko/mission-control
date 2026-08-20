@@ -87,6 +87,7 @@ describe('NavRail', () => {
     renderNavRail();
 
     const cases = [
+      ['All Tasks', 'lucide-list-checks', 'text-cyan-400'],
       ['My Day', 'lucide-sun', 'text-amber-400'],
       ['Triage', 'lucide-inbox', 'text-purple-400'],
       ['Projects', 'lucide-chart-network', 'text-violet-400'],
@@ -97,6 +98,12 @@ describe('NavRail', () => {
       const icon = screen.getByRole('link', { name }).querySelector('svg');
       expect(icon).toHaveClass(iconClass, colorClass);
     }
+  });
+
+  it('links the desktop navigation to the all tasks workspace', () => {
+    renderNavRail();
+
+    expect(screen.getByRole('link', { name: 'All Tasks' })).toHaveAttribute('href', '/all-tasks');
   });
 
   it('opens recently viewed projects without changing the Projects destination', async () => {

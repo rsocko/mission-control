@@ -1,6 +1,7 @@
 'use client';
 
-import { Suspense, useMemo, useRef, useState } from 'react';
+import { Suspense, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import Image from 'next/image';
 import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
@@ -42,6 +43,7 @@ import { TaskRow } from '@/components/task-list/TaskRow';
 import { NotificationsPanel, CollapsedNotificationsRail } from '@/components/notifications';
 import { useNotifications } from '@/lib/hooks/useNotifications';
 import { DashboardSidebar } from '@/components/dashboard/DashboardSidebar';
+import { MobileAllTasksList } from '@/components/all-tasks/MobileAllTasksList';
 import { TaskViewSwitcher } from '@/components/dashboard/TaskViewSwitcher';
 import { DashboardSkeleton, TaskRowSkeleton } from '@/components/ui/Skeleton';
 import { useDashboardSections } from '@/lib/hooks/useDashboardSections';
@@ -73,6 +75,22 @@ const MobileDashboard = dynamic(
   },
 );
 
+const PHONE_VIEWPORT_QUERY = '(max-width: 639px)';
+
+function subscribeToPhoneViewport(onChange: () => void) {
+  const mediaQuery = window.matchMedia(PHONE_VIEWPORT_QUERY);
+  mediaQuery.addEventListener('change', onChange);
+  return () => mediaQuery.removeEventListener('change', onChange);
+}
+
+function getPhoneViewportSnapshot() {
+  return window.matchMedia(PHONE_VIEWPORT_QUERY).matches;
+}
+
+function getServerPhoneViewportSnapshot() {
+  return null;
+}
+
 export default function DashboardPage() {
   return (
     <Suspense fallback={<DashboardSkeleton />}>
@@ -82,6 +100,26 @@ export default function DashboardPage() {
 }
 
 function DashboardPageInner() {
+  const pathname = usePathname();
+  return pathname === '/all-tasks' ? <AllTasksPageInner /> : <DashboardWorkspace />;
+}
+
+function AllTasksPageInner() {
+  const isPhone = useSyncExternalStore<boolean | null>(
+    subscribeToPhoneViewport,
+    getPhoneViewportSnapshot,
+    getServerPhoneViewportSnapshot,
+  );
+
+  if (isPhone === null) return <DashboardSkeleton />;
+  if (isPhone) return <MobileAllTasksList />;
+
+  return <DashboardWorkspace isAllTasksPage />;
+}
+
+function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boolean }) {
+  const originHref = isAllTasksPage ? '/all-tasks' : '/';
+  const originLabel = isAllTasksPage ? 'All Tasks' : 'Dashboard';
   const { state, actions, computed } = useDashboardData();
   const prefersReducedMotion = useReducedMotion() ?? false;
   const { toggleSection, isCollapsed } = useDashboardSections();
@@ -157,13 +195,14 @@ function DashboardPageInner() {
 
   return (
     <>
-      {/* Mobile Dashboard (F-83, F-84, F-85) */}
-      <div className="sm:hidden px-4 pt-3 pb-2 overflow-y-auto h-full">
-        <InsightsBackLink />
-        <MobileDashboard />
-      </div>
+      {!isAllTasksPage && (
+        <div className="sm:hidden px-4 pt-3 pb-2 overflow-y-auto h-full">
+          <InsightsBackLink />
+          <MobileDashboard />
+        </div>
+      )}
 
-      {/* Desktop Dashboard */}
+      {/* Desktop task workspace */}
       <div className="hidden min-w-0 sm:flex h-full">
       <div aria-live="polite" aria-atomic="true" className="sr-only" id="task-announcements" />
 
@@ -172,55 +211,57 @@ function DashboardPageInner() {
         actions={actions}
         sourceHasLists={computed.sourceHasLists}
         getSourceListsForType={computed.getSourceListsForType}
-        originHref="/"
-        originLabel="Dashboard"
+        originHref={originHref}
+        originLabel={originLabel}
         taskFilterContext={computed.taskFilterContext}
       />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden p-6">
         {/* Dashboard sections: collapsed items flow inline, expanded take full width */}
-        <div className="flex flex-wrap gap-2 mb-4 items-start">
-          <div className={isCollapsed('one-thing') ? 'flex-shrink-0' : 'w-full'}>
-            <OneThingBanner
-              onTaskClick={taskSelection.toggleTask}
-              onRefresh={() => actions.setRefreshTrigger((n) => n + 1)}
-              collapsed={isCollapsed('one-thing')}
-              onToggleCollapse={() => toggleSection('one-thing')}
-            />
-          </div>
+        {!isAllTasksPage && (
+          <div className="flex flex-wrap gap-2 mb-4 items-start">
+            <div className={isCollapsed('one-thing') ? 'flex-shrink-0' : 'w-full'}>
+              <OneThingBanner
+                onTaskClick={taskSelection.toggleTask}
+                onRefresh={() => actions.setRefreshTrigger((n) => n + 1)}
+                collapsed={isCollapsed('one-thing')}
+                onToggleCollapse={() => toggleSection('one-thing')}
+              />
+            </div>
 
-          <div className={isCollapsed('kpis') ? 'flex-shrink-0' : 'w-full'}>
-            <KpiBar
-              quickFilter={state.quickFilter}
-              onFilterClick={actions.setQuickFilter}
-              unreadNotificationsCount={notificationsHook.stats.unread}
-              collapsed={isCollapsed('kpis')}
-              onToggleCollapse={() => toggleSection('kpis')}
-            />
-          </div>
+            <div className={isCollapsed('kpis') ? 'flex-shrink-0' : 'w-full'}>
+              <KpiBar
+                quickFilter={state.quickFilter}
+                onFilterClick={actions.setQuickFilter}
+                unreadNotificationsCount={notificationsHook.stats.unread}
+                collapsed={isCollapsed('kpis')}
+                onToggleCollapse={() => toggleSection('kpis')}
+              />
+            </div>
 
-          <div className={isCollapsed('recent-wins') ? 'flex-shrink-0' : 'w-full'}>
-            <RecentWins
-              onTaskClick={taskSelection.toggleTask}
-              collapsed={isCollapsed('recent-wins')}
-              onToggleCollapse={() => toggleSection('recent-wins')}
-            />
-          </div>
+            <div className={isCollapsed('recent-wins') ? 'flex-shrink-0' : 'w-full'}>
+              <RecentWins
+                onTaskClick={taskSelection.toggleTask}
+                collapsed={isCollapsed('recent-wins')}
+                onToggleCollapse={() => toggleSection('recent-wins')}
+              />
+            </div>
 
-          <div className={isCollapsed('routines') ? 'flex-shrink-0' : 'w-full'}>
-            <RoutineSnapshotWidget
-              collapsed={isCollapsed('routines')}
-              onToggleCollapse={() => toggleSection('routines')}
-            />
-          </div>
+            <div className={isCollapsed('routines') ? 'flex-shrink-0' : 'w-full'}>
+              <RoutineSnapshotWidget
+                collapsed={isCollapsed('routines')}
+                onToggleCollapse={() => toggleSection('routines')}
+              />
+            </div>
 
-          <div className={isCollapsed('triage-queue') ? 'flex-shrink-0' : 'w-full'}>
-            <TriageQueueWidget
-              collapsed={isCollapsed('triage-queue')}
-              onToggleCollapse={() => toggleSection('triage-queue')}
-            />
+            <div className={isCollapsed('triage-queue') ? 'flex-shrink-0' : 'w-full'}>
+              <TriageQueueWidget
+                collapsed={isCollapsed('triage-queue')}
+                onToggleCollapse={() => toggleSection('triage-queue')}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         <InsightsBackLink />
 
@@ -265,8 +306,8 @@ function DashboardPageInner() {
             <div className="flex items-center gap-1 flex-shrink-0">
               <TaskViewSwitcher
                 context={computed.taskFilterContext}
-                originHref="/"
-                originLabel="Dashboard"
+                originHref={originHref}
+                originLabel={originLabel}
               />
               <ShowCompletedToggle />
               <ViewDensityToggle />

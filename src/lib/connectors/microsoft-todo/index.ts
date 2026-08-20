@@ -22,7 +22,14 @@ import { eq } from 'drizzle-orm';
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
 import { mapGraphTask, mapSubstrateTask, mapChecklistItem, mapStatus, statusToGraph, priorityToImportance, parseSourceId } from './task-transformer';
-import type { GraphTodoList, GraphTodoTask, GraphChecklistItem, SubstrateMyDayTask, MicrosoftTodoConfig } from './types';
+import type {
+  GraphChecklistItem,
+  GraphLinkedResource,
+  GraphTodoList,
+  GraphTodoTask,
+  MicrosoftTodoConfig,
+  SubstrateMyDayTask,
+} from './types';
 
 export type { SubstrateMyDayTask } from './types';
 
@@ -787,6 +794,17 @@ export class MicrosoftTodoConnector implements IConnector {
         const pageTasks: TaskItem[] = [];
 
         for (const graphTask of data.value || []) {
+          if (
+            wellKnownListName === 'flaggedEmails'
+            && (!Array.isArray(graphTask.linkedResources) || graphTask.linkedResources.length === 0)
+          ) {
+            graphTask.linkedResources = await this.fetchLinkedResources(
+              listId,
+              graphTask.id,
+              graphTask.linkedResources,
+            );
+          }
+
           if (isCompletedPass && graphTask.recurrence && graphTask.status === 'completed') {
             const titleKey = (graphTask.title || '').trim().toLowerCase();
             const completedAt = graphTask.completedDateTime?.dateTime || graphTask.lastModifiedDateTime || '';
@@ -857,6 +875,41 @@ export class MicrosoftTodoConnector implements IConnector {
     if (recurringTasks.length > 0) {
       yield recurringTasks;
     }
+  }
+
+  private async fetchLinkedResources(
+    listId: string,
+    taskId: string,
+    expandedResources: GraphLinkedResource[] | undefined,
+  ): Promise<GraphLinkedResource[]> {
+    const resources = [...(expandedResources ?? [])];
+    let url = `/me/todo/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}/linkedResources`;
+
+    while (url) {
+      let response: Response;
+      try {
+        response = await this.client.graphFetch(url);
+      } catch (error) {
+        connectorLogger.warn({ err: error, listId, taskId }, 'Failed to fetch flagged email linked resources');
+        return resources;
+      }
+      if (!response.ok) {
+        connectorLogger.warn(
+          { status: response.status, listId, taskId },
+          'Failed to fetch flagged email linked resources',
+        );
+        return resources;
+      }
+
+      const data = await response.json() as {
+        value?: GraphLinkedResource[];
+        '@odata.nextLink'?: string;
+      };
+      resources.push(...(data.value ?? []));
+      url = data['@odata.nextLink']?.replace(GRAPH_BASE_URL, '') ?? '';
+    }
+
+    return resources;
   }
 
   private async *fetchTasksFromHiddenLists(

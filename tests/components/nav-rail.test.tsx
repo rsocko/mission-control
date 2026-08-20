@@ -359,7 +359,7 @@ describe('NavRail', () => {
     renderNavRail();
 
     expect(screen.getByRole('group', { name: 'Plan' })).toHaveTextContent(
-      'DashboardMy DayProjectsKanbanGoalsTimeline'
+      'DashboardAll TasksMy DayProjectsKanbanGoalsTimeline'
     );
     expect(screen.getByRole('group', { name: 'Operate' })).toHaveTextContent(
       'NotificationsRoutinesTriageQuick SortReconciliation'

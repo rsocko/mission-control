@@ -3,6 +3,7 @@ import type {
   TaskEditPolicy,
   TaskSourceModel,
 } from '@/types';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 
 /** A tag that can be displayed on, added to, or removed from a task. */
 export interface TaskTag {
@@ -53,6 +54,9 @@ export interface TaskDetail {
   recurrence?: string | null;
   effort?: number | null;
   reminderAt?: string | null;
+  reminderRelative?: ReminderRelativeRule | null;
+  reminderDueTime?: string | null;
+  reminderTimezone?: string;
   isInMyDay?: boolean;
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
@@ -114,6 +118,8 @@ export interface TaskConfirmDialogState {
   confirmLabel: string;
   variant: 'danger' | 'warning';
   onConfirm: () => void;
+  alternateLabel?: string;
+  onAlternate?: () => void;
 }
 
 /** An AI-suggested micro-status for the task. */

@@ -22,7 +22,7 @@ import { getLocalToday } from '@/lib/utils/date';
 import { buildDeepLinkUrl } from '@/lib/utils/deep-links';
 import logger from '@/lib/logger';
 import { getStatusLifecycleUpdates } from '@/lib/tasks/status-lifecycle';
-import { isDemoMode } from '@/lib/mode';
+import { getTimezone, isDemoMode } from '@/lib/mode';
 import {
   resolveTaskFieldPolicy,
   type FieldPolicy,
@@ -46,6 +46,7 @@ import {
   wasTaskAutoCompletedByReconciliation,
 } from '@/lib/connectors/scout/reconciliation-service';
 import { evaluateRulesForTasks } from '@/lib/rules';
+import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
 import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
@@ -90,6 +91,12 @@ export async function PATCH(
     if (!currentTask) {
       return ApiErrors.notFound('Task');
     }
+    const currentSchedule = input.status === 'done' || input.status === 'cancelled'
+      ? await db.select({ recurrence: taskSchedules.recurrence })
+          .from(taskSchedules)
+          .where(eq(taskSchedules.taskId, id))
+          .limit(1)
+      : [];
     const expectedUpdatedAt = request.headers.get('x-expected-task-updated-at');
     if (expectedUpdatedAt && currentTask.updatedAt !== expectedUpdatedAt) {
       return NextResponse.json({
@@ -241,12 +248,35 @@ export async function PATCH(
     if (input.microStatus !== undefined) updates.microStatus = input.microStatus;
     if (input.snoozedUntil !== undefined) updates.snoozedUntil = input.snoozedUntil;
     if (input.effort !== undefined) updates.effort = input.effort;
-    if (input.reminderAt !== undefined) updates.reminderAt = input.reminderAt;
+    if (
+      input.dueDate !== undefined
+      || input.reminderAt !== undefined
+      || input.reminderRelative !== undefined
+      || input.reminderDueTime !== undefined
+    ) {
+      const reminderMutation = resolveRelativeReminderMutation({
+        current: currentTask,
+        input,
+        timezone: getTimezone(),
+        now: new Date(now),
+      });
+      if (!reminderMutation.success) {
+        return NextResponse.json({
+          error: reminderMutation.error,
+          code: reminderMutation.code,
+        }, { status: reminderMutation.status });
+      }
+      Object.assign(updates, reminderMutation.updates);
+    }
 
     if (input.status === 'done' || input.status === 'cancelled') {
       updates.microStatus = null;
       updates.snoozedUntil = null;
       updates.reminderAt = null;
+      if (!currentSchedule[0]?.recurrence) {
+        updates.reminderRelative = null;
+        updates.reminderDueTime = null;
+      }
     }
 
     const shouldWriteThrough = [...policies.values()]
@@ -461,6 +491,21 @@ export async function PATCH(
       }
     }
 
+    const reminder = (
+      input.dueDate !== undefined
+      || input.reminderAt !== undefined
+      || input.reminderRelative !== undefined
+      || input.reminderDueTime !== undefined
+      || input.status === 'done'
+      || input.status === 'cancelled'
+    )
+      ? await db.select({
+          reminderAt: tasks.reminderAt,
+          reminderRelative: tasks.reminderRelative,
+          reminderDueTime: tasks.reminderDueTime,
+        }).from(tasks).where(eq(tasks.id, id)).get()
+      : undefined;
+
     return NextResponse.json({
       success: true,
       fields: Object.fromEntries(
@@ -469,6 +514,7 @@ export async function PATCH(
           { mode: policy.mutation, persisted: true },
         ]),
       ),
+      ...(reminder ? { reminder } : {}),
     });
   } catch (error) {
     if (error instanceof TaskRevisionConflictError) {
@@ -807,6 +853,8 @@ export async function DELETE(
           microStatus: null,
           snoozedUntil: null,
           reminderAt: null,
+          reminderRelative: null,
+          reminderDueTime: null,
           updatedAt: now,
         }).where(eq(tasks.id, id)).run();
       });
@@ -980,6 +1028,7 @@ export async function GET(
       task: {
         ...task[0],
         sourceUrl,
+        reminderTimezone: getTimezone(),
         estimatedDuration: scheduleRow[0]?.estimatedDuration ?? null,
         recurrence: scheduleRow[0]?.recurrence ?? legacyRecurrence,
         tagIds: taskTagRows.map(tt => tt.tagId),

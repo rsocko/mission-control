@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TaskField } from '@/types';
+import { REMINDER_RELATIVE_RULE_VALUES } from '@/lib/tasks/relative-reminder';
 
 const TASK_PATCH_SCHEMA = z.strictObject({
   title: z.string().trim().min(1),
@@ -20,6 +21,9 @@ const TASK_PATCH_SCHEMA = z.strictObject({
   reminderAt: z.string().datetime({ offset: true })
     .transform(value => new Date(value).toISOString())
     .nullable(),
+  reminderRelative: z.enum(REMINDER_RELATIVE_RULE_VALUES).nullable(),
+  reminderDueTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).nullable(),
+  relativeReminderDueDateResolution: z.enum(['remove', 'convert_to_absolute']).optional(),
 }).partial();
 
 export type TaskPatchInput = z.infer<typeof TASK_PATCH_SCHEMA>;
@@ -41,6 +45,9 @@ const FIELD_BY_INPUT_KEY = {
   effort: 'effort',
   statusReason: 'statusReason',
   reminderAt: 'reminderAt',
+  reminderRelative: 'reminderAt',
+  reminderDueTime: 'reminderAt',
+  relativeReminderDueDateResolution: 'reminderAt',
 } as const satisfies Record<keyof TaskPatchInput, TaskField>;
 
 const IMMUTABLE_INPUT_FIELDS = new Set([

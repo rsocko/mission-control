@@ -11,10 +11,23 @@ interface ConfirmDialogProps {
   confirmVariant: 'danger' | 'warning';
   onConfirm: () => void;
   onCancel: () => void;
+  alternateLabel?: string;
+  onAlternate?: () => void;
   children?: React.ReactNode;
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel, confirmVariant, onConfirm, onCancel, children }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel,
+  confirmVariant,
+  onConfirm,
+  onCancel,
+  alternateLabel,
+  onAlternate,
+  children,
+}: ConfirmDialogProps) {
   const wasOpen = useRef(false);
 
   // Safety net: if Radix's pointer-events cleanup on <body> is disrupted by a
@@ -47,6 +60,14 @@ export function ConfirmDialog({ open, title, message, confirmLabel, confirmVaria
           </AlertDialogPrimitive.Description>
           {children}
           <div className="flex items-center justify-end gap-2 mt-4">
+            {alternateLabel && onAlternate && (
+              <AlertDialogPrimitive.Action
+                onClick={onAlternate}
+                className="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] font-medium text-red-400 hover:bg-red-500/10 transition-colors duration-100"
+              >
+                {alternateLabel}
+              </AlertDialogPrimitive.Action>
+            )}
             <AlertDialogPrimitive.Cancel
               onClick={onCancel}
               className="text-xs px-3 py-1.5 rounded-[var(--radius-sm)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100"

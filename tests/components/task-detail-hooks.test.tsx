@@ -235,6 +235,52 @@ describe('useTaskDetailData', () => {
 });
 
 describe('useTaskDetailMutations', () => {
+  it('saves the canonical relative reminder returned by the server', async () => {
+    const reminder = {
+      reminderAt: '2026-08-02T13:00:00.000Z',
+      reminderRelative: '1_day_before' as const,
+      reminderDueTime: '09:00',
+    };
+    const fetchMock = stubFetch(() => jsonResponse({ reminder }));
+    const { result } = renderMutations({
+      task: { ...baseTask, dueDate: '2026-08-03' },
+    });
+
+    await act(async () => {
+      expect(await result.current.mutations.handleReminderChange({
+        reminderRelative: '1_day_before',
+        reminderDueTime: '09:00',
+      })).toBe(true);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      body: JSON.stringify({
+        reminderRelative: '1_day_before',
+        reminderDueTime: '09:00',
+      }),
+    }));
+    expect(result.current.task).toMatchObject(reminder);
+  });
+
+  it('asks how to resolve a relative reminder before removing its due date', async () => {
+    const task = {
+      ...baseTask,
+      reminderAt: '2026-08-02T13:00:00.000Z',
+      reminderRelative: '1_day_before' as const,
+      reminderDueTime: '09:00',
+    };
+    const { result, confirmRequests } = renderMutations({ task });
+
+    await act(async () => {
+      expect(await result.current.mutations.handleDueDateChange('')).toBe(false);
+    });
+
+    expect(confirmRequests[0]).toMatchObject({
+      confirmLabel: 'Keep reminder time',
+      alternateLabel: 'Remove reminder',
+    });
+  });
+
   it('saves a field and reports the change to the host', async () => {
     const onUpdate = vi.fn();
     const onNavigationCountsRefresh = vi.fn();

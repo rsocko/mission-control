@@ -22,6 +22,10 @@ import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
+import {
+  isReminderRelativeRule,
+  REMINDER_RELATIVE_RULES,
+} from '@/lib/tasks/relative-reminder';
 
 const EFFORT_LABELS = EFFORT_MEASURE_LABELS[DEFAULT_EFFORT_MEASURE];
 
@@ -169,7 +173,19 @@ export function TaskRow({
   const taskMeta = task.metadata ? (() => { try { return JSON.parse(task.metadata); } catch { return null; } })() : null;
   const recurrence = taskMeta?.recurrence;
   const isSnoozed = task.snoozedUntil && new Date(task.snoozedUntil) > new Date();
-  const hasReminder = task.reminderAt && new Date(task.reminderAt) > new Date();
+  const hasFutureReminder = Boolean(task.reminderAt && new Date(task.reminderAt) > new Date());
+  const relativeReminder = task.reminderRelative
+    && isReminderRelativeRule(task.reminderRelative)
+    ? task.reminderRelative
+    : null;
+  const hasReminder = hasFutureReminder || Boolean(relativeReminder);
+  const reminderLabel = hasFutureReminder && task.reminderAt
+    ? relativeReminder
+      ? `${REMINDER_RELATIVE_RULES[relativeReminder].label} (${formatReminderAt(task.reminderAt)})`
+      : formatReminderAt(task.reminderAt)
+    : relativeReminder
+      ? `${REMINDER_RELATIVE_RULES[relativeReminder].label} needs attention`
+      : '';
   const canComplete = canEditTaskField(task.editPolicy, 'status');
   const completionBlockedReason = taskFieldBlockedReason(task.editPolicy, 'status');
 
@@ -360,9 +376,9 @@ export function TaskRow({
 
       {hasReminder && (
         <span className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-1 px-1.5 py-0.5 rounded bg-purple-900/20 text-purple-400 border border-purple-800/30`}
-              title={`Reminder: ${new Date(task.reminderAt!).toLocaleString()}`}>
+              title={`Reminder: ${reminderLabel}`}>
           <Bell size={10} />
-          <span className="hidden @lg:inline">{formatReminderAt(task.reminderAt!)}</span>
+          <span className="hidden @lg:inline">{reminderLabel}</span>
         </span>
       )}
 

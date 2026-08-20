@@ -6,6 +6,7 @@ import { ReminderPicker } from '@/components/ui/ReminderPicker';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
 import { cn } from '@/lib/utils';
 import type { TaskDetailMode } from './task-detail-types';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 
 export interface TaskPlanningSectionProps {
   mode: TaskDetailMode;
@@ -14,10 +15,15 @@ export interface TaskPlanningSectionProps {
   /** Highlights the section briefly after a jump from the due date field. */
   highlighted: boolean;
   reminderAt: string | null;
+  reminderRelative: ReminderRelativeRule | null;
+  reminderDueTime: string | null;
+  reminderTimezone: string;
+  dueDate: string | null;
+  reminderSaving: boolean;
   canEditReminder: boolean;
   reminderBlockedReason?: string;
   reminderSaveLabel?: string;
-  onReminderChange: (reminderAt: string | null) => void;
+  onReminderChange: React.ComponentProps<typeof ReminderPicker>['onChange'];
   /** Whether the connector accepts recurrence edits. */
   supportsRecurrence: boolean;
   /** Active recurrence rule, or 'none'. */
@@ -41,6 +47,11 @@ export function TaskPlanningSection({
   headingRef,
   highlighted,
   reminderAt,
+  reminderRelative,
+  reminderDueTime,
+  reminderTimezone,
+  dueDate,
+  reminderSaving,
   canEditReminder,
   reminderBlockedReason,
   reminderSaveLabel,
@@ -84,7 +95,12 @@ export function TaskPlanningSection({
           <Bell size={13} className={`flex-shrink-0 ${reminderAt ? 'text-purple-400' : 'text-[var(--text-muted)]'}`} />
           <ReminderPicker
             value={reminderAt ?? null}
-            onChange={canEditReminder ? onReminderChange : () => {}}
+            relativeRule={reminderRelative}
+            dueDate={dueDate}
+            dueTime={reminderDueTime}
+            timezone={reminderTimezone}
+            saving={reminderSaving}
+            onChange={canEditReminder ? onReminderChange : () => false}
             disabled={!canEditReminder}
           />
         </div>

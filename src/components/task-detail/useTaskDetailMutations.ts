@@ -50,6 +50,8 @@ export interface TaskConfirmRequest {
   confirmLabel: string;
   variant: 'danger' | 'warning';
   onConfirm: () => void;
+  alternateLabel?: string;
+  onAlternate?: () => void;
 }
 
 export interface UseTaskDetailMutationsOptions {
@@ -106,6 +108,7 @@ export function useTaskDetailMutations({
   const [updatingMyDay, setUpdatingMyDay] = useState(false);
   const [updatingProjectPhaseIds, setUpdatingProjectPhaseIds] = useState<Set<string>>(new Set());
   const [skippingToCurrent, setSkippingToCurrent] = useState(false);
+  const [reminderSaving, setReminderSaving] = useState(false);
   const [microStatusSuggestion, setMicroStatusSuggestion] = useState<MicroStatusSuggestion | null>(null);
   const [showMicroStatusPicker, setShowMicroStatusPicker] = useState(false);
   const [showCloseReasonPicker, setShowCloseReasonPicker] = useState(false);
@@ -261,8 +264,14 @@ export function useTaskDetailMutations({
         toast.error('Failed to update task status');
         return;
       }
+      const reminder = result.data.reminder as Pick<
+        TaskDetail,
+        'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+      > | undefined;
       if (!ensureFieldsEditable('status')) return;
-      setTask((prev) => prev ? { ...prev, status: 'cancelled', statusReason: reason } : prev);
+      setTask((prev) => prev
+        ? { ...prev, status: 'cancelled', statusReason: reason, ...(reminder ?? {}) }
+        : prev);
       onUpdate?.({ status: 'cancelled', statusReason: reason });
       notifyNavigationCountsChanged();
       return;
@@ -278,7 +287,11 @@ export function useTaskDetailMutations({
       toast.error('Failed to update task status');
       return;
     }
-    setTask((prev) => prev ? { ...prev, status, statusReason: null } : prev);
+    const reminder = result.data.reminder as Pick<
+      TaskDetail,
+      'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+    > | undefined;
+    setTask((prev) => prev ? { ...prev, status, statusReason: null, ...(reminder ?? {}) } : prev);
     onUpdate?.({ status });
     notifyNavigationCountsChanged();
   }, [ensureFieldsEditable, onUpdate, setTask, task?.connectorType, taskId]);
@@ -465,11 +478,48 @@ export function useTaskDetailMutations({
     onUpdate?.(updates);
   }, [ensureFieldsEditable, flashHighlight, onUpdate, setTask, taskId]);
 
-  const handleDueDateChange = useCallback(async (dueDate: string) => {
-    if (!(await saveField('dueDate', dueDate || null))) return false;
-    setTask((prev) => prev?.id === taskId ? { ...prev, dueDate: dueDate || null } : prev);
+  const applyDueDateChange = useCallback(async (
+    dueDate: string,
+    relativeReminderDueDateResolution?: 'remove' | 'convert_to_absolute',
+  ) => {
+    if (!ensureFieldsEditable('dueDate', ...(task?.reminderRelative ? ['reminderAt'] as const : []))) {
+      return false;
+    }
+    const result = await patchTask(taskId, {
+      dueDate: dueDate || null,
+      ...(relativeReminderDueDateResolution ? { relativeReminderDueDateResolution } : {}),
+    });
+    if (!result.ok) {
+      toast.error(typeof result.data.error === 'string' ? result.data.error : 'Failed to save due date');
+      return false;
+    }
+    const reminder = result.data.reminder as Pick<
+      TaskDetail,
+      'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+    > | undefined;
+    setTask((prev) => prev?.id === taskId
+      ? { ...prev, dueDate: dueDate || null, ...(reminder ?? {}) }
+      : prev);
+    onUpdate?.({ dueDate: dueDate || null });
+    notifyNavigationCountsChanged();
     return true;
-  }, [saveField, setTask, taskId]);
+  }, [ensureFieldsEditable, onUpdate, setTask, task?.reminderRelative, taskId]);
+
+  const handleDueDateChange = useCallback(async (dueDate: string) => {
+    if (!dueDate && task?.reminderRelative) {
+      requestConfirm({
+        title: 'Remove due date?',
+        message: 'This reminder is relative to the due date. Keep its currently computed time as an absolute reminder, or remove the reminder with the due date.',
+        confirmLabel: 'Keep reminder time',
+        variant: 'warning',
+        onConfirm: () => { void applyDueDateChange('', 'convert_to_absolute'); },
+        alternateLabel: 'Remove reminder',
+        onAlternate: () => { void applyDueDateChange('', 'remove'); },
+      });
+      return false;
+    }
+    return applyDueDateChange(dueDate);
+  }, [applyDueDateChange, requestConfirm, task?.reminderRelative]);
 
   const handleSkipToCurrent = useCallback(async (skipToCurrentDate: string | null) => {
     if (!skipToCurrentDate || skipToCurrentInFlightRef.current) return;
@@ -485,11 +535,34 @@ export function useTaskDetailMutations({
     }
   }, [handleDueDateChange]);
 
-  const handleReminderChange = useCallback((reminderAt: string | null) => {
-    void saveField('reminderAt', reminderAt).then((saved) => {
-      if (saved) setTask((prev) => prev ? { ...prev, reminderAt } : prev);
-    });
-  }, [saveField, setTask]);
+  const handleReminderChange = useCallback(async (updates: {
+    reminderAt?: string | null;
+    reminderRelative?: TaskDetail['reminderRelative'];
+    reminderDueTime?: string | null;
+  }) => {
+    if (!ensureFieldsEditable('reminderAt') || reminderSaving) return false;
+    setReminderSaving(true);
+    try {
+      const result = await patchTask(taskId, updates);
+      if (!result.ok) {
+        toast.error(typeof result.data.error === 'string'
+          ? result.data.error
+          : 'Failed to save reminder');
+        return false;
+      }
+      const reminder = result.data.reminder as Pick<
+        TaskDetail,
+        'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+      > | undefined;
+      if (reminder) {
+        setTask((prev) => prev ? { ...prev, ...reminder } : prev);
+        onUpdate?.(reminder);
+      }
+      return true;
+    } finally {
+      setReminderSaving(false);
+    }
+  }, [ensureFieldsEditable, onUpdate, reminderSaving, setTask, taskId]);
 
   const handleRecurrenceChange = useCallback(async (recurrence: string) => {
     const value = recurrence === 'none' ? null : recurrence;
@@ -623,6 +696,7 @@ export function useTaskDetailMutations({
     handleDueDateChange,
     handleSkipToCurrent,
     handleReminderChange,
+    reminderSaving,
     handleRecurrenceChange,
     handleMicroStatusChange,
     requestMicroStatusSuggestion,

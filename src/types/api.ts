@@ -1,4 +1,5 @@
 import type { ScoreBreakdown } from '@/lib/smart-score';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 import type {
   HubProject,
   KanbanColumn,
@@ -55,6 +56,8 @@ export type TaskListItemDto = TaskListDomainFields & {
   scoreBreakdown?: ScoreBreakdown | null;
   snoozedUntil?: string | null;
   reminderAt?: string | null;
+  reminderRelative?: ReminderRelativeRule | null;
+  reminderDueTime?: string | null;
   hubProjectIds?: string[];
   projectPhaseMemberships?: Array<{
     projectId: string;

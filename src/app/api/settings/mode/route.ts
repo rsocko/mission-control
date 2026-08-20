@@ -3,6 +3,10 @@ import { getAppMode, setAppMode, getSettings, updateSettings, type AppMode } fro
 import { clearDatabase, resetDemoDatabase } from '@/lib/seed-api';
 import { clearTriageSampleData } from '@/lib/triage/lifecycle';
 import { isPublicDemoMode } from '@/lib/public-demo';
+import { runTransaction } from '@/db';
+import { tasks } from '@/db/schema';
+import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
+import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
 
 /**
  * GET /api/settings/mode — Get current app mode and settings
@@ -102,6 +106,51 @@ export async function PATCH(request: Request) {
   }
 
   if (Object.keys(updates).length > 0) {
+    if (typeof updates.timezone === 'string' && updates.timezone !== getSettings().timezone) {
+      const now = new Date();
+      const invalidCount = runTransaction((tx) => {
+        const relativeTasks = tx.select({
+          id: tasks.id,
+          dueDate: tasks.dueDate,
+          reminderAt: tasks.reminderAt,
+          reminderRelative: tasks.reminderRelative,
+          reminderDueTime: tasks.reminderDueTime,
+        }).from(tasks).where(and(
+          isNotNull(tasks.reminderRelative),
+          isNotNull(tasks.reminderAt),
+          isNotNull(tasks.dueDate),
+          isNotNull(tasks.reminderDueTime),
+          inArray(tasks.status, ['todo', 'in_progress']),
+          gt(tasks.reminderAt, now.toISOString()),
+        )).all();
+        const recomputed = relativeTasks.map((task) => ({
+          task,
+          result: resolveRelativeReminderMutation({
+            current: task,
+            input: { dueDate: task.dueDate },
+            timezone: updates.timezone as string,
+            now,
+          }),
+        }));
+        const invalid = recomputed.filter((item) => !item.result.success);
+        if (invalid.length > 0) return invalid.length;
+        for (const item of recomputed) {
+          if (!item.result.success) continue;
+          tx.update(tasks)
+            .set({ ...item.result.updates, updatedAt: now.toISOString() })
+            .where(eq(tasks.id, item.task.id))
+            .run();
+        }
+        return 0;
+      });
+      if (invalidCount > 0) {
+        return NextResponse.json({
+          error: 'The timezone change would make one or more relative reminders invalid or past',
+          code: 'RELATIVE_REMINDER_TIMEZONE_CONFLICT',
+          affectedCount: invalidCount,
+        }, { status: 409 });
+      }
+    }
     updateSettings(updates as Partial<{ timezone: string }>);
   }
 

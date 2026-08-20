@@ -91,13 +91,18 @@ describe('NavRail', () => {
       ['My Day', 'lucide-sun', 'text-amber-400'],
       ['Triage', 'lucide-inbox', 'text-purple-400'],
       ['Projects', 'lucide-chart-network', 'text-violet-400'],
-      ['Icon Finder', 'lucide-search', 'text-indigo-400'],
     ];
 
     for (const [name, iconClass, colorClass] of cases) {
       const icon = screen.getByRole('link', { name }).querySelector('svg');
       expect(icon).toHaveClass(iconClass, colorClass);
     }
+  });
+
+  it('does not show Icon Finder in the desktop navigation', () => {
+    renderNavRail();
+
+    expect(screen.queryByRole('link', { name: 'Icon Finder' })).not.toBeInTheDocument();
   });
 
   it('links the desktop navigation to the all tasks workspace', () => {

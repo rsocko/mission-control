@@ -190,6 +190,8 @@ export function NavRail({
   const syncPopoverCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPopoverHovered = useRef(false);
   const clickSuppressUntil = useRef(0);
+  const pointerDown = useRef(false);
+  const pointerFocusTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const expanded = pinned || hovered || focused || projectMenuOpen;
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
@@ -216,6 +218,13 @@ export function NavRail({
   }, []);
 
   const handlePointerDownCapture = useCallback(() => {
+    pointerDown.current = true;
+    setFocused(false);
+    if (pointerFocusTimer.current) clearTimeout(pointerFocusTimer.current);
+    pointerFocusTimer.current = setTimeout(() => {
+      pointerDown.current = false;
+      pointerFocusTimer.current = null;
+    }, 0);
     clickSuppressUntil.current = Date.now() + 800;
     if (expandTimer.current) {
       clearTimeout(expandTimer.current);
@@ -247,6 +256,7 @@ export function NavRail({
     if (expandTimer.current) clearTimeout(expandTimer.current);
     if (collapseTimer.current) clearTimeout(collapseTimer.current);
     if (syncPopoverCloseTimer.current) clearTimeout(syncPopoverCloseTimer.current);
+    if (pointerFocusTimer.current) clearTimeout(pointerFocusTimer.current);
   }, []);
 
   const isActive = (href: string) =>
@@ -268,7 +278,9 @@ export function NavRail({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
-      onFocusCapture={() => setFocused(true)}
+      onFocusCapture={() => {
+        if (!pointerDown.current) setFocused(true);
+      }}
       onBlurCapture={(event) => {
         const nextFocus = event.relatedTarget;
         if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {

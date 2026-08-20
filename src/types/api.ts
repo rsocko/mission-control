@@ -70,7 +70,9 @@ export type TaskListItemDto = TaskListDomainFields & {
 export interface TaskListStatsDto {
   totalOpen: number;
   overdue: number;
+  dueToday: number;
   dueThisWeek: number;
+  noDate: number;
   highPriority: number;
   assignedToMe: number;
   myDay: number;

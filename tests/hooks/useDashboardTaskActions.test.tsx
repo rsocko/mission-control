@@ -56,7 +56,9 @@ const initialResponse: TaskResponse = {
   stats: {
     totalOpen: 1,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: 1,
     highPriority: 0,
     assignedToMe: 1,
     myDay: 0,

@@ -78,6 +78,7 @@ describe('View in Graph collection surfaces', () => {
             filters: { tag: 'planning' },
           }],
           allSourceCounts: {},
+          loading: false,
         }}
         filters={{
           sourceFilter: null,
@@ -89,6 +90,7 @@ describe('View in Graph collection surfaces', () => {
           priorityFilter: [],
           statusFilter: [],
           hiddenQuickFilters: [],
+          quickFilterVisibility: {},
         }}
         sidebar={{
           sidebarExpanded: false,
@@ -119,7 +121,7 @@ describe('View in Graph collection surfaces', () => {
           setTagsExpanded: vi.fn(),
           applyView,
           deleteView: vi.fn(),
-          toggleQuickFilterVisibility: vi.fn(),
+          setQuickFilterVisibility: vi.fn(),
         }}
         computed={{
           sourceHasLists: () => false,

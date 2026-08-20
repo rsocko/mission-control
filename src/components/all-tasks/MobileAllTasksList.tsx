@@ -9,7 +9,15 @@ import { MobileSheet } from '@/components/ui/MobileSheet';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
+import {
+  getQuickFilterDefinition,
+  getQuickFilterVisibility,
+  isQuickFilterVisible,
+  QUICK_FILTERS,
+  type QuickFilterVisibility,
+} from '@/lib/tasks/quick-filters';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
+import type { TaskListStatsDto } from '@/types/api';
 import { cn } from '@/lib/utils';
 import type {
   DashboardTaskViewModel as Task,
@@ -20,19 +28,6 @@ import type {
 import type { MyDayItem } from '@/components/today/types';
 
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
-
-type FilterMode = 'all' | 'overdue' | 'due-today' | 'high-priority';
-
-const QUICK_FILTERS: Array<{
-  value: FilterMode;
-  label: string;
-  description: string;
-}> = [
-  { value: 'all', label: 'Any date or priority', description: 'Show every active task' },
-  { value: 'overdue', label: 'Overdue', description: 'Past its due date' },
-  { value: 'due-today', label: 'Due today', description: 'Due before tomorrow' },
-  { value: 'high-priority', label: 'High priority', description: 'Critical and high priority' },
-];
 
 interface TaskGroup {
   key: string;
@@ -81,7 +76,7 @@ export function MobileAllTasksList() {
   const { state, actions, computed } = useDashboardData();
   const selectedTaskId = state.selectedTaskId;
   const setSelectedTaskId = actions.setSelectedTaskId;
-  const [activeFilter, setActiveFilter] = useState<FilterMode>('all');
+  const activeFilter = getQuickFilterDefinition(state.quickFilter)?.id ?? 'all';
   const [activeScheduleTrayId, setActiveScheduleTrayId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const filterHeaderRef = useRef<HTMLDivElement>(null);
@@ -108,27 +103,21 @@ export function MobileAllTasksList() {
   }, [actions]);
   const { containerRef, isRefreshing, pullDistance, containerProps, contentStyle } = usePullToRefresh({ onRefresh, enabled: !isSheetOpen });
 
-  // Filter tasks based on active quick-filter (source filtering is handled server-side via actions.setSourceFilter)
-  const filteredTasks = useMemo(() => {
-    const tasks = state.taskResponse.tasks;
-
-    if (activeFilter === 'overdue') {
-      return tasks.filter((t) => {
-        const d = t.dueDate?.split('T')[0];
-        return d && d < today && t.status !== 'done';
-      });
-    } else if (activeFilter === 'due-today') {
-      return tasks.filter((t) => t.dueDate?.split('T')[0] === today && t.status !== 'done');
-    } else if (activeFilter === 'high-priority') {
-      return tasks.filter((t) => (t.priority === 'critical' || t.priority === 'high') && t.status !== 'done');
-    }
-
-    return tasks;
-  }, [state.taskResponse.tasks, activeFilter, today]);
+  const filteredTasks = state.taskResponse.tasks;
 
   // Group tasks by priority
   const groups: TaskGroup[] = useMemo(() => {
-    const active = filteredTasks.filter((t) => t.status !== 'done');
+    if (activeFilter === 'recentlyClosed') {
+      return filteredTasks.length > 0
+        ? [{
+            key: 'recently-closed',
+            label: 'Recently Closed',
+            items: filteredTasks.map(taskToMyDayItem),
+          }]
+        : [];
+    }
+
+    const active = filteredTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
     const sortByPriority = (a: Task, b: Task) =>
       (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4);
 
@@ -161,9 +150,14 @@ export function MobileAllTasksList() {
     if (upcoming.length > 0) result.push({ key: 'upcoming', label: 'Upcoming', items: upcoming.map(taskToMyDayItem) });
     if (noDue.length > 0) result.push({ key: 'no-due', label: 'No Due Date', items: noDue.map(taskToMyDayItem) });
     return result;
-  }, [filteredTasks, today]);
+  }, [activeFilter, filteredTasks, today]);
 
-  const totalActive = useMemo(() => filteredTasks.filter((t) => t.status !== 'done').length, [filteredTasks]);
+  const totalActive = useMemo(
+    () => activeFilter === 'recentlyClosed'
+      ? filteredTasks.length
+      : filteredTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
+    [activeFilter, filteredTasks],
+  );
 
   // Task actions
   const handleSetDueDate = useCallback(async (taskId: string, date: string) => {
@@ -197,11 +191,11 @@ export function MobileAllTasksList() {
     + Number(Boolean(state.listFilter));
   const filterSummary = activeListName
     || activeSourceName
-    || QUICK_FILTERS.find((filter) => filter.value === activeFilter)?.label
+    || getQuickFilterDefinition(activeFilter)?.label
     || 'All tasks';
 
   const clearFilters = useCallback(() => {
-    setActiveFilter('all');
+    actions.setQuickFilter(null);
     actions.setSourceFilter(null);
     actions.setListFilter(null);
   }, [actions]);
@@ -364,7 +358,12 @@ export function MobileAllTasksList() {
           sourceLists={state.sourceLists}
           syncStatus={state.syncStatus}
           sourceCounts={computed.sidebarSourceCounts}
-          onQuickFilterChange={setActiveFilter}
+          stats={state.taskResponse.stats}
+          hiddenQuickFilters={state.hiddenQuickFilters}
+          quickFilterVisibility={state.quickFilterVisibility}
+          loading={state.loading}
+          onQuickFilterChange={(filter) => actions.setQuickFilter(filter === 'all' ? null : filter)}
+          onQuickFilterVisibilityChange={actions.setQuickFilterVisibility}
           onSourceFilterChange={(source) => {
             actions.setSourceFilter(source);
             actions.setListFilter(null);
@@ -381,14 +380,19 @@ export function MobileAllTasksList() {
 }
 
 interface MobileTaskFiltersProps {
-  activeFilter: FilterMode;
+  activeFilter: string;
   sourceFilter: string | null;
   listFilter: string | null;
   sources: EnabledSource[];
   sourceLists: SourceList[];
   syncStatus: SyncStatusEntry[];
   sourceCounts: Record<string, number>;
-  onQuickFilterChange: (filter: FilterMode) => void;
+  stats: TaskListStatsDto;
+  hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
+  loading: boolean;
+  onQuickFilterChange: (filter: string) => void;
+  onQuickFilterVisibilityChange: (filter: string, visibility: QuickFilterVisibility) => void;
   onSourceFilterChange: (source: string | null) => void;
   onListFilterChange: (list: string | null, source: string | null) => void;
   onClear: () => void;
@@ -402,7 +406,12 @@ export function MobileTaskFilters({
   sourceLists,
   syncStatus,
   sourceCounts,
+  stats,
+  hiddenQuickFilters,
+  quickFilterVisibility,
+  loading,
   onQuickFilterChange,
+  onQuickFilterVisibilityChange,
   onSourceFilterChange,
   onListFilterChange,
   onClear,
@@ -445,6 +454,16 @@ export function MobileTaskFilters({
         || a.name.localeCompare(b.name);
     });
   const hasActiveFilters = activeFilter !== 'all' || Boolean(sourceFilter) || Boolean(listFilter);
+  const visibleQuickFilters = QUICK_FILTERS.filter((filter) => isQuickFilterVisible(
+    filter,
+    stats,
+    quickFilterVisibility,
+    {
+      activeFilter,
+      loading,
+      legacyHiddenFilters: hiddenQuickFilters,
+    },
+  ));
 
   return (
     <div className="px-4 pb-6">
@@ -472,19 +491,52 @@ export function MobileTaskFilters({
       </div>
 
       {!normalizedSearch && (
-        <FilterSection title="Quick filters">
-          <div className="grid grid-cols-2 gap-2">
-            {QUICK_FILTERS.map((filter) => (
+        <>
+          <FilterSection title="Quick filters">
+            <div className="grid grid-cols-2 gap-2">
               <FilterOptionButton
-                key={filter.value}
-                active={activeFilter === filter.value}
-                label={filter.label}
-                detail={filter.description}
-                onClick={() => onQuickFilterChange(filter.value)}
+                active={activeFilter === 'all'}
+                label="All tasks"
+                detail="Any date or priority"
+                onClick={() => onQuickFilterChange('all')}
               />
-            ))}
-          </div>
-        </FilterSection>
+              {visibleQuickFilters.map((filter) => (
+                <FilterOptionButton
+                  key={filter.id}
+                  active={activeFilter === filter.id}
+                  label={filter.label}
+                  detail={filter.description}
+                  onClick={() => onQuickFilterChange(filter.id)}
+                />
+              ))}
+            </div>
+          </FilterSection>
+          <details className="mb-5 rounded-xl border border-[var(--border)] bg-[var(--surface-0)]">
+            <summary className="min-h-11 cursor-pointer px-3 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              Customize quick filters
+            </summary>
+            <div className="space-y-2 border-t border-[var(--border-subtle)] p-3">
+              {QUICK_FILTERS.map((filter) => (
+                <label key={filter.id} className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--text-primary)]">
+                  <span>{filter.label}</span>
+                  <select
+                    aria-label={`${filter.label} visibility`}
+                    value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
+                    onChange={(event) => onQuickFilterVisibilityChange(
+                      filter.id,
+                      event.target.value as QuickFilterVisibility,
+                    )}
+                    className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-2 text-xs text-[var(--text-primary)]"
+                  >
+                    <option value="always">Always</option>
+                    <option value="when-not-empty">When not empty</option>
+                    <option value="hidden">Hidden</option>
+                  </select>
+                </label>
+              ))}
+            </div>
+          </details>
+        </>
       )}
 
       <FilterSection title="Sources">

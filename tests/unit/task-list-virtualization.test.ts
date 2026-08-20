@@ -23,7 +23,9 @@ function response(tasks: Task[], total: number, hasMore = true): TaskResponse {
     stats: {
       totalOpen: total,
       overdue: 0,
+      dueToday: 0,
       dueThisWeek: 0,
+      noDate: 0,
       highPriority: 0,
       assignedToMe: 0,
       myDay: 0,

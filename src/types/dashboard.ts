@@ -77,7 +77,9 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   stats: {
     totalOpen: 0,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: 0,
     highPriority: 0,
     assignedToMe: 0,
     myDay: 0,

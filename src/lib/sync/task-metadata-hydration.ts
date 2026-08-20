@@ -3,7 +3,12 @@ export function needsMicrosoftTodoLinkedResourceHydration(
   existingMetadata: Record<string, unknown>,
   remoteMetadata: Record<string, unknown> | undefined,
 ): boolean {
-  return connectorType === 'microsoft-todo'
-    && !Object.hasOwn(existingMetadata, 'linkedResources')
-    && Object.hasOwn(remoteMetadata ?? {}, 'linkedResources');
+  if (
+    connectorType !== 'microsoft-todo'
+    || !Object.hasOwn(remoteMetadata ?? {}, 'linkedResources')
+  ) {
+    return false;
+  }
+  return JSON.stringify(existingMetadata.linkedResources)
+    !== JSON.stringify(remoteMetadata?.linkedResources);
 }

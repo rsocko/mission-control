@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronDown, ChevronRight, History, Plus, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronRight, History, Info, Plus, RotateCcw } from 'lucide-react';
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -42,6 +42,8 @@ interface SuggestionGroupProps {
   listGroups: ListGroup[];
   projects: HubProject[];
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
 }
 
 export function SuggestionGroup({
@@ -56,6 +58,8 @@ export function SuggestionGroup({
   listGroups,
   projects,
   sortable = false,
+  description,
+  learnMoreHref,
 }: SuggestionGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
@@ -103,9 +107,23 @@ export function SuggestionGroup({
   return (
     <div className={`rounded-lg border ${styles.border} overflow-hidden`}>
       <div className={`flex items-center ${styles.bg}`}>
-        <button onClick={() => setExpanded(!expanded)} className="flex-1 px-3 py-2 flex items-center gap-2 hover:brightness-110 transition-[filter]">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 px-3 py-2 flex items-center gap-2 hover:brightness-110 transition-[filter]"
+          aria-expanded={expanded}
+          aria-label={description ? `${title} (${tasks.length}). ${description}` : undefined}
+        >
           <span className={styles.header}>{icon}</span>
-          <span className={`text-xs font-semibold ${styles.header} flex-1 text-left`}>{title}</span>
+          <span className={`flex flex-1 items-center gap-1 text-left text-xs font-semibold ${styles.header}`}>
+            {title}
+            {description && (
+              <Tooltip content={description} placement="left">
+                <span aria-hidden="true" className="inline-flex">
+                  <Info size={10} />
+                </span>
+              </Tooltip>
+            )}
+          </span>
           <span className={`text-xs ${styles.header} font-mono`}>{tasks.length}</span>
           <motion.span animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: 0.15 }} className={styles.header}>
             <ChevronRight size={12} />
@@ -121,6 +139,19 @@ export function SuggestionGroup({
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
+            {description && (
+              <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs leading-relaxed text-[var(--text-muted)]">
+                {description}
+                {learnMoreHref && (
+                  <>
+                    {' '}
+                    <a className="font-medium text-[var(--accent-400)] hover:underline" href={learnMoreHref}>
+                      View planning friction insights
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
             {sortable && (
               <div className="px-3 py-1 border-b border-[var(--border-subtle)] flex items-center">
                 <button onClick={() => setSortDir((dir) => dir === 'asc' ? 'desc' : 'asc')} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center gap-1 transition-colors">

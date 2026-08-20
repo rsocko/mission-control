@@ -97,6 +97,12 @@ export interface SuggestionGroups {
   repeatedlyRescheduled: SuggestionTask[];
 }
 
+export const REPLANNING_SUGGESTION = {
+  title: 'May Need Replanning',
+  description: 'Tasks with recent missed commitments, elapsed time blocks, overdue transitions, snooze extensions, or due dates moved later.',
+  insightsHref: '/insights#planning-friction',
+} as const;
+
 export interface CalendarEvent {
   id: string;
   subject: string;

@@ -4,7 +4,7 @@ import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plu
 import { SuggestionGroup } from './SuggestionGroup';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
-import type { SourceList, SuggestionGroups, SuggestionTask } from './types';
+import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
 
 interface TodaySidebarProps {
   suggestions: SuggestionGroups;
@@ -58,7 +58,15 @@ export function TodaySidebar({
 
         <div className="space-y-1">
           <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1"><Sparkles size={11} /> Suggestions</h4>
-          <SuggestionGroup title="Needs a Replan" icon={<RotateCcw size={12} />} tasks={suggestions.planningSignals} color="rose" {...interactionProps} />
+          <SuggestionGroup
+            title={REPLANNING_SUGGESTION.title}
+            icon={<RotateCcw size={12} />}
+            tasks={suggestions.planningSignals}
+            color="rose"
+            description={REPLANNING_SUGGESTION.description}
+            learnMoreHref={REPLANNING_SUGGESTION.insightsHref}
+            {...interactionProps}
+          />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />

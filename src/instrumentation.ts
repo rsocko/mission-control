@@ -50,7 +50,6 @@ export async function register() {
     pushNotificationScheduler,
     scheduledSummariesEnabled,
   } = await import('@/lib/push/scheduler');
-  const { taskReminderScheduler } = await import('@/lib/push/task-reminder-scheduler');
   const { wakeNotificationWritebackDispatcher } = await import(
     '@/lib/notifications/notification-writeback'
   );
@@ -120,11 +119,14 @@ export async function register() {
   } catch (err) {
     syncLogger.warn({ err }, 'Instrumentation: push notification scheduler init failed (non-fatal)');
   }
-  try {
-    await taskReminderScheduler.start();
-    syncLogger.info('Instrumentation: durable task reminder scheduler initialized');
-  } catch (err) {
-    syncLogger.warn({ err }, 'Instrumentation: task reminder scheduler init failed (non-fatal)');
+  if (!durableSyncMode) {
+    try {
+      const { taskReminderScheduler } = await import('@/lib/push/task-reminder-scheduler');
+      await taskReminderScheduler.start();
+      syncLogger.info('Instrumentation: inline task reminder scheduler initialized');
+    } catch (err) {
+      syncLogger.warn({ err }, 'Instrumentation: task reminder scheduler init failed (non-fatal)');
+    }
   }
   markRuntimeReady();
 }

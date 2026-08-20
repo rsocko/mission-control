@@ -63,6 +63,9 @@ export function mapGraphTask(
       listId,
       wellKnownListName: wellKnownListName || undefined,
       hasAttachments: graphTask.hasAttachments,
+      ...(graphTask.linkedResources
+        ? { linkedResources: graphTask.linkedResources }
+        : {}),
       recurrence: graphTask.recurrence ? parseRecurrencePattern(graphTask.recurrence) : null,
       recurrenceIdentity: graphTask.recurrence ? getRecurrencePatternIdentity(graphTask.recurrence) : null,
       missionControlTaskId,

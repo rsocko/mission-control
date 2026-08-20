@@ -50,6 +50,7 @@ import {
   reconcileGitHubTaskHierarchy,
 } from './github-hierarchy-reconciliation';
 import type { GitHubHierarchyObservation } from './github-hierarchy-reconciliation';
+import { needsMicrosoftTodoLinkedResourceHydration } from './task-metadata-hydration';
 
 /** How many tasks to process per batch before yielding to the event loop.
  *  Balances throughput (fewer yields = fewer context switches) against
@@ -578,6 +579,11 @@ export async function upsertTasks(
               && Object.keys(existingMetadata).length === 0
               && !!remoteTask.metadata
               && Object.keys(remoteTask.metadata).length > 0;
+            const needsLinkedResourceHydration = needsMicrosoftTodoLinkedResourceHydration(
+              existing.connectorType,
+              existingMetadata,
+              remoteTask.metadata,
+            );
             const needsGitHubCanonicalHydration = existing.connectorType === 'github-issues'
               && typeof existingMetadata.nodeId === 'string'
               && typeof existingMetadata.url !== 'string'
@@ -587,6 +593,7 @@ export async function upsertTasks(
               remoteNewer
               || forceTerminalSync
               || needsRemoteHydration
+              || needsLinkedResourceHydration
               || needsGitHubCanonicalHydration
               || stableLocatorChanged
               || replacementIds.has(remoteTask.sourceId)

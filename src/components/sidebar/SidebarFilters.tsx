@@ -5,6 +5,13 @@ import Image from 'next/image';
 import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
   DashboardProjectViewModel as HubProject,
@@ -398,22 +405,29 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
             <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Filter visibility</p>
             {QUICK_FILTERS.map((filter) => (
-              <label key={filter.id} className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+              <div key={filter.id} className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
                 <span className="min-w-0 truncate">{filter.label}</span>
-                <select
-                  aria-label={`${filter.label} visibility`}
+                <Select
                   value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
-                  onChange={(event) => setQuickFilterVisibility(
+                  onValueChange={(visibility) => setQuickFilterVisibility(
                     filter.id,
-                    event.target.value as QuickFilterVisibility,
+                    visibility as QuickFilterVisibility,
                   )}
-                  className="min-w-0 rounded border border-[var(--border)] bg-[var(--surface-1)] px-1.5 py-1 text-xs text-[var(--text-primary)]"
                 >
-                  <option value="always">Always</option>
-                  <option value="when-not-empty">When not empty</option>
-                  <option value="hidden">Hidden</option>
-                </select>
-              </label>
+                  <SelectTrigger
+                    variant="inline"
+                    aria-label={`${filter.label} visibility`}
+                    className="w-32"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">Always</SelectItem>
+                    <SelectItem value="when-not-empty">When not empty</SelectItem>
+                    <SelectItem value="hidden">Hidden</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             ))}
           </div>
         )}

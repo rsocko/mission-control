@@ -6,6 +6,13 @@ import { Check, Filter, ListChecks, Loader2, Search } from 'lucide-react';
 import { MobileSwipeTaskRow } from '@/components/today/MobileSwipeTaskRow';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { MobileSheet } from '@/components/ui/MobileSheet';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
@@ -517,22 +524,28 @@ export function MobileTaskFilters({
             </summary>
             <div className="space-y-2 border-t border-[var(--border-subtle)] p-3">
               {QUICK_FILTERS.map((filter) => (
-                <label key={filter.id} className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--text-primary)]">
+                <div key={filter.id} className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--text-primary)]">
                   <span>{filter.label}</span>
-                  <select
-                    aria-label={`${filter.label} visibility`}
+                  <Select
                     value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
-                    onChange={(event) => onQuickFilterVisibilityChange(
+                    onValueChange={(visibility) => onQuickFilterVisibilityChange(
                       filter.id,
-                      event.target.value as QuickFilterVisibility,
+                      visibility as QuickFilterVisibility,
                     )}
-                    className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-2 py-2 text-xs text-[var(--text-primary)]"
                   >
-                    <option value="always">Always</option>
-                    <option value="when-not-empty">When not empty</option>
-                    <option value="hidden">Hidden</option>
-                  </select>
-                </label>
+                    <SelectTrigger
+                      aria-label={`${filter.label} visibility`}
+                      className="min-h-11 w-36 text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="always">Always</SelectItem>
+                      <SelectItem value="when-not-empty">When not empty</SelectItem>
+                      <SelectItem value="hidden">Hidden</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               ))}
             </div>
           </details>

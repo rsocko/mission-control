@@ -33,7 +33,6 @@ import {
   CheckCircle2,
   AlertCircle,
   RefreshCw,
-  Search,
   ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -138,7 +137,6 @@ const navGroups: NavRailGroup[] = [
     items: [
       shortcutNavItem('/insights', Activity),
       { href: '/graph', label: 'Graph', icon: PhosphorGraphIcon, iconColor: 'text-indigo-400' },
-      shortcutNavItem('/icons', Search),
     ],
   },
   {

@@ -7,13 +7,14 @@ import logger from '@/lib/logger';
 
 export class TaskReminderScheduler {
   private task: ScheduledTask | null = null;
+  private activeRun: Promise<void> | null = null;
   private lastRun: string | null = null;
   private lastResult: TaskReminderRunResult | null = null;
   private lastError: string | null = null;
 
-  async start(): Promise<void> {
-    if (this.task) return;
-    this.task = cron.schedule('* * * * *', async () => {
+  private runOnce(): Promise<void> {
+    if (this.activeRun) return this.activeRun;
+    const run = (async () => {
       try {
         this.lastResult = await runDueTaskReminders();
         this.lastRun = new Date().toISOString();
@@ -21,14 +22,28 @@ export class TaskReminderScheduler {
       } catch (error) {
         this.lastRun = new Date().toISOString();
         this.lastError = error instanceof Error ? error.message : String(error);
+        throw error;
+      }
+    })();
+    const active = run.finally(() => {
+      if (this.activeRun === active) this.activeRun = null;
+    });
+    this.activeRun = active;
+    return active;
+  }
+
+  async start(): Promise<void> {
+    if (this.task) return;
+    this.task = cron.schedule('* * * * *', async () => {
+      try {
+        await this.runOnce();
+      } catch (error) {
         logger.error({ err: error }, 'Task reminder scheduler run failed');
       }
     });
     this.task.start();
     try {
-      this.lastResult = await runDueTaskReminders();
-      this.lastRun = new Date().toISOString();
-      this.lastError = null;
+      await this.runOnce();
     } catch (error) {
       this.stop();
       throw error;

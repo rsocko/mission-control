@@ -235,22 +235,27 @@ function fireClaim(claimed: ClaimedReminder, now: Date): 'fired' | 'cancelled' {
 
 function cancelInvalidatedOccurrences(now: Date, batchSize: number): number {
   const nowIso = now.toISOString();
+  const findInvalidated = (database: typeof db) => database
+    .select({ id: taskReminderOccurrences.id })
+    .from(taskReminderOccurrences)
+    .leftJoin(tasks, eq(taskReminderOccurrences.taskId, tasks.id))
+    .where(and(
+      inArray(taskReminderOccurrences.state, ['pending', 'processing', 'failed']),
+      or(
+        isNull(tasks.id),
+        isNull(tasks.reminderAt),
+        ne(tasks.reminderAt, taskReminderOccurrences.scheduledAt),
+        inArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
+      ),
+    ))
+    .orderBy(taskReminderOccurrences.updatedAt)
+    .limit(batchSize)
+    .all();
+
+  if (findInvalidated(db).length === 0) return 0;
+
   return runTransaction((tx) => {
-    const invalidated = tx.select({ id: taskReminderOccurrences.id })
-      .from(taskReminderOccurrences)
-      .leftJoin(tasks, eq(taskReminderOccurrences.taskId, tasks.id))
-      .where(and(
-        inArray(taskReminderOccurrences.state, ['pending', 'processing', 'failed']),
-        or(
-          isNull(tasks.id),
-          isNull(tasks.reminderAt),
-          ne(tasks.reminderAt, taskReminderOccurrences.scheduledAt),
-          inArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
-        ),
-      ))
-      .orderBy(taskReminderOccurrences.updatedAt)
-      .limit(batchSize)
-      .all();
+    const invalidated = findInvalidated(tx);
     if (invalidated.length === 0) return 0;
 
     return tx.update(taskReminderOccurrences).set({
@@ -275,6 +280,11 @@ function recordInvalidReminderTimestamps(now: Date, batchSize: number): number {
     isNotNull(tasks.reminderAt),
     notInArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
     sql`julianday(${tasks.reminderAt}) IS NULL`,
+    sql`NOT EXISTS (
+      SELECT 1 FROM task_reminder_occurrences occurrence
+      WHERE occurrence.task_id = ${tasks.id}
+        AND occurrence.scheduled_at = ${tasks.reminderAt}
+    )`,
   )).limit(batchSize).all();
   if (invalidTasks.length === 0) return 0;
 

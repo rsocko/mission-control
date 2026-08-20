@@ -2,7 +2,7 @@
 title: "External Agent Integration"
 status: proposed
 created: 2026-07-19
-last_reviewed: 2026-08-03
+last_reviewed: 2026-08-19
 category: design
 related:
   - "[AI & Agent Architecture (consolidated)](../active/ai-agent-architecture.md)"
@@ -45,10 +45,10 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
 2. **Protocol-first** — Use open standards (webhooks, MCP, REST) so any agent can integrate, not just GitHub Copilot.
 3. **Human-in-the-loop by default** — Outbound dispatches require confirmation. Inbound results land in a review queue before being committed.
 4. **Leverage what exists** — Build on top of the existing inbound webhook system, the agent dispatch framework, and the phase proposal review UI.
-5. **Transport follows agent capability** — Some agents accept pushes; others, including Scout, must poll and claim queued work. The dispatch lifecycle is transport-independent.
+5. **Transport follows agent capability** — Some agents accept pushes; others, including Scout and a GitHub Copilot app local automation, must poll and claim queued work. The dispatch lifecycle is transport-independent.
 6. **Minimize disclosed context** — Preview and classify every payload. Sensitive content should remain in its tenant-managed execution environment whenever possible.
-7. **Inference is not execution** — Copilot model access through Bifrost cannot read a repository, run commands, or open a PR. Coding execution requires an explicit local-workspace or hosted-cloud adapter.
-8. **Execution locality is user-visible** — Never silently move work between an MC-hosted workspace and a GitHub-hosted cloud agent. The preview identifies where code and task context will be processed.
+7. **Inference is not execution** — Copilot model access through Bifrost cannot read a repository, run commands, or open a PR. Coding execution requires an explicit execution adapter with repository and tool authority.
+8. **Execution locality is user-visible** — Never silently move work among MC-hosted, developer-workstation, and GitHub-hosted execution. The preview identifies where code and task context will be processed.
 
 ---
 
@@ -79,6 +79,7 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
                      │  │ Copilot     │  │ Copilot SDK      │ │
                      │  │ Cloud Agent │  │ Workspace Agent  │ │
                      │  └─────────────┘  └──────────────────┘ │
+                     │  Copilot app pull worker                │
                      │  Custom agents: MCP / REST / n8n        │
                      └─────────────────────────────────────────┘
 ```
@@ -118,7 +119,7 @@ CREATE TABLE external_agents (
 | `copilot-sdk-workspace` | MC-hosted Copilot SDK coding runtime | Provision isolated clone/worktree, then start a scoped SDK session | SDK events plus Git/PR references |
 | `webhook-roundtrip` | Any system that accepts a POST and calls back | POST to `endpoint` with MC context | Agent POSTs back to `inbound_webhook_id` |
 | `mcp` | MCP-compatible tool server | MCP tool invocation protocol | Inline response |
-| `pull-queue` | Agent without a supported inbound API, such as Scout | Agent polls MC and atomically claims a dispatch | Agent completes/fails through scoped MC tools |
+| `pull-queue` | Agent without a supported inbound API, such as Scout or a Copilot app local automation | Agent polls MC and atomically claims a dispatch | Agent completes/fails through scoped MC tools |
 | `manual` | Human-assisted hand-off (deep-link + clipboard) | Opens URL with pre-filled context | User pastes/imports result |
 
 ---
@@ -267,7 +268,7 @@ Or open VS Code with a pre-filled Copilot prompt via `vscode://` URI.
 2. Receives structured response synchronously (or via SSE)
 3. Parses into tasks/phases and routes to review
 
-#### `pull-queue` (Scout)
+#### `pull-queue`
 
 1. MC creates a queued dispatch after an explicit user preview/confirmation.
 2. The agent polls a scoped queue that returns only claimable work.
@@ -280,6 +281,29 @@ Or open VS Code with a pre-filled Copilot prompt via `vscode://` URI.
 
 This transport is preferred over a GitHub issue bridge for Scout because
 business M365 payloads should not be copied into a code-hosting work item.
+
+##### GitHub Copilot app pull-worker profile
+
+Issue #1519 tracks a developer-workstation coding profile that reuses this
+generic transport. A supported Copilot app local automation polls MC through
+authenticated, least-privilege MCP tools, claims only work compatible with its
+registered repositories and capabilities, executes in an app-managed isolated
+worktree, and returns structured branch, commit, check, artifact, and PR
+references.
+
+This is neither the MC-hosted Copilot SDK workspace nor GitHub-hosted cloud
+dispatch. The destination is a named user/workstation-owned worker with
+`external` locality, and the preview must say that execution depends on that
+workstation and automation being available. MC does not receive the worker's
+Copilot or GitHub credentials. The worker's MC credential is independently
+revocable and scoped to its agent identity, repositories, classifications, and
+actions.
+
+The feasibility gate must prove that scheduled or on-demand local automations
+can use the documented app and MCP surfaces without UI automation. Offline,
+sleep, expired-auth, interactive-permission, cancellation, overlapping-run,
+and lease-expiry behavior must remain visible in MC. A retry cannot silently
+switch to the MC-hosted workspace or GitHub-hosted cloud modes.
 
 #### `manual`
 
@@ -460,6 +484,7 @@ When the user clicks "Dispatch", a modal opens:
 │  Execution:                                    │
 │  ● GitHub-hosted cloud agent                   │
 │  ○ MC-hosted isolated workspace                │
+│  ○ Copilot app worker: Developer workstation   │
 │                                                │
 │  Instruction:                                  │
 │  ┌──────────────────────────────────────────┐  │
@@ -559,7 +584,7 @@ For the `manual` agent type, provide a quick import path:
 - User-to-server OAuth/PAT credential flow, entitlement checks, and token-scope diagnostics
 - Issue assignment as a compatibility/fallback entry point, not label-based dispatch
 - Cloud task polling, waiting-for-user UX, PR detection, and auto-linking
-- Separate isolated local SDK workspace adapter after the #2090 runtime spike
+- Separate isolated local SDK workspace adapter after the #1148 runtime spike
 - Per-dispatch execution-locality preview with no silent local/cloud fallback
 - Task status sync when PRs merge
 - Deep-link generation for Copilot Chat (VS Code + GitHub.com)
@@ -567,6 +592,7 @@ For the `manual` agent type, provide a quick import path:
 ### Phase 4: MCP + Automation
 - MCP client for invoking tool servers directly from MC
 - Pull-queue tools for agents without a supported inbound API
+- GitHub Copilot app pull-worker feasibility and delivery (#1519)
 - n8n workflow templates for common patterns
 - Scheduled agent dispatches (e.g., "every Monday, run competitor analysis")
 - Agent chaining (output of one agent feeds the next)
@@ -609,6 +635,7 @@ tenant-approved PoC before selecting it as the direct execution path.
 1. Bifrost/Copilot provider routing is inference only and does not imply code access.
 2. Direct Copilot SDK execution is MC-hosted and can access only a provisioned clone/worktree.
 3. Copilot cloud dispatch is GitHub-hosted and uses the Agent Tasks API; issue assignment remains a compatibility path.
-4. Cloud task creation requires a user-to-server token. Server-to-server installation tokens are not accepted by the preview API.
-5. Local and cloud modes have separate credentials, permission policies, status adapters, and cleanup responsibilities.
-6. A retry remains in the selected execution mode unless the user explicitly previews and confirms a new dispatch in another mode.
+4. A Copilot app pull worker is user/workstation-owned, uses the generic leased pull queue, and is available only while its local automation environment can run.
+5. Cloud task creation requires a user-to-server token. Server-to-server installation tokens are not accepted by the preview API.
+6. MC-hosted, developer-workstation, and GitHub-hosted modes have separate credentials, permission policies, status adapters, and cleanup responsibilities.
+7. A retry remains in the selected execution mode unless the user explicitly previews and confirms a new dispatch in another mode.

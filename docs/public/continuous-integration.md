@@ -6,6 +6,12 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
+Changes limited to `docs/**` or the standard root documentation files
+(`README.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `DESIGN.md`,
+`PRODUCT.md`, `SECURITY.md`, and `SUPPORT.md`) still report every required
+status check but skip dependency installation, lint, tests, and builds. Empty,
+mixed, or unclassifiable change sets fail closed and run the complete suite.
+
 CI restores npm's content-addressed download cache on every run. Only the
 successful workflow-policy job on `main` may save a cache, so parallel jobs do
 not race to upload the same archive and pull-request merge refs cannot create

@@ -91,9 +91,48 @@ for (const file of workflowFiles) {
   }
 
   if (file === 'ci.yml') {
+    const changes = workflow.jobs?.changes;
     const shards = workflow.jobs?.['unit-test-shards'];
     const aggregate = workflow.jobs?.['unit-tests'];
-    assert.ok(shards && aggregate, 'ci.yml must shard unit tests and expose an aggregate check');
+    const validate = workflow.jobs?.validate;
+    const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
+    assert.ok(changes && validate && shards && aggregate, 'ci.yml must classify changes and expose every check');
+    assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
+    assert.deepEqual(
+      changes.outputs,
+      { docs_only: '${{ steps.classify.outputs.docs_only }}' },
+      'change classification must expose its fail-closed result',
+    );
+    const classifier = changes.steps?.find((step) => step.id === 'classify');
+    assert.ok(classifier, 'ci.yml must classify changed files');
+    for (const invariant of [
+      'github.event.pull_request.base.sha || github.event.before',
+      'github.event.pull_request.head.sha || github.sha',
+      '0000000000000000000000000000000000000000',
+      'git cat-file -e "${BASE_SHA}^{commit}"',
+      'git diff --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
+      'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
+      'if [[ "${found_change}" != "true" ]]',
+    ]) {
+      assert.ok(source.includes(invariant), `documentation-only classification must enforce ${invariant}`);
+    }
+    assert.deepEqual(validate.needs, ['changes'], 'validation jobs must depend on change classification');
+    assert.deepEqual(shards.needs, ['changes'], 'unit-test shards must depend on change classification');
+    assert.equal(validate.if, 'always()', 'validation jobs must fail closed if change classification fails');
+    assert.equal(shards.if, 'always()', 'unit-test shards must fail closed if change classification fails');
+    for (const [jobName, job] of Object.entries({ validate, 'unit-test-shards': shards })) {
+      const expensiveSteps = job.steps?.filter((step) =>
+        step.uses || step.run === 'npm ci --no-audit --no-fund' ||
+        step.run?.startsWith('npm test -- --shard=') ||
+        step.name?.startsWith('Run ')
+      ) ?? [];
+      for (const step of expensiveSteps) {
+        assert.ok(
+          step.if?.includes(expensiveStepCondition),
+          `${jobName} step "${step.name}" must be gated for documentation-only changes`,
+        );
+      }
+    }
     assert.deepEqual(
       shards.strategy?.matrix?.shard,
       [1, 2, 3, 4],
@@ -114,7 +153,7 @@ for (const file of workflowFiles) {
     );
     assert.equal(aggregate.if, 'always()', 'aggregate unit-test check must report shard failures');
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
-      if (jobName === 'unit-tests') continue;
+      if (jobName === 'changes' || jobName === 'unit-tests') continue;
       const cacheRestores =
         job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
       assert.equal(cacheRestores.length, 1, `${jobName} must restore the shared npm cache`);
@@ -133,6 +172,7 @@ for (const file of workflowFiles) {
       "github.ref == 'refs/heads/main'",
       "matrix.name == 'Workflow policy'",
       "steps.npm-cache.outputs.cache-hit != 'true'",
+      expensiveStepCondition,
     ]) {
       assert.ok(
         cacheSaves[0].if.includes(invariant),

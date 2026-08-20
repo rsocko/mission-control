@@ -95,7 +95,6 @@ export async function PATCH(
       ? await db.select({ recurrence: taskSchedules.recurrence })
           .from(taskSchedules)
           .where(eq(taskSchedules.taskId, id))
-          .limit(1)
       : [];
     const expectedUpdatedAt = request.headers.get('x-expected-task-updated-at');
     if (expectedUpdatedAt && currentTask.updatedAt !== expectedUpdatedAt) {
@@ -491,19 +490,26 @@ export async function PATCH(
       }
     }
 
-    const reminder = (
+    const reminderChanged = (
       input.dueDate !== undefined
       || input.reminderAt !== undefined
       || input.reminderRelative !== undefined
       || input.reminderDueTime !== undefined
       || input.status === 'done'
       || input.status === 'cancelled'
-    )
-      ? await db.select({
-          reminderAt: tasks.reminderAt,
-          reminderRelative: tasks.reminderRelative,
-          reminderDueTime: tasks.reminderDueTime,
-        }).from(tasks).where(eq(tasks.id, id)).get()
+    );
+    const reminder = reminderChanged
+      ? {
+          reminderAt: updates.reminderAt !== undefined
+            ? updates.reminderAt
+            : currentTask.reminderAt ?? null,
+          reminderRelative: updates.reminderRelative !== undefined
+            ? updates.reminderRelative
+            : currentTask.reminderRelative ?? null,
+          reminderDueTime: updates.reminderDueTime !== undefined
+            ? updates.reminderDueTime
+            : currentTask.reminderDueTime ?? null,
+        }
       : undefined;
 
     return NextResponse.json({

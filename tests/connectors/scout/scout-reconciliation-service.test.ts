@@ -55,6 +55,7 @@ function testDatabase() {
       metadata TEXT DEFAULT '{}' NOT NULL, sync_status TEXT DEFAULT 'synced' NOT NULL,
       last_synced_at TEXT NOT NULL, push_retry_count INTEGER DEFAULT 0 NOT NULL,
       kanban_column TEXT, kanban_order REAL, snoozed_until TEXT, reminder_at TEXT,
+      reminder_relative TEXT, reminder_due_time TEXT,
       effort INTEGER, is_bulk_import INTEGER DEFAULT 0 NOT NULL,
       local_disposition TEXT DEFAULT 'active' NOT NULL,
       push_count INTEGER DEFAULT 0 NOT NULL

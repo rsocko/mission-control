@@ -90,18 +90,6 @@ describe('relative task reminders', () => {
       code: 'RELATIVE_REMINDER_DUE_DATE_REQUIRED',
     });
 
-    it('requires a due date when creating relative intent', () => {
-      expect(resolveRelativeReminderMutation({
-        current: { ...current, dueDate: null },
-        input: { reminderRelative: '1_day_before', reminderDueTime: '09:00' },
-        timezone: 'America/New_York',
-      })).toMatchObject({
-        success: false,
-        status: 400,
-        code: 'RELATIVE_REMINDER_DUE_DATE_REQUIRED',
-        error: 'Set a due date before choosing a relative reminder',
-      });
-    });
     expect(resolveRelativeReminderMutation({
       current: relative,
       input: { dueDate: null, relativeReminderDueDateResolution: 'convert_to_absolute' },
@@ -121,6 +109,19 @@ describe('relative task reminders', () => {
     })).toEqual({
       success: true,
       updates: { reminderAt: null, reminderRelative: null, reminderDueTime: null },
+    });
+  });
+
+  it('requires a due date when creating relative intent', () => {
+    expect(resolveRelativeReminderMutation({
+      current: { ...current, dueDate: null },
+      input: { reminderRelative: '1_day_before', reminderDueTime: '09:00' },
+      timezone: 'America/New_York',
+    })).toMatchObject({
+      success: false,
+      status: 400,
+      code: 'RELATIVE_REMINDER_DUE_DATE_REQUIRED',
+      error: 'Set a due date before choosing a relative reminder',
     });
   });
 

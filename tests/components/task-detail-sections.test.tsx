@@ -300,6 +300,20 @@ describe('TaskSourceActionsSection', () => {
     );
   });
 
+  it('renders linked resources without a known source icon', () => {
+    renderWithTooltips(
+      <TaskSourceActionsSection
+        {...sourceActionProps}
+        deepLink={{ url: 'https://example.com/tasks/7', label: 'Partner app' }}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Open in Partner app/ })).toHaveAttribute(
+      'href',
+      'https://example.com/tasks/7',
+    );
+  });
+
   it('hides deletion on mobile, where the action bar owns it', () => {
     const { container } = renderWithTooltips(
       <TaskSourceActionsSection {...sourceActionProps} mode="mobile" canDeleteTask />,

@@ -39,6 +39,7 @@ export function DashboardSidebar({
         projects: state.projects,
         savedViews: state.savedViews,
         allSourceCounts: state.allSourceCounts,
+        loading: state.loading,
       }}
       filters={{
         sourceFilter: state.sourceFilter,
@@ -50,6 +51,7 @@ export function DashboardSidebar({
         priorityFilter: state.priorityFilter,
         statusFilter: state.statusFilter,
         hiddenQuickFilters: state.hiddenQuickFilters,
+        quickFilterVisibility: state.quickFilterVisibility,
       }}
       sidebar={{
         sidebarExpanded: state.sidebarExpanded,
@@ -80,7 +82,7 @@ export function DashboardSidebar({
         setTagsExpanded: actions.setTagsExpanded,
         applyView: actions.applyView,
         deleteView: actions.deleteView,
-        toggleQuickFilterVisibility: actions.toggleQuickFilterVisibility,
+        setQuickFilterVisibility: actions.setQuickFilterVisibility,
       }}
       computed={{
         sourceHasLists,

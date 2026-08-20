@@ -2,9 +2,16 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox } from 'lucide-react';
+import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
   DashboardProjectViewModel as HubProject,
@@ -20,6 +27,13 @@ import type { SidebarMode } from '@/lib/hooks/useSidebarExpanded';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
 import type { GraphOrigin } from '@/lib/graph/graph-navigation';
 import { taskFilterContextFromSavedView } from '@/lib/task-filter-context';
+import {
+  getQuickFilterVisibility,
+  isQuickFilterVisible,
+  QUICK_FILTERS,
+  type QuickFilterIcon,
+  type QuickFilterVisibility,
+} from '@/lib/tasks/quick-filters';
 import { SidebarNavItem } from './SidebarNavItem';
 
 const TAG_DEFAULT_COUNT = 10;
@@ -39,6 +53,8 @@ interface SidebarFiltersProps {
     projects: HubProject[];
     savedViews: SavedView[];
     allSourceCounts: Record<string, number>;
+    loading: boolean;
+    quickFilterCountsAvailable?: boolean;
   };
   filters: {
     sourceFilter: string | null;
@@ -50,6 +66,7 @@ interface SidebarFiltersProps {
     priorityFilter: string[];
     statusFilter: string[];
     hiddenQuickFilters: string[];
+    quickFilterVisibility: Record<string, QuickFilterVisibility>;
   };
   sidebar: {
     sidebarExpanded: boolean;
@@ -80,7 +97,7 @@ interface SidebarFiltersProps {
     setTagsExpanded: (v: boolean) => void;
     applyView: (view: SavedView) => void;
     deleteView?: (id: string) => void;
-    toggleQuickFilterVisibility: (filterId: string) => void;
+    setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
   };
   computed: {
     sourceHasLists: (sourceType: string) => boolean;
@@ -92,12 +109,13 @@ interface SidebarFiltersProps {
 export function SidebarFilters({ data, filters, sidebar, actions, computed }: SidebarFiltersProps) {
   const {
     taskResponse, enabledSources, sourceLists, listGroups, allTags,
-    projects, savedViews, allSourceCounts,
+    projects, savedViews, allSourceCounts, loading,
+    quickFilterCountsAvailable = true,
   } = data;
   const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter,
-    hiddenQuickFilters,
+    hiddenQuickFilters, quickFilterVisibility,
   } = filters;
   const {
     sidebarExpanded, sidebarMode, collapsedSections, expandedSourceLists, collapsedListGroups,
@@ -108,7 +126,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
     setListSearch, setTagSearch, setTagsExpanded, applyView, deleteView,
-    toggleQuickFilterVisibility,
+    setQuickFilterVisibility,
   } = actions;
   const {
     sourceHasLists, getSourceListsForType,
@@ -116,6 +134,17 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
   } = computed;
 
   const [showFilterSettings, setShowFilterSettings] = React.useState(false);
+  const visibleQuickFilters = QUICK_FILTERS.filter((filter) => isQuickFilterVisible(
+    filter,
+    taskResponse.stats,
+    quickFilterVisibility,
+    {
+      activeFilter: quickFilter,
+      countsAvailable: quickFilterCountsAvailable,
+      loading,
+      legacyHiddenFilters: hiddenQuickFilters,
+    },
+  ));
   const selectedSourceList = sourceLists.find(sourceList =>
     matchesSourceListFilter(sourceList, listFilter)
   );
@@ -172,36 +201,23 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
         <div className="w-6 h-px bg-[var(--border)] my-2" />
 
         {/* Quick filter shortcuts */}
-        <button
-          onClick={() => setQuickFilter(quickFilter === 'today' ? null : 'today')}
-          className={`p-2 rounded-[var(--radius-md)] transition-colors duration-100 ${
-            quickFilter === 'today' ? 'text-amber-400 bg-amber-900/30' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-          }`}
-          title="Due Today"
-          aria-label="Due Today"
-        >
-          <Sun size={16} />
-        </button>
-        <button
-          onClick={() => setQuickFilter(quickFilter === 'overdue' ? null : 'overdue')}
-          className={`p-2 rounded-[var(--radius-md)] transition-colors duration-100 ${
-            quickFilter === 'overdue' ? 'text-red-400 bg-red-900/30' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-          }`}
-          title="Overdue"
-          aria-label="Overdue"
-        >
-          <Flame size={16} />
-        </button>
-        <button
-          onClick={() => setQuickFilter(quickFilter === 'starred' ? null : 'starred')}
-          className={`p-2 rounded-[var(--radius-md)] transition-colors duration-100 ${
-            quickFilter === 'starred' ? 'text-yellow-400 bg-yellow-900/30' : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-          }`}
-          title="Starred"
-          aria-label="Starred"
-        >
-          <Star size={16} />
-        </button>
+        {visibleQuickFilters
+          .filter((filter) => ['today', 'overdue', 'high'].includes(filter.id))
+          .map((filter) => (
+            <button
+              key={filter.id}
+              onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
+              className={`p-2 rounded-[var(--radius-md)] transition-colors duration-100 ${
+                quickFilter === filter.id
+                  ? `${filter.iconClassName} bg-[var(--surface-3)]`
+                  : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
+              }`}
+              title={filter.label}
+              aria-label={filter.label}
+            >
+              <QuickFilterIcon icon={filter.icon} size={16} />
+            </button>
+          ))}
 
         {projects.length > 0 && (
           <>
@@ -386,114 +402,53 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           </button>
         </div>
         {showFilterSettings && (
-          <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1">
-            <p className="text-[10px] text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Show/Hide Filters</p>
-            {[
-              { id: 'myDay', label: 'My Day' },
-              { id: 'inbox', label: 'Inbox' },
-              { id: 'overdue', label: 'Overdue' },
-              { id: 'high', label: 'High Priority' },
-              { id: 'week', label: 'Due This Week' },
-              { id: 'assigned', label: 'Assigned to Me' },
-              { id: 'recentlyCreated', label: 'Recently Created' },
-              { id: 'recentlyClosed', label: 'Recently Closed' },
-              { id: 'waiting', label: 'Waiting / On Hold' },
-            ].map(f => (
-              <label key={f.id} className="flex items-center gap-2 text-xs text-[var(--text-secondary)] cursor-pointer hover:text-[var(--text-primary)]">
-                <input
-                  type="checkbox"
-                  checked={!hiddenQuickFilters.includes(f.id)}
-                  onChange={() => toggleQuickFilterVisibility(f.id)}
-                  className="rounded border-[var(--border)] accent-[var(--accent)]"
-                />
-                {f.label}
-              </label>
+          <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
+            <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Filter visibility</p>
+            {QUICK_FILTERS.map((filter) => (
+              <div key={filter.id} className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
+                <span className="min-w-0 truncate">{filter.label}</span>
+                <Select
+                  value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
+                  onValueChange={(visibility) => setQuickFilterVisibility(
+                    filter.id,
+                    visibility as QuickFilterVisibility,
+                  )}
+                >
+                  <SelectTrigger
+                    variant="inline"
+                    aria-label={`${filter.label} visibility`}
+                    className="w-32"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="always">Always</SelectItem>
+                    <SelectItem value="when-not-empty">When not empty</SelectItem>
+                    <SelectItem value="hidden">Hidden</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             ))}
           </div>
         )}
         {!collapsedSections.has('quickFilters') && (
         <div className="space-y-1">
-          {!hiddenQuickFilters.includes('myDay') && (
-          <SidebarNavItem
-            icon={<Sun size={14} className="text-amber-400" />}
-            label="My Day"
-            count={taskResponse.stats.myDay || 0}
-            active={quickFilter === 'myDay'}
-            onClick={() => setQuickFilter(quickFilter === 'myDay' ? null : 'myDay')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('inbox') && (
-          <SidebarNavItem
-            icon={<Inbox size={14} className="text-teal-400" />}
-            label="Inbox"
-            count={taskResponse.stats.inbox || 0}
-            active={quickFilter === 'inbox'}
-            onClick={() => setQuickFilter(quickFilter === 'inbox' ? null : 'inbox')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('overdue') && (
-          <SidebarNavItem
-            icon={<Flame size={14} className="text-red-400" />}
-            label="Overdue"
-            count={taskResponse.stats.overdue}
-            active={quickFilter === 'overdue'}
-            onClick={() => setQuickFilter(quickFilter === 'overdue' ? null : 'overdue')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('high') && (
-          <SidebarNavItem
-            icon={<Star size={14} className="text-amber-400" />}
-            label="High Priority"
-            count={taskResponse.stats.highPriority}
-            active={quickFilter === 'high'}
-            onClick={() => setQuickFilter(quickFilter === 'high' ? null : 'high')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('week') && (
-          <SidebarNavItem
-            icon={<Clock size={14} className="text-blue-400" />}
-            label="Due This Week"
-            count={taskResponse.stats.dueThisWeek}
-            active={quickFilter === 'week'}
-            onClick={() => setQuickFilter(quickFilter === 'week' ? null : 'week')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('assigned') && (
-          <SidebarNavItem
-            icon={<User size={14} className="text-[var(--text-muted)]" />}
-            label="Assigned to Me"
-            count={taskResponse.stats.assignedToMe}
-            active={quickFilter === 'assigned'}
-            onClick={() => setQuickFilter(quickFilter === 'assigned' ? null : 'assigned')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('recentlyCreated') && (
-          <SidebarNavItem
-            icon={<Sparkles size={14} className="text-emerald-400" />}
-            label="Recently Created"
-            count={taskResponse.stats.recentlyCreated || 0}
-            active={quickFilter === 'recentlyCreated'}
-            onClick={() => setQuickFilter(quickFilter === 'recentlyCreated' ? null : 'recentlyCreated')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('recentlyClosed') && (
-          <SidebarNavItem
-            icon={<CheckCircle2 size={14} className="text-violet-400" />}
-            label="Recently Closed"
-            count={taskResponse.stats.recentlyClosed || 0}
-            active={quickFilter === 'recentlyClosed'}
-            onClick={() => setQuickFilter(quickFilter === 'recentlyClosed' ? null : 'recentlyClosed')}
-          />
-          )}
-          {!hiddenQuickFilters.includes('waiting') && (
-          <SidebarNavItem
-            icon={<Hourglass size={14} className="text-orange-400" />}
-            label="Waiting / On Hold"
-            count={taskResponse.stats.waiting || 0}
-            active={quickFilter === 'waiting'}
-            onClick={() => setQuickFilter(quickFilter === 'waiting' ? null : 'waiting')}
-          />
-          )}
+          {visibleQuickFilters.map((filter) => (
+            <SidebarNavItem
+              key={filter.id}
+              icon={(
+                <QuickFilterIcon
+                  icon={filter.icon}
+                  size={14}
+                  className={filter.iconClassName}
+                />
+              )}
+              label={filter.label}
+              count={taskResponse.stats[filter.statKey]}
+              active={quickFilter === filter.id}
+              onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
+            />
+          ))}
         </div>
         )}
       </div>
@@ -761,6 +716,32 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
   );
 }
 
+function QuickFilterIcon({
+  icon,
+  size,
+  className,
+}: {
+  icon: QuickFilterIcon;
+  size: number;
+  className?: string;
+}) {
+  const props = { size, className };
+  const icons: Record<QuickFilterIcon, React.ReactNode> = {
+    sun: <Sun {...props} />,
+    inbox: <Inbox {...props} />,
+    flame: <Flame {...props} />,
+    calendar: <CalendarDays {...props} />,
+    star: <Star {...props} />,
+    clock: <Clock {...props} />,
+    user: <User {...props} />,
+    sparkles: <Sparkles {...props} />,
+    completed: <CheckCircle2 {...props} />,
+    waiting: <Hourglass {...props} />,
+    'no-date': <CalendarX2 {...props} />,
+  };
+  return icons[icon];
+}
+
 // Sub-component for source list rendering within expanded sources
 function SourceListSection({
   source,
@@ -892,7 +873,7 @@ function SourceListSection({
                       {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
                       <span className="truncate">{sl.name}</span>
                       {sl.selectedForSync === false && (
-                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-amber-400">
+                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
                           Not syncing
                         </span>
                       )}
@@ -945,7 +926,7 @@ function SourceListSection({
                       {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
                       <span className="truncate">{sl.name}</span>
                       {sl.selectedForSync === false && (
-                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[8px] uppercase tracking-wide text-amber-400">
+                        <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
                           Not syncing
                         </span>
                       )}

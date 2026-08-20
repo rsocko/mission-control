@@ -39,7 +39,25 @@ function renderFilters(overrides: Partial<React.ComponentProps<typeof MobileTask
     sourceLists,
     syncStatus,
     sourceCounts: { github: 12 },
+    stats: {
+      totalOpen: 16,
+      overdue: 1,
+      dueToday: 2,
+      dueThisWeek: 3,
+      noDate: 0,
+      highPriority: 2,
+      assignedToMe: 0,
+      myDay: 0,
+      recentlyCreated: 0,
+      recentlyClosed: 0,
+      waiting: 0,
+      inbox: 4,
+    },
+    hiddenQuickFilters: [],
+    quickFilterVisibility: {},
+    loading: false,
     onQuickFilterChange: vi.fn(),
+    onQuickFilterVisibilityChange: vi.fn(),
     onSourceFilterChange: vi.fn(),
     onListFilterChange: vi.fn(),
     onClear: vi.fn(),
@@ -78,5 +96,14 @@ describe('MobileTaskFilters', () => {
     expect(screen.getByRole('button', { name: /Work Microsoft To Do · 4 tasks/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Mission Control/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Quick filters')).not.toBeInTheDocument();
+  });
+
+  it('shows catalog filters and auto-hides empty conditional filters', () => {
+    renderFilters();
+
+    expect(screen.getByRole('button', { name: /Due Today/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next 7 Days/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Assigned to Me/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /No Date/ })).not.toBeInTheDocument();
   });
 });

@@ -21,6 +21,8 @@ beforeEach(() => {
   useDashboardViewStore.setState({
     collapsedListGroups: [],
     collapsedSections: [],
+    hiddenQuickFilters: [],
+    quickFilterVisibility: {},
   });
 });
 
@@ -52,6 +54,7 @@ describe('dashboard state modules', () => {
       setViewDensity: vi.fn(),
       setShowCompleted: vi.fn(),
       toggleQuickFilterVisibility: vi.fn(),
+      setQuickFilterVisibility: vi.fn(),
     };
     const replaceUrl = vi.fn();
     const { result } = renderHook(() => useDashboardSavedViews({

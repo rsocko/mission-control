@@ -6,6 +6,7 @@ import type {
   MatrixMobileView,
   MatrixSizeMode,
 } from '@/lib/matrix/scales';
+import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 
 interface DashboardViewState {
   // Filters (session-scoped but survive navigation)
@@ -33,6 +34,7 @@ interface DashboardViewState {
 
   // Quick filter visibility (persist across sessions)
   hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
 
   // Sidebar state
   collapsedListGroups: string[];
@@ -59,6 +61,7 @@ interface DashboardViewState {
   setMatrixMobileView: (v: MatrixMobileView) => void;
   setHiddenQuickFilters: (v: string[]) => void;
   toggleQuickFilterVisibility: (filterId: string) => void;
+  setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
   setCollapsedListGroups: (v: string[]) => void;
   setCollapsedSections: (v: string[]) => void;
   resetFilters: () => void;
@@ -88,6 +91,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
       matrixColorCustomized: false,
       matrixMobileView: 'table',
       hiddenQuickFilters: [],
+      quickFilterVisibility: {},
       collapsedListGroups: [],
       collapsedSections: [],
 
@@ -124,6 +128,13 @@ export const useDashboardViewStore = create<DashboardViewState>()(
           set({ hiddenQuickFilters: [...current, filterId] });
         }
       },
+      setQuickFilterVisibility: (filterId, visibility) => set((state) => {
+        const next = { ...state.quickFilterVisibility, [filterId]: visibility };
+        return {
+          quickFilterVisibility: next,
+          hiddenQuickFilters: state.hiddenQuickFilters.filter((id) => id !== filterId),
+        };
+      }),
       setCollapsedListGroups: (v) => set({ collapsedListGroups: v }),
       setCollapsedSections: (v) => set({ collapsedSections: v }),
       resetFilters: () =>
@@ -153,6 +164,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
         matrixColorCustomized: state.matrixColorCustomized,
         matrixMobileView: state.matrixMobileView,
         hiddenQuickFilters: state.hiddenQuickFilters,
+        quickFilterVisibility: state.quickFilterVisibility,
         collapsedListGroups: state.collapsedListGroups,
         collapsedSections: state.collapsedSections,
         sourceFilter: state.sourceFilter,

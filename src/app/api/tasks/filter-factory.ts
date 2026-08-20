@@ -8,7 +8,9 @@ type EmptyResponse = {
   stats: {
     totalOpen: number;
     overdue: number;
+    dueToday: number;
     dueThisWeek: number;
+    noDate: number;
     highPriority: number;
     assignedToMe: number;
     myDay: number;
@@ -25,7 +27,9 @@ type EmptyResponse = {
 const EMPTY_STATS = {
   totalOpen: 0,
   overdue: 0,
+  dueToday: 0,
   dueThisWeek: 0,
+  noDate: 0,
   highPriority: 0,
   assignedToMe: 0,
   myDay: 0,

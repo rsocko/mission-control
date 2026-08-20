@@ -14,8 +14,59 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docs_only=true
+          found_change=false
+          if [[ -z "${BASE_SHA}" ||
+                "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            docs_only=false
+          else
+            while IFS= read -r -d '' path; do
+              found_change=true
+              case "${path}" in
+                docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md)
+                  ;;
+                *)
+                  docs_only=false
+                  ;;
+              esac
+            done < <(git diff --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}")
+          fi
+
+          if [[ "${found_change}" != "true" ]]; then
+            docs_only=false
+          fi
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+
   validate:
     name: ${{ matrix.name }}
+    if: always()
+    needs:
+      - changes
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
@@ -35,17 +86,24 @@ jobs:
           - name: Production build
             command: npm run build
     steps:
+      - name: Skip expensive validation for documentation-only changes
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "${{ matrix.name }} is not required for documentation-only changes."
+
       - name: Check out source
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
            persist-credentials: false
 
       - name: Set up Node.js
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
       - name: Restore npm download cache
+        if: needs.changes.outputs.docs_only != 'true'
         id: npm-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -55,20 +113,26 @@ jobs:
             npm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Run ${{ matrix.name }}
-        if: matrix.name != 'Production build'
+        if: >-
+          needs.changes.outputs.docs_only != 'true' &&
+          matrix.name != 'Production build'
         run: ${{ matrix.command }}
 
       - name: Run Production build
-        if: matrix.name == 'Production build'
+        if: >-
+          needs.changes.outputs.docs_only != 'true' &&
+          matrix.name == 'Production build'
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: ${{ matrix.command }}
 
       - name: Save npm download cache
         if: >-
+          needs.changes.outputs.docs_only != 'true' &&
           github.ref == 'refs/heads/main' &&
           matrix.name == 'Workflow policy' &&
           steps.npm-cache.outputs.cache-hit != 'true'
@@ -79,6 +143,9 @@ jobs:
 
   unit-test-shards:
     name: Unit tests (${{ matrix.shard }}/4)
+    if: always()
+    needs:
+      - changes
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -88,17 +155,24 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4]
     steps:
+      - name: Skip unit-test shard for documentation-only changes
+        if: needs.changes.outputs.docs_only == 'true'
+        run: echo "Unit-test shard ${{ matrix.shard }}/4 is not required for documentation-only changes."
+
       - name: Check out source
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
          persist-credentials: false
 
       - name: Set up Node.js
+        if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
          node-version: 22
 
       - name: Restore npm download cache
+        if: needs.changes.outputs.docs_only != 'true'
         id: npm-cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
@@ -108,9 +182,11 @@ jobs:
            npm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
+        if: needs.changes.outputs.docs_only != 'true'
         run: npm ci --no-audit --no-fund
 
       - name: Run unit-test shard
+        if: needs.changes.outputs.docs_only != 'true'
         run: npm test -- --shard=${{ matrix.shard }}/4
 
   unit-tests:

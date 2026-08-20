@@ -40,6 +40,7 @@ import type {
   SyncStatusEntry,
   SavedView,
 } from '@/types/dashboard';
+import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
 import {
@@ -117,6 +118,7 @@ export interface DashboardState {
   viewDensity: 'compact' | 'comfortable';
   showCompleted: boolean;
   hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
 
   // UI state
   selectedTaskId: string | null;
@@ -172,6 +174,7 @@ export interface DashboardActions {
   setViewDensity: (v: 'compact' | 'comfortable') => void;
   setShowCompleted: (v: boolean) => void;
   toggleQuickFilterVisibility: (filterId: string) => void;
+  setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
 
   // Task actions
   completeTask: (taskId: string) => Promise<void>;
@@ -260,12 +263,13 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter, textFilter, sortBy, sortDirection, groupBy,
-    viewDensity, showCompleted, hiddenQuickFilters,
+    viewDensity, showCompleted, hiddenQuickFilters, quickFilterVisibility,
   } = filterState;
   const {
     setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter,
     setProjectFilter, setPriorityFilter, setStatusFilter, setSortBy, setSortDirection,
     setGroupBy, setViewDensity, setShowCompleted, toggleQuickFilterVisibility,
+    setQuickFilterVisibility,
   } = filterActions;
   const [allTags, setAllTags] = useState<TaskTag[]>([]);
   const filterOptionsQuery = useQuery<{ assignees: string[] }>({
@@ -989,6 +993,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
       priorityFilter, statusFilter,
       sortBy, sortDirection, groupBy, viewDensity, showCompleted, hiddenQuickFilters,
+      quickFilterVisibility,
       selectedTaskId, bulkMode, bulkSelected, collapsedGroups, sidebarExpanded, sidebarMode,
       completingIds, exitingTasks, confirmDialog, saveTemplateTask, detailMode,
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
@@ -1001,7 +1006,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter, setProjectFilter,
       setPriorityFilter, setStatusFilter,
       setSortBy, setSortDirection, setGroupBy, setViewDensity, setShowCompleted,
-      toggleQuickFilterVisibility,
+      toggleQuickFilterVisibility, setQuickFilterVisibility,
       completeTask, snoozeTask, deleteTask,
       setTaskDueDate, setTaskPriority, setTaskStatus, setTaskLocalDisposition,
       moveTaskToList, addTaskToProject, addToMyDay, removeFromMyDay,

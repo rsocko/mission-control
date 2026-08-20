@@ -41,7 +41,11 @@ Replace tab-switching between task apps. See everything in one dense, keyboard-d
 - **List filter** — Drill into a specific source list
 - **Tag filter** — Multi-select tag filtering (AND logic)
 - **Project filter** — Scope to tasks within a hub project
-- **Quick filter** — Predefined smart filters (overdue, due today, high priority, no date)
+- **Quick filter** — Shared desktop/mobile smart filters for My Day, Inbox, overdue,
+  due today, next seven days, high priority, assigned, waiting/blocked, recent
+  activity, and tasks without a date
+- **Quick filter visibility** — Show each filter always, only when non-empty, or
+  hide it; active filters remain available when their count reaches zero
 - **Saved views** — User-created filter+sort presets
 
 ### Grouping & Sorting

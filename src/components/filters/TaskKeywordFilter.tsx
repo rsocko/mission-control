@@ -14,6 +14,7 @@ import {
   updateTaskFilterContext,
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
+import { getQuickFilterDefinition } from '@/lib/tasks/quick-filters';
 import { parseFilterQuery, type FilterToken, type FilterTokenType } from '@/lib/utils/parseFilterQuery';
 import type {
   DashboardProjectViewModel as HubProject,
@@ -85,17 +86,6 @@ const TOKEN_STYLES: Record<FilterTokenType, { bg: string; text: string; border: 
   phase:    { bg: 'bg-fuchsia-500/15', text: 'text-fuchsia-300', border: 'border-fuchsia-500/30' },
   disposition: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/30' },
   text:     { bg: '',                  text: '',                  border: '' },
-};
-
-const QUICK_FILTER_LABELS: Record<string, string> = {
-  myDay: 'My Day',
-  overdue: 'Overdue',
-  high: 'High Priority',
-  week: 'Due This Week',
-  assigned: 'Assigned to Me',
-  recentlyCreated: 'Recently Created',
-  recentlyClosed: 'Recently Closed',
-  waiting: 'Waiting / On Hold',
 };
 
 // ── Autocomplete suggestions ──────────────────────────────────────────────────
@@ -531,7 +521,7 @@ export function TaskKeywordFilter({
     if (quickFilter) {
       filters.push({
         id: `quick-${quickFilter}`,
-        label: `quick:${QUICK_FILTER_LABELS[quickFilter] || quickFilter}`,
+        label: `quick:${getQuickFilterDefinition(quickFilter)?.label || quickFilter}`,
         style: quickFilter === 'high'
           ? TOKEN_STYLES.priority
           : quickFilter === 'assigned'

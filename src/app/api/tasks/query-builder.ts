@@ -14,6 +14,14 @@ export function getQuickFilterCondition(quickFilter: string | null, today: strin
     return lt(tasks.dueDate, today);
   }
 
+  if (quickFilter === 'today') {
+    return eq(tasks.dueDate, today);
+  }
+
+  if (quickFilter === 'noDate') {
+    return or(isNull(tasks.dueDate), eq(tasks.dueDate, ''));
+  }
+
   if (quickFilter === 'high') {
     return inArray(tasks.priority, ['high', 'critical']);
   }

@@ -26,9 +26,15 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
       overdue: task.dueDate && task.dueDate < getClientToday()
         ? Math.max(0, response.stats.overdue - 1)
         : response.stats.overdue,
+      dueToday: task.dueDate === getClientToday()
+        ? Math.max(0, response.stats.dueToday - 1)
+        : response.stats.dueToday,
       dueThisWeek: task.dueDate && isDueThisWeek(task.dueDate)
         ? Math.max(0, response.stats.dueThisWeek - 1)
         : response.stats.dueThisWeek,
+      noDate: !task.dueDate
+        ? Math.max(0, response.stats.noDate - 1)
+        : response.stats.noDate,
       highPriority: task.priority === 'high' || task.priority === 'critical'
         ? Math.max(0, response.stats.highPriority - 1)
         : response.stats.highPriority,
@@ -59,9 +65,15 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
       overdue: task.dueDate && task.dueDate < getClientToday()
         ? response.stats.overdue + 1
         : response.stats.overdue,
+      dueToday: task.dueDate === getClientToday()
+        ? response.stats.dueToday + 1
+        : response.stats.dueToday,
       dueThisWeek: task.dueDate && isDueThisWeek(task.dueDate)
         ? response.stats.dueThisWeek + 1
         : response.stats.dueThisWeek,
+      noDate: !task.dueDate
+        ? response.stats.noDate + 1
+        : response.stats.noDate,
       highPriority: task.priority === 'high' || task.priority === 'critical'
         ? response.stats.highPriority + 1
         : response.stats.highPriority,

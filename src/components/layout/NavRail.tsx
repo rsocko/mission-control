@@ -44,6 +44,7 @@ import {
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import { getShortcutPage } from '@/lib/navigation/shortcut-catalog';
+import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
 
 import type { ComponentType } from 'react';
 import {
@@ -180,6 +181,8 @@ export function NavRail({
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
   const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const { preferences } = useNavigationBadgePreferences();
   const [syncPopoverOpen, setSyncPopoverOpen] = useState(false);
   const expandTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -188,7 +191,7 @@ export function NavRail({
   const syncPopoverHovered = useRef(false);
   const clickSuppressUntil = useRef(0);
 
-  const expanded = pinned || hovered;
+  const expanded = pinned || hovered || focused || projectMenuOpen;
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
   const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
   const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
@@ -265,6 +268,13 @@ export function NavRail({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onPointerDownCapture={handlePointerDownCapture}
+      onFocusCapture={() => setFocused(true)}
+      onBlurCapture={(event) => {
+        const nextFocus = event.relatedTarget;
+        if (!(nextFocus instanceof Node) || !event.currentTarget.contains(nextFocus)) {
+          setFocused(false);
+        }
+      }}
     >
       {/* Brand */}
       <div className="flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
@@ -301,6 +311,20 @@ export function NavRail({
               {group.items.filter(isVisible).map((item) => {
                 const active = isActive(item.href);
                 const Icon = item.icon;
+                if (item.href === '/projects') {
+                  return (
+                    <RecentProjectsNavItem
+                      key={item.href}
+                      active={active}
+                      expanded={expanded}
+                      icon={Icon}
+                      iconColor={item.iconColor}
+                      open={projectMenuOpen}
+                      pathname={pathname}
+                      onOpenChange={setProjectMenuOpen}
+                    />
+                  );
+                }
                 const badgeCount = item.badgeKey ? counts[item.badgeKey] : 0;
                 const badgeTone = item.badgeKey === 'notifications'
                   ? counts.notificationTone

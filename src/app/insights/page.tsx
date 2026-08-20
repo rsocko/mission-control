@@ -730,6 +730,7 @@ function PlanningFrictionSection({
 }) {
   return (
     <motion.section
+      id="planning-friction"
       variants={fadeSlideUp}
       className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
       aria-labelledby="planning-friction-heading"
@@ -759,7 +760,7 @@ function PlanningFrictionSection({
           </div>
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Most shifted tasks</h4>
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Most affected tasks</h4>
               <div className="space-y-2">
                 {data.topTasks.map(task => (
                   <button

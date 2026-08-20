@@ -255,6 +255,9 @@ describe('InsightsPage', () => {
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('Planning friction')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Planning friction' })).toHaveAttribute('id', 'planning-friction');
+    expect(screen.getByText('Most affected tasks')).toBeInTheDocument();
+    expect(screen.queryByText('Most shifted tasks')).not.toBeInTheDocument();
     expect(screen.getByText('Clarify launch plan')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open Clarify launch plan' }));
     expect(pushSpy).toHaveBeenCalledWith('/today?taskId=task-1');

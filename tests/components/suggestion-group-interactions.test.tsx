@@ -31,10 +31,14 @@ function renderGroup({
   onSelect = vi.fn<(taskId: string) => void>(),
   onComplete = vi.fn<() => void>(),
   onAdd = vi.fn<(taskId: string) => void>(),
+  description,
+  learnMoreHref,
 }: {
   onSelect?: (taskId: string) => void;
   onComplete?: () => void;
   onAdd?: (taskId: string) => void;
+  description?: string;
+  learnMoreHref?: string;
 } = {}) {
   const actions: TaskContextMenuActions = {
     onComplete,
@@ -60,6 +64,8 @@ function renderGroup({
         sourceLists={[]}
         listGroups={[]}
         projects={[]}
+        description={description}
+        learnMoreHref={learnMoreHref}
       />
     </TooltipProvider>,
   );
@@ -96,5 +102,15 @@ describe('SuggestionGroup task interactions', () => {
 
     expect(onAdd).toHaveBeenCalledWith('task-1');
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('explains algorithmic groups and links to their report', () => {
+    renderGroup({
+      description: 'Tasks with recent planning friction signals.',
+      learnMoreHref: '/insights#planning-friction',
+    });
+
+    expect(screen.getByText('Tasks with recent planning friction signals.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View planning friction insights' })).toHaveAttribute('href', '/insights#planning-friction');
   });
 });

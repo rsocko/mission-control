@@ -10,7 +10,7 @@ import {
 import { ConnectorIcon } from './SortableTaskRow';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
-import type { SuggestionGroups, SuggestionTask } from './types';
+import { REPLANNING_SUGGESTION, type SuggestionGroups, type SuggestionTask } from './types';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 
 interface MobileSuggestionsProps {
@@ -26,10 +26,19 @@ interface GroupConfig {
   icon: React.ReactNode;
   color: string;
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
 }
 
 const GROUPS: GroupConfig[] = [
-  { key: 'planningSignals', title: 'Needs a Replan', icon: <RotateCcw size={16} />, color: 'rose' },
+  {
+    key: 'planningSignals',
+    title: REPLANNING_SUGGESTION.title,
+    icon: <RotateCcw size={16} />,
+    color: 'rose',
+    description: REPLANNING_SUGGESTION.description,
+    learnMoreHref: REPLANNING_SUGGESTION.insightsHref,
+  },
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
   { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },
@@ -100,7 +109,7 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-2">
-              {GROUPS.map(({ key, title, icon, color, sortable }) => {
+              {GROUPS.map(({ key, title, icon, color, sortable, description, learnMoreHref }) => {
                 const tasks = suggestions[key];
                 if (tasks.length === 0) return null;
                 return (
@@ -112,6 +121,8 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
                     color={color}
                     tasks={tasks}
                     sortable={sortable}
+                    description={description}
+                    learnMoreHref={learnMoreHref}
                     expanded={expandedGroup === key}
                     onToggle={handleGroupToggle}
                     onAdd={onAddToDay}
@@ -134,6 +145,8 @@ function MobileSuggestionAccordion({
   color,
   tasks,
   sortable,
+  description,
+  learnMoreHref,
   expanded,
   onToggle,
   onAdd,
@@ -145,6 +158,8 @@ function MobileSuggestionAccordion({
   color: string;
   tasks: SuggestionTask[];
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
   expanded: boolean;
   onToggle: (key: keyof SuggestionGroups) => void;
   onAdd: (taskId: string) => void;
@@ -221,6 +236,19 @@ function MobileSuggestionAccordion({
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
+            {description && (
+              <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-xs leading-relaxed text-[var(--text-muted)]">
+                {description}
+                {learnMoreHref && (
+                  <>
+                    {' '}
+                    <a className="font-medium text-[var(--accent-400)] underline-offset-2 active:underline" href={learnMoreHref}>
+                      View planning friction insights
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
             {/* Sort control */}
             {sortable && (
               <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center">

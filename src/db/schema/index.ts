@@ -39,6 +39,7 @@ export {
 // Tasks, tags, scoring, routines
 export {
   tasks,
+  taskReminderOccurrences,
   taskSchedules,
   tags,
   taskTags,

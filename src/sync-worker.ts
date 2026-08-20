@@ -30,6 +30,7 @@ async function main(): Promise<void> {
     { publicRuntimeRelease },
     { DurableAiRunStore, DurableAiRunWorker },
     { WorkerHealthSnapshotScheduler },
+    { taskReminderScheduler },
   ] = await Promise.all([
     import('@/lib/sync'),
     import('@/lib/sync/worker'),
@@ -38,6 +39,7 @@ async function main(): Promise<void> {
     import('@/lib/runtime/release'),
     import('@/lib/ai/durable-runs'),
     import('@/lib/telemetry/health-snapshot'),
+    import('@/lib/push/task-reminder-scheduler'),
   ]);
 
   assertSupportedWorkerReplicaCount();
@@ -71,6 +73,8 @@ async function main(): Promise<void> {
   );
   worker.start();
   aiRunWorker.start();
+  await taskReminderScheduler.start();
+  syncLogger.info('Sync worker: durable task reminder scheduler initialized');
 
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
@@ -92,6 +96,7 @@ async function main(): Promise<void> {
     shutdownPromise = (async () => {
       syncLogger.info({ signal }, 'Sync worker shutting down');
       healthSnapshotScheduler.stop();
+      taskReminderScheduler.stop();
       await Promise.all([
         syncScheduler.stopAll(),
         worker.stop(),

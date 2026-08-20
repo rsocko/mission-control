@@ -9,8 +9,8 @@
  * Refs: #1539, #1540, #1541, #1542
  */
 import db from '@/db';
-import { tasks, myDayItems, triageItems } from '@/db/schema';
-import { eq, and, lt, ne, inArray, sql } from 'drizzle-orm';
+import { tasks, myDayItems, notifications, triageItems } from '@/db/schema';
+import { eq, and, lt, ne, inArray, like, sql } from 'drizzle-orm';
 import { getPreferences } from '@/lib/notifications/quiet-hours';
 import {
   createNotification,
@@ -23,13 +23,6 @@ import logger from '@/lib/logger';
 type ScheduledPushPayload = Omit<MissionControlPushPayload, 'notificationId' | 'body'> & {
   body: string;
 };
-
-/**
- * In-memory tracker for triage nudge deduplication.
- * Prevents re-notifying for the same threshold breach within a window.
- * Keyed by date string (YYYY-MM-DD), value is the count at last notification.
- */
-const triageNudgeTracker = new Map<string, number>();
 
 /**
  * Write a notification record to the notifications table so it shows
@@ -47,6 +40,7 @@ async function writeNotificationRecord(opts: {
   level: 'fyi' | 'heads_up';
   navigationTarget?: string;
   occurrenceKey?: string;
+  metadata?: Record<string, unknown>;
 }): Promise<CreateNotificationResult> {
   const today = getLocalToday();
   const dedupeKey = `push:${opts.templateKey}:${today}`;
@@ -62,7 +56,44 @@ async function writeNotificationRecord(opts: {
     dedupeKey,
     navigationTarget: opts.navigationTarget,
     occurrenceKey: opts.occurrenceKey,
+    metadata: opts.metadata,
   });
+}
+
+function parseTriageNudgeCount(
+  row: Pick<typeof notifications.$inferSelect, 'sourceId' | 'metadata'>,
+  sourcePrefix: string,
+): number | null {
+  const metadata = row.metadata && typeof row.metadata === 'object'
+    ? row.metadata as Record<string, unknown>
+    : {};
+  const metadataCount = metadata.queueSize;
+  if (typeof metadataCount === 'number' && Number.isInteger(metadataCount) && metadataCount >= 0) {
+    return metadataCount;
+  }
+
+  const sourceCount = Number(row.sourceId.slice(sourcePrefix.length));
+  return Number.isInteger(sourceCount) && sourceCount >= 0 ? sourceCount : null;
+}
+
+export async function getTriageNudgeHighWater(today = getLocalToday()): Promise<number | null> {
+  const sourcePrefix = `push:triage_nudge:${today}:`;
+  const priorNudges = await db.select({
+    sourceId: notifications.sourceId,
+    metadata: notifications.metadata,
+  }).from(notifications).where(and(
+    eq(notifications.connectorType, 'system'),
+    eq(notifications.connectorInstanceId, 'push-triggers'),
+    eq(notifications.templateKey, 'triage_nudge'),
+    like(notifications.sourceId, `${sourcePrefix}%`),
+  ));
+
+  let highWater: number | null = null;
+  for (const row of priorNudges) {
+    const count = parseTriageNudgeCount(row, sourcePrefix);
+    if (count !== null && (highWater === null || count > highWater)) highWater = count;
+  }
+  return highWater;
 }
 
 /**
@@ -222,19 +253,11 @@ export async function triggerTriageNudge(): Promise<boolean> {
   const threshold = prefs.triageNudgeThreshold ?? 5;
   if (count < threshold) return false;
 
-  // Deduplication: don't re-notify if we already notified for this count level today
   const today = getLocalToday();
-  const lastNotifiedCount = triageNudgeTracker.get(today);
-  if (lastNotifiedCount !== undefined && count <= lastNotifiedCount) {
-    logger.info({ count, lastNotifiedCount }, 'Triage nudge skipped (already notified at this threshold)');
+  const highWater = await getTriageNudgeHighWater(today);
+  if (highWater !== null && count <= highWater) {
+    logger.info({ count, highWater }, 'Triage nudge skipped (queue has not grown)');
     return false;
-  }
-
-  // Track this notification
-  triageNudgeTracker.set(today, count);
-  // Clean up old date entries
-  for (const key of triageNudgeTracker.keys()) {
-    if (key !== today) triageNudgeTracker.delete(key);
   }
 
   const payload: ScheduledPushPayload = {
@@ -252,6 +275,7 @@ export async function triggerTriageNudge(): Promise<boolean> {
     level: 'heads_up',
     navigationTarget: '/triage',
     occurrenceKey: String(count),
+    metadata: { queueSize: count },
   });
   logger.info(
     {

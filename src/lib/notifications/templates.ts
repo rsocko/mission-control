@@ -217,6 +217,17 @@ registerTemplate({
 
 // Tasks
 registerTemplate({
+  key: 'task_reminder',
+  category: 'tasks',
+  defaultLevel: 'heads_up',
+  categoryIcon: 'bell',
+  sourceDisplayMode: 'prominent',
+  defaultActions: [
+    { actionType: 'navigate', label: 'Open Task', icon: 'check-square', variant: 'primary', isPrimary: true },
+  ],
+});
+
+registerTemplate({
   key: 'task_overdue',
   category: 'tasks',
   defaultLevel: 'action_needed',

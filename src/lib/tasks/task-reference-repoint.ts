@@ -41,6 +41,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'task_history_events.task_id': 'history',
   'task_linked_sources.task_id': 'repoint',
   'task_projects.task_id': 'rebuild',
+  'task_reminder_occurrences.task_id': 'repoint',
   'task_schedules.task_id': 'rebuild',
   'task_source_write_leases.task_id': 'history',
   'task_tags.task_id': 'rebuild',
@@ -69,6 +70,7 @@ export function repointTaskReferences(
   tx.run(sql`UPDATE project_auto_include_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   rebuildProjectPlacements(tx, sourceTaskId, successorTaskId);
   tx.run(sql`UPDATE task_linked_sources SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
+  tx.run(sql`UPDATE task_reminder_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE notifications SET related_task_id = ${successorTaskId} WHERE related_task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE scout_reconciliation_suggestions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);
   tx.run(sql`UPDATE scout_reconciliation_task_state SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`);

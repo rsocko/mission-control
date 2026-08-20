@@ -22,7 +22,7 @@ import {
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
-import { getDeepLinkInfo } from '@/lib/utils/deep-links';
+import { getDeepLinkInfo, getLinkedResourceDeepLinkInfo } from '@/lib/utils/deep-links';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getNextRecurringDate } from '@/lib/utils/recurrence';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
@@ -499,6 +499,7 @@ export function TaskDetailPanel({
   }, []);
 
   const parsedMetadata = parseTaskMetadata(task?.metadata);
+  const linkedResourceDeepLink = getLinkedResourceDeepLinkInfo(parsedMetadata.linkedResources);
   const currentRecurrence: string = task?.recurrence !== undefined
     ? task.recurrence ?? 'none'
     : parsedMetadata?.recurrence ?? 'none';
@@ -944,7 +945,10 @@ export function TaskDetailPanel({
           supportsMoveToList={supportsMoveToList}
           hasWritableConnectors={writableConnectors.length > 0}
           onOpenMoveDialog={() => setShowMoveDialog(true)}
-          deepLink={task.sourceId ? getDeepLinkInfo(task.connectorType, task.sourceId) : null}
+          deepLink={
+            linkedResourceDeepLink
+            ?? (task.sourceId ? getDeepLinkInfo(task.connectorType, task.sourceId) : null)
+          }
           canDeleteTask={canDeleteTask}
           deleteLabel={taskRemovalLabel(task.editPolicy)}
           onDelete={mutations.handleDelete}

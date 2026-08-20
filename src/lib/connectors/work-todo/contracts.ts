@@ -54,7 +54,7 @@ const extendedTaskSchema = baseTaskSchema.extend({
     id: z.string().min(1).max(500),
     applicationName: z.string().max(255),
     displayName: z.string().max(1_000),
-    webUrl: z.string().max(4_000),
+    webUrl: z.string().max(4_000).optional(),
   }).strict()).max(100).optional(),
   attachments: z.array(z.object({
     id: z.string().min(1).max(500),

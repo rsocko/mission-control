@@ -68,9 +68,40 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_local_disposition').on(table.localDisposition),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
+  index('idx_tasks_due_reminder')
+    .on(table.reminderAt, table.status)
+    .where(sql`${table.reminderAt} IS NOT NULL`),
   index('idx_tasks_push_count')
     .on(table.pushCount)
     .where(sql`${table.pushCount} >= 2`),
+]);
+
+// ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────
+
+export const taskReminderOccurrences = sqliteTable('task_reminder_occurrences', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  scheduledAt: text('scheduled_at').notNull(),
+  state: text('state')
+    .$type<'pending' | 'processing' | 'fired' | 'cancelled' | 'failed'>()
+    .notNull()
+    .default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  claimToken: text('claim_token'),
+  claimedAt: text('claimed_at'),
+  leaseExpiresAt: text('lease_expires_at'),
+  firedAt: text('fired_at'),
+  cancelledAt: text('cancelled_at'),
+  notificationId: text('notification_id'),
+  lastError: text('last_error'),
+  nextAttemptAt: text('next_attempt_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_reminder_occurrences_task_schedule')
+    .on(table.taskId, table.scheduledAt),
+  index('idx_task_reminder_occurrences_claim')
+    .on(table.state, table.nextAttemptAt, table.leaseExpiresAt),
 ]);
 
 // ─── TASK SCHEDULES (Focus & Planning) ──────────────────────────────────────

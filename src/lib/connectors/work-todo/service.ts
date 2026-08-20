@@ -1,5 +1,6 @@
 import { randomUUID } from 'crypto';
 import { and, eq, gte, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { fromZonedTime } from 'date-fns-tz';
 import db, { runTransaction } from '@/db';
 import {
   connectorConfigs,
@@ -22,6 +23,7 @@ import {
 } from '@/db/schema';
 import { indexTaskSearch } from '@/lib/search';
 import { connectorLogger } from '@/lib/logger';
+import { windowsToIanaTimezone } from '@/lib/mode';
 import type { TaskPriority, TaskStatus } from '@/types';
 import type { WorkTodoAck, WorkTodoIngest } from './contracts';
 
@@ -40,6 +42,30 @@ function mapPriority(importance: string): TaskPriority {
   if (importance === 'high') return 'high';
   if (importance === 'low') return 'low';
   return 'none';
+}
+
+export function normalizeWorkTodoReminderAt(
+  value: { dateTime: string; timeZone: string } | null | undefined,
+): string | null {
+  if (!value) return null;
+  const hasOffset = /(?:Z|[+-]\d{2}:\d{2})$/i.test(value.dateTime);
+  if (hasOffset) {
+    const instant = new Date(value.dateTime);
+    if (!Number.isFinite(instant.getTime())) {
+      throw new Error(`Invalid Microsoft To Do reminder datetime "${value.dateTime}"`);
+    }
+    return instant.toISOString();
+  }
+
+  const timezone = windowsToIanaTimezone(value.timeZone);
+  if (!timezone) {
+    return `invalid-timezone:${encodeURIComponent(value.timeZone)}:${value.dateTime}`;
+  }
+  const instant = fromZonedTime(value.dateTime, timezone);
+  if (!Number.isFinite(instant.getTime())) {
+    throw new Error(`Invalid Microsoft To Do reminder datetime "${value.dateTime}"`);
+  }
+  return instant.toISOString();
 }
 
 function remoteSourceId(listId: string, taskId: string): string {
@@ -244,6 +270,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           recurrence: 'recurrence' in remoteTask ? remoteTask.recurrence ?? null : null,
           linkedResources: 'linkedResources' in remoteTask ? remoteTask.linkedResources ?? [] : [],
           attachmentMetadata: 'attachments' in remoteTask ? remoteTask.attachments ?? [] : [],
+          reminderTimeZone: remoteTask.reminderDateTime?.timeZone ?? null,
         };
         const taskId = existing?.id ?? randomUUID();
         const remoteValues = {
@@ -254,7 +281,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           dueDate: remoteTask.dueDateTime?.dateTime.slice(0, 10) ?? null,
           completedAt: remoteTask.completedDateTime?.dateTime ?? null,
           reminderAt: remoteTask.isReminderOn
-            ? remoteTask.reminderDateTime?.dateTime ?? null
+            ? normalizeWorkTodoReminderAt(remoteTask.reminderDateTime)
             : null,
         };
 

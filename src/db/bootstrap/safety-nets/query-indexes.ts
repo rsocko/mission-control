@@ -20,6 +20,7 @@ export function applyCoreQueryIndexSafetyNets(_sqlite: Database.Database): void 
   _execSafe('CREATE INDEX IF NOT EXISTS idx_tasks_status_priority ON tasks(status, priority)');
   _execSafe('CREATE INDEX IF NOT EXISTS idx_tasks_connector_type ON tasks(connector_type)');
   _execSafe('CREATE INDEX IF NOT EXISTS idx_tasks_list_counts ON tasks(is_checklist_item, connector_instance_id, source_list_id, status)');
+  _execSafe("CREATE INDEX IF NOT EXISTS idx_tasks_due_reminder ON tasks(reminder_at, status) WHERE reminder_at IS NOT NULL");
 
   // Junction tables: both columns for bidirectional lookups
   _execSafe('CREATE INDEX IF NOT EXISTS idx_task_tags_task_id ON task_tags(task_id)');

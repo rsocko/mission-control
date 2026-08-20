@@ -20,6 +20,23 @@ import { getPreferences } from '@/lib/notifications/quiet-hours';
 import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications';
 import { getTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
+import db from '@/db';
+import { appSettings } from '@/db/schema';
+import { eq } from 'drizzle-orm';
+
+export const SCHEDULED_SUMMARIES_SETTING_KEY = 'scheduled_summaries_enabled';
+
+export function scheduledSummariesEnabled(): boolean {
+  const setting = db.select({ value: appSettings.value }).from(appSettings).where(
+    eq(appSettings.key, SCHEDULED_SUMMARIES_SETTING_KEY),
+  ).get();
+  if (!setting) return true;
+  if (typeof setting.value === 'boolean') return setting.value;
+  return setting.value !== null
+    && typeof setting.value === 'object'
+    && !Array.isArray(setting.value)
+    && (setting.value as Record<string, unknown>).enabled === true;
+}
 
 interface PushJob {
   name: string;
@@ -142,7 +159,7 @@ export class PushNotificationScheduler {
       if (!job) return;
 
       try {
-        const sent = await handler();
+        const sent = scheduledSummariesEnabled() && await handler();
         job.lastRun = new Date().toISOString();
         job.lastResult = sent ? 'sent' : 'skipped';
         job.lastError = undefined;

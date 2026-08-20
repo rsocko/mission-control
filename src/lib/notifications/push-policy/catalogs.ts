@@ -31,6 +31,16 @@ export const SYSTEM_NOTIFICATION_TYPES = [
     sensitivity: 'standard',
     defaultPreview: 'title_and_body',
   },
+  {
+    key: 'task_reminder',
+    label: 'Task reminder',
+    description: 'A reminder explicitly scheduled for a task.',
+    defaultLevel: 'heads_up',
+    pushEligible: true,
+    pushRecommendation: 'action_needed_or_higher',
+    sensitivity: 'standard',
+    defaultPreview: 'title_and_body',
+  },
 ] as const satisfies readonly ConnectorNotificationTypeDefinition[];
 
 export const GITHUB_NOTIFICATION_TYPES = [

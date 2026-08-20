@@ -22,4 +22,20 @@ describe('Microsoft To Do linked-resource hydration', () => {
       { linkedResources: [] },
     )).toBe(false);
   });
+
+  it('replaces an empty expanded collection when the dedicated endpoint recovers a link', () => {
+    expect(needsMicrosoftTodoLinkedResourceHydration(
+      'microsoft-todo',
+      { graphId: 'task-1', linkedResources: [] },
+      {
+        graphId: 'task-1',
+        linkedResources: [{
+          id: 'email-link',
+          applicationName: 'Microsoft Outlook',
+          displayName: 'Flagged email',
+          webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+        }],
+      },
+    )).toBe(true);
+  });
 });

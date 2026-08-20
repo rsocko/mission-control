@@ -232,7 +232,7 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "applicationName", "displayName", "webUrl"],
+            "required": ["id", "applicationName", "displayName"],
             "properties": {
               "id": {
                 "type": "string",

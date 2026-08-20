@@ -6,18 +6,80 @@
  * "Open in <Source>" actions.
  */
 
-/** Display metadata for a deep link */
-export interface DeepLinkInfo {
+/** Display metadata for a source link shown in task details. */
+export interface SourceLinkInfo {
   url: string;
   /** Human-readable source name, e.g. "GitHub" */
   label: string;
   /** Icon path for the connector */
+  icon?: string;
+}
+
+/** Connector deep links always have a registered connector icon. */
+export interface DeepLinkInfo extends SourceLinkInfo {
   icon: string;
 }
 
 const CONNECTOR_DISPLAY: Record<string, { label: string; icon: string }> = {
   'github-issues': { label: 'GitHub', icon: '/icons/connectors/github.svg' },
 };
+
+const LINKED_RESOURCE_ICONS: Array<{
+  matches: (applicationName: string) => boolean;
+  label: string;
+  icon: string;
+}> = [
+  {
+    matches: applicationName => /\boutlook\b/i.test(applicationName),
+    label: 'Outlook',
+    icon: '/icons/connectors/outlook.svg',
+  },
+];
+
+function safeWebUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a task's first usable external linked resource.
+ * Mission Control links are omitted because they only point back to the current app.
+ */
+export function getLinkedResourceDeepLinkInfo(linkedResources: unknown): SourceLinkInfo | null {
+  if (!Array.isArray(linkedResources)) return null;
+
+  for (const resource of linkedResources) {
+    if (!resource || typeof resource !== 'object') continue;
+    const candidate = resource as Record<string, unknown>;
+    const applicationName = typeof candidate.applicationName === 'string'
+      ? candidate.applicationName.trim()
+      : '';
+    if (/^mission control$/i.test(applicationName)) continue;
+
+    const url = safeWebUrl(candidate.webUrl);
+    if (!url) continue;
+
+    const knownDisplay = LINKED_RESOURCE_ICONS.find(display => display.matches(applicationName));
+    if (knownDisplay) {
+      return { url, label: knownDisplay.label, icon: knownDisplay.icon };
+    }
+
+    const displayName = typeof candidate.displayName === 'string'
+      ? candidate.displayName.trim()
+      : '';
+    return {
+      url,
+      label: applicationName || displayName || 'source',
+    };
+  }
+
+  return null;
+}
 
 /**
  * Build a deep link URL for a task given its connector type and sourceId.

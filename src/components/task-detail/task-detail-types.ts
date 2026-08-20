@@ -139,6 +139,12 @@ export interface TaskDetailMetadata {
   actionType?: string;
   urgency?: string;
   recurrence?: string;
+  linkedResources?: Array<{
+    id?: string;
+    applicationName?: string;
+    displayName?: string;
+    webUrl?: string;
+  }>;
 }
 
 export interface TaskDetailPanelProps {

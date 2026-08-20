@@ -15,6 +15,8 @@ import { calendarClassNames } from './calendar-classes';
 
 // ─── Preset helpers ─────────────────────────────────────────────────────────
 
+const DEFAULT_RELATIVE_DUE_TIME = '09:00';
+
 function getLaterToday(): Date | null {
   const now = new Date();
   // If it's past 6pm, "later today" doesn't make sense
@@ -102,9 +104,12 @@ export function ReminderPicker({
   const [open, setOpen] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
   const [customTime, setCustomTime] = useState('09:00');
-  const [relativeDueTime, setRelativeDueTime] = useState(dueTime ?? '');
+  const [relativeDueTime, setRelativeDueTime] = useState(
+    dueTime ?? DEFAULT_RELATIVE_DUE_TIME,
+  );
   const [saveError, setSaveError] = useState<string | null>(null);
   const timeInputRef = useRef<HTMLInputElement>(null);
+  const relativeTimeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (disabled) setOpen(false);
@@ -116,7 +121,7 @@ export function ReminderPicker({
   }, [open]);
 
   useEffect(() => {
-    setRelativeDueTime(dueTime ?? '');
+    setRelativeDueTime(dueTime ?? DEFAULT_RELATIVE_DUE_TIME);
   }, [dueTime]);
 
   const laterToday = getLaterToday();
@@ -166,8 +171,13 @@ export function ReminderPicker({
     : 'Set reminder';
 
   const handleRelative = useCallback((rule: ReminderRelativeRule) => {
-    if (!dueDate || !relativeDueTime) {
+    if (!dueDate) {
+      setSaveError('Set a due date before choosing a relative reminder.');
+      return;
+    }
+    if (!relativeDueTime) {
       setSaveError('Set the task due time before choosing a relative reminder.');
+      relativeTimeInputRef.current?.focus();
       return;
     }
     const computed = computeRelativeReminderAt({
@@ -305,6 +315,7 @@ export function ReminderPicker({
                     <Clock size={13} className="text-purple-400/70" aria-hidden="true" />
                     <span>Due time</span>
                     <input
+                      ref={relativeTimeInputRef}
                       type="time"
                       value={relativeDueTime}
                       onChange={(event) => {
@@ -323,7 +334,8 @@ export function ReminderPicker({
                       ? computeRelativeReminderAt({ dueDate, dueTime: relativeDueTime, timezone, rule })
                       : null;
                     const computedAt = computed?.success ? computed.reminderAt : null;
-                    const unavailable = !computedAt || new Date(computedAt) <= new Date();
+                    const unavailable = relativeDueTime !== ''
+                      && (!computedAt || new Date(computedAt) <= new Date());
                     return (
                       <button
                         key={rule}

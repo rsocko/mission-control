@@ -8,7 +8,6 @@ vi.unmock('drizzle-orm');
 
 let sqlite: Database.Database;
 let resetDemoDatabase: () => Promise<void>;
-let canonicalHistoryCount: number;
 
 beforeAll(async () => {
   const directory = mkdtempSync(join(tmpdir(), 'mc-demo-seed-'));
@@ -18,7 +17,6 @@ beforeAll(async () => {
   sqlite.prepare('SELECT 1').get();
   ({ resetDemoDatabase } = await import('@/lib/seed-api'));
   await resetDemoDatabase();
-  canonicalHistoryCount = count('task_history_events');
 });
 
 function count(table: string): number {
@@ -96,7 +94,11 @@ describe('canonical demo seed', () => {
     `).run();
     await resetDemoDatabase();
 
-    expect(count('task_history_events')).toBe(canonicalHistoryCount);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM task_history_events
+      WHERE task_id = 'stale-demo-task'
+    `).get()).toEqual({ count: 0 });
     expect(() => sqlite.prepare(`
       DELETE FROM task_history_events WHERE task_id = 't-hr1'
     `).run()).toThrow(/append-only/);

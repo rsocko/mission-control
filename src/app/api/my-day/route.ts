@@ -12,6 +12,7 @@ import {
   sourceLists,
   taskProjects,
   taskSchedules,
+  taskHistoryEvents,
 } from '@/db/schema';
 import { eq, and, lt, lte, gt, gte, sql, ne, inArray, isNull } from 'drizzle-orm';
 import { connectorRegistry } from '@/lib/connectors';
@@ -24,6 +25,11 @@ import { ApiErrors } from '@/lib/api-error';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { getTaskSourceVisibilityConditions } from '@/app/api/tasks/canonical-filter';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
+import {
+  appendPlanningSignal,
+  finalizePlanningSignalsIfDue,
+  planningFrictionEventTypes,
+} from '@/lib/planning-signals';
 
 const SUGGESTION_LIMIT = 200;
 
@@ -176,6 +182,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    try {
+      finalizePlanningSignalsIfDue();
+    } catch (error) {
+      logger.warn({ err: error }, 'Planning signal finalization will retry later');
+    }
     const taskVisibilityConditions = [
       ...getTaskSourceVisibilityConditions(),
       eq(tasks.localDisposition, 'active'),
@@ -565,13 +576,29 @@ export async function GET(request: Request) {
       .map(pickSuggestionFields);
 
     // ─── 9. Carried Forward (in My Day 3+ times, still incomplete) ───────────
-    const carriedForwardRows = await db.select({
+    const [carriedForwardRows, planningSignalRows] = await Promise.all([db.select({
       taskId: myDayItems.taskId,
       count: sql<number>`COUNT(*)`.as('count'),
     })
       .from(myDayItems)
       .groupBy(myDayItems.taskId)
-      .having(sql`COUNT(*) >= 3`);
+      .having(sql`COUNT(*) >= 3`),
+    db.select({
+      taskId: taskHistoryEvents.taskId,
+      count: sql<number>`COUNT(*)`.as('count'),
+    })
+      .from(taskHistoryEvents)
+      .where(and(
+        inArray(taskHistoryEvents.eventType, [...planningFrictionEventTypes()]),
+        gte(
+          taskHistoryEvents.occurredAt,
+          getLocalDateBoundsISO(addDays(date, -90)).dayStart,
+        ),
+      ))
+      .groupBy(taskHistoryEvents.taskId)
+      .orderBy(sql`COUNT(*) DESC`)
+      .limit(SUGGESTION_LIMIT),
+    ]);
 
     const carriedTaskIds = carriedForwardRows
       .map(r => r.taskId)
@@ -594,7 +621,36 @@ export async function GET(request: Request) {
       carriedForwardSuggestions = carriedTasks.map(pickSuggestionFields);
     }
 
+    const planningSignalCountByTask = new Map(
+      planningSignalRows.map(row => [row.taskId, row.count]),
+    );
+    const planningSignalTaskIds = planningSignalRows
+      .map(row => row.taskId)
+      .filter(id => !myDayTaskIds.includes(id));
+    let planningSignalSuggestions: Array<ReturnType<typeof pickSuggestionFields> & {
+      planningSignalCount: number;
+    }> = [];
+    if (planningSignalTaskIds.length > 0) {
+      const signaledTasks = await db.select()
+        .from(tasks)
+        .where(and(
+          inArray(tasks.id, planningSignalTaskIds),
+          ne(tasks.status, 'done'),
+          ne(tasks.status, 'cancelled'),
+          isTopLevelTask,
+          ...taskVisibilityConditions,
+        ))
+        .limit(SUGGESTION_LIMIT);
+      planningSignalSuggestions = signaledTasks
+        .map(task => ({
+          ...pickSuggestionFields(task),
+          planningSignalCount: planningSignalCountByTask.get(task.id) ?? 0,
+        }))
+        .sort((left, right) => right.planningSignalCount - left.planningSignalCount);
+    }
+
     const suggestionGroups = {
+      planningSignals: planningSignalSuggestions,
       yesterday: yesterdaySuggestions,
       overdue: overdueSuggestions,
       dueToday: dueTodaySuggestions,
@@ -753,13 +809,24 @@ export async function POST(request: Request) {
     const order = (maxOrder[0]?.max || 0) + 1;
     const id = `md-${crypto.randomUUID().slice(0, 8)}`;
 
-    await db.insert(myDayItems).values({
-      id,
-      taskId,
-      date: targetDate,
-      addedAt: new Date().toISOString(),
-      isAutoIncluded: false,
-      order,
+    const addedAt = new Date().toISOString();
+    runTransaction((tx) => {
+      tx.insert(myDayItems).values({
+        id,
+        taskId,
+        date: targetDate,
+        addedAt,
+        isAutoIncluded: false,
+        order,
+      }).run();
+      appendPlanningSignal({
+        taskId,
+        eventType: 'my_day_committed',
+        date: targetDate,
+        occurredAt: addedAt,
+        provenance: 'my-day-api',
+        metadata: { origin: 'explicit-local' },
+      }, tx);
     });
 
     // Write-back: set isInMyDay on Microsoft Todo
@@ -795,6 +862,7 @@ export async function DELETE(request: Request) {
     const resolvedTaskId = runTransaction((tx) => {
       let removedTaskId: string | null = taskId;
       let removedDate = requestedDate || getLocalToday();
+      let removedExistingItem = false;
 
       if (itemId) {
         const item = tx.select({
@@ -806,17 +874,25 @@ export async function DELETE(request: Request) {
           .get();
         removedTaskId = item?.taskId || null;
         removedDate = item?.date || removedDate;
-        tx.delete(myDayItems).where(eq(myDayItems.id, itemId)).run();
+        removedExistingItem = tx.delete(myDayItems).where(eq(myDayItems.id, itemId)).run().changes > 0;
       } else if (taskId) {
-        tx.delete(myDayItems)
+        removedExistingItem = tx.delete(myDayItems)
           .where(and(
             eq(myDayItems.taskId, taskId),
             eq(myDayItems.date, removedDate),
           ))
-          .run();
+          .run().changes > 0;
       }
 
-      if (removedTaskId) {
+      if (removedTaskId && removedExistingItem) {
+        appendPlanningSignal({
+          taskId: removedTaskId,
+          eventType: 'my_day_withdrawn',
+          date: removedDate,
+          occurredAt: removedAt,
+          provenance: 'my-day-api',
+          metadata: { origin: 'explicit-local' },
+        }, tx);
         const existingExclusion = tx.select({ id: myDayExclusions.id })
           .from(myDayExclusions)
           .where(and(

@@ -87,7 +87,9 @@ When on My Day, the global quick-add bar automatically sets `addToMyDay: true` s
 - Tasks: Filtered from all connected sources (due today + manually added)
 - Calendar events: Microsoft Graph calendar connector
 - Suggestions: AI engine using priority, due date, energy, and behavioral patterns
-- Planning friction: lifetime `pushCount` plus immutable later-date events in task history
+- Planning friction: lifetime `pushCount` plus immutable task-history signals for later due-date moves, missed My Day and Focus commitments, elapsed time blocks, overdue transitions, and snooze extensions
+- Microsoft To Do commitments: current My Day state plus a bounded three-day historical observation window when the Substrate response confirms the requested `CommittedDay`
+- Replanning: open tasks with recent planning-friction signals appear in the **Needs a Replan** suggestion group
 
 ## Related
 

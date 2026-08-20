@@ -25,8 +25,14 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       { label: '> 90 days', count: 0, minDays: 91, maxDays: null },
     ],
     planningFriction: {
+      signalsInPeriod: 0,
+      affectedTaskCount: 0,
       pushesInPeriod: 0,
       pushedTaskCount: 0,
+      missedCommitments: 0,
+      elapsedBlocks: 0,
+      overdueTransitions: 0,
+      snoozeExtensions: 0,
       totalDaysDeferred: 0,
       averageDaysPerPush: 0,
       topTasks: [],
@@ -210,8 +216,14 @@ describe('detectObservations', () => {
   it('turns repeated due-date pushes into an actionable observation', () => {
     const snapshot = makeSnapshot({
       planningFriction: {
+        signalsInPeriod: 5,
+        affectedTaskCount: 2,
         pushesInPeriod: 5,
         pushedTaskCount: 2,
+        missedCommitments: 0,
+        elapsedBlocks: 0,
+        overdueTransitions: 0,
+        snoozeExtensions: 0,
         totalDaysDeferred: 18,
         averageDaysPerPush: 3.6,
         topTasks: [],
@@ -224,11 +236,11 @@ describe('detectObservations', () => {
     const observation = result.find(item => item.id === 'obs-planning-friction');
 
     expect(observation).toMatchObject({
-      title: 'Plans shifted 5 times',
+      title: '5 planning friction signals',
       severity: 'warning',
     });
     expect(observation?.description).toContain('planning');
-    expect(observation?.description).toContain('18 days');
+    expect(observation?.description).toContain('5 later due-date moves');
   });
 
   it('returns max 3 observations', () => {

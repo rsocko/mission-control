@@ -201,7 +201,7 @@ function detectWorkloadImbalance(snapshot: InsightsSnapshot): AIObservation | nu
 
 function detectPlanningFriction(snapshot: InsightsSnapshot): AIObservation | null {
   const friction = snapshot.planningFriction;
-  if (friction.pushesInPeriod < 3) return null;
+  if (friction.signalsInPeriod < 3) return null;
 
   const strongestPattern = friction.topTags[0] ?? friction.topLists[0];
   const patternHint = strongestPattern
@@ -211,8 +211,8 @@ function detectPlanningFriction(snapshot: InsightsSnapshot): AIObservation | nul
   return {
     id: 'obs-planning-friction',
     type: 'pattern',
-    title: `Plans shifted ${friction.pushesInPeriod} times`,
-    description: `${friction.pushedTaskCount} tasks moved a total of ${friction.totalDaysDeferred} days.${patternHint}`,
+    title: `${friction.signalsInPeriod} planning friction signals`,
+    description: `${friction.affectedTaskCount} tasks were affected, including ${friction.missedCommitments} missed commitments and ${friction.pushesInPeriod} later due-date moves.${patternHint}`,
     severity: 'warning',
   };
 }

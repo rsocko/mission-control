@@ -24,6 +24,7 @@ export interface MyDayItem {
   priority: string;
   dueDate: string | null;
   pushCount?: number;
+  planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceId?: string;
@@ -72,6 +73,7 @@ export interface SuggestionTask {
   priority: string;
   dueDate: string | null;
   pushCount?: number;
+  planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceId?: string | null;
@@ -83,6 +85,7 @@ export interface SuggestionTask {
 }
 
 export interface SuggestionGroups {
+  planningSignals: SuggestionTask[];
   yesterday: SuggestionTask[];
   overdue: SuggestionTask[];
   dueToday: SuggestionTask[];
@@ -144,6 +147,7 @@ export interface SaveTemplateTask {
 }
 
 export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
+  planningSignals: [],
   yesterday: [],
   overdue: [],
   dueToday: [],

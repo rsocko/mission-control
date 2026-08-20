@@ -57,7 +57,7 @@ Move beyond "how many tasks did I complete?" to understand behavioral patterns. 
 | **Task Age** | Distribution of open tasks across <1, 1–7, 8–30, 31–60, 61–90, and >90 day buckets |
 | **Routine Heatmap** | Daily routine completion density (calendar grid) |
 | **Project Velocity** | Completion rate per project (bar chart) |
-| **Planning Friction** | Later due-date moves, days deferred, and recurring task, list, and tag patterns |
+| **Planning Friction** | Missed day/focus commitments, elapsed time blocks, overdue transitions, snooze extensions, later due-date moves, and task/list/tag patterns |
 
 ### AI Observations
 - Automatically generated insights about your patterns
@@ -75,10 +75,12 @@ Move beyond "how many tasks did I complete?" to understand behavioral patterns. 
 - Routine completion data
 - Project progress snapshots
 - AI observation engine (background analysis)
-- Due-date push events. Events retain task ID, previous/new dates, timestamp, and delay days; list and tag rankings are resolved from current task organization rather than copied into every event.
+- Immutable planning signals. Events retain task ID, planning date or previous/new values, timestamp, provenance, and relevant delay metadata; list and tag rankings are resolved from current task organization rather than copied into every event.
 
 ### Planning Friction Semantics
 - A push is recorded only when an existing due date moves to a later calendar date
+- A missed commitment is recorded after the local day closes when a user-selected or remotely observed My Day/Focus commitment was not withdrawn and was not completed by day end
+- Time-block, overdue, and snooze-extension signals remain separate event types so the UI can explain why work needs replanning
 - `pushCount` is a lifetime task-level total for fast sorting and My Day suggestions
 - Task history events provide period-aware trends and preserve the magnitude of each move
 - Insights show top tasks, lists, and tags; title keyword extraction is intentionally deferred because it adds noisy derived data without a clear action

@@ -104,6 +104,7 @@ describe('insights configured-timezone bucketing', () => {
       [
         {
           taskId: 'task-1',
+          eventType: 'due_date_pushed',
           previousValue: '2026-08-10',
           newValue: '2026-08-14',
           title: 'Plan launch',
@@ -113,6 +114,7 @@ describe('insights configured-timezone bucketing', () => {
         },
         {
           taskId: 'task-1',
+          eventType: 'due_date_pushed',
           previousValue: '2026-08-14',
           newValue: '2026-08-20',
           title: 'Plan launch',
@@ -132,12 +134,15 @@ describe('insights configured-timezone bucketing', () => {
     const result = await computeInsightsSection('summary', 7);
 
     expect(result.planningFriction).toMatchObject({
+      signalsInPeriod: 2,
+      affectedTaskCount: 1,
       pushesInPeriod: 2,
       pushedTaskCount: 1,
       totalDaysDeferred: 10,
       averageDaysPerPush: 5,
       topTasks: [expect.objectContaining({
         id: 'task-1',
+        signalsInPeriod: 2,
         pushesInPeriod: 2,
         daysDeferredInPeriod: 10,
       })],

@@ -58,6 +58,7 @@ import {
   hasConnectorSyncJobLease,
   runWithConnectorOperationLease,
 } from './connector-lock';
+import { finalizePlanningSignalsIfDue } from '@/lib/planning-signals';
 import { validateAndFreezeGitHubIdentityContext } from './github-identity-context';
 import {
   mergeGitHubHierarchyObservation,
@@ -913,6 +914,15 @@ export class SyncExecutionPipeline {
         durationMs: Date.now() - startTime,
         errors: errors.length,
       }, 'Sync completed');
+
+      try {
+        finalizePlanningSignalsIfDue();
+      } catch (planningSignalError) {
+        syncLogger.warn(
+          { err: planningSignalError, connectorId },
+          'Planning signal finalization will retry after the next sync',
+        );
+      }
 
       // ─── DURATION BUDGET GUARD ─────────────────────────────────────────
       const syncDurationMs = Date.now() - startTime;

@@ -58,6 +58,7 @@ import {
   getRoutineWeekContext,
   type RoutineCadenceConfig,
 } from './routine-heatmap';
+import { planningFrictionEventTypes } from '@/lib/planning-signals';
 
 export type { TaskAgeBucket } from './task-age';
 
@@ -132,11 +133,19 @@ export interface PlanningFrictionTask {
   pushCount: number;
   pushesInPeriod: number;
   daysDeferredInPeriod: number;
+  signalsInPeriod: number;
+  missedCommitmentsInPeriod: number;
 }
 
 export interface PlanningFrictionInsights {
+  signalsInPeriod: number;
+  affectedTaskCount: number;
   pushesInPeriod: number;
   pushedTaskCount: number;
+  missedCommitments: number;
+  elapsedBlocks: number;
+  overdueTransitions: number;
+  snoozeExtensions: number;
   totalDaysDeferred: number;
   averageDaysPerPush: number;
   topTasks: PlanningFrictionTask[];
@@ -380,6 +389,7 @@ async function getPlanningFriction(
   const { dayStart, nextDayStart } = getRangeBounds(start, end);
   const eventRows = await db.select({
     taskId: taskHistoryEvents.taskId,
+    eventType: taskHistoryEvents.eventType,
     previousValue: taskHistoryEvents.previousValue,
     newValue: taskHistoryEvents.newValue,
     title: tasks.title,
@@ -390,7 +400,7 @@ async function getPlanningFriction(
     .from(taskHistoryEvents)
     .innerJoin(tasks, eq(taskHistoryEvents.taskId, tasks.id))
     .where(and(
-      eq(taskHistoryEvents.eventType, 'due_date_pushed'),
+      inArray(taskHistoryEvents.eventType, [...planningFrictionEventTypes()]),
       timestampGte(taskHistoryEvents.occurredAt, dayStart),
       timestampLt(taskHistoryEvents.occurredAt, nextDayStart),
       eq(tasks.depth, 0),
@@ -400,27 +410,44 @@ async function getPlanningFriction(
   const perTask = new Map<string, PlanningFrictionTask>();
   const listCounts = new Map<string, number>();
   let totalDaysDeferred = 0;
+  let pushesInPeriod = 0;
+  let missedCommitments = 0;
+  let elapsedBlocks = 0;
+  let overdueTransitions = 0;
+  let snoozeExtensions = 0;
 
   for (const event of eventRows) {
-    const previousDate = event.previousValue?.slice(0, 10);
-    const nextDate = event.newValue?.slice(0, 10);
-    const deferredDays = previousDate && nextDate
-      ? Math.max(0, daysBetween(previousDate, nextDate))
-      : 0;
+    const isDueDatePush = event.eventType === 'due_date_pushed';
+    const previousDate = isDueDatePush ? event.previousValue?.slice(0, 10) : null;
+    const nextDate = isDueDatePush ? event.newValue?.slice(0, 10) : null;
+    const deferredDays = previousDate && nextDate ? Math.max(0, daysBetween(previousDate, nextDate)) : 0;
     totalDaysDeferred += deferredDays;
+    if (isDueDatePush) pushesInPeriod++;
+    if (event.eventType === 'my_day_missed' || event.eventType === 'focus_missed') missedCommitments++;
+    if (event.eventType === 'scheduled_block_elapsed') elapsedBlocks++;
+    if (event.eventType === 'became_overdue') overdueTransitions++;
+    if (event.eventType === 'snooze_extended') snoozeExtensions++;
 
     const current = perTask.get(event.taskId);
     if (current) {
-      current.pushesInPeriod += 1;
+      current.pushesInPeriod += isDueDatePush ? 1 : 0;
       current.daysDeferredInPeriod += deferredDays;
+      current.signalsInPeriod += 1;
+      current.missedCommitmentsInPeriod += (
+        event.eventType === 'my_day_missed' || event.eventType === 'focus_missed'
+      ) ? 1 : 0;
     } else {
       perTask.set(event.taskId, {
         id: event.taskId,
         title: event.title,
         dueDate: event.dueDate,
         pushCount: event.pushCount,
-        pushesInPeriod: 1,
+        pushesInPeriod: isDueDatePush ? 1 : 0,
         daysDeferredInPeriod: deferredDays,
+        signalsInPeriod: 1,
+        missedCommitmentsInPeriod: (
+          event.eventType === 'my_day_missed' || event.eventType === 'focus_missed'
+        ) ? 1 : 0,
       });
     }
 
@@ -445,8 +472,8 @@ async function getPlanningFriction(
 
     for (const tag of tagRows) {
       if (isSyntheticTag(tag.name)) continue;
-      const taskPushes = perTask.get(tag.taskId)?.pushesInPeriod ?? 0;
-      tagCounts.set(tag.name, (tagCounts.get(tag.name) ?? 0) + taskPushes);
+      const taskSignals = perTask.get(tag.taskId)?.signalsInPeriod ?? 0;
+      tagCounts.set(tag.name, (tagCounts.get(tag.name) ?? 0) + taskSignals);
     }
   }
 
@@ -458,15 +485,23 @@ async function getPlanningFriction(
   );
 
   return {
-    pushesInPeriod: eventRows.length,
-    pushedTaskCount: perTask.size,
+    signalsInPeriod: eventRows.length,
+    affectedTaskCount: perTask.size,
+    pushesInPeriod,
+    pushedTaskCount: [...perTask.values()].filter(task => task.pushesInPeriod > 0).length,
+    missedCommitments,
+    elapsedBlocks,
+    overdueTransitions,
+    snoozeExtensions,
     totalDaysDeferred,
-    averageDaysPerPush: eventRows.length > 0
-      ? Math.round((totalDaysDeferred / eventRows.length) * 10) / 10
+    averageDaysPerPush: pushesInPeriod > 0
+      ? Math.round((totalDaysDeferred / pushesInPeriod) * 10) / 10
       : 0,
     topTasks: [...perTask.values()]
       .sort((a, b) => (
-        b.pushesInPeriod - a.pushesInPeriod
+        b.signalsInPeriod - a.signalsInPeriod
+        || b.missedCommitmentsInPeriod - a.missedCommitmentsInPeriod
+        || b.pushesInPeriod - a.pushesInPeriod
         || b.daysDeferredInPeriod - a.daysDeferredInPeriod
         || a.title.localeCompare(b.title)
       ))

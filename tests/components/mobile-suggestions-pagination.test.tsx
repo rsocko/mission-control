@@ -43,6 +43,7 @@ function suggestion(index: number): SuggestionTask {
 
 function suggestionGroups(overdue: SuggestionTask[]): SuggestionGroups {
   return {
+    planningSignals: [],
     yesterday: [],
     overdue,
     dueToday: [],

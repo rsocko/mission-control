@@ -170,6 +170,15 @@ export const taskHistoryEvents = sqliteTable('task_history_events', {
   index('idx_task_history_type_time').on(table.eventType, table.occurredAt),
   index('idx_task_history_project_time').on(table.projectId, table.occurredAt),
   index('idx_task_history_phase_time').on(table.phaseId, table.occurredAt),
+  uniqueIndex('idx_task_history_planning_signal_once')
+    .on(table.taskId, table.eventType, table.newValue)
+    .where(sql`${table.eventType} IN ('my_day_missed', 'focus_missed', 'scheduled_block_elapsed', 'became_overdue')`),
+  uniqueIndex('idx_task_history_planning_observation_once')
+    .on(table.taskId, table.eventType, table.newValue, table.occurredAt)
+    .where(sql`${table.eventType} IN ('my_day_committed', 'my_day_withdrawn', 'focus_committed', 'focus_withdrawn')`),
+  index('idx_task_history_planning_date')
+    .on(table.eventType, table.newValue)
+    .where(sql`${table.eventType} IN ('my_day_committed', 'my_day_withdrawn', 'focus_committed', 'focus_withdrawn')`),
 ]);
 
 export const taskFieldStates = sqliteTable('task_field_states', {

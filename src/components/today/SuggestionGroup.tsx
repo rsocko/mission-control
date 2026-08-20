@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronRight, History, Plus, RotateCcw } from 'lucide-react';
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { Tooltip } from '@/components/ui/Tooltip';
@@ -228,6 +228,14 @@ function SuggestionRow({
                   title={`Rescheduled ${task.pushCount ?? 0} times`}
                 >
                   <RotateCcw size={9} aria-hidden="true" /> {task.pushCount ?? 0}
+                </span>
+              )}
+              {(task.planningSignalCount ?? 0) > 0 && (
+                <span
+                  className="inline-flex items-center gap-0.5 text-xs text-rose-400"
+                  title={`${task.planningSignalCount ?? 0} planning friction signals`}
+                >
+                  <History size={9} aria-hidden="true" /> {task.planningSignalCount ?? 0}
                 </span>
               )}
             </span>

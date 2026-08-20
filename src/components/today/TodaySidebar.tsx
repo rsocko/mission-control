@@ -58,6 +58,7 @@ export function TodaySidebar({
 
         <div className="space-y-1">
           <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1"><Sparkles size={11} /> Suggestions</h4>
+          <SuggestionGroup title="Needs a Replan" icon={<RotateCcw size={12} />} tasks={suggestions.planningSignals} color="rose" {...interactionProps} />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />

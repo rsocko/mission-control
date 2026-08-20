@@ -96,8 +96,14 @@ const insightsPayload = {
   sourceBreakdown: [],
   taskAge: [],
   planningFriction: {
+    signalsInPeriod: 5,
+    affectedTaskCount: 2,
     pushesInPeriod: 3,
     pushedTaskCount: 2,
+    missedCommitments: 2,
+    elapsedBlocks: 0,
+    overdueTransitions: 0,
+    snoozeExtensions: 0,
     totalDaysDeferred: 12,
     averageDaysPerPush: 4,
     topTasks: [{
@@ -105,6 +111,8 @@ const insightsPayload = {
       title: 'Clarify launch plan',
       dueDate: '2026-08-20',
       pushCount: 5,
+      signalsInPeriod: 4,
+      missedCommitmentsInPeriod: 2,
       pushesInPeriod: 2,
       daysDeferredInPeriod: 9,
     }],

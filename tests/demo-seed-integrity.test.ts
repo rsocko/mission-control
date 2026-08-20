@@ -92,11 +92,13 @@ describe('canonical demo seed', () => {
       ) VALUES ('stale-demo-task', 'baseline', '2026-01-01T00:00:00.000Z',
         '2026-01-01T00:00:00.000Z', 'test')
     `).run();
-    const expectedHistoryCount = count('task_history_events') - 1;
-
     await resetDemoDatabase();
 
-    expect(count('task_history_events')).toBe(expectedHistoryCount);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM task_history_events
+      WHERE task_id = 'stale-demo-task'
+    `).get()).toEqual({ count: 0 });
     expect(() => sqlite.prepare(`
       DELETE FROM task_history_events WHERE task_id = 't-hr1'
     `).run()).toThrow(/append-only/);

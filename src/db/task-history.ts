@@ -15,6 +15,16 @@ export const TASK_HISTORY_EVENT_TYPES = [
   'project_removed',
   'phase_added',
   'phase_removed',
+  'due_date_pushed',
+  'my_day_committed',
+  'my_day_withdrawn',
+  'my_day_missed',
+  'focus_committed',
+  'focus_withdrawn',
+  'focus_missed',
+  'snooze_extended',
+  'scheduled_block_elapsed',
+  'became_overdue',
 ] as const;
 
 export type TaskHistoryEventType = typeof TASK_HISTORY_EVENT_TYPES[number];

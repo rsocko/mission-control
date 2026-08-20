@@ -69,11 +69,14 @@ vi.mock('drizzle-orm', () => ({
   inArray: vi.fn(() => 'in-array'),
   ne: vi.fn(() => 'ne'),
 }));
+vi.mock('@/lib/planning-signals', () => ({
+  appendPlanningSignal: vi.fn(() => true),
+  finalizePlanningSignals: vi.fn(),
+  finalizePlanningSignalsIfDue: vi.fn(),
+}));
 
 let resolveRemoteTasks!: (tasks: unknown[]) => void;
-const fetchMyDayTasks = vi.fn(() => new Promise<unknown[]>((resolve) => {
-  resolveRemoteTasks = resolve;
-}));
+const fetchMyDayTasks = vi.fn<(date: string) => Promise<unknown[]>>();
 const fetchMyDaySuggestions = vi.fn().mockResolvedValue([]);
 vi.mock('@/lib/connectors/microsoft-todo', () => ({
   MicrosoftTodoConnector: class {
@@ -88,6 +91,12 @@ describe('My Day reconciliation coalescing', () => {
     selectCall = 0;
     selectOverrides.clear();
     vi.clearAllMocks();
+    fetchMyDayTasks
+      .mockImplementationOnce(() => new Promise<unknown[]>((resolve) => {
+        resolveRemoteTasks = resolve;
+      }))
+      .mockResolvedValue([]);
+    fetchMyDaySuggestions.mockResolvedValue([]);
   });
 
   it('shares one remote fetch across equivalent concurrent requests', async () => {
@@ -106,7 +115,13 @@ describe('My Day reconciliation coalescing', () => {
     const [firstResponse, secondResponse] = await Promise.all([first, second]);
     expect(firstResponse.status).toBe(200);
     expect(secondResponse.status).toBe(200);
-    expect(fetchMyDayTasks).toHaveBeenCalledTimes(1);
+    expect(fetchMyDayTasks).toHaveBeenCalledTimes(4);
+    expect(fetchMyDayTasks.mock.calls.map(([date]) => date)).toEqual([
+      '2026-08-08',
+      '2026-08-07',
+      '2026-08-06',
+      '2026-08-05',
+    ]);
     expect(fetchMyDaySuggestions).toHaveBeenCalledTimes(1);
     const { ne } = await import('drizzle-orm');
     expect(ne).toHaveBeenCalledWith('status', 'done');

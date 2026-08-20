@@ -29,6 +29,7 @@ interface GroupConfig {
 }
 
 const GROUPS: GroupConfig[] = [
+  { key: 'planningSignals', title: 'Needs a Replan', icon: <RotateCcw size={16} />, color: 'rose' },
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
   { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },

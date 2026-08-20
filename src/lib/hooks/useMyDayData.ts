@@ -32,6 +32,7 @@ export function useMyDayData(todayISO: string) {
       setItems((myDayData.items as MyDayItem[]) || []);
       const sugg = myDayData.suggestions as Record<string, unknown[]> | undefined;
       setSuggestions({
+        planningSignals: (sugg?.planningSignals as MyDayItem[]) || [],
         yesterday: (sugg?.yesterday as MyDayItem[]) || [],
         overdue: (sugg?.overdue as MyDayItem[]) || [],
         dueToday: (sugg?.dueToday as MyDayItem[]) || [],

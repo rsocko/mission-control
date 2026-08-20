@@ -23,6 +23,11 @@ import {
   shouldSuppressRecurringMyDaySuccessor,
 } from '@/lib/sync/recurring-task-reconciliation';
 import { parseSubstrateRecurrence } from '@/lib/connectors/microsoft-todo/task-transformer';
+import {
+  appendPlanningSignal,
+  finalizePlanningSignals,
+  finalizePlanningSignalsIfDue,
+} from '@/lib/planning-signals';
 
 const MAX_REMOTE_MY_DAY_TASKS = 2_000;
 const MY_DAY_QUERY_BATCH_SIZE = 400;
@@ -85,6 +90,11 @@ async function reconcileMyDay(
 ): Promise<NextResponse> {
   const startedAt = Date.now();
   try {
+    try {
+      finalizePlanningSignalsIfDue();
+    } catch (error) {
+      logger.warn({ err: error }, 'Planning signal finalization will retry later');
+    }
     // Find the Microsoft Todo connector config from DB
     const [config] = await db.select()
       .from(connectorConfigs)
@@ -423,6 +433,16 @@ async function reconcileMyDay(
       });
     }
     added = await insertMyDayRows(myDayRowsToInsert);
+    for (const item of myDayRowsToInsert) {
+      appendPlanningSignal({
+        taskId: item.taskId,
+        eventType: 'my_day_committed',
+        date: today,
+        occurredAt: item.addedAt,
+        provenance: 'microsoft-todo-substrate',
+        metadata: { origin: 'remote-observed' },
+      });
+    }
 
     // Remove tasks that are no longer in remote My Day
     // Only remove auto-included ones (preserve user-added items)
@@ -468,6 +488,20 @@ async function reconcileMyDay(
         }
       }
     }
+    const localItemsById = new Map(localItems.map(item => [item.id, item]));
+    const withdrawnAt = new Date().toISOString();
+    for (const itemId of myDayIdsToRemove) {
+      const item = localItemsById.get(itemId);
+      if (!item) continue;
+      appendPlanningSignal({
+        taskId: item.taskId,
+        eventType: 'my_day_withdrawn',
+        date: today,
+        occurredAt: withdrawnAt,
+        provenance: 'microsoft-todo-substrate',
+        metadata: { origin: 'remote-observed' },
+      });
+    }
     for (let index = 0; index < myDayIdsToRemove.length; index += MY_DAY_QUERY_BATCH_SIZE) {
       const result = await db.delete(myDayItems).where(
         inArray(myDayItems.id, myDayIdsToRemove.slice(index, index + MY_DAY_QUERY_BATCH_SIZE)),
@@ -512,6 +546,18 @@ async function reconcileMyDay(
       });
     }
     dueTodayAdded = await insertMyDayRows(dueTodayRows);
+    const historicalObserved = await observeRecentRemoteMyDay(
+      connector,
+      config.id,
+      today,
+    );
+    if (historicalObserved > 0) {
+      try {
+        finalizePlanningSignals();
+      } catch (error) {
+        logger.warn({ err: error }, 'Historical planning signals will finalize later');
+      }
+    }
 
     const result = {
       synced: true,
@@ -519,6 +565,7 @@ async function reconcileMyDay(
       removed,
       created,
       dueTodayAdded,
+      historicalObserved,
       skippedFutureRecurring,
       skippedArchivedRecurring,
       remoteCount: remoteTasks.length,
@@ -553,6 +600,65 @@ async function reconcileMyDay(
       { status: 500 }
     );
   }
+}
+
+async function observeRecentRemoteMyDay(
+  connector: MicrosoftTodoConnector,
+  connectorInstanceId: string,
+  today: string,
+): Promise<number> {
+  const observedDates: string[] = [];
+  const cursor = new Date(`${today}T12:00:00Z`);
+  for (let daysAgo = 1; daysAgo <= 3; daysAgo++) {
+    cursor.setUTCDate(cursor.getUTCDate() - 1);
+    observedDates.push(cursor.toISOString().slice(0, 10));
+  }
+
+  let observed = 0;
+  for (const date of observedDates) {
+    let remoteTasks: Awaited<ReturnType<MicrosoftTodoConnector['fetchMyDayTasks']>>;
+    try {
+      remoteTasks = await withTimeout(
+        connector.fetchMyDayTasks(date),
+        MY_DAY_SYNC_TIMEOUT_MS,
+        `Microsoft To Do historical My Day request timed out for ${date}`,
+      );
+    } catch (error) {
+      logger.warn({ err: error, date }, 'Skipped historical My Day observation');
+      continue;
+    }
+    if (remoteTasks.length === 0 || remoteTasks.length > MAX_REMOTE_MY_DAY_TASKS) continue;
+
+    const sourceIds = remoteTasks
+      .filter(task => task.CommittedDay?.slice(0, 10) === date)
+      .map(task => `${task.ParentFolderId}:${task.Id}`);
+    if (sourceIds.length === 0) continue;
+    const localTasks: Array<{ id: string; sourceId: string }> = [];
+    for (let index = 0; index < sourceIds.length; index += MY_DAY_QUERY_BATCH_SIZE) {
+      localTasks.push(...await db.select({
+        id: tasks.id,
+        sourceId: tasks.sourceId,
+      })
+        .from(tasks)
+        .where(and(
+          eq(tasks.connectorInstanceId, connectorInstanceId),
+          inArray(tasks.sourceId, sourceIds.slice(index, index + MY_DAY_QUERY_BATCH_SIZE)),
+        )));
+    }
+
+    const { dayStart } = getLocalDateBoundsISO(date);
+    for (const task of localTasks) {
+      if (appendPlanningSignal({
+        taskId: task.id,
+        eventType: 'my_day_committed',
+        date,
+        occurredAt: dayStart,
+        provenance: 'microsoft-todo-substrate',
+        metadata: { origin: 'remote-observed', lateObservation: true },
+      })) observed++;
+    }
+  }
+  return observed;
 }
 
 function recurringSiblingKey(sourceListId: string | null, title: string): string {

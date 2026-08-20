@@ -7,6 +7,7 @@ import { dbLogger } from '@/lib/logger';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { ApiErrors } from '@/lib/api-error';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
+import { appendPlanningSignal } from '@/lib/planning-signals';
 
 const MAX_SLOTS = 3;
 
@@ -174,14 +175,27 @@ export async function POST(request: Request) {
 
     const id = `focus-${crypto.randomUUID().slice(0, 8)}`;
 
-    await db.insert(focusItems).values({
-      id,
-      taskId,
-      scope,
-      date: effectiveDate,
-      slot,
-      addedAt: new Date().toISOString(),
-      isAiSuggested: isAiSuggested || false,
+    const addedAt = new Date().toISOString();
+    runTransaction((tx) => {
+      tx.insert(focusItems).values({
+        id,
+        taskId,
+        scope,
+        date: effectiveDate,
+        slot,
+        addedAt,
+        isAiSuggested: isAiSuggested || false,
+      }).run();
+      if (scope === 'today') {
+        appendPlanningSignal({
+          taskId,
+          eventType: 'focus_committed',
+          date: effectiveDate,
+          occurredAt: addedAt,
+          provenance: 'focus-items-api',
+          metadata: { origin: isAiSuggested ? 'accepted-ai-suggestion' : 'explicit-local' },
+        }, tx);
+      }
     });
 
     return NextResponse.json({ id, slot }, { status: 201 });
@@ -201,14 +215,41 @@ export async function DELETE(request: Request) {
   const scope = searchParams.get('scope');
 
   try {
+    const removedAt = new Date().toISOString();
     if (itemId) {
-      await db.delete(focusItems).where(eq(focusItems.id, itemId));
+      runTransaction((tx) => {
+        const item = tx.select().from(focusItems).where(eq(focusItems.id, itemId)).get();
+        if (!item) return;
+        tx.delete(focusItems).where(eq(focusItems.id, itemId)).run();
+        if (item.scope === 'today') {
+          appendPlanningSignal({
+            taskId: item.taskId,
+            eventType: 'focus_withdrawn',
+            date: item.date,
+            occurredAt: removedAt,
+            provenance: 'focus-items-api',
+            metadata: { origin: 'explicit-local' },
+          }, tx);
+        }
+      });
     } else if (taskId && scope) {
       const date = searchParams.get('date') || getLocalToday();
       const effectiveDate = scope === 'week' ? getWeekMonday(date) : date;
-      await db.delete(focusItems).where(
-        and(eq(focusItems.taskId, taskId), eq(focusItems.scope, scope), eq(focusItems.date, effectiveDate))
-      );
+      runTransaction((tx) => {
+        const result = tx.delete(focusItems).where(
+          and(eq(focusItems.taskId, taskId), eq(focusItems.scope, scope), eq(focusItems.date, effectiveDate))
+        ).run();
+        if (scope === 'today' && result.changes > 0) {
+          appendPlanningSignal({
+            taskId,
+            eventType: 'focus_withdrawn',
+            date: effectiveDate,
+            occurredAt: removedAt,
+            provenance: 'focus-items-api',
+            metadata: { origin: 'explicit-local' },
+          }, tx);
+        }
+      });
     } else {
       return ApiErrors.badRequest('id or (taskId + scope) is required');
     }

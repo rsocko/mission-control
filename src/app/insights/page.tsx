@@ -741,21 +741,21 @@ function PlanningFrictionSection({
         <div>
           <h3 id="planning-friction-heading" className="text-sm font-semibold">Planning friction</h3>
           <p className="mt-1 text-xs text-slate-400">
-            Later due-date moves reveal where plans repeatedly need more room. Initial scheduling and earlier moves are excluded.
+            Missed day commitments, elapsed focus blocks, overdue transitions, snooze extensions, and later due-date moves reveal where plans need more room.
           </p>
         </div>
       </div>
-      {data.pushesInPeriod === 0 ? (
+      {data.signalsInPeriod === 0 ? (
         <p className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-500">
-          No later due-date moves in this period.
+          No planning friction signals in this period.
         </p>
       ) : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <FrictionMetric label="Signals" value={data.signalsInPeriod} />
+            <FrictionMetric label="Missed commitments" value={data.missedCommitments} />
             <FrictionMetric label="Later moves" value={data.pushesInPeriod} />
-            <FrictionMetric label="Tasks affected" value={data.pushedTaskCount} />
             <FrictionMetric label="Days deferred" value={data.totalDaysDeferred} />
-            <FrictionMetric label="Average move" value={data.averageDaysPerPush} suffix=" days" />
           </div>
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
@@ -771,7 +771,7 @@ function PlanningFrictionSection({
                   >
                     <span className="min-w-0 truncate text-sm text-slate-200">{task.title}</span>
                     <span className="shrink-0 text-xs tabular-nums text-amber-400">
-                      {task.pushesInPeriod} moves / {task.daysDeferredInPeriod} days
+                      {task.signalsInPeriod} signals / {task.missedCommitmentsInPeriod} missed
                     </span>
                   </button>
                 ))}

@@ -73,6 +73,24 @@ describe('NavRail', () => {
     expect(nav).toHaveClass('w-16');
   });
 
+  it('does not keep the navigation expanded after pointer navigation', () => {
+    renderNavRail();
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const projectsLink = screen.getByRole('link', { name: 'Projects' });
+
+    fireEvent.mouseEnter(nav);
+    act(() => vi.advanceTimersByTime(300));
+    expect(nav).toHaveClass('w-[200px]');
+
+    fireEvent.pointerDown(projectsLink);
+    fireEvent.focus(projectsLink);
+    fireEvent.click(projectsLink);
+    fireEvent.mouseLeave(nav);
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(nav).toHaveClass('w-16');
+  });
+
   it('expands for keyboard focus so secondary navigation controls are reachable', () => {
     renderNavRail();
     const nav = screen.getByRole('navigation', { name: 'Main navigation' });

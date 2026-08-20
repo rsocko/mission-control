@@ -99,7 +99,7 @@ Mission Control is a **personal task & alert aggregation hub** — a dense, dark
 | Outlook Calendar | ✅ | ❌ | ✅ | ✅ | 80% |  
 | Outlook Email | ✅ | ✅ | ✅ | ✅ | 80% |  
 | Home Assistant | ✅ | ❌ | ❌ | N/A | New — alerts only |  
-| RyMessage | ✅ | ❌ | ❌ | N/A | Webhook receiver |  
+| RyMessage | ✅ | ❌ | ❌ | N/A | Notification webhook built; provider-owned task bridge proposed (#1524) |
 | Document Intelligence | ✅ | ❌ | ❌ | N/A | Alert provider |  
 | Tyrion (Monarch Money) | ✅ | ✅ | ❌ | N/A | Finance projection, attribution, insights, and notifications |
 | Custom REST | ✅ | Cfg | Cfg | N/A | Template available |  

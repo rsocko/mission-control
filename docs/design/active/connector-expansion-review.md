@@ -34,7 +34,7 @@ This document reviews all existing connectors, maps them against the planned Con
 | 2 | GitHub Issues | `github-issues` | ✅ | ✅ | — | ✅ | ✅ | ✅ | Kanban, micro-status as `mc:*` labels, GitHub notifications → alerts |
 | 3 | Outlook Calendar | `outlook-calendar` | ✅ | — | — | — | — | ✅ | **Today timeline: calendar meeting overlay** (amber `CalendarEventBlock`), `/api/calendar-events` |
 | 4 | Outlook Email | `outlook-email` | ✅ | — | — | — | — | ✅ | Flagged/important emails → triage queue alerts |
-| 5 | RyMessage | `rymessage` | ✅ | — | — | — | — | — | AI-extracted iMessage actions → alerts; webhook + REST + SQLite modes |
+| 5 | RyMessage | `rymessage` | ✅ | — | — | — | — | — | AI-extracted actions → notifications today; provider-owned task materialization bridge proposed |
 | 6 | Tyrion | `finance-manager` | ✅ | ✅ | — | — | ✅ | — | Finance projection, attribution, insights, notifications, and bounded exception escalation |
 | 7 | Home Assistant | `home-assistant` | ✅ | — | — | — | — | — | Device state → triage alerts; rule engine with cooldowns |
 | 8 | Document Intelligence | `document-intelligence` | ✅ | ✅ | — | — | — | — | Bill extraction → tasks; statement tracking → alerts; EOB matching |
@@ -172,7 +172,7 @@ No connector exists in Mission Control. See [§ Model Catalog Gap Analysis](#mod
 | Connector | Status | Notes |
 |-----------|--------|-------|
 | **Custom REST** | ✅ Built | Generic adapter — field mapping, status/priority maps, custom headers. "Escape hatch" for any REST API. |
-| **RyMessage** | ✅ Built | AI-extracted iMessage actions → alerts. Webhook + REST + SQLite modes. Full lifecycle tracking. |
+| **RyMessage** | ⚠️ Transitional | Notification ingestion is built. First-class task candidates, provider materialization defaults, provenance, and lifecycle reconciliation are proposed in `../proposed/rymessage-task-materialization.md`. |
 | **n8n Webhook** | ✅ Built | Route-level integration (not a factory connector). Inbound + outbound webhook support. |
 
 ---

@@ -118,7 +118,7 @@ connectors are excluded from task field-policy and mutation surfaces.
 | Scout | Tasks | `ingested` | Title, description, priority, and due date use override-aware inbound merge | Lifecycle and all other ordinary task fields | Pull-based lifecycle feed; no direct connector call |
 | Outlook Calendar | Notifications only | — | — | — | — |
 | Outlook Email | Notifications only | — | — | — | — |
-| RyMessage | Notifications only | — | — | — | — |
+| RyMessage | Notifications now; task candidates/materializations proposed | Provider-owned bridge | RyMessage owns extraction; the selected provider owns task fields and lifecycle | Provenance-aware planning overlays only after correlation | Through selected provider; relationship lifecycle through Companion |
 | Home Assistant | Notifications only | — | — | — | — |
 | Tyrion | Notifications only | — | — | — | — |
 | Monarch Money | Notifications only | — | — | — | — |
@@ -132,6 +132,14 @@ change Tyrion's notification-only capability and must not restore generic Financ
 `create_task` notification actions. The `finance`, `finance-manager`, and
 `monarch-money` aliases are all excluded from generic task destinations; provider
 resolution omits and action execution rejects `create_task` for each alias.
+
+RyMessage is a transitional exception to the notification-only runtime
+classification. Its current connector emits notifications, while the proposed
+bridge contract allows RyMessage to produce task candidates and materialize
+them in a selected provider. When Microsoft To Do is selected, MC imports the
+provider task through `microsoft-todo` and attaches RyMessage provenance; it
+must not create a second task under the `rymessage` identity. See
+[RyMessage Task Materialization](../design/proposed/rymessage-task-materialization.md).
 
 ### Tyrion snapshot contract
 

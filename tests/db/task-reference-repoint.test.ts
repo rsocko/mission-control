@@ -165,6 +165,13 @@ describe('repointTaskReferences', () => {
       sortAt: now,
       relatedTaskId: sourceTaskId,
     });
+    await db.insert(schema.taskReminderOccurrences).values({
+      id: 'inventory-reminder-occurrence',
+      taskId: sourceTaskId,
+      scheduledAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
     await db.insert(schema.scoutReconciliationRuns).values({
       id: 'inventory-scout-run',
       scopeKey: 'task:inventory-source',
@@ -255,6 +262,7 @@ describe('repointTaskReferences', () => {
       ['project_phase_items', 'task_id'],
       ['task_linked_sources', 'task_id'],
       ['task_projects', 'task_id'],
+      ['task_reminder_occurrences', 'task_id'],
       ['scout_reconciliation_suggestions', 'task_id'],
       ['scout_reconciliation_task_state', 'task_id'],
     ]) {

@@ -34,6 +34,7 @@ import {
   AlertCircle,
   RefreshCw,
   Search,
+  ListChecks,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNavRailPrefs } from '@/lib/hooks/useNavRailPrefs';
@@ -114,6 +115,7 @@ const navGroups: NavRailGroup[] = [
     label: 'Plan',
     items: [
       shortcutNavItem('/', LayoutDashboard),
+      { href: '/all-tasks', label: 'All Tasks', icon: ListChecks, iconColor: 'text-cyan-400' },
       shortcutNavItem('/today', Sun, { badgeKey: 'myDay', badgeTone: 'amber' }),
       shortcutNavItem('/projects', ChartNetwork),
       shortcutNavItem('/kanban', Columns3),

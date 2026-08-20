@@ -28,11 +28,14 @@ vi.mock('next/navigation', () => ({
 type MockDivProps = React.ComponentPropsWithoutRef<'div'>;
 const MockMotionDiv = React.forwardRef<HTMLDivElement, MockDivProps>(({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>);
 MockMotionDiv.displayName = 'MockMotionDiv';
+type MockSectionProps = React.ComponentPropsWithoutRef<'section'>;
+const MockMotionSection = React.forwardRef<HTMLElement, MockSectionProps>(({ children, ...props }, ref) => <section ref={ref} {...props}>{children}</section>);
+MockMotionSection.displayName = 'MockMotionSection';
 
 vi.mock('motion/react', () => ({
   motion: {
     div: MockMotionDiv,
-    section: MockMotionDiv,
+    section: MockMotionSection,
   },
 }));
 

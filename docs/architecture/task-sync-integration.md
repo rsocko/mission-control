@@ -176,7 +176,7 @@ sequenceDiagram
 | `outlook-email` | Microsoft Graph API | Read (flagged → tasks), Notifications | OAuth2 (MSAL) |
 | `outlook-calendar` | Microsoft Graph API | Read (events → timeline) | OAuth2 (MSAL) |
 | `home-assistant` | HA REST API | Notifications (device states) | Long-lived token |
-| `rymessage` | Webhook/REST | Read (messages → tasks) | API key |
+| `rymessage` | Webhook/REST | Notifications today; task materialization bridge proposed | API key today; dedicated Companion integration principal proposed |
 | `document-intelligence` | Azure AI | Read (extracted action items) | API key |
 | `monarch-money` | Monarch API | Notifications (finance) | Session token |
 | `custom-rest` | Any REST API | Configurable | Configurable |
@@ -299,7 +299,8 @@ Mission Control already stores n8n connection state in `integrationConfigs` tabl
 | Outlook Email connector | ✅ Done | `src/lib/connectors/outlook-email/` |
 | Outlook Calendar connector | ✅ Done | `src/lib/connectors/outlook-calendar/` |
 | Home Assistant connector | ✅ Done | `src/lib/connectors/home-assistant/` |
-| RyMessage connector | ✅ Done | `src/lib/connectors/rymessage/` |
+| RyMessage notification connector | ✅ Done | `src/lib/connectors/rymessage/` |
+| RyMessage task materialization bridge | 🔲 Proposed | `docs/design/proposed/rymessage-task-materialization.md` |
 | Document Intelligence connector | ✅ Done | `src/lib/connectors/document-intelligence/` |
 | Monarch Money connector | ✅ Done | `src/lib/connectors/monarch-money/` |
 | Custom REST connector | ✅ Done | `src/lib/connectors/custom-rest/` |

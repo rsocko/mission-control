@@ -10,6 +10,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  Bell,
   BellOff,
   Moon,
   Sun,
@@ -31,6 +32,7 @@ import {
 /* ─────── Types ─────── */
 
 interface PushPreferences {
+  pushDeliveryEnabled: boolean;
   morningEnabled: boolean;
   morningHour: number;
   triageNudgeEnabled: boolean;
@@ -52,10 +54,12 @@ interface SchedulerJob {
 
 interface SchedulerStatus {
   running: boolean;
+  enabled?: boolean;
   jobs: SchedulerJob[];
 }
 
 const DEFAULT_PREFS: PushPreferences = {
+  pushDeliveryEnabled: true,
   morningEnabled: true,
   morningHour: 8,
   triageNudgeEnabled: true,
@@ -256,7 +260,7 @@ export function PushNotificationSettings() {
   const toggleScheduler = useCallback(async () => {
     if (!scheduler || schedulerBusy) return;
     setSchedulerBusy(true);
-    const action = scheduler.running ? 'stop' : 'start';
+    const action = (scheduler.enabled ?? scheduler.running) ? 'stop' : 'start';
     try {
       const res = await fetch('/api/push/scheduler', {
         method: 'POST',
@@ -360,6 +364,18 @@ export function PushNotificationSettings() {
       <SectionLabel>Global</SectionLabel>
       <SectionCard>
         <SettingRow
+          icon={<Bell size={14} />}
+          label="Push Delivery"
+          description="Allow eligible notifications to reach registered devices"
+          trailing={
+            <Toggle
+              enabled={prefs.pushDeliveryEnabled}
+              onChange={(v) => update({ pushDeliveryEnabled: v })}
+              label="Push Delivery"
+            />
+          }
+        />
+        <SettingRow
           icon={<BellOff size={14} />}
           label="Do Not Disturb"
           description="Suppress all push notifications"
@@ -373,13 +389,15 @@ export function PushNotificationSettings() {
         />
         <SettingRow
           icon={<Power size={14} />}
-          label="Notification Scheduler"
-          description={scheduler?.running ? 'Running — triggers fire on schedule' : 'Stopped — no automatic triggers'}
+          label="Scheduled Summaries"
+          description={(scheduler?.enabled ?? scheduler?.running)
+            ? 'Morning, triage, and carry-forward summaries are enabled'
+            : 'Morning, triage, and carry-forward summaries are stopped'}
           trailing={
             <Toggle
-              enabled={scheduler?.running ?? false}
+              enabled={scheduler?.enabled ?? scheduler?.running ?? false}
               onChange={schedulerBusy ? () => {} : toggleScheduler}
-              label="Notification Scheduler"
+              label="Scheduled Summaries"
             />
           }
           isLast

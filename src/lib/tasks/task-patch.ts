@@ -17,7 +17,9 @@ const TASK_PATCH_SCHEMA = z.strictObject({
   snoozedUntil: z.string().nullable(),
   effort: z.number().int().min(1).max(5).nullable(),
   statusReason: z.enum(['completed', 'not_planned', 'duplicate', 'moved']).nullable(),
-  reminderAt: z.string().nullable(),
+  reminderAt: z.string().datetime({ offset: true })
+    .transform(value => new Date(value).toISOString())
+    .nullable(),
 }).partial();
 
 export type TaskPatchInput = z.infer<typeof TASK_PATCH_SCHEMA>;

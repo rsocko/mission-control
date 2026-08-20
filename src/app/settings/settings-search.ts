@@ -59,7 +59,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Notification enrichment', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['re-enrichment', 'ai enrichment'] },
   { title: 'Push Notifications', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['alerts', 'browser'] },
   { title: 'Do Not Disturb', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['dnd', 'mute'] },
-  { title: 'Notification Scheduler', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule'] },
+  { title: 'Scheduled Summaries', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule', 'notification scheduler'] },
   { title: 'Morning Summary', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['digest'] },
   { title: 'Triage Nudge', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['reminder'] },
   { title: 'Carry-Forward Reminder', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['reminder'] },

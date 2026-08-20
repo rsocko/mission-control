@@ -96,6 +96,14 @@ function normalizeFTSScore(rank: number) {
   return 1 / (1 + Math.abs(rank));
 }
 
+function parseIssueNumberQuery(query: string): number | null {
+  const match = query.match(/^#?(\d+)$/);
+  if (!match) return null;
+
+  const issueNumber = Number(match[1]);
+  return Number.isSafeInteger(issueNumber) && issueNumber > 0 ? issueNumber : null;
+}
+
 function toMatchQuery(query: string) {
   // Check for user-provided quoted phrases
   const phrases: string[] = [];
@@ -318,6 +326,76 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
   }));
 }
 
+function searchTasksByIssueNumber(
+  issueNumber: number,
+  limit: number,
+  filters: SearchFilters,
+): SearchResult[] {
+  const source = filters.source ?? null;
+  const status = filters.status ?? null;
+  const sourceIdSuffix = `%:${issueNumber}`;
+  const rows = sqlite
+    .prepare(
+      `
+        SELECT
+          t.id,
+          t.title,
+          t.description,
+          t.status,
+          t.priority,
+          t.source_list_name AS sourceListName,
+          t.connector_type AS connectorType,
+          t.updated_at AS updatedAt
+        FROM tasks t
+        WHERE t.connector_type = 'github-issues'
+          AND t.source_id LIKE ?
+          AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
+          AND (? IS NULL OR t.status = ?)
+          AND (? = 0 OR LOWER(t.status) <> 'done')
+        ORDER BY t.updated_at DESC
+        LIMIT ?
+      `,
+    )
+    .all(
+      sourceIdSuffix,
+      source,
+      source,
+      source,
+      status,
+      status,
+      filters.excludeDone ? 1 : 0,
+      limit,
+    ) as Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      status: string;
+      priority: string;
+      sourceListName: string | null;
+      connectorType: string;
+      updatedAt: string;
+    }>;
+
+  return rows.map((row) => ({
+    type: 'task',
+    id: row.id,
+    title: row.title,
+    snippet: truncate(row.description) || truncate(row.sourceListName),
+    score: 2,
+    source: 'fts',
+    href: buildTaskHref(row.id),
+    highlights: {},
+    metadata: {
+      status: row.status,
+      priority: row.priority,
+      sourceListName: row.sourceListName,
+      connectorType: row.connectorType,
+      updatedAt: row.updatedAt,
+      issueNumber,
+    },
+  }));
+}
+
 function searchNotifications(query: string, limit: number, filters: SearchFilters): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
@@ -409,13 +487,25 @@ export async function searchFTS(
   const type = options.type ?? 'all';
   const limit = normalizeLimit(options.limit);
   const matchQuery = toMatchQuery(normalizedQuery);
+  const issueNumber = parseIssueNumberQuery(normalizedQuery);
+  const exactIssueResults = issueNumber !== null && (type === 'all' || type === 'tasks')
+    ? searchTasksByIssueNumber(issueNumber, limit, options)
+    : [];
 
   const results = [
+    ...exactIssueResults,
     ...(type === 'all' || type === 'tasks' ? searchTasks(matchQuery, limit, options) : []),
     ...(type === 'all' || type === 'notifications' ? searchNotifications(matchQuery, limit, options) : []),
   ];
+  const seen = new Set<string>();
 
   return results
+    .filter((result) => {
+      const key = `${result.type}:${result.id}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .sort((left, right) => right.score - left.score)
     .slice(0, limit);
 }

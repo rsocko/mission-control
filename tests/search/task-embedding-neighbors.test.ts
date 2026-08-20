@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: () => ({
     provider: 'ollama',
     configured: true,
@@ -10,6 +10,9 @@ vi.mock('@/lib/ai', () => ({
     embeddingModel: 'nomic-embed-text',
     semanticSearchEnabled: true,
   }),
+}));
+
+vi.mock('@/lib/ai/provider-factory', () => ({
   getAIRequestContext: () => ({
     featureId: 'semantic-embedding',
     sensitivity: 'restricted',
@@ -226,7 +229,7 @@ describe('findSimilarTaskEmbeddings', () => {
   });
 
   it('stores fallback vectors under the actual routed provider and model', async () => {
-    const ai = await import('@/lib/ai');
+    const ai = await import('@/lib/ai/provider-factory');
     vi.mocked(ai.getAIRouteOutcome).mockReturnValueOnce({
       provider: 'fallback-provider',
       model: 'fallback-model',

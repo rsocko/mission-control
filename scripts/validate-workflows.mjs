@@ -14,6 +14,8 @@ const hostedRunners = new Set(['ubuntu-24.04', 'ubuntu-22.04']);
 const permissionValues = new Set(['read', 'write', 'none']);
 const allowedActions = new Set([
   'actions/attest',
+  'actions/cache/restore',
+  'actions/cache/save',
   'actions/checkout',
   'actions/setup-node',
 ]);
@@ -111,6 +113,39 @@ for (const file of workflowFiles) {
       'aggregate unit-test check must depend on every shard',
     );
     assert.equal(aggregate.if, 'always()', 'aggregate unit-test check must report shard failures');
+    for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
+      if (jobName === 'unit-tests') continue;
+      const cacheRestores =
+        job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
+      assert.equal(cacheRestores.length, 1, `${jobName} must restore the shared npm cache`);
+      assert.equal(
+        cacheRestores[0].with?.path,
+        '~/.npm',
+        `${jobName} must cache npm downloads rather than node_modules`,
+      );
+    }
+    const cacheSaves =
+      workflow.jobs?.validate?.steps?.filter((step) =>
+        step.uses?.startsWith('actions/cache/save@')
+      ) ?? [];
+    assert.equal(cacheSaves.length, 1, 'ci.yml must use one designated npm cache writer');
+    for (const invariant of [
+      "github.ref == 'refs/heads/main'",
+      "matrix.name == 'Workflow policy'",
+      "steps.npm-cache.outputs.cache-hit != 'true'",
+    ]) {
+      assert.ok(
+        cacheSaves[0].if.includes(invariant),
+        `npm cache saves must enforce ${invariant}`,
+      );
+    }
+    assert.equal(
+      workflow.jobs?.['unit-test-shards']?.steps?.some((step) =>
+        step.uses?.startsWith('actions/cache/save@')
+      ),
+      false,
+      'unit-test shards must not race to save the npm cache',
+    );
   }
 
   if (hasWritePermissions) {
@@ -235,6 +270,11 @@ for (const file of workflowFiles) {
     ]) {
       assert.ok(source.includes(invariant), `${file} must enforce publication invariant: ${invariant}`);
     }
+    assert.doesNotMatch(
+      source,
+      /(?:cache-from|cache-to):?\s+type=gha/u,
+      `${file} must not enable the BuildKit cache unless benchmarks meet the documented threshold`,
+    );
     const attestationSteps =
       publish.steps?.filter((step) => step.uses?.startsWith('actions/attest@')) ?? [];
     assert.equal(attestationSteps.length, 1, `${file} publish job must have exactly one attestation`);
@@ -273,7 +313,7 @@ for (const file of workflowFiles) {
     assert.equal(typeof uses, 'string', `${file} contains a non-string uses value`);
     assert.match(
       uses,
-      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/u,
+      /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.-]+)*@[0-9a-f]{40}$/u,
       `${file} action references must use a full commit SHA`,
     );
     const action = uses.slice(0, uses.indexOf('@'));

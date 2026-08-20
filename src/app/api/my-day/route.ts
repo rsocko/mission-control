@@ -368,6 +368,7 @@ export async function GET(request: Request) {
         id: task.id,
         title: task.title,
         status: task.status,
+        microStatus: task.microStatus,
         priority: task.priority,
         dueDate: task.dueDate,
         pushCount: task.pushCount,
@@ -406,6 +407,7 @@ export async function GET(request: Request) {
         sourceListId: tasks.sourceListId,
         sourceListName: tasks.sourceListName,
         status: tasks.status,
+        microStatus: tasks.microStatus,
         metadata: tasks.metadata,
       })
         .from(myDayItems)
@@ -519,6 +521,7 @@ export async function GET(request: Request) {
         id: t.taskId,
         title: t.title,
         status: t.status,
+        microStatus: t.microStatus,
         priority: t.priority,
         dueDate: t.dueDate,
         pushCount: t.pushCount,

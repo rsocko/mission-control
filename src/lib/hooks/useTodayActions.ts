@@ -6,6 +6,7 @@ import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 import type {
   CalendarEvent,
   ConfirmDialogState,
@@ -85,29 +86,43 @@ export function useTodayActions({
   };
 
   async function addToDay(taskId: string) {
-    const res = await fetch('/api/my-day', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskId, date: todayISO }),
-    });
-    const data = await res.json();
-    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
-    if (data.writeBack?.attempted && !data.writeBack?.success) {
-      toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
+    try {
+      const res = await fetch('/api/my-day', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId, date: todayISO }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add task to My Day');
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+      notifyTaskChanged(taskId);
+      if (data.writeBack?.attempted && !data.writeBack?.success) {
+        toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
+      }
+      fetchData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add task to My Day');
     }
-    fetchData();
   }
 
   async function removeFromDay(taskId: string) {
+    const previousItems = items;
     setItems((prev) => prev.filter((item) => item.taskId !== taskId));
-    const params = new URLSearchParams({ taskId, date: todayISO });
-    const res = await fetch(`/api/my-day?${params.toString()}`, { method: 'DELETE' });
-    const data = await res.json();
-    window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
-    if (data.writeBack?.attempted && !data.writeBack?.success) {
-      toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
+    try {
+      const params = new URLSearchParams({ taskId, date: todayISO });
+      const res = await fetch(`/api/my-day?${params.toString()}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove task from My Day');
+      window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+      notifyTaskChanged(taskId);
+      if (data.writeBack?.attempted && !data.writeBack?.success) {
+        toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
+      }
+      fetchData({ skipSync: true });
+    } catch (error) {
+      setItems(previousItems);
+      toast.error(error instanceof Error ? error.message : 'Failed to remove task from My Day');
     }
-    fetchData({ skipSync: true });
   }
 
   async function setTaskLocalDisposition(
@@ -148,6 +163,7 @@ export function useTodayActions({
       if (!response.ok || data.fields?.localDisposition?.persisted !== true) {
         throw new Error(data.error || 'Mission Control state was not saved');
       }
+      notifyTaskChanged(taskId);
       toast.success(disposition === 'handled'
         ? 'Marked handled in Mission Control'
         : disposition === 'dismissed'
@@ -181,6 +197,7 @@ export function useTodayActions({
           body: JSON.stringify({ status: 'done' }),
         });
         if (!response.ok) throw new Error('Failed to complete task');
+        notifyTaskChanged(taskId);
       },
       rollback: () => {
         setItems((current) => current.map((candidate) => (
@@ -198,6 +215,7 @@ export function useTodayActions({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: previousStatus }),
         });
+        notifyTaskChanged(taskId);
         fetchData();
         window.dispatchEvent(new CustomEvent('mc:task-completed'));
       });
@@ -219,6 +237,7 @@ export function useTodayActions({
         body: JSON.stringify({ dueDate: date }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       toast.success('Due date updated');
       fetchData();
     } catch {
@@ -236,6 +255,7 @@ export function useTodayActions({
         body: JSON.stringify({ priority }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       toast.success('Priority updated');
       fetchData();
     } catch {
@@ -252,6 +272,7 @@ export function useTodayActions({
         body: JSON.stringify({ title }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       fetchData({ skipSync: true });
     } catch {
       toast.error('Failed to update title');
@@ -267,6 +288,7 @@ export function useTodayActions({
         body: JSON.stringify({ description }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
     } catch {
       toast.error('Failed to update description');
     }
@@ -281,6 +303,7 @@ export function useTodayActions({
         body: JSON.stringify({ status }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       toast.success('Status updated');
       fetchData();
     } catch {
@@ -347,6 +370,7 @@ export function useTodayActions({
         body: JSON.stringify({ targetListId }),
       });
       if (!res.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       const data = await res.json();
       toast.success(`Moved to ${targetList?.name || 'list'}`, {
         action: data.previousListId ? {
@@ -357,6 +381,7 @@ export function useTodayActions({
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ targetListId: data.previousListId }),
             });
+            notifyTaskChanged(taskId);
             fetchData();
           },
         } : undefined,

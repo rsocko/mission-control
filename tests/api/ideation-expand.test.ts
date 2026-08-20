@@ -10,7 +10,7 @@ vi.mock('@/lib/ai/ideation-expand', async (importOriginal) => {
   return { ...original, generateIdeationExpansion };
 });
 
-vi.mock('@/lib/ai', () => ({ getResolvedAIConfig }));
+vi.mock('@/lib/ai/config-resolver', () => ({ getResolvedAIConfig }));
 vi.mock('@/lib/logger', () => ({ default: { error: vi.fn() } }));
 
 import { POST } from '@/app/api/ideation/expand/route';

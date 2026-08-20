@@ -69,6 +69,26 @@ export function needsAttention(
     && notification.level !== 'digest';
 }
 
+export function countsTowardAttention(
+  notification: {
+    state?: string;
+    disposition?: string;
+    sourceState?: string;
+    snoozedUntil?: string | null;
+    readState?: string;
+    level?: string | null;
+  },
+  now = new Date(),
+): boolean {
+  return isInInbox(notification, now)
+    && notification.level !== 'digest'
+    && (
+      notification.level === 'urgent'
+      || notification.level === 'action_needed'
+      || isNotificationUnread(notification)
+    );
+}
+
 export function isNotificationUnread(
   notification: { state?: string; readState?: string },
 ): boolean {

@@ -236,7 +236,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
 
-  const handleGeneratePhaseProposal = useCallback(async () => {
+  const handleGeneratePhaseProposal = useCallback(async (guidance?: string) => {
     if (!projectId) return;
 
     setIsGenerating(true);
@@ -244,7 +244,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       const response = await fetch('/api/project-phases/ai-suggest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId }),
+        body: JSON.stringify({
+          projectId,
+          ...(guidance ? { context: guidance } : {}),
+        }),
       });
 
       const payload = (await response.json().catch(() => null)) as { proposal?: PhaseProposal; error?: string } | null;
@@ -262,7 +265,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }
   }, [projectId]);
 
-  const handleRefinePhases = useCallback(async () => {
+  const handleRefinePhases = useCallback(async (guidance?: string) => {
     if (!projectId || phases.length === 0) return;
 
     setIsRefining(true);
@@ -275,7 +278,11 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       const response = await fetch('/api/project-phases/ai-refine', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId, currentPhases }),
+        body: JSON.stringify({
+          projectId,
+          currentPhases,
+          ...(guidance ? { instruction: guidance } : {}),
+        }),
       });
 
       const payload = (await response.json().catch(() => null)) as { proposal?: PhaseProposal; error?: string } | null;
@@ -294,8 +301,8 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   }, [phaseItemsByPhase, phases, projectId]);
 
   const proposalActions = useMemo(() => ({
-    generate: () => { void handleGeneratePhaseProposal(); },
-    refine: () => { void handleRefinePhases(); },
+    generate: (guidance?: string) => { void handleGeneratePhaseProposal(guidance); },
+    refine: (guidance?: string) => { void handleRefinePhases(guidance); },
     isGenerating,
     isRefining,
   }), [handleGeneratePhaseProposal, handleRefinePhases, isGenerating, isRefining]);

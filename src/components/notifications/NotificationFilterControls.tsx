@@ -25,6 +25,10 @@ import {
   DEFAULT_NOTIFICATION_QUERY,
   type NotificationQuery,
 } from '@/lib/notifications/query';
+import {
+  formatNotificationCategoryLabel,
+  formatNotificationSourceLabel,
+} from '@/lib/notifications/categories';
 import { cn } from '@/lib/utils';
 
 type BuilderFilterKey =
@@ -66,25 +70,11 @@ const FILTER_DEFINITIONS: FilterDefinition[] = [
   { key: 'source', label: 'Source', icon: ListFilter, kind: 'options', common: true },
 ];
 
-const CATEGORY_LABELS: Record<string, string> = {
-  ai_insights: 'AI Insights',
-  finance: 'Finance',
-  home: 'Home',
-  packages: 'Packages',
-  social: 'Social',
-  system: 'System',
-  tasks: 'Tasks',
-};
-
 function formatLabel(value: string): string {
   return value
     .split(/[-_]+/)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-}
-
-function categoryLabel(value: string): string {
-  return CATEGORY_LABELS[value] ?? formatLabel(value);
 }
 
 export interface ActiveNotificationFilter {
@@ -101,7 +91,10 @@ export function activeNotificationFilters(
   if (query.q) filters.push({ key: 'q', label: `Search: ${query.q}` });
   if (query.level) filters.push({ key: 'level', label: `Level: ${formatLabel(query.level)}` });
   if (query.category) {
-    filters.push({ key: 'category', label: `Category: ${categoryLabel(query.category)}` });
+    filters.push({
+      key: 'category',
+      label: `Category: ${formatNotificationCategoryLabel(query.category)}`,
+    });
   }
   if (query.merchant) {
     filters.push({
@@ -109,7 +102,12 @@ export function activeNotificationFilters(
       label: `Merchant: ${merchantLabel ?? 'Unavailable merchant'}`,
     });
   }
-  if (query.source) filters.push({ key: 'source', label: `Source: ${formatLabel(query.source)}` });
+  if (query.source) {
+    filters.push({
+      key: 'source',
+      label: `Source: ${formatNotificationSourceLabel(query.source)}`,
+    });
+  }
   if (query.sourceAccount) {
     filters.push({ key: 'sourceAccount', label: `Source account: ${query.sourceAccount}` });
   }
@@ -476,7 +474,7 @@ function filterOptions(
     return uniqueValues(Object.keys(facets.category), query.category)
       .map(value => ({
         value,
-        label: categoryLabel(value),
+        label: formatNotificationCategoryLabel(value),
         count: facets.category[value] ?? 0,
       }));
   }
@@ -484,7 +482,7 @@ function filterOptions(
     return uniqueValues(Object.keys(facets.source), query.source)
       .map(value => ({
         value,
-        label: formatLabel(value),
+        label: formatNotificationSourceLabel(value),
         count: facets.source[value] ?? 0,
       }));
   }

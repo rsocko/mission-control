@@ -13,6 +13,7 @@ import { TaskPickerDialog } from '@/components/projects/TaskPickerDialog';
 import { AddTaskModal } from '@/components/add-task';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { uiLogger } from '@/lib/client-logger';
@@ -32,6 +33,7 @@ interface FocusItem {
   isAiSuggested: boolean;
   title: string;
   status: string;
+  microStatus?: string | null;
   priority: string;
   dueDate: string | null;
   connectorType: string;
@@ -492,18 +494,20 @@ function FocusSlot({
         <button
           onClick={handleComplete}
           disabled={visuallyCompleted || !canComplete}
-          className={`w-6 h-6 rounded-full text-xs font-bold flex items-center justify-center flex-shrink-0 border transition-[background-color,border-color,color] duration-150 ${
-            visuallyCompleted
-              ? 'bg-emerald-900/40 text-emerald-400 border-emerald-800/30'
-              : 'bg-blue-900/40 text-blue-400 border-blue-800/30 hover:bg-emerald-900/30 hover:border-emerald-700/40 hover:text-emerald-400'
-          }`}
+          className="group/status flex h-6 w-6 shrink-0 items-center justify-center text-xs font-bold"
           title={visuallyCompleted
             ? 'Completed'
             : canComplete
               ? 'Mark complete'
               : taskFieldBlockedReason(item.editPolicy, 'status')}
         >
-          {visuallyCompleted ? <Check size={14} /> : slotNumber}
+          <TaskStatusIndicator
+            status={item.status}
+            microStatus={item.microStatus}
+            isCompleting={isCompleting}
+            size="lg"
+            idleContent={slotNumber}
+          />
         </button>
       </CompletionBurst>
 
@@ -523,6 +527,7 @@ function FocusSlot({
           {item.sourceListName && (
             <span className="text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
           )}
+          <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
           {item.isAiSuggested && (
             <span className="text-xs text-purple-400/70 flex items-center gap-0.5">
               <Sparkles size={8} /> AI

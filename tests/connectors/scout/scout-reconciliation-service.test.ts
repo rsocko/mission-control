@@ -216,6 +216,25 @@ describe('Scout reconciliation service', () => {
       policyDecision: 'deny',
       applied: false,
     });
+    expect(Object.keys(result).sort()).toEqual([
+      'dryRun',
+      'idempotentReplay',
+      'reconciled',
+      'runId',
+      'summary',
+    ]);
+    expect(Object.keys(result.reconciled[0]).sort()).toEqual([
+      'action',
+      'applied',
+      'appliedResult',
+      'candidateAction',
+      'confidence',
+      'policyDecision',
+      'policyReason',
+      'signals',
+      'taskId',
+      'title',
+    ]);
     expect((await database.select().from(tasks).where(eq(tasks.id, 'task-1')))[0].status).toBe('todo');
     expect(await database.select().from(scoutReconciliationSuggestions)).toHaveLength(0);
   });

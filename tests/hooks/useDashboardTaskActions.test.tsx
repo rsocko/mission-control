@@ -11,6 +11,7 @@ import type {
   DashboardTaskViewModel as Task,
 } from '@/types/dashboard';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -40,6 +41,7 @@ const task = {
   editPolicy: {
     fields: {
       priority: { mutation: 'local' },
+      status: { mutation: 'local' },
     },
     removalMode: 'local-delete',
   } as Task['editPolicy'],
@@ -54,7 +56,9 @@ const initialResponse: TaskResponse = {
   stats: {
     totalOpen: 1,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: 1,
     highPriority: 0,
     assignedToMe: 1,
     myDay: 0,
@@ -65,7 +69,11 @@ const initialResponse: TaskResponse = {
   },
 };
 
-function useHarness(quickFilter: string | null = null) {
+function useHarness(
+  quickFilter: string | null = null,
+  runTaskCompletion = vi.fn(),
+  updateTaskGroupCounts = vi.fn(),
+) {
   const [taskResponse, setTaskResponse] = useState(initialResponse);
   const [, setMyDayTaskIds] = useState(new Set<string>());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState(new Map<string, string>());
@@ -93,8 +101,9 @@ function useHarness(quickFilter: string | null = null) {
     setConfirmDialog,
     listRef,
     completionScopeKey: 'all-tasks',
-    runTaskCompletion: vi.fn(),
+    runTaskCompletion,
     fetchData: vi.fn(),
+    updateTaskGroupCounts,
   });
 
   return { actions, taskResponse };
@@ -149,6 +158,21 @@ describe('useDashboardTaskActions', () => {
     expect(toast.error).toHaveBeenCalledWith('Failed to update priority');
   });
 
+  it('reports successful list mutations so an open detail panel can refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const taskChanged = vi.fn();
+    window.addEventListener(TASK_CHANGED_EVENT, taskChanged);
+    const { result } = renderHook(() => useHarness());
+
+    await act(async () => {
+      await result.current.actions.setTaskStatus('task-1', 'in_progress');
+    });
+
+    expect(taskChanged).toHaveBeenCalledOnce();
+    expect((taskChanged.mock.calls[0][0] as CustomEvent).detail).toEqual({ taskId: 'task-1' });
+    window.removeEventListener(TASK_CHANGED_EVENT, taskChanged);
+  });
+
   it('refreshes navigation counts when My Day membership changes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -164,5 +188,32 @@ describe('useDashboardTaskActions', () => {
 
     expect(refreshListener).toHaveBeenCalledTimes(1);
     window.removeEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, refreshListener);
+  });
+
+  it('updates grouped totals with the optimistic completion', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const updateTaskGroupCounts = vi.fn();
+    const runTaskCompletion = vi.fn(async (
+      _taskId: string,
+      options: {
+        optimisticUpdate: () => void;
+        request: () => Promise<void>;
+      },
+    ) => {
+      options.optimisticUpdate();
+      await options.request();
+      return 'completed' as const;
+    });
+    const { result } = renderHook(() => useHarness(
+      null,
+      runTaskCompletion,
+      updateTaskGroupCounts,
+    ));
+
+    await act(async () => {
+      await result.current.actions.completeTask('task-1');
+    });
+
+    expect(updateTaskGroupCounts).toHaveBeenCalledWith(task, null);
   });
 });

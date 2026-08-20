@@ -194,7 +194,7 @@ function makeNotification(id: string, title: string): NotificationItem {
     body: 'Please review the change.',
     level: 'action_needed',
     levelRank: 1,
-    category: 'social',
+    category: 'development',
     state: 'unread',
     readState: 'unread',
     disposition: 'inbox',
@@ -288,7 +288,7 @@ describe('NotificationsPage data states', () => {
     expect(replaceFilters).toHaveBeenCalledWith({
       ...DEFAULT_NOTIFICATION_QUERY,
       level: 'urgent',
-      state: 'unread',
+      state: null,
     });
     expect(screen.queryByRole('button', { name: /Action needed/ })).not.toBeInTheDocument();
   });

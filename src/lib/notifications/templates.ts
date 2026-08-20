@@ -155,10 +155,10 @@ registerTemplate({
   ],
 });
 
-// Social / Code
+// Development
 registerTemplate({
   key: 'pr_review_requested',
-  category: 'social',
+  category: 'development',
   defaultLevel: 'action_needed',
   categoryIcon: 'git-pull-request',
   sourceDisplayMode: 'prominent',
@@ -170,7 +170,7 @@ registerTemplate({
 
 registerTemplate({
   key: 'mention',
-  category: 'social',
+  category: 'development',
   defaultLevel: 'heads_up',
   categoryIcon: 'at-sign',
   sourceDisplayMode: 'compact',

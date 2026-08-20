@@ -26,6 +26,7 @@ import {
   NOTIFICATION_SOURCE_ICONS,
   NOTIFICATION_SOURCE_LABELS,
 } from '@/types/dashboard';
+import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -40,6 +41,7 @@ const LEVEL_ICONS: Record<string, React.ComponentType<{ size?: number; className
 const CATEGORY_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   system: Server,
   tasks: CheckSquare,
+  development: GitPullRequest,
   finance: DollarSign,
   home: Home,
   social: AtSign,
@@ -495,7 +497,7 @@ export function NotificationCard({
             <span className="text-[var(--text-muted)]" aria-hidden="true">·</span>
             <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
               <CategoryIcon size={10} className="opacity-60" />
-              {humanizeIdentifier(notification.category)}
+              {formatNotificationCategoryLabel(notification.category)}
             </span>
             <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-md ${levelConfig.pillClass}`}>
               <LevelIcon size={10} />
@@ -680,7 +682,7 @@ export function NotificationDetail({
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">{sourceName}</p>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              {humanizeIdentifier(notification.category)} · {formatTimeAgo(notification.receivedAt)}
+              {formatNotificationCategoryLabel(notification.category)} · {formatTimeAgo(notification.receivedAt)}
             </p>
           </div>
         </div>

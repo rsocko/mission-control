@@ -29,6 +29,8 @@ export const reasoningTools = {
         suggestions: suggestions.map(t => ({
           id: t.id,
           title: t.title,
+          status: t.status,
+          microStatus: t.microStatus,
           priority: t.priority,
           dueDate: t.dueDate,
           source: t.connectorType,

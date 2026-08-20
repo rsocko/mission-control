@@ -10,6 +10,7 @@ import {
 import { getLocalToday } from '@/lib/utils/client-date';
 import { EMPTY_TASK_RESPONSE, type SourceList } from '@/types/dashboard';
 import type { UniverseFilterOptions } from './UniverseTaskFilters';
+import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 
 type ContextPatch = Partial<Omit<TaskFilterContext, 'version'>>;
 
@@ -40,7 +41,7 @@ export function UniverseSidebarFilters({
   const [listSearch, setListSearch] = useState('');
   const [tagSearch, setTagSearch] = useState('');
   const [tagsExpanded, setTagsExpanded] = useState(false);
-  const [hiddenQuickFilters, setHiddenQuickFilters] = useState<string[]>([]);
+  const [quickFilterVisibility, setQuickFilterVisibility] = useState<Record<string, QuickFilterVisibility>>({});
 
   const sourceFilter = context.sources.length === 1 ? context.sources[0] : null;
   const selectedSourceRef = useRef(sourceFilter);
@@ -82,6 +83,8 @@ export function UniverseSidebarFilters({
           projects: options.projects,
           savedViews: options.savedViews,
           allSourceCounts,
+          loading: options.loading,
+          quickFilterCountsAvailable: false,
         }}
         filters={{
           sourceFilter,
@@ -92,7 +95,8 @@ export function UniverseSidebarFilters({
           projectFilter: context.projectId,
           priorityFilter: context.priorities,
           statusFilter: context.statuses,
-          hiddenQuickFilters,
+          hiddenQuickFilters: [],
+          quickFilterVisibility,
         }}
         sidebar={{
           sidebarExpanded,
@@ -155,10 +159,10 @@ export function UniverseSidebarFilters({
             view.filterContext ?? taskFilterContextFromSavedView(view.filters),
             'push',
           ),
-          toggleQuickFilterVisibility: (filterId) => setHiddenQuickFilters((current) =>
-            current.includes(filterId)
-              ? current.filter((id) => id !== filterId)
-              : [...current, filterId]),
+          setQuickFilterVisibility: (filterId, visibility) => setQuickFilterVisibility((current) => ({
+            ...current,
+            [filterId]: visibility,
+          })),
         }}
         computed={{
           sourceHasLists: (sourceType) => options.sourceLists.some(

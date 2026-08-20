@@ -210,6 +210,13 @@ describe('checkpointed dependency reconciliation', () => {
       { full: true },
     );
     expect(first.snapshot).toMatchObject({ status: 'running', processed: 2, total: 5 });
+    expect(Object.keys(first).sort()).toEqual([
+      'failed',
+      'imported',
+      'pushed',
+      'removed',
+      'snapshot',
+    ]);
     expect(await dbModule.default.select().from(schema.taskDependencies)).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: `${connectorId}-stale` })]),
     );

@@ -1,4 +1,4 @@
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai';
+import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
 import { generateText } from 'ai';
 import db from '@/db';
 import { tasks, myDayItems, taskSchedules } from '@/db/schema';

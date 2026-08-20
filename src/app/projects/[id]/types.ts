@@ -43,6 +43,7 @@ type ProjectTaskDtoFields = Pick<
   | 'connectorType'
   | 'connectorInstanceId'
   | 'localDisposition'
+  | 'microStatus'
   | 'taskSourceModel'
   | 'editPolicy'
 >;

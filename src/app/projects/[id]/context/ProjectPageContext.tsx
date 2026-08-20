@@ -48,6 +48,24 @@ import {
   useProjectTaskActions,
   type RunProjectHierarchyCommand,
 } from '../useProjectTaskActions';
+import { notifyTaskChanged } from '@/lib/task-change-events';
+
+function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
+  switch (command.type) {
+    case 'move_tasks':
+    case 'assign_tasks':
+    case 'remove_tasks':
+      return command.taskIds;
+    case 'restore_task_positions':
+      return command.placements.map((placement) => placement.taskId);
+    case 'restore_project_tasks':
+      return command.states.map((state) => state.taskId);
+    case 'update_phase_item':
+      return [command.taskId];
+    case 'reorder_phases':
+      return [];
+  }
+}
 
 interface ProjectPageDataContextValue {
   projectId: string;
@@ -220,6 +238,7 @@ export function ProjectPageProvider({
       });
       if (projectId !== currentProjectIdRef.current) return result;
       applyHierarchySnapshot(result.hierarchy);
+      for (const taskId of hierarchyCommandTaskIds(command)) notifyTaskChanged(taskId);
       hierarchyUndoTrackerRef.current.push(commandId, result.revision);
       setHierarchyAnnouncement(options.announcement);
       const undoEntryId = pushUndoWithToast(options.undoLabel, async () => {
@@ -230,6 +249,9 @@ export function ProjectPageProvider({
             command: result.inverseCommand,
           });
           applyHierarchySnapshot(undoResult.hierarchy);
+          for (const taskId of hierarchyCommandTaskIds(result.inverseCommand)) {
+            notifyTaskChanged(taskId);
+          }
           hierarchyUndoTrackerRef.current.complete(commandId, undoResult.revision);
           setHierarchyAnnouncement(`Undid: ${options.announcement}`);
         } catch (caughtError) {

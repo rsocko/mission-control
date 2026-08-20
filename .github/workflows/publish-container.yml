@@ -225,6 +225,7 @@ jobs:
         run: |
           set -euo pipefail
           metadata_file="${RUNNER_TEMP}/build-metadata.json"
+          build_started_at="${SECONDS}"
 
           docker buildx build \
             --file Dockerfile \
@@ -240,8 +241,10 @@ jobs:
             .
 
           digest="$(jq -er '."containerimage.digest" | select(test("^sha256:[0-9a-f]{64}$"))' "${metadata_file}")"
+          build_duration="$((SECONDS - build_started_at))"
           echo "Published ${IMAGE}@${digest}"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "build_duration_seconds=${build_duration}" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
@@ -318,6 +321,7 @@ jobs:
 
       - name: Publish image summary
         env:
+          BUILD_DURATION_SECONDS: ${{ steps.publish.outputs.build_duration_seconds }}
           DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ${{ steps.image.outputs.name }}
           PUSH_LATEST: ${{ steps.tags.outputs.push_latest }}
@@ -332,6 +336,8 @@ jobs:
             echo "Digest: \`${IMAGE}@${DIGEST}\`"
             echo
             echo "Immutable version: \`${IMAGE}:${VERSION_TAG}\`"
+            echo
+            echo "Build duration: ${BUILD_DURATION_SECONDS} seconds"
             if [[ -n "${SHA_TAG}" ]]; then
               echo
               echo "Immutable source: \`${IMAGE}:${SHA_TAG}\`"

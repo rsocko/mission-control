@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 import {
   removeTaskFromResponse,
   replaceTaskInKeywordFilteredResponse,
@@ -83,6 +84,7 @@ export interface UseDashboardTaskActionsOptions {
   completionScopeKey: string;
   runTaskCompletion: DashboardTaskCompletionRunner;
   fetchData: DashboardFetchData;
+  updateTaskGroupCounts: (previousTask: Task | null, nextTask: Task | null) => void;
 }
 
 export interface DashboardTaskActions {
@@ -155,6 +157,7 @@ export function useDashboardTaskActions(
           removedFromVisibleResponse = current.tasks.some((candidate) => candidate.id === taskId);
           return removeTaskFromResponse(current, taskId, task);
         });
+        if (removedFromVisibleResponse) dependencies.updateTaskGroupCounts(task, null);
         dependencies.setMyDayItemStatuses((current) => {
           if (!current.has(taskId)) return current;
           const next = new Map(current);
@@ -170,14 +173,17 @@ export function useDashboardTaskActions(
           body: JSON.stringify({ status: 'done' }),
         });
         if (!response.ok) throw new Error('Failed');
+        notifyTaskChanged(taskId);
       },
       rollback: () => {
         if (!removedFromVisibleResponse || optionsRef.current.completionScopeKey !== scopeKey) return;
-        dependencies.setTaskResponse((current) => (
-          current.tasks.some((candidate) => candidate.id === taskId)
-            ? current
-            : restoreTaskToResponse(current, task, taskIndex)
-        ));
+        let restoredToVisibleResponse = false;
+        dependencies.setTaskResponse((current) => {
+          if (current.tasks.some((candidate) => candidate.id === taskId)) return current;
+          restoredToVisibleResponse = true;
+          return restoreTaskToResponse(current, task, taskIndex);
+        });
+        if (restoredToVisibleResponse) dependencies.updateTaskGroupCounts(null, task);
         dependencies.setMyDayItemStatuses((current) => {
           if (previousMyDayStatus === undefined || current !== optimisticMyDayStatuses) return current;
           const next = new Map(current);
@@ -195,6 +201,7 @@ export function useDashboardTaskActions(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'todo' }),
         });
+        notifyTaskChanged(taskId);
         void optionsRef.current.fetchData(false, true, true);
         window.dispatchEvent(new CustomEvent('mc:task-completed'));
       });
@@ -233,13 +240,18 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ snoozedUntil }),
       });
       if (!response.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       pushUndoWithToast(snoozedUntil ? 'Task snoozed' : 'Snooze cleared', () => {
         dependencies.setTaskResponse(previous);
         fetch(`/api/tasks/${taskId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ snoozedUntil: task.snoozedUntil || null }),
-        }).then(() => void optionsRef.current.fetchData(false, true, true))
+        }).then((undoResponse) => {
+          if (!undoResponse.ok) throw new Error('Failed');
+          notifyTaskChanged(taskId);
+          void optionsRef.current.fetchData(false, true, true);
+        })
           .catch(() => toast.error('Failed to undo snooze'));
       }, { type: 'info' });
       setTimeout(() => void optionsRef.current.fetchData(false, true, true), 3000);
@@ -258,6 +270,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ taskId, date: getClientToday() }),
       });
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to add task to My Day');
       dependencies.setMyDayTaskIds((previous) => new Set(previous).add(taskId));
       const task = dependencies.taskResponse.tasks.find((candidate) => candidate.id === taskId);
       dependencies.setMyDayItemStatuses((previous) => {
@@ -266,6 +279,7 @@ export function useDashboardTaskActions(
         return next;
       });
       window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+      notifyTaskChanged(taskId);
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Added to My Day locally, but failed to sync to Microsoft To Do');
       } else {
@@ -282,6 +296,7 @@ export function useDashboardTaskActions(
       const params = new URLSearchParams({ taskId, date: getClientToday() });
       const response = await fetch(`/api/my-day?${params.toString()}`, { method: 'DELETE' });
       const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to remove task from My Day');
       dependencies.setMyDayTaskIds((previous) => {
         const next = new Set(previous);
         next.delete(taskId);
@@ -293,6 +308,7 @@ export function useDashboardTaskActions(
         return next;
       });
       window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+      notifyTaskChanged(taskId);
       if (data.writeBack?.attempted && !data.writeBack?.success) {
         toast.warning('Removed from My Day locally, but failed to sync to Microsoft To Do');
       } else {
@@ -331,6 +347,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ dueDate: date }),
       });
       if (!response.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       toast.success('Due date updated');
       void optionsRef.current.fetchData(false, true);
     } catch {
@@ -354,6 +371,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ priority: newPriority }),
       });
       if (!response.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       void optionsRef.current.fetchData(false, true);
     } catch {
       dependencies.setTaskResponse(previous);
@@ -376,6 +394,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ status: newStatus }),
       });
       if (!response.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       void optionsRef.current.fetchData(false, true);
     } catch {
       dependencies.setTaskResponse(previous);
@@ -416,6 +435,7 @@ export function useDashboardTaskActions(
       if (!response.ok || data.fields?.localDisposition?.persisted !== true) {
         throw new Error('Mission Control state was not saved');
       }
+      notifyTaskChanged(taskId);
       toast.success(disposition === 'handled'
         ? 'Marked handled in Mission Control; upstream task unchanged'
         : disposition === 'dismissed'
@@ -510,6 +530,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ targetListId }),
       });
       if (!response.ok) throw new Error('Failed');
+      notifyTaskChanged(taskId);
       const data = await response.json();
       if (data.previousListId) {
         pushUndoWithToast(`Moved to ${targetList?.name || 'list'}`, async () => {
@@ -518,6 +539,7 @@ export function useDashboardTaskActions(
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ targetListId: data.previousListId }),
           });
+          notifyTaskChanged(taskId);
           void optionsRef.current.fetchData(false, true);
         });
       } else {
@@ -548,6 +570,7 @@ export function useDashboardTaskActions(
         body: JSON.stringify({ taskId, phaseId: phaseId ?? null }),
       });
       if (!response.ok) throw new Error('Failed to add to project');
+      notifyTaskChanged(taskId);
 
       const phaseName = phaseId
         ? project?.phases?.find((phase) => phase.id === phaseId)?.name ?? null

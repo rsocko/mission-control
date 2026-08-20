@@ -16,6 +16,10 @@ import {
   tasks,
 } from '@/db/schema';
 import { emitEvent } from '@/lib/events';
+import {
+  runResumableReconciliation,
+  type ResumableReconciliationSnapshot,
+} from '@/lib/reconciliation';
 import { getStatusLifecycleUpdates } from '@/lib/tasks/status-lifecycle';
 import {
   DEFAULT_SCOUT_SETTINGS,
@@ -36,6 +40,12 @@ import {
 } from './reconciliation-domain';
 
 type ReconciliationDatabase = BetterSQLite3Database<typeof schema>;
+
+interface ScoutReconciliationSnapshot extends ResumableReconciliationSnapshot {
+  runId: string;
+  leaseToken: string;
+  plans: Parameters<typeof persistEvaluation>[1][];
+}
 
 const MAX_TASKS_PER_RUN = 200;
 const RUN_LOCK_MINUTES = 15;
@@ -736,24 +746,74 @@ export async function reconcileScoutTasks(
       });
     }
 
-    const { results, summary } = database.transaction((tx) => {
-      const results = plans.map((plan) => persistEvaluation(tx, plan));
-      const summary = summaryFor(results, ignoredSignals);
-      if (!request.dryRun) createDigestNotification(tx, runId, summary, now);
-      const completion = tx.update(scoutReconciliationRuns).set({
-        status: 'completed',
-        summary,
-        completedAt: now.toISOString(),
-      }).where(and(
-        eq(scoutReconciliationRuns.id, runId),
-        eq(scoutReconciliationRuns.status, 'running'),
-        eq(scoutReconciliationRuns.leaseToken, leaseToken),
-      )).run();
-      if (completion.changes !== 1) {
-        throw new ScoutReconciliationError('Reconciliation run lost its active claim', 409);
-      }
-      return { results, summary };
+    const engineResult = await runResumableReconciliation({
+      createSnapshot: async (): Promise<ScoutReconciliationSnapshot> => ({
+        runId,
+        leaseToken,
+        plans: [],
+        status: 'running',
+        cursor: 0,
+        total: plans.length,
+        batchSize: Math.max(1, plans.length),
+        failureCount: 0,
+        nextAttemptAt: null,
+      }),
+      loadBatch: async (_snapshot, window) => plans.slice(window.start, window.end),
+      executeBatch: async (_snapshot, batch) => batch,
+      advanceCursor: async (snapshot, batch, window) => ({
+        ...snapshot,
+        cursor: window.end,
+        plans: [...snapshot.plans, ...batch],
+      }),
+      classifyRetry: () => ({ retryable: false }),
+      recordFailure: async (snapshot, failure) => ({
+        ...snapshot,
+        status: 'failed' as const,
+        failureCount: failure.failureCount,
+        nextAttemptAt: failure.nextAttemptAt,
+      }),
+      reportProgress: (snapshot) => ({
+        runId: snapshot.runId,
+        processed: snapshot.cursor,
+        total: snapshot.total,
+        status: snapshot.status,
+      }),
+      complete: async (snapshot) => {
+        const completionResult = database.transaction((tx) => {
+          const results = snapshot.plans.map((plan) => persistEvaluation(tx, plan));
+          const summary = summaryFor(results, ignoredSignals);
+          if (!request.dryRun) createDigestNotification(tx, runId, summary, now);
+          const completion = tx.update(scoutReconciliationRuns).set({
+            status: 'completed',
+            summary,
+            completedAt: now.toISOString(),
+          }).where(and(
+            eq(scoutReconciliationRuns.id, runId),
+            eq(scoutReconciliationRuns.status, 'running'),
+            eq(scoutReconciliationRuns.leaseToken, leaseToken),
+          )).run();
+          if (completion.changes !== 1) {
+            throw new ScoutReconciliationError('Reconciliation run lost its active claim', 409);
+          }
+          return { results, summary };
+        });
+        return {
+          snapshot: { ...snapshot, status: 'completed' as const },
+          result: completionResult,
+        };
+      },
+    }, {
+      retryBaseMs: 1,
+      retryMaxMs: 1,
+      now: () => now,
     });
+    if (engineResult.outcome !== 'completed') {
+      throw new ScoutReconciliationError(
+        'Atomic Scout reconciliation did not complete its single batch',
+        500,
+      );
+    }
+    const { results, summary } = engineResult.completion;
 
     for (const completed of results.filter((result) => result.action === 'auto-complete' && result.applied)) {
       emitEvent({

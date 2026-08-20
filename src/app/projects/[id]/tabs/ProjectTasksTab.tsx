@@ -6,7 +6,6 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
-  CheckCircle2,
   ChevronDown,
   Plus,
   Search,
@@ -19,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import {
   Select,
   SelectContent,
@@ -347,15 +347,16 @@ export function ProjectTasksTab({
                             type="button"
                             onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
                             disabled={completingIds.has(task.id)}
-                            className={cn(
-                              'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                              isDone
-                                ? 'bg-green-400 border-green-400 text-white'
-                                : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                            )}
+                            className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
                             aria-label={isDone ? 'Completed' : 'Mark complete'}
                           >
-                            {isDone && <CheckCircle2 size={14} />}
+                            <TaskStatusIndicator
+                              status={task.status}
+                              microStatus={task.microStatus}
+                              isCompleting={completingIds.has(task.id)}
+                              size="md"
+                              className="scale-90"
+                            />
                           </button>
                         </CompletionBurst>
                         <PriorityDot priority={task.priority} />
@@ -363,6 +364,7 @@ export function ProjectTasksTab({
                         <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                         <TaskDisplayId task={task} />
                         <TaskInfoBadges task={task} />
+                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                         {(task.tags ?? []).slice(0, 3).map((tag) => (
                           <Badge key={tag.id} variant="outline">{tag.name}</Badge>
                         ))}

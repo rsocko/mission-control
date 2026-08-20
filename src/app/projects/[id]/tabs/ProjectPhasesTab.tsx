@@ -51,9 +51,7 @@ import {
   NotepadText,
   PencilLine,
   Plus,
-  RefreshCw,
   Search,
-  Sparkles,
   Trash2,
   X,
 } from 'lucide-react';
@@ -75,6 +73,7 @@ import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import {
   Select,
   SelectContent,
@@ -148,6 +147,7 @@ import type {
   ProjectTaskOverlayActions,
   RequestConfirmation,
 } from './contracts';
+import { AIPlanControl } from './AIPlanControl';
 
 const ProjectStructureGraph = dynamic(
   () => import('@/components/graph/ProjectStructureGraph'),
@@ -909,15 +909,8 @@ export function ProjectPhasesTab({
                 Select
               </button>
             )}
-            <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating || proposalActions.isRefining}>
-              {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-              AI Suggest Phases
-            </Button>
             {phases.length > 0 ? (
-              <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.refine()} disabled={proposalActions.isRefining || proposalActions.isGenerating}>
-                {proposalActions.isRefining ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                Refine Plan
-              </Button>
+              <AIPlanControl hasPhases proposalActions={proposalActions} />
             ) : null}
             <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
               {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
@@ -1184,10 +1177,11 @@ export function ProjectPhasesTab({
               <p className="text-sm font-medium text-[var(--text-primary)]">No phases yet</p>
               <p className="mt-2 text-sm text-[var(--text-tertiary)]">Create the first phase to start shaping delivery.</p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <Button variant="secondary" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating}>
-                  {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-                  AI Suggest Phases
-                </Button>
+                <AIPlanControl
+                  hasPhases={false}
+                  proposalActions={proposalActions}
+                  variant="secondary"
+                />
                 <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
                   <Plus />
                   Add first phase
@@ -1360,6 +1354,19 @@ export function ProjectPhasesTab({
                                       <button type="button" onClick={() => void handleCyclePhaseStatus(phase)} disabled={isPhaseMutationDisabled} title="Click to cycle status">
                                         <PhaseStatusBadge status={phase.status} />
                                       </button>
+                                      {statusSummary.mismatchMessage ? (
+                                        <Tooltip content={statusSummary.mismatchMessage} placement="bottom">
+                                          <span
+                                            role="img"
+                                            tabIndex={0}
+                                            title={statusSummary.mismatchMessage}
+                                            aria-label={`Phase status warning: ${statusSummary.mismatchMessage}`}
+                                            className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 text-[var(--warning)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--warning)]/60"
+                                          >
+                                            <CircleAlert size={13} />
+                                          </span>
+                                        </Tooltip>
+                                      ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
                                       <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
                                         <Layers3 size={11} />
@@ -1378,15 +1385,6 @@ export function ProjectPhasesTab({
                                           <span className="tabular-nums">{pctComplete}%</span>
                                         </span>
                                       )}
-                                      {statusSummary.mismatchMessage ? (
-                                        <span
-                                          role="status"
-                                          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2 py-1 text-xs font-medium text-[var(--warning)]"
-                                        >
-                                          <CircleAlert size={12} />
-                                          {statusSummary.mismatchMessage}
-                                        </span>
-                                      ) : null}
                                       {/* Description icon when no description exists */}
                                       {!phase.description && editingPhaseDescId !== phase.id && (
                                         <Tooltip content="Add description">
@@ -1662,15 +1660,16 @@ export function ProjectPhasesTab({
                                                         type="button"
                                                         onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
                                                         disabled={completingIds.has(task.id)}
-                                                        className={cn(
-                                                          'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                                          isDone
-                                                            ? 'bg-green-400 border-green-400 text-white'
-                                                            : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                                        )}
+                                                        className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
                                                         aria-label={isDone ? 'Completed' : 'Mark complete'}
                                                       >
-                                                        {isDone && <CheckCircle2 size={14} />}
+                                                        <TaskStatusIndicator
+                                                          status={task.status}
+                                                          microStatus={task.microStatus}
+                                                          isCompleting={completingIds.has(task.id)}
+                                                          size="md"
+                                                          className="scale-90"
+                                                        />
                                                       </button>
                                                     </CompletionBurst>
                                                     <div className="min-w-0">
@@ -1680,6 +1679,7 @@ export function ProjectPhasesTab({
                                                         <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                                                         <TaskDisplayId task={task} />
                                                         <TaskInfoBadges task={task} />
+                                                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                                                       </div>
                                                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                                         <span>{PRIORITY_LABELS[task.priority]}</span>
@@ -1827,15 +1827,16 @@ export function ProjectPhasesTab({
                                           type="button"
                                           onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
                                           disabled={completingIds.has(task.id)}
-                                          className={cn(
-                                            'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                            isDone
-                                              ? 'bg-green-400 border-green-400 text-white'
-                                              : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                          )}
+                                          className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
                                           aria-label={isDone ? 'Completed' : 'Mark complete'}
                                         >
-                                          {isDone && <CheckCircle2 size={14} />}
+                                          <TaskStatusIndicator
+                                            status={task.status}
+                                            microStatus={task.microStatus}
+                                            isCompleting={completingIds.has(task.id)}
+                                            size="md"
+                                            className="scale-90"
+                                          />
                                         </button>
                                       </CompletionBurst>
                                       <div className="min-w-0">
@@ -1845,6 +1846,7 @@ export function ProjectPhasesTab({
                                           <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
                                           <TaskDisplayId task={task} />
                                           <TaskInfoBadges task={task} />
+                                          <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                                         </div>
                                         <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
                                           <span>{PRIORITY_LABELS[task.priority]}</span>

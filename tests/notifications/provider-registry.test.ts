@@ -156,6 +156,7 @@ describe('notification provider registry', () => {
     }));
 
     expect(getNotificationProvider('github-issues')?.displayName).toBe('GitHub');
+    expect(resolved?.presentation.category).toBe('development');
     expect(resolved?.presentation.actions?.[0].label).toBe('Review PR');
     expect(resolved?.presentation.actions?.[0].payload).toEqual({
       url: 'https://github.com/acme/repo/pull/42',

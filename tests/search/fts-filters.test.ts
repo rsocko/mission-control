@@ -40,6 +40,18 @@ describe('FTS authoritative filters', () => {
       )),
       makeTask('filtered-match', 'Project Alpha', 'in_progress'),
       makeTask('completed-match', 'Project Alpha', 'done'),
+      {
+        ...makeTask('github-issue-123', 'octo/repo', 'todo'),
+        sourceId: 'octo/repo:123',
+        connectorType: 'github-issues',
+        title: 'Fix command palette lookup',
+        metadata: { issueNumber: 123 },
+      },
+      {
+        ...makeTask('local-task-123', 'Local', 'todo'),
+        sourceId: 'local:123',
+        title: 'Not a GitHub issue',
+      },
     ]);
 
     searchFTS = fts.searchFTS;
@@ -55,5 +67,17 @@ describe('FTS authoritative filters', () => {
     });
 
     expect(results.map((result) => result.id)).toEqual(['filtered-match']);
+  });
+
+  it.each(['123', '#123'])('finds a GitHub issue by number with query %s', async (query) => {
+    const results = await searchFTS(query, {
+      type: 'tasks',
+      excludeDone: true,
+      limit: 5,
+    });
+
+    expect(results.map((result) => result.id)).toContain('github-issue-123');
+    expect(results.map((result) => result.id)).not.toContain('local-task-123');
+    expect(results.find((result) => result.id === 'github-issue-123')?.metadata.issueNumber).toBe(123);
   });
 });

@@ -904,7 +904,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       if (result.success && result.result) {
         if (result.result.url) {
           if (result.result.target === '_blank' || result.result.type === 'open_url') {
-            completeExternalNavigation(externalWindow, result.result.url);
+            await completeExternalNavigation(externalWindow, result.result.url);
           } else {
             cancelExternalNavigation(externalWindow);
             router.push(result.result.url);
@@ -920,8 +920,9 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       }
       await fetchNotifications();
       return result;
-    } catch {
+    } catch (error) {
       cancelExternalNavigation(externalWindow);
+      console.error('Notification action failed:', error);
       return { success: false };
     }
   }, [fetchNotifications, notifications, router]);

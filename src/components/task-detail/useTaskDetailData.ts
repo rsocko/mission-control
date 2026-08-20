@@ -20,6 +20,10 @@ import type {
   TaskTag,
   WritableConnector,
 } from './task-detail-types';
+import {
+  TASK_CHANGED_EVENT,
+  type TaskChangedEventDetail,
+} from '@/lib/task-change-events';
 
 export interface UseTaskDetailDataOptions {
   taskId: string;
@@ -70,6 +74,7 @@ export function useTaskDetailData({
     Record<string, ProjectHierarchySnapshot | null>
   >({});
   const [writableConnectors, setWritableConnectors] = useState<WritableConnector[]>([]);
+  const taskRequestVersionRef = useRef(0);
 
   // Keep host callbacks out of effect dependencies so a new task only reloads
   // when its identifier actually changes.
@@ -89,6 +94,7 @@ export function useTaskDetailData({
 
   // Fetch full task details
   useEffect(() => {
+    const requestVersion = ++taskRequestVersionRef.current;
     setLoading(true);
     setExtraTags([]);
     setConnectorCaps(null);
@@ -96,13 +102,39 @@ export function useTaskDetailData({
     onTaskResetRef.current?.();
     fetchTaskDetail(taskId)
       .then((loaded) => {
-        if (loaded) {
+        if (loaded && requestVersion === taskRequestVersionRef.current) {
           setTask(loaded);
           onTaskLoadedRef.current?.(loaded);
         }
       })
       .catch((err) => { taskLogger.error('Failed to fetch task details', { err, taskId }); })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (requestVersion === taskRequestVersionRef.current) setLoading(false);
+      });
+  }, [taskId]);
+
+  useEffect(() => {
+    const handleTaskChanged = (event: Event) => {
+      const { taskId: changedTaskId } = (event as CustomEvent<TaskChangedEventDetail>).detail;
+      if (changedTaskId !== taskId) return;
+
+      const requestVersion = ++taskRequestVersionRef.current;
+      fetchTaskDetail(taskId)
+        .then((loaded) => {
+          if (!loaded || requestVersion !== taskRequestVersionRef.current) return;
+          setTask(loaded);
+          onTaskLoadedRef.current?.(loaded);
+        })
+        .catch((err) => {
+          taskLogger.error('Failed to refresh changed task details', { err, taskId });
+        })
+        .finally(() => {
+          if (requestVersion === taskRequestVersionRef.current) setLoading(false);
+        });
+    };
+
+    window.addEventListener(TASK_CHANGED_EVENT, handleTaskChanged);
+    return () => window.removeEventListener(TASK_CHANGED_EVENT, handleTaskChanged);
   }, [taskId]);
 
   // Auto-detect potential duplicates for open tasks

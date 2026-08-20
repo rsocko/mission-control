@@ -10,6 +10,7 @@ describe('planning signals', () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('@/db');
     vi.doUnmock('@/db/schema');
+    vi.doUnmock('drizzle-orm');
     vi.resetModules();
 
     const [dbModule, schemaModule, planningModule] = await Promise.all([

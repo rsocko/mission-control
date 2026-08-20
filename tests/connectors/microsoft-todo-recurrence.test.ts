@@ -13,7 +13,11 @@ vi.mock('@/lib/connectors/microsoft-todo/graph-client', () => ({
 }));
 
 import { buildMicrosoftRecurrencePattern } from '@/lib/connectors/microsoft-todo';
-import { parseRecurrencePattern, parseSubstrateRecurrence } from '@/lib/connectors/microsoft-todo/task-transformer';
+import {
+  mapGraphTask,
+  parseRecurrencePattern,
+  parseSubstrateRecurrence,
+} from '@/lib/connectors/microsoft-todo/task-transformer';
 
 describe('Microsoft To Do recurrence serialization', () => {
   it('serializes custom day intervals', () => {
@@ -75,5 +79,29 @@ describe('Microsoft To Do recurrence serialization', () => {
       Pattern: { Type: 'daily', Interval: 2 },
       Range: { Type: 'noEnd', StartDate: '2026-08-02' },
     })).toBe('every 2 days');
+  });
+
+  it('preserves Graph linked resources for task detail source actions', () => {
+    const task = mapGraphTask({
+      id: 'flagged-task',
+      title: 'Follow up',
+      status: 'notStarted',
+      importance: 'normal',
+      createdDateTime: '2026-08-20T12:00:00Z',
+      lastModifiedDateTime: '2026-08-20T12:00:00Z',
+      linkedResources: [{
+        id: 'email-link',
+        applicationName: 'Microsoft Outlook',
+        displayName: 'Flagged email',
+        webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+      }],
+    }, 'flagged-emails', 'Flagged Emails', 'microsoft-todo', 'todo-1', 'flaggedEmails');
+
+    expect(task.metadata.linkedResources).toEqual([{
+      id: 'email-link',
+      applicationName: 'Microsoft Outlook',
+      displayName: 'Flagged email',
+      webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+    }]);
   });
 });

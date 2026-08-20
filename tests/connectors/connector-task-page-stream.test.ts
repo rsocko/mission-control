@@ -137,6 +137,9 @@ describe('connector task page streams', () => {
     const iterator = connector.fetchTasks(new Date('2026-08-01T00:00:00Z'));
     const first = await iterator.next();
     expect(first.value?.map(task => task.title)).toEqual(['First page']);
+    expect(graphFetch.mock.calls.some(([url]) => (
+      String(url).includes('$expand=checklistItems,linkedResources')
+    ))).toBe(true);
     expect(graphFetch.mock.calls.filter(([url]) => String(url).includes('/tasks?'))).toHaveLength(2);
 
     const second = await iterator.next();

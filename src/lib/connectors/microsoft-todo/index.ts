@@ -764,10 +764,10 @@ export class MicrosoftTodoConnector implements IConnector {
     wellKnownListName?: string,
   ): AsyncGenerator<TaskItem[], void, unknown> {
     const passes = since
-      ? [`/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems&$filter=lastModifiedDateTime ge ${since.toISOString()}`]
+      ? [`/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems,linkedResources&$filter=lastModifiedDateTime ge ${since.toISOString()}`]
       : [
-          `/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems`,
-          `/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems&$filter=status eq 'completed'`,
+          `/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems,linkedResources`,
+          `/me/todo/lists/${listId}/tasks?$top=100&$expand=checklistItems,linkedResources&$filter=status eq 'completed'`,
         ];
     const recurringTasks: TaskItem[] = [];
     const recentCompletedRecurring = new Map<string, { completedAt: string; sourceId: string }>();

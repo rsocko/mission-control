@@ -354,4 +354,36 @@ describe('NotificationsPanel V2', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Review PR' }), { key: 'Enter' });
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it('passes the selected task reminder delay to the action endpoint', async () => {
+    const onExecuteAction = vi.fn(async () => ({ success: true }));
+    const reminder = makeNotification({
+      id: 'reminder-1',
+      templateKey: 'task_reminder',
+      actions: [{
+        id: 'reminder-1:remind-later',
+        notificationId: 'reminder-1',
+        actionType: 'remind_later',
+        label: 'Remind later',
+        variant: 'secondary',
+        isPrimary: false,
+        sortOrder: 1,
+        payload: {},
+        opensExternal: false,
+        requiresConfirmation: false,
+        createdBy: 'system',
+      }],
+    });
+
+    render(<NotificationCard notification={reminder} onExecuteAction={onExecuteAction} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Remind later' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Tomorrow morning' }));
+
+    await waitFor(() => {
+      expect(onExecuteAction).toHaveBeenCalledWith(
+        'reminder-1:remind-later',
+        { duration: 'tomorrow_morning' },
+      );
+    });
+  });
 });

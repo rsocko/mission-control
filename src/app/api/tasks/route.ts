@@ -730,6 +730,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { title, description, priority, dueDate, connectorType, sourceListId, sourceListName, tags: tagIdsList, tagSlugs, projectIds, recurrence, estimatedDuration, effort } = body;
+    const recurrenceMode = body.recurrenceMode === 'completion' ? 'completion' : 'schedule';
     const requestedConnectorInstanceId = typeof body.connectorInstanceId === 'string'
       && body.connectorInstanceId.trim()
       ? body.connectorInstanceId.trim()
@@ -755,6 +756,14 @@ export async function POST(request: Request) {
     metadata.missionControlTaskId = id;
 
     const isRemote = typeof connectorType === 'string' && connectorType !== 'local';
+    if (recurrenceMode === 'completion' && !recurrence) {
+      return ApiErrors.badRequest(
+        'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
+    if (recurrenceMode === 'completion' && isRemote) {
+      return ApiErrors.badRequest('Completion-anchored recurrence is available only for local tasks');
+    }
     let connectorInstanceId = isRemote
       ? requestedConnectorInstanceId ?? 'local'
       : 'local';
@@ -956,17 +965,21 @@ export async function POST(request: Request) {
           ).onConflictDoNothing().run();
         }
 
-        if (estimatedDuration || dueDate) {
+        if (estimatedDuration || dueDate || recurrence) {
           tx.insert(taskSchedules).values({
             taskId: id,
             scheduledDate: dueDate || getLocalToday(),
             estimatedDuration: estimatedDuration || null,
+            recurrence: recurrence || null,
+            recurrenceMode,
             isTimeBlocked: false,
           }).onConflictDoUpdate({
             target: taskSchedules.taskId,
             set: {
               estimatedDuration: estimatedDuration || null,
               scheduledDate: dueDate || getLocalToday(),
+              recurrence: recurrence || null,
+              recurrenceMode,
             },
           }).run();
         }

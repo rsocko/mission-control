@@ -38,7 +38,10 @@ export type NotificationActionType =
   | 'approve'
   | 'reject'
   | 'dismiss'
-  | 'snooze';
+  | 'snooze'
+  | 'remind_later'
+  | 'complete_task'
+  | 'dismiss_reminder';
 export type NotificationActionVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 export type NotificationCategory =
   | 'system'

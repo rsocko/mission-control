@@ -77,6 +77,7 @@ export interface MissionControlPushPayload {
   body?: string;
   tag: string;
   url: string;
+  kind?: 'task_reminder';
 }
 
 export interface CreateNotificationInput {
@@ -200,6 +201,9 @@ function buildPayload(
     tag: `mc:${notification.id}`,
     url: navigationTarget ?? fallbackUrl,
   };
+  if (notification.templateKey === 'task_reminder') {
+    payload.kind = 'task_reminder';
+  }
   if (policy.preview === 'title_and_body' && notification.body) {
     payload.body = redactPushText(notification.body, 512);
   }

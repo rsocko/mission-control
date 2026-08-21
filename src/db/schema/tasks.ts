@@ -25,6 +25,8 @@ export const tasks = sqliteTable('tasks', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+  // Set only on locally generated recurring occurrences. One successor per occurrence.
+  recurrenceGeneratedFromTaskId: text('recurrence_generated_from_task_id'),
 
   // Hierarchy
   parentId: text('parent_id'),
@@ -76,6 +78,9 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_push_count')
     .on(table.pushCount)
     .where(sql`${table.pushCount} >= 2`),
+  uniqueIndex('idx_tasks_recurrence_generated_from')
+    .on(table.recurrenceGeneratedFromTaskId)
+    .where(sql`${table.recurrenceGeneratedFromTaskId} IS NOT NULL`),
 ]);
 
 // ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────
@@ -115,6 +120,10 @@ export const taskSchedules = sqliteTable('task_schedules', {
   estimatedDuration: integer('estimated_duration'), // minutes
   isTimeBlocked: integer('is_time_blocked', { mode: 'boolean' }).notNull().default(false),
   recurrence: text('recurrence'),
+  recurrenceMode: text('recurrence_mode')
+    .$type<'schedule' | 'completion'>()
+    .notNull()
+    .default('schedule'),
 });
 
 // ─── TAGS ───────────────────────────────────────────────────────────────────

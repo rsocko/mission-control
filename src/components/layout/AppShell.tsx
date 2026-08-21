@@ -291,7 +291,7 @@ function AppShellInner({
   const mainContent = (
     <main
       id="main-content"
-      className="flex-1 overflow-hidden bg-[var(--background)] pb-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] sm:pb-0"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--background)]"
     >
       <MobileRouteGate route={routeMetadata}>
         {children}
@@ -311,7 +311,7 @@ function AppShellInner({
   useAppBadge(appBadgeCount);
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
+    <div className="app-viewport flex bg-[var(--background)]">
       <PriorityWizardGate />
       <KeyboardShortcuts />
       <DopamineMenu />
@@ -327,8 +327,6 @@ function AppShellInner({
 
       {/* Right area: toolbar + content */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
-        <DemoModeBanner />
-
         {/* Mobile Header (F-11/F-12/F-13/F-14) */}
         <MobileHeader
           title={mobileTitle}
@@ -337,6 +335,8 @@ function AppShellInner({
           isDrawerOpen={isDrawerOpen}
           navigationCounts={navigationCounts}
         />
+
+        <DemoModeBanner />
 
         {/* Toolbar: Search + Quick Add + Actions (desktop only) */}
         {features?.taskCreation !== false && (

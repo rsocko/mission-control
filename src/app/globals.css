@@ -479,3 +479,11 @@ html:not([data-navigated]) ::view-transition-new(main-content) {
 .safe-area-pb {
   padding-bottom: var(--safe-area-inset-bottom);
 }
+
+/* The application shell owns the visual viewport; routes own scrolling within it. */
+.app-viewport {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+}

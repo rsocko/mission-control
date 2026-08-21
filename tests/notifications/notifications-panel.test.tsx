@@ -377,7 +377,7 @@ describe('NotificationsPanel V2', () => {
 
     render(<NotificationCard notification={reminder} onExecuteAction={onExecuteAction} />);
     fireEvent.click(screen.getByRole('button', { name: 'Remind later' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Tomorrow morning' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Tomorrow morning' }));
 
     await waitFor(() => {
       expect(onExecuteAction).toHaveBeenCalledWith(

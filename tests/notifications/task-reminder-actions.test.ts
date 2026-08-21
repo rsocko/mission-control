@@ -1,6 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 process.env.MC_DB_PATH = ':memory:';
+vi.unmock('drizzle-orm');
+vi.unmock('crypto');
 
 let db: typeof import('@/db').default;
 let schema: typeof import('@/db/schema');

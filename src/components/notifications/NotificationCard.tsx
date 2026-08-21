@@ -395,7 +395,9 @@ export function NotificationCard({
 
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id, params);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result?.success === false) {
         toast.error(`${action.label} failed`);
       }
@@ -671,7 +673,9 @@ export function NotificationDetail({
 
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id, params);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result.success) {
         toast.success(`${action.label} completed`);
       } else {

@@ -91,6 +91,15 @@ beforeEach(() => {
 });
 
 describe('MobileHeader search (F-14)', () => {
+  it('stays in shell flow and owns the top safe area once', () => {
+    render(<MobileHeader title="Today" onMenuPress={vi.fn()} />);
+    const header = screen.getByRole('banner');
+
+    expect(header.className).toContain('shrink-0');
+    expect(header.className).toContain('safe-area-pt');
+    expect(header.className.match(/\bsafe-area-pt\b/g)).toHaveLength(1);
+  });
+
   it('dispatches mission-control:open-search event on search click', () => {
     const eventSpy = vi.fn();
     window.addEventListener('mission-control:open-search', eventSpy);

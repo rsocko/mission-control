@@ -158,7 +158,7 @@ export default function MobileTriageStream({
       )}
 
       <div style={contentStyle}>
-      <div className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/95 pb-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] backdrop-blur-xl">
+      <div className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/95 pb-4 pt-3 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3 px-4">
           <div className="min-w-0">
             <p className="text-xs font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">Triage stream</p>
@@ -288,7 +288,7 @@ export default function MobileTriageStream({
         </div>
       </div>
 
-      <div className="flex-1 px-4 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] pt-4">
+      <div className="flex-1 px-4 pb-4 pt-4">
         {loading ? (
           <div className="flex min-h-[40vh] items-center justify-center">
             <Loader2 size={24} className="animate-spin text-sky-300" />

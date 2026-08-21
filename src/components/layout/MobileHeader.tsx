@@ -148,7 +148,10 @@ export function MobileHeader({
   );
 
   return (
-    <header className="flex flex-col sm:hidden">
+    <header
+      className="safe-area-pt flex shrink-0 flex-col bg-[var(--surface-0)] sm:hidden"
+      data-mobile-shell-header
+    >
       <div className="flex items-center h-12 px-3 bg-[var(--surface-0)] border-b border-[var(--border-subtle)]">
         {/* Hamburger button with notification dot */}
         <button

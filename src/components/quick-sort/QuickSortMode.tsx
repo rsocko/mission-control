@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  ArrowRight,
   CheckCircle2,
   Keyboard,
   Loader2,
@@ -843,13 +842,13 @@ export default function QuickSortMode() {
       ) : (
         <div className="flex min-h-0 min-w-0">
           <section
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+            className="quick-sort-mode flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             data-testid="quick-sort-mode"
           >
-            <div className="flex flex-shrink-0 items-center gap-3 border-b border-transparent px-4 pb-3 pt-4 lg:border-[var(--border-subtle)] lg:px-6">
+            <div className="quick-sort-mode-header flex min-h-11 flex-shrink-0 items-center gap-2 border-b border-transparent px-4 py-2 lg:gap-3 lg:border-[var(--border-subtle)] lg:px-6 lg:py-3">
               <button
                 onClick={() => setMode(null)}
-                className="p-2 -ml-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors lg:hidden"
+                className="-ml-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] lg:hidden"
                 aria-label="Back"
               >
                 <ArrowLeft size={18} />
@@ -860,24 +859,27 @@ export default function QuickSortMode() {
                   Choose an action below or use the keyboard shortcuts.
                 </p>
               </div>
+              <div className="quick-sort-landscape-order hidden min-w-0">
+                <OrderSelector value={order} onChange={setOrder} />
+              </div>
               <button
                 type="button"
                 onClick={() => void handleUndo()}
                 disabled={!lastOperation || busy}
-                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={lastOperation ? `Undo ${lastOperation.label}` : 'Nothing to undo'}
               >
                 <RotateCcw size={15} />
                 <span className="hidden sm:inline">Undo</span>
               </button>
               {remaining > 0 && (
-                <span className="rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                <span className="quick-sort-remaining rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                   <AnimatedCounter value={remaining} className="tabular-nums" /> left
                 </span>
               )}
             </div>
 
-            <div className="flex flex-shrink-0 items-center gap-3 px-4 pb-3 lg:px-6 lg:py-3">
+            <div className="quick-sort-order-row flex flex-shrink-0 items-center gap-3 px-4 pb-2 lg:px-6 lg:py-3">
               <div className="min-w-0 flex-1">
                 <OrderSelector value={order} onChange={setOrder} />
               </div>
@@ -941,7 +943,7 @@ export default function QuickSortMode() {
               </div>
             ) : (
               <>
-                <div className="relative flex min-h-[19rem] flex-1 flex-col overflow-hidden px-4 lg:px-6">
+                <div className="quick-sort-card-region relative flex min-h-0 flex-1 flex-col overflow-hidden px-4 lg:min-h-[19rem] lg:px-6">
                   {tasks.length === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center gap-5 px-6 py-12">
                       <CheckCircle2 size={48} className="text-green-400" />
@@ -1003,6 +1005,7 @@ export default function QuickSortMode() {
                           onAcceptSuggestions={handleAcceptSuggestions}
                           onAcceptFocused={handleAcceptFocused}
                           onSkip={handleSkip}
+                          busy={busy}
                         />
                       ))}
 
@@ -1027,6 +1030,7 @@ export default function QuickSortMode() {
                               onSkip={handleSkip}
                               onUndo={lastOperation ? handleUndo : undefined}
                               undoLabel={lastOperation?.label}
+                              busy={busy}
                             />
                           </motion.div>
                         )}
@@ -1037,22 +1041,6 @@ export default function QuickSortMode() {
 
                 {topTask && (
                   <>
-                    <div className="mx-4 mb-3 flex-shrink-0 rounded-[22px] bg-white/[0.03] px-4 py-3 ring-1 ring-inset ring-white/[0.06] lg:hidden">
-                      <div className="flex items-center justify-center gap-3 text-[13px]">
-                        {mode !== 'no_due_date' && (
-                          <>
-                            <span className="inline-flex items-center gap-1 text-violet-300"><ArrowLeft className="w-3.5 h-3.5" /> Accept AI</span>
-                            <span className="text-slate-600">·</span>
-                            <span className="inline-flex items-center gap-1 text-sky-300"><ArrowRight className="w-3.5 h-3.5" /> Override</span>
-                            <span className="text-slate-600">·</span>
-                          </>
-                        )}
-                        <span className="text-slate-400">
-                          Swipe up to skip{lastOperation ? ' · down to undo' : ''}
-                        </span>
-                      </div>
-                    </div>
-
                     {hasAnySuggestion && (
                       <div className="mx-6 mb-3 hidden items-center gap-3 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 lg:flex">
                         <Sparkles size={16} className="text-violet-300" />
@@ -1082,7 +1070,7 @@ export default function QuickSortMode() {
                     )}
 
                     <div
-                      className="flex-shrink-0 border-t border-[var(--border-subtle)] pb-2 pt-3 lg:px-2 lg:pb-4"
+                      className="quick-sort-action-region min-h-0 flex-shrink-0 overflow-hidden border-t border-[var(--border-subtle)] pb-2 pt-2 lg:px-2 lg:pb-4 lg:pt-3"
                       data-testid="quick-sort-actions"
                     >
                       <QuickSortActions

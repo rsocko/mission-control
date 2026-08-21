@@ -85,7 +85,7 @@ function TagPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="input-glow flex items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
+      <div className="input-glow flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3">
         <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
         <input
           ref={inputRef}
@@ -93,17 +93,21 @@ function TagPicker({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search tags…"
-          className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+          className="min-h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
           disabled={disabled}
           title={disabled ? disabledReason : undefined}
         />
         {query && (
-          <button onClick={() => setQuery('')} className="text-[var(--text-tertiary)]">
+          <button
+            onClick={() => setQuery('')}
+            className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-tertiary)]"
+            aria-label="Clear tag search"
+          >
             <X size={12} />
           </button>
         )}
       </div>
-      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+      <div className="flex flex-wrap gap-1.5">
         {tagsLoading && <span className="text-xs text-[var(--text-muted)]">Loading…</span>}
         {!tagsLoading && sorted.length === 0 && (
           <span className="text-xs text-[var(--text-muted)]">No tags found</span>
@@ -118,7 +122,7 @@ function TagPicker({
               disabled={disabled}
               title={disabled ? disabledReason : undefined}
               className={cn(
-                'flex items-center gap-1.5 text-xs px-3 py-2 rounded-full border transition-colors min-h-[36px]',
+                'flex min-h-11 items-center gap-1.5 rounded-full border px-3 py-2 text-xs transition-colors',
                 isSuggested
                   ? 'border-[var(--accent)]/40 bg-indigo-950/40 text-indigo-300 ring-1 ring-[var(--accent)]/30'
                   : isRecent
@@ -199,10 +203,14 @@ export default function QuickSortActions({
   ));
 
   return (
-    <div className="flex flex-col gap-3 px-4">
-      {/* Mode-specific action buttons */}
-      {mode === 'no_priority' && (
-        <div className="grid grid-cols-4 gap-2">
+    <div className="quick-sort-actions-inner flex max-h-full min-h-0 flex-col gap-2 px-4">
+      <div
+        className="quick-sort-primary-actions flex min-h-0 flex-col gap-2 overflow-y-auto overscroll-contain"
+        data-testid="quick-sort-primary-actions"
+      >
+        {/* Mode-specific action buttons */}
+        {mode === 'no_priority' && (
+          <div className="grid grid-cols-4 gap-2">
           {PRIORITY_OPTIONS.map((opt) => {
             const isSuggested = opt.value === suggestedPriority;
             return (
@@ -212,7 +220,7 @@ export default function QuickSortActions({
                 disabled={busy || !canApplyMode}
                 title={!canApplyMode ? modeBlockedReason : undefined}
                 className={cn(
-                  'flex flex-col items-center gap-0.5 rounded-xl border py-3.5 font-semibold transition-all active:scale-95 disabled:opacity-50',
+                  'quick-sort-primary-button flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl border py-2 font-semibold transition-all active:scale-95 disabled:opacity-50',
                   opt.classes,
                   isSuggested && 'ring-2 ring-[var(--accent)]/50 shadow-[0_0_8px_rgba(99,102,241,0.2)]'
                 )}
@@ -223,11 +231,11 @@ export default function QuickSortActions({
               </button>
             );
           })}
-        </div>
-      )}
+          </div>
+        )}
 
-      {mode === 'no_effort' && (
-        <div className="grid grid-cols-5 gap-2">
+        {mode === 'no_effort' && (
+          <div className="grid grid-cols-5 gap-2">
           {EFFORT_OPTIONS.map((opt) => {
             const isSuggested = opt.value === suggestedEffort;
             return (
@@ -237,7 +245,7 @@ export default function QuickSortActions({
                 disabled={busy || !canApplyMode}
                 title={!canApplyMode ? modeBlockedReason : undefined}
                 className={cn(
-                  'flex flex-col items-center justify-center rounded-xl border py-3.5 font-semibold text-base transition-all active:scale-95 disabled:opacity-50',
+                  'quick-sort-primary-button flex min-h-11 flex-col items-center justify-center rounded-xl border py-2 font-semibold text-base transition-all active:scale-95 disabled:opacity-50',
                   opt.classes,
                   isSuggested && 'ring-2 ring-[var(--accent)]/50 shadow-[0_0_8px_rgba(99,102,241,0.2)]'
                 )}
@@ -247,23 +255,23 @@ export default function QuickSortActions({
               </button>
             );
           })}
-        </div>
-      )}
+          </div>
+        )}
 
-      {mode === 'no_tags' && (
-        <TagPicker
-          onApply={onApplyTag}
-          allTags={allTags}
-          tagsLoading={tagsLoading}
-          suggestedTagIds={suggestedTagIds}
-          recentTagIds={recentTagSet}
-          disabled={!canApplyMode}
-          disabledReason={modeBlockedReason}
-        />
-      )}
+        {mode === 'no_tags' && (
+          <TagPicker
+            onApply={onApplyTag}
+            allTags={allTags}
+            tagsLoading={tagsLoading}
+            suggestedTagIds={suggestedTagIds}
+            recentTagIds={recentTagSet}
+            disabled={busy || !canApplyMode}
+            disabledReason={!canApplyMode ? modeBlockedReason : undefined}
+          />
+        )}
 
-      {mode === 'no_due_date' && (
-        <div className="grid grid-cols-3 gap-2">
+        {mode === 'no_due_date' && (
+          <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => { triggerHaptic('light'); onApplyDueDate(getLocalToday()); }}
             disabled={busy || !canApplyMode}
@@ -294,11 +302,11 @@ export default function QuickSortActions({
             title={!canApplyMode ? modeBlockedReason : undefined}
             className="min-h-[48px] justify-center rounded-xl border-violet-700/50 bg-violet-950/40 px-2 py-3 text-sm font-medium text-violet-300"
           />
-        </div>
-      )}
+          </div>
+        )}
 
-      {dispositionOptions.length > 0 && (
-        <div className="grid grid-cols-2 gap-2">
+        {dispositionOptions.length > 0 && (
+          <div className="grid grid-cols-2 gap-2">
           {dispositionOptions.map((option) => (
             <button
               key={option.value}
@@ -316,16 +324,17 @@ export default function QuickSortActions({
           <p className="col-span-2 text-center text-[10px] text-[var(--text-muted)]">
             Mission Control only. The upstream task is unchanged.
           </p>
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {/* Lower-frequency task detail action stays far left for right-handed use. */}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid flex-shrink-0 grid-cols-3 gap-2">
         <button
           onClick={onViewTask}
           disabled={busy}
           aria-label="View task"
-          className="flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-transparent px-2 py-3.5 text-xs text-[var(--text-tertiary)] transition-colors active:bg-[var(--surface-2)] disabled:opacity-50"
+          className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-transparent px-2 py-2 text-xs text-[var(--text-tertiary)] transition-colors active:bg-[var(--surface-2)] disabled:opacity-50"
         >
           <ExternalLink size={13} />
           View
@@ -334,7 +343,7 @@ export default function QuickSortActions({
           onClick={() => { triggerHapticFeedback('taskComplete'); onMarkDone(); }}
           disabled={busy || !canMarkDone}
           title={!canMarkDone ? taskFieldBlockedReason(task.editPolicy, 'status') : undefined}
-          className="flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl border border-green-700/40 bg-green-950/30 px-2 py-3.5 text-sm font-medium text-green-400 transition-colors active:bg-green-900/50 disabled:opacity-50"
+          className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-green-700/40 bg-green-950/30 px-2 py-2 text-sm font-medium text-green-400 transition-colors active:bg-green-900/50 disabled:opacity-50"
         >
           <CheckCircle2 size={14} />
           Done
@@ -343,7 +352,7 @@ export default function QuickSortActions({
           onClick={() => { triggerHaptic('light'); onSkip(); }}
           disabled={busy || !canSkip}
           title={!canSkip ? taskFieldBlockedReason(task.editPolicy, 'snoozedUntil') : undefined}
-          className="flex min-h-[48px] items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-3.5 text-sm text-[var(--text-secondary)] transition-colors active:bg-[var(--surface-3)] disabled:opacity-50"
+          className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-2 text-sm text-[var(--text-secondary)] transition-colors active:bg-[var(--surface-3)] disabled:opacity-50"
         >
           <SkipForward size={14} />
           Skip

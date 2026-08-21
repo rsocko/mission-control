@@ -2,7 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ModeSelector from '@/components/quick-sort/ModeSelector';
 import QuickSortActions from '@/components/quick-sort/QuickSortActions';
-import QuickSortCard, { getQuickSortSwipeAction } from '@/components/quick-sort/QuickSortCard';
+import QuickSortCard, {
+  getQuickSortGestureAxis,
+  getQuickSortSwipeAction,
+} from '@/components/quick-sort/QuickSortCard';
 import type { QuickSortQueueTask } from '@/lib/hooks/useQuickSortData';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
@@ -292,12 +295,17 @@ describe('Quick Sort plan/schedule queue', () => {
 
     const content = screen.getByRole('heading', { level: 2 }).parentElement;
     expect(content).toHaveClass('min-h-0', 'overflow-y-auto', 'overscroll-contain', 'touch-pan-y');
-    expect(content?.parentElement).toHaveClass('touch-none');
     expect(content).toHaveAttribute('tabindex', '0');
     expect(content).toHaveAttribute('aria-label', 'Task details');
+    expect(screen.getByTestId('quick-sort-swipe-handle')).toHaveClass('h-11', 'touch-none');
   });
 
-  it('treats swipe up as a skip gesture without changing horizontal swipe actions', () => {
+  it('requires meaningful, directionally dominant travel before committing gestures', () => {
+    expect(getQuickSortGestureAxis(8, -9)).toBeNull();
+    expect(getQuickSortGestureAxis(40, -38)).toBeNull();
+    expect(getQuickSortGestureAxis(-60, 20)).toBe('x');
+    expect(getQuickSortGestureAxis(20, -60)).toBe('y');
+
     expect(getQuickSortSwipeAction({
       axis: 'y',
       offsetX: 0,
@@ -316,12 +324,22 @@ describe('Quick Sort plan/schedule queue', () => {
       velocityY: -600,
       hasSuggestions: false,
       hasFocusedSuggestion: false,
+    })).toBe('snapBack');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 8,
+      offsetY: -60,
+      velocityX: 0,
+      velocityY: -600,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
     })).toBe('skip');
 
     expect(getQuickSortSwipeAction({
       axis: 'x',
       offsetX: -120,
-      offsetY: -160,
+      offsetY: -40,
       velocityX: 0,
       velocityY: 0,
       hasSuggestions: true,
@@ -334,6 +352,16 @@ describe('Quick Sort plan/schedule queue', () => {
       offsetY: -40,
       velocityX: 0,
       velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('snapBack');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 90,
+      offsetY: -110,
+      velocityX: 0,
+      velocityY: -700,
       hasSuggestions: false,
       hasFocusedSuggestion: false,
     })).toBe('snapBack');
@@ -352,5 +380,58 @@ describe('Quick Sort plan/schedule queue', () => {
 
     expect(getQuickSortSwipeAction({ ...gesture, hasUndo: true })).toBe('undo');
     expect(getQuickSortSwipeAction({ ...gesture, hasUndo: false })).toBe('snapBack');
+  });
+
+  it('blocks skip gestures during updates and routes policy-blocked skips to feedback', () => {
+    const gesture = {
+      axis: 'y' as const,
+      offsetX: 0,
+      offsetY: -120,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    };
+
+    expect(getQuickSortSwipeAction({ ...gesture, busy: true })).toBe('snapBack');
+    expect(getQuickSortSwipeAction({ ...gesture, canSkip: false })).toBe('blockedSkip');
+  });
+
+  it('describes unavailable skip gestures and disables the handle while busy', () => {
+    const blockedReason = 'Snooze is controlled by the upstream task source';
+    const { rerender } = render(
+      <QuickSortCard
+        task={{
+          ...task,
+          editPolicy: makeTaskEditPolicy({
+            sourceModel: 'remote-mirror',
+            mutations: { snoozedUntil: 'blocked' },
+            reasons: { snoozedUntil: blockedReason },
+          }),
+        }}
+        mode="no_priority"
+        stackIndex={0}
+        onAcceptSuggestions={vi.fn()}
+        onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    const handle = screen.getByTestId('quick-sort-swipe-handle');
+    expect(handle).toHaveAccessibleName(expect.stringContaining(`Skip unavailable. ${blockedReason}`));
+    expect(handle).toHaveAttribute('title', blockedReason);
+
+    rerender(
+      <QuickSortCard
+        task={task}
+        mode="no_priority"
+        stackIndex={0}
+        onAcceptSuggestions={vi.fn()}
+        onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
+        busy
+      />,
+    );
+    expect(handle).toHaveAttribute('aria-disabled', 'true');
   });
 });

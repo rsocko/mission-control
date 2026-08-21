@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QuickSortMode from '@/components/quick-sort/QuickSortMode';
-import { editableTaskPolicy } from '../fixtures/task-edit-policy';
+import type { TaskEditPolicy } from '@/types';
+import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
 const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   updateTask: vi.fn(),
   suggestions: {},
   taskPriority: 'none',
+  taskEditPolicy: null as unknown as TaskEditPolicy,
   hasTasks: true,
 }));
 
@@ -44,7 +46,7 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
       projects: [],
       phases: [],
       tags: [],
-      editPolicy: editableTaskPolicy,
+      editPolicy: mocks.taskEditPolicy,
     }] : [],
     loading: false,
     counts: { no_priority: 1, no_effort: 1, no_tags: 1, no_due_date: 0 },
@@ -76,7 +78,14 @@ vi.mock('@/components/ui/AnimatedCounter', () => ({
     <span data-testid="animated-counter">{value}</span>
   ),
 }));
-vi.mock('@/components/quick-sort/QuickSortCard', () => ({ default: () => <div>Task card</div> }));
+vi.mock('@/components/quick-sort/QuickSortCard', () => ({
+  default: ({ onSkip }: { onSkip: (taskId: string) => void }) => (
+    <>
+      <div>Task card</div>
+      <button onClick={() => onSkip('task-1')}>Simulate swipe up</button>
+    </>
+  ),
+}));
 vi.mock('@/components/quick-sort/QuickSortActions', () => ({
   default: ({ onSkip, onViewTask }: { onSkip: () => void; onViewTask: () => void }) => (
     <>
@@ -109,6 +118,7 @@ describe('QuickSortMode task drawer', () => {
     mocks.alternateReloadQueue.mockResolvedValue(undefined);
     mocks.suggestions = {};
     mocks.taskPriority = 'none';
+    mocks.taskEditPolicy = editableTaskPolicy;
     mocks.hasTasks = true;
   });
 
@@ -434,6 +444,25 @@ describe('QuickSortMode task drawer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to skip task'));
+    expect(mocks.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('surfaces policy feedback when a skip gesture is blocked', async () => {
+    const blockedReason = 'Snooze is controlled by the upstream task source';
+    mocks.taskEditPolicy = makeTaskEditPolicy({
+      sourceModel: 'remote-mirror',
+      mutations: { snoozedUntil: 'blocked' },
+      reasons: { snoozedUntil: blockedReason },
+    });
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate swipe up' }));
+
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(blockedReason));
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(mocks.dismiss).not.toHaveBeenCalled();
   });
 

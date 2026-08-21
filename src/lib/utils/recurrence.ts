@@ -1,3 +1,5 @@
+import { fromZonedTime } from 'date-fns-tz';
+
 /**
  * Maximum number of recurrence iterations when advancing past overdue dates.
  * 1000 iterations covers even a daily task that has been overdue for ~2.7 years,
@@ -142,4 +144,45 @@ export function getNextRecurringDate(
   }
 
   return formatDateYMD(d);
+}
+
+/**
+ * Advance exactly one interval from the local date/time at which an occurrence
+ * was completed. Date-only tasks remain date-only; timed tasks retain the
+ * completion wall-clock time in the configured timezone.
+ */
+export function getCompletionAnchoredDueDate(
+  completedAt: string,
+  recurrence: string,
+  timezone: string,
+  includeTime: boolean,
+): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(completedAt))
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  );
+  const date = new Date(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+  );
+  advanceDate(date, recurrence);
+  const nextDate = formatDateYMD(date);
+  if (!includeTime) return nextDate;
+
+  return fromZonedTime(
+    `${nextDate}T${parts.hour}:${parts.minute}:${parts.second}`,
+    timezone,
+  ).toISOString();
 }

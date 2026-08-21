@@ -78,7 +78,7 @@ const CONNECTOR_ICON_PATHS: Record<string, string> = {
 };
 
 // Connectors that support recurrence
-const RECURRENCE_CONNECTORS = ['microsoft-todo', 'outlook-calendar'];
+const RECURRENCE_CONNECTORS = ['local', 'microsoft-todo', 'outlook-calendar'];
 
 const PANEL_WIDTH_STORAGE_KEY = 'mission-control:detail-panel-width';
 
@@ -254,6 +254,11 @@ export function TaskDetailPanel({
   const canEditPhases = canEdit('phases');
   const canEditReminder = canEdit('reminderAt');
   const canEditRecurrence = canEdit('recurrence');
+  const completionModeAvailable = Boolean(
+    task
+    && (task.connectorType === 'local' || task.sourceId?.startsWith('local:'))
+    && task.editPolicy.fields.recurrence.mutation === 'local',
+  );
   const canEditDependencies = canEdit('dependencies');
   const canDeleteTask = canRemoveTask(task?.editPolicy);
   const dispositionOptions = task
@@ -866,10 +871,13 @@ export function TaskDetailPanel({
           onReminderChange={mutations.handleReminderChange}
           supportsRecurrence={supportsRecurrence}
           currentRecurrence={currentRecurrence}
+          recurrenceMode={task.recurrenceMode ?? 'schedule'}
+          completionModeAvailable={completionModeAvailable}
           canEditRecurrence={canEditRecurrence}
           recurrenceBlockedReason={blockedReason('recurrence')}
           recurrenceSaveLabel={saveLabel('recurrence')}
           onRecurrenceChange={(recurrence) => { void mutations.handleRecurrenceChange(recurrence); }}
+          onRecurrenceModeChange={(recurrenceMode) => { void mutations.handleRecurrenceModeChange(recurrenceMode); }}
           skipToCurrentDate={skipToCurrentDate}
           skippingToCurrent={mutations.skippingToCurrent}
           canEditDueDate={canEditDueDate}

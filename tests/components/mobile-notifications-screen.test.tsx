@@ -45,9 +45,12 @@ vi.mock('motion/react', async () => {
         transition,
         layout,
         drag,
+        dragListener,
         dragConstraints,
         dragElastic,
         dragMomentum,
+        dragSnapToOrigin,
+        dragTransition,
         dragControls,
         style,
         onDragStart,
@@ -65,6 +68,9 @@ vi.mock('motion/react', async () => {
         dragConstraints,
         dragElastic,
         dragMomentum,
+        dragListener,
+        dragSnapToOrigin,
+        dragTransition,
         dragControls,
       ];
       const dragStartHandler = onDragStart as ((event: PointerEvent) => void) | undefined;

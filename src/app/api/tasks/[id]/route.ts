@@ -1,14 +1,18 @@
 import { NextResponse } from 'next/server';
+import { formatInTimeZone } from 'date-fns-tz';
 import db, { runTransaction } from '@/db';
 import {
   tasks,
   taskTags,
   taskProjects,
+  taskDependencies,
+  taskAttachments,
   taskSchedules,
   taskFieldStates,
   prioritySyncLog,
   myDayItems,
   tags as tagsTable,
+  projectPhaseItems,
 } from '@/db/schema';
 import { and, eq, inArray } from 'drizzle-orm';
 import { resolveOutboundPriority } from '@/lib/priority';
@@ -47,6 +51,8 @@ import {
 } from '@/lib/connectors/scout/reconciliation-service';
 import { evaluateRulesForTasks } from '@/lib/rules';
 import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
+import { computeRelativeReminderAt, isReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import { getCompletionAnchoredDueDate } from '@/lib/utils/recurrence';
 import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
@@ -91,8 +97,18 @@ export async function PATCH(
     if (!currentTask) {
       return ApiErrors.notFound('Task');
     }
-    const currentSchedule = input.status === 'done' || input.status === 'cancelled'
-      ? await db.select({ recurrence: taskSchedules.recurrence })
+    const currentSchedule = (
+      input.status === 'done'
+      || input.status === 'cancelled'
+      || input.recurrenceMode !== undefined
+    )
+      ? await db.select({
+          recurrence: taskSchedules.recurrence,
+          recurrenceMode: taskSchedules.recurrenceMode,
+          estimatedDuration: taskSchedules.estimatedDuration,
+          scheduledTime: taskSchedules.scheduledTime,
+          isTimeBlocked: taskSchedules.isTimeBlocked,
+        })
           .from(taskSchedules)
           .where(eq(taskSchedules.taskId, id))
       : [];
@@ -125,6 +141,19 @@ export async function PATCH(
 
     const localIdentity = currentTask.sourceId.startsWith('local:')
       || currentTask.connectorType === 'local';
+    if (input.recurrenceMode === 'completion' && !localIdentity) {
+      return ApiErrors.badRequest(
+        'Completion-anchored recurrence is available only for local tasks',
+      );
+    }
+    if (
+      input.recurrenceMode === 'completion'
+      && !(input.recurrence ?? currentSchedule[0]?.recurrence)
+    ) {
+      return ApiErrors.badRequest(
+        'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
     const [capabilities, connectorEnabled] = localIdentity
       ? [null, true] as const
       : await Promise.all([
@@ -218,6 +247,12 @@ export async function PATCH(
       && currentTask.status !== input.status
       && !['done', 'cancelled'].includes(currentTask.status)
       && ['done', 'cancelled'].includes(input.status);
+    const shouldReturnCompletionOccurrence = input.status === 'done'
+      && currentSchedule[0]?.recurrenceMode === 'completion'
+      && Boolean(currentSchedule[0].recurrence)
+      && localIdentity;
+    const shouldCreateCompletionOccurrence = shouldReturnCompletionOccurrence
+      && isBecomingTerminal;
 
     const updates: Record<string, unknown> = { updatedAt: now };
     if (input.title !== undefined) updates.title = input.title;
@@ -309,6 +344,8 @@ export async function PATCH(
     const mergeableFields = parsed.fields.filter(isMergeableTaskField);
     const sourceModel = [...policies.values()][0]?.sourceModel;
     let overrideChanges: LocalOverrideChange[] = [];
+    let recurrenceNextTaskId: string | null = null;
+    let statusTransitionApplied = true;
     runTransaction((tx) => {
       if (sourceModel === 'ingested' && mergeableFields.length > 0) {
         const stateRows = tx
@@ -350,18 +387,29 @@ export async function PATCH(
         .where(and(
           eq(tasks.id, id),
           expectedUpdatedAt ? eq(tasks.updatedAt, expectedUpdatedAt) : undefined,
+          isBecomingTerminal ? eq(tasks.status, currentTask.status) : undefined,
         ))
         .run();
       if (expectedUpdatedAt && updateResult.changes === 0) {
         throw new TaskRevisionConflictError('Task changed during update');
       }
+      if (isBecomingTerminal && updateResult.changes === 0) {
+        statusTransitionApplied = false;
+      }
 
-      if (input.estimatedDuration !== undefined || input.recurrence !== undefined) {
+      if (
+        input.estimatedDuration !== undefined
+        || input.recurrence !== undefined
+        || input.recurrenceMode !== undefined
+      ) {
         tx.insert(taskSchedules).values({
           taskId: id,
           scheduledDate: getLocalToday(),
           estimatedDuration: input.estimatedDuration,
           recurrence: input.recurrence,
+          recurrenceMode: input.recurrence === null
+            ? 'schedule'
+            : input.recurrenceMode,
           isTimeBlocked: false,
         }).onConflictDoUpdate({
           target: taskSchedules.taskId,
@@ -370,6 +418,11 @@ export async function PATCH(
               ? { estimatedDuration: input.estimatedDuration }
               : {}),
             ...(input.recurrence !== undefined ? { recurrence: input.recurrence } : {}),
+            ...(input.recurrence === null
+              ? { recurrenceMode: 'schedule' as const }
+              : input.recurrenceMode !== undefined
+                ? { recurrenceMode: input.recurrenceMode }
+                : {}),
           },
         }).run();
       }
@@ -428,10 +481,156 @@ export async function PATCH(
       if (suppressFutureAutoCompletion) {
         suppressAutoCompletionAfterReopen(tx, id, now);
       }
-      if (isBecomingTerminal) {
+      if (isBecomingTerminal && statusTransitionApplied) {
         supersedePendingReconciliationSuggestions(tx, id, now);
       }
+
+      if (shouldCreateCompletionOccurrence && statusTransitionApplied) {
+        const recurrence = currentSchedule[0]!.recurrence!;
+        const nextTaskId = randomUUID();
+        const recurrenceTimezone = getTimezone();
+        const includeCompletionTime = Boolean(
+          currentTask.dueDate?.includes('T') || currentSchedule[0]?.scheduledTime,
+        );
+        const nextDueDate = getCompletionAnchoredDueDate(
+          now,
+          recurrence,
+          recurrenceTimezone,
+          includeCompletionTime,
+        );
+        const nextScheduledDate = nextDueDate.includes('T')
+          ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'yyyy-MM-dd')
+          : nextDueDate;
+        const nextScheduledTime = includeCompletionTime
+          ? formatInTimeZone(now, recurrenceTimezone, 'HH:mm')
+          : null;
+        const metadata = parseTaskMetadataCompat(currentTask.metadata).metadata;
+        delete metadata.workTodoDirtyFields;
+        delete metadata.triageItemId;
+        metadata.missionControlTaskId = nextTaskId;
+        metadata.recurrencePreviousTaskId = id;
+
+        let nextReminderAt: string | null = null;
+        const relativeRule = currentTask.reminderRelative ?? '';
+        if (isReminderRelativeRule(relativeRule) && currentTask.reminderDueTime) {
+          const reminder = computeRelativeReminderAt({
+            dueDate: nextScheduledDate,
+            dueTime: currentTask.reminderDueTime,
+            timezone: recurrenceTimezone,
+            rule: relativeRule,
+          });
+          if (reminder.success) nextReminderAt = reminder.reminderAt;
+        }
+
+        const inserted = tx.insert(tasks).values({
+          id: nextTaskId,
+          sourceId: `local:${nextTaskId}`,
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          title: currentTask.title,
+          description: currentTask.description,
+          status: 'todo',
+          localDisposition: 'active',
+          priority: currentTask.priority,
+          dueDate: nextDueDate,
+          createdAt: now,
+          updatedAt: now,
+          completedAt: null,
+          recurrenceGeneratedFromTaskId: id,
+          parentId: currentTask.parentId,
+          depth: currentTask.depth,
+          isChecklistItem: currentTask.isChecklistItem,
+          sourceListId: currentTask.sourceListId,
+          sourceListName: currentTask.sourceListName,
+          assignee: currentTask.assignee,
+          metadata,
+          syncStatus: 'synced',
+          lastSyncedAt: now,
+          kanbanColumn: currentTask.kanbanColumn,
+          kanbanOrder: currentTask.kanbanOrder,
+          reminderAt: nextReminderAt,
+          reminderRelative: isReminderRelativeRule(currentTask.reminderRelative ?? '')
+            ? currentTask.reminderRelative
+            : null,
+          reminderDueTime: isReminderRelativeRule(currentTask.reminderRelative ?? '')
+            ? currentTask.reminderDueTime
+            : null,
+          effort: currentTask.effort,
+          isBulkImport: false,
+        }).onConflictDoNothing().run();
+
+        if (inserted.changes > 0) {
+          recurrenceNextTaskId = nextTaskId;
+          tx.insert(taskSchedules).values({
+            taskId: nextTaskId,
+            scheduledDate: nextScheduledDate,
+            scheduledTime: nextScheduledTime,
+            estimatedDuration: currentSchedule[0]?.estimatedDuration,
+            isTimeBlocked: currentSchedule[0]?.isTimeBlocked ?? false,
+            recurrence,
+            recurrenceMode: 'completion',
+          }).run();
+
+          const tagRows = tx.select({ tagId: taskTags.tagId })
+            .from(taskTags).where(eq(taskTags.taskId, id)).all();
+          if (tagRows.length) {
+            tx.insert(taskTags).values(tagRows.map((row) => ({
+              taskId: nextTaskId,
+              tagId: row.tagId,
+            }))).run();
+          }
+          const projectRows = tx.select({ projectId: taskProjects.projectId })
+            .from(taskProjects).where(eq(taskProjects.taskId, id)).all();
+          if (projectRows.length) {
+            tx.insert(taskProjects).values(projectRows.map((row) => ({
+              taskId: nextTaskId,
+              projectId: row.projectId,
+            }))).run();
+          }
+          const phaseRows = tx.select().from(projectPhaseItems)
+            .where(eq(projectPhaseItems.taskId, id)).all();
+          if (phaseRows.length) {
+            tx.insert(projectPhaseItems).values(phaseRows.map((row) => ({
+              ...row,
+              id: randomUUID(),
+              taskId: nextTaskId,
+              createdAt: now,
+            }))).run();
+          }
+          const dependencyRows = tx.select().from(taskDependencies)
+            .where(eq(taskDependencies.taskId, id)).all();
+          if (dependencyRows.length) {
+            tx.insert(taskDependencies).values(dependencyRows.map((row) => ({
+              ...row,
+              id: randomUUID(),
+              taskId: nextTaskId,
+              syncStatus: 'local' as const,
+              syncAction: null,
+              syncError: null,
+              lastSyncedAt: null,
+              createdAt: now,
+            }))).run();
+          }
+          const attachmentRows = tx.select().from(taskAttachments)
+            .where(eq(taskAttachments.taskId, id)).all();
+          if (attachmentRows.length) {
+            tx.insert(taskAttachments).values(attachmentRows.map((row) => ({
+              ...row,
+              id: randomUUID(),
+              taskId: nextTaskId,
+              createdAt: now,
+            }))).run();
+          }
+        } else {
+          recurrenceNextTaskId = tx.select({ id: tasks.id }).from(tasks)
+            .where(eq(tasks.recurrenceGeneratedFromTaskId, id)).get()?.id ?? null;
+        }
+      }
     });
+    if (shouldReturnCompletionOccurrence && !recurrenceNextTaskId) {
+      recurrenceNextTaskId = (await db.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.recurrenceGeneratedFromTaskId, id)).limit(1))[0]?.id ?? null;
+    }
 
     logger.info({
       taskId: id,
@@ -457,7 +656,9 @@ export async function PATCH(
       const [updatedTask] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
       if (updatedTask) await indexTaskSearch(updatedTask);
     }
-    const completedNow = input.status === 'done' && currentTask.status !== 'done';
+    const completedNow = input.status === 'done'
+      && currentTask.status !== 'done'
+      && statusTransitionApplied;
     if (completedNow) {
       emitEvent({
         type: 'task.completed',
@@ -521,6 +722,7 @@ export async function PATCH(
         ]),
       ),
       ...(reminder ? { reminder } : {}),
+      ...(recurrenceNextTaskId ? { recurrenceNextTaskId } : {}),
     });
   } catch (error) {
     if (error instanceof TaskRevisionConflictError) {
@@ -998,6 +1200,7 @@ export async function GET(
     const scheduleRow = await db.select({
       estimatedDuration: taskSchedules.estimatedDuration,
       recurrence: taskSchedules.recurrence,
+      recurrenceMode: taskSchedules.recurrenceMode,
     }).from(taskSchedules).where(eq(taskSchedules.taskId, id)).limit(1);
     const myDayRow = await db.select({ id: myDayItems.id })
       .from(myDayItems)
@@ -1037,6 +1240,7 @@ export async function GET(
         reminderTimezone: getTimezone(),
         estimatedDuration: scheduleRow[0]?.estimatedDuration ?? null,
         recurrence: scheduleRow[0]?.recurrence ?? legacyRecurrence,
+        recurrenceMode: scheduleRow[0]?.recurrenceMode ?? 'schedule',
         tagIds: taskTagRows.map(tt => tt.tagId),
         projectIds: taskProjectRows.map(tp => tp.projectId),
         subtasks,

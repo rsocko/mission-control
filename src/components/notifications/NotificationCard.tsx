@@ -63,6 +63,9 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   run_workflow: Zap,
   dismiss: X,
   snooze: Clock,
+  complete_task: CheckCircle,
+  dismiss_reminder: X,
+  remind_later: Clock,
 };
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
@@ -77,7 +80,10 @@ interface NotificationCardProps {
   onHandle?: () => void;
   onSnooze?: (duration: string) => void;
   onMute?: () => void;
-  onExecuteAction?: (actionId: string) => void | Promise<{ success: boolean }>;
+  onExecuteAction?: (
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => void | Promise<{ success: boolean }>;
 }
 
 interface PresentationMetadataChip {
@@ -375,7 +381,10 @@ export function NotificationCard({
 
   const aiSuggested = notification.aiSuggestedActionId;
 
-  const handleInlineAction = async (action: NotificationAction) => {
+  const handleInlineAction = async (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
     if (!onExecuteAction) return;
     if (
       action.requiresConfirmation
@@ -386,7 +395,9 @@ export function NotificationCard({
 
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result?.success === false) {
         toast.error(`${action.label} failed`);
       }
@@ -527,15 +538,25 @@ export function NotificationCard({
                 />
               )}
               {!panel && secondaryActions.map(action => (
-                <ActionButton
-                  key={action.id}
-                  action={action}
-                  levelConfig={levelConfig}
-                  isAiSuggested={action.id === aiSuggested}
-                  isLoading={pendingActionId === action.id}
-                  disabled={pendingActionId !== null}
-                  onClick={() => void handleInlineAction(action)}
-                />
+                action.actionType === 'remind_later' ? (
+                  <RemindLaterButton
+                    key={action.id}
+                    action={action}
+                    disabled={pendingActionId !== null}
+                    isLoading={pendingActionId === action.id}
+                    onSelect={(duration) => void handleInlineAction(action, { duration })}
+                  />
+                ) : (
+                  <ActionButton
+                    key={action.id}
+                    action={action}
+                    levelConfig={levelConfig}
+                    isAiSuggested={action.id === aiSuggested}
+                    isLoading={pendingActionId === action.id}
+                    disabled={pendingActionId !== null}
+                    onClick={() => void handleInlineAction(action)}
+                  />
+                )
               ))}
             </div>
           )}
@@ -600,7 +621,10 @@ export function NotificationCard({
 
 export interface NotificationDetailProps {
   notification: NotificationItem;
-  onExecuteAction: (actionId: string) => Promise<{ success: boolean }>;
+  onExecuteAction: (
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ success: boolean }>;
   onMarkRead?: () => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   onArchive?: () => void | Promise<void>;
@@ -636,7 +660,10 @@ export function NotificationDetail({
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
 
-  const handleAction = async (action: NotificationAction) => {
+  const handleAction = async (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
     if (
       action.requiresConfirmation
       && !window.confirm(`Are you sure you want to ${action.label.toLowerCase()}?`)
@@ -646,7 +673,9 @@ export function NotificationDetail({
 
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result.success) {
         toast.success(`${action.label} completed`);
       } else {
@@ -759,15 +788,25 @@ export function NotificationDetail({
               />
             )}
             {secondaryActions.map(action => (
-              <ActionButton
-                key={action.id}
-                action={action}
-                levelConfig={levelConfig}
-                isAiSuggested={action.id === notification.aiSuggestedActionId}
-                isLoading={pendingActionId === action.id}
-                disabled={pendingActionId !== null}
-                onClick={() => void handleAction(action)}
-              />
+              action.actionType === 'remind_later' ? (
+                <RemindLaterButton
+                  key={action.id}
+                  action={action}
+                  disabled={pendingActionId !== null}
+                  isLoading={pendingActionId === action.id}
+                  onSelect={(duration) => void handleAction(action, { duration })}
+                />
+              ) : (
+                <ActionButton
+                  key={action.id}
+                  action={action}
+                  levelConfig={levelConfig}
+                  isAiSuggested={action.id === notification.aiSuggestedActionId}
+                  isLoading={pendingActionId === action.id}
+                  disabled={pendingActionId !== null}
+                  onClick={() => void handleAction(action)}
+                />
+              )
             ))}
           </div>
         )}
@@ -975,6 +1014,73 @@ function SnoozeMenu({
                 className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] transition-colors"
               >
                 {opt.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+const REMIND_LATER_OPTIONS = [
+  { label: 'In 15 minutes', value: '15m' },
+  { label: 'In 1 hour', value: '1h' },
+  { label: 'Tomorrow morning', value: 'tomorrow_morning' },
+] as const;
+
+function RemindLaterButton({
+  action,
+  disabled,
+  isLoading,
+  onSelect,
+}: {
+  action: NotificationAction;
+  disabled: boolean;
+  isLoading: boolean;
+  onSelect: (duration: typeof REMIND_LATER_OPTIONS[number]['value']) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(value => !value);
+        }}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-wait disabled:opacity-60"
+      >
+        {isLoading ? <LoaderCircle size={13} className="animate-spin" /> : <Clock size={13} />}
+        {action.label}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.12 }}
+            role="menu"
+            className="absolute left-0 top-full z-50 mt-1 min-w-40 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 shadow-xl shadow-black/40"
+          >
+            {REMIND_LATER_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpen(false);
+                  onSelect(option.value);
+                }}
+                className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                {option.label}
               </button>
             ))}
           </motion.div>

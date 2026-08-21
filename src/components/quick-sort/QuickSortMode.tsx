@@ -866,7 +866,7 @@ export default function QuickSortMode() {
                 type="button"
                 onClick={() => void handleUndo()}
                 disabled={!lastOperation || busy}
-                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={lastOperation ? `Undo ${lastOperation.label}` : 'Nothing to undo'}
               >
                 <RotateCcw size={15} />

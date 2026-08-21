@@ -28,6 +28,17 @@ export function getQuickSortGestureAxis(offsetX: number, offsetY: number): 'x' |
   return null;
 }
 
+// A fast flick can end before Motion flushes a pan frame, so the axis is never locked
+// mid-gesture. Fall back to the final offsets so flicks stay as predictable as slow drags;
+// the same travel and dominance rules still apply.
+export function resolveQuickSortGestureAxis(
+  lockedAxis: 'x' | 'y' | null,
+  offsetX: number,
+  offsetY: number,
+): 'x' | 'y' | null {
+  return lockedAxis ?? getQuickSortGestureAxis(offsetX, offsetY);
+}
+
 function isCommittedSwipe({
   primaryOffset,
   secondaryOffset,
@@ -251,7 +262,7 @@ export default function QuickSortCard({
 
   const handleDragEnd = useCallback(
     (_: unknown, info: PanInfo) => {
-      const axis = dragAxis.current;
+      const axis = resolveQuickSortGestureAxis(dragAxis.current, info.offset.x, info.offset.y);
       dragAxis.current = null;
 
       const action = getQuickSortSwipeAction({

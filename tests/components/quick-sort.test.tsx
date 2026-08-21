@@ -5,6 +5,7 @@ import QuickSortActions from '@/components/quick-sort/QuickSortActions';
 import QuickSortCard, {
   getQuickSortGestureAxis,
   getQuickSortSwipeAction,
+  resolveQuickSortGestureAxis,
 } from '@/components/quick-sort/QuickSortCard';
 import type { QuickSortQueueTask } from '@/lib/hooks/useQuickSortData';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
@@ -298,6 +299,30 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(content).toHaveAttribute('tabindex', '0');
     expect(content).toHaveAttribute('aria-label', 'Task details');
     expect(screen.getByTestId('quick-sort-swipe-handle')).toHaveClass('h-11', 'touch-none');
+  });
+
+  it('resolves a flick axis at gesture end when no pan frame locked one', () => {
+    // A fast flick can end before Motion flushes a pan frame, leaving the axis unlocked.
+    expect(resolveQuickSortGestureAxis(null, 4, -140)).toBe('y');
+    expect(resolveQuickSortGestureAxis(null, -140, 6)).toBe('x');
+
+    // The fallback must not relax the travel or dominance rules.
+    expect(resolveQuickSortGestureAxis(null, 0, -8)).toBeNull();
+    expect(resolveQuickSortGestureAxis(null, 40, -38)).toBeNull();
+
+    // An axis locked during the drag still wins over the final offsets.
+    expect(resolveQuickSortGestureAxis('x', 20, -200)).toBe('x');
+    expect(resolveQuickSortGestureAxis('y', -200, 20)).toBe('y');
+
+    expect(getQuickSortSwipeAction({
+      axis: resolveQuickSortGestureAxis(null, 4, -140),
+      offsetX: 4,
+      offsetY: -140,
+      velocityX: 0,
+      velocityY: -900,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('skip');
   });
 
   it('requires meaningful, directionally dominant travel before committing gestures', () => {

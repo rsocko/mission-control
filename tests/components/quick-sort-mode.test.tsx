@@ -133,6 +133,17 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshQueue).toHaveBeenCalledOnce();
   });
 
+  it('keeps the icon-only undo control at a 44px touch target on mobile', () => {
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
+
+    const undo = screen.getByRole('button', { name: 'Nothing to undo' });
+    expect(undo.className).toContain('min-h-11');
+    expect(undo.className).toContain('min-w-11');
+    expect(undo.querySelector('span')?.className).toContain('hidden');
+  });
+
   it('opens task details as an inline desktop panel', () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       matches: false,

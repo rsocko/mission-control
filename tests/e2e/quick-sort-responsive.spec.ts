@@ -295,7 +295,62 @@ for (const viewport of [
       (element) => element.clientHeight,
     )).toBeGreaterThanOrEqual(44);
     await expectOnlyBoundedRegionsScroll(page);
+    await expectComfortableTouchTargets(page);
   });
+}
+
+test('every visible Quick Sort control keeps a 44px touch target on iPhone 16 Pro Max', async ({ page }) => {
+  await openPriorityQueue(page);
+  await expectComfortableTouchTargets(page);
+
+  await page.getByRole('button', { name: /Critical/ }).click();
+  await expect(page.getByRole('heading', { name: 'Next task' })).toBeVisible();
+  await expectComfortableTouchTargets(page);
+});
+
+test('landscape swaps the queue order control into the header instead of dropping it', async ({ page }) => {
+  await openPriorityQueue(page, {
+    viewport: { width: 620, height: 390 },
+    safeAreaTop: 12,
+    safeAreaBottom: 21,
+  });
+
+  const layout = await page.evaluate(() => {
+    const landscapeOrder = document.querySelector<HTMLElement>('.quick-sort-landscape-order')!;
+    const orderRow = document.querySelector<HTMLElement>('.quick-sort-order-row')!;
+    return {
+      landscapeOrderDisplay: getComputedStyle(landscapeOrder).display,
+      landscapeOrderControls: landscapeOrder.querySelectorAll('button, [role="button"]').length,
+      orderRowDisplay: getComputedStyle(orderRow).display,
+    };
+  });
+
+  expect(layout.landscapeOrderDisplay).not.toBe('none');
+  expect(layout.landscapeOrderControls).toBeGreaterThan(0);
+  expect(layout.orderRowDisplay).toBe('none');
+  await expectStableQuickSortShell(page);
+});
+
+async function expectComfortableTouchTargets(page: Page) {
+  const undersized = await page.evaluate(() => {
+    const mode = document.querySelector<HTMLElement>('[data-testid="quick-sort-mode"]')!;
+    return Array.from(
+      mode.querySelectorAll<HTMLElement>('button, a[href], [role="button"], input, select'),
+    )
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        return rect.height < 43.5 || rect.width < 43.5;
+      })
+      .map((element) => {
+        const rect = element.getBoundingClientRect();
+        const label = element.getAttribute('aria-label') || element.textContent || '';
+        return `${label.trim().slice(0, 40)} ${Math.round(rect.width)}x${Math.round(rect.height)}`;
+      });
+  });
+  expect(undersized).toEqual([]);
 }
 
 test('button actions still execute without destabilizing the shell', async ({ page }) => {
@@ -335,7 +390,23 @@ test('short screens bound overflowing mode actions above the persistent fallback
   await expectOnlyBoundedRegionsScroll(page);
 });
 
-test('swipe handle executes a deliberate skip gesture', async ({ page }) => {
+async function dispatchPointer(page: Page, type: string, clientX: number, clientY: number, down: boolean) {
+  await page.locator('body').dispatchEvent(type, {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    buttons: down ? 1 : 0,
+    clientX,
+    clientY,
+  });
+}
+
+const nextFrame = (page: Page) => page.evaluate(() => (
+  new Promise((resolve) => { requestAnimationFrame(() => resolve(null)); })
+));
+
+test('swipe handle executes a deliberate skip drag', async ({ page }) => {
   await openPriorityQueue(page);
   const operationRequest = page.waitForRequest((request) => (
     request.url().endsWith('/api/tasks/quick-sort/operations')
@@ -357,30 +428,82 @@ test('swipe handle executes a deliberate skip gesture', async ({ page }) => {
     clientY: centerY,
   });
   for (let step = 1; step <= 8; step += 1) {
-    await page.locator('body').dispatchEvent('pointermove', {
-      pointerId: 1,
-      pointerType: 'touch',
-      isPrimary: true,
-      button: 0,
-      buttons: 1,
-      clientX: centerX,
-      clientY: centerY - (140 * step) / 8,
-    });
+    await dispatchPointer(page, 'pointermove', centerX, centerY - (140 * step) / 8, true);
+    await nextFrame(page);
   }
-  await page.locator('body').dispatchEvent('pointerup', {
-    pointerId: 1,
-    pointerType: 'touch',
-    isPrimary: true,
-    button: 0,
-    buttons: 0,
-    clientX: centerX,
-    clientY: centerY - 140,
-  });
+  await dispatchPointer(page, 'pointerup', centerX, centerY - 140, false);
 
   const request = await operationRequest;
   const body = JSON.parse(request.postData() ?? '{}');
   expect(body.action).toBe('skipped');
   expect(new Date(body.patch.snoozedUntil).getTime()).toBeGreaterThan(Date.now());
   await expect(page.getByRole('heading', { name: 'Next task' })).toBeVisible();
+  await expectStableQuickSortShell(page);
+});
+
+test('swipe handle executes a fast flick that outruns the pan frame', async ({ page }) => {
+  await openPriorityQueue(page);
+  const operationRequest = page.waitForRequest((request) => (
+    request.url().endsWith('/api/tasks/quick-sort/operations')
+    && request.method() === 'POST'
+  ));
+  const handle = page.getByTestId('quick-sort-swipe-handle');
+  const box = (await handle.boundingBox())!;
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+
+  await handle.dispatchEvent('pointerdown', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    buttons: 1,
+    clientX: centerX,
+    clientY: centerY,
+  });
+  // A small nudge starts the pan but stays under the axis-lock distance.
+  await dispatchPointer(page, 'pointermove', centerX, centerY - 6, true);
+  await nextFrame(page);
+  // The flick and the lift land inside one frame, so the axis is never locked mid-gesture.
+  await dispatchPointer(page, 'pointermove', centerX, centerY - 140, true);
+  await dispatchPointer(page, 'pointerup', centerX, centerY - 140, false);
+
+  const request = await operationRequest;
+  expect(JSON.parse(request.postData() ?? '{}').action).toBe('skipped');
+  await expect(page.getByRole('heading', { name: 'Next task' })).toBeVisible();
+  await expectStableQuickSortShell(page);
+});
+
+test('swipe handle ignores a diagonal gesture without a dominant axis', async ({ page }) => {
+  await openPriorityQueue(page);
+  let operationRequests = 0;
+  page.on('request', (request) => {
+    if (request.url().endsWith('/api/tasks/quick-sort/operations') && request.method() === 'POST') {
+      operationRequests += 1;
+    }
+  });
+
+  const handle = page.getByTestId('quick-sort-swipe-handle');
+  const box = (await handle.boundingBox())!;
+  const centerX = box.x + box.width / 2;
+  const centerY = box.y + box.height / 2;
+  await handle.dispatchEvent('pointerdown', {
+    pointerId: 1,
+    pointerType: 'touch',
+    isPrimary: true,
+    button: 0,
+    buttons: 1,
+    clientX: centerX,
+    clientY: centerY,
+  });
+  await dispatchPointer(page, 'pointermove', centerX - 6, centerY - 6, true);
+  await nextFrame(page);
+  await dispatchPointer(page, 'pointermove', centerX - 90, centerY - 90, true);
+  await nextFrame(page);
+  await dispatchPointer(page, 'pointerup', centerX - 90, centerY - 90, false);
+  await nextFrame(page);
+
+  await expect(page.getByRole('heading', { name: /Long mobile card content/ })).toBeVisible();
+  expect(operationRequests).toBe(0);
   await expectStableQuickSortShell(page);
 });

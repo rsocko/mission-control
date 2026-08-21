@@ -1,15 +1,22 @@
 'use client';
 
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { Check, ChevronDown, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react';
+import { Check, ChevronDown, Clock, FolderOpen, Loader2, Plus, Trash2 } from 'lucide-react';
 import {
   Select,
+  SelectGroup,
   SelectTrigger,
   SelectContent,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
 } from '@/components/ui/select';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
+import {
+  groupProjectTargets,
+  saveRecentProjectTarget,
+} from '@/lib/projects/project-targets';
 import { cn } from '@/lib/utils';
 import { taskPhaseInProject } from './useTaskDetailData';
 import type { HubProject, TaskDetailMode } from './task-detail-types';
@@ -55,6 +62,25 @@ export function TaskProjectAssignmentSection({
   onProjectPhaseChange,
 }: TaskProjectAssignmentSectionProps) {
   const allProjectsAdded = assignableProjects.every((project) => projectIds.includes(project.id));
+  const availableProjects = assignableProjects.filter((project) => !projectIds.includes(project.id));
+  const { recentProjects, categories } = groupProjectTargets(availableProjects);
+
+  function handleAddProject(projectId: string) {
+    saveRecentProjectTarget(projectId);
+    onAddProject(projectId);
+  }
+
+  function renderProject(project: HubProject, recent = false) {
+    return (
+      <SelectItem key={project.id} value={project.id}>
+        <span className="inline-flex items-center gap-1.5">
+          {recent && <Clock size={11} className="shrink-0 text-[var(--text-muted)]" />}
+          <IconRenderer value={project.icon} size={14} color={project.color} fallback={<span>📁</span>} />
+          {project.name}
+        </span>
+      </SelectItem>
+    );
+  }
 
   return (
     <section className={cn(
@@ -67,7 +93,7 @@ export function TaskProjectAssignmentSection({
         <h3 className="text-xs font-semibold text-[var(--text-secondary)]">Projects &amp; phases</h3>
         <Select
           value=""
-          onValueChange={onAddProject}
+          onValueChange={handleAddProject}
           disabled={!canEditProjects || allProjectsAdded}
         >
           <SelectTrigger
@@ -83,13 +109,23 @@ export function TaskProjectAssignmentSection({
             <span className="flex items-center gap-1"><Plus size={11} />Add project</span>
           </SelectTrigger>
           <SelectContent>
-            {assignableProjects.filter((project) => !projectIds.includes(project.id)).map((project) => (
-              <SelectItem key={project.id} value={project.id}>
-                <span className="inline-flex items-center gap-1.5">
-                  <IconRenderer value={project.icon} size={14} color={project.color} fallback={<span>📁</span>} />
-                  {project.name}
-                </span>
-              </SelectItem>
+            {recentProjects.length > 0 && (
+              <>
+                <SelectGroup>
+                  <SelectLabel className="text-xs uppercase tracking-wider">Recent</SelectLabel>
+                  {recentProjects.map((project) => renderProject(project, true))}
+                </SelectGroup>
+                <SelectSeparator />
+              </>
+            )}
+            {categories.map(({ category, projects: categoryProjects }, index) => (
+              <SelectGroup key={category || '__uncategorized'}>
+                {index > 0 && <SelectSeparator />}
+                <SelectLabel className="text-xs uppercase tracking-wider">
+                  {category || 'Uncategorized'}
+                </SelectLabel>
+                {categoryProjects.map((project) => renderProject(project))}
+              </SelectGroup>
             ))}
           </SelectContent>
         </Select>

@@ -28,6 +28,10 @@ import {
   taskFieldBlockedReason,
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
+import {
+  groupProjectTargets,
+  saveRecentProjectTarget,
+} from '@/lib/projects/project-targets';
 import { MobileTaskActions } from './MobileTaskActions';
 
 // Shared context-menu panel styles
@@ -807,24 +811,6 @@ function MoveToListSearch({ sourceLists, listGroups = [], onSelect, onMoveToSour
   );
 }
 
-// ─── Add to project MRU helpers ──────────────────────────────────────────────
-
-const RECENT_PROJECT_TARGETS_KEY = 'mission-control:recent-project-targets';
-const MAX_RECENT_PROJECTS = 5;
-
-function getRecentProjectTargets(): string[] {
-  try {
-    const stored = localStorage.getItem(RECENT_PROJECT_TARGETS_KEY);
-    return stored ? JSON.parse(stored) : [];
-  } catch { return []; }
-}
-
-function saveRecentProjectTarget(projectId: string) {
-  const recent = getRecentProjectTargets().filter((id) => id !== projectId);
-  recent.unshift(projectId);
-  localStorage.setItem(RECENT_PROJECT_TARGETS_KEY, JSON.stringify(recent.slice(0, MAX_RECENT_PROJECTS)));
-}
-
 function AddToProjectMenu({
   projects,
   taskProjectIds = [],
@@ -836,27 +822,7 @@ function AddToProjectMenu({
   taskProjectPhaseMemberships?: TaskProjectPhaseMembership[];
   onSelect: (projectId: string, phaseId?: string | null) => void;
 }) {
-  const recentIds = getRecentProjectTargets();
-
-  // Recent projects first, then the rest grouped by category
-  const recentProjects = recentIds
-    .map((id) => projects.find((p) => p.id === id))
-    .filter(Boolean) as HubProject[];
-  const restProjects = projects.filter((p) => !recentIds.includes(p.id));
-
-  // Group remaining projects by category
-  const grouped = new Map<string, HubProject[]>();
-  for (const p of restProjects) {
-    const cat = p.category || '';
-    if (!grouped.has(cat)) grouped.set(cat, []);
-    grouped.get(cat)!.push(p);
-  }
-  // Sort categories alphabetically, uncategorized last
-  const sortedCategories = [...grouped.keys()].sort((a, b) => {
-    if (!a) return 1;
-    if (!b) return -1;
-    return a.localeCompare(b);
-  });
+  const { recentProjects, categories } = groupProjectTargets(projects);
 
   function handleSelect(project: HubProject, phaseId?: string | null) {
     saveRecentProjectTarget(project.id);
@@ -947,15 +913,15 @@ function AddToProjectMenu({
           <ContextMenu.Separator className="my-1 h-px bg-[var(--border-subtle)]" />
         </>
       )}
-      {sortedCategories.map((cat, idx) => (
-        <React.Fragment key={cat || '__uncategorized'}>
+      {categories.map(({ category, projects: categoryProjects }, idx) => (
+        <React.Fragment key={category || '__uncategorized'}>
           {idx > 0 && <ContextMenu.Separator className="my-1 h-px bg-[var(--border-subtle)]" />}
-          {cat && (
+          {category && (
             <ContextMenu.Label className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
-              {cat}
+              {category}
             </ContextMenu.Label>
           )}
-          {grouped.get(cat)!.map((p) => renderProject(p))}
+          {categoryProjects.map((p) => renderProject(p))}
         </React.Fragment>
       ))}
     </>

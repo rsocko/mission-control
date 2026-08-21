@@ -1177,6 +1177,45 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('option', { name: /Other hidden project/ })).not.toBeInTheDocument();
   });
 
+  it('shows recent projects first and groups the remaining project choices by category', async () => {
+    localStorage.setItem('mission-control:recent-project-targets', JSON.stringify(['project-recent']));
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [
+        { id: 'project-work', name: 'Work project', icon: null, color: '#60a5fa', category: 'Work' },
+        { id: 'project-personal', name: 'Personal project', icon: null, color: '#60a5fa', category: 'Personal' },
+        { id: 'project-recent', name: 'Recent project', icon: null, color: '#60a5fa', category: 'Personal' },
+        { id: 'project-other', name: 'Other project', icon: null, color: '#60a5fa', category: null },
+      ] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Add project' }));
+
+    expect(screen.getAllByRole('option').map((option) => option.textContent?.replace('📁', ''))).toEqual([
+      'Recent project',
+      'Personal project',
+      'Work project',
+      'Other project',
+    ]);
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+    expect(screen.getByText('Personal')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('Uncategorized')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: /Work project/ }));
+    expect(JSON.parse(localStorage.getItem('mission-control:recent-project-targets') ?? '[]')).toEqual([
+      'project-work',
+      'project-recent',
+    ]);
+  });
+
   it.each(['dialog', 'workspace'] as const)(
     'places relationships in the approved %s primary-column grid slot',
     async (mode) => {

@@ -84,6 +84,7 @@ export interface HubProject {
   name: string;
   color: string;
   icon: string | null;
+  category?: string | null;
   hidden?: boolean;
 }
 

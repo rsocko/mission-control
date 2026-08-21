@@ -1,9 +1,15 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications, notificationActions } from '@/db/schema';
-import { eq, and, lt, or } from 'drizzle-orm';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import db, { runTransaction } from '@/db';
+import {
+  notifications,
+  notificationActions,
+  pushPreferences,
+  tasks,
+} from '@/db/schema';
+import { eq, and, isNull, lt, notInArray, or } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
-import { isDemoMode } from '@/lib/mode';
+import { getTimezone, isDemoMode } from '@/lib/mode';
 import {
   dismissNotificationsAndEnqueueWritebacks,
   wakeNotificationWritebackDispatcher,
@@ -16,6 +22,36 @@ import {
   normalizeNotificationUrl,
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
+
+const TERMINAL_TASK_STATUSES = ['done', 'cancelled'] as const;
+const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
+type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
+
+class ReminderActionConflictError extends Error {}
+
+function isRemindLaterDuration(value: unknown): value is RemindLaterDuration {
+  return REMIND_LATER_DURATIONS.includes(value as RemindLaterDuration);
+}
+
+export function getRemindLaterTarget(
+  duration: RemindLaterDuration,
+  now: Date,
+  timezone: string,
+  morningHour: number,
+): string {
+  if (duration === '15m') return new Date(now.getTime() + 15 * 60_000).toISOString();
+  if (duration === '1h') return new Date(now.getTime() + 60 * 60_000).toISOString();
+
+  const localDate = formatInTimeZone(now, timezone, 'yyyy-MM-dd');
+  const [year, month, day] = localDate.split('-').map(Number);
+  const tomorrow = new Date(Date.UTC(year, month - 1, day + 1))
+    .toISOString()
+    .slice(0, 10);
+  return fromZonedTime(
+    `${tomorrow}T${String(morningHour).padStart(2, '0')}:00:00`,
+    timezone,
+  ).toISOString();
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -152,6 +188,149 @@ export async function POST(
         return NextResponse.json({
           success: true,
           result: { type: 'navigate', target },
+        });
+      }
+
+      case 'remind_later':
+      case 'complete_task':
+      case 'dismiss_reminder': {
+        if (notification.templateKey !== 'task_reminder' || !notification.relatedTaskId) {
+          return ApiErrors.badRequest('Reminder actions require a task reminder notification');
+        }
+        const duration = body.duration;
+        if (action.actionType === 'remind_later' && !isRemindLaterDuration(duration)) {
+          return ApiErrors.badRequest('Invalid duration. Use: 15m, 1h, tomorrow_morning');
+        }
+
+        let completionResult: Record<string, unknown> = {};
+        if (action.actionType === 'complete_task') {
+          const { PATCH: patchTask } = await import('@/app/api/tasks/[id]/route');
+          const completionResponse = await patchTask(new Request(
+            `http://localhost/api/tasks/${encodeURIComponent(notification.relatedTaskId)}`,
+            {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: 'done' }),
+            },
+          ), {
+            params: Promise.resolve({ id: notification.relatedTaskId }),
+          });
+          completionResult = asRecord(await completionResponse.json());
+          if (!completionResponse.ok) {
+            return NextResponse.json(completionResult, { status: completionResponse.status });
+          }
+        }
+
+        const actionNow = new Date();
+        const actionNowIso = actionNow.toISOString();
+        const timezone = getTimezone();
+        const morningHour = db.select({ morningHour: pushPreferences.morningHour })
+          .from(pushPreferences)
+          .where(eq(pushPreferences.id, 'default'))
+          .get()?.morningHour ?? 8;
+        const reminderAt = action.actionType === 'remind_later'
+          ? getRemindLaterTarget(duration as RemindLaterDuration, actionNow, timezone, morningHour)
+          : null;
+        try {
+          runTransaction((tx) => {
+            const liveNotification = tx.select().from(notifications)
+              .where(eq(notifications.id, id))
+              .get();
+            const task = tx.select().from(tasks)
+              .where(eq(tasks.id, notification.relatedTaskId!))
+              .get();
+            if (!liveNotification || !task) {
+              throw new ReminderActionConflictError('The reminder task no longer exists');
+            }
+            if (
+              liveNotification.disposition !== 'inbox'
+              || liveNotification.sourceState !== 'active'
+            ) {
+              throw new ReminderActionConflictError('This reminder has already been handled');
+            }
+            if (
+              TERMINAL_TASK_STATUSES.includes(
+                task.status as typeof TERMINAL_TASK_STATUSES[number],
+              )
+              && !(action.actionType === 'complete_task' && task.status === 'done')
+            ) {
+              throw new ReminderActionConflictError('This task is already complete or cancelled');
+            }
+
+            const claimed = tx.update(notificationActions).set({
+              executionState: 'running',
+              claimedAt: actionNowIso,
+              lastError: null,
+            }).where(and(
+              eq(notificationActions.id, actionId),
+              eq(notificationActions.notificationId, id),
+              eq(notificationActions.executionState, 'pending'),
+            )).run();
+            if (claimed.changes !== 1) {
+              throw new ReminderActionConflictError('This reminder action has already been handled');
+            }
+
+            if (action.actionType === 'remind_later') {
+              const scheduled = tx.update(tasks).set({
+                reminderAt,
+                updatedAt: actionNowIso,
+              }).where(and(
+                eq(tasks.id, task.id),
+                isNull(tasks.reminderAt),
+                notInArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
+              )).run();
+              if (scheduled.changes !== 1) {
+                throw new ReminderActionConflictError(
+                  'The task reminder changed before it could be rescheduled',
+                );
+              }
+            } else if (action.actionType === 'dismiss_reminder') {
+              tx.update(tasks).set({
+                reminderAt: null,
+                reminderRelative: null,
+                reminderDueTime: null,
+                updatedAt: actionNowIso,
+              }).where(eq(tasks.id, task.id)).run();
+            }
+
+            const metadata = parseActionPayload(liveNotification.metadata);
+            const notificationPatch = action.actionType === 'dismiss_reminder'
+              ? legacyStateMutationPatch(liveNotification, 'dismissed', actionNowIso)
+              : {
+                  ...legacyStateMutationPatch(liveNotification, 'archived', actionNowIso),
+                  archivedAt: actionNowIso,
+                };
+            tx.update(notifications).set({
+              ...notificationPatch,
+              isActionable: false,
+              primaryActionId: null,
+              metadata: {
+                ...metadata,
+                reminderAction: action.actionType,
+                reminderActionAt: actionNowIso,
+                ...(reminderAt ? { rescheduledFor: reminderAt } : {}),
+              },
+            }).where(eq(notifications.id, id)).run();
+            tx.update(notificationActions).set({
+              executionState: 'completed',
+              completedAt: actionNowIso,
+              lastError: null,
+            }).where(eq(notificationActions.notificationId, id)).run();
+          });
+        } catch (error) {
+          if (error instanceof ReminderActionConflictError) {
+            return NextResponse.json({ success: false, error: error.message }, { status: 409 });
+          }
+          throw error;
+        }
+
+        return NextResponse.json({
+          success: true,
+          result: {
+            type: action.actionType,
+            ...(reminderAt ? { reminderAt } : {}),
+            ...(action.actionType === 'complete_task' ? completionResult : {}),
+          },
         });
       }
 

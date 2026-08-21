@@ -14,7 +14,13 @@ import {
   sql,
 } from 'drizzle-orm';
 import db, { runTransaction } from '@/db';
-import { taskReminderOccurrences, taskSchedules, tasks } from '@/db/schema';
+import {
+  notificationActions,
+  notifications,
+  taskReminderOccurrences,
+  taskSchedules,
+  tasks,
+} from '@/db/schema';
 import {
   createNotificationsInTransaction,
   wakeNotificationDeliveryDispatcher,
@@ -198,10 +204,62 @@ function fireClaim(claimed: ClaimedReminder, now: Date): 'fired' | 'cancelled' {
         scheduledAt: claimed.occurrence.scheduledAt,
         reminderOccurrenceId: claimed.occurrence.id,
       },
+      isActionable: true,
     }], {
       now,
       wakeDispatcher: false,
     });
+    const actionId = (suffix: string) => `${created.notification.id}:${suffix}`;
+    tx.insert(notificationActions).values([
+      {
+        id: actionId('view'),
+        notificationId: created.notification.id,
+        actionType: 'navigate',
+        label: 'View task',
+        icon: 'arrow-right',
+        variant: 'primary',
+        isPrimary: true,
+        sortOrder: 0,
+        payload: { target: `/today?taskId=${encodeURIComponent(task.id)}` },
+        createdBy: 'system',
+      },
+      {
+        id: actionId('remind-later'),
+        notificationId: created.notification.id,
+        actionType: 'remind_later',
+        label: 'Remind later',
+        icon: 'clock',
+        variant: 'secondary',
+        sortOrder: 1,
+        payload: {},
+        createdBy: 'system',
+      },
+      {
+        id: actionId('complete'),
+        notificationId: created.notification.id,
+        actionType: 'complete_task',
+        label: 'Complete task',
+        icon: 'check-circle',
+        variant: 'secondary',
+        sortOrder: 2,
+        payload: {},
+        createdBy: 'system',
+      },
+      {
+        id: actionId('dismiss'),
+        notificationId: created.notification.id,
+        actionType: 'dismiss_reminder',
+        label: 'Dismiss reminder',
+        icon: 'x',
+        variant: 'danger',
+        sortOrder: 3,
+        payload: {},
+        createdBy: 'system',
+      },
+    ]).onConflictDoNothing().run();
+    tx.update(notifications).set({
+      primaryActionId: actionId('view'),
+    }).where(eq(notifications.id, created.notification.id)).run();
 
     const completed = tx.update(taskReminderOccurrences).set({
       state: 'fired',

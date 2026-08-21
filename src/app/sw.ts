@@ -287,12 +287,32 @@ self.addEventListener("sync", (event: ExtendableEvent & { tag?: string }) => {
 self.addEventListener("push", (event: PushEvent) => {
   const data = event.data?.json() ?? {};
   const title = data.title || "Mission Control";
-  const options: NotificationOptions = {
+  const reminderActions = data.kind === "task_reminder"
+    ? [
+        { action: "remind-15m", title: "15 minutes" },
+        { action: "remind-1h", title: "1 hour" },
+        { action: "remind-tomorrow", title: "Tomorrow" },
+        { action: "complete-task", title: "Complete" },
+        { action: "dismiss-reminder", title: "Dismiss" },
+      ]
+    : [];
+  const notificationConstructor = Notification as unknown as { maxActions?: number };
+  const maxActions = typeof notificationConstructor.maxActions === "number"
+    ? notificationConstructor.maxActions
+    : reminderActions.length;
+  const options: NotificationOptions & {
+    actions?: Array<{ action: string; title: string }>;
+  } = {
     body: data.body || "",
     icon: "/icon-v4-192.png",
     badge: "/icon-v4-192.png",
     tag: data.tag || "mc-notification",
-    data: { url: data.url || "/" },
+    data: {
+      url: data.url || "/",
+      notificationId: data.notificationId,
+      kind: data.kind,
+    },
+    actions: reminderActions.slice(0, maxActions),
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });
@@ -300,6 +320,32 @@ self.addEventListener("push", (event: PushEvent) => {
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close();
   const url = event.notification.data?.url || "/";
+  const notificationId = event.notification.data?.notificationId;
+  const reminderAction = event.action && notificationId
+    ? {
+        "remind-15m": { suffix: "remind-later", body: { duration: "15m" } },
+        "remind-1h": { suffix: "remind-later", body: { duration: "1h" } },
+        "remind-tomorrow": { suffix: "remind-later", body: { duration: "tomorrow_morning" } },
+        "complete-task": { suffix: "complete", body: {} },
+        "dismiss-reminder": { suffix: "dismiss", body: {} },
+      }[event.action]
+    : undefined;
+
+  if (reminderAction) {
+    const actionId = `${notificationId}:${reminderAction.suffix}`;
+    event.waitUntil(
+      fetch(`/api/notifications/${encodeURIComponent(notificationId)}/actions/${encodeURIComponent(actionId)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(reminderAction.body),
+      }).then((response) => {
+        if (!response.ok) return self.clients.openWindow(`/notifications?id=${encodeURIComponent(notificationId)}`);
+      }).catch(() => (
+        self.clients.openWindow(`/notifications?id=${encodeURIComponent(notificationId)}`)
+      )),
+    );
+    return;
+  }
   event.waitUntil(
     self.clients
       .matchAll({ type: "window", includeUncontrolled: true })

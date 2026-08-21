@@ -152,6 +152,7 @@ export function AddTaskModal({
   const [effort, setEffort] = useState<number | null>(initialParsed?.effort || null);
   const [customDurationInput, setCustomDurationInput] = useState('');
   const [recurrence, setRecurrence] = useState<string>(initialParsed?.recurrence || 'none');
+  const [recurrenceMode, setRecurrenceMode] = useState<'schedule' | 'completion'>('schedule');
   const [availableLists, setAvailableLists] = useState<SourceList[]>([]);
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>(initialListId || initialDestination.listId || '');
@@ -176,7 +177,6 @@ export function AddTaskModal({
       setSelectedListId('');
       return;
     }
-
     // Find the connector id (use the base connector, not list-level destination)
     const connectorId = destination.id;
     fetch(`/api/connectors/${connectorId}/lists`)
@@ -311,6 +311,7 @@ export function AddTaskModal({
           estimatedDuration: estimatedDuration || undefined,
           effort: effort || undefined,
           recurrence: recurrence !== 'none' ? recurrence : undefined,
+          recurrenceMode: recurrence !== 'none' ? recurrenceMode : undefined,
           triageItemId,
         }),
       });
@@ -347,6 +348,7 @@ export function AddTaskModal({
           setEffort(null);
           setCustomDurationInput('');
           setRecurrence('none');
+          setRecurrenceMode('schedule');
           setAddToMyDay(false);
           setTagSearchQuery('');
           setShowTagDropdown(false);
@@ -541,7 +543,11 @@ export function AddTaskModal({
               {destinations.filter(d => !d.listId).map((dest) => (
                 <button
                   key={dest.id}
-                  onClick={() => { setDestination(dest); setSelectedListId(''); }}
+                  onClick={() => {
+                    setDestination(dest);
+                    setSelectedListId('');
+                    if (dest.connectorType !== 'local') setRecurrenceMode('schedule');
+                  }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                     destination.id === dest.id && !destination.listId
                       ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent-400)]'
@@ -821,7 +827,14 @@ export function AddTaskModal({
                 <Repeat size={10} />
                 Repeat
               </label>
-              <RecurrencePicker value={recurrence} onChange={setRecurrence} variant="full" />
+              <RecurrencePicker
+                value={recurrence}
+                onChange={setRecurrence}
+                mode={recurrenceMode}
+                onModeChange={setRecurrenceMode}
+                completionModeAvailable={destination.connectorType === 'local'}
+                variant="full"
+              />
               {recurrence !== 'none' && ['ms-todo', 'outlook-calendar'].includes(destination.connectorType) && (
                 <p className="text-xs text-[var(--text-muted)] mt-1">
                   Synced to {destination.connectorType === 'ms-todo' ? 'Microsoft To Do' : 'Outlook'}

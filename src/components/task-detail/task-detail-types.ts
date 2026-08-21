@@ -52,6 +52,7 @@ export interface TaskDetail {
   metadata: string | null;
   estimatedDuration?: number | null;
   recurrence?: string | null;
+  recurrenceMode?: 'schedule' | 'completion';
   effort?: number | null;
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;

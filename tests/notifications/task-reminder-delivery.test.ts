@@ -20,6 +20,7 @@ beforeAll(async () => {
 beforeEach(() => {
   db.delete(schema.notificationDeliveryEvents).run();
   db.delete(schema.taskReminderOccurrences).run();
+  db.delete(schema.notificationActions).run();
   db.delete(schema.notifications).run();
   db.delete(schema.taskSchedules).run();
   db.delete(schema.tasks).run();
@@ -64,6 +65,25 @@ describe('durable task reminder delivery', () => {
         templateKey: 'task_reminder',
         relatedTaskId: 'missed',
         navigationTarget: '/today?taskId=missed',
+      }),
+    ]);
+    expect(db.select().from(schema.notificationActions).all()).toEqual([
+      expect.objectContaining({
+        actionType: 'navigate',
+        label: 'View task',
+        isPrimary: true,
+      }),
+      expect.objectContaining({
+        actionType: 'remind_later',
+        label: 'Remind later',
+      }),
+      expect.objectContaining({
+        actionType: 'complete_task',
+        label: 'Complete task',
+      }),
+      expect.objectContaining({
+        actionType: 'dismiss_reminder',
+        label: 'Dismiss reminder',
       }),
     ]);
     expect(db.select().from(schema.taskReminderOccurrences).all()).toEqual([

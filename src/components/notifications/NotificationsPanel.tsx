@@ -84,8 +84,12 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
       focusTarget?.focus();
     });
   }, [setSelectedId]);
-  const handleExecuteAction = useCallback(async (notificationId: string, actionId: string) => {
-    const result = await executeAction(notificationId, actionId);
+  const handleExecuteAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
+    const result = await executeAction(notificationId, actionId, params);
     if (result.success && selectedIdRef.current === notificationId) {
       setSelectedId(null);
       setSelectedSnapshot(null);
@@ -151,7 +155,7 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
             <NotificationDetail
               notification={selectedNotification}
               onClose={() => closePreview(true)}
-              onExecuteAction={(actionId) => handleExecuteAction(selectedNotification.id, actionId)}
+              onExecuteAction={(actionId, params) => handleExecuteAction(selectedNotification.id, actionId, params)}
               onMarkRead={async () => {
                 if (isNotificationUnread(selectedNotification)) {
                   await hook.markRead([selectedNotification.id]);
@@ -350,7 +354,11 @@ function NotificationGroup({
     notification: (typeof hook.notifications)[number],
     trigger: HTMLElement | null,
   ) => void;
-  onExecuteAction: (notificationId: string, actionId: string) => Promise<{ success: boolean }>;
+  onExecuteAction: (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ success: boolean }>;
 }) {
   if (items.length === 0) return null;
 
@@ -388,7 +396,7 @@ function NotificationGroup({
               onMute={() => notification.mutedAt
                 ? hook.unmute([notification.id])
                 : hook.mute([notification.id])}
-              onExecuteAction={(actionId) => onExecuteAction(notification.id, actionId)}
+              onExecuteAction={(actionId, params) => onExecuteAction(notification.id, actionId, params)}
             />
           ))}
         </AnimatePresence>

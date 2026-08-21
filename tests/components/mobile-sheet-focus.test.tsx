@@ -88,6 +88,21 @@ describe('MobileSheet focus management', () => {
     expect(input).toHaveFocus();
   });
 
+  it('uses an explicit accessible label instead of the visual title', () => {
+    render(
+      <MobileSheet
+        isOpen
+        onClose={() => {}}
+        title="Notification details"
+        ariaLabel="Notification: Open me"
+      >
+        <div>Content</div>
+      </MobileSheet>,
+    );
+
+    expect(screen.getByRole('dialog', { name: 'Notification: Open me' })).toBeInTheDocument();
+  });
+
   it('uses deliberate distance and velocity thresholds for drag dismissal', () => {
     expect(shouldDismissMobileSheet(119, 699)).toBe(false);
     expect(shouldDismissMobileSheet(120, 0)).toBe(true);

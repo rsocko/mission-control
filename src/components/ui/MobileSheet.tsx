@@ -16,7 +16,7 @@ export interface MobileSheetProps {
   children: React.ReactNode;
   /** Title shown in the sheet header */
   title?: string;
-  /** Accessible dialog name when the visual title is intentionally omitted */
+  /** Accessible dialog name; overrides the visual title when provided */
   ariaLabel?: string;
   /** Height of the sheet: 'auto' fits content, 'full' is near-fullscreen, or a CSS height like '75%' */
   height?: 'auto' | 'full' | string;
@@ -95,6 +95,7 @@ export function MobileSheet({
               <Dialog.Content
                 asChild
                 forceMount
+                {...(ariaLabel ? { 'aria-label': ariaLabel, 'aria-labelledby': undefined } : {})}
                 aria-describedby={undefined}
                 onOpenAutoFocus={() => {
                   previousFocusRef.current = document.activeElement instanceof HTMLElement

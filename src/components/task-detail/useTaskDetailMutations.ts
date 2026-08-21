@@ -567,8 +567,23 @@ export function useTaskDetailMutations({
   const handleRecurrenceChange = useCallback(async (recurrence: string) => {
     const value = recurrence === 'none' ? null : recurrence;
     if (!(await saveField('recurrence', value))) return;
-    setTask((prev) => prev ? { ...prev, recurrence: value } : prev);
+    setTask((prev) => prev ? {
+      ...prev,
+      recurrence: value,
+      ...(value === null ? { recurrenceMode: 'schedule' as const } : {}),
+    } : prev);
   }, [saveField, setTask]);
+
+  const handleRecurrenceModeChange = useCallback(async (recurrenceMode: 'schedule' | 'completion') => {
+    if (!ensureFieldsEditable('recurrence')) return;
+    const result = await patchTask(taskId, { recurrenceMode });
+    if (!result.ok) {
+      toast.error('Failed to save recurrence timing');
+      return;
+    }
+    setTask((prev) => prev ? { ...prev, recurrenceMode } : prev);
+    onUpdate?.({ recurrenceMode });
+  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
 
   const handleMicroStatusChange = useCallback(async (microStatus: string | null) => {
     if (!ensureFieldsEditable('microStatus')) return;
@@ -698,6 +713,7 @@ export function useTaskDetailMutations({
     handleReminderChange,
     reminderSaving,
     handleRecurrenceChange,
+    handleRecurrenceModeChange,
     handleMicroStatusChange,
     requestMicroStatusSuggestion,
     dismissMicroStatusSuggestion,

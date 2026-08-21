@@ -28,10 +28,13 @@ export interface TaskPlanningSectionProps {
   supportsRecurrence: boolean;
   /** Active recurrence rule, or 'none'. */
   currentRecurrence: string;
+  recurrenceMode: 'schedule' | 'completion';
+  completionModeAvailable: boolean;
   canEditRecurrence: boolean;
   recurrenceBlockedReason?: string;
   recurrenceSaveLabel?: string;
   onRecurrenceChange: (recurrence: string) => void;
+  onRecurrenceModeChange: (mode: 'schedule' | 'completion') => void;
   /** Next occurrence date when the task is overdue and recurring, else null. */
   skipToCurrentDate: string | null;
   skippingToCurrent: boolean;
@@ -58,10 +61,13 @@ export function TaskPlanningSection({
   onReminderChange,
   supportsRecurrence,
   currentRecurrence,
+  recurrenceMode,
+  completionModeAvailable,
   canEditRecurrence,
   recurrenceBlockedReason,
   recurrenceSaveLabel,
   onRecurrenceChange,
+  onRecurrenceModeChange,
   skipToCurrentDate,
   skippingToCurrent,
   canEditDueDate,
@@ -116,7 +122,15 @@ export function TaskPlanningSection({
             <div className="flex-1 min-w-0 space-y-1.5">
               {supportsRecurrence ? (
                 <div title={!canEditRecurrence ? recurrenceBlockedReason : recurrenceSaveLabel}>
-                  <RecurrencePicker value={currentRecurrence} onChange={onRecurrenceChange} variant="compact" disabled={!canEditRecurrence} />
+                  <RecurrencePicker
+                    value={currentRecurrence}
+                    onChange={onRecurrenceChange}
+                    mode={recurrenceMode}
+                    onModeChange={onRecurrenceModeChange}
+                    completionModeAvailable={completionModeAvailable}
+                    variant="compact"
+                    disabled={!canEditRecurrence}
+                  />
                 </div>
               ) : (
                 <span className="text-xs text-blue-400">{getRecurrenceDisplayLabel(currentRecurrence)}</span>

@@ -31,7 +31,7 @@ const {
 const transaction = {
   update: vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => ({ run: vi.fn() })),
+      where: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
     })),
   })),
   delete: vi.fn(() => ({

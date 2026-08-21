@@ -47,6 +47,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'task_tags.task_id': 'rebuild',
   'task_triage_log.task_id': 'repoint',
   'tasks.parent_id': 'repoint',
+  'tasks.recurrence_generated_from_task_id': 'lineage',
   'weekly_one_thing.task_id': 'repoint',
   'work_todo_outbound_changes.remote_task_id': 'external-identity',
   'work_todo_outbound_changes.task_id': 'source-operation',

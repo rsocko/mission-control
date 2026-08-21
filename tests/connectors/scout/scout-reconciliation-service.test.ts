@@ -58,7 +58,8 @@ function testDatabase() {
       reminder_relative TEXT, reminder_due_time TEXT,
       effort INTEGER, is_bulk_import INTEGER DEFAULT 0 NOT NULL,
       local_disposition TEXT DEFAULT 'active' NOT NULL,
-      push_count INTEGER DEFAULT 0 NOT NULL
+      push_count INTEGER DEFAULT 0 NOT NULL,
+      recurrence_generated_from_task_id TEXT
     );
     CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
     CREATE TABLE task_history_events (

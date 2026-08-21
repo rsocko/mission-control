@@ -1,19 +1,14 @@
 'use client';
 
-import { useEffect, useCallback, useRef } from 'react';
-import { motion, AnimatePresence, useDragControls, useReducedMotion, type PanInfo } from 'motion/react';
+import { useCallback, useRef } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
+import { AnimatePresence, motion, useDragControls, useReducedMotion, type PanInfo } from 'motion/react';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { surfaceExitTransition } from '@/lib/motion';
 
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',');
+const DISMISS_DISTANCE_PX = 120;
+const DISMISS_VELOCITY_PX_PER_SECOND = 700;
 
 export interface MobileSheetProps {
   isOpen: boolean;
@@ -21,20 +16,25 @@ export interface MobileSheetProps {
   children: React.ReactNode;
   /** Title shown in the sheet header */
   title?: string;
-  /** Accessible dialog name when the visual title is intentionally omitted */
+  /** Accessible dialog name; overrides the visual title when provided */
   ariaLabel?: string;
-  /** Height of the sheet: 'auto' fits content, 'full' is near-fullscreen, or a percentage like '75%' */
+  /** Height of the sheet: 'auto' fits content, 'full' is near-fullscreen, or a CSS height like '75%' */
   height?: 'auto' | 'full' | string;
   /** Extra className on the sheet container */
   className?: string;
+  /** Extra className on the scrollable content container */
+  contentClassName?: string;
   /** Stable fallback focus target when the element that opened the sheet is removed */
   returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
+export function shouldDismissMobileSheet(offsetY: number, velocityY: number): boolean {
+  return offsetY >= DISMISS_DISTANCE_PX || velocityY >= DISMISS_VELOCITY_PX_PER_SECOND;
+}
+
 /**
- * Mobile bottom sheet with drag-to-dismiss.
- * Slides up from the bottom with a backdrop overlay.
- * Drag the handle or swipe down to dismiss.
+ * Mobile bottom sheet with accessible modal behavior and drag-to-dismiss.
+ * Dragging is isolated to the handle so scrolling form content remains predictable.
  */
 export function MobileSheet({
   isOpen,
@@ -44,170 +44,147 @@ export function MobileSheet({
   ariaLabel,
   height = 'auto',
   className,
+  contentClassName,
   returnFocusRef,
 }: MobileSheetProps) {
   const dragControls = useDragControls();
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
-  const onCloseRef = useRef(onClose);
   const prefersReducedMotion = useReducedMotion();
-  onCloseRef.current = onClose;
-
-  // Keep keyboard focus inside the modal sheet.
-  useEffect(() => {
-    if (!isOpen) return;
-    previousFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const fallbackFocus = returnFocusRef?.current;
-    const focusSheet = requestAnimationFrame(() => {
-      const firstFocusable = sheetRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
-      (firstFocusable || sheetRef.current)?.focus();
-    });
-
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) {
-        onCloseRef.current();
-        return;
-      }
-      if (e.key !== 'Tab' || e.defaultPrevented || !sheetRef.current) return;
-
-      const sheet = sheetRef.current;
-      const focusable = Array.from(sheet.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-        .filter((element) => element.getAttribute('aria-hidden') !== 'true');
-      if (focusable.length === 0) {
-        e.preventDefault();
-        sheet.focus();
-        return;
-      }
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !focusable.includes(active as HTMLElement))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && (active === last || !focusable.includes(active as HTMLElement))) {
-        e.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handler);
-    return () => {
-      cancelAnimationFrame(focusSheet);
-      document.removeEventListener('keydown', handler);
-      const focusTarget = previousFocusRef.current?.isConnected
-        && previousFocusRef.current !== document.body
-        ? previousFocusRef.current
-        : fallbackFocus;
-      focusTarget?.focus();
-      previousFocusRef.current = null;
-    };
-  }, [isOpen, returnFocusRef]);
-
-  // Lock body scroll when open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-      return () => { document.body.style.overflow = ''; };
-    }
-  }, [isOpen]);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   const handleDragEnd = useCallback(
     (_: unknown, info: PanInfo) => {
-      // Dismiss if dragged down more than 100px or with high velocity
-      if (info.offset.y > 100 || info.velocity.y > 500) {
+      if (shouldDismissMobileSheet(info.offset.y, info.velocity.y)) {
         onClose();
       }
     },
-    [onClose]
+    [onClose],
   );
 
   const heightClass =
     height === 'full'
-      ? 'max-h-[92vh]'
+      ? 'h-[92dvh] max-h-[calc(100dvh-env(safe-area-inset-top))]'
       : height === 'auto'
-        ? 'max-h-[85vh]'
+        ? 'max-h-[85dvh]'
         : '';
-  const heightStyle = height !== 'full' && height !== 'auto' ? { maxHeight: height } : undefined;
+  const heightStyle = height !== 'full' && height !== 'auto'
+    ? { height, maxHeight: 'calc(100dvh - env(safe-area-inset-top))' }
+    : undefined;
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            className={cn("fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px]", className)}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={prefersReducedMotion ? { duration: 0 } : surfaceExitTransition}
-            onClick={onClose}
-            aria-hidden="true"
-          />
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Portal forceMount>
+        <AnimatePresence>
+          {isOpen && (
+            <>
+              <Dialog.Overlay asChild forceMount>
+                <motion.div
+                  key="mobile-sheet-overlay"
+                  className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px]"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={prefersReducedMotion ? { duration: 0 } : surfaceExitTransition}
+                />
+              </Dialog.Overlay>
 
-          {/* Sheet */}
-          <motion.div
-            ref={sheetRef}
-            role="dialog"
-            aria-modal="true"
-            aria-label={ariaLabel || title || 'Detail sheet'}
-            tabIndex={-1}
-            className={cn(
-              'fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-2xl bg-[var(--surface-1)] border-t border-[var(--border)] shadow-2xl overflow-hidden outline-none',
-              heightClass,
-              className
-            )}
-            style={heightStyle}
-            initial={prefersReducedMotion ? { y: 0 } : { y: '100%' }}
-            animate={{
-              y: 0,
-              transition: prefersReducedMotion
-                ? { duration: 0 }
-                : { type: 'spring', damping: 30, stiffness: 300 },
-            }}
-            exit={{
-              y: prefersReducedMotion ? 0 : '100%',
-              transition: prefersReducedMotion ? { duration: 0 } : surfaceExitTransition,
-            }}
-            drag="y"
-            dragControls={dragControls}
-            dragConstraints={{ top: 0 }}
-            dragElastic={0.2}
-            onDragEnd={handleDragEnd}
-          >
-            {/* Drag handle */}
-            <div
-              className="flex-shrink-0 flex items-center justify-center pt-3 pb-2 cursor-grab active:cursor-grabbing"
-              onPointerDown={(e) => dragControls.start(e)}
-              role="separator"
-              aria-label="Drag to dismiss sheet"
-            >
-              <div className="w-10 h-1 rounded-full bg-[var(--text-tertiary)]/40" />
-            </div>
-
-            {/* Header */}
-            {title && (
-              <div className="flex items-center justify-between px-4 pb-3 border-b border-[var(--border-subtle)]">
-                <h2 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h2>
-                <button
-                  onClick={onClose}
-                  className="p-2 -mr-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
-                  aria-label="Close"
+              <Dialog.Content
+                asChild
+                forceMount
+                {...(ariaLabel ? { 'aria-label': ariaLabel, 'aria-labelledby': undefined } : {})}
+                aria-describedby={undefined}
+                onOpenAutoFocus={() => {
+                  previousFocusRef.current = document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null;
+                }}
+                onCloseAutoFocus={(event) => {
+                  const opener = previousFocusRef.current?.isConnected
+                    && previousFocusRef.current !== document.body
+                    ? previousFocusRef.current
+                    : null;
+                  const focusTarget = opener ?? returnFocusRef?.current ?? null;
+                  previousFocusRef.current = null;
+                  if (!focusTarget) return;
+                  event.preventDefault();
+                  focusTarget.focus();
+                }}
+              >
+                <motion.div
+                  key="mobile-sheet-content"
+                  className={cn(
+                    'fixed inset-x-0 bottom-0 z-50 flex flex-col overflow-hidden rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface-1)] shadow-2xl outline-none',
+                    heightClass,
+                    className,
+                  )}
+                  style={heightStyle}
+                  initial={prefersReducedMotion ? { y: 0 } : { y: '100%' }}
+                  animate={{
+                    y: 0,
+                    transition: prefersReducedMotion
+                      ? { duration: 0 }
+                      : { type: 'spring', damping: 34, stiffness: 380 },
+                  }}
+                  exit={{
+                    y: prefersReducedMotion ? 0 : '100%',
+                    transition: prefersReducedMotion ? { duration: 0 } : surfaceExitTransition,
+                  }}
+                  drag="y"
+                  dragListener={false}
+                  dragControls={dragControls}
+                  dragConstraints={{ top: 0, bottom: 0 }}
+                  dragElastic={{ top: 0, bottom: 0.18 }}
+                  dragMomentum={false}
+                  dragSnapToOrigin="y"
+                  dragTransition={{ bounceStiffness: 700, bounceDamping: 45 }}
+                  onDragEnd={handleDragEnd}
                 >
-                  <X size={18} />
-                </button>
-              </div>
-            )}
+                  {!title && (
+                    <Dialog.Title className="sr-only">
+                      {ariaLabel || 'Detail sheet'}
+                    </Dialog.Title>
+                  )}
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto overscroll-contain">
-              {children}
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+                  <div
+                    className="flex touch-none shrink-0 cursor-grab items-center justify-center pb-2 pt-3 active:cursor-grabbing"
+                    onPointerDown={(event) => dragControls.start(event)}
+                    role="separator"
+                    aria-label="Drag down to close sheet"
+                    aria-orientation="horizontal"
+                  >
+                    <div className="h-1 w-10 rounded-full bg-[var(--text-tertiary)]/40" />
+                  </div>
+
+                  {title && (
+                    <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 pb-3">
+                      <Dialog.Title className="text-sm font-semibold text-[var(--text-primary)]">
+                        {title}
+                      </Dialog.Title>
+                      <Dialog.Close asChild>
+                        <button
+                          type="button"
+                          className="-mr-2 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+                          aria-label="Close"
+                        >
+                          <X size={18} />
+                        </button>
+                      </Dialog.Close>
+                    </div>
+                  )}
+
+                  <div className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain', contentClassName)}>
+                    {children}
+                  </div>
+                </motion.div>
+              </Dialog.Content>
+            </>
+          )}
+        </AnimatePresence>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

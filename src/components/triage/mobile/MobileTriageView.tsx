@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -50,8 +49,6 @@ export default function MobileTriageView({
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<TriageSourcePlatform | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const prefersReducedMotion = useReducedMotion() ?? false;
-
   const selectedItem = useMemo(
     () => items.find((i) => i.id === selectedItemId) ?? null,
     [items, selectedItemId],
@@ -110,16 +107,12 @@ export default function MobileTriageView({
       )}
 
       {/* Bottom sheet detail view (F-45: opens on card tap from stream) */}
-      <AnimatePresence initial={!prefersReducedMotion}>
-        {selectedItem && (
-          <MobileTriageItemDetail
-            item={selectedItem}
-            onClose={handleCloseDetail}
-            onAction={onAction}
-            busyAction={busyAction}
-          />
-        )}
-      </AnimatePresence>
+      <MobileTriageItemDetail
+        item={selectedItem}
+        onClose={handleCloseDetail}
+        onAction={onAction}
+        busyAction={busyAction}
+      />
     </div>
   );
 }

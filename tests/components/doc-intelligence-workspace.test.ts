@@ -94,7 +94,12 @@ describe('document workspace semantics', () => {
       correspondent: undefined,
       documentTitle: undefined,
       documentType: undefined,
+      documentUrl: undefined,
       previewUrl: undefined,
+      previewType: undefined,
+      previewLabel: undefined,
+      documentId: undefined,
+      docHubUrl: undefined,
     });
   });
 });

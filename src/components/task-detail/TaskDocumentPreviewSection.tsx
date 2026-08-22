@@ -13,6 +13,8 @@ export interface TaskDocumentPreviewSectionProps {
   connectorType: string;
   metadata: TaskDetailMetadata;
   dueDate?: string | null;
+  className?: string;
+  fillAvailableSpace?: boolean;
 }
 
 function normalizePreviewUrl(value: string | undefined): string | null {
@@ -30,11 +32,13 @@ function DocumentPreview({
   title,
   type,
   expanded,
+  fillAvailableSpace,
 }: {
   url: string;
   title: string;
   type: TaskDetailMetadata['previewType'];
   expanded?: boolean;
+  fillAvailableSpace?: boolean;
 }) {
   if (type === 'image') {
     return (
@@ -43,7 +47,10 @@ function DocumentPreview({
       <img
         src={url}
         alt={`Preview of ${title}`}
-        className={cn('h-full w-full bg-black/20 object-contain', expanded ? 'min-h-[70vh]' : 'min-h-64')}
+        className={cn(
+          'h-full w-full bg-black/20 object-contain',
+          expanded ? 'min-h-[70vh]' : fillAvailableSpace ? 'min-h-[60vh]' : 'min-h-64',
+        )}
       />
     );
   }
@@ -59,14 +66,20 @@ function DocumentPreview({
       sandbox={sameOrigin
         ? 'allow-forms allow-popups allow-scripts'
         : 'allow-forms allow-popups allow-same-origin allow-scripts'}
-      className={cn('w-full border-0 bg-white', expanded ? 'h-full min-h-[70vh]' : 'h-72')}
+      className={cn(
+        'w-full border-0 bg-white',
+        expanded ? 'h-full min-h-[70vh]' : fillAvailableSpace ? 'h-[70vh] min-h-[32rem]' : 'h-72',
+      )}
     />
   );
 }
 
-function DocumentPreviewPlaceholder({ title }: { title: string }) {
+function DocumentPreviewPlaceholder({ title, fillAvailableSpace }: { title: string; fillAvailableSpace?: boolean }) {
   return (
-    <div className="flex h-52 flex-col items-center justify-center bg-[var(--surface-0)] px-6 text-center">
+    <div className={cn(
+      'flex flex-col items-center justify-center bg-[var(--surface-0)] px-6 text-center',
+      fillAvailableSpace ? 'min-h-[32rem]' : 'h-52',
+    )}>
       <div className="mb-3 flex h-14 w-11 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--surface-2)] shadow-lg">
         <FileText size={20} className="text-indigo-300" />
       </div>
@@ -83,10 +96,13 @@ export function TaskDocumentPreviewSection({
   connectorType,
   metadata,
   dueDate,
+  className,
+  fillAvailableSpace = false,
 }: TaskDocumentPreviewSectionProps) {
   const [expanded, setExpanded] = useState(false);
   const previewUrl = normalizePreviewUrl(metadata.previewUrl);
   if (!previewUrl) return null;
+  const originalUrl = normalizePreviewUrl(metadata.documentUrl) || previewUrl;
 
   const title = metadata.documentTitle || 'Document';
   const isDocumentIntelligence = connectorType === 'document-intelligence';
@@ -103,6 +119,8 @@ export function TaskDocumentPreviewSection({
       (mode === 'panel' || mode === 'mobile') && 'order-7',
       mode === 'dialog' && 'col-start-2 row-start-6',
       mode === 'workspace' && 'col-start-2 row-start-6',
+      fillAvailableSpace && 'border-t-0 pt-0',
+      className,
     )}>
       <div className="mb-2 flex items-center gap-2">
         <FileText size={13} className="text-[var(--text-muted)]" />
@@ -142,11 +160,12 @@ export function TaskDocumentPreviewSection({
                     url={previewUrl}
                     title={title}
                     type={metadata.previewType}
+                    fillAvailableSpace={fillAvailableSpace}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/20 to-transparent" />
                 </>
               ) : (
-                <DocumentPreviewPlaceholder title={title} />
+                <DocumentPreviewPlaceholder title={title} fillAvailableSpace={fillAvailableSpace} />
               )}
             </div>
 
@@ -177,7 +196,7 @@ export function TaskDocumentPreviewSection({
             metadata.docHubUrl || canEmbed ? 'grid-cols-2' : 'grid-cols-1',
           )}>
             <a
-              href={previewUrl}
+              href={originalUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:text-[var(--text-primary)]"
@@ -242,7 +261,7 @@ export function TaskDocumentPreviewSection({
                     </a>
                   )}
                   <a
-                    href={previewUrl}
+                    href={originalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white hover:bg-[var(--accent-hover)]"

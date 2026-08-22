@@ -21,7 +21,12 @@ export interface DocumentTaskMetadata {
   correspondent?: string;
   documentTitle?: string;
   documentType?: string;
+  documentUrl?: string;
   previewUrl?: string;
+  previewType?: 'pdf' | 'iframe' | 'external' | 'image';
+  previewLabel?: string;
+  documentId?: string | number;
+  docHubUrl?: string;
 }
 
 export type DocumentView =
@@ -79,7 +84,19 @@ export function parseDocumentTaskMetadata(metadata: string | null | undefined): 
       correspondent: typeof value.correspondent === 'string' ? value.correspondent : undefined,
       documentTitle: typeof value.documentTitle === 'string' ? value.documentTitle : undefined,
       documentType: typeof value.documentType === 'string' ? value.documentType : undefined,
+      documentUrl: typeof value.documentUrl === 'string' ? value.documentUrl : undefined,
       previewUrl: typeof value.previewUrl === 'string' ? value.previewUrl : undefined,
+      previewType: value.previewType === 'pdf'
+        || value.previewType === 'iframe'
+        || value.previewType === 'external'
+        || value.previewType === 'image'
+        ? value.previewType
+        : undefined,
+      previewLabel: typeof value.previewLabel === 'string' ? value.previewLabel : undefined,
+      documentId: typeof value.documentId === 'string' || typeof value.documentId === 'number'
+        ? value.documentId
+        : undefined,
+      docHubUrl: typeof value.docHubUrl === 'string' ? value.docHubUrl : undefined,
     };
   } catch {
     return {};

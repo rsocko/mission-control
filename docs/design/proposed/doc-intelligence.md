@@ -90,13 +90,16 @@ metadata.previewLabel   // button label, e.g. "View in Paperless"
 The `TaskDetailPanel` renders a document preview section for **any task** with `metadata.previewUrl` set.
 Any future connector can use this without code changes to the UI.
 
-The DocIntelligence connector sets these from `action.document_url`:
+The DocIntelligence connector prefers OWL-provided `preview_url` or `thumbnail_url`.
+When neither is present, it derives Paperless's inline PDF preview endpoint from
+`action.document_url`, while retaining the original URL for the open-document action:
 
 ```typescript
 metadata: {
   // ... existing fields
-  previewUrl: action.document_url,
-  previewType: 'external',
+  documentUrl: action.document_url,
+  previewUrl: action.preview_url ?? action.thumbnail_url ?? paperlessPreviewUrl,
+  previewType: action.preview_type ?? inferredPreviewType,
   previewLabel: 'View in Paperless',
 }
 ```

@@ -25,6 +25,7 @@ import {
 import { toast } from 'sonner';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
+import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';
 import { GroupByDropdown, type GroupOption } from '@/components/toolbar/GroupByDropdown';
 import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
@@ -182,6 +183,14 @@ export default function DocIntelligencePage() {
     () => Object.entries(correspondentCounts).sort(([left], [right]) => left.localeCompare(right)),
     [correspondentCounts],
   );
+  const selectedTask = useMemo(
+    () => tasks.find((task) => task.id === selectedTaskId) ?? null,
+    [selectedTaskId, tasks],
+  );
+  const selectedTaskMetadata = useMemo(
+    () => parseDocumentTaskMetadata(selectedTask?.metadata),
+    [selectedTask],
+  );
 
   const activeFilters = [
     actionTypeFilter !== 'all' ? ACTION_TYPE_META[actionTypeFilter]?.label : null,
@@ -338,7 +347,7 @@ export default function DocIntelligencePage() {
 
         <main className={cn(
           'overflow-y-auto border-r border-[var(--border)]',
-          selectedTaskId ? 'hidden w-full sm:block sm:w-[340px] sm:shrink-0 xl:w-[420px]' : 'flex-1',
+          selectedTaskId ? 'hidden w-full sm:block sm:w-[360px] sm:shrink-0 xl:w-[440px] 2xl:w-[500px]' : 'flex-1',
         )}>
           {loading ? (
             <div className="flex items-center justify-center py-16">
@@ -376,14 +385,29 @@ export default function DocIntelligencePage() {
         </main>
 
         {selectedTaskId ? (
-          <section className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-0)]" aria-label="Document action details">
-            <TaskDetailPanel
-              taskId={selectedTaskId}
-              onClose={() => setSelectedTaskId(null)}
-              onUpdate={handleTaskUpdate}
-              mode="panel"
-              minPanelWidth={420}
-            />
+          <section className="flex min-w-0 flex-1 overflow-hidden bg-[var(--surface-0)]" aria-label="Document action details">
+            <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
+              <TaskDetailPanel
+                taskId={selectedTaskId}
+                onClose={() => setSelectedTaskId(null)}
+                onUpdate={handleTaskUpdate}
+                mode="panel"
+                minPanelWidth={420}
+                fillContainer
+                documentPreviewClassName="2xl:hidden"
+              />
+            </div>
+            {selectedTask && selectedTaskMetadata.previewUrl && (
+              <div className="hidden min-w-0 flex-1 overflow-y-auto border-l border-[var(--border)] p-5 2xl:block">
+                <TaskDocumentPreviewSection
+                  mode="panel"
+                  connectorType={selectedTask.connectorType}
+                  metadata={selectedTaskMetadata}
+                  dueDate={selectedTask.dueDate}
+                  fillAvailableSpace
+                />
+              </div>
+            )}
           </section>
         ) : (
           <section className="hidden min-w-0 flex-1 items-center justify-center bg-[var(--surface-0)] sm:flex">

@@ -30,7 +30,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EffortSelect } from '@/components/EffortBadge';
 import { MICRO_STATUS_CONFIG } from '@/types';
-import type { MicroStatus } from '@/types';
+import type { MicroStatus, TaskStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { PRIORITY_TEXT_COLORS, TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 import type { MicroStatusSuggestion, TaskDetailMode } from './task-detail-types';
@@ -52,6 +52,7 @@ export interface TaskStatusFieldProps {
   microStatus: string | null;
   /** GitHub issues expose extra "close as…" options. */
   connectorType: string;
+  supportedStatusValues?: TaskStatus[];
   canEditStatus: boolean;
   canEditMicroStatus: boolean;
   statusBlockedReason?: string;
@@ -71,12 +72,36 @@ export interface TaskStatusFieldProps {
   onCancelCloseReason: () => void;
 }
 
+const DEFAULT_STATUS_OPTIONS = [
+  { value: 'todo', label: 'To Do', className: TASK_STATUS_VISUALS.todo.textClass },
+  { value: 'in_progress', label: 'In Progress', className: TASK_STATUS_VISUALS.in_progress.textClass },
+  { value: 'blocked', label: 'Blocked', className: TASK_STATUS_VISUALS.blocked.textClass },
+  { value: 'done', label: 'Done', className: TASK_STATUS_VISUALS.done.textClass },
+  { value: 'cancelled', label: 'Cancelled', className: TASK_STATUS_VISUALS.cancelled.textClass },
+] as const;
+
+export function getTaskStatusOptions(
+  connectorType: string,
+  supportedStatusValues?: readonly TaskStatus[],
+) {
+  const supported = supportedStatusValues ? new Set<string>(supportedStatusValues) : null;
+  return DEFAULT_STATUS_OPTIONS
+    .filter((option) => !supported || supported.has(option.value))
+    .map((option) => ({
+      ...option,
+      label: connectorType === 'document-intelligence' && option.value === 'cancelled'
+        ? "Won't do"
+        : option.label,
+    }));
+}
+
 /** Status select, status reason badge, micro-status, and GitHub close reasons. */
 export function TaskStatusField({
   status,
   statusReason,
   microStatus,
   connectorType,
+  supportedStatusValues,
   canEditStatus,
   canEditMicroStatus,
   statusBlockedReason,
@@ -97,6 +122,7 @@ export function TaskStatusField({
 }: TaskStatusFieldProps) {
   const microStatusConfig = microStatus ? MICRO_STATUS_CONFIG[microStatus as MicroStatus] : undefined;
   const isClosed = status === 'done' || status === 'cancelled';
+  const statusOptions = getTaskStatusOptions(connectorType, supportedStatusValues);
 
   return (
     <div className="relative flex min-h-28 flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
@@ -129,11 +155,11 @@ export function TaskStatusField({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todo" className={TASK_STATUS_VISUALS.todo.textClass}>To Do</SelectItem>
-            <SelectItem value="in_progress" className={TASK_STATUS_VISUALS.in_progress.textClass}>In Progress</SelectItem>
-            <SelectItem value="blocked" className={TASK_STATUS_VISUALS.blocked.textClass}>Blocked</SelectItem>
-            <SelectItem value="done" className={TASK_STATUS_VISUALS.done.textClass}>Done</SelectItem>
-            <SelectItem value="cancelled" className={TASK_STATUS_VISUALS.cancelled.textClass}>Cancelled</SelectItem>
+            {statusOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value} className={option.className}>
+                {option.label}
+              </SelectItem>
+            ))}
             {connectorType === 'github-issues' && (
               <>
                 <SelectItem value="cancelled:not_planned" className="text-rose-400">Close as Not Planned</SelectItem>

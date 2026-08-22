@@ -2,6 +2,7 @@ import type {
   ConnectorCapabilities,
   TaskField,
   TaskFieldCapabilityProfile,
+  TaskStatus,
   TaskSourceModel,
 } from '@/types';
 
@@ -110,9 +111,9 @@ export const DOCUMENT_INTELLIGENCE_FIELD_PROFILE = completeProfile({
   title: SOURCE_READ_ONLY_FIELD,
   description: SOURCE_READ_ONLY_FIELD,
   status: SOURCE_DIRECT_FIELD,
-  statusReason: SOURCE_READ_ONLY_FIELD,
   priority: SOURCE_READ_ONLY_FIELD,
   dueDate: SOURCE_READ_ONLY_FIELD,
+  snoozedUntil: SOURCE_READ_ONLY_FIELD,
 });
 
 export const SCOUT_FIELD_PROFILE = completeProfile({
@@ -329,6 +330,8 @@ export const GITHUB_ISSUES_TASK_AUTHORITY = Object.freeze({
 export const DOCUMENT_INTELLIGENCE_TASK_AUTHORITY = Object.freeze({
   taskSourceModel: 'remote-managed',
   statusWriteBack: 'direct',
+  supportedTaskStatuses: ['todo', 'done', 'cancelled'] satisfies TaskStatus[],
+  taskAbsenceMeansDeleted: false,
   taskFieldProfile: DOCUMENT_INTELLIGENCE_FIELD_PROFILE,
 }) satisfies Partial<ConnectorCapabilities>;
 

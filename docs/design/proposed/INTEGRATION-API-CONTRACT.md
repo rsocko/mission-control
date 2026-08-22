@@ -73,7 +73,10 @@ Fetch document-derived actions that MC maps to TaskItems.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | `string` | No | Filter by status: `pending`, `in_progress`, `done`, `dismissed` |
+| `status` | `string` | No | MC sends `all`; individual values are `pending`, legacy `acknowledged`, `completed`, `dismissed`, `snoozed`, and `not_an_action` |
+| `limit` | `number` | No | MC requests pages of 100 |
+| `offset` | `number` | No | Zero-based offset; MC advances it by the returned row count |
+| `updated_since` | ISO 8601 timestamp | No | Inclusive source-update filter supported by OWL |
 
 **Response:** `200 OK`
 
@@ -88,8 +91,10 @@ interface DocAction {
   amount?: number | null;           // Dollar amount (for 'pay' actions)
   correspondent?: string | null;    // Entity name (for 'pay' actions)
   summary: string;                  // AI-generated action summary
-  status: 'pending' | 'in_progress' | 'done' | 'dismissed';
+  status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;               // ISO 8601 timestamp
+  updated_at: string;               // ISO 8601 source freshness timestamp
+  snoozed_until?: string | null;     // Present for snoozed actions
   document_url?: string;            // Paperless document URL
   document_type?: string | null;
   preview_url?: string | null;       // Embeddable OWL/Paperless preview URL
@@ -98,7 +103,11 @@ interface DocAction {
 }
 ```
 
-**Response body:** `DocAction[]`
+**Response body:** OWL returns a flat `DocAction[]`, ordered deterministically by
+`created_at DESC, id DESC`. MC requests successive offsets until a page contains
+fewer than 100 rows. For backward compatibility, MC also accepts an envelope
+whose records are named `actions`, `items`, or `results`, with cursor or page
+metadata. Repeating a page is treated as an upstream error.
 
 **MC Mapping:** Each action where `action_type ∈ {pay, respond, file, review, sign, schedule}` is mapped to a `TaskItem` via `mapActionToTask()`.
 
@@ -118,15 +127,52 @@ Update an action's status (task completion / alert dismissal writeback).
 
 ```typescript
 interface ActionStatusUpdate {
-  status: 'done' | 'dismissed';
+  status: 'pending' | 'completed' | 'done' | 'dismissed';
 }
 ```
 
 **Response:** `200 OK` (empty body or updated action)
 
 **MC Usage:**
-- `completeTask(sourceId)` → sends `{ status: 'done' }`
+- `completeTask(sourceId)` → sends `{ status: 'completed' }`
+- `reopenTask(sourceId)` → sends `{ status: 'pending' }`
+- `updateTask(sourceId, { status: 'cancelled' })` → sends `{ status: 'dismissed' }`
 - `dismissAlert(sourceId)` → sends `{ status: 'dismissed' }` (for `eob-*` and `action-*` prefixed IDs)
+
+OWL performs the corresponding Paperless-aware mutation before reporting
+success.
+
+---
+
+#### `POST /api/action-queue/actions/{id}/snooze`
+
+Snooze an action in OWL and its Paperless-backed workflow.
+
+```typescript
+interface ActionSnooze {
+  until: string; // Future ISO 8601 timestamp
+}
+```
+
+**Response:** `200 OK` or another 2xx response after the source mutation
+succeeds.
+
+---
+
+#### `POST /api/action-queue/actions/{id}/feedback`
+
+Record classifier or extraction feedback.
+
+```typescript
+type ActionFeedback =
+  | { feedback_type: 'not_an_action' }
+  | { feedback_type: 'misclassified'; corrected_action_type: DocAction['action_type'] }
+  | { feedback_type: 'wrong_urgency'; corrected_urgency: DocAction['urgency'] }
+  | { feedback_type: 'wrong_amount'; corrected_amount: number | null };
+```
+
+`not_an_action` is a terminal source disposition. The correction variants update
+the extracted value but do not change the task lifecycle.
 
 ---
 
@@ -403,7 +449,13 @@ When a module is disabled, the connector skips the corresponding API call entire
 | — | `id` | `docintel-{id}` |
 | `action_type` + fields | `title` | `buildTaskTitle()` — e.g. "Pay: PG&E — $143.22" |
 | `summary` | `description` | Direct |
-| `status` | `status` | `pending`/`in_progress` → `todo`, `done` → `done`, `dismissed` → `cancelled` |
+| `status` | `status` | `pending` → `todo`; `completed`/legacy `done` → `done`; `dismissed`/`not_an_action` → `cancelled`; `snoozed` → `todo` |
+| `snoozed_until` | `snoozedUntil` | Preserved only while OWL status is `snoozed` |
+| `updated_at` | `updatedAt` | Source freshness timestamp; falls back to `created_at` |
+| `status` | `metadata.owlStatus` | Original OWL lifecycle value |
+| `dismissed`/`not_an_action` | `metadata.owlDisposition` | Preserves the terminal source outcome |
+| `snoozed_until` | `metadata.owlSnoozedUntil` | Preserves the source snooze deadline |
+| `updated_at` | `metadata.owlUpdatedAt` | Preserves source freshness for diagnostics |
 | `urgency` | `priority` | `critical` → `critical`, `high` → `high`, `medium` → `medium`, `low` → `low` |
 | `due_date` | `dueDate` | Direct (ISO string) |
 | `created_at` | `createdAt` | Direct (ISO string) |

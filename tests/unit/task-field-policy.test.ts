@@ -150,7 +150,9 @@ describe('resolveTaskFieldPolicy', () => {
     };
 
     expect(resolveTaskFieldPolicy(task, caps, 'status').mutation).toBe('write-through');
-    expect(resolveTaskFieldPolicy(task, caps, 'statusReason').mutation).toBe('blocked');
+    expect(resolveTaskFieldPolicy(task, caps, 'statusReason').mutation).toBe('local');
+    expect(resolveTaskFieldPolicy(task, caps, 'microStatus').mutation).toBe('local');
+    expect(resolveTaskFieldPolicy(task, caps, 'snoozedUntil').mutation).toBe('blocked');
   });
 
   it('blocks every mutation for notification-only connector history', () => {

@@ -166,6 +166,15 @@ export async function PATCH(
       connectorEnabled,
       forceLocal: isDemoMode(),
     };
+    if (
+      input.status !== undefined
+      && capabilities?.supportedTaskStatuses
+      && !capabilities.supportedTaskStatuses.includes(input.status)
+    ) {
+      return ApiErrors.validation(
+        `This task source does not support status "${input.status}"`,
+      );
+    }
     const policies = new Map<TaskField, FieldPolicy>(
       parsed.fields.map((field) => [
         field,
@@ -1247,6 +1256,7 @@ export async function GET(
         isInMyDay: myDayRow.length > 0,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,
+        supportedStatusValues: caps?.supportedTaskStatuses,
       },
     });
   } catch (error) {

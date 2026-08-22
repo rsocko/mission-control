@@ -8,13 +8,14 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
-import type { TaskItem } from '@/types';
+import type { ConnectorCapabilities, TaskItem } from '@/types';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockExistingTasks: unknown[] = [];
 const mockUpdateSets: unknown[] = [];
 let selectCallCount = 0;
+let mockCapabilities: ConnectorCapabilities | null = null;
 
 type AwaitableTagRows = unknown[] & {
   where: ReturnType<typeof vi.fn>;
@@ -69,7 +70,7 @@ vi.mock('@/db/schema', () => ({
 }));
 
 vi.mock('@/lib/connectors/capabilities', () => ({
-  getConnectorCapabilities: vi.fn(async () => null),
+  getConnectorCapabilities: vi.fn(async () => mockCapabilities),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -133,6 +134,7 @@ vi.mock('crypto', async (importOriginal) => {
 });
 
 import { upsertTasks } from '@/lib/sync/pull-manager';
+import { detectDeletions } from '@/lib/sync/deletion-detector';
 
 describe('pull-manager terminal status sync', () => {
   const connectorId = 'gh-conn-1';
@@ -149,6 +151,7 @@ describe('pull-manager terminal status sync', () => {
     mockExistingTasks.length = 0;
     mockUpdateSets.length = 0;
     selectCallCount = 0;
+    mockCapabilities = null;
   });
 
   function makeExistingTask(overrides: Record<string, unknown> = {}) {
@@ -245,6 +248,71 @@ describe('pull-manager terminal status sync', () => {
     )).toBe(true);
   });
 
+  it('preserves MC-local snoozes when a connector omits the field', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        snoozedUntil: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask()],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+  });
+
+  it('preserves MC-local status context when the source omits it', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        microStatus: { authority: 'local', writeBack: 'none' },
+        statusReason: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({ microStatus: undefined, statusReason: undefined })],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+  });
+
   it('forces remote "cancelled" when local is in_progress', async () => {
     mockExistingTasks.push(makeExistingTask({
       status: 'in_progress',
@@ -266,6 +334,59 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets).toContainEqual(
       expect.objectContaining({ status: 'cancelled' }),
     );
+  });
+
+  it('reconciles terminal OWL outcomes and preserves disposition metadata', async () => {
+    const owlConnectorId = 'owl-1';
+    const owlConnector = {
+      ...mockConnector,
+      type: 'document-intelligence',
+      displayName: 'OWL',
+    } as unknown as IConnector;
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      supportedTaskStatuses: ['todo', 'done', 'cancelled'],
+      taskAbsenceMeansDeleted: false,
+    };
+    mockExistingTasks.push(makeExistingTask({
+      connectorType: 'document-intelligence',
+      connectorInstanceId: owlConnectorId,
+      sourceId: 'owl-action-1',
+      status: 'todo',
+      lastSyncedAt: '2026-08-21T12:00:00Z',
+    }));
+
+    const result = await upsertTasks(
+      owlConnectorId,
+      owlConnector,
+      [makeRemoteTask({
+        connectorType: 'document-intelligence',
+        connectorInstanceId: owlConnectorId,
+        sourceId: 'owl-action-1',
+        status: 'cancelled',
+        updatedAt: '2026-08-21T10:00:00Z',
+        metadata: {
+          owlStatus: 'not_an_action',
+          owlDisposition: 'not_an_action',
+        },
+      })],
+      true,
+      [],
+    );
+
+    expect(result.updated).toBe(1);
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      status: 'cancelled',
+      metadata: expect.stringContaining('"owlDisposition":"not_an_action"'),
+    }));
+    expect(detectDeletions).not.toHaveBeenCalled();
   });
 
   it('accepts a remote-mirror transition from in_progress back to todo', async () => {

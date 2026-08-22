@@ -19,9 +19,31 @@ export interface DocStatsResponse {
   eobMatching?: { unmatched: number; matched: number };
 }
 
+export type DocActionStatus = 'pending' | 'completed' | 'dismissed';
+
+export type DocActionFeedback =
+  | { feedback_type: 'not_an_action' }
+  | { feedback_type: 'misclassified'; corrected_action_type: string }
+  | { feedback_type: 'wrong_urgency'; corrected_urgency: string }
+  | { feedback_type: 'wrong_amount'; corrected_amount: number | null };
+
+export interface DocActionPage<T> {
+  actions?: T[];
+  items?: T[];
+  results?: T[];
+  next_cursor?: string | null;
+  nextCursor?: string | null;
+  page?: number;
+  total_pages?: number;
+  totalPages?: number;
+}
+
 export interface DocClient {
   fetchJson<T>(path: string, params?: Record<string, string | undefined>): Promise<T>;
-  patchActionStatus(sourceId: string, status: 'pending' | 'done' | 'dismissed'): Promise<void>;
+  fetchAllActions<T>(status?: string): Promise<T[]>;
+  patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void>;
+  snoozeAction(sourceId: string, until: string): Promise<void>;
+  submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void>;
   fetchHealth(): Promise<DocHealthResponse>;
   fetchStats(): Promise<DocStatsResponse>;
 }
@@ -53,32 +75,117 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
     };
   }
 
+  async function request(
+    path: string,
+    init: RequestInit = {},
+    params?: Record<string, string | undefined>,
+  ): Promise<Response> {
+    const response = await fetch(buildUrl(path, params), {
+      ...init,
+      headers: {
+        ...getHeaders(),
+        ...init.headers,
+      },
+    });
+    if (!response.ok) {
+      const detail = (await response.text()).trim();
+      throw new Error(
+        `OWL request failed: ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ''}`,
+      );
+    }
+    return response;
+  }
+
+  async function postJson(path: string, body: unknown): Promise<void> {
+    await request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   return {
     async fetchJson<T>(path: string, params?: Record<string, string | undefined>): Promise<T> {
-      const response = await fetch(buildUrl(path, params), {
-        headers: getHeaders(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`OWL request failed: ${response.status} ${response.statusText}`);
-      }
-
+      const response = await request(path, {}, params);
       return response.json() as Promise<T>;
     },
 
-    async patchActionStatus(sourceId: string, status: 'pending' | 'done' | 'dismissed'): Promise<void> {
-      const response = await fetch(buildUrl(`/api/action-queue/actions/${sourceId}`), {
+    async fetchAllActions<T>(status = 'all'): Promise<T[]> {
+      const all: T[] = [];
+      let cursor: string | undefined;
+      let page = 1;
+      let offset = 0;
+      let paginationMode: 'unknown' | 'array-offset' | 'envelope' = 'unknown';
+      const seenPageKeys = new Set<string>();
+
+      while (true) {
+        const response = await request('/api/action-queue/actions', {}, {
+          status,
+          limit: '100',
+          cursor,
+          page: paginationMode === 'envelope' && !cursor ? String(page) : undefined,
+          offset: paginationMode !== 'envelope' && !cursor ? String(offset) : undefined,
+        });
+        const payload = await response.json() as T[] | DocActionPage<T>;
+        if (Array.isArray(payload)) {
+          paginationMode = 'array-offset';
+          const pageKey = `array:${JSON.stringify(payload)}`;
+          if (seenPageKeys.has(pageKey)) {
+            throw new Error('OWL pagination repeated an offset page');
+          }
+          seenPageKeys.add(pageKey);
+          all.push(...payload);
+          if (payload.length < 100) break;
+          offset += payload.length;
+          continue;
+        }
+
+        paginationMode = 'envelope';
+        const actions = payload.actions ?? payload.items ?? payload.results ?? [];
+        all.push(...actions);
+        const nextCursor = payload.next_cursor ?? payload.nextCursor ?? undefined;
+        const totalPages = payload.total_pages ?? payload.totalPages;
+        const nextPage = nextCursor
+          ? page
+          : typeof totalPages === 'number' && page < totalPages
+            ? page + 1
+            : null;
+        if (!nextCursor && nextPage === null) break;
+
+        const pageKey = nextCursor ? `cursor:${nextCursor}` : `page:${nextPage}`;
+        if (seenPageKeys.has(pageKey)) {
+          throw new Error('OWL pagination repeated a page token');
+        }
+        seenPageKeys.add(pageKey);
+        cursor = nextCursor;
+        if (nextPage !== null) page = nextPage;
+      }
+
+      return all;
+    },
+
+    async patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void> {
+      await request(`/api/action-queue/actions/${encodeURIComponent(sourceId)}`, {
         method: 'PATCH',
         headers: {
-          ...getHeaders(),
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ status }),
       });
+    },
 
-      if (!response.ok) {
-        throw new Error(`OWL update failed: ${response.status} ${response.statusText}`);
-      }
+    async snoozeAction(sourceId: string, until: string): Promise<void> {
+      await postJson(
+        `/api/action-queue/actions/${encodeURIComponent(sourceId)}/snooze`,
+        { until },
+      );
+    },
+
+    async submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void> {
+      await postJson(
+        `/api/action-queue/actions/${encodeURIComponent(sourceId)}/feedback`,
+        feedback,
+      );
     },
 
     async fetchHealth(): Promise<DocHealthResponse> {

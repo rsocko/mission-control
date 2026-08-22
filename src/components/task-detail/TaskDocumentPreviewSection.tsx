@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, FileText, Maximize2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { buildPaperlessPreviewUrl } from '@/lib/connectors/document-intelligence/preview-url';
 import { cn } from '@/lib/utils';
 import { parseLocalDate } from '@/lib/utils/date-format';
 import type { TaskDetailMetadata, TaskDetailMode } from './task-detail-types';
@@ -100,15 +101,28 @@ export function TaskDocumentPreviewSection({
   fillAvailableSpace = false,
 }: TaskDocumentPreviewSectionProps) {
   const [expanded, setExpanded] = useState(false);
-  const previewUrl = normalizePreviewUrl(metadata.previewUrl);
+  const isDocumentIntelligence = connectorType === 'document-intelligence';
+  const suppliedPreviewUrl = normalizePreviewUrl(metadata.previewUrl);
+  const documentUrl = normalizePreviewUrl(metadata.documentUrl);
+  const legacyPaperlessPreviewUrl = isDocumentIntelligence
+    && metadata.previewType === 'external'
+    && metadata.documentId != null
+    && documentUrl != null
+    && suppliedPreviewUrl === documentUrl
+    ? normalizePreviewUrl(buildPaperlessPreviewUrl(
+        documentUrl,
+        metadata.documentId,
+      ))
+    : null;
+  const previewUrl = legacyPaperlessPreviewUrl || suppliedPreviewUrl;
   if (!previewUrl) return null;
-  const originalUrl = normalizePreviewUrl(metadata.documentUrl) || previewUrl;
+  const originalUrl = documentUrl || suppliedPreviewUrl || previewUrl;
 
   const title = metadata.documentTitle || 'Document';
-  const isDocumentIntelligence = connectorType === 'document-intelligence';
-  const canEmbed = metadata.previewType === 'pdf'
-    || metadata.previewType === 'iframe'
-    || metadata.previewType === 'image';
+  const previewType = legacyPaperlessPreviewUrl ? 'pdf' : metadata.previewType;
+  const canEmbed = previewType === 'pdf'
+    || previewType === 'iframe'
+    || previewType === 'image';
   const formattedDueDate = dueDate
     ? parseLocalDate(dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -159,7 +173,7 @@ export function TaskDocumentPreviewSection({
                   <DocumentPreview
                     url={previewUrl}
                     title={title}
-                    type={metadata.previewType}
+                    type={previewType}
                     fillAvailableSpace={fillAvailableSpace}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/20 to-transparent" />
@@ -240,7 +254,7 @@ export function TaskDocumentPreviewSection({
                 <DocumentPreview
                   url={previewUrl}
                   title={title}
-                  type={metadata.previewType}
+                  type={previewType}
                   expanded
                 />
               </div>

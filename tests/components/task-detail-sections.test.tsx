@@ -272,6 +272,7 @@ describe('TaskDocumentPreviewSection', () => {
         metadata={{
           previewUrl: 'https://docs.example/2',
           previewType: 'external',
+          documentId: 2,
           documentTitle: 'External statement',
         }}
       />,
@@ -280,6 +281,31 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.getByText('This source does not expose an embeddable preview. Open the original document to review it.')).toBeInTheDocument();
     expect(screen.queryByTitle('Preview of External statement')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Expand document preview' })).not.toBeInTheDocument();
+  });
+
+  it('upgrades legacy Paperless document links to PDF previews', () => {
+    render(
+      <TaskDocumentPreviewSection
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://paperless.example/documents/42/details',
+          documentUrl: 'https://paperless.example/documents/42/details',
+          previewType: 'external',
+          documentId: 42,
+          documentTitle: 'Legacy statement',
+        }}
+      />,
+    );
+
+    expect(screen.getByTitle('Preview of Legacy statement')).toHaveAttribute(
+      'src',
+      'https://paperless.example/api/documents/42/preview/',
+    );
+    expect(screen.getByRole('link', { name: /Open Doc/ })).toHaveAttribute(
+      'href',
+      'https://paperless.example/documents/42/details',
+    );
   });
 });
 

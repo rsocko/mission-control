@@ -4,6 +4,7 @@
 
 import type { TaskItem, InboundNotification, TriageItem, TriageActionType } from '@/types';
 import { buildDocHubTaskLinks, buildDocHubEobUrl, buildDocHubStatementsUrl } from './doc-hub-links';
+import { buildPaperlessPreviewUrl } from './preview-url';
 
 export interface DocAction {
   id: string;
@@ -141,20 +142,6 @@ function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
   if (pathname.endsWith('.pdf') || pathname.endsWith('/preview/')) return 'pdf';
   if (/\.(avif|gif|jpe?g|png|svg|webp)$/.test(pathname)) return 'image';
   return 'iframe';
-}
-
-function buildPaperlessPreviewUrl(documentUrl: string | undefined, documentId: number): string | undefined {
-  const url = safeUrl(documentUrl);
-  if (!url) return undefined;
-
-  const documentsPathIndex = url.pathname.indexOf('/documents/');
-  const basePath = documentsPathIndex >= 0
-    ? url.pathname.slice(0, documentsPathIndex)
-    : '';
-  url.pathname = `${basePath}/api/documents/${documentId}/preview/`;
-  url.search = '';
-  url.hash = '';
-  return url.toString();
 }
 
 function safeUrl(value: string | undefined): URL | null {

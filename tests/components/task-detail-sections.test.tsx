@@ -229,7 +229,8 @@ describe('TaskDocumentPreviewSection', () => {
           amount: 42.5,
           urgency: 'high',
           previewType: 'pdf',
-          docHubUrl: 'https://owl.example/1',
+          docHubUrl: 'https://owl.example/admin/actions/action-1',
+          docHubDocumentUrl: 'https://owl.example/admin/documents/1',
         }}
         dueDate="2026-08-30"
       />,
@@ -244,7 +245,10 @@ describe('TaskDocumentPreviewSection', () => {
       'https://paperless.example/documents/1',
     );
     expect(screen.getByText('Aug 30, 2026')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute('href', 'https://owl.example/1');
+    expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute(
+      'href',
+      'https://owl.example/#/metadata/1',
+    );
 
     fireEvent.click(screen.getByRole('button', { name: 'Expand document preview' }));
     expect(screen.getByTestId('expanded-document-preview')).toBeInTheDocument();

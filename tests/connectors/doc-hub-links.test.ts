@@ -10,6 +10,7 @@ import {
   buildDocHubTaskLinks,
   buildDocHubEobUrl,
   buildDocHubStatementsUrl,
+  normalizeDocHubUrl,
 } from '@/lib/connectors/document-intelligence/doc-hub-links';
 import {
   mapActionToTask,
@@ -79,32 +80,32 @@ function makeUnmatchedEob(overrides?: Partial<UnmatchedEob>): UnmatchedEob {
 describe('buildDocHubUrl', () => {
   it('builds action URLs', () => {
     expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'action', id: 'act-123' }))
-      .toBe('http://localhost:8200/admin/actions/act-123');
+      .toBe('http://localhost:8200/#/action-queue');
   });
 
   it('builds EOB URLs', () => {
     expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'eob', id: 'eob-99' }))
-      .toBe('http://localhost:8200/admin/eob/eob-99');
+      .toBe('http://localhost:8200/#/eob?tab=unmatched');
   });
 
   it('builds statement URL (no ID needed)', () => {
     expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'statement' }))
-      .toBe('http://localhost:8200/admin/statements');
+      .toBe('http://localhost:8200/#/statements');
   });
 
   it('builds document URLs', () => {
     expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'document', id: 42 }))
-      .toBe('http://localhost:8200/admin/documents/42');
+      .toBe('http://localhost:8200/#/metadata/42');
   });
 
   it('strips trailing slash from base URL', () => {
     expect(buildDocHubUrl({ baseUrl: 'http://localhost:8200/', type: 'action', id: 'x' }))
-      .toBe('http://localhost:8200/admin/actions/x');
+      .toBe('http://localhost:8200/#/action-queue');
   });
 
   it('works with production URL', () => {
     expect(buildDocHubUrl({ baseUrl: PROD_URL, type: 'action', id: 'act-1' }))
-      .toBe('https://doc-intel.example/admin/actions/act-1');
+      .toBe('https://doc-intel.example/#/action-queue');
   });
 
   it('returns null if baseUrl is empty', () => {
@@ -118,8 +119,31 @@ describe('buildDocHubUrl', () => {
   });
 
   it('encodes special characters in IDs', () => {
-    expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'action', id: 'foo/bar' }))
-      .toBe('http://localhost:8200/admin/actions/foo%2Fbar');
+    expect(buildDocHubUrl({ baseUrl: BASE_URL, type: 'document', id: 'foo/bar' }))
+      .toBe('http://localhost:8200/#/metadata/foo%2Fbar');
+  });
+});
+
+describe('normalizeDocHubUrl', () => {
+  it('upgrades persisted legacy document URLs', () => {
+    expect(normalizeDocHubUrl('http://localhost:8200/admin/documents/42'))
+      .toBe('http://localhost:8200/#/metadata/42');
+  });
+
+  it('upgrades persisted legacy action URLs', () => {
+    expect(normalizeDocHubUrl('http://localhost:8200/admin/actions/act-123'))
+      .toBe('http://localhost:8200/#/action-queue');
+  });
+
+  it('preserves a configured base path when upgrading legacy URLs', () => {
+    expect(normalizeDocHubUrl('https://owl.example/apps/owl/admin/documents/42'))
+      .toBe('https://owl.example/apps/owl/#/metadata/42');
+  });
+
+  it('preserves current and invalid URLs', () => {
+    expect(normalizeDocHubUrl('http://localhost:8200/#/metadata/42'))
+      .toBe('http://localhost:8200/#/metadata/42');
+    expect(normalizeDocHubUrl('not-a-url')).toBe('not-a-url');
   });
 });
 
@@ -128,13 +152,13 @@ describe('buildDocHubUrl', () => {
 describe('buildDocHubTaskLinks', () => {
   it('returns both actionUrl and documentUrl', () => {
     const links = buildDocHubTaskLinks(BASE_URL, 'act-123', 42);
-    expect(links.actionUrl).toBe('http://localhost:8200/admin/actions/act-123');
-    expect(links.documentUrl).toBe('http://localhost:8200/admin/documents/42');
+    expect(links.actionUrl).toBe('http://localhost:8200/#/action-queue');
+    expect(links.documentUrl).toBe('http://localhost:8200/#/metadata/42');
   });
 
   it('returns null documentUrl when no documentId', () => {
     const links = buildDocHubTaskLinks(BASE_URL, 'act-123');
-    expect(links.actionUrl).toBe('http://localhost:8200/admin/actions/act-123');
+    expect(links.actionUrl).toBe('http://localhost:8200/#/action-queue');
     expect(links.documentUrl).toBeNull();
   });
 });
@@ -144,7 +168,7 @@ describe('buildDocHubTaskLinks', () => {
 describe('buildDocHubEobUrl', () => {
   it('builds EOB admin URL', () => {
     expect(buildDocHubEobUrl(BASE_URL, 'eob-99'))
-      .toBe('http://localhost:8200/admin/eob/eob-99');
+      .toBe('http://localhost:8200/#/eob?tab=unmatched');
   });
 });
 
@@ -153,7 +177,7 @@ describe('buildDocHubEobUrl', () => {
 describe('buildDocHubStatementsUrl', () => {
   it('builds statements admin URL', () => {
     expect(buildDocHubStatementsUrl(BASE_URL))
-      .toBe('http://localhost:8200/admin/statements');
+      .toBe('http://localhost:8200/#/statements');
   });
 });
 
@@ -162,12 +186,12 @@ describe('buildDocHubStatementsUrl', () => {
 describe('mapActionToTask with docHubBaseUrl', () => {
   it('populates docHubUrl in metadata when baseUrl provided', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID, BASE_URL);
-    expect(task.metadata.docHubUrl).toBe('http://localhost:8200/admin/actions/act-123');
+    expect(task.metadata.docHubUrl).toBe('http://localhost:8200/#/action-queue');
   });
 
   it('populates docHubDocumentUrl in metadata', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID, BASE_URL);
-    expect(task.metadata.docHubDocumentUrl).toBe('http://localhost:8200/admin/documents/42');
+    expect(task.metadata.docHubDocumentUrl).toBe('http://localhost:8200/#/metadata/42');
   });
 
   it('omits docHubUrl when no baseUrl provided', () => {
@@ -179,12 +203,12 @@ describe('mapActionToTask with docHubBaseUrl', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID, BASE_URL);
     expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');
     expect(task.metadata.previewType).toBe('external');
-    expect(task.metadata.docHubUrl).toBe('http://localhost:8200/admin/actions/act-123');
+    expect(task.metadata.docHubUrl).toBe('http://localhost:8200/#/action-queue');
   });
 
   it('uses production URL correctly', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID, PROD_URL);
-    expect(task.metadata.docHubUrl).toBe('https://doc-intel.example/admin/actions/act-123');
+    expect(task.metadata.docHubUrl).toBe('https://doc-intel.example/#/action-queue');
   });
 });
 
@@ -195,7 +219,7 @@ describe('mapMissingStatementToNotification with docHubBaseUrl', () => {
     const alert = mapMissingStatementToNotification(
       makeMissingStatement(), CONNECTOR_TYPE, CONNECTOR_ID, PAPERLESS_URL, BASE_URL
     );
-    expect(alert.metadata.docHubUrl).toBe('http://localhost:8200/admin/statements');
+    expect(alert.metadata.docHubUrl).toBe('http://localhost:8200/#/statements');
   });
 
   it('omits docHubUrl when no baseUrl provided', () => {
@@ -211,7 +235,7 @@ describe('mapUnmatchedEobToNotification with docHubBaseUrl', () => {
     const alert = mapUnmatchedEobToNotification(
       makeUnmatchedEob(), CONNECTOR_TYPE, CONNECTOR_ID, BASE_URL
     );
-    expect(alert.metadata.docHubUrl).toBe('http://localhost:8200/admin/eob/eob-99');
+    expect(alert.metadata.docHubUrl).toBe('http://localhost:8200/#/eob?tab=unmatched');
   });
 
   it('omits docHubUrl when no baseUrl provided', () => {

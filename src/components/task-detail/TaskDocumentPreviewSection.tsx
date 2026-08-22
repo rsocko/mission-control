@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, FileText, Maximize2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
+import { normalizeDocHubUrl } from '@/lib/connectors/document-intelligence/doc-hub-links';
 import { cn } from '@/lib/utils';
 import { parseLocalDate } from '@/lib/utils/date-format';
 import type { TaskDetailMetadata, TaskDetailMode } from './task-detail-types';
@@ -124,6 +125,7 @@ export function TaskDocumentPreviewSection({
   const canEmbed = previewType === 'pdf'
     || previewType === 'iframe'
     || previewType === 'image';
+  const owlUrl = normalizeDocHubUrl(metadata.docHubDocumentUrl || metadata.docHubUrl);
   const formattedDueDate = dueDate
     ? parseLocalDate(dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
     : null;
@@ -209,7 +211,7 @@ export function TaskDocumentPreviewSection({
 
           <div className={cn(
             'mt-2.5 grid gap-2',
-            metadata.docHubUrl || canEmbed ? 'grid-cols-2' : 'grid-cols-1',
+            owlUrl || canEmbed ? 'grid-cols-2' : 'grid-cols-1',
           )}>
             <a
               href={originalUrl}
@@ -220,9 +222,9 @@ export function TaskDocumentPreviewSection({
               <ExternalLink size={11} />
               {metadata.previewLabel || 'Open Doc'}
             </a>
-            {metadata.docHubUrl ? (
+            {owlUrl ? (
               <a
-                href={metadata.docHubUrl}
+                href={owlUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center justify-center gap-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 px-2.5 py-1.5 text-xs font-medium text-blue-400 transition-colors duration-100 hover:bg-blue-500/20"
@@ -267,9 +269,9 @@ export function TaskDocumentPreviewSection({
                   {typeof metadata.amount === 'number' ? ` · $${metadata.amount.toFixed(2)}` : ''}
                 </p>
                 <div className="flex shrink-0 items-center gap-2">
-                  {metadata.docHubUrl && (
+                  {owlUrl && (
                     <a
-                      href={metadata.docHubUrl}
+                      href={owlUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="rounded-lg border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"

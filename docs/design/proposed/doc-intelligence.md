@@ -91,14 +91,15 @@ The `TaskDetailPanel` renders a document preview section for **any task** with `
 Any future connector can use this without code changes to the UI.
 
 The DocIntelligence connector prefers OWL-provided `preview_url` or `thumbnail_url`.
-When neither is present, it derives Paperless's inline PDF preview endpoint from
-`action.document_url`, while retaining the original URL for the open-document action:
+When neither is present, it retains `action.document_url` as the external link. MC
+renders PDFs through a task-scoped, same-origin endpoint that authenticates to OWL's
+Paperless download proxy server-side:
 
 ```typescript
 metadata: {
   // ... existing fields
   documentUrl: action.document_url,
-  previewUrl: action.preview_url ?? action.thumbnail_url ?? paperlessPreviewUrl,
+  previewUrl: action.preview_url ?? action.thumbnail_url ?? action.document_url,
   previewType: action.preview_type ?? inferredPreviewType,
   previewLabel: 'View in Paperless',
 }

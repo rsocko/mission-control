@@ -132,8 +132,8 @@ describe('mapActionToTask', () => {
   it('maps metadata correctly', () => {
     const task = mapActionToTask(mockPayAction, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
     const meta = task.metadata as Record<string, unknown>;
-    expect(meta.previewUrl).toBe('https://paperless.example/api/documents/42/preview/');
-    expect(meta.previewType).toBe('pdf');
+    expect(meta.previewUrl).toBe('https://paperless.example/documents/42');
+    expect(meta.previewType).toBe('external');
     expect(meta.previewLabel).toBe('View in Paperless-ngx');
     expect(meta.amount).toBe(143.22);
     expect(meta.correspondent).toBe('PG&E');

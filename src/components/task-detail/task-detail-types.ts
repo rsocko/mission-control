@@ -133,8 +133,11 @@ export interface MicroStatusSuggestion {
 /** Metadata fields the panel reads out of a task's JSON metadata blob. */
 export interface TaskDetailMetadata {
   previewUrl?: string;
+  previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;
   documentTitle?: string;
+  documentType?: string;
+  documentId?: string | number;
   docHubUrl?: string;
   correspondent?: string;
   amount?: number;

@@ -225,15 +225,22 @@ describe('TaskDocumentPreviewSection', () => {
           correspondent: 'Acme',
           amount: 42.5,
           urgency: 'high',
+          previewType: 'pdf',
           docHubUrl: 'https://owl.example/1',
         }}
+        dueDate="2026-08-30"
       />,
     );
 
     expect(screen.getByText('Invoice 4711')).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('high')).toBeInTheDocument();
+    expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
+    expect(screen.getByText('Aug 30, 2026')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute('href', 'https://owl.example/1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand document preview' }));
+    expect(screen.getByTestId('expanded-document-preview')).toBeInTheDocument();
   });
 
   it('renders a generic preview link for other connectors', () => {
@@ -248,7 +255,25 @@ describe('TaskDocumentPreviewSection', () => {
     const link = screen.getByRole('link', { name: 'Open Document' });
     expect(link).toHaveAttribute('href', 'https://files.example/a.pdf');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(screen.getByText('$8.00')).toBeInTheDocument();
+    expect(link).toHaveTextContent('$8.00');
+  });
+
+  it('does not iframe document-intelligence links marked as external', () => {
+    render(
+      <TaskDocumentPreviewSection
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://docs.example/2',
+          previewType: 'external',
+          documentTitle: 'External statement',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('This source does not expose an embeddable preview. Open the original document to review it.')).toBeInTheDocument();
+    expect(screen.queryByTitle('Preview of External statement')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand document preview' })).not.toBeInTheDocument();
   });
 });
 

@@ -176,7 +176,8 @@ follows [`octo-org/tyrion#175`](https://github.com/octo-org/tyrion/pull/175):
 |---|---|
 | Large transaction or material recurring increase insight | Notification only |
 | Category or merchant variance | High-confidence members in one bounded monthly digest; medium confidence remains status only |
-| Open attribution exception | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
+| Open human-reviewable attribution exception (`no-match`, confidence ambiguity, rule conflict, historical tie, or manual-decision conflict) | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
+| Attribution configuration, authentication, service, policy, timeout, contract, or system failure | Connector/Finance status only; settle any prior actionable projection |
 | Failed `finance_mutation_audit` write-back | Status only while retries remain; one `mc-owned` task and My Day item after at least three failed attempts while the authoritative failure is no more than 60 minutes old |
 | Resolved or superseded exception | Complete or cancel the projected task and settle the notification |
 | Stale source state | Preserve existing work with stale metadata; never create, escalate, or reopen attention |
@@ -192,6 +193,14 @@ sets above 5,000 rows remain atomic and cannot starve newer attention behind
 historical, stale, status-only, settled, or already-routed rows.
 Routing metadata contains opaque local references and stable codes only, never
 mutation error text or upstream identifiers.
+
+Historical `attribution_not_configured` projections can be repaired only through
+the trusted, audited, dry-run-gated operator endpoint documented in
+[`Finance Attention Projection Repair`](../operations/finance-attention-repair.md).
+The repair leaves authoritative attribution exceptions intact so a later
+configured sync can replace them with genuine review work. The repair is fenced
+to the August 11-12, 2026 MC producer window and does not infer Tyrion policy
+state, outbox state, or fingerprint-key parity.
 
 Duplicate and connector-health signal detection, identity, and lifecycle remain
 owned by Tyrion ([`octo-org/tyrion#174`](https://github.com/octo-org/tyrion/pull/174)).

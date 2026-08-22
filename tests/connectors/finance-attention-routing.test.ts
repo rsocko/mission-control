@@ -24,6 +24,8 @@ let reconcileFinanceAttention:
   typeof import('@/lib/finance/attention-routing')['reconcileFinanceAttention'];
 let selectFinanceAttentionRoute:
   typeof import('@/lib/finance/attention-routing')['selectFinanceAttentionRoute'];
+let isHumanReviewableAttributionReason:
+  typeof import('@/lib/finance/attention-routing')['isHumanReviewableAttributionReason'];
 let financeAttentionSourceId:
   typeof import('@/lib/finance/attention-routing')['financeAttentionSourceId'];
 let financeAttentionTaskId:
@@ -181,6 +183,7 @@ beforeAll(async () => {
     financeAttentionTaskId,
     FINANCE_TASK_PROMOTION_DAILY_CAP,
     FINANCE_MY_DAY_DAILY_CAP,
+    isHumanReviewableAttributionReason,
     reconcileFinanceAttention,
     selectFinanceAttentionRoute,
   } = await import('@/lib/finance/attention-routing'));
@@ -195,6 +198,44 @@ afterAll(() => {
 });
 
 describe.sequential('finance attention routing', () => {
+  it('allowlists only the complete human-reviewable attribution reason set', () => {
+    const expected = new Map<string, boolean>([
+      ['attribution_ambiguous', true],
+      ['card-rule-conflict', true],
+      ['historical-attribution-tie', true],
+      ['low-confidence', true],
+      ['manual_decision_conflict', true],
+      ['merchant-rule-conflict', true],
+      ['no-match', true],
+      ['review-required', true],
+      ['attribution_auth_invalid', false],
+      ['attribution_auth_not_configured', false],
+      ['attribution_auth_required', false],
+      ['attribution_forbidden', false],
+      ['attribution_not_configured', false],
+      ['attribution_operation_failed', false],
+      ['attribution_projection_missing', false],
+      ['attribution_rate_limited', false],
+      ['attribution_route_not_available', false],
+      ['attribution_service_unavailable', false],
+      ['attribution_timeout', false],
+      ['engine-unavailable', false],
+      ['invalid_attribution_contract', false],
+      ['invalid_attribution_correlation', false],
+      ['policy_conflict', false],
+      ['policy-unavailable', false],
+      ['policy-version-mismatch', false],
+      ['policy_unavailable', false],
+    ]);
+
+    for (const [reasonCode, actionable] of expected) {
+      expect(
+        isHumanReviewableAttributionReason(reasonCode),
+        reasonCode,
+      ).toBe(actionable);
+    }
+  });
+
   it('selects every routing matrix outcome deterministically', () => {
     const signal = {
       connectorId,
@@ -629,12 +670,13 @@ describe.sequential('finance attention routing', () => {
     expect(count('notification_actions')).toBe(0);
   });
 
-  it('disables prior attention while the authoritative exception is status-only', async () => {
+  it('disables prior attention for a non-retryable configuration failure', async () => {
     seedAttribution();
     await reconcileFinanceAttention({ connectorId, now });
     sqlite.prepare(`
       UPDATE finance_attribution_exceptions
-      SET retryable = 1, last_observed_at = ?, updated_at = ?
+      SET reason_code = 'attribution_not_configured', retryable = 0,
+          last_observed_at = ?, updated_at = ?
     `).run(now.toISOString(), now.toISOString());
 
     const result = await reconcileFinanceAttention({ connectorId, now });

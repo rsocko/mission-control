@@ -9,6 +9,7 @@ import {
   TyrionBridgeUrlValidationError,
 } from './bridge-url';
 import { FINANCE_PROVIDER_ALIASES, normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { currencySchema } from '@/lib/finance/currency';
 
 type ConnectorConfigRow = typeof connectorConfigs.$inferSelect;
 type ConnectorConfigLike = {
@@ -16,6 +17,19 @@ type ConnectorConfigLike = {
   credentials?: unknown;
   settings?: unknown;
 };
+
+export type FinanceConnectorConfigurationState =
+  | { status: 'configured'; code: null }
+  | { status: 'needs-configuration'; code: 'household_currency_unavailable' };
+
+export class FinanceConnectorConfigurationError extends Error {
+  constructor(
+    readonly code: 'household_currency_required' | 'household_currency_invalid',
+  ) {
+    super(code);
+    this.name = 'FinanceConnectorConfigurationError';
+  }
+}
 
 export function isFinanceConnectorType(type: string): boolean {
   return normalizeFinanceProviderAlias(type) !== null;
@@ -39,6 +53,36 @@ export function sanitizeFinanceConnectorWrite<T extends ConnectorConfigLike>(con
     credentials: serviceToken ? { serviceToken } : {},
     settings: safeSettings,
   };
+}
+
+export function validateFinanceConnectorSettings(
+  settings: unknown,
+  options: { requireHouseholdCurrency: boolean },
+): Record<string, unknown> {
+  const parsed = parseObject(settings);
+  const hasCurrency = Object.prototype.hasOwnProperty.call(parsed, 'householdCurrency');
+  if (!hasCurrency) {
+    if (options.requireHouseholdCurrency) {
+      throw new FinanceConnectorConfigurationError('household_currency_required');
+    }
+    return parsed;
+  }
+  if (!currencySchema.safeParse(parsed.householdCurrency).success) {
+    throw new FinanceConnectorConfigurationError('household_currency_invalid');
+  }
+  return parsed;
+}
+
+export function getFinanceConnectorConfigurationState(
+  settings: unknown,
+): FinanceConnectorConfigurationState {
+  return currencySchema.safeParse(parseObject(settings).householdCurrency).success
+    ? { status: 'configured', code: null }
+    : { status: 'needs-configuration', code: 'household_currency_unavailable' };
+}
+
+export function isCardRuleFingerprintParityProven(settings: unknown): boolean {
+  return parseObject(settings).cardRuleFingerprintParityProven === true;
 }
 
 export function redactFinanceConnector<T extends ConnectorConfigLike>(config: T): T {

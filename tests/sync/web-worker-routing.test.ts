@@ -30,6 +30,9 @@ const queueMocks = vi.hoisted(() => {
 });
 
 vi.mock('@/db', () => ({
+  sqlite: {
+    prepare: vi.fn(() => ({ get: vi.fn(() => undefined) })),
+  },
   default: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({

@@ -4,9 +4,19 @@ import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities';
 import type { SyncResult } from '@/types';
 import type { SyncStreamEvent } from './events';
 import { connectorSyncLeaseOwner, recoverExpiredSyncJobs } from './connector-lock';
+import {
+  assertConnectorSyncEnqueueAllowed,
+  isConnectorSyncQuarantined,
+} from './control-state';
 
 export type SyncJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
-export type SyncJobSource = 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery';
+export type SyncJobSource =
+  | 'api'
+  | 'schedule'
+  | 'nightly'
+  | 'watchdog'
+  | 'recovery'
+  | 'operator-canary';
 
 export interface SyncJob {
   id: string;
@@ -195,6 +205,7 @@ interface EnqueueSyncJobOptions {
   scheduledFor?: Date;
   maxAttempts?: number;
   durationBudgetMs?: number;
+  operatorCanaryRunId?: string;
 }
 
 function enqueueSyncJobRecord(
@@ -206,6 +217,12 @@ function enqueueSyncJobRecord(
   const availableAt = (options.availableAt ?? nowDate).toISOString();
   const scheduledFor = (options.scheduledFor ?? options.availableAt ?? nowDate).toISOString();
   const full = options.full === true;
+  const source = options.source ?? 'api';
+  assertConnectorSyncEnqueueAllowed(
+    connectorId,
+    source,
+    options.operatorCanaryRunId,
+  );
   const identityStamp = captureGitHubIdentityStamp(connectorId);
   const maintenanceLock = sqlite.prepare(`
     SELECT operation_id AS operationId
@@ -277,7 +294,7 @@ function enqueueSyncJobRecord(
     id,
     connectorId,
     full ? 1 : 0,
-    options.source ?? 'api',
+    source,
     options.maxAttempts ?? positiveInteger(process.env.MC_SYNC_JOB_MAX_ATTEMPTS, 3),
     availableAt,
     scheduledFor,
@@ -352,6 +369,31 @@ export function claimNextSyncJob(
           SELECT 1
           FROM connector_maintenance_locks
           WHERE connector_instance_id = sync_jobs.connector_id
+        )
+        AND (
+          (
+            sync_jobs.source <> 'operator-canary'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM connector_sync_controls
+              WHERE connector_id = sync_jobs.connector_id
+                AND scheduler_state = 'quarantined'
+            )
+          )
+          OR (
+            sync_jobs.source = 'operator-canary'
+            AND EXISTS (
+              SELECT 1
+              FROM connector_sync_controls controls
+              INNER JOIN connector_sync_operator_runs runs
+                ON runs.connector_id = controls.connector_id
+                AND runs.quarantine_id = controls.quarantine_id
+                AND runs.operation = 'canary'
+                AND runs.job_id = sync_jobs.id
+              WHERE controls.connector_id = sync_jobs.connector_id
+                AND controls.scheduler_state = 'quarantined'
+            )
+          )
         )
       ORDER BY full DESC, scheduled_for ASC, created_at ASC
       LIMIT 1
@@ -767,6 +809,10 @@ export function getSyncQueueMetrics(now = new Date()): SyncQueueMetrics {
 }
 
 export function registerSyncSchedule(connectorId: string, intervalMinutes: number): void {
+  if (isConnectorSyncQuarantined(connectorId)) {
+    unregisterSyncSchedule(connectorId);
+    return;
+  }
   const now = new Date();
   const nowIso = now.toISOString();
   sqlite.prepare(`
@@ -869,6 +915,12 @@ export function enqueueDueSyncSchedules(now = new Date()): SyncJob[] {
         FROM connector_maintenance_locks
         WHERE connector_instance_id = sync_schedules.connector_id
       )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM connector_sync_controls
+        WHERE connector_id = sync_schedules.connector_id
+          AND scheduler_state = 'quarantined'
+      )
   `).run();
   const due = sqlite.prepare(`
     SELECT
@@ -881,6 +933,12 @@ export function enqueueDueSyncSchedules(now = new Date()): SyncJob[] {
         SELECT 1
         FROM connector_maintenance_locks
         WHERE connector_instance_id = sync_schedules.connector_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM connector_sync_controls
+        WHERE connector_id = sync_schedules.connector_id
+          AND scheduler_state = 'quarantined'
       )
     ORDER BY next_due_at, connector_id
   `).all(nowIso) as Array<{

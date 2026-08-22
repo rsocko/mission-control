@@ -1,6 +1,7 @@
 import type { SyncResult } from '@/types';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
 import { assertConnectorMaintenanceUnlocked } from './maintenance-lock';
+import { assertConnectorSyncEnqueueAllowed } from './control-state';
 import {
   countRemainingSyncJobs,
   enqueueSyncJob,
@@ -56,6 +57,10 @@ export class SyncQueue {
     options?: SyncRequestOptions,
   ): Promise<SyncResult> {
     assertConnectorMaintenanceUnlocked(connectorId);
+    assertConnectorSyncEnqueueAllowed(
+      connectorId,
+      options?.source ?? 'api',
+    );
     if (!isDurableSyncMode()) {
       return this.enqueueSync(connectorId, options);
     }
@@ -94,6 +99,7 @@ export class SyncQueue {
   }
 
   queueFollowUpSync(connectorId: string): void {
+    assertConnectorSyncEnqueueAllowed(connectorId, 'api');
     if (isDurableSyncMode()) {
       enqueueSyncJob(connectorId, { full: true, source: 'api' });
       return;

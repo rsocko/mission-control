@@ -153,11 +153,20 @@ bridge acknowledges success.
 
 Each normalized snapshot page is separately submitted to Tyrion's protected
 batch attribution v1 service. Mission Control sends only opaque keyed source
-references, date, normalized merchant, an irreversible instrument fingerprint,
-observation time, and a structured existing manual decision. Mission Control
-authenticates with the finance-manager bearer token over private service DNS;
-Tyrion fixes the service actor and household scope server-side. Tyrion remains
-the sole policy and engine runtime.
+references, date, normalized merchant, an irreversible instrument fingerprint
+or `null`, observation time, and a structured existing manual decision. The
+fingerprint is sent only when parity with Tyrion's retained fingerprint sidecar
+has been independently proven; otherwise card-rule attribution is blocked.
+No request fingerprint key-version field exists. Mission Control authenticates
+with the finance-manager bearer token over private service DNS; Tyrion fixes the
+service actor and household scope server-side. Tyrion remains the sole policy
+and engine runtime.
+
+Finance connector creation requires an exact uppercase ISO-4217
+`settings.householdCurrency`. It is non-secret application state shared by
+connector setup and Finance Insight publication validation. Existing connectors
+without it remain editable, preserve unrelated settings, and report
+`needs-configuration` until an operator selects a supported currency.
 
 Attribution metadata is persisted beside the transaction mirror. Current review
 exceptions are unique by connector and transaction, with idempotent manual
@@ -201,6 +210,10 @@ The repair leaves authoritative attribution exceptions intact so a later
 configured sync can replace them with genuine review work. The repair is fenced
 to the August 11-12, 2026 MC producer window and does not infer Tyrion policy
 state, outbox state, or fingerprint-key parity.
+
+Scheduler quarantine, one-shot canary sync, and exact-generation Finance Insight
+cutover procedures are documented in
+[`Tyrion Recovery and Finance Insight Readiness`](../operations/tyrion-recovery-readiness.md).
 
 Duplicate signal detection remains owned by Tyrion
 ([`octo-org/tyrion#174`](https://github.com/octo-org/tyrion/pull/174)).

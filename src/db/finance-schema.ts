@@ -747,6 +747,29 @@ export const financeInsightCutovers = sqliteTable('finance_insight_cutovers', {
     .on(table.deliveryEnabled, table.updatedAt),
 ]);
 
+export const financeInsightCutoverAudit = sqliteTable('finance_insight_cutover_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  operation: text('operation').$type<'enable' | 'rollback'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  sourceGeneration: text('source_generation'),
+  resultCode: text('result_code').notNull(),
+  blockerCodes: text('blocker_codes', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+  legacyExpiredCount: integer('legacy_expired_count').notNull().default(0),
+  importedCount: integer('imported_count').notNull().default(0),
+  suppressedDeliveryCount: integer('suppressed_delivery_count').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_insight_cutover_audit_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_insight_cutover_audit_connector')
+    .on(table.connectorId, table.createdAt),
+]);
+
 // ─── KID CARD RULES ─────────────────────────────────────────────────────────
 
 export const kidCardRules = sqliteTable('kid_card_rules', {

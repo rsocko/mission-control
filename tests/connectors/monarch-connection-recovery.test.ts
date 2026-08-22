@@ -276,4 +276,53 @@ describe('Monarch connection-loss recovery', () => {
     expect(await harness.db.select().from(harness.schema.notifications)).toHaveLength(2);
     harness.sqlite.close();
   });
+
+  it('blocks bounded recovery sync without contacting Monarch while quarantined', async () => {
+    const harness = await loadHarness();
+    const now = '2026-08-22T12:00:00.000Z';
+    const config: ConnectorConfig = {
+      id: 'finance-quarantined',
+      type: 'finance-manager',
+      name: 'Tyrion',
+      enabled: true,
+      syncMode: 'poll',
+      capabilities: {
+        read: true,
+        write: true,
+        delete: false,
+        sync: true,
+        subtasks: false,
+        lists: false,
+        tags: true,
+        tagWriteBack: false,
+      },
+      credentials: { serviceToken: 'invented-service-token-with-32-characters' },
+      settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
+      syncedLists: [],
+    };
+    harness.db.insert(harness.schema.connectorConfigs).values({
+      ...config,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+    harness.db.insert(harness.schema.connectorSyncControls).values({
+      connectorId: config.id,
+      schedulerState: 'quarantined',
+      quarantineId: 'quarantine-recovery-test',
+      quarantinedAt: now,
+      updatedAt: now,
+    }).run();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(harness.recovery.verifyFinanceConnectionRecovery({
+      config,
+      now: new Date(now),
+    })).resolves.toEqual({
+      recovered: false,
+      reason: 'connector_sync_quarantined',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    harness.sqlite.close();
+  });
 });

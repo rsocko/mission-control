@@ -21,6 +21,9 @@ const mockSyncLogRows: Array<{
 
 vi.mock('@/db', () => {
   return {
+    sqlite: {
+      prepare: vi.fn(() => ({ get: vi.fn(() => undefined) })),
+    },
     default: {
       select: vi.fn(() => ({
         from: vi.fn(() => ({

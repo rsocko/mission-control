@@ -208,7 +208,7 @@ describe('TaskTagsSection', () => {
 describe('TaskDocumentPreviewSection', () => {
   it('renders nothing without a preview URL', () => {
     const { container } = render(
-      <TaskDocumentPreviewSection mode="panel" connectorType="local" metadata={{}} />,
+      <TaskDocumentPreviewSection taskId="task-1" mode="panel" connectorType="local" metadata={{}} />,
     );
 
     expect(container).toBeEmptyDOMElement();
@@ -217,6 +217,7 @@ describe('TaskDocumentPreviewSection', () => {
   it('renders the structured document layout for document intelligence', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task-1"
         mode="panel"
         connectorType="document-intelligence"
         metadata={{
@@ -252,6 +253,7 @@ describe('TaskDocumentPreviewSection', () => {
   it('renders a generic preview link for other connectors', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task-1"
         mode="panel"
         connectorType="local"
         metadata={{ previewUrl: 'https://files.example/a.pdf', correspondent: 'Acme', amount: 8 }}
@@ -267,12 +269,12 @@ describe('TaskDocumentPreviewSection', () => {
   it('does not iframe document-intelligence links marked as external', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task-2"
         mode="panel"
         connectorType="document-intelligence"
         metadata={{
           previewUrl: 'https://docs.example/2',
           previewType: 'external',
-          documentId: 2,
           documentTitle: 'External statement',
         }}
       />,
@@ -286,6 +288,7 @@ describe('TaskDocumentPreviewSection', () => {
   it('upgrades legacy Paperless document links to PDF previews', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task/42"
         mode="panel"
         connectorType="document-intelligence"
         metadata={{
@@ -300,7 +303,7 @@ describe('TaskDocumentPreviewSection', () => {
 
     expect(screen.getByTitle('Preview of Legacy statement')).toHaveAttribute(
       'src',
-      'https://paperless.example/api/documents/42/preview/',
+      '/api/tasks/task%2F42/document-preview',
     );
     expect(screen.getByRole('link', { name: /Open Doc/ })).toHaveAttribute(
       'href',

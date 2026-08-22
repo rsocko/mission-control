@@ -152,7 +152,7 @@ connection. Saved SQLite values take precedence over environment defaults.
 | `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Optional positive policy fence; blank derives the fence from the first successful batch |
 | `TYRION_ATTRIBUTION_TIMEOUT_MS` | `10000` | Bounded Tyrion attribution request timeout, capped at 30 seconds |
 | `MONARCH_WEB_URL` | `https://app.monarchmoney.com` | Public Monarch origin used for comprehensive finance workflow links |
-| `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Public Tyrion operations origin used only for the `/configuration` link |
+| `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Allowlisted public Tyrion operations root used for configuration and the server-constructed `?source=mission-control` reconnect action |
 | `FINANCE_EXTERNAL_ALLOWED_HOSTS` | — | Additional comma-separated HTTPS hosts approved for public finance links |
 | `FINANCE_OWL_ALLOWED_HOSTS` | — | Additional comma-separated HTTPS hosts approved for mapped OWL document actions |
 | `DOC_INTELLIGENCE_URL` | `http://localhost:8200` | OWL, the Paperless-ngx connector and document agent for Mission Control |
@@ -179,6 +179,19 @@ queries, fragments, encoded separators, or path traversal. The bare
 versioned gateway. The browser `/api/bridge` proxy and Tyrion auth, session, raw
 bridge, and internal routes are not connector APIs. Connector requests never
 follow redirects.
+
+Mission Control polls normalized Tyrion health every five minutes. Degraded or
+unavailable health remains suppressed for the first 15 minutes; a verified
+`expired` or `unauthenticated` state is immediately actionable. One durable
+outage episode owns one notification and, after four hours, one local task and
+My Day item. Restarting Mission Control does not reset either threshold.
+Recovery is not inferred from navigation: Mission Control requires connected
+live health, performs `POST /sync?days=30` without a request body, and then
+requires a second connected live health response before settling the episode.
+The reconnect action is built only from `TYRION_OPERATIONS_URL`; producer URLs,
+Monarch cookies, `session_id`, `csrftoken`, and reusable session material are
+not accepted.
+
 The attribution client calls only
 `POST http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch` and
 uses the connector's persisted service token, falling back to

@@ -100,12 +100,12 @@ describe('DocumentIntelligenceConnector', () => {
       const connector = await createConnector();
       fetchMock.mockResolvedValueOnce(new Response('Server Error', { status: 500 }));
 
-      await expect(connector.dismissAlert('eob-42')).rejects.toThrow('OWL update failed');
+      await expect(connector.dismissAlert('eob-42')).rejects.toThrow('OWL request failed');
     });
   });
 
   describe('completeTask', () => {
-    it('calls PATCH with status "done"', async () => {
+    it('calls PATCH with status "completed"', async () => {
       fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
       const connector = await createConnector();
 
@@ -116,12 +116,12 @@ describe('DocumentIntelligenceConnector', () => {
       );
       expect(patchCall).toBeDefined();
       expect(patchCall![0]).toContain('/api/action-queue/actions/act-1');
-      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'done' });
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'completed' });
     });
   });
 
   describe('updateTask', () => {
-    it('writes back "done" status to DI', async () => {
+    it('writes back completed status to OWL', async () => {
       fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
       const connector = await createConnector();
 
@@ -131,7 +131,7 @@ describe('DocumentIntelligenceConnector', () => {
         (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
       );
       expect(patchCall).toBeDefined();
-      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'done' });
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'completed' });
     });
 
     it('writes back "dismissed" for cancelled status', async () => {
@@ -147,21 +147,25 @@ describe('DocumentIntelligenceConnector', () => {
       expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'dismissed' });
     });
 
-    it.each(['todo', 'in_progress'] as const)(
-      'writes back "pending" when status changes to %s',
-      async (status) => {
-        fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
-        const connector = await createConnector();
+    it('writes back pending when a task is reopened', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
 
-        await connector.updateTask('act-1', { status });
+      await connector.updateTask('act-1', { status: 'todo' });
 
-        const patchCall = fetchMock.mock.calls.find(
-          (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
-        );
-        expect(patchCall).toBeDefined();
-        expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'pending' });
-      },
-    );
+      const patchCall = fetchMock.mock.calls.find(
+        (call: unknown[]) => (call[1] as RequestInit)?.method === 'PATCH'
+      );
+      expect(JSON.parse((patchCall![1] as RequestInit).body as string)).toEqual({ status: 'pending' });
+    });
+
+    it('rejects statuses OWL cannot represent', async () => {
+      const connector = await createConnector();
+
+      await expect(connector.updateTask('act-1', { status: 'in_progress' }))
+        .rejects.toThrow('OWL does not support task status "in_progress"');
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('fetchTasks', () => {
@@ -189,9 +193,130 @@ describe('DocumentIntelligenceConnector', () => {
       const tasks = (await Array.fromAsync(connector.fetchTasks())).flat();
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
-      expect(tasks[0].metadata.previewType).toBe('pdf');
+      expect(tasks[0].metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');
+      expect(tasks[0].metadata.previewType).toBe('external');
       expect(tasks[0].metadata.previewLabel).toBe('View in Paperless-ngx');
+    });
+
+    it('paginates the flat OWL response by offset and uses updated_at freshness', async () => {
+      const firstPage = Array.from({ length: 100 }, (_, index) => ({
+        id: `act-${index + 1}`,
+        document_id: index + 1,
+        document_title: `Invoice ${index + 1}`,
+        action_type: 'pay',
+        urgency: 'high',
+        amount: 250,
+        summary: 'Pay invoice',
+        status: 'pending',
+        created_at: '2026-07-20T12:00:00Z',
+        updated_at: '2026-08-20T12:00:00Z',
+      }));
+      const secondPage = [{
+          id: 'act-101',
+          document_id: 101,
+          document_title: 'Reply',
+          action_type: 'respond',
+          urgency: 'medium',
+          summary: 'Reply to letter',
+          status: 'completed',
+          created_at: '2026-07-20T12:00:00Z',
+          updated_at: '2026-08-21T12:00:00Z',
+      }];
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify(secondPage), { status: 200 }));
+      const connector = await createConnector();
+
+      const tasks = (await Array.fromAsync(
+        connector.fetchTasks(new Date('2026-08-01T00:00:00Z')),
+      )).flat();
+
+      expect(tasks).toHaveLength(101);
+      expect(tasks.at(-1)?.status).toBe('done');
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(String(fetchMock.mock.calls[0][0])).toContain('status=all');
+      expect(String(fetchMock.mock.calls[0][0])).toContain('offset=0');
+      expect(String(fetchMock.mock.calls[1][0])).toContain('offset=100');
+    });
+
+    it('reconciles legacy actions without updated_at during incremental pulls', async () => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([{
+        id: 'act-legacy',
+        document_id: 44,
+        document_title: 'Legacy bill',
+        action_type: 'pay',
+        urgency: 'low',
+        summary: 'Legacy action completed after creation',
+        status: 'completed',
+        created_at: '2026-01-01T12:00:00Z',
+      }]), { status: 200 }));
+      const connector = await createConnector();
+
+      const tasks = (await Array.fromAsync(
+        connector.fetchTasks(new Date('2026-08-01T00:00:00Z')),
+      )).flat();
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        sourceId: 'act-legacy',
+        status: 'done',
+      });
+    });
+  });
+
+  describe('OWL task actions', () => {
+    it('sends source-side snooze and classifier feedback payloads', async () => {
+      fetchMock.mockImplementation(() => Promise.resolve(new Response('{}', { status: 200 })));
+      const connector = await createConnector();
+
+      await connector.snoozeAction('act-1', '2026-08-23T13:00:00.000Z');
+      await connector.submitActionFeedback('act-1', { feedback_type: 'not_an_action' });
+      await connector.submitActionFeedback('act-1', {
+        feedback_type: 'wrong_amount',
+        corrected_amount: 125.5,
+      });
+
+      expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('/api/action-queue/actions/act-1/snooze'),
+        expect.stringContaining('/api/action-queue/actions/act-1/feedback'),
+        expect.stringContaining('/api/action-queue/actions/act-1/feedback'),
+      ]);
+      expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({
+        until: '2026-08-23T13:00:00.000Z',
+      });
+      expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+        feedback_type: 'wrong_amount',
+        corrected_amount: 125.5,
+      });
+    });
+  });
+
+  describe('fetchTriageItems', () => {
+    it('paginates the complete pending action queue', async () => {
+      const makeAction = (index: number) => ({
+        id: `triage-${index}`,
+        document_id: index,
+        document_title: `Document ${index}`,
+        action_type: 'review',
+        urgency: 'medium',
+        summary: `Review document ${index}`,
+        status: 'pending',
+        created_at: '2026-08-20T12:00:00Z',
+        updated_at: '2026-08-20T12:00:00Z',
+      });
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify(Array.from({ length: 100 }, (_, index) => makeAction(index))),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify([makeAction(100)]), { status: 200 }));
+      const connector = await createConnector();
+
+      const items = await connector.fetchTriageItems();
+
+      expect(items).toHaveLength(101);
+      expect(String(fetchMock.mock.calls[0][0])).toContain('status=pending');
+      expect(String(fetchMock.mock.calls[1][0])).toContain('offset=100');
     });
   });
 

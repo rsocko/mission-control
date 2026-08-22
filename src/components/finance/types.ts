@@ -78,6 +78,8 @@ export interface FinanceHealth {
       warning: string | null;
     }>;
   };
+  recovery: import('@/lib/connectors/monarch-money/recovery-contract')
+    .FinanceConnectionRecoveryView | null;
 }
 
 export type FinanceInsightPresentationState =

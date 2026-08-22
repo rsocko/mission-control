@@ -401,6 +401,37 @@ describe.sequential('finance attention projection repair API', () => {
     });
   });
 
+  it('binds an apply idempotency key to its original dry-run', async () => {
+    seedProjection({ exceptionId: 'affected-idempotency-binding' });
+    const firstDryRun = await post(
+      { mode: 'dry-run' },
+      'repair-binding-dry-0001',
+    );
+    const applyBody = {
+      mode: 'apply',
+      dryRunId: firstDryRun.body.runId,
+      confirmation: 'repair-attribution-not-configured-projections',
+    };
+    const applied = await post(applyBody, 'repair-binding-apply-0001');
+    expect(applied.response.status).toBe(200);
+
+    const secondDryRun = await post(
+      { mode: 'dry-run' },
+      'repair-binding-dry-0002',
+    );
+    const conflict = await post({
+      ...applyBody,
+      dryRunId: secondDryRun.body.runId,
+    }, 'repair-binding-apply-0001');
+
+    expect(conflict.response.status).toBe(409);
+    expect(conflict.body).toMatchObject({ code: 'repair_idempotency_conflict' });
+    expect(count(
+      'finance_attention_repair_audit',
+      `WHERE mode = 'apply'`,
+    )).toBe(1);
+  });
+
   it('preserves local notification dismissal without suppressing the source exception', async () => {
     seedProjection({ exceptionId: 'affected-dismissed' });
     sqlite.prepare(`

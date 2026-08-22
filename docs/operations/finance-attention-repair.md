@@ -37,7 +37,7 @@ guessing a fingerprint.
 
 ## Deployment requirement
 
-Deploy migration `0112_finance_attention_repair` before invoking the endpoint.
+Deploy migration `0113_finance_attention_repair` before invoking the endpoint.
 It adds only `finance_attention_repair_audit` and two indexes; no data backfill,
 Tyrion deployment, connector enablement, or planned downtime is required.
 Normal startup migration handling applies it on the first database connection.

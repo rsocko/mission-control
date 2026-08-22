@@ -71,14 +71,14 @@ function makeUnmatchedEob(overrides?: Partial<UnmatchedEob>): UnmatchedEob {
 // ─── mapActionToTask ───────────────────────────────────────────────────────
 
 describe('mapActionToTask', () => {
-  it('builds a Paperless PDF preview URL from document_url', () => {
+  it('retains the Paperless document URL when OWL provides no preview', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID);
-    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
+    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');
   });
 
-  it('renders the Paperless preview as a PDF', () => {
+  it('marks the Paperless document URL as external', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID);
-    expect(task.metadata.previewType).toBe('pdf');
+    expect(task.metadata.previewType).toBe('external');
   });
 
   it('sets previewLabel to "View in Paperless-ngx"', () => {
@@ -123,9 +123,38 @@ describe('mapActionToTask', () => {
 
   it('maps action statuses correctly', () => {
     expect(mapActionToTask(makeAction({ status: 'pending' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('todo');
-    expect(mapActionToTask(makeAction({ status: 'in_progress' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('in_progress');
+    expect(mapActionToTask(makeAction({ status: 'snoozed' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('todo');
+    expect(mapActionToTask(makeAction({ status: 'completed' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('done');
     expect(mapActionToTask(makeAction({ status: 'done' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('done');
     expect(mapActionToTask(makeAction({ status: 'dismissed' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('cancelled');
+    expect(mapActionToTask(makeAction({ status: 'not_an_action' }), CONNECTOR_TYPE, CONNECTOR_ID).status).toBe('cancelled');
+  });
+
+  it('uses updated_at and preserves OWL disposition and snooze metadata', () => {
+    const updatedAt = '2026-08-21T14:30:00Z';
+    const snoozedUntil = '2026-08-23T13:00:00Z';
+    const snoozed = mapActionToTask(
+      makeAction({ status: 'snoozed', updated_at: updatedAt, snoozed_until: snoozedUntil }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+    const noAction = mapActionToTask(
+      makeAction({ status: 'not_an_action', updated_at: updatedAt }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+
+    expect(snoozed.updatedAt).toBe(updatedAt);
+    expect(snoozed.snoozedUntil).toBe(snoozedUntil);
+    expect(snoozed.metadata).toMatchObject({
+      owlStatus: 'snoozed',
+      owlSnoozedUntil: snoozedUntil,
+      owlUpdatedAt: updatedAt,
+    });
+    expect(noAction.metadata).toMatchObject({
+      owlStatus: 'not_an_action',
+      owlDisposition: 'not_an_action',
+    });
   });
 });
 

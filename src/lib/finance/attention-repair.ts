@@ -538,10 +538,14 @@ export function repairAttributionNotConfiguredAttention(input: {
       const connector = loadConnector(input.connectorId);
       const replay = findAudit(input.connectorId, idempotencyKey);
       if (replay) {
-        if (replay.mode !== input.mode) {
+        const requestedDryRunId = input.dryRunId?.trim() || null;
+        if (
+          replay.mode !== input.mode
+          || (input.mode === 'apply' && replay.dryRunId !== requestedDryRunId)
+        ) {
           throw new FinanceAttentionRepairError(
             'repair_idempotency_conflict',
-            'Idempotency key was already used for a different repair mode',
+            'Idempotency key was already used for a different repair request',
             409,
           );
         }
@@ -594,6 +598,7 @@ export function repairAttributionNotConfiguredAttention(input: {
         counts,
         now,
       });
+
       const result: FinanceAttentionRepairResult = {
         runId,
         mode: input.mode,

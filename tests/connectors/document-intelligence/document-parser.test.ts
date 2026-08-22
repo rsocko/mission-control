@@ -132,8 +132,8 @@ describe('mapActionToTask', () => {
   it('maps metadata correctly', () => {
     const task = mapActionToTask(mockPayAction, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
     const meta = task.metadata as Record<string, unknown>;
-    expect(meta.previewUrl).toBe('https://paperless.example/api/documents/42/preview/');
-    expect(meta.previewType).toBe('pdf');
+    expect(meta.previewUrl).toBe('https://paperless.example/documents/42');
+    expect(meta.previewType).toBe('external');
     expect(meta.previewLabel).toBe('View in Paperless-ngx');
     expect(meta.amount).toBe(143.22);
     expect(meta.correspondent).toBe('PG&E');
@@ -173,9 +173,11 @@ describe('mapActionToTask', () => {
   it('maps statuses correctly', () => {
     const statuses: [DocAction['status'], string][] = [
       ['pending', 'todo'],
-      ['in_progress', 'in_progress'],
+      ['completed', 'done'],
       ['done', 'done'],
       ['dismissed', 'cancelled'],
+      ['not_an_action', 'cancelled'],
+      ['snoozed', 'todo'],
     ];
     for (const [diStatus, mcStatus] of statuses) {
       const task = mapActionToTask({ ...mockPayAction, status: diStatus }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);

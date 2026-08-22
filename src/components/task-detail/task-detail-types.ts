@@ -1,6 +1,7 @@
 import type {
   LocalDisposition,
   TaskEditPolicy,
+  TaskStatus,
   TaskSourceModel,
 } from '@/types';
 import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
@@ -58,10 +59,12 @@ export interface TaskDetail {
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
   reminderTimezone?: string;
+  snoozedUntil?: string | null;
   isInMyDay?: boolean;
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
   editPolicy: TaskEditPolicy;
+  supportedStatusValues?: TaskStatus[];
 }
 
 /** A list within the task's own source, used for same-source moves. */
@@ -144,6 +147,10 @@ export interface TaskDetailMetadata {
   amount?: number;
   actionType?: string;
   urgency?: string;
+  owlStatus?: string;
+  owlDisposition?: string;
+  owlSnoozedUntil?: string;
+  owlUpdatedAt?: string;
   recurrence?: string;
   linkedResources?: Array<{
     id?: string;
@@ -191,8 +198,14 @@ export interface TaskDetailPanelProps {
 }
 
 /** Parse a task's metadata blob, tolerating absent or malformed JSON. */
-export function parseTaskMetadata(metadata: string | null | undefined): TaskDetailMetadata {
+export function parseTaskMetadata(
+  metadata: string | Record<string, unknown> | null | undefined,
+): TaskDetailMetadata {
   if (!metadata) return {};
+  if (typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as TaskDetailMetadata;
+  }
+  if (typeof metadata !== 'string') return {};
   try {
     const parsed: unknown = JSON.parse(metadata);
     return parsed && typeof parsed === 'object' ? parsed as TaskDetailMetadata : {};

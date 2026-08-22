@@ -8,6 +8,7 @@ import type { LocalDisposition } from '@/types';
 import { cn } from '@/lib/utils';
 import { MoveToListDropdown } from './MoveToListDropdown';
 import type { SourceList, TaskDetailMode } from './task-detail-types';
+import type { ReactNode } from 'react';
 
 /** One Mission Control disposition the task can be switched to. */
 export interface TaskDispositionOption {
@@ -36,6 +37,8 @@ export interface TaskSourceActionsSectionProps {
   canDeleteTask: boolean;
   deleteLabel: string;
   onDelete: () => void;
+  /** Connector-specific actions that should remain separate from global lifecycle values. */
+  sourceSpecificActions?: ReactNode;
 }
 
 /** Source-level actions: disposition, moves, deep link, and deletion. */
@@ -54,6 +57,7 @@ export function TaskSourceActionsSection({
   canDeleteTask,
   deleteLabel,
   onDelete,
+  sourceSpecificActions,
 }: TaskSourceActionsSectionProps) {
   const showDelete = canDeleteTask && mode !== 'mobile';
   const showMoveToList = supportsMoveToList && Boolean(onMoveToList);
@@ -61,7 +65,8 @@ export function TaskSourceActionsSection({
     || showMoveToList
     || hasWritableConnectors
     || Boolean(deepLink)
-    || showDelete;
+    || showDelete
+    || Boolean(sourceSpecificActions);
   if (!hasAnyAction) return null;
 
   return (
@@ -73,6 +78,7 @@ export function TaskSourceActionsSection({
     )}>
       <h3 className="border-b border-[var(--border-subtle)] px-3 py-2.5 text-xs font-semibold text-[var(--text-secondary)]">Source &amp; actions</h3>
       <div className="flex flex-wrap items-center gap-2 p-3">
+        {sourceSpecificActions}
         {dispositionOptions.length > 0 && (
           <div className="w-full rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] p-2.5">
             <div className="mb-2 flex items-start gap-2">

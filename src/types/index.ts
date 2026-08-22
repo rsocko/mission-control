@@ -108,6 +108,8 @@ export interface TaskItem {
   createdAt: string;
   updatedAt: string;
   completedAt?: string;
+  /** Source-backed or local snooze timestamp. Snoozed tasks remain open. */
+  snoozedUntil?: string | null;
 
   // Hierarchy
   parentId?: string;
@@ -664,6 +666,10 @@ export interface ConnectorCapabilities {
   taskSourceModel?: TaskSourceModel;
   /** How status changes are exposed to the source. */
   statusWriteBack?: WriteBackMode;
+  /** Mission Control lifecycle values the source can represent and write back. */
+  supportedTaskStatuses?: TaskStatus[];
+  /** Whether a task missing from a complete pull should be treated as deleted. */
+  taskAbsenceMeansDeleted?: boolean;
   /** Whether a pull consumer remains active while its connector is disabled. */
   pullWriteBackWhenDisabled?: boolean;
   /** Optional per-field authority overrides for hybrid connectors. */

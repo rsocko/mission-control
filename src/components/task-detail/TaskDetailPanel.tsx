@@ -42,6 +42,7 @@ import { TaskDuplicatesSection } from './TaskDuplicatesSection';
 import { TaskSourceActionsSection } from './TaskSourceActionsSection';
 import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
+import { OwlTaskActions } from './OwlTaskActions';
 import { TaskDetailFooter, TaskMobileActionBar } from './TaskDetailFooter';
 import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
 import { useTaskDetailData } from './useTaskDetailData';
@@ -744,6 +745,7 @@ export function TaskDetailPanel({
             statusReason: task.statusReason,
             microStatus: task.microStatus,
             connectorType: task.connectorType,
+            supportedStatusValues: task.supportedStatusValues,
             canEditStatus,
             canEditMicroStatus,
             statusBlockedReason: blockedReason('status'),
@@ -962,9 +964,30 @@ export function TaskDetailPanel({
           canDeleteTask={canDeleteTask}
           deleteLabel={taskRemovalLabel(task.editPolicy)}
           onDelete={mutations.handleDelete}
+          sourceSpecificActions={task.connectorType === 'document-intelligence' ? (
+            <OwlTaskActions
+              key={task.id}
+              taskId={task.id}
+              metadata={parsedMetadata}
+              snoozedUntil={task.snoozedUntil}
+              onTaskUpdate={(update) => {
+                setTask((current) => current ? {
+                  ...current,
+                  ...update,
+                  metadata: JSON.stringify(update.metadata),
+                } : current);
+                onUpdate?.({
+                  status: update.status,
+                  priority: update.priority,
+                  snoozedUntil: update.snoozedUntil,
+                });
+              }}
+            />
+          ) : undefined}
         />
 
         <TaskDocumentPreviewSection
+          taskId={taskId}
           mode={mode}
           connectorType={task.connectorType}
           metadata={parsedMetadata}

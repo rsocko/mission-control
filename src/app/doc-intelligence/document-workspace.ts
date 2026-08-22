@@ -27,6 +27,37 @@ export interface DocumentTaskMetadata {
   previewLabel?: string;
   documentId?: string | number;
   docHubUrl?: string;
+  recommendedCta?: {
+    id: string;
+    label: string;
+    url?: string | null;
+    phone?: string | null;
+  } | null;
+  extractedData?: {
+    account_number?: string | null;
+    payment_url?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    reference_number?: string | null;
+    links?: Array<{
+      url: string;
+      label?: string | null;
+      purpose?: string | null;
+    }> | null;
+  } | null;
+}
+
+export interface DocumentActionLink {
+  href: string;
+  label: string;
+  kind: 'web' | 'phone' | 'email';
+  primary: boolean;
+}
+
+export interface DocumentActionHelpers {
+  links: DocumentActionLink[];
+  accountNumber?: string;
+  referenceNumber?: string;
 }
 
 export type DocumentView =
@@ -97,10 +128,131 @@ export function parseDocumentTaskMetadata(metadata: string | null | undefined): 
         ? value.documentId
         : undefined,
       docHubUrl: typeof value.docHubUrl === 'string' ? value.docHubUrl : undefined,
+      recommendedCta: parseRecommendedCta(value.recommendedCta),
+      extractedData: parseExtractedData(value.extractedData),
     };
   } catch {
     return {};
   }
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function optionalString(value: unknown): string | null | undefined {
+  return value === null || typeof value === 'string' ? value : undefined;
+}
+
+function parseRecommendedCta(value: unknown): DocumentTaskMetadata['recommendedCta'] {
+  if (value === null) return null;
+  const candidate = record(value);
+  if (!candidate || typeof candidate.id !== 'string' || typeof candidate.label !== 'string') {
+    return undefined;
+  }
+  return {
+    id: candidate.id,
+    label: candidate.label,
+    url: optionalString(candidate.url),
+    phone: optionalString(candidate.phone),
+  };
+}
+
+function parseExtractedData(value: unknown): DocumentTaskMetadata['extractedData'] {
+  if (value === null) return null;
+  const candidate = record(value);
+  if (!candidate) return undefined;
+  const links = Array.isArray(candidate.links)
+    ? candidate.links.flatMap((item) => {
+      const link = record(item);
+      return link && typeof link.url === 'string'
+        ? [{
+            url: link.url,
+            label: optionalString(link.label),
+            purpose: optionalString(link.purpose),
+          }]
+        : [];
+    })
+    : candidate.links === null
+      ? null
+      : undefined;
+  return {
+    account_number: optionalString(candidate.account_number),
+    payment_url: optionalString(candidate.payment_url),
+    phone: optionalString(candidate.phone),
+    email: optionalString(candidate.email),
+    reference_number: optionalString(candidate.reference_number),
+    links,
+  };
+}
+
+function safeWebUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function safePhoneUrl(value: string | null | undefined): string | null {
+  const phone = value?.trim();
+  if (!phone || !/^\+?[\d().\s-]{3,}$/.test(phone)) return null;
+  const normalized = phone.replace(/[^\d+]/g, '');
+  return /^\+?\d{3,}$/.test(normalized) ? `tel:${normalized}` : null;
+}
+
+function safeEmailUrl(value: string | null | undefined): string | null {
+  const email = value?.trim();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return null;
+  return `mailto:${email}`;
+}
+
+export function buildDocumentActionHelpers(metadata: DocumentTaskMetadata): DocumentActionHelpers {
+  const links: DocumentActionLink[] = [];
+  const seen = new Set<string>();
+  const addLink = (
+    href: string | null,
+    label: string,
+    kind: DocumentActionLink['kind'],
+    primary = false,
+  ) => {
+    if (!href) return;
+    const key = href.toLocaleLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    links.push({ href, label, kind, primary });
+  };
+
+  const recommended = metadata.recommendedCta;
+  addLink(safeWebUrl(recommended?.url), recommended?.label || 'Open recommended action', 'web', true);
+  addLink(safePhoneUrl(recommended?.phone), recommended?.label || 'Call', 'phone', true);
+
+  const extracted = metadata.extractedData;
+  addLink(safeWebUrl(extracted?.payment_url), 'Pay online', 'web');
+  for (const link of extracted?.links ?? []) {
+    const href = safeWebUrl(link.url);
+    let fallbackLabel = 'Open link';
+    if (href) {
+      try {
+        fallbackLabel = new URL(href).hostname;
+      } catch {
+        // safeWebUrl already validated this URL.
+      }
+    }
+    addLink(href, link.label || link.purpose || fallbackLabel, 'web');
+  }
+  addLink(safePhoneUrl(extracted?.phone), 'Call', 'phone');
+  addLink(safeEmailUrl(extracted?.email), 'Email', 'email');
+
+  return {
+    links,
+    accountNumber: extracted?.account_number || undefined,
+    referenceNumber: extracted?.reference_number || undefined,
+  };
 }
 
 function localDateTimestamp(value: string | null | undefined): number | null {

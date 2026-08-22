@@ -3,26 +3,58 @@
  */
 
 import type { TaskItem, InboundNotification, TriageItem, TriageActionType } from '@/types';
+import { z } from 'zod';
 import { buildDocHubTaskLinks, buildDocHubEobUrl, buildDocHubStatementsUrl } from './doc-hub-links';
 import { buildPaperlessPreviewUrl } from './preview-url';
 
-export interface DocAction {
-  id: string;
-  document_id: number;
-  document_title: string;
-  action_type: 'pay' | 'respond' | 'file' | 'review' | 'sign' | 'schedule';
-  urgency: 'critical' | 'high' | 'medium' | 'low';
-  due_date?: string | null;
-  amount?: number | null;
-  correspondent?: string | null;
-  summary: string;
-  status: 'pending' | 'in_progress' | 'done' | 'dismissed';
-  created_at: string;
-  document_url?: string;
-  document_type?: string | null;
-  preview_url?: string | null;
-  preview_type?: 'pdf' | 'iframe' | 'image' | 'external' | null;
-  thumbnail_url?: string | null;
+const recommendedCtaSchema = z.looseObject({
+  id: z.string(),
+  label: z.string(),
+  url: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const extractedLinkSchema = z.looseObject({
+  url: z.string(),
+  label: z.string().nullable().optional(),
+  purpose: z.string().nullable().optional(),
+});
+
+const extractedDataSchema = z.looseObject({
+  account_number: z.string().nullable().optional(),
+  payment_url: z.string().nullable().optional(),
+  phone: z.string().nullable().optional(),
+  email: z.string().nullable().optional(),
+  reference_number: z.string().nullable().optional(),
+  links: z.array(extractedLinkSchema).nullable().optional(),
+});
+
+export const docActionSchema = z.looseObject({
+  id: z.string(),
+  document_id: z.number(),
+  document_title: z.string(),
+  action_type: z.enum(['pay', 'respond', 'file', 'review', 'sign', 'schedule']),
+  urgency: z.enum(['critical', 'high', 'medium', 'low']),
+  due_date: z.string().nullable().optional(),
+  amount: z.number().nullable().optional(),
+  correspondent: z.string().nullable().optional(),
+  summary: z.string(),
+  status: z.enum(['pending', 'in_progress', 'done', 'dismissed']),
+  created_at: z.string(),
+  document_url: z.string().nullable().optional(),
+  document_type: z.string().nullable().optional(),
+  preview_url: z.string().nullable().optional(),
+  preview_type: z.enum(['pdf', 'iframe', 'image', 'external']).nullable().optional(),
+  thumbnail_url: z.string().nullable().optional(),
+  recommended_cta: recommendedCtaSchema.nullable().optional(),
+  extracted_data: extractedDataSchema.nullable().optional(),
+});
+
+export type DocAction = z.infer<typeof docActionSchema>;
+
+export function parseDocActions(payload: unknown): DocAction[] {
+  return z.array(docActionSchema).parse(payload);
 }
 
 export interface MissingStatement {
@@ -110,6 +142,8 @@ export function mapActionToTask(
       previewLabel: 'View in Paperless-ngx',
       docHubUrl: hubLinks.actionUrl,
       docHubDocumentUrl: hubLinks.documentUrl,
+      recommendedCta: action.recommended_cta,
+      extractedData: action.extracted_data,
     },
     syncStatus: 'synced',
     lastSyncedAt: new Date().toISOString(),
@@ -131,10 +165,11 @@ function resolveActionPreview(action: DocAction): {
     return { url: action.thumbnail_url, type: 'image' };
   }
 
-  const paperlessPreviewUrl = buildPaperlessPreviewUrl(action.document_url, action.document_id);
+  const documentUrl = action.document_url ?? undefined;
+  const paperlessPreviewUrl = buildPaperlessPreviewUrl(documentUrl, action.document_id);
   return paperlessPreviewUrl
     ? { url: paperlessPreviewUrl, type: 'pdf' }
-    : { url: action.document_url, type: 'external' };
+    : { url: documentUrl, type: 'external' };
 }
 
 function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
@@ -291,6 +326,8 @@ export function mapActionToTriageItem(
       connectorInstanceId,
       docHubUrl: hubLinks.actionUrl,
       docHubDocumentUrl: hubLinks.documentUrl,
+      recommendedCta: action.recommended_cta,
+      extractedData: action.extracted_data,
     },
     actionsTaken: [],
   };

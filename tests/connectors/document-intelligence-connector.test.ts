@@ -179,6 +179,16 @@ describe('DocumentIntelligenceConnector', () => {
         status: 'pending',
         created_at: '2026-07-20T12:00:00Z',
         document_url: 'http://paperless.example:8000/documents/42',
+        recommended_cta: {
+          id: 'pay-now',
+          label: 'Pay invoice',
+          url: 'https://billing.example/pay/123',
+        },
+        extracted_data: {
+          account_number: 'ACCT-123',
+          payment_url: 'https://billing.example/pay/123',
+          future_helper: 'retained',
+        },
       }];
 
       fetchMock.mockImplementation(() =>
@@ -192,6 +202,31 @@ describe('DocumentIntelligenceConnector', () => {
       expect(tasks[0].metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
       expect(tasks[0].metadata.previewType).toBe('pdf');
       expect(tasks[0].metadata.previewLabel).toBe('View in Paperless-ngx');
+      expect(tasks[0].metadata.recommendedCta).toEqual(actions[0].recommended_cta);
+      expect(tasks[0].metadata.extractedData).toEqual(actions[0].extracted_data);
+    });
+
+    it('accepts legacy action payloads that omit helper fields', async () => {
+      const action = {
+        id: 'act-legacy',
+        document_id: 43,
+        document_title: 'Legacy invoice',
+        action_type: 'review',
+        urgency: 'low',
+        summary: 'Review invoice',
+        status: 'pending',
+        created_at: '2026-07-20T12:00:00Z',
+      };
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(new Response(JSON.stringify([action]), { status: 200 }))
+      );
+      const connector = await createConnector();
+
+      const tasks = (await Array.fromAsync(connector.fetchTasks())).flat();
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].metadata.recommendedCta).toBeUndefined();
+      expect(tasks[0].metadata.extractedData).toBeUndefined();
     });
   });
 

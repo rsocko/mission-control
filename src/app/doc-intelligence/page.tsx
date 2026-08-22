@@ -47,6 +47,7 @@ import {
   type DocumentView,
   type SortDirection,
 } from './document-workspace';
+import { ActionHelpersSection } from './ActionHelpersSection';
 
 type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
@@ -386,16 +387,19 @@ export default function DocIntelligencePage() {
 
         {selectedTaskId ? (
           <section className="flex min-w-0 flex-1 overflow-hidden bg-[var(--surface-0)]" aria-label="Document action details">
-            <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
-              <TaskDetailPanel
-                taskId={selectedTaskId}
-                onClose={() => setSelectedTaskId(null)}
-                onUpdate={handleTaskUpdate}
-                mode="panel"
-                minPanelWidth={420}
-                fillContainer
-                documentPreviewClassName="2xl:hidden"
-              />
+            <div className="flex h-full min-w-0 flex-1 flex-col 2xl:max-w-[440px] 2xl:shrink-0">
+              {selectedTask && <ActionHelpersSection metadata={selectedTaskMetadata} />}
+              <div className="min-h-0 flex-1">
+                <TaskDetailPanel
+                  taskId={selectedTaskId}
+                  onClose={() => setSelectedTaskId(null)}
+                  onUpdate={handleTaskUpdate}
+                  mode="panel"
+                  minPanelWidth={420}
+                  fillContainer
+                  documentPreviewClassName="2xl:hidden"
+                />
+              </div>
             </div>
             {selectedTask && selectedTaskMetadata.previewUrl && (
               <div className="hidden min-w-0 flex-1 overflow-y-auto border-l border-[var(--border)] p-5 2xl:block">

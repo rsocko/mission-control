@@ -1,11 +1,11 @@
 /**
- * Deep link URL generation for the Document Intelligence Hub admin UI.
+ * Deep link URL generation for the OWL frontend.
  *
- * DI Hub admin routes:
- *   /admin/actions/{action_id}   – action detail
- *   /admin/eob/{eob_id}          – EOB match details
- *   /admin/statements            – statement tracker
- *   /admin/documents/{doc_id}    – document detail with OCR view
+ * OWL frontend routes use a HashRouter:
+ *   /#/action-queue              – action queue
+ *   /#/eob?tab=unmatched         – unmatched EOB queue
+ *   /#/statements                – statement tracker
+ *   /#/metadata/{doc_id}         – document metadata detail
  */
 
 export type DocHubLinkType = 'action' | 'eob' | 'statement' | 'document';
@@ -19,8 +19,47 @@ export interface DocHubLinkOptions {
   id?: string | number;
 }
 
+const LEGACY_ROUTE_MAPPINGS: Array<{
+  pattern: RegExp;
+  buildHash: (match: RegExpMatchArray) => string;
+}> = [
+  { pattern: /\/admin\/actions\/[^/]+$/, buildHash: () => '#/action-queue' },
+  { pattern: /\/admin\/eob\/[^/]+$/, buildHash: () => '#/eob?tab=unmatched' },
+  { pattern: /\/admin\/statements$/, buildHash: () => '#/statements' },
+  {
+    pattern: /\/admin\/documents\/([^/]+)$/,
+    buildHash: (match) => `#/metadata/${match[1]}`,
+  },
+];
+
 /**
- * Build a DI Hub admin deep link URL.
+ * Upgrade deep links persisted before OWL moved from server-rendered admin
+ * pages to its HashRouter frontend.
+ */
+export function normalizeDocHubUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+
+  try {
+    const url = new URL(value);
+    for (const mapping of LEGACY_ROUTE_MAPPINGS) {
+      const match = url.pathname.match(mapping.pattern);
+      if (!match) continue;
+
+      const basePath = url.pathname.slice(0, match.index);
+      url.pathname = `${basePath}/`;
+      url.search = '';
+      url.hash = mapping.buildHash(match);
+      return url.toString();
+    }
+  } catch {
+    return value;
+  }
+
+  return value;
+}
+
+/**
+ * Build an OWL frontend deep link URL.
  * Returns the full URL string, or null if required params are missing.
  */
 export function buildDocHubUrl(options: DocHubLinkOptions): string | null {
@@ -28,20 +67,20 @@ export function buildDocHubUrl(options: DocHubLinkOptions): string | null {
 
   if (!baseUrl) return null;
 
-  const cleanBase = baseUrl.replace(/\/$/, '');
+  const cleanBase = baseUrl.replace(/\/+$/, '');
 
   switch (type) {
     case 'action':
       if (!id) return null;
-      return `${cleanBase}/admin/actions/${encodeURIComponent(String(id))}`;
+      return `${cleanBase}/#/action-queue`;
     case 'eob':
       if (!id) return null;
-      return `${cleanBase}/admin/eob/${encodeURIComponent(String(id))}`;
+      return `${cleanBase}/#/eob?tab=unmatched`;
     case 'statement':
-      return `${cleanBase}/admin/statements`;
+      return `${cleanBase}/#/statements`;
     case 'document':
       if (!id) return null;
-      return `${cleanBase}/admin/documents/${encodeURIComponent(String(id))}`;
+      return `${cleanBase}/#/metadata/${encodeURIComponent(String(id))}`;
     default:
       return null;
   }

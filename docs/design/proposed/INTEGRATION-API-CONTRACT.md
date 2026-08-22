@@ -91,6 +91,10 @@ interface DocAction {
   status: 'pending' | 'in_progress' | 'done' | 'dismissed';
   created_at: string;               // ISO 8601 timestamp
   document_url?: string;            // Paperless document URL
+  document_type?: string | null;
+  preview_url?: string | null;       // Embeddable OWL/Paperless preview URL
+  preview_type?: 'pdf' | 'iframe' | 'image' | 'external' | null;
+  thumbnail_url?: string | null;     // Used when no richer preview is available
 }
 ```
 
@@ -404,8 +408,10 @@ When a module is disabled, the connector skips the corresponding API call entire
 | `due_date` | `dueDate` | Direct (ISO string) |
 | `created_at` | `createdAt` | Direct (ISO string) |
 | `document_url` | `metadata.documentUrl` | Direct |
-| `document_url` | `metadata.previewUrl` | Direct |
-| — | `metadata.previewType` | `'external'` |
+| `preview_url` | `metadata.previewUrl` | Preferred rich preview when supplied |
+| `thumbnail_url` | `metadata.previewUrl` | Used when no rich preview is supplied |
+| `document_url` | `metadata.previewUrl` | Derives Paperless `/api/documents/{id}/thumb/` as a fallback |
+| `preview_type` | `metadata.previewType` | Direct when `preview_url` is supplied; otherwise inferred |
 | — | `metadata.previewLabel` | `'View in Paperless'` |
 | `amount` | `metadata.amount` | Direct |
 | `correspondent` | `metadata.correspondent` | Direct |

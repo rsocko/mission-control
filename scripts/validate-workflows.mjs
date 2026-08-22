@@ -93,12 +93,15 @@ for (const file of workflowFiles) {
   if (file === 'ci.yml') {
     const changes = workflow.jobs?.changes;
     const impeccable = workflow.jobs?.impeccable;
+    const workflowPolicyResult = workflow.jobs?.['workflow-policy'];
+    const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
     const aggregate = workflow.jobs?.['unit-tests'];
     const validate = workflow.jobs?.validate;
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
     assert.ok(
-      changes && impeccable && validate && shards && aggregate,
+      changes && impeccable && workflowPolicyResult && workerRuntimeResult &&
+        validate && shards && aggregate,
       'ci.yml must classify changes and expose every check',
     );
     assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
@@ -209,6 +212,23 @@ for (const file of workflowFiles) {
       'MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs',
       'worker runtime smoke test must reuse the production standalone artifact',
     );
+    for (const [jobName, job] of Object.entries({
+      'workflow-policy': workflowPolicyResult,
+      'worker-runtime': workerRuntimeResult,
+    })) {
+      assert.deepEqual(job.needs, ['validate'], `${jobName} result must depend on validation`);
+      assert.ok(
+        job.if.includes('always()') && job.if.includes("needs.validate.result != 'skipped'"),
+        `${jobName} result must report failures without allocating a docs-only runner`,
+      );
+      assert.ok(
+        job.steps?.some((step) =>
+          step.env?.VALIDATE_RESULT === '${{ needs.validate.result }}' &&
+          step.run === 'test "${VALIDATE_RESULT}" = "success"'
+        ),
+        `${jobName} result must preserve its required check name`,
+      );
+    }
     assert.ok(
       shards.steps?.some((step) =>
         step.run === 'npm test -- --shard=${{ matrix.shard }}/4'
@@ -227,7 +247,13 @@ for (const file of workflowFiles) {
       'aggregate unit-test check must report shard failures without allocating a docs-only runner',
     );
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
-      if (jobName === 'changes' || jobName === 'impeccable' || jobName === 'unit-tests') continue;
+      if (
+        jobName === 'changes' ||
+        jobName === 'impeccable' ||
+        jobName === 'workflow-policy' ||
+        jobName === 'worker-runtime' ||
+        jobName === 'unit-tests'
+      ) continue;
       const cacheRestores =
         job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
       assert.equal(cacheRestores.length, 1, `${jobName} must restore the shared npm cache`);

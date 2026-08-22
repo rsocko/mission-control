@@ -183,6 +183,40 @@ jobs:
           path: ~/.npm
           key: ${{ steps.npm-cache.outputs.cache-primary-key }}
 
+  workflow-policy:
+    name: Workflow policy
+    if: >-
+      always() &&
+      needs.validate.result != 'skipped'
+    needs:
+      - validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm workflow policy passed
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+        run: test "${VALIDATE_RESULT}" = "success"
+
+  worker-runtime:
+    name: Worker runtime
+    if: >-
+      always() &&
+      needs.validate.result != 'skipped'
+    needs:
+      - validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm worker runtime passed
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+        run: test "${VALIDATE_RESULT}" = "success"
+
   unit-test-shards:
     name: Unit tests (${{ matrix.shard }}/4)
     if: >-

@@ -8,6 +8,13 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import type { ConnectorConfig } from './types';
@@ -451,18 +458,23 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
           <label htmlFor="tyrion-household-currency" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
             Household currency
           </label>
-          <select
-            id="tyrion-household-currency"
-            required
+          <Select
             value={householdCurrency}
-            onChange={(event) => setHouseholdCurrency(event.target.value)}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            onValueChange={setHouseholdCurrency}
           >
-            <option value="">Select an ISO 4217 currency</option>
+            <SelectTrigger
+            id="tyrion-household-currency"
+            aria-required="true"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            >
+            <SelectValue placeholder="Select an ISO 4217 currency" />
+            </SelectTrigger>
+            <SelectContent>
             {supportedCurrencyCodes.map((currency) => (
-              <option key={currency} value={currency}>{currency}</option>
+              <SelectItem key={currency} value={currency}>{currency}</SelectItem>
             ))}
-          </select>
+            </SelectContent>
+          </Select>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
             Controls bounded Tyrion insight presentation and notification amounts. This is connector configuration, not a secret.
           </p>

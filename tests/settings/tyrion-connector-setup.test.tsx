@@ -29,9 +29,8 @@ it('submits the configurable Tyrion Bridge API URL and setup token', async () =>
   fireEvent.change(screen.getByLabelText('Service token'), {
     target: { value: 'invented-setup-token' },
   });
-  fireEvent.change(screen.getByLabelText('Household currency'), {
-    target: { value: 'USD' },
-  });
+  fireEvent.click(screen.getByRole('combobox', { name: 'Household currency' }));
+  fireEvent.click(screen.getByRole('option', { name: 'USD' }));
   expect(document.body).toHaveTextContent('https://tyrion.example/api/connector/v1');
 
   fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));

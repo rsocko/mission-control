@@ -986,18 +986,26 @@ function DefaultConnectorEditPanel({
               <label htmlFor={`tyrion-household-currency-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Household currency
               </label>
-              <select
-                id={`tyrion-household-currency-${connector.id}`}
-                required
+              <Select
                 value={editHouseholdCurrency}
-                onChange={(event) => { setEditHouseholdCurrency(event.target.value); markDirty(); }}
-                className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
+                onValueChange={(value) => {
+                setEditHouseholdCurrency(value);
+                markDirty();
+                }}
               >
-                <option value="">Select an ISO 4217 currency</option>
+                <SelectTrigger
+                id={`tyrion-household-currency-${connector.id}`}
+                aria-required="true"
+                className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
+                >
+                <SelectValue placeholder="Select an ISO 4217 currency" />
+                </SelectTrigger>
+                <SelectContent>
                 {supportedCurrencyCodes.map((currency) => (
-                  <option key={currency} value={currency}>{currency}</option>
+                  <SelectItem key={currency} value={currency}>{currency}</SelectItem>
                 ))}
-              </select>
+                </SelectContent>
+              </Select>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
                 Used for bounded Tyrion insight presentation and notification amounts.
               </p>

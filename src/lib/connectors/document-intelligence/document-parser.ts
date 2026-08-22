@@ -4,7 +4,6 @@
 
 import type { TaskItem, InboundNotification, TriageItem, TriageActionType } from '@/types';
 import { buildDocHubTaskLinks, buildDocHubEobUrl, buildDocHubStatementsUrl } from './doc-hub-links';
-import { buildPaperlessPreviewUrl } from './preview-url';
 
 export interface DocAction {
   id: string;
@@ -147,10 +146,7 @@ function resolveActionPreview(action: DocAction): {
     return { url: action.thumbnail_url, type: 'image' };
   }
 
-  const paperlessPreviewUrl = buildPaperlessPreviewUrl(action.document_url, action.document_id);
-  return paperlessPreviewUrl
-    ? { url: paperlessPreviewUrl, type: 'pdf' }
-    : { url: action.document_url, type: 'external' };
+  return { url: action.document_url, type: 'external' };
 }
 
 function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {

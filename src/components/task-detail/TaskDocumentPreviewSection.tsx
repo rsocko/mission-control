@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, FileText, Maximize2 } from 'lucide-react';
 import { Modal } from '@/components/ui/Modal';
-import { buildPaperlessPreviewUrl } from '@/lib/connectors/document-intelligence/preview-url';
 import { cn } from '@/lib/utils';
 import { parseLocalDate } from '@/lib/utils/date-format';
 import type { TaskDetailMetadata, TaskDetailMode } from './task-detail-types';
 
 export interface TaskDocumentPreviewSectionProps {
+  taskId: string;
   mode: TaskDetailMode;
   connectorType: string;
   metadata: TaskDetailMetadata;
@@ -56,7 +56,8 @@ function DocumentPreview({
     );
   }
 
-  const sameOrigin = typeof window !== 'undefined' && new URL(url).origin === window.location.origin;
+  const sameOrigin = typeof window !== 'undefined'
+    && new URL(url, window.location.href).origin === window.location.origin;
 
   return (
     <iframe
@@ -93,6 +94,7 @@ function DocumentPreviewPlaceholder({ title, fillAvailableSpace }: { title: stri
 }
 
 export function TaskDocumentPreviewSection({
+  taskId,
   mode,
   connectorType,
   metadata,
@@ -104,22 +106,17 @@ export function TaskDocumentPreviewSection({
   const isDocumentIntelligence = connectorType === 'document-intelligence';
   const suppliedPreviewUrl = normalizePreviewUrl(metadata.previewUrl);
   const documentUrl = normalizePreviewUrl(metadata.documentUrl);
-  const legacyPaperlessPreviewUrl = isDocumentIntelligence
-    && metadata.previewType === 'external'
+  const shouldProxyPdf = isDocumentIntelligence
     && metadata.documentId != null
-    && documentUrl != null
-    && suppliedPreviewUrl === documentUrl
-    ? normalizePreviewUrl(buildPaperlessPreviewUrl(
-        documentUrl,
-        metadata.documentId,
-      ))
-    : null;
-  const previewUrl = legacyPaperlessPreviewUrl || suppliedPreviewUrl;
+    && (metadata.previewType === 'pdf' || metadata.previewType === 'external');
+  const previewUrl = shouldProxyPdf
+    ? `/api/tasks/${encodeURIComponent(taskId)}/document-preview`
+    : suppliedPreviewUrl;
   if (!previewUrl) return null;
   const originalUrl = documentUrl || suppliedPreviewUrl || previewUrl;
 
   const title = metadata.documentTitle || 'Document';
-  const previewType = legacyPaperlessPreviewUrl ? 'pdf' : metadata.previewType;
+  const previewType = shouldProxyPdf ? 'pdf' : metadata.previewType;
   const canEmbed = previewType === 'pdf'
     || previewType === 'iframe'
     || previewType === 'image';

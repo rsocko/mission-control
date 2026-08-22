@@ -987,6 +987,7 @@ export function TaskDetailPanel({
         />
 
         <TaskDocumentPreviewSection
+          taskId={taskId}
           mode={mode}
           connectorType={task.connectorType}
           metadata={parsedMetadata}

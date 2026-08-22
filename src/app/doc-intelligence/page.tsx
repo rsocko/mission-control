@@ -400,6 +400,7 @@ export default function DocIntelligencePage() {
             {selectedTask && selectedTaskMetadata.previewUrl && (
               <div className="hidden min-w-0 flex-1 overflow-y-auto border-l border-[var(--border)] p-5 2xl:block">
                 <TaskDocumentPreviewSection
+                  taskId={selectedTask.id}
                   mode="panel"
                   connectorType={selectedTask.connectorType}
                   metadata={selectedTaskMetadata}

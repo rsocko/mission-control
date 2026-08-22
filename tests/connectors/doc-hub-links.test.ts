@@ -175,10 +175,10 @@ describe('mapActionToTask with docHubBaseUrl', () => {
     expect(task.metadata.docHubUrl).toBeNull();
   });
 
-  it('populates the Paperless PDF preview alongside docHubUrl', () => {
+  it('populates the Paperless document link alongside docHubUrl', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID, BASE_URL);
-    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
-    expect(task.metadata.previewType).toBe('pdf');
+    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');
+    expect(task.metadata.previewType).toBe('external');
     expect(task.metadata.docHubUrl).toBe('http://localhost:8200/admin/actions/act-123');
   });
 

@@ -2,6 +2,13 @@
 
 import { useMemo, useState } from 'react';
 import { AlertTriangle, Check, Loader2, Moon, Save } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { postOwlTaskAction, type OwlTaskActionUpdate } from './task-detail-api';
 import type { TaskDetailMetadata } from './task-detail-types';
 
@@ -190,14 +197,23 @@ export function OwlTaskActions({
             <label htmlFor={`owl-action-type-${taskId}`} className="text-xs text-[var(--text-muted)]">
               Action type
             </label>
-            <select
-              id={`owl-action-type-${taskId}`}
+            <Select
               value={actionType}
-              onChange={(event) => setActionType(event.target.value)}
-              className={inputClass}
+              onValueChange={setActionType}
             >
-              {ACTION_TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+              <SelectTrigger
+                id={`owl-action-type-${taskId}`}
+                aria-label="OWL action type"
+                className={inputClass}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ACTION_TYPES.map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <button
               type="button"
               disabled={busyAction !== null}
@@ -217,14 +233,23 @@ export function OwlTaskActions({
             <label htmlFor={`owl-urgency-${taskId}`} className="text-xs text-[var(--text-muted)]">
               Urgency
             </label>
-            <select
-              id={`owl-urgency-${taskId}`}
+            <Select
               value={urgency}
-              onChange={(event) => setUrgency(event.target.value)}
-              className={inputClass}
+              onValueChange={setUrgency}
             >
-              {URGENCY_VALUES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-            </select>
+              <SelectTrigger
+                id={`owl-urgency-${taskId}`}
+                aria-label="OWL urgency"
+                className={inputClass}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {URGENCY_VALUES.map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <button
               type="button"
               disabled={busyAction !== null}

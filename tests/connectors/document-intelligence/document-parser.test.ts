@@ -132,12 +132,35 @@ describe('mapActionToTask', () => {
   it('maps metadata correctly', () => {
     const task = mapActionToTask(mockPayAction, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
     const meta = task.metadata as Record<string, unknown>;
-    expect(meta.previewUrl).toBe('https://paperless.example/documents/42');
-    expect(meta.previewType).toBe('external');
+    expect(meta.previewUrl).toBe('https://paperless.example/api/documents/42/preview/');
+    expect(meta.previewType).toBe('pdf');
     expect(meta.previewLabel).toBe('View in Paperless-ngx');
     expect(meta.amount).toBe(143.22);
     expect(meta.correspondent).toBe('PG&E');
     expect(meta.actionType).toBe('pay');
+  });
+
+  it('prefers an OWL-provided rich preview', () => {
+    const task = mapActionToTask({
+      ...mockPayAction,
+      preview_url: 'https://owl.example/previews/42.pdf',
+      preview_type: 'pdf',
+      thumbnail_url: 'https://owl.example/thumbnails/42.webp',
+    }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
+
+    expect(task.metadata.previewUrl).toBe('https://owl.example/previews/42.pdf');
+    expect(task.metadata.previewType).toBe('pdf');
+    expect(task.metadata.documentUrl).toBe(mockPayAction.document_url);
+  });
+
+  it('uses an OWL-provided thumbnail when no rich preview is available', () => {
+    const task = mapActionToTask({
+      ...mockPayAction,
+      thumbnail_url: 'https://owl.example/thumbnails/42.webp',
+    }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
+
+    expect(task.metadata.previewUrl).toBe('https://owl.example/thumbnails/42.webp');
+    expect(task.metadata.previewType).toBe('image');
   });
 
   it('maps a file action without amount', () => {

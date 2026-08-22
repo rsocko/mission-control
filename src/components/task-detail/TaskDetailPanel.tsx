@@ -101,6 +101,8 @@ export function TaskDetailPanel({
   animatePanel = true,
   portalDialog = false,
   minPanelWidth = 280,
+  fillContainer = false,
+  documentPreviewClassName,
   focusPanelOnMount = false,
   notesOpenRequest = null,
   subtasksOpenRequest = null,
@@ -967,6 +969,7 @@ export function TaskDetailPanel({
           connectorType={task.connectorType}
           metadata={parsedMetadata}
           dueDate={task.dueDate}
+          className={documentPreviewClassName}
         />
 
         <TaskAttachmentCard
@@ -1088,18 +1091,25 @@ export function TaskDetailPanel({
     <motion.aside
       ref={panelRef}
       tabIndex={focusPanelOnMount ? -1 : undefined}
-      className="bg-[var(--surface-1)] border-l border-[var(--border)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)] flex-shrink-0 overflow-y-auto relative"
-      style={{ width: panelWidth, maxWidth: 'min(calc(100vw - 4rem), 100%)' }}
+      className={cn(
+        'relative flex-shrink-0 overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)]',
+        fillContainer && 'h-full w-full',
+      )}
+      style={fillContainer
+        ? { width: '100%', maxWidth: '100%' }
+        : { width: panelWidth, maxWidth: 'min(calc(100vw - 4rem), 100%)' }}
       variants={animatePanel ? panelSlideFromRight : undefined}
       initial={animatePanel ? 'hidden' : false}
       animate={animatePanel ? 'show' : undefined}
       exit={animatePanel ? 'exit' : undefined}
     >
       {/* Resize handle */}
-      <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent)]/30 active:bg-[var(--accent)]/50 transition-colors z-10"
-        onMouseDown={handleResizeStart}
-      />
+      {!fillContainer && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent)]/30 active:bg-[var(--accent)]/50 transition-colors z-10"
+          onMouseDown={handleResizeStart}
+        />
+      )}
       {panelContent}
     </motion.aside>
     {confirmDialogElement}

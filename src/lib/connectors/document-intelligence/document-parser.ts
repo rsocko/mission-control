@@ -18,6 +18,10 @@ export interface DocAction {
   status: 'pending' | 'in_progress' | 'done' | 'dismissed';
   created_at: string;
   document_url?: string;
+  document_type?: string | null;
+  preview_url?: string | null;
+  preview_type?: 'pdf' | 'iframe' | 'image' | 'external' | null;
+  thumbnail_url?: string | null;
 }
 
 export interface MissingStatement {
@@ -70,6 +74,7 @@ export function mapActionToTask(
   const hubLinks = docHubBaseUrl
     ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
     : { actionUrl: null, documentUrl: null };
+  const preview = resolveActionPreview(action);
 
   return {
     id: `docintel-${action.id}`,
@@ -96,10 +101,11 @@ export function mapActionToTask(
       correspondent: action.correspondent,
       documentId: action.document_id,
       documentTitle: action.document_title,
+      documentType: action.document_type,
       documentUrl: action.document_url,
       urgency: action.urgency,
-      previewUrl: action.document_url,
-      previewType: 'external',
+      previewUrl: preview.url,
+      previewType: preview.type,
       previewLabel: 'View in Paperless-ngx',
       docHubUrl: hubLinks.actionUrl,
       docHubDocumentUrl: hubLinks.documentUrl,
@@ -107,6 +113,58 @@ export function mapActionToTask(
     syncStatus: 'synced',
     lastSyncedAt: new Date().toISOString(),
   };
+}
+
+function resolveActionPreview(action: DocAction): {
+  url: string | undefined;
+  type: NonNullable<DocAction['preview_type']>;
+} {
+  if (action.preview_url) {
+    return {
+      url: action.preview_url,
+      type: action.preview_type || inferPreviewType(action.preview_url),
+    };
+  }
+
+  if (action.thumbnail_url) {
+    return { url: action.thumbnail_url, type: 'image' };
+  }
+
+  const paperlessPreviewUrl = buildPaperlessPreviewUrl(action.document_url, action.document_id);
+  return paperlessPreviewUrl
+    ? { url: paperlessPreviewUrl, type: 'pdf' }
+    : { url: action.document_url, type: 'external' };
+}
+
+function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
+  const pathname = safeUrl(url)?.pathname.toLowerCase() || '';
+  if (pathname.endsWith('.pdf') || pathname.endsWith('/preview/')) return 'pdf';
+  if (/\.(avif|gif|jpe?g|png|svg|webp)$/.test(pathname)) return 'image';
+  return 'iframe';
+}
+
+function buildPaperlessPreviewUrl(documentUrl: string | undefined, documentId: number): string | undefined {
+  const url = safeUrl(documentUrl);
+  if (!url) return undefined;
+
+  const documentsPathIndex = url.pathname.indexOf('/documents/');
+  const basePath = documentsPathIndex >= 0
+    ? url.pathname.slice(0, documentsPathIndex)
+    : '';
+  url.pathname = `${basePath}/api/documents/${documentId}/preview/`;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+function safeUrl(value: string | undefined): URL | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 export function mapMissingStatementToNotification(

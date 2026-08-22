@@ -135,6 +135,7 @@ export interface TaskDetailMetadata {
   previewUrl?: string;
   previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;
+  documentUrl?: string;
   documentTitle?: string;
   documentType?: string;
   documentId?: string | number;
@@ -177,6 +178,10 @@ export interface TaskDetailPanelProps {
   portalDialog?: boolean;
   /** Override the minimum resizable width when a host surface requires more coverage. */
   minPanelWidth?: number;
+  /** Fill a host-owned pane instead of using the user's global side-panel width. */
+  fillContainer?: boolean;
+  /** Additional responsive visibility classes for the embedded document preview. */
+  documentPreviewClassName?: string;
   /** Move keyboard focus into the panel when it opens. */
   focusPanelOnMount?: boolean;
   /** Open the existing expanded Notes dialog after the requested task loads. */

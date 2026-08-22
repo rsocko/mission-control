@@ -221,6 +221,8 @@ describe('TaskDocumentPreviewSection', () => {
         connectorType="document-intelligence"
         metadata={{
           previewUrl: 'https://docs.example/1',
+          documentUrl: 'https://paperless.example/documents/1',
+          previewLabel: 'View in Paperless-ngx',
           documentTitle: 'Invoice 4711',
           correspondent: 'Acme',
           amount: 42.5,
@@ -236,6 +238,10 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('high')).toBeInTheDocument();
     expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
+    expect(screen.getByRole('link', { name: /View in Paperless-ngx/ })).toHaveAttribute(
+      'href',
+      'https://paperless.example/documents/1',
+    );
     expect(screen.getByText('Aug 30, 2026')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute('href', 'https://owl.example/1');
 

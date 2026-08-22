@@ -189,8 +189,8 @@ describe('DocumentIntelligenceConnector', () => {
       const tasks = (await Array.fromAsync(connector.fetchTasks())).flat();
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].metadata.previewUrl).toBe('http://paperless.example:8000/documents/42');
-      expect(tasks[0].metadata.previewType).toBe('external');
+      expect(tasks[0].metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
+      expect(tasks[0].metadata.previewType).toBe('pdf');
       expect(tasks[0].metadata.previewLabel).toBe('View in Paperless-ngx');
     });
   });

@@ -183,7 +183,7 @@ export function TaskDocumentPreviewSection({
               className="flex items-center justify-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors duration-100 hover:text-[var(--text-primary)]"
             >
               <ExternalLink size={11} />
-              {metadata.previewLabel || 'Open in Paperless'}
+              {metadata.previewLabel || 'Open Doc'}
             </a>
             {metadata.docHubUrl ? (
               <a

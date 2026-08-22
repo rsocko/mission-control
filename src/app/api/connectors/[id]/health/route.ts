@@ -20,6 +20,10 @@ import { isTrustedFinanceReadRequest } from '@/lib/connectors/monarch-money/fina
 import { getFinanceDatasetHealth } from '@/lib/connectors/monarch-money/dataset-sync';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import logger from '@/lib/logger';
+import {
+  getFinanceConnectionRecoveryView,
+  reconcileFinanceConnectionObservation,
+} from '@/lib/connectors/monarch-money/connection-recovery';
 
 /**
  * GET /api/connectors/[id]/health
@@ -106,6 +110,7 @@ export async function GET(
             },
           },
           projection,
+          recovery: null,
         });
       }
       const config = financeConnectorConfigFromRow(connector);
@@ -149,10 +154,18 @@ export async function GET(
       if (connector.enabled) {
         try {
           bridge = await new MonarchBridgeClient(config).getHealth();
+          reconcileFinanceConnectionObservation({
+            connectorId: id,
+            observation: { kind: 'health', health: bridge },
+          });
         } catch (error) {
           bridgeErrorCode = error instanceof MonarchBridgeError
             ? error.code
             : 'bridge_unavailable';
+          reconcileFinanceConnectionObservation({
+            connectorId: id,
+            observation: { kind: 'unavailable', errorCode: bridgeErrorCode },
+          });
         }
       }
       const lastSuccessMs = state?.lastSuccessfulSyncAt
@@ -268,6 +281,7 @@ export async function GET(
           },
         },
         projection,
+        recovery: getFinanceConnectionRecoveryView(id),
       });
     }
 

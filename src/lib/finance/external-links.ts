@@ -45,14 +45,20 @@ function owlAllowedHosts(): Set<string> {
   ]);
 }
 
-function approvedOrigin(value: string | undefined, fallback: string): URL {
-  const url = new URL(value?.trim() || fallback);
-  if (url.protocol !== 'https:' || url.username || url.password || !allowedHosts().has(url.hostname.toLowerCase())) {
+function approvedOperationsRoot(value: string | undefined): URL {
+  const rawValue = value?.trim() || DEFAULT_TYRION_ORIGIN;
+  const url = new URL(rawValue);
+  if (
+    url.protocol !== 'https:'
+    || url.username
+    || url.password
+    || url.pathname !== '/'
+    || url.search
+    || url.hash
+    || !allowedHosts().has(url.hostname.toLowerCase())
+  ) {
     throw new Error('Finance external URL is not approved');
   }
-  url.pathname = '/';
-  url.search = '';
-  url.hash = '';
   return url;
 }
 
@@ -82,7 +88,7 @@ function link(origin: URL, pathname: string): string {
 
 export function resolveFinanceExternalLinks() {
   const monarch = resolveMonarchOrigin();
-  const tyrion = approvedOrigin(process.env.TYRION_OPERATIONS_URL, DEFAULT_TYRION_ORIGIN);
+  const tyrion = approvedOperationsRoot(process.env.TYRION_OPERATIONS_URL);
 
   return {
     monarch: Object.fromEntries(

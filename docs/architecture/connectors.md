@@ -193,12 +193,23 @@ historical, stale, status-only, settled, or already-routed rows.
 Routing metadata contains opaque local references and stable codes only, never
 mutation error text or upstream identifiers.
 
-Duplicate and connector-health signal detection, identity, and lifecycle remain
-owned by Tyrion ([`octo-org/tyrion#174`](https://github.com/octo-org/tyrion/pull/174)).
-Mission Control does not invoke those handlers because no approved authenticated
-cross-process transport exists. Due/overdue reconciliation is also deferred:
-Tyrion has no authoritative reconciliation event DTO/API and Mission Control has
-no `/finance/reconciliation` producer route. Neither signal is inferred locally.
+Tyrion owns reusable Monarch session material and exposes only normalized
+connector health to Mission Control. Mission Control persists one outage episode
+per connector and polls the authenticated health contract every five minutes.
+Transient degraded or unavailable health is suppressed before 15 minutes. At
+15 minutes it produces one high actionable notification; verified expired or
+unauthenticated health produces one critical actionable notification
+immediately. Either episode promotes to one local task and My Day item at four
+hours. Episode timing, notification identity, and task identity survive restart.
+
+The primary notification action is always **Reconnect Monarch**. Mission Control
+constructs its destination from the allowlisted server-side Tyrion operations
+root and adds only `source=mission-control`; producer-provided URLs and reusable
+authentication material are rejected. Returning from Tyrion does not prove
+recovery. Mission Control independently requires connected live health, a
+successful bounded `POST /sync?days=30`, and a second connected live health
+check before resolving the notification and task. Until then, Finance settings
+and the Finance overview show one persistent stale-data warning.
 
 Web and worker processes resolve the same canonical Bridge API base URL from the
 connector's persisted settings. Production defaults to the protected,

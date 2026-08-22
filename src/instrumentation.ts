@@ -98,6 +98,10 @@ export async function register() {
     }
 
     syncScheduler.startWatchdog();
+    const { financeConnectionRecoveryScheduler } = await import(
+      '@/lib/connectors/monarch-money/recovery-scheduler'
+    );
+    await financeConnectionRecoveryScheduler.start();
 
     try {
       await triageSyncScheduler.initialize();

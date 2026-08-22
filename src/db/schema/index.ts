@@ -247,6 +247,7 @@ export {
 export {
   financeTransactions,
   financeSyncState,
+  financeConnectionOutages,
   financeInsightPublicationState,
   financeInsightPublicationDelivery,
   financeInsightPublications,

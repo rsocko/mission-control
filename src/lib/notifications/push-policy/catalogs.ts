@@ -151,6 +151,26 @@ export const DOCUMENT_INTELLIGENCE_NOTIFICATION_TYPES = [
 
 export const FINANCE_NOTIFICATION_TYPES = [
   {
+    key: 'finance_connector_degraded',
+    label: 'Monarch connection degraded',
+    description: 'The Monarch connector has remained degraded for at least 15 minutes.',
+    defaultLevel: 'action_needed',
+    pushEligible: true,
+    pushRecommendation: 'action_needed_or_higher',
+    sensitivity: 'sensitive',
+    defaultPreview: 'title_only',
+  },
+  {
+    key: 'finance_connector_authentication_expired',
+    label: 'Monarch authentication expired',
+    description: 'Verified Monarch authentication loss is blocking synchronization.',
+    defaultLevel: 'urgent',
+    pushEligible: true,
+    pushRecommendation: 'action_needed_or_higher',
+    sensitivity: 'sensitive',
+    defaultPreview: 'title_only',
+  },
+  {
     key: 'finance_attribution_review',
     label: 'Finance attribution review',
     description: 'A finance attribution exception needs review.',
@@ -203,6 +223,8 @@ export const FINANCE_NOTIFICATION_TYPES = [
 ] as const satisfies readonly ConnectorNotificationTypeDefinition[];
 
 const FINANCE_TEMPLATE_CATALOG_KEYS: Readonly<Record<string, string>> = {
+  connectorDegraded: 'finance_connector_degraded',
+  connectorAuthenticationExpired: 'finance_connector_authentication_expired',
   'finance-attribution-review': 'finance_attribution_review',
   'finance-insight-recurringAmountChange': 'finance_insight_recurring_amount_change',
   'finance-insight-largeTransaction': 'finance_insight_large_transaction',

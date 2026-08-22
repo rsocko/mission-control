@@ -54,6 +54,18 @@ export function formatDateLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * Format a compact calendar date, including the year when it differs from the
+ * current year.
+ */
+export function formatShortDate(dateStr: string | null | undefined, now = new Date()): string {
+  const date = parseLocalDate(dateStr);
+  if (!date) return '';
+  const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric' };
+  if (date.getFullYear() !== now.getFullYear()) opts.year = 'numeric';
+  return date.toLocaleDateString('en-US', opts);
+}
+
 // ---------------------------------------------------------------------------
 // Relative date formatting (for due dates, display)
 // ---------------------------------------------------------------------------

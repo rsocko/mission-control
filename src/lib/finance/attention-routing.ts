@@ -29,6 +29,16 @@ export const FINANCE_MY_DAY_DAILY_CAP = 8;
 const MY_DAY_DUE_SOON_DAYS = 2;
 const TASK_CONNECTOR_TYPE = 'mission-control';
 const TASK_CONNECTOR_INSTANCE_ID = 'mission-control';
+const HUMAN_REVIEWABLE_ATTRIBUTION_REASONS = new Set([
+  'attribution_ambiguous',
+  'card-rule-conflict',
+  'historical-attribution-tie',
+  'low-confidence',
+  'manual_decision_conflict',
+  'merchant-rule-conflict',
+  'no-match',
+  'review-required',
+]);
 
 export type FinanceAttentionSignalKind =
   | 'attributionReviewRequired'
@@ -151,6 +161,10 @@ export function selectFinanceAttentionRoute(
     : 'actionableNotification';
 }
 
+export function isHumanReviewableAttributionReason(reasonCode: string): boolean {
+  return HUMAN_REVIEWABLE_ATTRIBUTION_REASONS.has(reasonCode);
+}
+
 function attributionSignal(
   connectorId: string,
   row: AttributionExceptionRow,
@@ -175,7 +189,9 @@ function attributionSignal(
       row.sourceFingerprint,
       row.policyVersion ?? 'none',
     ].join(':'),
-    actionable: open && row.retryable === 0,
+    actionable: open
+      && row.retryable === 0
+      && isHumanReviewableAttributionReason(row.reasonCode),
     settlementReason: open
       ? null
       : row.status === 'dismissed'

@@ -473,6 +473,30 @@ export const financeAttributionAudit = sqliteTable('finance_attribution_audit', 
     .on(table.connectorId, table.transactionId, table.createdAt),
 ]);
 
+export const financeAttentionRepairAudit = sqliteTable('finance_attention_repair_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id').notNull(),
+  mode: text('mode').$type<'dry-run' | 'apply'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  dryRunId: text('dry_run_id'),
+  reasonCode: text('reason_code').notNull(),
+  targetDigest: text('target_digest').notNull(),
+  occurrenceCount: integer('occurrence_count').notNull(),
+  notificationCount: integer('notification_count').notNull(),
+  actionCount: integer('action_count').notNull(),
+  deliveryCount: integer('delivery_count').notNull(),
+  taskCount: integer('task_count').notNull(),
+  myDayCount: integer('my_day_count').notNull(),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_attention_repair_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_attention_repair_connector')
+    .on(table.connectorId, table.createdAt),
+]);
+
 // ─── KID PROFILES ───────────────────────────────────────────────────────────
 
 export const kidProfiles = sqliteTable('kid_profiles', {

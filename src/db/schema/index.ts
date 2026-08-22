@@ -272,6 +272,7 @@ export {
   financeAttributionSubjects,
   financeAttributionExceptions,
   financeAttributionAudit,
+  financeAttentionRepairAudit,
   kidProfiles,
   kidCardRules,
   kidMerchantRules,

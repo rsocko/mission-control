@@ -71,14 +71,14 @@ function makeUnmatchedEob(overrides?: Partial<UnmatchedEob>): UnmatchedEob {
 // ─── mapActionToTask ───────────────────────────────────────────────────────
 
 describe('mapActionToTask', () => {
-  it('builds a Paperless thumbnail URL from document_url', () => {
+  it('builds a Paperless PDF preview URL from document_url', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID);
-    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/thumb/');
+    expect(task.metadata.previewUrl).toBe('http://paperless.example:8000/api/documents/42/preview/');
   });
 
-  it('renders the Paperless thumbnail as an image', () => {
+  it('renders the Paperless preview as a PDF', () => {
     const task = mapActionToTask(makeAction(), CONNECTOR_TYPE, CONNECTOR_ID);
-    expect(task.metadata.previewType).toBe('image');
+    expect(task.metadata.previewType).toBe('pdf');
   });
 
   it('sets previewLabel to "View in Paperless-ngx"', () => {

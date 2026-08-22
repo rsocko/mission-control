@@ -410,7 +410,7 @@ When a module is disabled, the connector skips the corresponding API call entire
 | `document_url` | `metadata.documentUrl` | Direct |
 | `preview_url` | `metadata.previewUrl` | Preferred rich preview when supplied |
 | `thumbnail_url` | `metadata.previewUrl` | Used when no rich preview is supplied |
-| `document_url` | `metadata.previewUrl` | Derives Paperless `/api/documents/{id}/thumb/` as a fallback |
+| `document_url` | `metadata.previewUrl` | Derives Paperless `/api/documents/{id}/preview/` as a PDF fallback |
 | `preview_type` | `metadata.previewType` | Direct when `preview_url` is supplied; otherwise inferred |
 | — | `metadata.previewLabel` | `'View in Paperless'` |
 | `amount` | `metadata.amount` | Direct |

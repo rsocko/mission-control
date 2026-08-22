@@ -130,9 +130,9 @@ function resolveActionPreview(action: DocAction): {
     return { url: action.thumbnail_url, type: 'image' };
   }
 
-  const paperlessThumbnailUrl = buildPaperlessThumbnailUrl(action.document_url, action.document_id);
-  return paperlessThumbnailUrl
-    ? { url: paperlessThumbnailUrl, type: 'image' }
+  const paperlessPreviewUrl = buildPaperlessPreviewUrl(action.document_url, action.document_id);
+  return paperlessPreviewUrl
+    ? { url: paperlessPreviewUrl, type: 'pdf' }
     : { url: action.document_url, type: 'external' };
 }
 
@@ -143,7 +143,7 @@ function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
   return 'iframe';
 }
 
-function buildPaperlessThumbnailUrl(documentUrl: string | undefined, documentId: number): string | undefined {
+function buildPaperlessPreviewUrl(documentUrl: string | undefined, documentId: number): string | undefined {
   const url = safeUrl(documentUrl);
   if (!url) return undefined;
 
@@ -151,7 +151,7 @@ function buildPaperlessThumbnailUrl(documentUrl: string | undefined, documentId:
   const basePath = documentsPathIndex >= 0
     ? url.pathname.slice(0, documentsPathIndex)
     : '';
-  url.pathname = `${basePath}/api/documents/${documentId}/thumb/`;
+  url.pathname = `${basePath}/api/documents/${documentId}/preview/`;
   url.search = '';
   url.hash = '';
   return url.toString();

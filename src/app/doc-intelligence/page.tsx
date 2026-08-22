@@ -32,7 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { cn } from '@/lib/utils/cn';
-import { parseLocalDate } from '@/lib/utils/date-format';
+import { formatShortDate } from '@/lib/utils/date-format';
 import {
   countByMetadata,
   countDocumentViews,
@@ -626,7 +626,7 @@ function ActionRow({ task, isSelected, onClick }: { task: DocumentTask; isSelect
             {task.dueDate && (
               <span className="ml-auto flex shrink-0 items-center gap-0.5 text-xs text-[var(--text-muted)]">
                 <Clock size={10} />
-                {parseLocalDate(task.dueDate)?.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                {formatShortDate(task.dueDate)}
               </span>
             )}
           </div>

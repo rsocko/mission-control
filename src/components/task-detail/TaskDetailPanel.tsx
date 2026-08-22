@@ -966,6 +966,7 @@ export function TaskDetailPanel({
           mode={mode}
           connectorType={task.connectorType}
           metadata={parsedMetadata}
+          dueDate={task.dueDate}
         />
 
         <TaskAttachmentCard

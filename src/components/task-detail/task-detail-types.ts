@@ -143,6 +143,7 @@ export interface TaskDetailMetadata {
   documentType?: string;
   documentId?: string | number;
   docHubUrl?: string;
+  docHubDocumentUrl?: string;
   correspondent?: string;
   amount?: number;
   actionType?: string;

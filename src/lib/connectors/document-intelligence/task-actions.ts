@@ -33,7 +33,7 @@ export interface OwlTaskActionResult {
 export class OwlTaskActionError extends Error {
   constructor(
     message: string,
-    readonly code: 'NOT_FOUND' | 'NOT_OWL' | 'CONNECTOR_UNAVAILABLE' | 'REMOTE_WRITE_FAILED',
+    readonly code: 'NOT_FOUND' | 'NOT_OWL' | 'CONNECTOR_UNAVAILABLE' | 'REMOTE_WRITE_FAILED' | 'TASK_CHANGED',
     readonly status: number,
     options?: ErrorOptions,
   ) {
@@ -46,6 +46,8 @@ interface OwlActionConnector extends IConnector {
   snoozeAction(sourceId: string, until: string): Promise<void>;
   submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void>;
 }
+
+const taskActionQueues = new Map<string, Promise<void>>();
 
 function isOwlActionConnector(connector: IConnector | null): connector is OwlActionConnector {
   if (!connector || connector.type !== 'document-intelligence') return false;
@@ -140,7 +142,7 @@ function localMetadataAfter(
   };
 }
 
-export async function performOwlTaskAction(
+async function performOwlTaskActionNow(
   taskId: string,
   input: OwlTaskActionInput,
 ): Promise<OwlTaskActionResult> {
@@ -180,8 +182,22 @@ export async function performOwlTaskAction(
   }
 
   const now = new Date().toISOString();
+  const latestTask = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    .then((rows) => rows[0]);
+  if (
+    !latestTask
+    || latestTask.connectorType !== 'document-intelligence'
+    || latestTask.connectorInstanceId !== task.connectorInstanceId
+    || latestTask.sourceId !== task.sourceId
+  ) {
+    throw new OwlTaskActionError(
+      'Task changed while the OWL action was being applied; refresh to reconcile the source result',
+      'TASK_CHANGED',
+      409,
+    );
+  }
   const metadata = localMetadataAfter(
-    parseTaskMetadataCompat(task.metadata).metadata,
+    parseTaskMetadataCompat(latestTask.metadata).metadata,
     input,
     now,
   );
@@ -189,32 +205,46 @@ export async function performOwlTaskAction(
     ? 'cancelled'
     : input.action === 'snooze'
       ? 'todo'
-      : task.status;
+      : latestTask.status;
   const statusReason = input.action === 'not_an_action'
     ? 'not_planned'
     : input.action === 'snooze'
       ? null
-      : task.statusReason;
+      : latestTask.statusReason;
   const snoozedUntil = input.action === 'snooze'
     ? input.until
     : input.action === 'not_an_action'
       ? null
-      : task.snoozedUntil;
+      : latestTask.snoozedUntil;
   const priority = input.action === 'correct' && input.field === 'urgency'
     ? input.value
-    : task.priority;
+    : latestTask.priority;
 
-  await db.update(tasks).set({
+  const updates: Partial<typeof tasks.$inferInsert> = {
     metadata,
-    status,
-    statusReason,
-    snoozedUntil,
-    priority,
-    completedAt: input.action === 'not_an_action' ? now : task.completedAt,
     updatedAt: now,
     lastSyncedAt: now,
     syncStatus: 'synced',
-  }).where(eq(tasks.id, taskId));
+  };
+  if (input.action === 'snooze') {
+    Object.assign(updates, {
+      status,
+      statusReason,
+      snoozedUntil,
+      completedAt: null,
+    });
+  } else if (input.action === 'not_an_action') {
+    Object.assign(updates, {
+      status,
+      statusReason,
+      snoozedUntil,
+      completedAt: now,
+    });
+  } else if (input.field === 'urgency') {
+    updates.priority = priority;
+  }
+
+  await db.update(tasks).set(updates).where(eq(tasks.id, taskId));
 
   return {
     status,
@@ -225,4 +255,24 @@ export async function performOwlTaskAction(
     updatedAt: now,
     syncStatus: 'synced',
   };
+}
+
+export async function performOwlTaskAction(
+  taskId: string,
+  input: OwlTaskActionInput,
+): Promise<OwlTaskActionResult> {
+  const previous = taskActionQueues.get(taskId) ?? Promise.resolve();
+  const result = previous
+    .catch(() => undefined)
+    .then(() => performOwlTaskActionNow(taskId, input));
+  const settled = result.then(() => undefined, () => undefined);
+  taskActionQueues.set(taskId, settled);
+
+  try {
+    return await result;
+  } finally {
+    if (taskActionQueues.get(taskId) === settled) {
+      taskActionQueues.delete(taskId);
+    }
+  }
 }

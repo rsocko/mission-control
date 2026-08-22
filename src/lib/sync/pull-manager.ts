@@ -1053,6 +1053,12 @@ async function applyRemoteUpdate(
   // When the connector doesn't support a field, preserve the MC-local value
   // instead of overwriting it with the remote's null/empty value.
   const connectorHasDueDate = caps?.dueDate === true;
+  const connectorOwnsSnooze =
+    caps?.taskFieldProfile?.snoozedUntil?.authority === 'source';
+  const connectorOwnsMicroStatus =
+    caps?.taskFieldProfile?.microStatus?.authority === 'source';
+  const connectorOwnsStatusReason =
+    caps?.taskFieldProfile?.statusReason?.authority === 'source';
 
   // A remote priority of 'none' means "no priority set" — it should never
   // overwrite a locally-set value. Only an explicit non-none priority from
@@ -1105,8 +1111,12 @@ async function applyRemoteUpdate(
     title: indexedTask.title,
     description: indexedTask.description,
     status: indexedTask.status,
-    microStatus: remote.microStatus || null,
-    statusReason: remote.statusReason || null,
+    microStatus: connectorOwnsMicroStatus
+      ? (remote.microStatus || null)
+      : existingTask.microStatus,
+    statusReason: connectorOwnsStatusReason
+      ? (remote.statusReason || null)
+      : existingTask.statusReason,
     priority: indexedTask.priority,
     dueDate: resolvedDueDate,
     updatedAt: indexedTask.updatedAt,
@@ -1114,7 +1124,9 @@ async function applyRemoteUpdate(
     // (many connectors omit it) but the task is still done, keep the locally-recorded
     // timestamp so the "completed today" counter survives syncs and server restarts.
     completedAt: remote.completedAt || (resolvedStatus === 'done' ? existingTask.completedAt : null),
-    snoozedUntil: remote.snoozedUntil || null,
+    snoozedUntil: connectorOwnsSnooze
+      ? (remote.snoozedUntil || null)
+      : existingTask.snoozedUntil,
     isChecklistItem: remote.isChecklistItem ?? existingTask.isChecklistItem,
     sourceListId: remote.sourceListId || existingTask.sourceListId || null,
     sourceListName: indexedTask.sourceListName,

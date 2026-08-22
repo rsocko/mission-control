@@ -248,6 +248,71 @@ describe('pull-manager terminal status sync', () => {
     )).toBe(true);
   });
 
+  it('preserves MC-local snoozes when a connector omits the field', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        snoozedUntil: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask()],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+  });
+
+  it('preserves MC-local status context when the source omits it', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        microStatus: { authority: 'local', writeBack: 'none' },
+        statusReason: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({ microStatus: undefined, statusReason: undefined })],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+  });
+
   it('forces remote "cancelled" when local is in_progress', async () => {
     mockExistingTasks.push(makeExistingTask({
       status: 'in_progress',

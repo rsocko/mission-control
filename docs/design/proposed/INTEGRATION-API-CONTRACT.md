@@ -73,10 +73,10 @@ Fetch document-derived actions that MC maps to TaskItems.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | `string` | No | MC sends `all`; individual values are `pending`, `completed`, `dismissed`, `snoozed`, and `not_an_action` |
+| `status` | `string` | No | MC sends `all`; individual values are `pending`, legacy `acknowledged`, `completed`, `dismissed`, `snoozed`, and `not_an_action` |
 | `limit` | `number` | No | MC requests pages of 100 |
-| `cursor` | `string` | No | Opaque cursor returned by the preceding page |
-| `page` | `number` | No | One-based fallback when cursor pagination is unavailable |
+| `offset` | `number` | No | Zero-based offset; MC advances it by the returned row count |
+| `updated_since` | ISO 8601 timestamp | No | Inclusive source-update filter supported by OWL |
 
 **Response:** `200 OK`
 
@@ -91,7 +91,7 @@ interface DocAction {
   amount?: number | null;           // Dollar amount (for 'pay' actions)
   correspondent?: string | null;    // Entity name (for 'pay' actions)
   summary: string;                  // AI-generated action summary
-  status: 'pending' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
+  status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;               // ISO 8601 timestamp
   updated_at: string;               // ISO 8601 source freshness timestamp
   snoozed_until?: string | null;     // Present for snoozed actions
@@ -103,12 +103,11 @@ interface DocAction {
 }
 ```
 
-**Response body:** For backward compatibility MC accepts a complete
-`DocAction[]`, or a paginated envelope whose records are named `actions`,
-`items`, or `results`. Cursor fields may be `next_cursor` or `nextCursor`;
-page-count fields may be `total_pages` or `totalPages`. OWL should prefer one
-stable envelope and deterministic ordering. Repeating a page token is treated as
-an upstream error.
+**Response body:** OWL returns a flat `DocAction[]`, ordered deterministically by
+`created_at DESC, id DESC`. MC requests successive offsets until a page contains
+fewer than 100 rows. For backward compatibility, MC also accepts an envelope
+whose records are named `actions`, `items`, or `results`, with cursor or page
+metadata. Repeating a page is treated as an upstream error.
 
 **MC Mapping:** Each action where `action_type ∈ {pay, respond, file, review, sign, schedule}` is mapped to a `TaskItem` via `mapActionToTask()`.
 

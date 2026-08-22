@@ -198,26 +198,22 @@ describe('DocumentIntelligenceConnector', () => {
       expect(tasks[0].metadata.previewLabel).toBe('View in Paperless-ngx');
     });
 
-    it('paginates all statuses and uses updated_at freshness', async () => {
-      const firstPage = {
-        actions: [{
-          id: 'act-1',
-          document_id: 42,
-          document_title: 'Invoice',
-          action_type: 'pay',
-          urgency: 'high',
-          amount: 250,
-          summary: 'Pay invoice',
-          status: 'pending',
-          created_at: '2026-07-20T12:00:00Z',
-          updated_at: '2026-08-20T12:00:00Z',
-        }],
-        next_cursor: 'cursor-2',
-      };
-      const secondPage = {
-        actions: [{
-          id: 'act-2',
-          document_id: 43,
+    it('paginates the flat OWL response by offset and uses updated_at freshness', async () => {
+      const firstPage = Array.from({ length: 100 }, (_, index) => ({
+        id: `act-${index + 1}`,
+        document_id: index + 1,
+        document_title: `Invoice ${index + 1}`,
+        action_type: 'pay',
+        urgency: 'high',
+        amount: 250,
+        summary: 'Pay invoice',
+        status: 'pending',
+        created_at: '2026-07-20T12:00:00Z',
+        updated_at: '2026-08-20T12:00:00Z',
+      }));
+      const secondPage = [{
+          id: 'act-101',
+          document_id: 101,
           document_title: 'Reply',
           action_type: 'respond',
           urgency: 'medium',
@@ -225,9 +221,7 @@ describe('DocumentIntelligenceConnector', () => {
           status: 'completed',
           created_at: '2026-07-20T12:00:00Z',
           updated_at: '2026-08-21T12:00:00Z',
-        }],
-        next_cursor: null,
-      };
+      }];
       fetchMock
         .mockResolvedValueOnce(new Response(JSON.stringify(firstPage), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify(secondPage), { status: 200 }));
@@ -237,10 +231,36 @@ describe('DocumentIntelligenceConnector', () => {
         connector.fetchTasks(new Date('2026-08-01T00:00:00Z')),
       )).flat();
 
-      expect(tasks.map((task) => task.status)).toEqual(['todo', 'done']);
+      expect(tasks).toHaveLength(101);
+      expect(tasks.at(-1)?.status).toBe('done');
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(String(fetchMock.mock.calls[0][0])).toContain('status=all');
-      expect(String(fetchMock.mock.calls[1][0])).toContain('cursor=cursor-2');
+      expect(String(fetchMock.mock.calls[0][0])).toContain('offset=0');
+      expect(String(fetchMock.mock.calls[1][0])).toContain('offset=100');
+    });
+
+    it('reconciles legacy actions without updated_at during incremental pulls', async () => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([{
+        id: 'act-legacy',
+        document_id: 44,
+        document_title: 'Legacy bill',
+        action_type: 'pay',
+        urgency: 'low',
+        summary: 'Legacy action completed after creation',
+        status: 'completed',
+        created_at: '2026-01-01T12:00:00Z',
+      }]), { status: 200 }));
+      const connector = await createConnector();
+
+      const tasks = (await Array.fromAsync(
+        connector.fetchTasks(new Date('2026-08-01T00:00:00Z')),
+      )).flat();
+
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0]).toMatchObject({
+        sourceId: 'act-legacy',
+        status: 'done',
+      });
     });
   });
 
@@ -268,6 +288,35 @@ describe('DocumentIntelligenceConnector', () => {
         feedback_type: 'wrong_amount',
         corrected_amount: 125.5,
       });
+    });
+  });
+
+  describe('fetchTriageItems', () => {
+    it('paginates the complete pending action queue', async () => {
+      const makeAction = (index: number) => ({
+        id: `triage-${index}`,
+        document_id: index,
+        document_title: `Document ${index}`,
+        action_type: 'review',
+        urgency: 'medium',
+        summary: `Review document ${index}`,
+        status: 'pending',
+        created_at: '2026-08-20T12:00:00Z',
+        updated_at: '2026-08-20T12:00:00Z',
+      });
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify(Array.from({ length: 100 }, (_, index) => makeAction(index))),
+          { status: 200 },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify([makeAction(100)]), { status: 200 }));
+      const connector = await createConnector();
+
+      const items = await connector.fetchTriageItems();
+
+      expect(items).toHaveLength(101);
+      expect(String(fetchMock.mock.calls[0][0])).toContain('status=pending');
+      expect(String(fetchMock.mock.calls[1][0])).toContain('offset=100');
     });
   });
 

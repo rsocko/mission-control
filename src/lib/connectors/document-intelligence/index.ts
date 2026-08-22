@@ -166,7 +166,9 @@ export class DocumentIntelligenceConnector implements IConnector {
 
     yield actions
       .filter((action) => isTaskAction(action))
-      .filter((action) => isSinceMatch(action.updated_at || action.created_at, since))
+      // Legacy OWL responses have no updated_at. Include them on incremental pulls
+      // so a later completion or dismissal cannot remain stale in Mission Control.
+      .filter((action) => !action.updated_at || isSinceMatch(action.updated_at, since))
       .map((action) => mapActionToTask(action, this.type, this.id, this.settings.baseUrl));
   }
 
@@ -203,12 +205,11 @@ export class DocumentIntelligenceConnector implements IConnector {
       return [];
     }
 
-    const actions = await this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', {
-      status: 'pending',
-    });
+    const actions = await this.client!.fetchAllActions<DocAction>('pending');
 
     return actions
       .filter((action) => isTaskAction(action))
+      .filter((action) => action.status === 'pending')
       .filter((action) => isSinceMatch(action.created_at, since))
       .map((action) => mapActionToTriageItem(action, this.type, this.id, this.settings.paperlessBaseUrl, this.settings.baseUrl));
   }

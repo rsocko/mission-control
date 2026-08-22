@@ -16,7 +16,7 @@ export interface DocAction {
   amount?: number | null;
   correspondent?: string | null;
   summary: string;
-  status: 'pending' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
+  status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;
   updated_at?: string;
   snoozed_until?: string | null;
@@ -394,6 +394,7 @@ function mapActionStatus(status: DocAction['status']): TaskItem['status'] {
     case 'not_an_action':
       return 'cancelled';
     case 'snoozed':
+    case 'acknowledged':
     case 'pending':
       return 'todo';
     default: return 'todo';
@@ -422,13 +423,13 @@ function buildTaskTags(action: DocAction, connectorType: string) {
   return tags;
 }
 
-function buildTag(slug: string, name: string, _source: string) {
+function buildTag(slug: string, name: string, source: string) {
   return {
     id: `docintel-tag-${slug}`,
     name,
     slug,
     type: 'source' as const,
-    source: 'document-intelligence',
+    source,
     confirmed: true,
     createdAt: new Date().toISOString(),
   };

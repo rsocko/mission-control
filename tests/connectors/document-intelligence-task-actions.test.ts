@@ -158,6 +158,55 @@ describe('OWL task action service', () => {
     }));
   });
 
+  it('preserves concurrent lifecycle changes when saving a correction', async () => {
+    submitActionFeedback.mockImplementationOnce(async () => {
+      currentTask.status = 'done';
+      currentTask.statusReason = 'completed';
+      currentTask.completedAt = '2026-08-22T16:00:00.000Z';
+    });
+
+    const result = await performOwlTaskAction('task-1', {
+      action: 'correct',
+      field: 'amount',
+      value: 75,
+    });
+
+    const update = updateSet.mock.calls.at(-1)?.[0];
+    expect(update).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({ amount: 75 }),
+      syncStatus: 'synced',
+    }));
+    expect(update).not.toHaveProperty('status');
+    expect(update).not.toHaveProperty('statusReason');
+    expect(update).not.toHaveProperty('completedAt');
+    expect(update).not.toHaveProperty('snoozedUntil');
+    expect(update).not.toHaveProperty('priority');
+    expect(result.status).toBe('done');
+    expect(result.statusReason).toBe('completed');
+  });
+
+  it('serializes source actions for the same task', async () => {
+    let releaseFirst!: () => void;
+    snoozeAction.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    }));
+    const firstUntil = new Date(Date.now() + 86_400_000).toISOString();
+    const secondUntil = new Date(Date.now() + 172_800_000).toISOString();
+
+    const first = performOwlTaskAction('task-1', { action: 'snooze', until: firstUntil });
+    await vi.waitFor(() => expect(snoozeAction).toHaveBeenCalledTimes(1));
+    const second = performOwlTaskAction('task-1', { action: 'snooze', until: secondUntil });
+    await Promise.resolve();
+    expect(snoozeAction).toHaveBeenCalledTimes(1);
+
+    releaseFirst();
+    await first;
+    await second;
+
+    expect(snoozeAction).toHaveBeenNthCalledWith(1, 'owl-action-1', firstUntil);
+    expect(snoozeAction).toHaveBeenNthCalledWith(2, 'owl-action-1', secondUntil);
+  });
+
   it('rejects non-OWL tasks without resolving a connector', async () => {
     currentTask.connectorType = 'github-issues';
 

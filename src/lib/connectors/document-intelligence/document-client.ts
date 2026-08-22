@@ -40,7 +40,7 @@ export interface DocActionPage<T> {
 
 export interface DocClient {
   fetchJson<T>(path: string, params?: Record<string, string | undefined>): Promise<T>;
-  fetchAllActions<T>(): Promise<T[]>;
+  fetchAllActions<T>(status?: string): Promise<T[]>;
   patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void>;
   snoozeAction(sourceId: string, until: string): Promise<void>;
   submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void>;
@@ -110,25 +110,37 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
       return response.json() as Promise<T>;
     },
 
-    async fetchAllActions<T>(): Promise<T[]> {
+    async fetchAllActions<T>(status = 'all'): Promise<T[]> {
       const all: T[] = [];
       let cursor: string | undefined;
       let page = 1;
+      let offset = 0;
+      let paginationMode: 'unknown' | 'array-offset' | 'envelope' = 'unknown';
       const seenPageKeys = new Set<string>();
 
       while (true) {
         const response = await request('/api/action-queue/actions', {}, {
-          status: 'all',
+          status,
           limit: '100',
           cursor,
-          page: cursor ? undefined : String(page),
+          page: paginationMode === 'envelope' && !cursor ? String(page) : undefined,
+          offset: paginationMode !== 'envelope' && !cursor ? String(offset) : undefined,
         });
         const payload = await response.json() as T[] | DocActionPage<T>;
         if (Array.isArray(payload)) {
+          paginationMode = 'array-offset';
+          const pageKey = `array:${JSON.stringify(payload)}`;
+          if (seenPageKeys.has(pageKey)) {
+            throw new Error('OWL pagination repeated an offset page');
+          }
+          seenPageKeys.add(pageKey);
           all.push(...payload);
-          break;
+          if (payload.length < 100) break;
+          offset += payload.length;
+          continue;
         }
 
+        paginationMode = 'envelope';
         const actions = payload.actions ?? payload.items ?? payload.results ?? [];
         all.push(...actions);
         const nextCursor = payload.next_cursor ?? payload.nextCursor ?? undefined;

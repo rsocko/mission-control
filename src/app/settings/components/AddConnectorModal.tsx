@@ -21,6 +21,10 @@ import { ConnectorBrandIcon } from './ConnectorBrandIcon';
 import { useConnectorCreation } from './useConnectorCreation';
 import { useOAuthConnectorInstanceId } from './useOAuthConnectorInstanceId';
 import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
+import {
+  currencySchema,
+  supportedCurrencyCodes,
+} from '@/lib/finance/currency';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -312,6 +316,7 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   const [instanceName, setInstanceName] = useState('Tyrion');
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_TYRION_SETUP_BRIDGE_URL);
   const [serviceToken, setServiceToken] = useState('');
+  const [householdCurrency, setHouseholdCurrency] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [status, setStatus] = useState<'idle' | 'testing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -330,7 +335,10 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         body: JSON.stringify({
           type: 'finance-manager',
           credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
-          settings: { bridgeUrl: bridgeUrl.trim() },
+          settings: {
+            bridgeUrl: bridgeUrl.trim(),
+            householdCurrency,
+          },
         }),
       });
       const data = await res.json();
@@ -350,6 +358,11 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   async function createConnector() {
     setStatus('idle');
     setErrorMessage('');
+    if (!currencySchema.safeParse(householdCurrency).success) {
+      setStatus('error');
+      setErrorMessage('Select a supported household currency');
+      return;
+    }
     try {
       await creation.create({
         type: 'finance-manager',
@@ -359,7 +372,10 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         pollIntervalMinutes: 240,
         capabilities: { read: true, write: true, delete: false, sync: true, lists: false, subtasks: false, tags: true, tagWriteBack: false },
         credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
-        settings: { bridgeUrl: bridgeUrl.trim() },
+        settings: {
+          bridgeUrl: bridgeUrl.trim(),
+          householdCurrency,
+        },
         syncedLists: [],
       });
     } catch { /* rendered by the shared creation state */ }
@@ -432,6 +448,27 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         </div>
 
         <div>
+          <label htmlFor="tyrion-household-currency" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+            Household currency
+          </label>
+          <select
+            id="tyrion-household-currency"
+            required
+            value={householdCurrency}
+            onChange={(event) => setHouseholdCurrency(event.target.value)}
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+          >
+            <option value="">Select an ISO 4217 currency</option>
+            {supportedCurrencyCodes.map((currency) => (
+              <option key={currency} value={currency}>{currency}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Controls bounded Tyrion insight presentation and notification amounts. This is connector configuration, not a secret.
+          </p>
+        </div>
+
+        <div>
           <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Display Name</label>
           <input
             type="text"
@@ -494,7 +531,7 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
 
           <motion.button
             onClick={createConnector}
-            disabled={creation.status === 'creating'}
+            disabled={creation.status === 'creating' || !currencySchema.safeParse(householdCurrency).success}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
           >

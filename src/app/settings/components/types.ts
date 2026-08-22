@@ -23,6 +23,10 @@ export interface ConnectorConfig {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  configurationState?: {
+    status: 'configured' | 'needs-configuration';
+    code: 'household_currency_unavailable' | null;
+  };
 }
 
 export interface SourceList {
@@ -67,7 +71,7 @@ export interface SyncLogEntry {
   syncedAt: string;
   durationMs: number | null;
   jobId?: string | null;
-  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | null;
+  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
   scheduledFor?: string | null;
   startedAt?: string | null;
   attempt?: number | null;

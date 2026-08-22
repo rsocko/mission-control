@@ -29,6 +29,9 @@ it('submits the configurable Tyrion Bridge API URL and setup token', async () =>
   fireEvent.change(screen.getByLabelText('Service token'), {
     target: { value: 'invented-setup-token' },
   });
+  fireEvent.change(screen.getByLabelText('Household currency'), {
+    target: { value: 'USD' },
+  });
   expect(document.body).toHaveTextContent('https://tyrion.example/api/connector/v1');
 
   fireEvent.click(screen.getByRole('button', { name: 'Test Connection' }));
@@ -38,7 +41,10 @@ it('submits the configurable Tyrion Bridge API URL and setup token', async () =>
   expect(JSON.parse(String(init?.body))).toEqual({
     type: 'finance-manager',
     credentials: { serviceToken: 'invented-setup-token' },
-    settings: { bridgeUrl: 'https://bridge.example.test/connector/v1' },
+    settings: {
+      bridgeUrl: 'https://bridge.example.test/connector/v1',
+      householdCurrency: 'USD',
+    },
   });
 });
 
@@ -53,7 +59,10 @@ it('edits the persisted Tyrion Bridge API URL without round-tripping credentials
     capabilities: { read: true, write: true, sync: true },
     credentials: {},
     hasCredentials: true,
-    settings: { bridgeUrl: 'http://old-bridge:8100' },
+    settings: {
+      bridgeUrl: 'http://old-bridge:8100',
+      householdCurrency: 'USD',
+    },
     syncedLists: [],
     createdAt: '2026-08-01T00:00:00.000Z',
     updatedAt: '2026-08-01T00:00:00.000Z',
@@ -80,8 +89,58 @@ it('edits the persisted Tyrion Bridge API URL without round-tripping credentials
   await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(
     'finance-test',
     expect.objectContaining({
-      settings: { bridgeUrl: 'http://new-bridge:8100' },
+      settings: {
+        bridgeUrl: 'http://new-bridge:8100',
+        householdCurrency: 'USD',
+      },
     }),
   ));
   expect(JSON.stringify(onUpdate.mock.calls)).not.toContain('serviceToken');
+});
+
+it('preserves a legacy needs-configuration state on unrelated edits', async () => {
+  const connector: ConnectorConfig = {
+    id: 'finance-legacy',
+    type: 'finance-manager',
+    name: 'Legacy Tyrion',
+    enabled: false,
+    syncMode: 'manual',
+    pollIntervalMinutes: 240,
+    capabilities: { read: true, write: true, sync: true },
+    credentials: {},
+    hasCredentials: true,
+    settings: { bridgeUrl: 'http://legacy-bridge:8100' },
+    configurationState: {
+      status: 'needs-configuration',
+      code: 'household_currency_unavailable',
+    },
+    syncedLists: [],
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+    deletedAt: null,
+  };
+  const onUpdate = vi.fn().mockResolvedValue(undefined);
+  render(<DefaultConnectorEditPanel
+    connector={connector}
+    sourceLists={[]}
+    onUpdate={onUpdate}
+    onPurgeSourceList={vi.fn().mockResolvedValue(undefined)}
+    onDelete={() => undefined}
+    confirmDelete={null}
+    setConfirmDelete={() => undefined}
+    onHealthRefresh={() => undefined}
+  />);
+
+  fireEvent.change(screen.getByLabelText('Display Name'), {
+    target: { value: 'Legacy Tyrion renamed' },
+  });
+  fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+  await waitFor(() => expect(onUpdate).toHaveBeenCalledWith(
+    'finance-legacy',
+    expect.objectContaining({
+      name: 'Legacy Tyrion renamed',
+      settings: { bridgeUrl: 'http://legacy-bridge:8100' },
+    }),
+  ));
 });

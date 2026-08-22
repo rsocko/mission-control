@@ -1,6 +1,9 @@
 import 'server-only';
 
 import { z } from 'zod';
+import { currencySchema } from '@/lib/finance/currency';
+
+export { currencySchema } from '@/lib/finance/currency';
 
 export const FINANCE_INSIGHTS_CONTRACT_VERSION = '1.0' as const;
 export const FINANCE_INSIGHT_FACT_KINDS = [
@@ -22,7 +25,6 @@ export const FINANCE_INSIGHT_ITEM_LIMITS = {
 } as const;
 
 const reservedIdentifiers = new Set(['__proto__', 'constructor', 'prototype']);
-const supportedCurrencies = new Set(Intl.supportedValuesOf('currency'));
 const utcTimestampPattern =
   /^(?:\d{4})-(?:\d{2})-(?:\d{2})T(?:\d{2}):(?:\d{2}):(?:\d{2})(?:\.\d{1,3})?Z$/;
 const identifierPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
@@ -61,10 +63,6 @@ export const utcTimestampSchema = z.string()
   .max(30)
   .regex(utcTimestampPattern)
   .refine(validUtcTimestamp);
-export const currencySchema = z.string()
-  .length(3)
-  .regex(/^[A-Z]{3}$/)
-  .refine((value) => supportedCurrencies.has(value));
 export const insightIdSchema = z.string().regex(/^insight-v1_[A-Za-z0-9_-]{43}$/);
 export const occurrenceIdSchema = z.string().regex(/^occurrence-v1_[A-Za-z0-9_-]{43}$/);
 const positiveSequenceSchema = z.number().int().safe().positive();

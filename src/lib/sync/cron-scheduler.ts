@@ -14,6 +14,7 @@ import {
   unregisterSyncSchedule,
 } from './job-queue';
 import type { SyncRequestOptions } from './queue';
+import { isConnectorSyncQuarantined } from './control-state';
 
 interface ScheduledJob {
   connectorId: string;
@@ -40,6 +41,10 @@ export class SyncCronScheduler {
   ) {}
 
   schedule(config: ConnectorConfig, staggerIndex = 0): void {
+    if (isConnectorSyncQuarantined(config.id)) {
+      this.unschedule(config.id);
+      return;
+    }
     if (isDurableSyncMode()) {
       if (!config.enabled || config.syncMode === 'manual') {
         unregisterSyncSchedule(config.id);
@@ -133,6 +138,7 @@ export class SyncCronScheduler {
           .from(connectorConfigs)
           .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
         for (const row of rows) {
+          if (isConnectorSyncQuarantined(row.id)) continue;
           try {
             await this.requestSync(row.id, { full: true, source: 'nightly' });
           } catch (err) {
@@ -172,6 +178,7 @@ export class SyncCronScheduler {
             : this.getInlineActiveSyncs(),
         );
         for (const row of pollConnectors) {
+          if (isConnectorSyncQuarantined(row.id)) continue;
           if (activeConnectorIds.has(row.id)) continue;
           const lastResult = this.getLastResult(row.id);
           if (!lastResult) continue;

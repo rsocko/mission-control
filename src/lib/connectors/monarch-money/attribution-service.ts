@@ -26,6 +26,7 @@ import {
   type AttributionBatchResult,
   type ManualDecision,
 } from './attribution-contract';
+import { isCardRuleFingerprintParityProven } from './config';
 
 type ActorType = 'parent-admin' | 'service';
 type ExceptionStatus = 'open' | 'retry_requested' | 'resolved' | 'dismissed';
@@ -66,7 +67,7 @@ interface AttributionFailure {
 interface CoordinatorDependencies {
   config?: TyrionAttributionConfig;
   client?: TyrionAttributionClient;
-  financeConfig?: Pick<ConnectorConfig, 'credentials'>;
+  financeConfig?: Pick<ConnectorConfig, 'credentials' | 'settings'>;
 }
 
 function localTransactionId(connectorId: string, upstreamTransactionId: string): string {
@@ -167,6 +168,7 @@ function prepareItems(
   connectorId: string,
   transactions: MonarchTransaction[],
   observedAt: string,
+  fingerprintParityProven: boolean,
 ): PreparedAttributionItem[] {
   const rows = currentRows(connectorId, transactions);
   return transactions.map((transaction) => {
@@ -188,12 +190,14 @@ function prepareItems(
         sourceRef: createAttributionSourceRef(config, connectorId, transaction.id),
         occurredOn: transaction.date,
         merchantName: normalizeAttributionMerchant(transaction.merchant.name),
-        instrumentFingerprint: createInstrumentFingerprint(
-          config,
-          connectorId,
-          transaction.account.id,
-          transaction.account.mask,
-        ),
+        instrumentFingerprint: fingerprintParityProven
+          ? createInstrumentFingerprint(
+              config,
+              connectorId,
+              transaction.account.id,
+              transaction.account.mask,
+            )
+          : null,
         observedAt,
         existingManualDecision: manualDecision,
       },
@@ -464,6 +468,13 @@ function applyResults(
     for (let index = 0; index < items.length; index++) {
       const item = items[index];
       const result = results[index];
+      if (item.item.instrumentFingerprint === null && result.method === 'card-rule') {
+        throw new TyrionAttributionError(
+          'card_rule_fingerprint_parity_unproven',
+          'Tyrion returned card-rule attribution without a proven fingerprint',
+          false,
+        );
+      }
       if (!manualResultMatches(item.manualDecision, result)) {
         const conflictUpdate = sqlite.prepare(`
           UPDATE finance_transactions
@@ -594,13 +605,13 @@ export class FinanceAttributionCoordinator {
   private terminalFailure: AttributionFailure | null = null;
   private attempted = false;
   private succeeded = false;
-  private readonly financeConfig: Pick<ConnectorConfig, 'credentials'>;
+  private readonly financeConfig: Pick<ConnectorConfig, 'credentials' | 'settings'>;
 
   constructor(
     private readonly connectorId: string,
     dependencies: CoordinatorDependencies = {},
   ) {
-    this.financeConfig = dependencies.financeConfig ?? { credentials: {} };
+    this.financeConfig = dependencies.financeConfig ?? { credentials: {}, settings: {} };
     if (dependencies.config) {
       this.config = dependencies.config;
       this.policyFence = dependencies.config.expectedPolicyVersion;
@@ -650,6 +661,7 @@ export class FinanceAttributionCoordinator {
         this.connectorId,
         transactions,
         observedAt,
+        isCardRuleFingerprintParityProven(this.financeConfig?.settings),
       );
     } catch (error) {
       this.attempted = true;

@@ -493,6 +493,26 @@ describe('Sync History retained items', () => {
           startedAt: '2026-08-03T20:00:30.000Z',
           attempt: 1,
           maxAttempts: 3,
+        }, {
+          id: 'log-canary',
+          connectorId: 'doc-1',
+          success: true,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          errors: [],
+          details: [],
+          syncedAt: '2026-08-03T20:02:00.000Z',
+          durationMs: 1000,
+          jobId: 'job-canary',
+          trigger: 'operator-canary',
+          scheduledFor: '2026-08-03T20:01:00.000Z',
+          startedAt: '2026-08-03T20:01:30.000Z',
+          attempt: 1,
+          maxAttempts: 1,
         }],
         scheduleHealth: {
           status: 'action_required',
@@ -550,6 +570,7 @@ describe('Sync History retained items', () => {
     expect(await screen.findByText('Action required')).toBeInTheDocument();
     expect(screen.getByText(/overdue 5m/i)).toBeInTheDocument();
     expect(screen.getByText('Scheduled')).toBeInTheDocument();
+    expect(screen.getByText('Operator canary')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
 

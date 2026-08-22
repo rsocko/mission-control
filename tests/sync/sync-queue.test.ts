@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   isDurableSyncMode: vi.fn(() => false),
   setQueuedExpensiveOperations: vi.fn(),
   assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorSyncEnqueueAllowed: vi.fn(),
 }));
 
 vi.mock('@/lib/sync/job-queue', () => ({
@@ -16,6 +17,9 @@ vi.mock('@/lib/sync/job-queue', () => ({
 }));
 vi.mock('@/lib/sync/maintenance-lock', () => ({
   assertConnectorMaintenanceUnlocked: mocks.assertConnectorMaintenanceUnlocked,
+}));
+vi.mock('@/lib/sync/control-state', () => ({
+  assertConnectorSyncEnqueueAllowed: mocks.assertConnectorSyncEnqueueAllowed,
 }));
 vi.mock('@/lib/telemetry/operations', () => ({
   setQueuedExpensiveOperations: mocks.setQueuedExpensiveOperations,
@@ -121,5 +125,20 @@ describe('SyncQueue', () => {
 
     const request = queue.requestSync('locked');
     await expect(request).rejects.toBe(failure);
+  });
+
+  it('rejects direct sync requests while connector quarantine is active', async () => {
+    const failure = new Error('connector_sync_quarantined');
+    mocks.assertConnectorSyncEnqueueAllowed.mockImplementationOnce(() => {
+      throw failure;
+    });
+    const queue = new SyncQueue(
+      async (connectorId) => result(connectorId),
+      () => false,
+    );
+
+    await expect(queue.requestSync('quarantined', { source: 'api' })).rejects.toBe(failure);
+    expect(mocks.assertConnectorSyncEnqueueAllowed)
+      .toHaveBeenCalledWith('quarantined', 'api');
   });
 });

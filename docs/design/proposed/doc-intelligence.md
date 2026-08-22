@@ -54,6 +54,14 @@ The connector communicates with the DocIntelligence service:
 | `GET /api/documents/:id` *(planned)* | documents | Document detail + thumbnail URL |
 | `GET /api/stats` *(planned)* | all | Processing stats for Insights tab |
 
+Action responses may also include nullable `recommended_cta` and `extracted_data`
+objects. Mission Control validates and retains these fields in task metadata. The
+custom Document Actions detail view renders only their known action helpers:
+safe HTTP(S) links, `tel:` phone actions, `mailto:` email actions, and concise
+account/reference context. Unknown extracted keys remain available for forward
+compatibility but are never rendered as raw JSON. Older OWL instances that omit
+both fields remain supported.
+
 ---
 
 ## Design Decisions

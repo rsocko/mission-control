@@ -17,6 +17,7 @@ import {
   mapActionToTriageItem,
   mapMissingStatementToNotification,
   mapUnmatchedEobToNotification,
+  parseDocActions,
 } from './document-parser';
 import type { DocAction, MissingStatement, UnmatchedEob } from './document-parser';
 import { DOCUMENT_INTELLIGENCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
@@ -97,6 +98,13 @@ export class DocumentIntelligenceConnector implements IConnector {
   };
   private client: DocClient | null = null;
 
+  private async fetchActions(): Promise<DocAction[]> {
+    return parseDocActions(await this.client!.fetchJson<unknown>(
+      '/api/action-queue/actions',
+      { status: 'pending' },
+    ));
+  }
+
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
     (this as { id: string }).id = config.id;
@@ -126,7 +134,7 @@ export class DocumentIntelligenceConnector implements IConnector {
       const checks: Array<Promise<unknown>> = [];
 
       if (this.settings.modules.actionQueue) {
-        checks.push(this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', { status: 'pending' }));
+        checks.push(this.fetchActions());
       }
       if (this.settings.modules.statements) {
         checks.push(this.client!.fetchJson<MissingStatement[]>('/api/statements/missing'));
@@ -157,9 +165,7 @@ export class DocumentIntelligenceConnector implements IConnector {
       return;
     }
 
-    const actions = await this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', {
-      status: 'pending',
-    });
+    const actions = await this.fetchActions();
 
     yield actions
       .filter((action) => isTaskAction(action))
@@ -200,9 +206,7 @@ export class DocumentIntelligenceConnector implements IConnector {
       return [];
     }
 
-    const actions = await this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', {
-      status: 'pending',
-    });
+    const actions = await this.fetchActions();
 
     return actions
       .filter((action) => isTaskAction(action))
@@ -375,7 +379,7 @@ export class DocumentIntelligenceConnector implements IConnector {
         key: 'actionQueue',
         name: 'Action Queue',
         testFn: async () => {
-          const actions = await this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', { status: 'pending' });
+          const actions = await this.fetchActions();
           return `${actions.length} pending actions`;
         },
       },

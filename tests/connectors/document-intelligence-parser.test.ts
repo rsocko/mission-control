@@ -11,6 +11,7 @@ import {
   mapUnmatchedEobToNotification,
   isTaskAction,
   isSinceMatch,
+  parseDocActions,
 } from '@/lib/connectors/document-intelligence/document-parser';
 import type {
   DocAction,
@@ -100,6 +101,30 @@ describe('mapActionToTask', () => {
     expect(task.metadata.documentTitle).toBe('Invoice #123');
   });
 
+  it('preserves recommended CTA and extracted action data', () => {
+    const recommendedCta = {
+      id: 'pay-now',
+      label: 'Pay Acme',
+      url: 'https://billing.example/pay/123',
+      metadata: { source: 'document' },
+    };
+    const extractedData = {
+      account_number: 'ACCT-123',
+      reference_number: 'INV-456',
+      payment_url: 'https://billing.example/pay/123',
+      links: [{ url: 'https://billing.example/help', purpose: 'support' }],
+      future_helper: 'retained',
+    };
+    const task = mapActionToTask(
+      makeAction({ recommended_cta: recommendedCta, extracted_data: extractedData }),
+      CONNECTOR_TYPE,
+      CONNECTOR_ID,
+    );
+
+    expect(task.metadata.recommendedCta).toEqual(recommendedCta);
+    expect(task.metadata.extractedData).toEqual(extractedData);
+  });
+
   it('maps all action types correctly', () => {
     const types: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'review'];
     for (const actionType of types) {
@@ -107,6 +132,37 @@ describe('mapActionToTask', () => {
       expect(task.metadata.actionType).toBe(actionType);
       expect(task.metadata.previewUrl).toBeDefined();
     }
+  });
+
+  describe('parseDocActions', () => {
+    it('accepts legacy actions without advanced helper fields', () => {
+      expect(parseDocActions([makeAction()])).toEqual([makeAction()]);
+    });
+
+    it('retains nested helper fields and future extracted keys', () => {
+      const action = makeAction({
+        recommended_cta: {
+          id: 'pay-now',
+          label: 'Pay now',
+          phone: null,
+          metadata: { confidence: 0.9 },
+        },
+        extracted_data: {
+          email: 'billing@example.com',
+          links: null,
+          future_helper: { value: true },
+        },
+      });
+
+      expect(parseDocActions([action])).toEqual([action]);
+    });
+
+    it('rejects malformed nested helper fields', () => {
+      expect(() => parseDocActions([{
+        ...makeAction(),
+        recommended_cta: { id: 'missing-label' },
+      }])).toThrow();
+    });
   });
 
   it('builds title with correspondent and amount for pay actions', () => {

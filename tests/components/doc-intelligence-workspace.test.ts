@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   countDocumentViews,
+  buildDocumentActionHelpers,
   filterDocumentTasks,
   groupDocumentTasks,
   parseDocumentTaskMetadata,
@@ -100,6 +101,62 @@ describe('document workspace semantics', () => {
       previewLabel: undefined,
       documentId: undefined,
       docHubUrl: undefined,
+      recommendedCta: undefined,
+      extractedData: undefined,
+    });
+  });
+
+  it('builds safe deduplicated action helpers in priority order', () => {
+    const helpers = buildDocumentActionHelpers({
+      recommendedCta: {
+        id: 'pay',
+        label: 'Pay invoice',
+        url: 'https://billing.example/pay',
+      },
+      extractedData: {
+        account_number: 'ACCT-123',
+        reference_number: 'REF-456',
+        payment_url: 'https://billing.example/pay',
+        phone: '+1 (555) 010-0200',
+        email: 'billing@example.com',
+        links: [
+          { url: 'javascript:alert(1)', label: 'Unsafe' },
+          { url: 'data:text/html,unsafe', label: 'Also unsafe' },
+          { url: 'https://billing.example/help', purpose: 'Get help' },
+          { url: 'https://billing.example/help', label: 'Duplicate' },
+        ],
+      },
+    });
+
+    expect(helpers).toEqual({
+      accountNumber: 'ACCT-123',
+      referenceNumber: 'REF-456',
+      links: [
+        {
+          href: 'https://billing.example/pay',
+          label: 'Pay invoice',
+          kind: 'web',
+          primary: true,
+        },
+        {
+          href: 'https://billing.example/help',
+          label: 'Get help',
+          kind: 'web',
+          primary: false,
+        },
+        {
+          href: 'tel:+15550100200',
+          label: 'Call',
+          kind: 'phone',
+          primary: false,
+        },
+        {
+          href: 'mailto:billing@example.com',
+          label: 'Email',
+          kind: 'email',
+          primary: false,
+        },
+      ],
     });
   });
 });

@@ -285,6 +285,26 @@ describe('TaskDocumentPreviewSection', () => {
     expect(screen.queryByRole('button', { name: 'Expand document preview' })).not.toBeInTheDocument();
   });
 
+  it('keeps arbitrary iframe previews sandboxed', () => {
+    render(
+      <TaskDocumentPreviewSection
+        taskId="task-3"
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://viewer.example/document/3',
+          previewType: 'iframe',
+          documentTitle: 'Hosted statement',
+        }}
+      />,
+    );
+
+    expect(screen.getByTitle('Preview of Hosted statement')).toHaveAttribute(
+      'sandbox',
+      'allow-forms allow-popups allow-same-origin allow-scripts',
+    );
+  });
+
   it('upgrades legacy Paperless document links to PDF previews', () => {
     render(
       <TaskDocumentPreviewSection
@@ -301,14 +321,22 @@ describe('TaskDocumentPreviewSection', () => {
       />,
     );
 
-    expect(screen.getByTitle('Preview of Legacy statement')).toHaveAttribute(
+    const preview = screen.getByTitle('Preview of Legacy statement');
+    expect(preview).toHaveAttribute(
       'src',
       '/api/tasks/task%2F42/document-preview',
     );
+    expect(preview).not.toHaveAttribute('sandbox');
     expect(screen.getByRole('link', { name: /Open Doc/ })).toHaveAttribute(
       'href',
       'https://paperless.example/documents/42/details',
     );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand document preview' }));
+    expect(screen.getAllByTitle('Preview of Legacy statement')).toHaveLength(2);
+    for (const expandedPreview of screen.getAllByTitle('Preview of Legacy statement')) {
+      expect(expandedPreview).not.toHaveAttribute('sandbox');
+    }
   });
 });
 

@@ -32,12 +32,14 @@ function DocumentPreview({
   url,
   title,
   type,
+  trustedPdf,
   expanded,
   fillAvailableSpace,
 }: {
   url: string;
   title: string;
   type: TaskDetailMetadata['previewType'];
+  trustedPdf?: boolean;
   expanded?: boolean;
   fillAvailableSpace?: boolean;
 }) {
@@ -65,9 +67,11 @@ function DocumentPreview({
       title={`Preview of ${title}`}
       loading="lazy"
       referrerPolicy="no-referrer"
-      sandbox={sameOrigin
-        ? 'allow-forms allow-popups allow-scripts'
-        : 'allow-forms allow-popups allow-same-origin allow-scripts'}
+      sandbox={trustedPdf
+        ? undefined
+        : sameOrigin
+          ? 'allow-forms allow-popups allow-scripts'
+          : 'allow-forms allow-popups allow-same-origin allow-scripts'}
       className={cn(
         'w-full border-0 bg-white',
         expanded ? 'h-full min-h-[70vh]' : fillAvailableSpace ? 'h-[70vh] min-h-[32rem]' : 'h-72',
@@ -171,6 +175,7 @@ export function TaskDocumentPreviewSection({
                     url={previewUrl}
                     title={title}
                     type={previewType}
+                    trustedPdf={shouldProxyPdf}
                     fillAvailableSpace={fillAvailableSpace}
                   />
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/20 to-transparent" />
@@ -252,6 +257,7 @@ export function TaskDocumentPreviewSection({
                   url={previewUrl}
                   title={title}
                   type={previewType}
+                  trustedPdf={shouldProxyPdf}
                   expanded
                 />
               </div>

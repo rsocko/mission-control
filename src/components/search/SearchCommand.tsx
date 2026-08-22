@@ -88,7 +88,7 @@ function renderHighlightedText(value: string) {
     return (
       <mark
         key={`${marked[1]}-${index}`}
-        className="rounded-[4px] bg-yellow-500/20 px-0.5 text-[var(--text-primary)]"
+        className="rounded-[4px] bg-yellow-300 px-0.5 font-semibold text-yellow-950"
       >
         {marked[1]}
       </mark>

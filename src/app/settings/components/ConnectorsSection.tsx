@@ -43,6 +43,7 @@ import {
 } from '@/lib/connectors/scout/settings';
 import { WorkTodoBridgePanel } from './WorkTodoBridgePanel';
 import { defaultTyrionBridgeUrlForEnvironment } from '@/lib/connectors/monarch-money/constants';
+import { FinanceConnectionWarning } from '@/components/finance/FinanceConnectionWarning';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -1230,13 +1231,22 @@ function DefaultConnectorEditPanel({
               <Shield size={10} /> Authentication
             </h4>
             {isFinanceConnector ? (
-              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
-                </p>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
-                </p>
+              <div className="space-y-3">
+                {healthState?.data?.recovery && (
+                  <FinanceConnectionWarning
+                    connectorId={connector.id}
+                    recovery={healthState.data.recovery}
+                    onVerified={() => onHealthRefresh(connector.id)}
+                  />
+                )}
+                <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
+                  </p>
+                </div>
               </div>
             ) : connector.hasCredentials ? (
               <div className="flex items-center gap-2">

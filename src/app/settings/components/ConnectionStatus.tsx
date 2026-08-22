@@ -2,11 +2,13 @@
 
 import { AlertTriangle, Circle, Loader2, Wifi, WifiOff } from 'lucide-react';
 import type { ConnectorConfig } from './types';
+import type { FinanceConnectionRecoveryView } from '@/lib/connectors/monarch-money/recovery-contract';
 
 export interface ConnectorHealthResponse {
   overall: string;
   modules: Array<{ name: string; enabled: boolean; status: string; detail?: string }>;
   latencyMs?: number;
+  recovery?: FinanceConnectionRecoveryView | null;
 }
 
 export interface ConnectorHealthState {
@@ -22,7 +24,10 @@ export function ConnectionStatus({
   healthState?: ConnectorHealthState;
 }) {
   const hasCredentials = connector.hasCredentials === true;
-  const usesHealthStatus = connector.type === 'document-intelligence';
+  const usesHealthStatus = connector.type === 'document-intelligence'
+    || connector.type === 'finance-manager'
+    || connector.type === 'finance'
+    || connector.type === 'monarch-money';
 
   if (!connector.enabled) {
     return (

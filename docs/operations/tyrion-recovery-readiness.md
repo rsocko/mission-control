@@ -32,8 +32,8 @@ key material into a request, log, or incident note.
    enabled state, schedules, delivery gates, and notification counts.
 3. Deploy PR #1563 and this stacked PR as one immutable artifact. Web and worker
    must run the identical digest. Do not mix old and new worker/web revisions.
-4. Confirm migrations `0112_finance_attention_repair` and
-   `0113_tyrion_readiness` applied through normal startup.
+4. Confirm migrations `0113_finance_attention_repair` and
+   `0114_tyrion_readiness` applied through normal startup.
 5. Keep the connector disabled. Do not run a sync yet.
 
 Stop on a migration error, digest mismatch, unexpected worker revision, or

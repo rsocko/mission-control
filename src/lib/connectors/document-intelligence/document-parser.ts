@@ -16,8 +16,10 @@ export interface DocAction {
   amount?: number | null;
   correspondent?: string | null;
   summary: string;
-  status: 'pending' | 'in_progress' | 'done' | 'dismissed';
+  status: 'pending' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;
+  updated_at?: string;
+  snoozed_until?: string | null;
   document_url?: string;
   document_type?: string | null;
   preview_url?: string | null;
@@ -88,7 +90,13 @@ export function mapActionToTask(
     priority: mapUrgency(action.urgency),
     dueDate: action.due_date || undefined,
     createdAt: action.created_at || new Date().toISOString(),
-    updatedAt: action.created_at || new Date().toISOString(),
+    updatedAt: action.updated_at || action.created_at || new Date().toISOString(),
+    completedAt: action.status === 'completed' || action.status === 'done'
+      ? action.updated_at || action.created_at
+      : undefined,
+    snoozedUntil: action.status === 'snoozed'
+      ? action.snoozed_until || undefined
+      : null,
     childIds: [],
     depth: 0,
     isChecklistItem: false,
@@ -105,6 +113,14 @@ export function mapActionToTask(
       documentType: action.document_type,
       documentUrl: action.document_url,
       urgency: action.urgency,
+      owlStatus: action.status,
+      owlDisposition: action.status === 'dismissed' || action.status === 'not_an_action'
+        ? action.status
+        : undefined,
+      owlSnoozedUntil: action.status === 'snoozed'
+        ? action.snoozed_until || undefined
+        : undefined,
+      owlUpdatedAt: action.updated_at || action.created_at,
       previewUrl: preview.url,
       previewType: preview.type,
       previewLabel: 'View in Paperless-ngx',
@@ -371,9 +387,15 @@ function mapUrgency(urgency: string): TaskItem['priority'] {
 
 function mapActionStatus(status: DocAction['status']): TaskItem['status'] {
   switch (status) {
-    case 'done': return 'done';
-    case 'dismissed': return 'cancelled';
-    case 'in_progress': return 'in_progress';
+    case 'completed':
+    case 'done':
+      return 'done';
+    case 'dismissed':
+    case 'not_an_action':
+      return 'cancelled';
+    case 'snoozed':
+    case 'pending':
+      return 'todo';
     default: return 'todo';
   }
 }

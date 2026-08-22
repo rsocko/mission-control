@@ -173,9 +173,11 @@ describe('mapActionToTask', () => {
   it('maps statuses correctly', () => {
     const statuses: [DocAction['status'], string][] = [
       ['pending', 'todo'],
-      ['in_progress', 'in_progress'],
+      ['completed', 'done'],
       ['done', 'done'],
       ['dismissed', 'cancelled'],
+      ['not_an_action', 'cancelled'],
+      ['snoozed', 'todo'],
     ];
     for (const [diStatus, mcStatus] of statuses) {
       const task = mapActionToTask({ ...mockPayAction, status: diStatus }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);

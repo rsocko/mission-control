@@ -9,7 +9,12 @@ import type {
 } from '@/types';
 
 import { createDocumentClient } from './document-client';
-import type { DocClient, DocHealthResponse, DocStatsResponse } from './document-client';
+import type {
+  DocActionFeedback,
+  DocClient,
+  DocHealthResponse,
+  DocStatsResponse,
+} from './document-client';
 import {
   isTaskAction,
   isSinceMatch,
@@ -157,13 +162,11 @@ export class DocumentIntelligenceConnector implements IConnector {
       return;
     }
 
-    const actions = await this.client!.fetchJson<DocAction[]>('/api/action-queue/actions', {
-      status: 'pending',
-    });
+    const actions = await this.client!.fetchAllActions<DocAction>();
 
     yield actions
       .filter((action) => isTaskAction(action))
-      .filter((action) => isSinceMatch(action.created_at, since))
+      .filter((action) => isSinceMatch(action.updated_at || action.created_at, since))
       .map((action) => mapActionToTask(action, this.type, this.id, this.settings.baseUrl));
   }
 
@@ -211,7 +214,7 @@ export class DocumentIntelligenceConnector implements IConnector {
   }
 
   async completeTask(sourceId: string): Promise<void> {
-    await this.client!.patchActionStatus(sourceId, 'done');
+    await this.client!.patchActionStatus(sourceId, 'completed');
   }
 
   async reopenTask(sourceId: string): Promise<void> {
@@ -230,11 +233,13 @@ export class DocumentIntelligenceConnector implements IConnector {
 
   async updateTask(sourceId: string, updates: Partial<TaskItem>): Promise<TaskItem> {
     if (updates.status === 'done') {
-      await this.client!.patchActionStatus(sourceId, 'done');
+      await this.client!.patchActionStatus(sourceId, 'completed');
     } else if (updates.status === 'cancelled') {
       await this.client!.patchActionStatus(sourceId, 'dismissed');
-    } else if (updates.status === 'todo' || updates.status === 'in_progress') {
+    } else if (updates.status === 'todo') {
       await this.client!.patchActionStatus(sourceId, 'pending');
+    } else if (updates.status !== undefined) {
+      throw new Error(`OWL does not support task status "${updates.status}"`);
     }
 
     return {
@@ -260,6 +265,14 @@ export class DocumentIntelligenceConnector implements IConnector {
       syncStatus: 'synced',
       lastSyncedAt: new Date().toISOString(),
     };
+  }
+
+  async snoozeAction(sourceId: string, until: string): Promise<void> {
+    await this.client!.snoozeAction(sourceId, until);
+  }
+
+  async submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void> {
+    await this.client!.submitActionFeedback(sourceId, feedback);
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {

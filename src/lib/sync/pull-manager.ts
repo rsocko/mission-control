@@ -520,6 +520,7 @@ export async function upsertTasks(
             createdAt: remoteTask.createdAt || now,
             updatedAt: remoteTask.updatedAt || now,
             completedAt: remoteTask.completedAt || null,
+            snoozedUntil: remoteTask.snoozedUntil || null,
             parentId: remoteTask.parentId || null,
             depth: remoteTask.depth || 0,
             isChecklistItem: remoteTask.isChecklistItem || false,
@@ -896,19 +897,21 @@ export async function upsertTasks(
       if (state.state !== 'complete') currentInaccessibleSourceListIds.add(state.sourceId);
     }
 
-    const deletionResult = await detectDeletions(
-      connectorId,
-      remoteSourceIds,
-      true,
-      audit,
-      prefetchedForDeletion,
-      {
-        identityRuntime,
-        inaccessibleSourceListIds: currentInaccessibleSourceListIds,
-      },
-    );
-    removed += deletionResult.removed;
-    localOnlyProtected = deletionResult.localOnlyProtected;
+    if (caps?.taskAbsenceMeansDeleted !== false) {
+      const deletionResult = await detectDeletions(
+        connectorId,
+        remoteSourceIds,
+        true,
+        audit,
+        prefetchedForDeletion,
+        {
+          identityRuntime,
+          inaccessibleSourceListIds: currentInaccessibleSourceListIds,
+        },
+      );
+      removed += deletionResult.removed;
+      localOnlyProtected = deletionResult.localOnlyProtected;
+    }
   }
 
   if (connector.type === 'github-issues') {
@@ -1111,6 +1114,7 @@ async function applyRemoteUpdate(
     // (many connectors omit it) but the task is still done, keep the locally-recorded
     // timestamp so the "completed today" counter survives syncs and server restarts.
     completedAt: remote.completedAt || (resolvedStatus === 'done' ? existingTask.completedAt : null),
+    snoozedUntil: remote.snoozedUntil || null,
     isChecklistItem: remote.isChecklistItem ?? existingTask.isChecklistItem,
     sourceListId: remote.sourceListId || existingTask.sourceListId || null,
     sourceListName: indexedTask.sourceListName,

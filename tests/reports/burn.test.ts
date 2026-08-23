@@ -28,6 +28,7 @@ function baseline(
   state: {
     status?: string;
     effort?: number | null;
+    localDisposition?: string;
     projectIds?: string[];
     phaseIds?: string[];
   } = {},
@@ -41,6 +42,7 @@ function baseline(
     newValue: JSON.stringify({
       status: state.status ?? 'todo',
       effort: state.effort ?? null,
+      localDisposition: state.localDisposition ?? 'active',
       projectIds: state.projectIds ?? [],
       phaseIds: state.phaseIds ?? [],
     }),
@@ -331,6 +333,34 @@ describe('burn report reconstruction', () => {
       [total, remaining]
     ))).toEqual([[1, 1], [0, 0], [1, 1]]);
     expect(result.points.slice(0, 3).map(({ cancelled }) => cancelled)).toEqual([0, 1, 0]);
+  });
+
+  it('removes handled work from visible scope and restores it when reactivated', () => {
+    const result = report({
+      events: [
+        baseline('task-1', '2026-07-01T08:00:00.000Z', {
+          projectIds: ['project-1'],
+        }),
+        event({
+          taskId: 'task-1',
+          eventType: 'local_disposition_changed',
+          previousValue: 'active',
+          newValue: 'handled',
+          occurredAt: '2026-07-02T09:00:00.000Z',
+        }),
+        event({
+          taskId: 'task-1',
+          eventType: 'local_disposition_changed',
+          previousValue: 'handled',
+          newValue: 'active',
+          occurredAt: '2026-07-03T09:00:00.000Z',
+        }),
+      ],
+    });
+
+    expect(result.points.slice(0, 3).map(({ total, remaining }) => (
+      [total, remaining]
+    ))).toEqual([[1, 1], [0, 0], [1, 1]]);
   });
 
   it('reconstructs each workflow status for cumulative flow reporting', () => {

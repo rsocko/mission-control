@@ -10,6 +10,7 @@ export const TASK_HISTORY_EVENT_TYPES = [
   'micro_status_changed',
   'kanban_column_changed',
   'effort_changed',
+  'local_disposition_changed',
   'reopened',
   'project_added',
   'project_removed',
@@ -46,6 +47,7 @@ export interface TaskStateAtTime {
   microStatus: string | null;
   kanbanColumn: string | null;
   effort: number | null;
+  localDisposition: string;
   projectIds: string[];
   phaseIds: string[];
   asOf: string;
@@ -57,6 +59,7 @@ interface BaselineValue {
   microStatus?: unknown;
   kanbanColumn?: unknown;
   effort?: unknown;
+  localDisposition?: unknown;
   projectIds?: unknown;
   phaseIds?: unknown;
 }
@@ -147,6 +150,9 @@ export async function getTaskStateAtTime(
     microStatus: typeof baseline.microStatus === 'string' ? baseline.microStatus : null,
     kanbanColumn: typeof baseline.kanbanColumn === 'string' ? baseline.kanbanColumn : null,
     effort: typeof baseline.effort === 'number' ? baseline.effort : null,
+    localDisposition: typeof baseline.localDisposition === 'string'
+      ? baseline.localDisposition
+      : 'active',
     projectIds: [],
     phaseIds: [],
     asOf: at,
@@ -166,6 +172,9 @@ export async function getTaskStateAtTime(
         break;
       case 'effort_changed':
         state.effort = event.newValue === null ? null : Number(event.newValue);
+        break;
+      case 'local_disposition_changed':
+        if (event.newValue !== null) state.localDisposition = event.newValue;
         break;
       case 'project_added':
         if (event.projectId) projectIds.add(event.projectId);

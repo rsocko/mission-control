@@ -14,6 +14,11 @@ All configuration is via environment variables in `.env.local`. Copy from `.env.
 |----------|---------|-------------|
 | `LOG_LEVEL` | `info` (prod), `debug` (dev) | Logging verbosity: trace, debug, info, warn, error, fatal |
 | `MC_DB_PATH` | `./data/mission-control.db` | Path to SQLite database file |
+| `MC_ALERTMANAGER_WEBHOOK_TOKEN` | — | Required scoped bearer token of at least 32 characters for Alertmanager webhook intake |
+| `MC_ALERTMANAGER_INTEGRATION_ID` | `homelab` | Stable namespace used in Alertmanager incident identity |
+
+See [Alertmanager webhook intake](../integrations/alertmanager.md) for the exact
+producer URL, credential-file contract, payload allowlist, and response behavior.
 
 ### SQLite observability
 

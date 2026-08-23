@@ -1,7 +1,7 @@
 import db from '@/db';
 import { notificationSavedViews } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
-import { DEFAULT_GITHUB_NOTIFICATION_VIEWS } from '@/lib/notifications/views';
+import { BUILT_IN_NOTIFICATION_VIEWS } from '@/lib/notifications/views';
 import { eq } from 'drizzle-orm';
 
 export async function DELETE(
@@ -10,7 +10,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    if (DEFAULT_GITHUB_NOTIFICATION_VIEWS.some(view => view.id === id)) {
+    if (BUILT_IN_NOTIFICATION_VIEWS.some(view => view.id === id)) {
       return ApiErrors.badRequest('Built-in views cannot be deleted');
     }
     const result = await db.delete(notificationSavedViews)

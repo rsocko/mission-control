@@ -258,6 +258,41 @@ describe('notification provider registry', () => {
     });
   });
 
+  it('presents bounded Homelab incident context and approved actions', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'homelab',
+      category: 'infrastructure',
+      metadata: {
+        schemaVersion: 1,
+        fingerprint: 'abcdef',
+        status: 'firing',
+        type: 'homelab_service_unavailable',
+        node: 'node-1',
+        environment: 'production',
+        metrics: [{ label: 'Unavailable', value: '5m', tone: 'danger' }],
+        links: [
+          { kind: 'dashboard', url: 'https://grafana.example/d/node' },
+          { kind: 'logs', url: 'javascript:alert(1)' },
+        ],
+      },
+    }));
+
+    expect(getNotificationProvider('homelab')?.displayName).toBe('Homelab');
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'Homelab',
+      subtitle: 'node-1 - firing',
+      richContent: {
+        stats: [
+          { label: 'Environment', value: 'production' },
+          { label: 'Unavailable', value: '5m', tone: 'danger' },
+        ],
+        links: [{ label: 'Open dashboard', url: 'https://grafana.example/d/node' }],
+      },
+    });
+    expect(resolved?.presentation.actions).toHaveLength(1);
+  });
+
   it('keeps finance digests navigable without marking them actionable', () => {
     registerDefaultNotificationProviders();
     const resolved = resolveNotificationProvider(notification({

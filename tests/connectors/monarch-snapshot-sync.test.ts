@@ -97,6 +97,7 @@ function mockPages(pages: unknown[][], fetchedAt: string[] = []) {
 
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
+  process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
   vi.resetModules();
   const dbModule = await import('@/db');
   sqlite = dbModule.sqlite;
@@ -122,6 +123,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
+  delete process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION;
   sqlite.close();
   rmSync(tempDirectory, { recursive: true, force: true });
 });
@@ -420,9 +422,6 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
   });
 
   it('attributes a normalized page without sending private finance fields', async () => {
-    connectorConfig.settings.cardRuleFingerprintParityProven = true;
-    vi.stubEnv('TYRION_ATTRIBUTION_FINGERPRINT_KEY', 'invented-fingerprint-key-at-least-32-characters');
-    vi.stubEnv('TYRION_ATTRIBUTION_KEY_VERSION', '1');
     const attributionBodies: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -439,22 +438,22 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       };
       attributionBodies.push(body);
       return new Response(JSON.stringify({
-        contractVersion: '1.0',
+        contractVersion: '2.0',
         policyVersion: 7,
-        engineVersion: '1.0.0',
+        engineVersion: '2.0.0',
         results: body.items.map((entry) => ({
-          contractVersion: '1.0',
+          contractVersion: '2.0',
           sourceRef: entry.sourceRef,
           status: 'attributed',
           kidId: 'kid-one',
           confidence: 'definite',
-          method: 'card-rule',
-          explanation: 'Matched an instrument rule',
+          method: 'account-rule',
+          explanation: 'Matched an account rule',
           reviewStatus: 'not-required',
           reasons: [],
           decisionSource: 'automated',
           policyVersion: 7,
-          engineVersion: '1.0.0',
+          engineVersion: '2.0.0',
           evaluatedAt: '2026-08-08T12:00:00.000Z',
         })),
       }), { headers: { 'content-type': 'application/json' } });
@@ -463,21 +462,19 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
     await expect(synchronizer.sync({ full: false })).resolves.toMatchObject({
       itemsAdded: 1,
     });
-    delete connectorConfig.settings.cardRuleFingerprintParityProven;
-
     const firstAttributionBody = attributionBodies[0] as {
       items: Array<Record<string, unknown>>;
     };
     expect(Object.keys(firstAttributionBody.items[0]!).sort()).toEqual([
+      'accountRef',
       'existingManualDecision',
-      'instrumentFingerprint',
       'merchantName',
       'observedAt',
       'occurredOn',
       'sourceRef',
     ]);
-    expect(firstAttributionBody.items[0]!.instrumentFingerprint)
-      .toMatch(/^instrument-v1:[A-Za-z0-9_-]{43}$/);
+    expect(firstAttributionBody.items[0]!.accountRef)
+      .toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
     expect(JSON.stringify(attributionBodies[0])).not.toMatch(
       /amount|accountId|mask|notes|tags|category|attributed-transaction/,
     );
@@ -492,20 +489,18 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       kidId: 'kid-one',
       status: 'attributed',
       policyVersion: 7,
-      engineVersion: '1.0.0',
+      engineVersion: '2.0.0',
     });
   });
 
-  it('sends null fingerprints and blocks card-rule attribution until parity is proven', async () => {
-    vi.stubEnv('TYRION_ATTRIBUTION_FINGERPRINT_KEY', 'invented-fingerprint-key-at-least-32-characters');
-    vi.stubEnv('TYRION_ATTRIBUTION_KEY_VERSION', '1');
+  it('reuses one account reference without an attribution rollout gate', async () => {
     const attributionBodies: Array<{ items: Array<Record<string, unknown> & { sourceRef: string }> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       if (url.hostname !== 'tyrion-operations-ui') {
         return page([
           transaction('attributed-transaction'),
-          transaction('unproven-card-transaction'),
+          transaction('second-account-transaction'),
         ], null);
       }
       const body = JSON.parse(String(init?.body)) as {
@@ -513,22 +508,22 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       };
       attributionBodies.push(body);
       return new Response(JSON.stringify({
-        contractVersion: '1.0',
+        contractVersion: '2.0',
         policyVersion: 7,
-        engineVersion: '1.0.0',
+        engineVersion: '2.0.0',
         results: body.items.map((entry) => ({
-          contractVersion: '1.0',
+          contractVersion: '2.0',
           sourceRef: entry.sourceRef,
           status: 'attributed',
           kidId: 'kid-one',
           confidence: 'definite',
-          method: 'card-rule',
-          explanation: 'Matched an instrument rule',
+          method: 'account-rule',
+          explanation: 'Matched an account rule',
           reviewStatus: 'not-required',
           reasons: [],
           decisionSource: 'automated',
           policyVersion: 7,
-          engineVersion: '1.0.0',
+          engineVersion: '2.0.0',
           evaluatedAt: '2026-08-08T12:00:00.000Z',
         })),
       }), { headers: { 'content-type': 'application/json' } });
@@ -537,16 +532,19 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
     await expect(synchronizer.sync({ full: false })).resolves.toMatchObject({
       itemsAdded: 1,
     });
-    expect(attributionBodies[0]?.items[0]?.instrumentFingerprint).toBeNull();
+    expect(attributionBodies[0]?.items[0]?.accountRef)
+      .toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
+    expect(attributionBodies[0]?.items[1]?.accountRef)
+      .toBe(attributionBodies[0]?.items[0]?.accountRef);
     expect(sqlite.prepare(`
       SELECT assigned_kid_id AS kidId, attribution_status AS status,
              attribution_last_error_code AS failureCode
       FROM finance_transactions
-      WHERE upstream_transaction_id = 'unproven-card-transaction'
+      WHERE upstream_transaction_id = 'second-account-transaction'
     `).get()).toEqual({
-      kidId: null,
-      status: 'unavailable',
-      failureCode: 'card_rule_fingerprint_parity_unproven',
+      kidId: 'kid-one',
+      status: 'attributed',
+      failureCode: null,
     });
     sqlite.prepare(`
       DELETE FROM finance_attribution_audit
@@ -567,8 +565,6 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       idempotencyKey: 'manual-decision-0001',
       actorType: 'parent-admin',
     });
-    vi.stubEnv('TYRION_ATTRIBUTION_FINGERPRINT_KEY', 'invented-fingerprint-key-at-least-32-characters');
-    vi.stubEnv('TYRION_ATTRIBUTION_KEY_VERSION', '1');
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
       if (url.hostname !== 'tyrion-operations-ui') {
@@ -590,11 +586,11 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
         actorType: 'parent-admin',
       });
       return new Response(JSON.stringify({
-        contractVersion: '1.0',
+        contractVersion: '2.0',
         policyVersion: 7,
-        engineVersion: '1.0.0',
+        engineVersion: '2.0.0',
         results: [{
-          contractVersion: '1.0',
+          contractVersion: '2.0',
           sourceRef: body.items[0].sourceRef,
           status: 'attributed',
           kidId: 'kid-one',
@@ -605,7 +601,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
           reasons: [],
           decisionSource: 'manual',
           policyVersion: 7,
-          engineVersion: '1.0.0',
+          engineVersion: '2.0.0',
           evaluatedAt: '2026-08-08T12:00:00.000Z',
         }],
       }), { headers: { 'content-type': 'application/json' } });
@@ -645,8 +641,6 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       idempotencyKey: 'manual-decision-0003',
       actorType: 'parent-admin',
     });
-    vi.stubEnv('TYRION_ATTRIBUTION_FINGERPRINT_KEY', 'invented-fingerprint-key-at-least-32-characters');
-    vi.stubEnv('TYRION_ATTRIBUTION_KEY_VERSION', '1');
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       if (url.hostname !== 'tyrion-operations-ui') {
@@ -685,8 +679,6 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
   });
 
   it('commits the generation and deduplicates exceptions when policy is unavailable', async () => {
-    vi.stubEnv('TYRION_ATTRIBUTION_FINGERPRINT_KEY', 'invented-fingerprint-key-at-least-32-characters');
-    vi.stubEnv('TYRION_ATTRIBUTION_KEY_VERSION', '1');
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       if (url.hostname !== 'tyrion-operations-ui') {

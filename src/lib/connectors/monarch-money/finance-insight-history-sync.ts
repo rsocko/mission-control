@@ -15,6 +15,10 @@ import {
   type MonarchTransaction,
 } from './client';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from './constants';
+import {
+  ensureFinanceIdentityNamespace,
+  financeConnectorScopedReference,
+} from './identity';
 
 export const FINANCE_INSIGHT_HISTORY_MONTHS = 37;
 export const FINANCE_INSIGHT_HISTORY_MAX_SOURCE_AGE_MS = 48 * 60 * 60 * 1_000;
@@ -103,17 +107,32 @@ function amountMinor(value: number): number {
   return rounded;
 }
 
-function transactionFact(transaction: MonarchTransaction): TransactionSourceFactV1 {
+function transactionFact(
+  identityNamespace: string,
+  transaction: MonarchTransaction,
+): TransactionSourceFactV1 {
   return transactionSourceFactSchema.parse({
-    sourceRef: transaction.id,
+    sourceRef: financeConnectorScopedReference(
+      identityNamespace,
+      'transaction',
+      transaction.id,
+    ),
     occurredOn: transaction.date,
     amountMinor: amountMinor(transaction.amount),
     merchantName: normalizedName(transaction.merchant.name, 160),
-    categoryRef: transaction.category?.id ?? null,
-    accountRef: transaction.account.id,
+    categoryRef: transaction.category
+      ? financeConnectorScopedReference(identityNamespace, 'category', transaction.category.id)
+      : null,
+    accountRef: financeConnectorScopedReference(
+      identityNamespace,
+      'account',
+      transaction.account.id,
+    ),
     isPending: transaction.isPending,
     recurringRef: null,
-    tagRefs: [...new Set(transaction.tagReferences.map((tag) => tag.id))].sort(),
+    tagRefs: [...new Set(transaction.tagReferences.map((tag) => (
+      financeConnectorScopedReference(identityNamespace, 'tag', tag.id)
+    )))].sort(),
   });
 }
 
@@ -165,6 +184,7 @@ export class FinanceInsightHistorySynchronizer {
     coverageEnd: string;
   }> {
     const connectorId = this.config.id;
+    const identityNamespace = ensureFinanceIdentityNamespace(connectorId);
     const attemptId = randomUUID();
     const attemptAt = this.clock().toISOString();
     const coverageEnd = dateOnly(this.clock());
@@ -243,7 +263,7 @@ export class FinanceInsightHistorySynchronizer {
                 false,
               );
             }
-            const fact = transactionFact(transaction);
+            const fact = transactionFact(identityNamespace, transaction);
             if (allSourceRefs.has(fact.sourceRef)) {
               throw new MonarchBridgeError(
                 'invalid_contract',

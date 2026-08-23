@@ -10,6 +10,11 @@ import {
 } from './bridge-url';
 import { FINANCE_PROVIDER_ALIASES, normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import { currencySchema } from '@/lib/finance/currency';
+import {
+  createFinanceIdentityNamespace,
+  FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
+  financeIdentityNamespaceFromCredentials,
+} from './identity';
 
 type ConnectorConfigRow = typeof connectorConfigs.$inferSelect;
 type ConnectorConfigLike = {
@@ -45,13 +50,37 @@ export function sanitizeFinanceConnectorWrite<T extends ConnectorConfigLike>(con
   for (const key of ['serviceToken', 'bridgeToken', 'apiToken']) {
     delete safeSettings[key];
   }
+  delete safeSettings.cardRuleFingerprintParityProven;
+  delete safeSettings.cardRuleFingerprintParityProvenAt;
   if (safeSettings.bridgeUrl !== undefined) {
     safeSettings.bridgeUrl = normalizeTyrionBridgeUrl(safeSettings.bridgeUrl);
   }
+
   return {
     ...config,
     credentials: serviceToken ? { serviceToken } : {},
     settings: safeSettings,
+  };
+}
+
+export function protectNewFinanceConnectorCredentials(
+  credentials: unknown,
+): Record<string, string> {
+  return {
+    ...(parseObject(credentials) as Record<string, string>),
+    [FINANCE_IDENTITY_NAMESPACE_CREDENTIAL]: createFinanceIdentityNamespace(),
+  };
+}
+
+export function preserveFinanceConnectorIdentityCredentials(
+  credentials: unknown,
+  existingCredentials: unknown,
+): Record<string, string> {
+  const identityNamespace = financeIdentityNamespaceFromCredentials(existingCredentials)
+    ?? createFinanceIdentityNamespace();
+  return {
+    ...(parseObject(credentials) as Record<string, string>),
+    [FINANCE_IDENTITY_NAMESPACE_CREDENTIAL]: identityNamespace,
   };
 }
 
@@ -79,10 +108,6 @@ export function getFinanceConnectorConfigurationState(
   return currencySchema.safeParse(parseObject(settings).householdCurrency).success
     ? { status: 'configured', code: null }
     : { status: 'needs-configuration', code: 'household_currency_unavailable' };
-}
-
-export function isCardRuleFingerprintParityProven(settings: unknown): boolean {
-  return parseObject(settings).cardRuleFingerprintParityProven === true;
 }
 
 export function redactFinanceConnector<T extends ConnectorConfigLike>(config: T): T {

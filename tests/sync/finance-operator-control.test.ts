@@ -201,11 +201,6 @@ describe.sequential('finance operator sync control', () => {
     })).toThrowError(expect.objectContaining({ code: 'sync_canary_already_invoked' }));
     expect(operator.getFinanceSyncControlStatus(connectorId)).toMatchObject({
       connector: { enabled: false },
-      fingerprint: {
-        parityProven: false,
-        instrumentFingerprintMode: 'null',
-        cardRuleAttribution: 'blocked',
-      },
       canary: { status: 'queued' },
     });
     expect(fetchMock).not.toHaveBeenCalled();
@@ -240,53 +235,6 @@ describe.sequential('finance operator sync control', () => {
       idempotencyKey: key('rollback-failed'),
     });
     expect(operator.getFinanceSyncControlStatus(connectorId).scheduler.state).toBe('quarantined');
-  });
-
-  it('keeps parity updates idempotent without replacing connector settings', () => {
-    operator.quarantineFinanceConnectorSync({
-      connectorId,
-      actorType: 'service',
-      idempotencyKey: key('quarantine-parity'),
-    });
-    expect(operator.setFinanceFingerprintParity({
-      connectorId,
-      actorType: 'service',
-      idempotencyKey: key('parity'),
-      proven: true,
-    })).toEqual({ parityProven: true, replayed: false });
-    expect(operator.setFinanceFingerprintParity({
-      connectorId,
-      actorType: 'service',
-      idempotencyKey: key('parity'),
-      proven: true,
-    })).toEqual({ parityProven: true, replayed: true });
-    expect(() => operator.setFinanceFingerprintParity({
-      connectorId,
-      actorType: 'service',
-      idempotencyKey: key('parity'),
-      proven: false,
-    })).toThrowError(expect.objectContaining({ code: 'operator_idempotency_conflict' }));
-
-    sqlite.prepare(`
-      UPDATE connector_configs
-      SET settings = json_set(settings, '$.bridgeUrl', 'https://new.example.test/connector/v1')
-      WHERE id = ?
-    `).run(connectorId);
-    operator.setFinanceFingerprintParity({
-      connectorId,
-      actorType: 'service',
-      idempotencyKey: key('parity-revoke'),
-      proven: false,
-    });
-    const settings = JSON.parse((sqlite.prepare(`
-      SELECT settings FROM connector_configs WHERE id = ?
-    `).get(connectorId) as { settings: string }).settings);
-    expect(settings).toMatchObject({
-      bridgeUrl: 'https://new.example.test/connector/v1',
-      householdCurrency: 'USD',
-      cardRuleFingerprintParityProven: false,
-      cardRuleFingerprintParityProvenAt: null,
-    });
   });
 
   it('cancels queued canaries on rollback and requests cancellation for running canaries', () => {

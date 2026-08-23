@@ -29,6 +29,10 @@ let replaceFinanceInsightOccurrenceCache:
   typeof import('@/lib/finance-insights/occurrence-cache')['replaceFinanceInsightOccurrenceCache'];
 let readFinanceInsightOccurrenceCache:
   typeof import('@/lib/finance-insights/occurrence-cache')['readFinanceInsightOccurrenceCache'];
+let ensureFinanceIdentityNamespace:
+  typeof import('@/lib/connectors/monarch-money/identity')['ensureFinanceIdentityNamespace'];
+let financeConnectorScopedReference:
+  typeof import('@/lib/connectors/monarch-money/identity')['financeConnectorScopedReference'];
 
 const completeResult: DomainSyncResult = {
   itemsAdded: 5,
@@ -165,6 +169,18 @@ function insertHistoryFact(
   fact: TransactionSourceFactV1,
   generationId?: string,
 ): void {
+  const namespace = ensureFinanceIdentityNamespace(connectorId);
+  const scoped = (kind: string, value: string | null): string | null => (
+    value === null ? null : financeConnectorScopedReference(namespace, kind, value)
+  );
+  const scopedFact = {
+    ...fact,
+    sourceRef: scoped('transaction', fact.sourceRef)!,
+    categoryRef: scoped('category', fact.categoryRef),
+    accountRef: scoped('account', fact.accountRef),
+    recurringRef: scoped('recurring', fact.recurringRef),
+    tagRefs: fact.tagRefs.map((value) => scoped('tag', value)!),
+  };
   const resolvedGenerationId = generationId ?? (
     sqlite.prepare(`
       SELECT successful_generation_id AS generationId
@@ -178,9 +194,9 @@ function insertHistoryFact(
   `).run(
     connectorId,
     resolvedGenerationId,
-    fact.sourceRef,
-    fact.occurredOn,
-    JSON.stringify(fact),
+    scopedFact.sourceRef,
+    scopedFact.occurredOn,
+    JSON.stringify(scopedFact),
   );
 }
 
@@ -432,6 +448,10 @@ beforeAll(async () => {
     replaceFinanceInsightOccurrenceCache,
     readFinanceInsightOccurrenceCache,
   } = await import('@/lib/finance-insights/occurrence-cache'));
+  ({
+    ensureFinanceIdentityNamespace,
+    financeConnectorScopedReference,
+  } = await import('@/lib/connectors/monarch-money/identity'));
 });
 
 beforeEach(clearProjection);
@@ -485,9 +505,11 @@ describe.sequential('finance insight composite publication', () => {
       .map((batch) => batch.facts.length)).toEqual([250, 1]);
     expect(publication?.batches
       .flatMap((batch) => batch.kind === 'transaction' ? batch.facts : [])
-      .find((fact) => fact.sourceRef === 'transaction-one')).toMatchObject({
-        sourceRef: 'transaction-one',
-        tagRefs: ['tag-one'],
+      .find((fact) => fact.tagRefs.length === 1)).toMatchObject({
+        sourceRef: expect.stringMatching(/^transaction-v1:[A-Za-z0-9_-]{43}$/),
+        accountRef: expect.stringMatching(/^account-v1:[A-Za-z0-9_-]{43}$/),
+        categoryRef: expect.stringMatching(/^category-v1:[A-Za-z0-9_-]{43}$/),
+        tagRefs: [expect.stringMatching(/^tag-v1:[A-Za-z0-9_-]{43}$/)],
       });
     expect(publication?.alertCapable).toBe(true);
     expect(sqlite.prepare(`
@@ -517,7 +539,7 @@ describe.sequential('finance insight composite publication', () => {
     expect(publication?.batches
       .find((batch) => batch.kind === 'recurring')
       ?.facts[0]).toMatchObject({
-        sourceRef: 'recurring-one',
+        sourceRef: expect.stringMatching(/^recurring-v1:[A-Za-z0-9_-]{43}$/),
         amountMinor: 100,
       });
   });
@@ -841,7 +863,9 @@ describe.sequential('finance insight composite publication', () => {
     expect(loadFinanceInsightPublication('finance-a', undefined, () => baseNow)?.batches
       .filter((batch) => batch.kind === 'transaction')
       .flatMap((batch) => batch.kind === 'transaction' ? batch.facts : [])
-      .map((fact) => fact.sourceRef)).toEqual(['transaction-one']);
+      .map((fact) => fact.sourceRef)).toEqual([
+        expect.stringMatching(/^transaction-v1:[A-Za-z0-9_-]{43}$/),
+      ]);
   });
 
   it('partitions valid fact batches by both item count and T1 request bytes', () => {
@@ -859,7 +883,7 @@ describe.sequential('finance insight composite publication', () => {
       tagRefs.push(sourceRef);
       insertTag.run(`finance:tag:finance-a:${index}`, sourceRef, `Invented tag ${index}`);
     }
-    for (let index = 2; index <= 40; index++) {
+    for (let index = 2; index <= 120; index++) {
       insertHistoryFact('finance-a', {
         sourceRef: `large-transaction-${index}`,
         occurredOn: '2026-08-09',

@@ -2,10 +2,10 @@ import 'server-only';
 
 import { z } from 'zod';
 
-export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '1.0';
-export const TYRION_ATTRIBUTION_ENGINE_VERSION = '1.0.0';
-export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v1';
-export const TYRION_ATTRIBUTION_PATH = '/api/internal/v1/attribution/batch';
+export const TYRION_ATTRIBUTION_CONTRACT_VERSION = '2.0';
+export const TYRION_ATTRIBUTION_ENGINE_VERSION = '2.0.0';
+export const TYRION_ATTRIBUTION_PROVENANCE = 'mission-control-normalized-v2';
+export const TYRION_ATTRIBUTION_PATH = '/api/internal/v2/attribution/batch';
 export const TYRION_ATTRIBUTION_MAX_ITEMS = 100;
 export const TYRION_ATTRIBUTION_MAX_BODY_BYTES = 65_536;
 export const TYRION_ATTRIBUTION_MAX_RESPONSE_BYTES = 262_144;
@@ -19,7 +19,7 @@ const timestampSchema = z.string().datetime({ offset: true });
 const reasonSchema = z.enum([
   'no-match',
   'low-confidence',
-  'card-rule-conflict',
+  'account-rule-conflict',
   'merchant-rule-conflict',
   'historical-attribution-tie',
   'engine-unavailable',
@@ -44,9 +44,7 @@ export const attributionBatchItemSchema = z.object({
   sourceRef: identifierSchema,
   occurredOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   merchantName: z.string().min(1).max(160),
-  instrumentFingerprint: z.string()
-    .regex(/^instrument-v1:[A-Za-z0-9_-]{43}$/)
-    .nullable(),
+  accountRef: z.string().regex(/^account-v1:[A-Za-z0-9_-]{43}$/),
   observedAt: timestampSchema,
   existingManualDecision: manualDecisionSchema,
 }).strict();
@@ -54,7 +52,7 @@ export const attributionBatchItemSchema = z.object({
 export const attributionBatchRequestSchema = z.object({
   contractVersion: z.literal(TYRION_ATTRIBUTION_CONTRACT_VERSION),
   provenance: z.literal(TYRION_ATTRIBUTION_PROVENANCE),
-  expectedPolicyVersion: z.number().int().positive().nullable(),
+  expectedPolicyVersion: z.number().int().positive(),
   items: z.array(attributionBatchItemSchema)
     .min(1)
     .max(TYRION_ATTRIBUTION_MAX_ITEMS),
@@ -80,7 +78,7 @@ export const attributionBatchResultSchema = z.object({
   confidence: z.enum(['definite', 'likely', 'none']),
   method: z.enum([
     'manual',
-    'card-rule',
+    'account-rule',
     'merchant-rule',
     'historical-pattern',
     'unassigned',

@@ -36,6 +36,11 @@ import {
   type SourceGenerationCreateRequestV1,
 } from './contract';
 import { normalizeFinanceProviderAlias } from './provider';
+import {
+  ensureFinanceIdentityNamespace,
+  financeConnectorScopedReference,
+  validateFinanceConnectorScopedReference,
+} from '@/lib/connectors/monarch-money/identity';
 
 export const FINANCE_INSIGHT_PUBLICATION_CACHE_COUNT = 3;
 export const FINANCE_INSIGHT_PUBLICATION_FALLBACK_MS = 7 * 24 * 60 * 60 * 1_000;
@@ -229,6 +234,12 @@ export function loadFinanceInsightProjectionFacts(
   onlyKind?: SourceFactKindV1,
   transactionEnd?: string,
 ): ProjectionFacts {
+  const identityNamespace = ensureFinanceIdentityNamespace(connectorId);
+  const scoped = (kind: string, value: string | null): string | null => (
+    value === null
+      ? null
+      : financeConnectorScopedReference(identityNamespace, kind, value)
+  );
   const tagRows = onlyKind && onlyKind !== 'tag'
     ? []
     : sqlite.prepare(`
@@ -261,15 +272,15 @@ export function loadFinanceInsightProjectionFacts(
     isPending: number;
     tagReferences: unknown;
   }>).map((row) => ({
-    sourceRef: row.sourceRef,
+    sourceRef: scoped('transaction', row.sourceRef)!,
     occurredOn: row.occurredOn,
     amountMinor: amountMinor(row.amount)!,
     merchantName: normalizedName(row.merchantName, 160, 'Unknown merchant'),
-    categoryRef: row.categoryRef,
-    accountRef: row.accountRef,
+    categoryRef: scoped('category', row.categoryRef),
+    accountRef: scoped('account', row.accountRef),
     isPending: row.isPending === 1,
     recurringRef: null,
-    tagRefs: [...new Set(parseTags(row.tagReferences))].sort(),
+    tagRefs: [...new Set(parseTags(row.tagReferences).map((value) => scoped('tag', value)!))].sort(),
   }));
   const recurring = onlyKind && onlyKind !== 'recurring'
     ? []
@@ -289,13 +300,13 @@ export function loadFinanceInsightProjectionFacts(
     categoryRef: string | null;
     accountRef: string | null;
   }>).map((row) => ({
-    sourceRef: row.sourceRef,
+    sourceRef: scoped('recurring', row.sourceRef)!,
     displayName: normalizedName(row.merchant, 120, 'Unknown recurring item'),
     amountMinor: amountMinor(row.amount),
     cadence: recurringCadence(row.frequency),
     nextDate: row.nextDate,
-    categoryRef: row.categoryRef,
-    accountRef: row.accountRef,
+    categoryRef: scoped('category', row.categoryRef),
+    accountRef: scoped('account', row.accountRef),
     active: true,
   }));
   const category = onlyKind && onlyKind !== 'category'
@@ -311,9 +322,9 @@ export function loadFinanceInsightProjectionFacts(
     groupRef: string | null;
     active: number;
   }>).map((row) => ({
-    sourceRef: row.sourceRef,
+    sourceRef: scoped('category', row.sourceRef)!,
     displayName: normalizedName(row.name, 120, 'Unknown category'),
-    groupRef: row.groupRef,
+    groupRef: scoped('category-group', row.groupRef),
     active: row.active === 1,
   }));
   const account = onlyKind && onlyKind !== 'account'
@@ -324,12 +335,12 @@ export function loadFinanceInsightProjectionFacts(
     ORDER BY upstream_account_id
   `).all(connectorId) as Array<{ sourceRef: string; type: string; active: number }>)
     .map((row) => ({
-      sourceRef: row.sourceRef,
+      sourceRef: scoped('account', row.sourceRef)!,
       accountType: accountType(row.type),
       active: row.active === 1,
     }));
   const tag = tagRows.map((row) => ({
-    sourceRef: row.sourceRef,
+    sourceRef: scoped('tag', row.sourceRef)!,
     displayName: normalizedName(row.name, 120, 'Unknown tag'),
     active: row.active === 1,
   }));
@@ -340,13 +351,26 @@ export function loadFinanceInsightPublicationProjectionFacts(
   connectorId: string,
   transactionGenerationId: string,
 ): ProjectionFacts {
+  const scoped = (kind: string, value: string | null): string | null => (
+    validateFinanceConnectorScopedReference(kind, value)
+  );
   const transaction = (sqlite.prepare(`
     SELECT payload
     FROM finance_insight_transaction_projection_facts
     WHERE connector_id = ? AND generation_id = ?
     ORDER BY source_ref
   `).all(connectorId, transactionGenerationId) as Array<{ payload: string }>)
-    .map((row) => transactionSourceFactSchema.parse(JSON.parse(row.payload)));
+    .map((row) => {
+      const fact = transactionSourceFactSchema.parse(JSON.parse(row.payload));
+      return transactionSourceFactSchema.parse({
+        ...fact,
+        sourceRef: scoped('transaction', fact.sourceRef),
+        categoryRef: scoped('category', fact.categoryRef),
+        accountRef: scoped('account', fact.accountRef),
+        recurringRef: scoped('recurring', fact.recurringRef),
+        tagRefs: fact.tagRefs.map((value) => scoped('tag', value)!),
+      });
+    });
   return {
     transaction,
     recurring: loadFinanceInsightProjectionFacts(connectorId, '', 'recurring').recurring,

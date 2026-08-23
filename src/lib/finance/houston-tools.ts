@@ -92,7 +92,7 @@ type SafeTransactionRow = {
   confidence: 'definite' | 'likely' | 'none' | null;
   method:
     | 'manual'
-    | 'card-rule'
+    | 'account-rule'
     | 'merchant-rule'
     | 'historical-pattern'
     | 'unassigned'
@@ -382,7 +382,7 @@ function applyAttributionFreshness(
 const SAFE_ATTRIBUTION_REASONS = new Set([
   'no-match',
   'low-confidence',
-  'card-rule-conflict',
+  'account-rule-conflict',
   'merchant-rule-conflict',
   'historical-attribution-tie',
   'engine-unavailable',
@@ -402,7 +402,7 @@ function attributionConclusion(reason: string): string {
   switch (reason) {
     case 'no-match': return 'Tyrion could not match this transaction to a household member.';
     case 'low-confidence': return 'Tyrion found only a low-confidence household attribution.';
-    case 'card-rule-conflict': return 'Tyrion found conflicting card attribution rules.';
+    case 'account-rule-conflict': return 'Tyrion found conflicting account attribution rules.';
     case 'merchant-rule-conflict': return 'Tyrion found conflicting merchant attribution rules.';
     case 'historical-attribution-tie': return 'Tyrion found tied historical attribution evidence.';
     case 'engine-unavailable': return 'Tyrion attribution was unavailable for this transaction.';

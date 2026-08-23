@@ -11,7 +11,6 @@ import {
   quarantineFinanceConnectorSync,
   releaseFinanceConnectorQuarantine,
   rollbackFinanceOperatorCanary,
-  setFinanceFingerprintParity,
 } from '@/lib/sync/operator-control';
 import {
   FinanceCutoverOperatorError,
@@ -29,10 +28,6 @@ const operatorRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('authorize-canary') }).strict(),
   z.object({ action: z.literal('release-scheduler') }).strict(),
   z.object({ action: z.literal('rollback-canary') }).strict(),
-  z.object({
-    action: z.literal('assert-fingerprint-parity'),
-    parityProven: z.boolean(),
-  }).strict(),
   z.object({
     action: z.literal('enable-insight-cutover'),
     sourceGeneration: z.string().min(1).max(160),
@@ -128,13 +123,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
           connectorId: id,
           actorType: actor,
           idempotencyKey,
-        }));
-      case 'assert-fingerprint-parity':
-        return NextResponse.json(setFinanceFingerprintParity({
-          connectorId: id,
-          actorType: actor,
-          idempotencyKey,
-          proven: body.data.parityProven,
         }));
       case 'enable-insight-cutover':
         return NextResponse.json(enableFinanceInsightCutoverForOperator({

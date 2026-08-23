@@ -49,7 +49,9 @@ import { DashboardSkeleton, TaskRowSkeleton } from '@/components/ui/Skeleton';
 import { useDashboardSections } from '@/lib/hooks/useDashboardSections';
 import { useTaskContextMenuActionFactory } from '@/lib/hooks/useTaskContextMenuActionFactory';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
+import { EmptyStateQueryFilters } from '@/components/filters/EmptyStateQueryFilters';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
+import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -125,6 +127,8 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const { toggleSection, isCollapsed } = useDashboardSections();
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
+  const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
+  const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
@@ -363,7 +367,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
               <p className="mb-1 text-base font-medium text-[var(--text-secondary)]">No tasks found</p>
               {state.sourceFilter || state.listFilter || state.listGroupFilter || state.tagFilter.length > 0 || state.quickFilter || state.projectFilter || state.priorityFilter.length > 0 || state.statusFilter.length > 0 || textFilter ? (
                 <div className="flex flex-col items-center gap-3">
-                  <p className="text-sm">{textFilter ? `No tasks match "${textFilter}"` : 'No tasks match these filters'}</p>
+                  <p className="text-sm">
+                    {textFilter && !parsedTextFilter.hasStructuredTokens
+                      ? `No tasks match "${textFilter}"`
+                      : 'No tasks match these filters'}
+                  </p>
                   <div className="flex items-center gap-2 flex-wrap justify-center">
                     {state.sourceFilter && (
                       <span className="bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded-full text-xs border border-blue-800/40 flex items-center gap-1">
@@ -423,9 +431,16 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                         <button onClick={() => actions.setProjectFilter(null)} className="ml-1 hover:text-white">×</button>
                       </span>
                     )}
+                    {textFilter && (
+                      <EmptyStateQueryFilters
+                        query={textFilter}
+                        projects={state.projects}
+                        onQueryChange={setTextFilter}
+                      />
+                    )}
                   </div>
                   <button
-                    onClick={() => { actions.setSourceFilter(null); actions.setListFilter(null); actions.setListGroupFilter(null); actions.setTagFilter([]); actions.setQuickFilter(null); actions.setProjectFilter(null); actions.setPriorityFilter([]); actions.setStatusFilter([]); }}
+                    onClick={() => { actions.setSourceFilter(null); actions.setListFilter(null); actions.setListGroupFilter(null); actions.setTagFilter([]); actions.setQuickFilter(null); actions.setProjectFilter(null); actions.setPriorityFilter([]); actions.setStatusFilter([]); setTextFilter(''); }}
                     className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
                   >
                     Clear all filters

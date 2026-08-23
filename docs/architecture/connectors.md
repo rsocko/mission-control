@@ -152,15 +152,21 @@ recorded in `finance_mutation_audit`; local confirmation occurs only after the
 bridge acknowledges success.
 
 Each normalized snapshot page is separately submitted to Tyrion's protected
-batch attribution v1 service. Mission Control sends only opaque keyed source
-references, date, normalized merchant, an irreversible instrument fingerprint
-or `null`, observation time, and a structured existing manual decision. The
-fingerprint is sent only when parity with Tyrion's retained fingerprint sidecar
-has been independently proven; otherwise card-rule attribution is blocked.
-No request fingerprint key-version field exists. Mission Control authenticates
+batch attribution v2 service. Mission Control sends only deterministic opaque
+connector-scoped source and required account references, date, normalized
+merchant, observation time, and a structured existing manual decision. Raw
+Monarch account IDs and card masks never cross the boundary. Mission Control
+authenticates
 with the finance-manager bearer token over private service DNS; Tyrion fixes the
 service actor and household scope server-side. Tyrion remains the sole policy
 and engine runtime.
+
+The connector stores a random identity namespace beside its token in protected,
+browser-redacted connector credentials. Ordinary SHA-256 derivation produces
+stable connector-scoped transaction, recurring, category, category-group,
+account, and tag references for both attribution and Finance Insight
+publication. The namespace is identity state, not authentication key material;
+the bearer token remains authentication only.
 
 Finance connector creation requires an exact uppercase ISO-4217
 `settings.householdCurrency`. It is non-secret application state shared by
@@ -248,7 +254,7 @@ select another validated HTTPS base path or a safe private/local HTTP bridge.
 The gateway exposes only the bounded connector contract and does not expose
 browser-proxy, raw bridge, authentication, session, or internal routes.
 The same services reach attribution at
-`http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch`.
+`http://tyrion-operations-ui:3000/api/internal/v2/attribution/batch`.
 `https://tyrion.example` is the bounded operational UI and is intentionally not
 the bridge API origin.
 

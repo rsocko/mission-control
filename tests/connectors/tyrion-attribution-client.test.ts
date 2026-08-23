@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createAttributionHeaders,
   createAttributionRequests,
+  createAttributionAccountRef,
   createAttributionSourceRef,
-  createInstrumentFingerprint,
   resolveTyrionAttributionConfig,
   TyrionAttributionClient,
   TyrionAttributionError,
@@ -16,9 +16,8 @@ import type {
 
 const config: TyrionAttributionConfig = {
   serviceToken: 'invented-finance-manager-service-token',
-  fingerprintKey: 'invented-fingerprint-key-at-least-32-characters',
-  keyVersion: 1,
-  expectedPolicyVersion: null,
+  identityNamespace: 'a'.repeat(64),
+  expectedPolicyVersion: 2,
   timeoutMs: 50,
 };
 
@@ -26,45 +25,45 @@ const item: AttributionBatchItem = {
   sourceRef: 'source-v1:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
   occurredOn: '2026-08-08',
   merchantName: 'Invented merchant',
-  instrumentFingerprint: 'instrument-v1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
+  accountRef: 'account-v1:BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
   observedAt: '2026-08-08T12:00:00.000Z',
   existingManualDecision: null,
 };
 
 function request(overrides: Partial<AttributionBatchRequest> = {}): AttributionBatchRequest {
   return {
-    contractVersion: '1.0',
-    provenance: 'mission-control-normalized-v1',
-    expectedPolicyVersion: null,
+    contractVersion: '2.0',
+    provenance: 'mission-control-normalized-v2',
+    expectedPolicyVersion: 2,
     items: [item],
     ...overrides,
   };
 }
 
-function success(sourceRef = item.sourceRef, policyVersion = 7) {
+function success(sourceRef = item.sourceRef, policyVersion = 2) {
   return {
-    contractVersion: '1.0',
+    contractVersion: '2.0',
     policyVersion,
-    engineVersion: '1.0.0',
+    engineVersion: '2.0.0',
     results: [{
-      contractVersion: '1.0',
+      contractVersion: '2.0',
       sourceRef,
       status: 'attributed',
       kidId: 'kid-one',
       confidence: 'definite',
-      method: 'card-rule',
-      explanation: 'Matched a configured instrument rule',
+      method: 'account-rule',
+      explanation: 'Matched a configured account rule',
       reviewStatus: 'not-required',
       reasons: [],
       decisionSource: 'automated',
       policyVersion,
-      engineVersion: '1.0.0',
+      engineVersion: '2.0.0',
       evaluatedAt: '2026-08-08T12:00:01.000Z',
     }],
   };
 }
 
-describe('Tyrion attribution v1 client', () => {
+describe('Tyrion attribution v2 client', () => {
   it('uses only the shared finance-manager bearer credential', () => {
     const headers = createAttributionHeaders(config);
 
@@ -73,38 +72,34 @@ describe('Tyrion attribution v1 client', () => {
     expect([...headers.keys()].filter((name) => name.startsWith('x-tyrion'))).toEqual([]);
   });
 
-  it('derives stable scoped irreversible references with explicit key rotation', () => {
+  it('derives stable opaque connector-scoped references from protected state', () => {
     const source = createAttributionSourceRef(config, 'connector-a', 'private-transaction-id');
-    const instrument = createInstrumentFingerprint(
-      config,
-      'connector-a',
-      'private-account-id',
-      '1234',
-    );
+    const account = createAttributionAccountRef(config, 'private-account-id');
 
     expect(source).toMatch(/^source-v1:[A-Za-z0-9_-]{43}$/);
-    expect(instrument).toMatch(/^instrument-v1:[A-Za-z0-9_-]{43}$/);
+    expect(account).toMatch(/^account-v1:[A-Za-z0-9_-]{43}$/);
     expect(source).not.toContain('private-transaction-id');
-    expect(instrument).not.toContain('private-account-id');
+    expect(account).not.toContain('private-account-id');
     expect(createAttributionSourceRef(config, 'connector-a', 'private-transaction-id'))
       .toBe(source);
-    expect(createAttributionSourceRef(config, 'connector-b', 'private-transaction-id'))
-      .not.toBe(source);
-    expect(createAttributionSourceRef({ ...config, keyVersion: 2 }, 'connector-a', 'private-transaction-id'))
+    expect(createAttributionSourceRef({
+      ...config,
+      identityNamespace: 'b'.repeat(64),
+    }, 'connector-a', 'private-transaction-id'))
       .not.toBe(source);
   });
 
   it('sends only the strict minimized DTO and validates ordered metadata correlation', async () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe(
-        'http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch',
+        'http://tyrion-operations-ui:3000/api/internal/v2/attribution/batch',
       );
       expect(new Headers(init?.headers).get('authorization'))
         .toBe(`Bearer ${config.serviceToken}`);
       const body = JSON.parse(String(init?.body));
       expect(Object.keys(body.items[0]).sort()).toEqual([
+        'accountRef',
         'existingManualDecision',
-        'instrumentFingerprint',
         'merchantName',
         'observedAt',
         'occurredOn',
@@ -121,8 +116,8 @@ describe('Tyrion attribution v1 client', () => {
     );
 
     await expect(client.attribute(request())).resolves.toMatchObject({
-      policyVersion: 7,
-      engineVersion: '1.0.0',
+      policyVersion: 2,
+      engineVersion: '2.0.0',
     });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'error' });
@@ -149,15 +144,29 @@ describe('Tyrion attribution v1 client', () => {
       .rejects.toMatchObject({ code: 'policy_conflict' });
   });
 
+  it('keeps contract and policy versions independent behind the static fence', async () => {
+    const client = new TyrionAttributionClient(
+      { ...config, expectedPolicyVersion: 7 },
+      vi.fn().mockResolvedValue(new Response(JSON.stringify(success(item.sourceRef, 7)), {
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch,
+    );
+
+    await expect(client.attribute(request({ expectedPolicyVersion: 7 }))).resolves.toMatchObject({
+      contractVersion: '2.0',
+      policyVersion: 7,
+    });
+  });
+
   it('enforces item and body bounds and emits sanitized stable service errors', async () => {
     expect(() => createAttributionRequests(Array.from({ length: 101 }, (_, index) => ({
       ...item,
       sourceRef: `source-${index}`,
-    })), null)).not.toThrow();
+    })), 2)).not.toThrow();
     expect(createAttributionRequests(Array.from({ length: 101 }, (_, index) => ({
       ...item,
       sourceRef: `source-${index}`,
-    })), null)).toHaveLength(2);
+    })), 2)).toHaveLength(2);
 
     const client = new TyrionAttributionClient(
       config,
@@ -212,27 +221,37 @@ describe('Tyrion attribution v1 client', () => {
       code: 'invalid_attribution_contract',
     });
     expect(resolveTyrionAttributionConfig({
-      credentials: { serviceToken: 'persisted-token' },
+      credentials: {
+        serviceToken: 'persisted-token',
+        identityNamespace: config.identityNamespace,
+      },
     }, {
       FINANCE_MANAGER_API_TOKEN: 'environment-token',
-      TYRION_ATTRIBUTION_FINGERPRINT_KEY: config.fingerprintKey,
-      TYRION_ATTRIBUTION_KEY_VERSION: '1',
-    })).toMatchObject({ serviceToken: 'persisted-token' });
+      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
+    })).toMatchObject({ serviceToken: 'persisted-token', expectedPolicyVersion: 7 });
     expect(resolveTyrionAttributionConfig({
-      credentials: { bridgeToken: 'legacy-persisted-token' },
+      credentials: {
+        bridgeToken: 'legacy-persisted-token',
+        identityNamespace: config.identityNamespace,
+      },
     }, {
-      TYRION_ATTRIBUTION_FINGERPRINT_KEY: config.fingerprintKey,
-      TYRION_ATTRIBUTION_KEY_VERSION: '1',
+      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
     })).toMatchObject({ serviceToken: 'legacy-persisted-token' });
-    expect(resolveTyrionAttributionConfig({ credentials: {} }, {
+    expect(resolveTyrionAttributionConfig({
+      credentials: { identityNamespace: config.identityNamespace },
+    }, {
       FINANCE_MANAGER_API_TOKEN: 'environment-token',
-      TYRION_ATTRIBUTION_FINGERPRINT_KEY: config.fingerprintKey,
-      TYRION_ATTRIBUTION_KEY_VERSION: '1',
+      TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION: '7',
     })).toMatchObject({ serviceToken: 'environment-token' });
-    expect(() => resolveTyrionAttributionConfig({ credentials: {} }, {
-      TYRION_ATTRIBUTION_FINGERPRINT_KEY: config.fingerprintKey,
-      TYRION_ATTRIBUTION_KEY_VERSION: '1',
-    })).toThrowError(expect.objectContaining({ code: 'attribution_not_configured' }));
+    expect(() => resolveTyrionAttributionConfig({
+      credentials: { serviceToken: 'persisted-token' },
+    }, {})).toThrowError(expect.objectContaining({ code: 'attribution_not_configured' }));
+    expect(() => resolveTyrionAttributionConfig({
+      credentials: {
+        serviceToken: 'persisted-token',
+        identityNamespace: config.identityNamespace,
+      },
+    }, {})).toThrowError(expect.objectContaining({ code: 'attribution_not_configured' }));
   });
 
   it('accepts a maximum-item response larger than the request body limit', async () => {
@@ -241,9 +260,9 @@ describe('Tyrion attribution v1 client', () => {
       sourceRef: `source-v1:${index.toString().padStart(43, 'A')}`,
     }));
     const responseBody = {
-      contractVersion: '1.0',
-      policyVersion: 7,
-      engineVersion: '1.0.0',
+      contractVersion: '2.0',
+      policyVersion: 2,
+      engineVersion: '2.0.0',
       results: items.map((entry) => ({
         ...success(entry.sourceRef).results[0],
         sourceRef: entry.sourceRef,

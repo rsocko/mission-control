@@ -201,7 +201,7 @@ describe.sequential('finance attention routing', () => {
   it('allowlists only the complete human-reviewable attribution reason set', () => {
     const expected = new Map<string, boolean>([
       ['attribution_ambiguous', true],
-      ['card-rule-conflict', true],
+      ['account-rule-conflict', true],
       ['historical-attribution-tie', true],
       ['low-confidence', true],
       ['manual_decision_conflict', true],

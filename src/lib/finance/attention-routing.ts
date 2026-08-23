@@ -31,7 +31,7 @@ const TASK_CONNECTOR_TYPE = 'mission-control';
 const TASK_CONNECTOR_INSTANCE_ID = 'mission-control';
 const HUMAN_REVIEWABLE_ATTRIBUTION_REASONS = new Set([
   'attribution_ambiguous',
-  'card-rule-conflict',
+  'account-rule-conflict',
   'historical-attribution-tie',
   'low-confidence',
   'manual_decision_conflict',

@@ -152,9 +152,7 @@ connection. Saved SQLite values take precedence over environment defaults.
 | `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED` | `false` | Enables server-only staged publication, evaluation retry, and bounded occurrence shadow ingestion; notification delivery still requires the per-connector cutover fence |
 | `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` | `false` | Enables immediate notifications for eligible fresh large transactions and recurring amount increases |
 | `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` | `false` | Enables the grouped high-confidence monthly movers digest after 09:00 on day 2 in the configured household timezone |
-| `TYRION_ATTRIBUTION_FINGERPRINT_KEY` | — | Household deployment secret for irreversible connector-scoped references |
-| `TYRION_ATTRIBUTION_KEY_VERSION` | `1` | Rotation version included in reference derivation; changing it rotates all opaque refs |
-| `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Optional positive policy fence; blank derives the fence from the first successful batch |
+| `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Required positive static fence for normal attribution sync and operator readiness; production currently uses policy version `2`, which is independent of attribution contract version `2.0` |
 | `TYRION_ATTRIBUTION_TIMEOUT_MS` | `10000` | Bounded Tyrion attribution request timeout, capped at 30 seconds |
 | `MONARCH_WEB_URL` | `https://app.monarchmoney.com` | Public Monarch origin used for comprehensive finance workflow links |
 | `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Allowlisted public Tyrion operations root used for configuration and the server-constructed `?source=mission-control` reconnect action |
@@ -198,15 +196,24 @@ Monarch cookies, `session_id`, `csrftoken`, and reusable session material are
 not accepted.
 
 The attribution client calls only
-`POST http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch` and
+`POST http://tyrion-operations-ui:3000/api/internal/v2/attribution/batch` and
 uses the connector's persisted service token, falling back to
 `FINANCE_MANAGER_API_TOKEN`, as a standard bearer credential. New setup stores
 only the canonical `serviceToken` key; bounded legacy aliases remain readable
 for migration. That path must
 remain absent from public routers. Tyrion fixes the service actor and household
 identity server-side; Mission Control sends no identity, signature, timestamp,
-nonce, or replay metadata. Keep the fingerprint key independent from transport
-credentials and rotate it by incrementing `TYRION_ATTRIBUTION_KEY_VERSION`.
+nonce, or replay metadata. The bearer token is authentication only. Mission
+Control persists a random identity namespace in protected connector credentials
+and uses ordinary SHA-256 derivation to create stable opaque connector-scoped
+source and account references. Raw Monarch identifiers never cross the Tyrion
+service boundary, and the namespace is never returned to browser clients.
+
+Finance Insight source facts use the same protected connector namespace to
+replace raw Monarch transaction, recurring, category, category-group, account,
+and tag identifiers with deterministic connector-scoped references. These
+ordinary identities require no deployment `DATA_KEY`, identity key, or derived
+secret subkey.
 
 ## Bug Snap Widget
 

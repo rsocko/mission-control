@@ -39,10 +39,11 @@ describe('POST /api/tasks/[id]/owl', () => {
   });
 
   it('returns the remote-first local update contract', async () => {
+    const snoozeUntil = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     performOwlTaskAction.mockResolvedValue({
       status: 'todo',
       statusReason: null,
-      snoozedUntil: '2026-08-23T13:00:00.000Z',
+      snoozedUntil: snoozeUntil,
       priority: 'high',
       metadata: { owlStatus: 'snoozed' },
       updatedAt: '2026-08-22T13:00:00.000Z',
@@ -51,7 +52,7 @@ describe('POST /api/tasks/[id]/owl', () => {
 
     const response = await POST(request({
       action: 'snooze',
-      until: '2026-08-23T13:00:00.000Z',
+      until: snoozeUntil,
     }), { params: Promise.resolve({ id: 'task-1' }) });
 
     expect(response.status).toBe(200);
@@ -59,7 +60,7 @@ describe('POST /api/tasks/[id]/owl', () => {
       success: true,
       task: {
         status: 'todo',
-        snoozedUntil: '2026-08-23T13:00:00.000Z',
+        snoozedUntil: snoozeUntil,
         syncStatus: 'synced',
       },
     });

@@ -7,6 +7,7 @@ export type { QuickSortTaskSnapshot } from '@/types/quick-sort';
 
 export const QUICK_SORT_MODES = [
   'no_priority',
+  'quadrant',
   'no_effort',
   'no_tags',
   'no_due_date',

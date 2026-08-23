@@ -146,7 +146,7 @@ describe('MatrixScatter', () => {
     );
 
     fireEvent.click(screen.getByLabelText('Axes'));
-    fireEvent.click(screen.getByRole('option', { name: 'Priority x Effort' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Importance x Effort' }));
     expect(screen.getByText('Quick wins')).toBeInTheDocument();
     expect(screen.getByText('Strategic')).toBeInTheDocument();
     expect(useDashboardViewStore.getState()).toMatchObject({

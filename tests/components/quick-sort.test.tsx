@@ -60,7 +60,7 @@ describe('Quick Sort plan/schedule queue', () => {
     const onSelect = vi.fn();
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={onSelect}
       />,
     );
@@ -69,37 +69,37 @@ describe('Quick Sort plan/schedule queue', () => {
 
     expect(screen.getByText('P0 and P1 tasks without a due date')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
-      .toEqual(['1', '2', '3', '4']);
+      .toEqual(['1', '1', '2', '3', '4']);
     expect(onSelect).toHaveBeenCalledWith('no_due_date');
   });
 
   it('marks the active desktop queue as selected', () => {
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
         selectedMode="no_effort"
       />,
     );
 
     expect(screen.getByRole('button', { name: /Estimate Effort/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /Set Priority/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Pick Quadrant/i })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('disables empty queues and all queues during an in-flight update', () => {
     const { rerender } = render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 0, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 0, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('button', { name: /Estimate Effort/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Set Priority/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Pick Quadrant/i })).toBeEnabled();
 
     rerender(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
         disabled
       />,
@@ -118,6 +118,7 @@ describe('Quick Sort plan/schedule queue', () => {
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
@@ -140,6 +141,72 @@ describe('Quick Sort plan/schedule queue', () => {
     ]);
   });
 
+  it('applies safe quadrant actions and confirms elimination', () => {
+    const onApplyQuadrant = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="quadrant"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyDueDate={vi.fn()}
+        allTags={[]}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick date' }));
+    fireEvent.click(screen.getByRole('button', { name: /Delegate/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Eliminate/i }));
+
+    expect(screen.getByRole('alertdialog', { name: 'Confirm eliminate task' })).toBeInTheDocument();
+    expect(onApplyQuadrant.mock.calls).toEqual([
+      ['do_first'],
+      ['schedule', '2026-08-15'],
+      ['delegate'],
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminate' }));
+    expect(onApplyQuadrant).toHaveBeenLastCalledWith('eliminate');
+  });
+
+  it('keeps direct priority assignment as a separate action', () => {
+    const onApplyPriority = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_priority"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={onApplyPriority}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyDueDate={vi.fn()}
+        allTags={[]}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /P1 High/i }));
+
+    expect(onApplyPriority).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('button', { name: /Do first/i })).not.toBeInTheDocument();
+  });
+
   it('keeps View task left of the primary completion actions', () => {
     const onViewTask = vi.fn();
     render(
@@ -150,6 +217,7 @@ describe('Quick Sort plan/schedule queue', () => {
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
@@ -167,13 +235,16 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(onViewTask).toHaveBeenCalledOnce();
   });
 
-  it('maps priority and completion actions to semantic haptics', () => {
+  it('maps quadrant and completion actions to semantic haptics', () => {
+    triggerHapticFeedback.mockClear();
+    const onApplyQuadrant = vi.fn();
     const props = {
       task,
       onViewTask: vi.fn(),
       onSkip: vi.fn(),
       onMarkDone: vi.fn(),
       onSetLocalDisposition: vi.fn(),
+      onApplyQuadrant,
       onApplyPriority: vi.fn(),
       onApplyEffort: vi.fn(),
       onApplyTag: vi.fn(),
@@ -183,9 +254,9 @@ describe('Quick Sort plan/schedule queue', () => {
       recentTagIds: [],
       busy: false,
     };
-    const { rerender } = render(<QuickSortActions {...props} mode="no_priority" />);
+    const { rerender } = render(<QuickSortActions {...props} mode="quadrant" />);
 
-    fireEvent.click(screen.getByText('Critical').closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
     rerender(<QuickSortActions {...props} mode="no_due_date" />);
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
@@ -193,19 +264,21 @@ describe('Quick Sort plan/schedule queue', () => {
       ['priority'],
       ['taskComplete'],
     ]);
+    expect(onApplyQuadrant).toHaveBeenCalledWith('do_first');
   });
 
   it('keeps Scout actions editable in Quick Sort', () => {
-    const onApplyPriority = vi.fn();
+    const onApplyQuadrant = vi.fn();
     render(
       <QuickSortActions
         task={{ ...task, connectorType: 'scout', editPolicy: makeTaskEditPolicy({ sourceModel: 'ingested' }) }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
-        onApplyPriority={onApplyPriority}
+        onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={vi.fn()}
@@ -216,8 +289,8 @@ describe('Quick Sort plan/schedule queue', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('High').closest('button')!);
-    expect(onApplyPriority).toHaveBeenCalledWith('high');
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
+    expect(onApplyQuadrant).toHaveBeenCalledWith('do_first');
     expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
   });
 
@@ -234,11 +307,12 @@ describe('Quick Sort plan/schedule queue', () => {
             reasons: { priority: blockedReason, status: 'Status is controlled by the upstream task source' },
           }),
         }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={onSetLocalDisposition}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
@@ -250,8 +324,8 @@ describe('Quick Sort plan/schedule queue', () => {
       />,
     );
 
-    expect(screen.getByText('High').closest('button')).toBeDisabled();
-    expect(screen.getByText('High').closest('button')).toHaveAttribute('title', blockedReason);
+    expect(screen.getByRole('button', { name: /Do first/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Do first/i })).toHaveAttribute('title', blockedReason);
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'View task' })).toBeEnabled();
     expect(screen.getByText('Mission Control only. The upstream task is unchanged.')).toBeInTheDocument();

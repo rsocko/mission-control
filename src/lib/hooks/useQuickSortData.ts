@@ -5,7 +5,7 @@ import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type { LocalDisposition, TaskEditPolicy, TaskSourceModel } from '@/types';
 
-export type QuickSortQueueMode = 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date';
+export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_due_date';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
 export interface QuickSortQueueTask {
@@ -31,6 +31,7 @@ export interface QuickSortQueueTask {
 
 export interface QuickSortModeCounts {
   no_priority: number;
+  quadrant: number;
   no_effort: number;
   no_tags: number;
   no_due_date: number;
@@ -103,7 +104,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
       setHasMore(fetched.length >= 50);
 
       // Fetch suggestions for the first batch in the background
-      if (fetched.length > 0 && m !== 'no_due_date') {
+      if (fetched.length > 0 && m !== 'no_due_date' && m !== 'quadrant') {
         const ids = fetched.slice(0, 20).map((t) => t.id).join(',');
         fetch(`/api/tasks/quick-sort/suggestions?taskIds=${ids}`)
           .then((r) => r.json())

@@ -12,7 +12,7 @@ import {
 import { eq, and, isNull, notInArray, asc, desc, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 
-export type QuickSortQueueMode = 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date';
+export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_due_date';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
 const LIMIT = 50;
@@ -22,7 +22,7 @@ const PRIORITY_ORDER = sql`CASE ${tasks.priority}
   WHEN 'low' THEN 4 ELSE 5 END`;
 
 /**
- * GET /api/tasks/quick-sort?mode=no_priority|no_effort|no_tags|no_due_date
+ * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_due_date
  *    &counts=true                         (return badge counts only)
  *    &source=connectorType                (optional scope filter)
  *    &sourceList=sourceListName           (optional scope filter)
@@ -30,6 +30,7 @@ const PRIORITY_ORDER = sql`CASE ${tasks.priority}
  *
  * Smart sort per mode:
  *   no_priority → most recent first (new items need priority urgently)
+ *   quadrant    → most recent first (same candidates, guided decision)
  *   no_effort   → highest priority first, then most recent
  *   no_tags     → grouped by source list, then most recent within group
  *   no_due_date → highest priority first, then most recent
@@ -133,6 +134,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       counts: {
         no_priority: noPriorityCount,
+        quadrant: noPriorityCount,
         no_effort: noEffortCount,
         no_tags: noTagsCount,
         no_due_date: noDueDateCount,
@@ -140,13 +142,13 @@ export async function GET(request: Request) {
     });
   }
 
-  if (!mode || !['no_priority', 'no_effort', 'no_tags', 'no_due_date'].includes(mode)) {
+  if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_due_date'].includes(mode)) {
     return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
   }
 
   const conditions = [...scopeConditions];
 
-  if (mode === 'no_priority') {
+  if (mode === 'no_priority' || mode === 'quadrant') {
     conditions.push(eq(tasks.priority, 'none'));
   } else if (mode === 'no_effort') {
     conditions.push(isNull(tasks.effort));
@@ -169,7 +171,7 @@ export async function GET(request: Request) {
   } else {
     // "smart" — per-mode defaults
     orderClauses =
-      mode === 'no_priority'
+      mode === 'no_priority' || mode === 'quadrant'
         ? [desc(tasks.createdAt)]                           // newest first
         : mode === 'no_effort' || mode === 'no_due_date'
           ? [PRIORITY_ORDER, desc(tasks.createdAt)]         // highest priority, then newest

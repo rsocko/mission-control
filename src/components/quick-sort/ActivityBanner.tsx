@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Flame, Target, AlertCircle, CalendarClock, Sigma, Tag } from 'lucide-react';
+import { Flame, Target, AlertCircle, CalendarClock, Grid2X2, Sigma, Tag } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 
 interface TriageStats {
@@ -9,6 +9,7 @@ interface TriageStats {
     total: number;
     byMode: {
       no_priority: number;
+      quadrant: number;
       no_effort: number;
       no_tags: number;
       no_due_date: number;
@@ -31,7 +32,13 @@ export default function ActivityBanner() {
   if (!stats || (stats.thisWeek.total === 0 && stats.streak === 0)) return null;
 
   const { thisWeek, streak } = stats;
-  const { no_priority, no_effort, no_tags, no_due_date } = thisWeek.byMode;
+  const {
+    no_priority,
+    quadrant = 0,
+    no_effort,
+    no_tags,
+    no_due_date,
+  } = thisWeek.byMode;
 
   return (
     <div className="mx-4 mb-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3">
@@ -67,6 +74,12 @@ export default function ActivityBanner() {
             <span className="flex items-center gap-1">
               <AlertCircle size={11} className="text-amber-400" />
               <AnimatedCounter value={no_priority} className="tabular-nums" /> prioritized
+            </span>
+          )}
+          {quadrant > 0 && (
+            <span className="flex items-center gap-1">
+              <Grid2X2 size={11} className="text-rose-400" />
+              <AnimatedCounter value={quadrant} className="tabular-nums" /> quadrant decisions
             </span>
           )}
           {no_effort > 0 && (

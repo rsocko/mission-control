@@ -383,6 +383,8 @@ export default function QuickSortCard({
   const modePrompt =
     mode === 'no_priority'
       ? "What's the priority?"
+      : mode === 'quadrant'
+        ? 'Which quadrant?'
       : mode === 'no_effort'
         ? 'How much effort?'
         : mode === 'no_tags'

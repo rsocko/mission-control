@@ -32,6 +32,12 @@
         ],
         "createdAt": "2026-08-16T00:42:35.014Z",
         "reason": "The image source is a runtime Markdown value and already has a failure fallback."
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#ec4899",
+        "createdAt": "2026-08-23T15:05:05.385Z",
+        "reason": "Existing test fixture color predates this task and is not production UI."
       }
     ]
   },

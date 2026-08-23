@@ -54,6 +54,7 @@ function AssignPhaseTarget({
   isSaving,
   isRenameDisabled,
   onSelectTask,
+  onDoubleClickTask,
   selectedTaskId,
   completingIds,
   myDayTaskIds,
@@ -71,6 +72,7 @@ function AssignPhaseTarget({
   isSaving: boolean;
   isRenameDisabled: boolean;
   onSelectTask: (taskId: string | null) => void;
+  onDoubleClickTask: (taskId: string) => void;
   selectedTaskId: string | null;
   completingIds: Set<string>;
   myDayTaskIds: Set<string>;
@@ -208,6 +210,7 @@ function AssignPhaseTarget({
                                 isInactive && 'opacity-50',
                               )}
                               onClick={() => onSelectTask(task.id)}
+                              onDoubleClick={() => onDoubleClickTask(task.id)}
                             >
                               <button
                                 type="button"
@@ -295,6 +298,7 @@ interface PhaseAssignViewProps {
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onSelectTask: (taskId: string | null) => void;
+  onDoubleClickTask: (taskId: string) => void;
   onCompleteTask: (taskId: string) => void;
   onRenamePhase: (phase: ProjectPhase, name: string) => void | Promise<void>;
   savingPhaseIds: Set<string>;
@@ -322,6 +326,7 @@ export function PhaseAssignView({
   onDragStart,
   onDragEnd,
   onSelectTask,
+  onDoubleClickTask,
   onCompleteTask,
   onRenamePhase,
   savingPhaseIds,
@@ -492,6 +497,7 @@ export function PhaseAssignView({
                                 isInactive && 'opacity-50',
                               )}
                               onClick={() => onSelectTask(task.id)}
+                              onDoubleClick={() => onDoubleClickTask(task.id)}
                             >
                               <button
                                 type="button"
@@ -607,6 +613,7 @@ export function PhaseAssignView({
                   isSaving={savingPhaseIds.has(phase.id)}
                   isRenameDisabled={phaseMutationPending}
                   onSelectTask={onSelectTask}
+                  onDoubleClickTask={onDoubleClickTask}
                   selectedTaskId={selectedTaskId}
                   completingIds={completingIds}
                   myDayTaskIds={myDayTaskIds}

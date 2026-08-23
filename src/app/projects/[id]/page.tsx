@@ -134,10 +134,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     setTasks,
   } = useProjectPageMutations();
   const {
+    detailMode,
     handleAddToMyDay,
     handleRemoveFromMyDay,
     myDayTaskIds,
     selectedTaskId,
+    setDetailMode,
     setSelectedTaskId,
   } = useProjectPageTaskInteractions();
 
@@ -661,6 +663,8 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                 )
               );
             }}
+            mode={detailMode}
+            onModeChange={setDetailMode}
             isInMyDay={myDayTaskIds.has(selectedTaskId)}
             onToggleMyDay={() => myDayTaskIds.has(selectedTaskId)
               ? void handleRemoveFromMyDay(selectedTaskId)

@@ -28,6 +28,7 @@ function createDatabase() {
       micro_status TEXT,
       kanban_column TEXT,
       effort INTEGER,
+      local_disposition TEXT NOT NULL DEFAULT 'active',
       updated_at TEXT NOT NULL,
       sync_status TEXT NOT NULL DEFAULT 'synced'
     );
@@ -45,12 +46,17 @@ function createDatabase() {
 }
 
 function applyMigration(sqlite: Database.Database) {
-  const migration = readFileSync(
-    resolve(process.cwd(), 'drizzle/0031_add_task_history.sql'),
-    'utf8',
-  );
-  for (const statement of migration.split('--> statement-breakpoint')) {
-    if (statement.trim()) sqlite.exec(statement);
+  for (const migrationName of [
+    '0031_add_task_history.sql',
+    '0116_track_task_disposition_history.sql',
+  ]) {
+    const migration = readFileSync(
+      resolve(process.cwd(), `drizzle/${migrationName}`),
+      'utf8',
+    );
+    for (const statement of migration.split('--> statement-breakpoint')) {
+      if (statement.trim()) sqlite.exec(statement);
+    }
   }
 }
 
@@ -65,6 +71,7 @@ function insertTask(
     microStatus: string | null;
     kanbanColumn: string | null;
     effort: number | null;
+    localDisposition: string;
     updatedAt: string;
     syncStatus: string;
   }> = {},
@@ -72,10 +79,10 @@ function insertTask(
   sqlite.prepare(`
     INSERT INTO tasks (
       id, source_id, connector_type, connector_instance_id, status,
-      micro_status, kanban_column, effort, updated_at, sync_status
+      micro_status, kanban_column, effort, local_disposition, updated_at, sync_status
     ) VALUES (
       @id, @sourceId, @connectorType, @connectorInstanceId, @status,
-      @microStatus, @kanbanColumn, @effort, @updatedAt, @syncStatus
+      @microStatus, @kanbanColumn, @effort, @localDisposition, @updatedAt, @syncStatus
     )
   `).run({
     id: 'task-1',
@@ -86,6 +93,7 @@ function insertTask(
     microStatus: null,
     kanbanColumn: null,
     effort: null,
+    localDisposition: 'active',
     updatedAt: '2026-08-01T00:00:00.000Z',
     syncStatus: 'synced',
     ...overrides,
@@ -158,6 +166,24 @@ describe('task history migration and capture', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM project_phase_items').get()).toEqual({ count: 1 });
   });
 
+  it('backfills the current disposition for tasks hidden before history capture', async () => {
+    const sqlite = createDatabase();
+    insertTask(sqlite, { localDisposition: 'dismissed' });
+
+    applyMigration(sqlite);
+
+    expect(historyRows(sqlite).map((row) => row.eventType)).toEqual([
+      'baseline',
+      'local_disposition_changed',
+    ]);
+    const database = drizzle(sqlite, { schema });
+    expect(await getTaskStateAtTime(
+      'task-1',
+      '9999-12-31T23:59:59.999Z',
+      database,
+    )).toMatchObject({ localDisposition: 'dismissed' });
+  });
+
   it('captures local tracked changes and rejects history mutation', () => {
     const sqlite = createDatabase();
     applyMigration(sqlite);
@@ -166,7 +192,7 @@ describe('task history migration and capture', () => {
     sqlite.prepare(`
       UPDATE tasks
       SET status = 'in_progress', micro_status = 'blocked',
-        kanban_column = 'doing', effort = 3,
+        kanban_column = 'doing', effort = 3, local_disposition = 'handled',
         updated_at = '2026-08-02T00:00:00.000Z',
         sync_status = 'pending_push'
       WHERE id = 'task-1'
@@ -175,6 +201,7 @@ describe('task history migration and capture', () => {
     const rows = historyRows(sqlite);
     expect(rows.map((row) => row.eventType)).toEqual([
       'baseline',
+      'local_disposition_changed',
       'status_changed',
       'micro_status_changed',
       'kanban_column_changed',
@@ -315,6 +342,7 @@ describe('task history reporting helpers', () => {
       microStatus: null,
       kanbanColumn: null,
       effort: 3,
+      localDisposition: 'active',
       projectIds: ['project-2'],
       phaseIds: ['phase-2'],
       asOf: '9999-12-31T23:59:59.999Z',

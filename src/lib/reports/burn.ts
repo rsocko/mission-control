@@ -27,6 +27,7 @@ export const EFFORT_COVERAGE_THRESHOLD = 0.8;
 interface BaselineValue {
   status?: unknown;
   effort?: unknown;
+  localDisposition?: unknown;
   projectIds?: unknown;
   phaseIds?: unknown;
 }
@@ -34,6 +35,7 @@ interface BaselineValue {
 interface MutableTaskState {
   status: string;
   effort: number | null;
+  localDisposition: string;
   projectIds: Set<string>;
   phaseIds: Set<string>;
 }
@@ -229,6 +231,9 @@ function applyEvent(states: Map<string, MutableTaskState>, event: TaskHistoryEve
       effort: typeof baseline.effort === 'number' && Number.isFinite(baseline.effort)
         ? baseline.effort
         : null,
+      localDisposition: typeof baseline.localDisposition === 'string'
+        ? baseline.localDisposition
+        : 'active',
       projectIds: stringSet(baseline.projectIds),
       phaseIds: stringSet(baseline.phaseIds),
     });
@@ -247,6 +252,9 @@ function applyEvent(states: Map<string, MutableTaskState>, event: TaskHistoryEve
       state.effort = effort !== null && Number.isFinite(effort) ? effort : null;
       break;
     }
+    case 'local_disposition_changed':
+      if (event.newValue !== null) state.localDisposition = event.newValue;
+      break;
     case 'project_added':
       if (event.projectId) state.projectIds.add(event.projectId);
       break;
@@ -351,9 +359,12 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
     const isFuture = date > today;
     const isBeforeCompleteHistory = completeFromDate !== null && date < completeFromDate;
     const membershipStates = [...states.entries()].filter(([, state]) => (
-      input.scope === 'project'
-        ? state.projectIds.has(input.scopeId)
-        : state.phaseIds.has(input.scopeId)
+      state.localDisposition === 'active'
+      && (
+        input.scope === 'project'
+          ? state.projectIds.has(input.scopeId)
+          : state.phaseIds.has(input.scopeId)
+      )
     ));
     const scopedStates = membershipStates.filter(([, state]) => state.status !== 'cancelled');
     const completedStates = scopedStates.filter(([, state]) => state.status === 'done');

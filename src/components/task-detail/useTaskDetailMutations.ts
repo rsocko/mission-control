@@ -149,6 +149,7 @@ export function useTaskDetailMutations({
   const saveField = useCallback(async (
     field: TaskField,
     value: string | number | null | undefined,
+    reportError = true,
   ) => {
     if (!ensureFieldsEditable(field)) return false;
     try {
@@ -158,7 +159,9 @@ export function useTaskDetailMutations({
       notifyNavigationCountsChanged();
       return true;
     } catch {
-      toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+      if (reportError) {
+        toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+      }
       return false;
     }
   }, [ensureFieldsEditable, taskId, onUpdate]);

@@ -784,6 +784,116 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(onUpdate).toHaveBeenCalledWith({ description: valueWithSoftBreak });
   });
 
+  it('switches inline Notes to read mode before persistence finishes', async () => {
+    let resolvePatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const patchRequest = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const onUpdate = vi.fn();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') return patchRequest;
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn(), onUpdate });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Optimistic **notes**' } });
+    fireEvent.blur(editor, { relatedTarget: document.body });
+
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(await screen.findByText('notes')).toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolvePatch({ ok: true, json: async () => ({}) });
+      await patchRequest;
+    });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ description: 'Optimistic **notes**' }));
+  });
+
+  it('restores the inline Notes draft when optimistic persistence fails', async () => {
+    let resolvePatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const patchRequest = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolvePatch = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') return patchRequest;
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Draft that must survive' } });
+    fireEvent.blur(editor, { relatedTarget: document.body });
+
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Draft that must survive')).toBeInTheDocument();
+
+    await act(async () => {
+      resolvePatch({ ok: false, json: async () => ({ error: 'Save failed' }) });
+      await patchRequest;
+    });
+
+    expect(await screen.findByRole('textbox', { name: 'Edit notes' })).toHaveValue('Draft that must survive');
+    expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
+  });
+
+  it('does not let an older failed save roll back or report over newer Notes', async () => {
+    let resolveFirstPatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const firstPatch = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolveFirstPatch = resolve;
+    });
+    let patchCount = 0;
+    const onUpdate = vi.fn();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        patchCount++;
+        return patchCount === 1 ? firstPatch : json({});
+      }
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn(), onUpdate });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      target: { value: 'First draft' },
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      relatedTarget: document.body,
+    });
+
+    fireEvent.click(await screen.findByText('First draft'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      target: { value: 'Newest draft' },
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      relatedTarget: document.body,
+    });
+
+    expect(await screen.findByText('Newest draft')).toBeInTheDocument();
+    expect(patchCount).toBe(1);
+
+    await act(async () => {
+      resolveFirstPatch({ ok: false, json: async () => ({ error: 'Save failed' }) });
+      await firstPatch;
+    });
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ description: 'Newest draft' }));
+    expect(screen.getByText('Newest draft')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it('keeps expanded edit and preview rendering in parity', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/api/tasks/task-1') return json({ task });

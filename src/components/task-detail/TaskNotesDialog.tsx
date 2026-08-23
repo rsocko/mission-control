@@ -56,6 +56,10 @@ export function TaskNotesDialog({
       initial="hidden"
       animate="show"
       exit="exit"
+      onClick={(event) => {
+        const hasUnsavedDraft = editing && descValue !== (description || '');
+        if (event.target === event.currentTarget && !hasUnsavedDraft) onClose();
+      }}
     >
       <motion.section
         ref={dialogRef}

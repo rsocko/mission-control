@@ -1299,6 +1299,56 @@ describe('TaskDetailPanel redesigned presentations', () => {
     await waitFor(() => expect(expandButton).toHaveFocus());
   });
 
+  it('closes expanded Notes when the backdrop is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+    const onClose = vi.fn();
+
+    renderPanel({ taskId: 'task-1', mode: 'mobile', onClose });
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+    const expandButton = screen.getByRole('button', { name: 'Expand notes' });
+    fireEvent.click(expandButton);
+    const dialog = screen.getByRole('dialog', { name: 'Notes' });
+
+    fireEvent.click(dialog.parentElement!);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(expandButton).toHaveFocus());
+  });
+
+  it('keeps expanded Notes open when the backdrop is clicked with an unsaved draft', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'mobile', onClose: vi.fn() });
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand notes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Unsaved notes' } });
+    const dialog = screen.getByRole('dialog', { name: 'Notes' });
+
+    fireEvent.click(dialog.parentElement!);
+
+    expect(screen.getByRole('dialog', { name: 'Notes' })).toBeInTheDocument();
+    expect(editor).toHaveValue('Unsaved notes');
+  });
+
   it('renders mobile actions without desktop mode controls', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);

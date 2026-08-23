@@ -277,11 +277,14 @@ describe('QuickSortMode task drawer', () => {
     render(<QuickSortMode />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
-    fireEvent.keyDown(document, { key: '2' });
+    fireEvent.keyDown(document, { key: '1' });
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
-    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({ priority: 'high' });
+    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({
+      priority: 'high',
+      dueDate: expect.any(String),
+    });
   });
 
   it('leaves global navigation chords to the app shortcut handler', () => {
@@ -494,10 +497,10 @@ describe('QuickSortMode task drawer', () => {
     render(<QuickSortMode />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
-    fireEvent.keyDown(document, { key: '2' });
+    fireEvent.keyDown(document, { key: '1' });
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     await waitFor(() => expect(
-      screen.getByRole('button', { name: 'Undo Set priority' }),
+      screen.getByRole('button', { name: 'Undo Do first' }),
     ).toBeEnabled());
 
     const globalUndo = vi.fn();

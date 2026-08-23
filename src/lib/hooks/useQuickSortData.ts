@@ -103,7 +103,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
       setHasMore(fetched.length >= 50);
 
       // Fetch suggestions for the first batch in the background
-      if (fetched.length > 0 && m !== 'no_due_date') {
+      if (fetched.length > 0 && m !== 'no_due_date' && m !== 'no_priority') {
         const ids = fetched.slice(0, 20).map((t) => t.id).join(',');
         fetch(`/api/tasks/quick-sort/suggestions?taskIds=${ids}`)
           .then((r) => r.json())

@@ -542,8 +542,8 @@ export function MatrixScatter({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="priority-urgency">Priority x Urgency</SelectItem>
-              <SelectItem value="priority-effort">Priority x Effort</SelectItem>
+              <SelectItem value="priority-urgency">Importance x Urgency</SelectItem>
+              <SelectItem value="priority-effort">Importance x Effort</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -704,13 +704,13 @@ export function MatrixScatter({
                   {label}
                 </span>
               ))}
-              <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 -rotate-90 text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">Priority</span>
+              <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 -rotate-90 text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">Importance</span>
               <span className="absolute bottom-2 left-1/2 z-10 -translate-x-1/2 text-[10px] uppercase tracking-widest text-[var(--text-tertiary)]">
                 {matrixAxisMode === 'priority-effort' ? 'Effort' : 'Urgency'}
               </span>
               <svg
                 role="group"
-                aria-label={`${matrixAxisMode === 'priority-effort' ? 'Priority by effort' : 'Priority by urgency'} scatter plot`}
+                aria-label={`${matrixAxisMode === 'priority-effort' ? 'Importance by effort' : 'Importance by urgency'} scatter plot`}
                 viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
                 className="absolute inset-0 h-full w-full overflow-visible"
               >

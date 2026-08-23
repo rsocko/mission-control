@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, CalendarClock, Loader2, Sigma, Tag, Zap } from 'lucide-react';
+import { CalendarClock, Grid2X2, Loader2, Sigma, Tag, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import type { QuickSortModeCounts, QuickSortQueueMode } from '@/lib/hooks/useQuickSortData';
@@ -15,9 +15,9 @@ const MODES: Array<{
 }> = [
   {
     id: 'no_priority',
-    label: 'Set Priority',
-    description: 'Tasks without a priority level assigned',
-    icon: AlertCircle,
+    label: 'Pick Quadrant',
+    description: 'Decide what to do, schedule, delegate, or eliminate',
+    icon: Grid2X2,
     accentClass: 'border-amber-700/60 bg-amber-950/40 hover:bg-amber-950/70',
     badgeClass: 'bg-amber-900/60 text-amber-300',
   },

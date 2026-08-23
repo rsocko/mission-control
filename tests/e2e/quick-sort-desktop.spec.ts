@@ -120,19 +120,19 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/quick-sort');
 });
 
-test('keeps queue context visible and exposes desktop AI actions', async ({ page }) => {
+test('keeps quadrant queue context visible on desktop', async ({ page }) => {
   const queuePanel = page.locator('aside[aria-label="Quick Sort queues"]');
   await expect(queuePanel).toHaveCount(1);
   await expect(queuePanel).toBeVisible();
   await expect(page.getByRole('link', { name: 'Quick Sort' })).toBeVisible();
 
-  await page.getByRole('button', { name: /Set Priority/ }).click();
+  await page.getByRole('button', { name: /Pick Quadrant/ }).click();
 
-  await expect(page.getByRole('heading', { name: 'Set Priority' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Pick Quadrant' })).toBeVisible();
   await expect(page.getByRole('heading', { name: task.title })).toBeVisible();
   await expect(queuePanel).toHaveCount(1);
   await expect(queuePanel).toBeVisible();
-  await expect(page.getByRole('button', { name: /Apply suggestion/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Do first/ })).toBeVisible();
   await expect(page.getByRole('navigation', { name: 'Mobile navigation' })).toBeHidden();
   expect(await page.evaluate(
     () => (window as typeof window & { __quickSortQueueMaxCount: number }).__quickSortQueueMaxCount,
@@ -146,17 +146,20 @@ test('keeps queue context visible and exposes desktop AI actions', async ({ page
 });
 
 test('supports numeric desktop shortcuts for the active queue', async ({ page }) => {
-  await page.getByRole('button', { name: /Set Priority/ }).click();
+  await page.getByRole('button', { name: /Pick Quadrant/ }).click();
   await expect(page.getByRole('heading', { name: task.title })).toBeVisible();
 
   const operationRequest = page.waitForRequest((request) => (
     request.method() === 'POST' && request.url().endsWith('/api/tasks/quick-sort/operations')
   ));
-  await page.keyboard.press('2');
+  await page.keyboard.press('1');
 
-  expect((await operationRequest).postDataJSON().patch).toEqual({ priority: 'high' });
+  expect((await operationRequest).postDataJSON().patch).toEqual({
+    priority: 'high',
+    dueDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+  });
   await expect(page.getByText('All caught up!')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Undo Set priority' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Undo Do first' })).toBeEnabled();
 
   const undoRequest = page.waitForRequest((request) => (
     request.method() === 'POST' && request.url().endsWith('/undo')
@@ -170,7 +173,7 @@ test('supports numeric desktop shortcuts for the active queue', async ({ page })
 test('mounts the queue region when the active workspace crosses into desktop', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(1);
-  await page.getByRole('button', { name: /Set Priority/ }).click();
+  await page.getByRole('button', { name: /Pick Quadrant/ }).click();
   await expect(page.locator('aside[aria-label="Quick Sort queues"]')).toHaveCount(0);
 
   await page.setViewportSize({ width: 1440, height: 900 });

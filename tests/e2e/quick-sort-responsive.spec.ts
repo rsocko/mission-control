@@ -145,8 +145,8 @@ async function openPriorityQueue(
     safeAreaTop = 59,
     safeAreaBottom = 34,
     viewport,
-    queueName = /Set Priority/,
-    modeHeadingName = 'Set Priority',
+    queueName = /Pick Quadrant/,
+    modeHeadingName = 'Pick Quadrant',
   }: {
     runtime?: RuntimeContext;
     safeAreaTop?: number;
@@ -303,7 +303,7 @@ test('every visible Quick Sort control keeps a 44px touch target on iPhone 16 Pr
   await openPriorityQueue(page);
   await expectComfortableTouchTargets(page);
 
-  await page.getByRole('button', { name: /Critical/ }).click();
+  await page.getByRole('button', { name: /Do first/ }).click();
   await expect(page.getByRole('heading', { name: 'Next task' })).toBeVisible();
   await expectComfortableTouchTargets(page);
 });
@@ -360,9 +360,12 @@ test('button actions still execute without destabilizing the shell', async ({ pa
     && request.method() === 'POST'
   ));
 
-  await page.getByRole('button', { name: /Critical/ }).click();
+  await page.getByRole('button', { name: /Do first/ }).click();
   const request = await operationRequest;
-  expect(JSON.parse(request.postData() ?? '{}').patch).toEqual({ priority: 'critical' });
+  expect(JSON.parse(request.postData() ?? '{}').patch).toEqual({
+    priority: 'high',
+    dueDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+  });
   await expect(page.getByRole('heading', { name: 'Next task' })).toBeVisible();
   await expectStableQuickSortShell(page);
 });

@@ -27,6 +27,7 @@ export {
 import { githubNotificationProvider } from './github';
 import { documentIntelligenceNotificationProvider } from './document-intelligence';
 import { financeNotificationProvider } from './finance';
+import { homelabNotificationProvider } from './homelab';
 import { getNotificationProvider, registerNotificationProvider } from './registry';
 
 export function registerDefaultNotificationProviders(): void {
@@ -34,6 +35,7 @@ export function registerDefaultNotificationProviders(): void {
     githubNotificationProvider,
     documentIntelligenceNotificationProvider,
     financeNotificationProvider,
+    homelabNotificationProvider,
   ];
   for (const provider of defaultProviders) {
     if (!getNotificationProvider(provider.sourceType)) {

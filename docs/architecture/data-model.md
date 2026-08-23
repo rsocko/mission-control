@@ -254,6 +254,7 @@ The schema is split into domain files under `src/db/schema/`:
 | `connectors.ts` | connector_configs, list_groups, source_lists, sync_log, sync_jobs, sync_job_events, runtime_telemetry, sync_schedules, sync deletion/reconciliation tables, outbound_webhooks, integration_configs, inbound_webhooks, inbound_webhook_log, list_fix_audit_log, app_settings |
 | `tasks.ts` | tasks, task_field_states, task_ingest_suppressions, task_schedules, tags, task_tags, task_projects, my_day_items, my_day_exclusions, focus_items, weekly_one_thing, priority_sync_log, subtask_templates, priority_entities, source_rankings, smart_score_settings, routines, routine_completions, energy_checkins, resets, quick_sort_log, task_linked_sources, task_attachments |
 | `notifications.ts` | notifications, notification_actions |
+| `homelab.ts` | homelab_alert_receipts; durable delivery identity linked to notification incident projections |
 | `push.ts` | push_subscriptions, push_preferences, notification_push_rules, notification_delivery_events |
 | `native.ts` | native_installation_credentials, native_share_credentials, native_share_capture_requests, apns_registrations, native_push_requests |
 | `triage.ts` | triage_content_types, triage_items, triage_sync_state, triage_action_claims |

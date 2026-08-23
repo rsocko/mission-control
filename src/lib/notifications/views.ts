@@ -30,6 +30,15 @@ export const DEFAULT_GITHUB_NOTIFICATION_VIEWS: NotificationView[] = [
   builtIn('github-all', 'All GitHub', { source: 'github-issues' }),
 ];
 
+export const DEFAULT_HOMELAB_NOTIFICATION_VIEWS: NotificationView[] = [
+  builtIn('homelab-all', 'Homelab', { source: 'homelab' }),
+];
+
+export const BUILT_IN_NOTIFICATION_VIEWS: NotificationView[] = [
+  ...DEFAULT_GITHUB_NOTIFICATION_VIEWS,
+  ...DEFAULT_HOMELAB_NOTIFICATION_VIEWS,
+];
+
 export function notificationViewHref(view: NotificationView): string {
   const params = serializeNotificationQuery(view.query);
   params.set('view', view.id);

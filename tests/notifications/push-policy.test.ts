@@ -18,6 +18,7 @@ import {
   MAX_NOTIFICATION_PUSHES_PER_HOUR,
   validateNotificationPushRule,
 } from '@/lib/notifications/push-policy/rules';
+import { HOMELAB_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
 
 const reviewRequested = {
   key: 'pr_review_requested',
@@ -112,6 +113,15 @@ describe('connector notification catalog validation', () => {
     expect(validated).toEqual(catalog);
     expect(Object.isFrozen(validated)).toBe(true);
     expect(Object.isFrozen(validated[0])).toBe(true);
+  });
+
+  it('validates the conservative Homelab notification catalog', () => {
+    const validated = validateNotificationTypeCatalog(
+      'homelab',
+      HOMELAB_NOTIFICATION_TYPES,
+    );
+    expect(validated).toHaveLength(11);
+    expect(validated.every(definition => definition.pushRecommendation === 'off')).toBe(true);
   });
 
   it.each([

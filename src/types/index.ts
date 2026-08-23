@@ -51,7 +51,11 @@ export type NotificationCategory =
   | 'home'
   | 'social'
   | 'ai_insights'
-  | 'packages';
+  | 'packages'
+  | 'infrastructure'
+  | 'backup'
+  | 'automation'
+  | 'security';
 export type SyncMode = 'webhook' | 'poll' | 'manual';
 export type SourceListType = 'list' | 'project' | 'repo' | 'folder' | 'board';
 export type TriageSourcePlatform =

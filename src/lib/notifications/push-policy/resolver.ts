@@ -29,6 +29,7 @@ import {
 } from './rules';
 import {
   financeNotificationCatalogKey,
+  HOMELAB_NOTIFICATION_TYPES,
   SYSTEM_NOTIFICATION_TYPES,
 } from './catalogs';
 
@@ -173,6 +174,15 @@ export function createStoredNotificationPushPolicyResolver(
               source: 'connector' as const,
               sourceDetail: 'recommended' as const,
             };
+      }
+
+      if (input.connectorType === 'homelab') {
+        return resolveNotificationPushPolicy({
+          ...input,
+          catalog: HOMELAB_NOTIFICATION_TYPES,
+          exactRule,
+          wildcardRule,
+        });
       }
 
       if (input.connectorType === 'inbound-webhook') {

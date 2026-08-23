@@ -27,6 +27,16 @@ import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
+import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
+
+const PRIORITY_OPTIONS = [
+  ...(['critical', 'high', 'medium', 'low'] as const).map((value) => ({
+    value,
+    label: TASK_PRIORITY_VISUALS[value].shortLabel,
+    sublabel: TASK_PRIORITY_VISUALS[value].label,
+    classes: TASK_PRIORITY_VISUALS[value].badgeClass,
+  })),
+] as const;
 
 // ─── Effort ─────────────────────────────────────────────────────────────────
 
@@ -157,6 +167,7 @@ interface QuickSortActionsProps {
   onMarkDone: () => void;
   onSetLocalDisposition: (disposition: LocalDisposition) => void;
   onApplyQuadrant: (quadrant: QuadrantChoice, dueDate?: string) => void;
+  onApplyPriority: (priority: string) => void;
   onApplyEffort: (effort: number) => void;
   onApplyTag: (tagId: string, tagName: string) => void;
   onApplyDueDate: (dueDate: string) => void;
@@ -175,6 +186,7 @@ export default function QuickSortActions({
   onMarkDone,
   onSetLocalDisposition,
   onApplyQuadrant,
+  onApplyPriority,
   onApplyEffort,
   onApplyTag,
   onApplyDueDate,
@@ -184,11 +196,13 @@ export default function QuickSortActions({
   busy,
 }: QuickSortActionsProps) {
   const [confirmingEliminate, setConfirmingEliminate] = useState(false);
+  const suggestedPriority = suggestion?.priority?.value;
   const suggestedEffort = suggestion?.effort?.value;
   const suggestedTagIds = new Set(suggestion?.tags?.map((t) => t.id) ?? []);
   const recentTagSet = new Set(recentTagIds);
   const fieldByMode: Record<QuickSortQueueMode, TaskField> = {
     no_priority: 'priority',
+    quadrant: 'priority',
     no_effort: 'effort',
     no_tags: 'tags',
     no_due_date: 'dueDate',
@@ -222,6 +236,35 @@ export default function QuickSortActions({
       >
         {/* Mode-specific action buttons */}
         {mode === 'no_priority' && (
+          <div className="grid grid-cols-4 gap-2">
+            {PRIORITY_OPTIONS.map((option) => {
+              const isSuggested = option.value === suggestedPriority;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    triggerHapticFeedback('priority');
+                    onApplyPriority(option.value);
+                  }}
+                  disabled={busy || !canApplyMode}
+                  title={!canApplyMode ? modeBlockedReason : undefined}
+                  className={cn(
+                    'quick-sort-primary-button flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-xl border py-2 font-semibold transition-all active:scale-95 disabled:opacity-50',
+                    option.classes,
+                    isSuggested && 'ring-2 ring-[var(--accent)]/50 shadow-[0_0_8px_rgba(99,102,241,0.2)]',
+                  )}
+                >
+                  {isSuggested && <Sparkles size={10} className="mb-0.5 text-[var(--accent-300)]" />}
+                  <span className="text-base">{option.label}</span>
+                  <span className="text-[10px] opacity-70">{option.sublabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {mode === 'quadrant' && (
           confirmingEliminate ? (
             <div
               role="alertdialog"

@@ -45,7 +45,8 @@ import {
 import type { LocalDisposition, TaskField } from '@/types';
 
 const MODE_LABELS: Record<QuickSortQueueMode, string> = {
-  no_priority: 'Pick Quadrant',
+  no_priority: 'Set Priority',
+  quadrant: 'Pick Quadrant',
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
   no_due_date: 'Plan / Schedule',
@@ -414,7 +415,7 @@ export default function QuickSortMode() {
         await runOperation({
           task: topTask,
           patch: selection.patch,
-          operationMode: 'no_priority',
+          operationMode: 'quadrant',
           action: 'applied',
           label: selection.label,
         });
@@ -425,6 +426,36 @@ export default function QuickSortMode() {
         toast.success(selection.message);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : `Failed to apply ${selection.label}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, dismiss, refreshCounts, runOperation, topTask],
+  );
+
+  const handleApplyPriority = useCallback(
+    async (priority: string) => {
+      if (!topTask || busy) return;
+      if (!canEditTaskField(topTask.editPolicy, 'priority')) {
+        toast.error(taskFieldBlockedReason(topTask.editPolicy, 'priority'));
+        return;
+      }
+      setBusy(true);
+      try {
+        await runOperation({
+          task: topTask,
+          patch: { priority },
+          operationMode: 'no_priority',
+          action: 'applied',
+          label: 'Set priority',
+        });
+        dismiss(topTask.id);
+        refreshCounts();
+        setStatsKey((key) => key + 1);
+        setSessionSorted((count) => count + 1);
+        toast.success(`Priority set to ${priority}`);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to update priority');
       } finally {
         setBusy(false);
       }
@@ -558,7 +589,9 @@ export default function QuickSortMode() {
     const resolvesCurrentQueue =
       fields.status === 'done'
       || fields.status === 'cancelled'
-      || (mode === 'no_priority' && typeof fields.priority === 'string' && fields.priority !== 'none')
+      || ((mode === 'no_priority' || mode === 'quadrant')
+        && typeof fields.priority === 'string'
+        && fields.priority !== 'none')
       || (mode === 'no_effort' && typeof fields.effort === 'number')
       || (mode === 'no_due_date' && (
         typeof fields.dueDate === 'string'
@@ -672,6 +705,7 @@ export default function QuickSortMode() {
       if (!task) return;
       const fieldByMode: Record<QuickSortQueueMode, TaskField> = {
         no_priority: 'priority',
+        quadrant: 'priority',
         no_effort: 'effort',
         no_tags: 'tags',
         no_due_date: 'dueDate',
@@ -740,14 +774,15 @@ export default function QuickSortMode() {
     [suggestions, tasks, mode, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
-  const hasAnySuggestion = mode !== 'no_priority' && !!(
+  const hasAnySuggestion = mode !== 'quadrant' && !!(
     topSuggestion
     && (topSuggestion.priority || topSuggestion.effort || topSuggestion.tags.length > 0)
   );
-  const hasFocusedSuggestion = mode !== 'no_priority' && !!(
+  const hasFocusedSuggestion = mode !== 'quadrant' && !!(
     topSuggestion
     && (
-      (mode === 'no_effort' && topSuggestion.effort)
+      (mode === 'no_priority' && topSuggestion.priority)
+      || (mode === 'no_effort' && topSuggestion.effort)
       || (mode === 'no_tags' && topSuggestion.tags.length > 0)
     )
   );
@@ -799,7 +834,8 @@ export default function QuickSortMode() {
       if (!mode || !topTask || busy || selectedTaskId) return;
 
       const isLocalShortcut = (
-        (mode === 'no_priority' && ['1', '3'].includes(key))
+        (mode === 'no_priority' && ['1', '2', '3', '4'].includes(key))
+        || (mode === 'quadrant' && ['1', '3'].includes(key))
         || (mode === 'no_effort' && ['1', '2', '3', '4', '5'].includes(key))
         || ['a', 'k', 'd', 'v'].includes(key)
       );
@@ -809,9 +845,12 @@ export default function QuickSortMode() {
       }
 
       let handled = true;
-      if (mode === 'no_priority' && key === '1') {
+      if (mode === 'no_priority' && ['1', '2', '3', '4'].includes(key)) {
+        const priorities = ['critical', 'high', 'medium', 'low'];
+        void handleApplyPriority(priorities[Number(key) - 1]);
+      } else if (mode === 'quadrant' && key === '1') {
         void handleApplyQuadrant('do_first');
-      } else if (mode === 'no_priority' && key === '3') {
+      } else if (mode === 'quadrant' && key === '3') {
         void handleApplyQuadrant('delegate');
       } else if (mode === 'no_effort' && ['1', '2', '3', '4', '5'].includes(key)) {
         void handleApplyEffort(Number(key));
@@ -839,6 +878,7 @@ export default function QuickSortMode() {
     handleAcceptFocused,
     handleAcceptSuggestions,
     handleApplyEffort,
+    handleApplyPriority,
     handleApplyQuadrant,
     handleMarkDone,
     handleSkip,
@@ -938,7 +978,15 @@ export default function QuickSortMode() {
               </div>
               <div className="hidden flex-wrap items-center justify-end gap-1.5 text-[11px] text-[var(--text-muted)] lg:flex">
                 <Keyboard size={13} />
-                <span>{mode === 'no_priority' ? '1 do first · 3 delegate' : mode === 'no_effort' ? '1–5 choose' : 'Choose below'}</span>
+                <span>
+                  {mode === 'no_priority'
+                    ? '1-4 choose'
+                    : mode === 'quadrant'
+                      ? '1 do first · 3 delegate'
+                      : mode === 'no_effort'
+                        ? '1-5 choose'
+                        : 'Choose below'}
+                </span>
                 <span>·</span>
                 <span>A apply AI</span>
                 <span>·</span>
@@ -1076,7 +1124,7 @@ export default function QuickSortMode() {
                             <QuickSortCard
                               task={topTask}
                               mode={mode}
-                              suggestion={mode === 'no_priority' ? undefined : topSuggestion}
+                              suggestion={mode === 'quadrant' ? undefined : topSuggestion}
                               stackIndex={0}
                               onAcceptSuggestions={handleAcceptSuggestions}
                               onAcceptFocused={handleAcceptFocused}
@@ -1129,12 +1177,13 @@ export default function QuickSortMode() {
                       <QuickSortActions
                         task={topTask}
                         mode={mode}
-                        suggestion={mode === 'no_priority' ? undefined : topSuggestion}
+                        suggestion={mode === 'quadrant' ? undefined : topSuggestion}
                         onViewTask={() => setSelectedTaskId(topTask.id)}
                         onSkip={() => handleSkip(topTask.id)}
                         onMarkDone={handleMarkDone}
                         onSetLocalDisposition={handleSetLocalDisposition}
                         onApplyQuadrant={handleApplyQuadrant}
+                        onApplyPriority={handleApplyPriority}
                         onApplyEffort={handleApplyEffort}
                         onApplyTag={handleApplyTag}
                         onApplyDueDate={handleApplyDueDate}

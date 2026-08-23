@@ -78,7 +78,10 @@ describe('GET /api/tasks/quick-sort-stats', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      thisWeek: { total: 2 },
+      thisWeek: {
+        total: 2,
+        byMode: { no_priority: 2, quadrant: 0 },
+      },
       streak: 2,
     });
     expect(mocks.getLocalDateBoundsISO).toHaveBeenCalledWith('2026-08-10');

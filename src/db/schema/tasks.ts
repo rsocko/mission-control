@@ -446,7 +446,7 @@ export const quickSortLog = sqliteTable('task_triage_log', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),
   operationId: text('operation_id'),
-  /** 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date' */
+  /** 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_due_date' */
   mode: text('mode').notNull(),
   /** 'applied' | 'suggestion_accepted' | 'skipped' */
   action: text('action').notNull(),

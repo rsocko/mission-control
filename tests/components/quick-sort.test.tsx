@@ -60,7 +60,7 @@ describe('Quick Sort plan/schedule queue', () => {
     const onSelect = vi.fn();
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={onSelect}
       />,
     );
@@ -69,14 +69,14 @@ describe('Quick Sort plan/schedule queue', () => {
 
     expect(screen.getByText('P0 and P1 tasks without a due date')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
-      .toEqual(['1', '2', '3', '4']);
+      .toEqual(['1', '1', '2', '3', '4']);
     expect(onSelect).toHaveBeenCalledWith('no_due_date');
   });
 
   it('marks the active desktop queue as selected', () => {
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
         selectedMode="no_effort"
       />,
@@ -89,7 +89,7 @@ describe('Quick Sort plan/schedule queue', () => {
   it('disables empty queues and all queues during an in-flight update', () => {
     const { rerender } = render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 0, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 0, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
       />,
     );
@@ -99,7 +99,7 @@ describe('Quick Sort plan/schedule queue', () => {
 
     rerender(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
         onSelect={vi.fn()}
         disabled
       />,
@@ -119,6 +119,7 @@ describe('Quick Sort plan/schedule queue', () => {
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
         onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={onApplyDueDate}
@@ -145,12 +146,13 @@ describe('Quick Sort plan/schedule queue', () => {
     render(
       <QuickSortActions
         task={task}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
         onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={vi.fn()}
@@ -177,6 +179,34 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(onApplyQuadrant).toHaveBeenLastCalledWith('eliminate');
   });
 
+  it('keeps direct priority assignment as a separate action', () => {
+    const onApplyPriority = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_priority"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={onApplyPriority}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyDueDate={vi.fn()}
+        allTags={[]}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /P1 High/i }));
+
+    expect(onApplyPriority).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('button', { name: /Do first/i })).not.toBeInTheDocument();
+  });
+
   it('keeps View task left of the primary completion actions', () => {
     const onViewTask = vi.fn();
     render(
@@ -188,6 +218,7 @@ describe('Quick Sort plan/schedule queue', () => {
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
         onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={vi.fn()}
@@ -214,6 +245,7 @@ describe('Quick Sort plan/schedule queue', () => {
       onMarkDone: vi.fn(),
       onSetLocalDisposition: vi.fn(),
       onApplyQuadrant,
+      onApplyPriority: vi.fn(),
       onApplyEffort: vi.fn(),
       onApplyTag: vi.fn(),
       onApplyDueDate: vi.fn(),
@@ -222,7 +254,7 @@ describe('Quick Sort plan/schedule queue', () => {
       recentTagIds: [],
       busy: false,
     };
-    const { rerender } = render(<QuickSortActions {...props} mode="no_priority" />);
+    const { rerender } = render(<QuickSortActions {...props} mode="quadrant" />);
 
     fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
     rerender(<QuickSortActions {...props} mode="no_due_date" />);
@@ -240,12 +272,13 @@ describe('Quick Sort plan/schedule queue', () => {
     render(
       <QuickSortActions
         task={{ ...task, connectorType: 'scout', editPolicy: makeTaskEditPolicy({ sourceModel: 'ingested' }) }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
         onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={vi.fn()}
@@ -274,12 +307,13 @@ describe('Quick Sort plan/schedule queue', () => {
             reasons: { priority: blockedReason, status: 'Status is controlled by the upstream task source' },
           }),
         }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={onSetLocalDisposition}
         onApplyQuadrant={vi.fn()}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
         onApplyDueDate={vi.fn()}

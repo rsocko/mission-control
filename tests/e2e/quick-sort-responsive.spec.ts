@@ -61,7 +61,7 @@ test.beforeEach(async ({ browserName, page }) => {
     if (url.searchParams.get('counts') === 'true') {
       await route.fulfill({
         json: {
-          counts: { no_priority: 2, no_effort: 2, no_tags: 2, no_due_date: 0 },
+          counts: { no_priority: 2, quadrant: 2, no_effort: 2, no_tags: 2, no_due_date: 0 },
         },
       });
       return;
@@ -75,7 +75,7 @@ test.beforeEach(async ({ browserName, page }) => {
       json: {
         thisWeek: {
           total: 0,
-          byMode: { no_priority: 0, no_effort: 0, no_tags: 0, no_due_date: 0 },
+          byMode: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 0, no_due_date: 0 },
         },
         streak: 0,
       },

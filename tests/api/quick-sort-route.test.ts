@@ -138,6 +138,7 @@ describe('GET /api/tasks/quick-sort', () => {
 
     expect(body.counts).toEqual({
       no_priority: 1,
+      quadrant: 1,
       no_effort: 2,
       no_tags: 3,
       no_due_date: 4,

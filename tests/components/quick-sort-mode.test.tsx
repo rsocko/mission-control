@@ -49,7 +49,7 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
       editPolicy: mocks.taskEditPolicy,
     }] : [],
     loading: false,
-    counts: { no_priority: 1, no_effort: 1, no_tags: 1, no_due_date: 0 },
+    counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_due_date: 0 },
     suggestions: mocks.suggestions,
     recentTagIds: [],
     dismiss: mocks.dismiss,
@@ -67,6 +67,7 @@ vi.mock('@/components/quick-sort/ModeSelector', () => ({
     <>
       <button disabled={disabled} onClick={() => onSelect('no_tags')}>Open no-tags queue</button>
       <button disabled={disabled} onClick={() => onSelect('no_priority')}>Open priority queue</button>
+      <button disabled={disabled} onClick={() => onSelect('quadrant')}>Open quadrant queue</button>
     </>
   ),
 }));
@@ -264,7 +265,7 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshCounts).not.toHaveBeenCalled();
   });
 
-  it('supports desktop keyboard shortcuts without requiring swipe gestures', async () => {
+  it('supports direct priority keyboard shortcuts without requiring swipe gestures', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       matches: true,
       addEventListener: vi.fn(),
@@ -281,10 +282,7 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
-    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({
-      priority: 'high',
-      dueDate: expect.any(String),
-    });
+    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({ priority: 'critical' });
   });
 
   it('leaves global navigation chords to the app shortcut handler', () => {
@@ -299,7 +297,7 @@ describe('QuickSortMode task drawer', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickSortMode />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open quadrant queue' }));
     fireEvent.keyDown(document, { key: 'g' });
     fireEvent.keyDown(document, { key: 'd' });
 
@@ -496,7 +494,7 @@ describe('QuickSortMode task drawer', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickSortMode />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open quadrant queue' }));
     fireEvent.keyDown(document, { key: '1' });
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     await waitFor(() => expect(

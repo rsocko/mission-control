@@ -32,31 +32,41 @@ interface ScopeFilterProps {
 export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
   const [expanded, setExpanded] = useState(false);
   const [sources, setSources] = useState<SourceData | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   const hasFilter = !!(filter.source || filter.sourceList);
 
-  // Fetch sources eagerly so chip row renders on mount
   useEffect(() => {
-    if (!sources) {
-      setLoading(true);
-      fetch('/api/tasks/quick-sort?sources=true')
-        .then((r) => r.json())
-        .then((data) => setSources(data.sources ?? {}))
-        .catch(() => {})
-        .finally(() => setLoading(false));
-    }
-  }, [sources]);
+    const controller = new AbortController();
+    fetch('/api/tasks/quick-sort?sources=true', { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error('Failed to load sources');
+        return response.json();
+      })
+      .then((data) => setSources(data.sources ?? {}))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setLoadError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
 
-  useEffect(() => {
-    if (expanded) {
-      setSearchQuery('');
-      setTimeout(() => searchInputRef.current?.focus(), 50);
-    }
-  }, [expanded]);
+    return () => controller.abort();
+  }, []);
+
+  const toggleDropdown = () => {
+    const next = !expanded;
+    setExpanded(next);
+    if (!next) return;
+    setSearchQuery('');
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  };
 
   // Close on outside click/touch
   useEffect(() => {
@@ -85,7 +95,15 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
     setExpanded(false);
   };
 
-  // Filter sources and lists by search query
+  const toggleSource = (connectorType: string) => {
+    setExpandedSources((current) => {
+      const next = new Set(current);
+      if (next.has(connectorType)) next.delete(connectorType);
+      else next.add(connectorType);
+      return next;
+    });
+  };
+
   const filteredSources = sources
     ? Object.entries(sources).filter(([connectorType, data]) => {
         if (!searchQuery.trim()) return true;
@@ -96,80 +114,48 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
       })
     : [];
 
-  // Source chip keys for top-level quick filter
-  const sourceKeys = sources ? Object.keys(sources) : [];
-
   return (
     <div className="px-4 mb-4" ref={panelRef}>
-      {/* Source chips row — quick top-level filter */}
-      {sourceKeys.length > 1 && (
-        <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-3 border-b border-[var(--border-subtle)] scrollbar-none">
-          <button
-            onClick={() => onChange({})}
-            className={cn(
-              'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-              !filter.source
-                ? 'bg-[var(--accent-400)] text-white'
-                : 'bg-[var(--surface-3)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-            )}
-          >
-            All
-          </button>
-          {sourceKeys.map((key) => (
-            <button
-              key={key}
-              onClick={() => {
-                if (filter.source === key && !filter.sourceList) {
-                  onChange({});
-                } else {
-                  onChange({ source: key });
-                }
-              }}
-              className={cn(
-                'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors',
-                filter.source === key
-                  ? 'bg-[var(--accent-400)] text-white'
-                  : 'bg-[var(--surface-3)] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
-              )}
-            >
-              {SOURCE_LABELS[key] ?? key}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Filter toggle — list picker */}
-      <button
-        onClick={() => setExpanded(!expanded)}
+      <div
         className={cn(
-          'flex items-center gap-2 text-sm py-2.5 px-3 rounded-lg border transition-colors w-full',
+          'flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm transition-colors',
           hasFilter
             ? 'border-[var(--accent-400)]/40 bg-[var(--accent-400)]/10 text-[var(--accent-400)]'
             : 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-tertiary)]'
         )}
       >
         <Filter size={14} />
-        <span className="flex-1 text-left truncate">
-          {hasFilter
-            ? `${SOURCE_LABELS[filter.source!] ?? filter.source}${filter.sourceList ? ` → ${filter.sourceList}` : ''}`
-            : 'All sources'}
-        </span>
-        {hasFilter ? (
+        <button
+          type="button"
+          onClick={toggleDropdown}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-2 text-left"
+          aria-expanded={expanded}
+          aria-controls="quick-sort-source-options"
+        >
+          <span className="flex-1 truncate">
+            {hasFilter
+              ? `${SOURCE_LABELS[filter.source!] ?? filter.source}${filter.sourceList ? ` / ${filter.sourceList}` : ''}`
+              : 'All sources'}
+          </span>
+          <ChevronDown size={14} className={cn('flex-shrink-0 transition-transform', expanded && 'rotate-180')} />
+        </button>
+        {hasFilter && (
           <button
+            type="button"
             onClick={(e) => { e.stopPropagation(); clearFilter(); }}
-            className="p-1 rounded hover:bg-[var(--surface-3)]"
+            className="flex min-h-11 min-w-11 items-center justify-center rounded hover:bg-[var(--surface-3)]"
+            aria-label="Clear source filter"
           >
             <X size={14} />
           </button>
-        ) : (
-          <ChevronDown size={14} className={cn('transition-transform flex-shrink-0', expanded && 'rotate-180')} />
         )}
-      </button>
+      </div>
 
-      {/* Dropdown */}
       {expanded && (
-        <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] overflow-hidden flex flex-col max-h-[60vh]">
-          {/* Search input */}
+        <div
+          id="quick-sort-source-options"
+          className="mt-2 flex max-h-[60vh] flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)]"
+        >
           <div className="input-glow flex items-center gap-2 px-3 py-3 border-b border-[var(--border-subtle)] flex-shrink-0 bg-[var(--surface-2)]">
             <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
             <input
@@ -177,20 +163,28 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search sources…"
+              placeholder="Search sources and lists…"
+              aria-label="Search sources and lists"
               className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none min-w-0"
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} className="p-1 text-[var(--text-tertiary)] flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="flex min-h-11 min-w-11 flex-shrink-0 items-center justify-center text-[var(--text-tertiary)]"
+                aria-label="Clear source search"
+              >
                 <X size={14} />
               </button>
             )}
           </div>
 
-          {/* Scrollable list */}
           <div className="overflow-y-auto overscroll-contain">
             {loading && (
               <div className="px-4 py-4 text-sm text-[var(--text-muted)]">Loading sources…</div>
+            )}
+            {!loading && loadError && (
+              <div className="px-4 py-4 text-sm text-[var(--text-muted)]">Could not load sources</div>
             )}
             {!loading && sources && Object.keys(sources).length === 0 && (
               <div className="px-4 py-4 text-sm text-[var(--text-muted)]">No sources found</div>
@@ -200,12 +194,12 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
             )}
             {!loading && sources && (
               <div className="py-1">
-                {/* "All sources" option (only when not searching) */}
                 {!searchQuery.trim() && (
                   <button
+                    type="button"
                     onClick={() => { clearFilter(); setExpanded(false); }}
                     className={cn(
-                      'w-full text-left px-4 py-3 text-sm transition-colors active:bg-[var(--surface-3)]',
+                      'min-h-11 w-full px-4 text-left text-sm transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)]',
                       !hasFilter ? 'text-[var(--accent-400)] font-medium' : 'text-[var(--text-secondary)]'
                     )}
                   >
@@ -215,31 +209,48 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
 
                 {filteredSources.map(([connectorType, data]) => {
                   const q = searchQuery.toLowerCase();
+                  const sourceLabel = SOURCE_LABELS[connectorType] ?? connectorType;
                   const filteredLists = searchQuery.trim()
-                    ? data.lists.filter((list) => list.name.toLowerCase().includes(q) || (SOURCE_LABELS[connectorType] ?? connectorType).toLowerCase().includes(q))
+                    ? data.lists.filter((list) => list.name.toLowerCase().includes(q) || sourceLabel.toLowerCase().includes(q))
                     : data.lists;
+                  const listsExpanded = searchQuery.trim() !== '' || expandedSources.has(connectorType);
 
                   return (
-                    <div key={connectorType}>
-                      <button
-                        onClick={() => selectSource(connectorType)}
-                        className={cn(
-                          'w-full text-left px-4 py-3 text-sm font-medium transition-colors active:bg-[var(--surface-3)]',
-                          filter.source === connectorType && !filter.sourceList
-                            ? 'text-[var(--accent-400)]'
-                            : 'text-[var(--text-primary)]'
+                    <div key={connectorType} className="border-t border-[var(--border-subtle)] first:border-t-0">
+                      <div className="flex items-center">
+                        <button
+                          type="button"
+                          onClick={() => selectSource(connectorType)}
+                          className={cn(
+                            'min-h-11 min-w-0 flex-1 px-4 text-left text-sm font-medium transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)]',
+                            filter.source === connectorType && !filter.sourceList
+                              ? 'text-[var(--accent-400)]'
+                              : 'text-[var(--text-primary)]'
+                          )}
+                        >
+                          {sourceLabel}
+                        </button>
+                        {data.lists.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleSource(connectorType)}
+                            className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]"
+                            aria-label={`${listsExpanded ? 'Collapse' : 'Expand'} ${sourceLabel} lists`}
+                            aria-expanded={listsExpanded}
+                          >
+                            <ChevronDown size={14} className={cn('transition-transform', listsExpanded && 'rotate-180')} />
+                          </button>
                         )}
-                      >
-                        {SOURCE_LABELS[connectorType] ?? connectorType}
-                      </button>
-                      {filteredLists.length > 0 && (
-                        <div className="pl-4 pb-1">
+                      </div>
+                      {listsExpanded && filteredLists.length > 0 && (
+                        <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-2)] py-1 pl-3">
                           {filteredLists.map((list) => (
                             <button
+                              type="button"
                               key={list.name}
                               onClick={() => selectList(connectorType, list.name)}
                               className={cn(
-                                'w-full text-left px-3 py-3 text-sm rounded-lg transition-colors active:bg-[var(--surface-3)]',
+                                'min-h-11 w-full rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--surface-3)]',
                                 filter.source === connectorType && filter.sourceList === list.name
                                   ? 'text-[var(--accent-400)] font-medium'
                                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'

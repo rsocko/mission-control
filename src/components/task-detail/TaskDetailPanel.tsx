@@ -143,6 +143,9 @@ export function TaskDetailPanel({
   const recurrenceFocusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTransientStateRef = useRef<() => void>(() => {});
   const activeTaskIdRef = useRef<string | null>(taskId);
+  const descriptionMutationRef = useRef(0);
+  const descriptionEditSessionRef = useRef(0);
+  const descriptionSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const {
     task,
@@ -162,6 +165,8 @@ export function TaskDetailPanel({
   } = useTaskDetailData({
     taskId,
     onTaskReset: () => {
+      descriptionMutationRef.current++;
+      descriptionEditSessionRef.current++;
       setEditingTitle(false);
       setEditingDesc(false);
       setNotesExpanded(false);
@@ -223,6 +228,13 @@ export function TaskDetailPanel({
     requestConfirm,
   });
   const { resetTransientState, saveField } = mutations;
+  const saveDescription = useCallback((description: string | null) => {
+    const save = descriptionSaveQueueRef.current.then(
+      () => saveField('description', description, false),
+    );
+    descriptionSaveQueueRef.current = save.then(() => undefined);
+    return save;
+  }, [saveField]);
   useEffect(() => {
     resetTransientStateRef.current = resetTransientState;
   }, [resetTransientState]);
@@ -470,14 +482,68 @@ export function TaskDetailPanel({
     return true;
   };
 
-  const handleDescBlur = async () => {
-    if (descValue !== (task?.description || '')) {
-      const saved = await saveField('description', descValue || null);
-      if (!saved) return false;
-      setTask((prev) => prev ? { ...prev, description: descValue || null } : prev);
+  const handleExpandedDescSave = async () => {
+    if (!task || descValue === (task.description || '')) return true;
+    const taskIdAtSave = task.id;
+    const nextDescription = descValue || null;
+    const mutationId = ++descriptionMutationRef.current;
+    const saved = await saveDescription(nextDescription);
+    if (!saved) {
+      if (
+        descriptionMutationRef.current === mutationId
+        && activeTaskIdRef.current === taskIdAtSave
+      ) {
+        toast.error('Failed to save notes');
+      }
+      return false;
     }
-    setEditingDesc(false);
+    if (
+      descriptionMutationRef.current === mutationId
+      && activeTaskIdRef.current === taskIdAtSave
+    ) {
+      setTask((prev) => (
+        prev?.id === taskIdAtSave ? { ...prev, description: nextDescription } : prev
+      ));
+    }
     return true;
+  };
+
+  const handleDescBlur = async () => {
+    if (!task || descValue === (task.description || '')) {
+      setEditingDesc(false);
+      return true;
+    }
+
+    const taskIdAtSave = task.id;
+    const previousDescription = task.description;
+    const nextDescription = descValue || null;
+    const mutationId = ++descriptionMutationRef.current;
+    const editSessionId = descriptionEditSessionRef.current;
+
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: nextDescription } : prev
+    ));
+    setEditingDesc(false);
+
+    const saved = await saveDescription(nextDescription);
+    if (saved) return true;
+    if (
+      descriptionMutationRef.current !== mutationId
+      || activeTaskIdRef.current !== taskIdAtSave
+    ) {
+      return false;
+    }
+
+    toast.error('Failed to save notes');
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: previousDescription } : prev
+    ));
+    if (descriptionEditSessionRef.current === editSessionId) {
+      setDescValue(nextDescription || '');
+      setEditingDesc(true);
+      setTimeout(() => descRef.current?.focus(), 0);
+    }
+    return false;
   };
 
   const handleCheckboxToggle = useCallback(async (index: number, checked: boolean) => {
@@ -485,26 +551,39 @@ export function TaskDetailPanel({
     const taskIdAtSave = task.id;
     const previousDesc = task.description;
     const newDesc = toggleMarkdownCheckbox(previousDesc, index, checked);
+    const mutationId = ++descriptionMutationRef.current;
     setDescValue(newDesc);
     setTask((prev) => (
       prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
     ));
-    const saved = await saveField('description', newDesc);
+    const saved = await saveDescription(newDesc);
     if (!saved) {
-      if (activeTaskIdRef.current === taskIdAtSave) {
+      if (
+        descriptionMutationRef.current === mutationId
+        && activeTaskIdRef.current === taskIdAtSave
+      ) {
+        toast.error('Failed to save notes');
         setDescValue(previousDesc);
+        setTask((prev) => (
+          prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
+        ));
       }
-      setTask((prev) => (
-        prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
-      ));
       return;
     }
-  }, [saveField, setTask, task?.description, task?.id]);
+  }, [saveDescription, setTask, task]);
 
   const startDescriptionEdit = useCallback(() => {
+    descriptionEditSessionRef.current++;
+    setDescValue(task?.description || '');
     setEditingDesc(true);
     setTimeout(() => descRef.current?.focus(), 0);
-  }, []);
+  }, [task?.description]);
+
+  const cancelDescriptionEdit = useCallback(() => {
+    descriptionEditSessionRef.current++;
+    setDescValue(task?.description || '');
+    setEditingDesc(false);
+  }, [task?.description]);
 
   const parsedMetadata = parseTaskMetadata(task?.metadata);
   const linkedResourceDeepLink = getLinkedResourceDeepLinkInfo(parsedMetadata.linkedResources);
@@ -810,10 +889,7 @@ export function TaskDetailPanel({
           expandButtonRef={notesExpandButtonRef}
           onDescValueChange={setDescValue}
           onEditStart={startDescriptionEdit}
-          onEditCancel={() => {
-            setDescValue(task.description || '');
-            setEditingDesc(false);
-          }}
+          onEditCancel={cancelDescriptionEdit}
           onEditorBlur={handleDescBlur}
           onExpand={() => {
             setExpandedNotesEditing(editingDesc);
@@ -1038,7 +1114,7 @@ export function TaskDetailPanel({
                 onDescValueChange={setDescValue}
                 onEditingChange={setExpandedNotesEditing}
                 onCancelEdit={() => { setDescValue(task.description || ''); setExpandedNotesEditing(false); }}
-                onSave={handleDescBlur}
+                onSave={handleExpandedDescSave}
                 onClose={closeExpandedNotes}
                 onPaste={handleImagePaste}
                 onCheckboxToggle={canEditDescription ? handleCheckboxToggle : undefined}

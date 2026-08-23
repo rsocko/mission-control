@@ -240,6 +240,9 @@ export function loadFinanceInsightProjectionFacts(
       ? null
       : financeConnectorScopedReference(identityNamespace, kind, value)
   );
+  const bySourceRef = <T extends { sourceRef: string }>(left: T, right: T): number => (
+    left.sourceRef < right.sourceRef ? -1 : left.sourceRef > right.sourceRef ? 1 : 0
+  );
   const tagRows = onlyKind && onlyKind !== 'tag'
     ? []
     : sqlite.prepare(`
@@ -281,7 +284,7 @@ export function loadFinanceInsightProjectionFacts(
     isPending: row.isPending === 1,
     recurringRef: null,
     tagRefs: [...new Set(parseTags(row.tagReferences).map((value) => scoped('tag', value)!))].sort(),
-  }));
+  })).sort(bySourceRef);
   const recurring = onlyKind && onlyKind !== 'recurring'
     ? []
     : (sqlite.prepare(`
@@ -308,7 +311,7 @@ export function loadFinanceInsightProjectionFacts(
     categoryRef: scoped('category', row.categoryRef),
     accountRef: scoped('account', row.accountRef),
     active: true,
-  }));
+  })).sort(bySourceRef);
   const category = onlyKind && onlyKind !== 'category'
     ? []
     : (sqlite.prepare(`
@@ -326,7 +329,7 @@ export function loadFinanceInsightProjectionFacts(
     displayName: normalizedName(row.name, 120, 'Unknown category'),
     groupRef: scoped('category-group', row.groupRef),
     active: row.active === 1,
-  }));
+  })).sort(bySourceRef);
   const account = onlyKind && onlyKind !== 'account'
     ? []
     : (sqlite.prepare(`
@@ -338,12 +341,13 @@ export function loadFinanceInsightProjectionFacts(
       sourceRef: scoped('account', row.sourceRef)!,
       accountType: accountType(row.type),
       active: row.active === 1,
-    }));
+    }))
+    .sort(bySourceRef);
   const tag = tagRows.map((row) => ({
     sourceRef: scoped('tag', row.sourceRef)!,
     displayName: normalizedName(row.name, 120, 'Unknown tag'),
     active: row.active === 1,
-  }));
+  })).sort(bySourceRef);
   return { transaction: transactions, recurring, category, account, tag };
 }
 

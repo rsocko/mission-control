@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
@@ -17,26 +18,47 @@ let getFinanceDatasetHealth:
 let financeDatasetFreshness:
   typeof import('@/lib/connectors/monarch-money/dataset-sync')['financeDatasetFreshness'];
 
-const connector = (id: string): ConnectorConfig => ({
-  id,
-  type: 'finance-manager',
-  name: id,
-  enabled: true,
-  syncMode: 'poll',
-  capabilities: {
-    read: true,
-    write: true,
-    delete: false,
-    sync: true,
-    subtasks: false,
-    lists: false,
-    tags: true,
-    tagWriteBack: false,
-  },
-  credentials: { serviceToken: 'invented-token' },
-  settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
-  syncedLists: [],
-});
+const connector = (id: string): ConnectorConfig => {
+  const config: ConnectorConfig = {
+    id,
+    type: 'finance-manager',
+    name: id,
+    enabled: true,
+    syncMode: 'poll',
+    capabilities: {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: false,
+      tags: true,
+      tagWriteBack: false,
+    },
+    credentials: {
+      serviceToken: 'invented-token',
+      identityNamespace: createHash('sha256').update(id).digest('hex'),
+    },
+    settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
+    syncedLists: [],
+  };
+  sqlite.prepare(`
+    INSERT OR IGNORE INTO connector_configs (
+      id, type, name, enabled, sync_mode, capabilities, credentials,
+      settings, synced_lists, created_at, updated_at
+    ) VALUES (?, ?, ?, 1, 'poll', ?, ?, ?, '[]', ?, ?)
+  `).run(
+    config.id,
+    config.type,
+    config.name,
+    JSON.stringify(config.capabilities),
+    JSON.stringify(config.credentials),
+    JSON.stringify(config.settings),
+    now.toISOString(),
+    now.toISOString(),
+  );
+  return config;
+};
 
 function response(path: string, overrides: Record<string, unknown> = {}) {
   const common = {

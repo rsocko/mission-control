@@ -50,7 +50,7 @@ export const financeTransactions = sqliteTable('finance_transactions', {
     .default('pending'),
   attributionConfidence: text('attribution_confidence').$type<'definite' | 'likely' | 'none'>(),
   attributionMethod: text('attribution_method')
-    .$type<'manual' | 'card-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
+    .$type<'manual' | 'account-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
   attributionExplanation: text('attribution_explanation'),
   attributionReasons: text('attribution_reasons', { mode: 'json' })
     .$type<string[]>()

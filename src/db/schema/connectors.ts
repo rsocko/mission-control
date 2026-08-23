@@ -297,7 +297,7 @@ export const connectorSyncOperatorRuns = sqliteTable('connector_sync_operator_ru
     .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
   quarantineId: text('quarantine_id'),
   operation: text('operation')
-    .$type<'quarantine' | 'canary' | 'release' | 'rollback' | 'fingerprint-parity'>()
+    .$type<'quarantine' | 'canary' | 'release' | 'rollback'>()
     .notNull(),
   actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
   idempotencyKey: text('idempotency_key').notNull(),

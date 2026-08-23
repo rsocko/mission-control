@@ -24,6 +24,8 @@ import { normalizeGitHubOrigin } from '@/lib/connectors/github-issues/identity';
 import {
   FinanceConnectorConfigurationError,
   isFinanceConnectorType,
+  preserveFinanceConnectorIdentityCredentials,
+  protectNewFinanceConnectorCredentials,
   sanitizeFinanceConnectorWrite,
   validateFinanceConnectorSettings,
 } from '@/lib/connectors/monarch-money/config';
@@ -215,7 +217,9 @@ export async function POST(request: Request) {
         capabilities: workTodoSettings
           ? capabilitiesForWorkTodo(workTodoSettings)
           : capabilities || { read: true, write: false, delete: false, sync: true, subtasks: false, lists: false },
-        credentials: credentials || {},
+        credentials: isFinanceConnectorType(type)
+          ? protectNewFinanceConnectorCredentials(credentials)
+          : credentials || {},
         settings: connectorSettings,
         syncedLists: syncedLists || [],
         createdAt: now,
@@ -284,6 +288,7 @@ export async function PATCH(request: Request) {
     const [existing] = await db
       .select({
         type: connectorConfigs.type,
+        credentials: connectorConfigs.credentials,
         settings: connectorConfigs.settings,
         updatedAt: connectorConfigs.updatedAt,
       })
@@ -308,7 +313,10 @@ export async function PATCH(request: Request) {
       });
       if (updates.credentials !== undefined) {
         if ('serviceToken' in sanitized.credentials) {
-          updates.credentials = sanitized.credentials;
+          updates.credentials = preserveFinanceConnectorIdentityCredentials(
+            sanitized.credentials,
+            existing.credentials,
+          );
         } else {
           delete updates.credentials;
         }

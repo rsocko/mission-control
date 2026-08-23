@@ -156,7 +156,10 @@ describe('GET /api/connectors list queries', () => {
 
     const [created] = await db.select().from(connectorConfigs)
       .where(eq(connectorConfigs.id, 'finance-new'));
-    expect(created.credentials).toEqual({ serviceToken: 'browser-create-token' });
+    expect(created.credentials).toEqual({
+      serviceToken: 'browser-create-token',
+      identityNamespace: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     expect(created.settings).toEqual({
       bridgeUrl: 'http://tyrion-monarch-bridge:8100',
       householdCurrency: 'USD',
@@ -180,7 +183,7 @@ describe('GET /api/connectors list queries', () => {
 
     const [updated] = await db.select().from(connectorConfigs)
       .where(eq(connectorConfigs.id, 'finance-new'));
-    expect(updated.credentials).toEqual({ serviceToken: 'browser-create-token' });
+    expect(updated.credentials).toEqual(created.credentials);
     expect(updated.settings).toEqual({
       bridgeUrl: 'http://custom-tyrion-bridge:8100',
       householdCurrency: 'USD',

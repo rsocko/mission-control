@@ -169,16 +169,22 @@ describe.sequential('finance insight transaction history projection', () => {
       `).get(connector.id, first.generationId) as { payload: string }
     ).payload);
     expect(payload).toEqual({
-      sourceRef: 'transaction-one',
+      sourceRef: expect.stringMatching(/^transaction-v1:[A-Za-z0-9_-]{43}$/),
       occurredOn: '2026-08-09',
       amountMinor: -8425,
       merchantName: 'Invented market',
-      categoryRef: 'category-one',
-      accountRef: 'account-one',
+      categoryRef: expect.stringMatching(/^category-v1:[A-Za-z0-9_-]{43}$/),
+      accountRef: expect.stringMatching(/^account-v1:[A-Za-z0-9_-]{43}$/),
       isPending: false,
       recurringRef: null,
-      tagRefs: ['tag-one', 'tag-two'],
+      tagRefs: [
+        expect.stringMatching(/^tag-v1:[A-Za-z0-9_-]{43}$/),
+        expect.stringMatching(/^tag-v1:[A-Za-z0-9_-]{43}$/),
+      ],
     });
+    expect(JSON.stringify(payload)).not.toMatch(
+      /transaction-one|category-one|account-one|tag-one|tag-two/,
+    );
     expect(JSON.stringify(payload)).not.toMatch(/notes|logo|mask|displayName|tags/i);
   });
 

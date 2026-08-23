@@ -22,8 +22,8 @@ not contact Monarch or Tyrion.
 All operator mutations require the existing trusted Finance mutation boundary
 and an `Idempotency-Key` of 16-160 safe characters. Responses and audit rows
 contain only connector/generation IDs, stable codes, timestamps, and counts.
-Never paste credentials, finance payloads, notification content, or fingerprint
-key material into a request, log, or incident note.
+Never paste credentials, protected connector identity state, finance payloads,
+or notification content into a request, log, or incident note.
 
 ## 1. Backup and immutable deployment
 
@@ -32,8 +32,17 @@ key material into a request, log, or incident note.
    enabled state, schedules, delivery gates, and notification counts.
 3. Deploy PR #1563 and this stacked PR as one immutable artifact. Web and worker
    must run the identical digest. Do not mix old and new worker/web revisions.
-4. Confirm migrations `0113_finance_attention_repair` and
-   `0114_tyrion_readiness` applied through normal startup.
+4. Confirm migrations `0113_finance_attention_repair`,
+   `0114_tyrion_readiness`, and `0117_simplify_tyrion_identities` applied
+   through normal startup. Migration `0117` invalidates cached Finance Insight
+   publications and identity-dependent projection/backfill proofs so no legacy
+   raw source identity can be replayed. A fresh disabled/quarantined sync must
+   regenerate them before canary authorization. It also resets non-manual v1
+   attribution, current exceptions, derived subjects, and occurrence summaries
+   for re-evaluation under v2 while preserving authoritative manual decisions
+   and audit history. Existing Finance Insight delivery cutover is rolled back
+   fail closed and must be explicitly re-authorized against a regenerated v2
+   publication.
 5. Keep the connector disabled. Do not run a sync yet.
 
 Stop on a migration error, digest mismatch, unexpected worker revision, or
@@ -49,17 +58,20 @@ Legacy connectors without it report `needs-configuration` and unrelated edits
 preserve that state.
 
 Configure the service token through the existing credential mechanism and set
-the expected attribution policy fence. Keep
+`TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` to Tyrion's exact active policy
+version. This static positive fence is required for both normal sync and the
+operator readiness preflight. Do not infer it from attribution
+`contractVersion: "2.0"`: the contract version and mutable policy CAS version
+are independent. Production currently uses policy version `2`. Keep
 `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED=true`, while leaving:
 
 - `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` off
 - `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` off
 - Finance Insight cutover delivery off
 
-Do not invent or send a Tyrion fingerprint key-version field. The Tyrion
-fingerprint sidecar has no request version. If retained-sidecar parity is not
-independently proven, Mission Control sends `instrumentFingerprint: null` and
-rejects any card-rule attribution result.
+Mission Control v2 sends a required opaque `accountRef` and never sends Monarch
+account IDs, masks, connector identity namespaces, or identity key versions.
+The persisted service token is authentication only.
 
 ## 3. Metadata-only readiness
 
@@ -109,24 +121,7 @@ Require `status: quarantined`, then repeat metadata readiness and require
 `sync_quarantine_active_job`, let the current job finish; do not force a second
 job or bypass the fence.
 
-## 6. Declare fingerprint parity
-
-Only after independently verifying the retained Tyrion fingerprint sidecar:
-
-```bash
-curl --fail-with-body -X POST \
-  "$MC_ORIGIN/api/connectors/$CONNECTOR_ID/finance-operations" \
-  -H "X-MC-API-Key: ${MC_API_KEY}" \
-  -H "Idempotency-Key: tyrion-fingerprint-parity-20260822-01" \
-  -H "Content-Type: application/json" \
-  --data '{"action":"assert-fingerprint-parity","parityProven":true}'
-```
-
-Without proof, send the same action with `false`. Readiness must then report
-`instrumentFingerprintMode: null` and `cardRuleAttribution: blocked`. Never use
-key material or a caller-supplied version as proof.
-
-## 7. Run exactly one controlled canary
+## 6. Run exactly one controlled canary
 
 Require sync readiness `ready: true`, with notification/delivery/presentation/
 actions gates false, before authorization.
@@ -156,7 +151,7 @@ Poll metadata readiness until the canary is terminal. Require:
 Readiness and verification must not call Monarch. Only the explicitly
 authorized canary performs provider sync.
 
-## 8. Canary rollback or scheduler release
+## 7. Canary rollback or scheduler release
 
 On failure, unexpected notification delta, degraded attribution, stale/partial
 projection, policy mismatch, private error content, or worker/artifact change,
@@ -191,7 +186,7 @@ Enable the connector separately in Settings only after release and confirm one
 poll schedule is registered. Stop and quarantine again if more than one
 scheduled or active job appears.
 
-## 9. Stage Finance Insight cutover and delivery
+## 8. Stage Finance Insight cutover and delivery
 
 Let a normal post-release sync complete with shadow ingestion on and all
 delivery gates off. Copy the exact `publication.sourceGeneration` from:

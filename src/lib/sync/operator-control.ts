@@ -6,7 +6,6 @@ import logger from '@/lib/logger';
 import type { FinanceActorType } from '@/lib/connectors/monarch-money/finance-request';
 import {
   getFinanceConnectorConfigurationState,
-  isCardRuleFingerprintParityProven,
   isFinanceConnectorType,
 } from '@/lib/connectors/monarch-money/config';
 import { getPersistedFinanceManagerServiceToken } from '@/lib/connectors/monarch-money/client';
@@ -198,7 +197,6 @@ export function getFinanceSyncControlStatus(connectorId: string) {
   const immediateNotificationsEnabled = gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE);
   const monthlyDigestEnabled = gateEnabled(FINANCE_MONTHLY_DIGEST_GATE);
   const deliveryEnabled = cutover?.deliveryEnabled === 1;
-  const fingerprintParityProven = isCardRuleFingerprintParityProven(settings);
   const queued = jobs.queued ?? 0;
   const running = jobs.running ?? 0;
   const configurationState = getFinanceConnectorConfigurationState(settings);
@@ -234,11 +232,6 @@ export function getFinanceSyncControlStatus(connectorId: string) {
       releasedAt: control?.releasedAt ?? null,
       queued,
       running,
-    },
-    fingerprint: {
-      parityProven: fingerprintParityProven,
-      instrumentFingerprintMode: fingerprintParityProven ? 'retained-sidecar' : 'null',
-      cardRuleAttribution: fingerprintParityProven ? 'permitted' : 'blocked',
     },
     gates: {
       shadowIngestEnabled: isFinanceInsightShadowIngestEnabled(),
@@ -556,70 +549,5 @@ export function rollbackFinanceOperatorCanary(input: {
       operation: 'financeOperatorCanaryRollback',
     }, 'Finance operator canary rolled back');
     return result;
-  }).immediate();
-}
-
-export function setFinanceFingerprintParity(input: {
-  connectorId: string;
-  actorType: FinanceActorType;
-  idempotencyKey: string | null;
-  proven: boolean;
-  now?: Date;
-}) {
-  const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
-  return sqlite.transaction(() => {
-    connectorRow(input.connectorId);
-    const replay = replayOrConflict(input.connectorId, idempotencyKey, 'fingerprint-parity');
-    if (replay) {
-      const parityProven = replay.resultCode === 'fingerprint_parity_proven';
-      if (parityProven !== input.proven) {
-        throw new SyncOperatorError('operator_idempotency_conflict');
-      }
-      return { parityProven, replayed: true };
-    }
-    const control = sqlite.prepare(`
-      SELECT quarantine_id AS quarantineId
-      FROM connector_sync_controls
-      WHERE connector_id = ? AND scheduler_state = 'quarantined'
-    `).get(input.connectorId) as { quarantineId: string | null } | undefined;
-    if (!control) throw new SyncOperatorError('sync_quarantine_required');
-    const now = (input.now ?? new Date()).toISOString();
-    sqlite.prepare(`
-      UPDATE connector_configs
-      SET settings = json_set(
-            settings,
-            '$.cardRuleFingerprintParityProven', json(?),
-            '$.cardRuleFingerprintParityProvenAt', ?
-          ),
-          updated_at = ?
-      WHERE id = ?
-    `).run(
-      input.proven ? 'true' : 'false',
-      input.proven ? now : null,
-      now,
-      input.connectorId,
-    );
-    sqlite.prepare(`
-      INSERT INTO connector_sync_operator_runs (
-        id, connector_id, quarantine_id, operation, actor_type, idempotency_key,
-        result_code, cancelled_queued_count, created_at, completed_at
-      ) VALUES (?, ?, ?, 'fingerprint-parity', ?, ?, ?, 0, ?, ?)
-    `).run(
-      randomUUID(),
-      input.connectorId,
-      control.quarantineId,
-      input.actorType,
-      idempotencyKey,
-      input.proven ? 'fingerprint_parity_proven' : 'fingerprint_parity_revoked',
-      now,
-      now,
-    );
-    logger.info({
-      connectorId: input.connectorId,
-      quarantineId: control.quarantineId,
-      parityProven: input.proven,
-      operation: 'financeFingerprintParity',
-    }, 'Finance fingerprint parity state updated');
-    return { parityProven: input.proven, replayed: false };
   }).immediate();
 }

@@ -26,14 +26,12 @@ notifications, post-cutover failures, and genuine ambiguity exceptions are
 excluded. The endpoint returns only counts, stable codes, opaque run IDs, and a
 SHA-256 scope digest.
 
-Tyrion attribution is stateless strict v1 and has no attribution outbox. This
+Tyrion attribution is stateless strict v2 and has no attribution outbox. This
 repair does not inspect Tyrion policy, automation jobs, or Finance Insight
 occurrences, and it never translates a local notification dismissal into a
-Tyrion policy suppression. It does not require or infer a fingerprint key
-version. A later attribution recovery may send a null instrument fingerprint
-when parity with Tyrion's persisted fingerprint-key sidecar cannot be proven;
-that explicitly disables card-rule matching for that request rather than
-guessing a fingerprint.
+Tyrion policy suppression. Attribution recovery sends a required opaque
+connector-scoped account reference and never sends a raw Monarch account ID or
+card identity.
 
 ## Deployment requirement
 
@@ -103,9 +101,8 @@ database directly.
    `finance-attribution-review` projections for the connector.
 4. Leave the authoritative exceptions in place. After Tyrion attribution is
    correctly configured, a normal connector sync can re-evaluate them and
-   recreate only genuine human-review work. Do not enable card-rule attribution
-   unless fingerprint-key parity is independently proven; use null fingerprints
-   otherwise.
+   recreate only genuine human-review work. Account attribution remains governed
+   by Tyrion's policy-version fence.
 
 Stable operator errors are `forbidden`, `invalid_repair_request`,
 `invalid_repair_idempotency_key`, `repair_confirmation_required`,

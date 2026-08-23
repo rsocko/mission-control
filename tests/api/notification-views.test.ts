@@ -37,7 +37,7 @@ vi.mock('@/lib/api-error', () => ({
 describe('notification saved views API', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns built-in GitHub defaults before custom views', async () => {
+  it('returns built-in GitHub and Homelab defaults before custom views', async () => {
     mockDb.select.mockImplementationOnce(() => chainable([{
       id: 'custom-1',
       name: 'My queue',
@@ -49,9 +49,14 @@ describe('notification saved views API', () => {
     const response = await GET();
     const data = await response.json();
 
-    expect(data.views).toHaveLength(8);
+    expect(data.views).toHaveLength(9);
     expect(data.views[0]).toMatchObject({ name: 'Review requests', builtIn: true });
-    expect(data.views[7]).toMatchObject({ name: 'My queue', builtIn: false });
+    expect(data.views[7]).toMatchObject({
+      id: 'homelab-all',
+      name: 'Homelab',
+      builtIn: true,
+    });
+    expect(data.views[8]).toMatchObject({ name: 'My queue', builtIn: false });
   });
 
   it('canonicalizes filters when creating a named view', async () => {
@@ -95,6 +100,17 @@ describe('notification saved views API', () => {
     const response = await DELETE(
       new Request('http://localhost/api/notifications/views/github-all', { method: 'DELETE' }),
       { params: Promise.resolve({ id: 'github-all' }) },
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockDb.delete).not.toHaveBeenCalled();
+  });
+
+  it('protects the built-in Homelab view from deletion', async () => {
+    const { DELETE } = await import('@/app/api/notifications/views/[id]/route');
+    const response = await DELETE(
+      new Request('http://localhost/api/notifications/views/homelab-all', { method: 'DELETE' }),
+      { params: Promise.resolve({ id: 'homelab-all' }) },
     );
 
     expect(response.status).toBe(400);

@@ -2,7 +2,7 @@ import db from '@/db';
 import { notificationSavedViews } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
 import { parseNotificationQuery } from '@/lib/notifications/query';
-import { DEFAULT_GITHUB_NOTIFICATION_VIEWS, type NotificationView } from '@/lib/notifications/views';
+import { BUILT_IN_NOTIFICATION_VIEWS, type NotificationView } from '@/lib/notifications/views';
 import { asc } from 'drizzle-orm';
 
 function customView(row: typeof notificationSavedViews.$inferSelect): NotificationView {
@@ -23,7 +23,7 @@ export async function GET() {
       .from(notificationSavedViews)
       .orderBy(asc(notificationSavedViews.name));
     return Response.json({
-      views: [...DEFAULT_GITHUB_NOTIFICATION_VIEWS, ...rows.map(customView)],
+      views: [...BUILT_IN_NOTIFICATION_VIEWS, ...rows.map(customView)],
     });
   } catch (error) {
     return ApiErrors.internal('Failed to load notification views', error);

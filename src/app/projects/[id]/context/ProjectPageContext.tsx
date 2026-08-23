@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
+import type { TaskDetailMode } from '@/components/task-detail/task-detail-types';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
@@ -96,7 +97,10 @@ interface ProjectPageMutationsContextValue {
 interface ProjectPageTaskInteractionsContextValue {
   selectedTaskId: string | null;
   setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
+  detailMode: Exclude<TaskDetailMode, 'mobile'>;
+  setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
   toggleTask: (taskId: string) => void;
+  handleTaskDoubleClick: (taskId: string) => void;
   cancelPendingDeselect: () => void;
   handleGraphTaskSelect: (taskId: string | null) => void;
   allProjects: HubProject[];
@@ -156,6 +160,8 @@ export function ProjectPageProvider({
   const [error, setError] = useState<string | null>(null);
   const [hierarchyAnnouncement, setHierarchyAnnouncement] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
+  const [detailMode, setDetailMode] =
+    useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const hierarchyRevisionRef = useRef(0);
   const hierarchyProjectIdRef = useRef<string | null>(null);
@@ -166,14 +172,20 @@ export function ProjectPageProvider({
 
   const {
     cancelPendingDeselect,
+    handleTaskDoubleClick,
     toggleTask,
   } = useTaskSelection({
     selectedTaskId,
-    onSelectionChange: setSelectedTaskId,
+    onSelectionChange: (taskId) => {
+      setDetailMode('panel');
+      setSelectedTaskId(taskId);
+    },
+    onDoubleClick: () => setDetailMode('dialog'),
   });
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
     cancelPendingDeselect();
+    setDetailMode('panel');
     setSelectedTaskId(taskId);
   }, [cancelPendingDeselect]);
 
@@ -522,7 +534,10 @@ export function ProjectPageProvider({
   const taskInteractionsValue = useMemo<ProjectPageTaskInteractionsContextValue>(() => ({
     selectedTaskId,
     setSelectedTaskId,
+    detailMode,
+    setDetailMode,
     toggleTask,
+    handleTaskDoubleClick,
     cancelPendingDeselect,
     handleGraphTaskSelect,
     allProjects,
@@ -534,7 +549,9 @@ export function ProjectPageProvider({
     handleRemoveFromMyDay: taskActions.handleRemoveFromMyDay,
   }), [
     allProjects,
+    detailMode,
     handleGraphTaskSelect,
+    handleTaskDoubleClick,
     selectedTaskId,
     taskActions.completingIds,
     taskActions.getTaskContextActions,

@@ -213,6 +213,7 @@ export function ProjectPhasesTab({
     getTaskContextActions,
     handleCompleteTask,
     handleGraphTaskSelect,
+    handleTaskDoubleClick,
     myDayTaskIds,
     selectedTaskId,
     setSelectedTaskId,
@@ -1631,6 +1632,12 @@ export function ProjectPhasesTab({
                                                       toggleTask(task.id);
                                                     }
                                                   }}
+                                                  onDoubleClick={(e) => {
+                                                    if (!bulk.bulkMode) {
+                                                      e.stopPropagation();
+                                                      handleTaskDoubleClick(task.id);
+                                                    }
+                                                  }}
                                                 >
                                                   <div className="flex min-w-0 items-center gap-2">
                                                     {bulk.bulkMode ? (
@@ -1798,6 +1805,12 @@ export function ProjectPhasesTab({
                                         toggleTask(task.id);
                                       }
                                     }}
+                                    onDoubleClick={(e) => {
+                                      if (!bulk.bulkMode) {
+                                        e.stopPropagation();
+                                        handleTaskDoubleClick(task.id);
+                                      }
+                                    }}
                                   >
                                     <div className="flex min-w-0 items-center gap-2">
                                       {bulk.bulkMode ? (
@@ -1917,6 +1930,7 @@ export function ProjectPhasesTab({
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
               onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : toggleTask(taskId)}
+              onDoubleClickTask={handleTaskDoubleClick}
               onCompleteTask={handleCompleteTask}
               onRenamePhase={renamePhase}
               savingPhaseIds={savingPhaseIds}

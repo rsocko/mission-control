@@ -203,6 +203,7 @@ export default function TodayPage() {
           connectorInstanceId: 'local',
           sourceListName: detail.sourceListName || null,
           createdAt: new Date().toISOString(),
+          completedAt: null,
           tags: [],
           hasDescription: false,
           localDisposition: detail.localDisposition || 'active',

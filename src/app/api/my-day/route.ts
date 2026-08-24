@@ -215,6 +215,7 @@ export async function GET(request: Request) {
       sourceListName: tasks.sourceListName,
       assignee: tasks.assignee,
       createdAt: tasks.createdAt,
+      completedAt: tasks.completedAt,
       metadata: tasks.metadata,
       effort: tasks.effort,
       microStatus: tasks.microStatus,

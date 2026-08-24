@@ -123,6 +123,15 @@ export function sortMyDayItems(
   });
 }
 
+export function sortCompletedMyDayItems(items: MyDayItem[]): MyDayItem[] {
+  return [...items].sort((a, b) => {
+    if (!a.completedAt && b.completedAt) return 1;
+    if (a.completedAt && !b.completedAt) return -1;
+    const comparison = b.completedAt?.localeCompare(a.completedAt || '') ?? 0;
+    return comparison !== 0 ? comparison : b.addedAt.localeCompare(a.addedAt);
+  });
+}
+
 export function reorderMyDayItems(
   items: MyDayItem[],
   activeId: string,

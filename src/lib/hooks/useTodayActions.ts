@@ -183,11 +183,14 @@ export function useTodayActions({
     const item = items.find((current) => current.taskId === taskId);
     const taskTitle = item?.title || taskContext?.title || 'Task';
     const previousStatus = item?.status || taskContext?.status || 'todo';
+    const previousCompletedAt = item?.completedAt ?? null;
 
     const outcome = await runTaskCompletion(taskId, {
       optimisticUpdate: () => {
         setItems((current) => current.map((candidate) => (
-          candidate.taskId === taskId ? { ...candidate, status: 'done' } : candidate
+          candidate.taskId === taskId
+            ? { ...candidate, status: 'done', completedAt: new Date().toISOString() }
+            : candidate
         )));
       },
       request: async () => {
@@ -202,7 +205,7 @@ export function useTodayActions({
       rollback: () => {
         setItems((current) => current.map((candidate) => (
           candidate.taskId === taskId && candidate.status === 'done'
-            ? { ...candidate, status: previousStatus }
+            ? { ...candidate, status: previousStatus, completedAt: previousCompletedAt }
             : candidate
         )));
       },

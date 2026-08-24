@@ -32,6 +32,7 @@ export interface MyDayItem {
   sourceListName: string | null;
   assignee?: string | null;
   createdAt: string | null;
+  completedAt: string | null;
   tags: TaskTag[];
   metadata?: string | null;
   subtaskTotal?: number;

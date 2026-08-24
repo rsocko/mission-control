@@ -189,6 +189,7 @@ describe('GET /api/my-day suggestions', () => {
         taskId: string;
         isAutoIncluded: boolean;
         addedAt: string;
+        completedAt: string | null;
       }>;
       suggestions: Record<string, Array<{ id: string }>>;
     };
@@ -217,11 +218,13 @@ describe('GET /api/my-day suggestions', () => {
         taskId: 'completed-today',
         isAutoIncluded: true,
         addedAt: '2026-08-05T16:00:00.000Z',
+        completedAt: '2026-08-05T16:00:00.000Z',
       }),
       expect.objectContaining({
         taskId: 'completed-microsoft-today',
         isAutoIncluded: true,
         addedAt: '2026-08-05T16:30:00.0000000',
+        completedAt: '2026-08-05T16:30:00.0000000',
       }),
     ]));
     expect(suggestedIds).not.toContain('handled-today');

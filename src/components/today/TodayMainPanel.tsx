@@ -90,6 +90,7 @@ import {
   reorderMyDayItems,
   resolveMyDayGroupSelection,
   resolveMyDaySortSelection,
+  sortCompletedMyDayItems,
   sortMyDayItems,
 } from '@/lib/utils/my-day-view';
 import type {
@@ -341,8 +342,8 @@ export function TodayMainPanel({
     [filteredItemsByStatus.open, sortBy, sortDirection],
   );
   const completedItems = useMemo(
-    () => sortMyDayItems(filteredItemsByStatus.completed, sortBy, sortDirection),
-    [filteredItemsByStatus.completed, sortBy, sortDirection],
+    () => sortCompletedMyDayItems(filteredItemsByStatus.completed),
+    [filteredItemsByStatus.completed],
   );
   const cancelledItems = useMemo(
     () => sortMyDayItems(filteredItemsByStatus.cancelled, sortBy, sortDirection),

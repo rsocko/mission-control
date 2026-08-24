@@ -59,6 +59,7 @@ function taskToMyDayItem(task: Task): MyDayItem {
     sourceId: task.sourceId ?? undefined,
     sourceListName: task.sourceListName,
     createdAt: null,
+    completedAt: null,
     tags: task.tags ?? [],
     metadata: task.metadata,
     subtaskTotal: task.subtaskTotal,

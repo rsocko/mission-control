@@ -9,6 +9,7 @@ import {
   taskAttachments,
   taskSchedules,
   taskFieldStates,
+  taskHistoryEvents,
   prioritySyncLog,
   myDayItems,
   tags as tagsTable,
@@ -285,6 +286,7 @@ export async function PATCH(
     }
     Object.assign(updates, lifecycleUpdates);
     if (input.priority !== undefined) updates.priority = input.priority;
+    if (input.planningHorizon !== undefined) updates.planningHorizon = input.planningHorizon;
     if (input.dueDate !== undefined) updates.dueDate = input.dueDate;
     if (input.kanbanColumn !== undefined) updates.kanbanColumn = input.kanbanColumn;
     if (input.kanbanOrder !== undefined) updates.kanbanOrder = input.kanbanOrder;
@@ -487,6 +489,21 @@ export async function PATCH(
           timestamp: now,
         }).run();
       }
+      if (
+        input.planningHorizon !== undefined
+        && input.planningHorizon !== currentTask.planningHorizon
+      ) {
+        tx.insert(taskHistoryEvents).values({
+          taskId: id,
+          eventType: 'planning_horizon_changed',
+          fieldName: 'planningHorizon',
+          previousValue: currentTask.planningHorizon,
+          newValue: input.planningHorizon,
+          occurredAt: now,
+          recordedAt: now,
+          provenance: 'task-patch',
+        }).run();
+      }
       if (suppressFutureAutoCompletion) {
         suppressAutoCompletionAfterReopen(tx, id, now);
       }
@@ -541,6 +558,7 @@ export async function PATCH(
           status: 'todo',
           localDisposition: 'active',
           priority: currentTask.priority,
+          planningHorizon: currentTask.planningHorizon,
           dueDate: nextDueDate,
           createdAt: now,
           updatedAt: now,

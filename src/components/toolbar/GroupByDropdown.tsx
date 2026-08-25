@@ -15,6 +15,7 @@ export const DEFAULT_GROUP_OPTIONS: readonly GroupOption[] = [
   { value: 'status', label: 'Status' },
   { value: 'tag', label: 'Tag' },
   { value: 'priority', label: 'Priority' },
+  { value: 'planningHorizon', label: 'Planning Horizon' },
   { value: 'effort', label: 'Effort' },
   { value: 'dueDate', label: 'Due Date' },
   { value: 'project', label: 'Project + Phase' },

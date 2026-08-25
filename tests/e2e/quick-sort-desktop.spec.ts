@@ -16,6 +16,7 @@ const task = {
   sourceListId: null,
   sourceListName: 'octo-org/mission-control',
   dueDate: null,
+  planningHorizon: null,
   createdAt: '2026-08-01T12:00:00.000Z',
   projects: [{ id: 'project-1', name: 'Mission Control', color: '#6366f1' }],
   phases: [],
@@ -62,7 +63,7 @@ test.beforeEach(async ({ page }) => {
     if (url.searchParams.get('counts') === 'true') {
       await route.fulfill({
         json: {
-          counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_due_date: 0 },
+          counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0 },
         },
       });
       return;
@@ -90,7 +91,7 @@ test.beforeEach(async ({ page }) => {
       json: {
         thisWeek: {
           total: 4,
-          byMode: { no_priority: 4, quadrant: 0, no_effort: 0, no_tags: 0, no_due_date: 0 },
+          byMode: { no_priority: 4, quadrant: 0, no_effort: 0, no_tags: 0, no_planning_horizon: 0 },
         },
         streak: 2,
       },

@@ -23,6 +23,9 @@ export function applyTaskSafetyNets(_sqlite: Database.Database): void {
   if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'effort')) {
     _sqlite.exec('ALTER TABLE tasks ADD COLUMN effort INTEGER');
   }
+  if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'planning_horizon')) {
+    _sqlite.exec('ALTER TABLE tasks ADD COLUMN planning_horizon TEXT');
+  }
   if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'status_reason')) {
     _sqlite.exec('ALTER TABLE tasks ADD COLUMN status_reason TEXT');
   }
@@ -52,5 +55,8 @@ export function applyTaskSafetyNets(_sqlite: Database.Database): void {
   );
   _execSafe(
     'CREATE INDEX IF NOT EXISTS idx_tasks_local_disposition ON tasks(local_disposition)',
+  );
+  _execSafe(
+    'CREATE INDEX IF NOT EXISTS idx_tasks_planning_horizon ON tasks(planning_horizon)',
   );
 }

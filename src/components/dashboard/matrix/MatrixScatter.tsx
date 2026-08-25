@@ -30,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getTaskPriorityVisual, getTaskStatusVisual } from '@/lib/constants/task-formatting';
+import { PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
 import type {
   DashboardProjectViewModel as HubProject,
   DashboardTaskViewModel as Task,
@@ -68,6 +69,20 @@ const PRIORITY_RANK: Record<string, number> = {
   medium: 2,
   high: 3,
   critical: 4,
+};
+
+const HORIZON_RANK: Record<string, number> = {
+  someday: 1,
+  later: 2,
+  next: 3,
+  now: 4,
+};
+
+const HORIZON_COLORS: Record<string, string> = {
+  now: '#ef4444',
+  next: '#f59e0b',
+  later: '#3b82f6',
+  someday: '#64748b',
 };
 
 function urgencyColor(urgency: number | null): string {
@@ -125,12 +140,16 @@ function taskColor(
   if (mode === 'urgency') return urgencyColor(item.urgency);
   if (mode === 'status') return item.task.status === 'waiting' ? '#f59e0b' : getTaskStatusVisual(item.task.status).color;
   if (mode === 'priority') return getTaskPriorityVisual(item.task.priority).color;
+  if (mode === 'planning-horizon') return HORIZON_COLORS[item.task.planningHorizon ?? ''] ?? '#64748b';
   return projectColors(item.task, projects)[0] ?? '#64748b';
 }
 
-function formatDueDate(item: ProjectedMatrixTask): string {
+function formatTimingSignal(item: ProjectedMatrixTask): string {
   if (item.urgencyState === 'invalid') return 'Invalid due date';
-  if (item.urgencyState === 'none') return 'No due date';
+  if (item.urgencyState === 'none') return 'No due date or planning horizon';
+  if (item.urgencyState === 'horizon' && item.task.planningHorizon) {
+    return `${PLANNING_HORIZON_LABELS[item.task.planningHorizon]} planning horizon`;
+  }
   if (item.urgencyState === 'overdue') return `${Math.abs(item.daysUntilDue ?? 0)}d overdue`;
   if (item.urgencyState === 'today') return 'Due today';
   return `Due in ${item.daysUntilDue}d`;
@@ -166,14 +185,16 @@ function Mark({
   onHover: (item: ProjectedMatrixTask | null) => void;
 }) {
   const { diameter, missing } = markerDiameter(item.task, item.urgency, sizeMode);
-  const missingEncoding = missing || (colorMode === 'urgency' && item.urgency === null);
+  const missingEncoding = missing
+    || (colorMode === 'urgency' && item.urgency === null)
+    || (colorMode === 'planning-horizon' && !item.task.planningHorizon);
   const radius = (diameter * densityScale) / 2;
   const colors = colorMode === 'project' ? projectColors(item.task, projects) : [];
   const names = projectNames(item.task, projects);
   const accessibleName = [
     item.task.title,
     `${priorityLabel(item.task.priority)} priority`,
-    formatDueDate(item),
+    formatTimingSignal(item),
     `Effort ${item.task.effort ?? 'needs data'}`,
     `Smart Score ${item.task.smartScore ?? 'needs data'}`,
     `Status ${item.task.status.replaceAll('_', ' ')}`,
@@ -262,7 +283,7 @@ function TaskTable({
   projects: Map<string, HubProject>;
   onSelectTask: (task: Task) => void;
 }) {
-  type SortKey = 'title' | 'priority' | 'urgency' | 'dueDate' | 'effort' | 'smartScore' | 'project' | 'status';
+  type SortKey = 'title' | 'priority' | 'urgency' | 'dueDate' | 'planningHorizon' | 'effort' | 'smartScore' | 'project' | 'status';
   const [sort, setSort] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({
     key: 'smartScore',
     direction: 'desc',
@@ -272,8 +293,9 @@ function TaskTable({
     const valueFor = (task: Task, key: SortKey): string | number => {
       if (key === 'title') return task.title.toLocaleLowerCase();
       if (key === 'priority') return PRIORITY_RANK[task.priority] ?? -1;
-      if (key === 'urgency') return urgencyScore(task.dueDate, today).value ?? -1;
+      if (key === 'urgency') return urgencyScore(task.dueDate, today, task.planningHorizon ?? null).value ?? -1;
       if (key === 'dueDate') return task.dueDate ?? '9999-12-31';
+      if (key === 'planningHorizon') return HORIZON_RANK[task.planningHorizon ?? ''] ?? 0;
       if (key === 'effort') return task.effort ?? -1;
       if (key === 'smartScore') return task.smartScore ?? -1;
       if (key === 'project') return projectNames(task, projects).join(', ').toLocaleLowerCase();
@@ -293,6 +315,7 @@ function TaskTable({
     { key: 'priority', label: 'Priority' },
     { key: 'urgency', label: 'Urgency' },
     { key: 'dueDate', label: 'Due date' },
+    { key: 'planningHorizon', label: 'Planning horizon' },
     { key: 'effort', label: 'Effort' },
     { key: 'smartScore', label: 'Smart score' },
     { key: 'project', label: 'Project' },
@@ -331,7 +354,7 @@ function TaskTable({
         </thead>
         <tbody className="divide-y divide-[var(--border)]">
           {pageTasks.map((task) => {
-            const urgency = urgencyScore(task.dueDate, today).value;
+            const urgency = urgencyScore(task.dueDate, today, task.planningHorizon ?? null).value;
             const names = projectNames(task, projects);
             return (
               <tr key={task.id} className="bg-[var(--surface-1)] hover:bg-[var(--surface-2)]">
@@ -347,6 +370,9 @@ function TaskTable({
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{priorityLabel(task.priority)}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{urgency ?? 'Needs data'}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{task.dueDate ?? 'No due date'}</td>
+                <td className="px-3 py-2 text-[var(--text-secondary)]">
+                  {task.planningHorizon ? PLANNING_HORIZON_LABELS[task.planningHorizon] : 'Not set'}
+                </td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{task.effort ?? 'Needs data'}</td>
                 <td className="px-3 py-2 text-[var(--text-secondary)]">{task.smartScore ?? 'Needs data'}</td>
                 <td className="max-w-40 truncate px-3 py-2 text-[var(--text-secondary)]">{names.join(', ') || 'No project'}</td>
@@ -471,7 +497,7 @@ export function MatrixScatter({
     () => [...new Map([
       ...projection.needsData.missingPriority,
       ...projection.needsData.missingEffort,
-      ...projection.needsData.missingDueDate,
+      ...projection.needsData.missingPlanningSignal,
       ...projection.needsData.invalidDueDate,
     ].map((task) => [task.id, task])).values()],
     [projection.needsData],
@@ -578,6 +604,7 @@ export function MatrixScatter({
               <SelectItem value="urgency">Urgency</SelectItem>
               <SelectItem value="status">Status</SelectItem>
               <SelectItem value="priority">Priority</SelectItem>
+              <SelectItem value="planning-horizon">Planning horizon</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -626,8 +653,11 @@ export function MatrixScatter({
         {projection.needsData.missingEffort.length > 0 && (
           <span>{projection.needsData.missingEffort.length} missing effort</span>
         )}
-        {projection.needsData.missingDueDate.length > 0 && (
-          <span>{projection.needsData.missingDueDate.length} missing due date</span>
+        {projection.horizonFallback.length > 0 && (
+          <span>{projection.horizonFallback.length} using planning horizon</span>
+        )}
+        {projection.needsData.missingPlanningSignal.length > 0 && (
+          <span>{projection.needsData.missingPlanningSignal.length} missing date and horizon</span>
         )}
         {projection.needsData.invalidDueDate.length > 0 && (
           <span>{projection.needsData.invalidDueDate.length} invalid due date</span>
@@ -814,7 +844,7 @@ export function MatrixScatter({
                 >
                   <p className="truncate font-semibold text-[var(--text-primary)]">{hovered.task.title}</p>
                   <p className="mt-1 text-[var(--text-secondary)]">
-                    {priorityLabel(hovered.task.priority)} · {formatDueDate(hovered)} · Effort {hovered.task.effort ?? '—'}
+                    {priorityLabel(hovered.task.priority)} · {formatTimingSignal(hovered)} · Effort {hovered.task.effort ?? '—'}
                   </p>
                   <p className="mt-1 truncate text-[var(--text-tertiary)]">
                     {projectNames(hovered.task, projectMap).join(', ') || 'No project'} · Score {hovered.task.smartScore ?? '—'} · {hovered.task.status.replaceAll('_', ' ')}
@@ -858,7 +888,7 @@ export function MatrixScatter({
                     >
                       <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{item.task.title}</span>
                       <span className="text-xs text-[var(--text-tertiary)]">
-                        Score {item.task.smartScore ?? '—'} · {formatDueDate(item)}
+                        Score {item.task.smartScore ?? '—'} · {formatTimingSignal(item)}
                       </span>
                     </button>
                   ))}
@@ -925,7 +955,7 @@ export function MatrixScatter({
             {([
               ['Missing priority', projection.needsData.missingPriority],
               ['Missing effort', projection.needsData.missingEffort],
-              ['Missing due date', projection.needsData.missingDueDate],
+              ['Missing date and planning horizon', projection.needsData.missingPlanningSignal],
               ['Invalid due date', projection.needsData.invalidDueDate],
             ] satisfies Array<[string, Task[]]>).map(([label, groupTasks]) => {
               if (!groupTasks.length) return null;

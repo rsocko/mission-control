@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeft,
   CalendarDays,
+  Clock3,
   Check,
   ChevronRight,
   CircleUserRound,
@@ -56,6 +57,7 @@ const CATEGORIES: CategoryDefinition[] = [
   { type: 'assignee', label: 'Assignee', icon: CircleUserRound },
   { type: 'tag', label: 'Tag', icon: Tag },
   { type: 'priority', label: 'Priority', icon: Zap },
+  { type: 'horizon', label: 'Planning Horizon', icon: Clock3 },
   { type: 'status', label: 'Status', icon: Check },
   { type: 'source', label: 'Source', icon: Unplug },
   { type: 'list', label: 'List', icon: List },
@@ -351,6 +353,14 @@ function getOptions(
           ? 'No priority'
           : `${PRIORITY_LABELS[value] || ''} ${capitalize(value)}`.trim(),
         })),
+      ];
+    case 'horizon':
+      return [
+        { value: 'now', label: 'Now' },
+        { value: 'next', label: 'Next' },
+        { value: 'later', label: 'Later' },
+        { value: 'someday', label: 'Someday' },
+        { value: 'none', label: 'Not set' },
       ];
     case 'status':
       return ['todo', 'in_progress', 'done', 'cancelled'].map((value) => ({

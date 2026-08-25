@@ -101,7 +101,7 @@ export async function GET() {
         quadrant: byMode['quadrant'] ?? 0,
         no_effort: byMode['no_effort'] ?? 0,
         no_tags: byMode['no_tags'] ?? 0,
-        no_due_date: byMode['no_due_date'] ?? 0,
+        no_planning_horizon: byMode['no_planning_horizon'] ?? 0,
       },
     },
     streak,
@@ -127,7 +127,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'taskId, mode, and action are required' }, { status: 400 });
   }
 
-  const validModes = ['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_due_date'];
+  const validModes = ['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon'];
   const validActions = ['applied', 'suggestion_accepted', 'skipped'];
   if (!validModes.includes(mode) || !validActions.includes(action)) {
     return NextResponse.json({ error: 'Invalid mode or action' }, { status: 400 });

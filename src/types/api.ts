@@ -4,6 +4,7 @@ import type {
   HubProject,
   KanbanColumn,
   LocalDisposition,
+  PlanningHorizon,
   Tag,
   TaskEditPolicy,
   TaskItem,
@@ -41,6 +42,7 @@ export type TaskListItemDto = TaskListDomainFields & {
   taskSourceModel: TaskSourceModel;
   microStatus: string | null;
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   sourceListId?: string | null;
   sourceListName: string | null;

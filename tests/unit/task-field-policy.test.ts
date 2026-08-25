@@ -155,7 +155,7 @@ describe('resolveTaskFieldPolicy', () => {
     expect(resolveTaskFieldPolicy(task, caps, 'snoozedUntil').mutation).toBe('blocked');
   });
 
-  it('blocks every mutation for notification-only connector history', () => {
+  it('blocks notification-only mutations except local planning horizon', () => {
     const caps = capabilities({
       notificationOnly: true,
       taskSourceModel: 'remote-mirror',
@@ -168,8 +168,12 @@ describe('resolveTaskFieldPolicy', () => {
 
     for (const field of TASK_FIELDS) {
       const policy = resolveTaskFieldPolicy(task, caps, field);
-      expect(policy.mutation).toBe('blocked');
-      expect(policy.reason).toContain('notification-only');
+      if (field === 'planningHorizon') {
+        expect(policy).toMatchObject({ mutation: 'local', inbound: 'local-wins' });
+      } else {
+        expect(policy.mutation).toBe('blocked');
+        expect(policy.reason).toContain('notification-only');
+      }
     }
   });
 

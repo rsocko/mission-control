@@ -30,9 +30,10 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EffortSelect } from '@/components/EffortBadge';
 import { MICRO_STATUS_CONFIG } from '@/types';
-import type { MicroStatus, TaskStatus } from '@/types';
+import type { MicroStatus, PlanningHorizon, TaskStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { PRIORITY_TEXT_COLORS, TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
+import { PLANNING_HORIZONS, PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
 import type { MicroStatusSuggestion, TaskDetailMode } from './task-detail-types';
 
 const DURATION_OPTIONS = [
@@ -344,19 +345,29 @@ export function TaskStatusField({
 
 export interface TaskPriorityFieldProps {
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   canEditPriority: boolean;
+  canEditPlanningHorizon: boolean;
   priorityBlockedReason?: string;
+  planningHorizonBlockedReason?: string;
   prioritySaveLabel?: string;
+  planningHorizonSaveLabel?: string;
   onPriorityChange: (priority: string) => void;
+  onPlanningHorizonChange: (planningHorizon: PlanningHorizon | null) => void;
 }
 
-/** Priority select. */
+/** Priority and broad planning intent. */
 export function TaskPriorityField({
   priority,
+  planningHorizon,
   canEditPriority,
+  canEditPlanningHorizon,
   priorityBlockedReason,
+  planningHorizonBlockedReason,
   prioritySaveLabel,
+  planningHorizonSaveLabel,
   onPriorityChange,
+  onPlanningHorizonChange,
 }: TaskPriorityFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
@@ -373,6 +384,32 @@ export function TaskPriorityField({
         <SelectContent>
           {Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => (
             <SelectItem key={value} value={value} className={visual.textClass}>{visual.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={planningHorizon ?? 'none'}
+        onValueChange={(value) => onPlanningHorizonChange(
+          value === 'none' ? null : value as PlanningHorizon,
+        )}
+        disabled={!canEditPlanningHorizon}
+      >
+        <SelectTrigger
+          aria-label="Planning horizon"
+          title={!canEditPlanningHorizon
+            ? planningHorizonBlockedReason
+            : planningHorizonSaveLabel}
+          variant="inline"
+          className="mt-auto min-h-8 w-full justify-between rounded-lg border border-[var(--border-subtle)] px-2 text-xs"
+        >
+          <SelectValue placeholder="Planning horizon" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Not set</SelectItem>
+          {PLANNING_HORIZONS.map((value) => (
+            <SelectItem key={value} value={value}>
+              {PLANNING_HORIZON_LABELS[value]}
+            </SelectItem>
           ))}
         </SelectContent>
       </Select>

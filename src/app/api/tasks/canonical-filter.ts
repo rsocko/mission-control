@@ -22,9 +22,11 @@ import {
   withCondition,
 } from './query-builder';
 import { normalizedCsv } from './query-input';
+import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 
 const VALID_STATUSES = new Set(['todo', 'in_progress', 'done', 'cancelled']);
 const VALID_PRIORITIES = new Set(['critical', 'high', 'medium', 'low', 'none']);
+const VALID_PLANNING_HORIZONS = new Set(['now', 'next', 'later', 'someday']);
 const VALID_LOCAL_DISPOSITIONS = new Set(['active', 'handled', 'dismissed']);
 
 export interface CanonicalTaskFilterConditions {
@@ -80,6 +82,20 @@ export async function buildCanonicalTaskFilterConditions(
   const priority = searchParams.get('priority');
   if (priorities.length) conditions.push(inArray(tasks.priority, priorities));
   else if (priority && VALID_PRIORITIES.has(priority)) conditions.push(eq(tasks.priority, priority));
+
+  const planningHorizons = normalizedCsv(
+    searchParams,
+    'planningHorizons',
+    VALID_PLANNING_HORIZONS,
+  ).filter(isPlanningHorizon);
+  const planningHorizon = searchParams.get('planningHorizon');
+  if (planningHorizons.length) {
+    conditions.push(inArray(tasks.planningHorizon, planningHorizons));
+  } else if (planningHorizon === 'none') {
+    conditions.push(isNull(tasks.planningHorizon));
+  } else if (isPlanningHorizon(planningHorizon)) {
+    conditions.push(eq(tasks.planningHorizon, planningHorizon));
+  }
 
   const localDispositions = normalizedCsv(
     searchParams,

@@ -254,6 +254,7 @@ export function TaskDetailPanel({
   const canEditDescription = canEdit('description');
   const canEditStatus = canEdit('status');
   const canEditPriority = canEdit('priority');
+  const canEditPlanningHorizon = canEdit('planningHorizon');
   const canEditDueDate = canEdit('dueDate');
   const canEditEffort = canEdit('effort');
   const canEditDuration = canEdit('estimatedDuration');
@@ -845,10 +846,17 @@ export function TaskDetailPanel({
           }}
           priority={{
             priority: task.priority,
+            planningHorizon: task.planningHorizon,
             canEditPriority,
+            canEditPlanningHorizon,
             priorityBlockedReason: blockedReason('priority'),
+            planningHorizonBlockedReason: blockedReason('planningHorizon'),
             prioritySaveLabel: saveLabel('priority'),
+            planningHorizonSaveLabel: saveLabel('planningHorizon'),
             onPriorityChange: (priority) => { void mutations.handlePriorityChange(priority); },
+            onPlanningHorizonChange: (planningHorizon) => {
+              void mutations.handlePlanningHorizonChange(planningHorizon);
+            },
           }}
           dueDate={{
             dueDate: taskDueDateOnly,

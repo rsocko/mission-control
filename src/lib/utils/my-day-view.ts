@@ -4,6 +4,7 @@ import { getLocalToday } from '@/lib/utils/client-date';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
 
 const PRIORITY_ORDER: Record<string, number> = {
   critical: 0,
@@ -11,6 +12,13 @@ const PRIORITY_ORDER: Record<string, number> = {
   medium: 2,
   low: 3,
   none: 4,
+};
+
+const PLANNING_HORIZON_ORDER: Record<string, number> = {
+  now: 0,
+  next: 1,
+  later: 2,
+  someday: 3,
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -99,6 +107,10 @@ export function sortMyDayItems(
         break;
       case 'effort':
         comparison = (a.effort ?? Number.MAX_SAFE_INTEGER) - (b.effort ?? Number.MAX_SAFE_INTEGER);
+        break;
+      case 'planningHorizon':
+        comparison = (PLANNING_HORIZON_ORDER[a.planningHorizon ?? ''] ?? 4)
+          - (PLANNING_HORIZON_ORDER[b.planningHorizon ?? ''] ?? 4);
         break;
       case 'dueDate':
         comparison = compareNullableText(a.dueDate, b.dueDate);
@@ -202,6 +214,17 @@ export function groupMyDayItems(
       ['None', 4],
     ]);
     result.sort((a, b) => (priorityOrder.get(a.label) ?? 5) - (priorityOrder.get(b.label) ?? 5));
+  } else if (groupBy === 'planningHorizon') {
+    const planningHorizonOrder = new Map([
+      ['Now', 0],
+      ['Next', 1],
+      ['Later', 2],
+      ['Someday', 3],
+      ['Not set', 4],
+    ]);
+    result.sort((a, b) => (
+      (planningHorizonOrder.get(a.label) ?? 5) - (planningHorizonOrder.get(b.label) ?? 5)
+    ));
   } else if (groupBy === 'effort') {
     result.sort((a, b) => numericGroupValue(a.label, 'Effort ') - numericGroupValue(b.label, 'Effort '));
   } else if (groupBy === 'dueDate') {
@@ -224,6 +247,10 @@ function getGroupLabels(item: MyDayItem, groupBy: string, projects: HubProject[]
       return visibleTagGroups(item);
     case 'priority':
       return [humanize(item.priority || 'none')];
+    case 'planningHorizon':
+      return [item.planningHorizon
+        ? PLANNING_HORIZON_LABELS[item.planningHorizon]
+        : 'Not set'];
     case 'effort':
       return [item.effort ? `Effort ${item.effort}` : 'No Effort'];
     case 'dueDate':

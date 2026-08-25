@@ -231,6 +231,7 @@ export async function createQuickAddTask(
       title: taskData.title,
       dueDate: taskData.dueDate,
       priority: taskData.priority || 'none',
+      planningHorizon: taskData.planningHorizon,
       connectorType: input.destination.connectorType,
       connectorInstanceId: input.destination.connectorType === 'local'
         ? undefined

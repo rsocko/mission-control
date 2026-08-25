@@ -21,6 +21,7 @@ import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isI
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
+import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import {
   isReminderRelativeRule,
@@ -306,6 +307,8 @@ export function TaskRow({
           </div>
         )}
       </div>
+
+      <PlanningHorizonBadge planningHorizon={task.planningHorizon} />
 
       {task.priority !== 'none' && (
         <button

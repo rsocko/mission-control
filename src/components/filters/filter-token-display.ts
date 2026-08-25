@@ -7,6 +7,7 @@ export const FILTER_TOKEN_STYLES: Record<FilterTokenType, { bg: string; text: st
   title: { bg: 'bg-purple-500/15', text: 'text-purple-300', border: 'border-purple-500/30' },
   tag: { bg: 'bg-green-500/15', text: 'text-green-300', border: 'border-green-500/30' },
   priority: { bg: 'bg-red-500/20', text: 'text-red-300', border: 'border-red-500/30' },
+  horizon: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/30' },
   status: { bg: 'bg-yellow-500/15', text: 'text-yellow-300', border: 'border-yellow-500/30' },
   source: { bg: 'bg-blue-500/15', text: 'text-blue-300', border: 'border-blue-500/30' },
   list: { bg: 'bg-cyan-500/15', text: 'text-cyan-300', border: 'border-cyan-500/30' },
@@ -27,6 +28,7 @@ export function getFilterTokenDisplayValue(token: FilterToken, projects: HubProj
       list: 'No list',
       phase: 'No phase',
       priority: 'No priority',
+      horizon: 'No planning horizon',
       project: 'No project',
       tag: 'No tags',
     };

@@ -22,6 +22,7 @@ export interface MyDayItem {
   status: string;
   statusReason?: TaskItem['statusReason'] | null;
   priority: string;
+  planningHorizon?: TaskItem['planningHorizon'] | null;
   dueDate: string | null;
   pushCount?: number;
   planningSignalCount?: number;
@@ -87,6 +88,7 @@ export interface SuggestionTask {
 
 export interface SuggestionGroups {
   planningSignals: SuggestionTask[];
+  planningNow: SuggestionTask[];
   yesterday: SuggestionTask[];
   overdue: SuggestionTask[];
   dueToday: SuggestionTask[];
@@ -155,6 +157,7 @@ export interface SaveTemplateTask {
 
 export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
   planningSignals: [],
+  planningNow: [],
   yesterday: [],
   overdue: [],
   dueToday: [],

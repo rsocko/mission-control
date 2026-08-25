@@ -6,7 +6,6 @@ import { Check, FileText, FolderOpen, RotateCcw, SkipForward, Sparkles, Tag } fr
 import { cn } from '@/lib/utils';
 import { triggerHaptic } from '@/lib/utils/haptics';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import { getMissingFields } from '@/lib/hooks/useQuickSortData';
 
@@ -17,7 +16,7 @@ const SWIPE_VELOCITY_THRESHOLD = 500;
 const SWIPE_AXIS_DOMINANCE = 1.25;
 const SWIPE_AXIS_LOCK_DISTANCE = 12;
 
-type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'blockedSkip' | 'undo' | 'snapBack';
+type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'undo' | 'snapBack';
 
 export function getQuickSortGestureAxis(offsetX: number, offsetY: number): 'x' | 'y' | null {
   const absoluteX = Math.abs(offsetX);
@@ -74,7 +73,6 @@ export function getQuickSortSwipeAction({
   hasSuggestions,
   hasFocusedSuggestion,
   hasUndo = false,
-  canSkip = true,
   busy = false,
 }: {
   axis: 'x' | 'y' | null;
@@ -85,7 +83,6 @@ export function getQuickSortSwipeAction({
   hasSuggestions: boolean;
   hasFocusedSuggestion: boolean;
   hasUndo?: boolean;
-  canSkip?: boolean;
   busy?: boolean;
 }): QuickSortSwipeAction {
   if (busy) return 'snapBack';
@@ -128,7 +125,7 @@ export function getQuickSortSwipeAction({
       threshold: SWIPE_THRESHOLD_Y,
     })
   ) {
-    return canSkip ? 'skip' : 'blockedSkip';
+    return 'skip';
   }
 
   if (
@@ -218,11 +215,6 @@ export default function QuickSortCard({
       (mode === 'no_effort' && suggestion.effort) ||
       (mode === 'no_tags' && suggestion.tags.length > 0))
   );
-  const canSkip = canEditTaskField(task.editPolicy, 'snoozedUntil');
-  const skipBlockedReason = canSkip
-    ? undefined
-    : taskFieldBlockedReason(task.editPolicy, 'snoozedUntil');
-
   // Swipe-left reveal: card slides left, showing action boxes on right
   const revealWidth = useTransform(x, [-200, 0], [200, 0]);
   const revealOpacity = useTransform(x, [-SWIPE_THRESHOLD_X, -40, 0], [1, 0.6, 0]);
@@ -274,7 +266,6 @@ export default function QuickSortCard({
         hasSuggestions,
         hasFocusedSuggestion,
         hasUndo: !!onUndo,
-        canSkip,
         busy,
       });
 
@@ -298,10 +289,6 @@ export default function QuickSortCard({
             animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
           }
         });
-      } else if (action === 'blockedSkip') {
-        triggerHaptic('light');
-        void onSkip(task.id);
-        animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
       } else if (action === 'undo' && onUndo) {
         triggerHaptic('medium');
         void Promise.resolve(onUndo()).finally(() => {
@@ -315,7 +302,6 @@ export default function QuickSortCard({
     },
     [
       busy,
-      canSkip,
       hasFocusedSuggestion,
       hasSuggestions,
       onAcceptFocused,
@@ -655,10 +641,9 @@ export default function QuickSortCard({
             'Swipe handle.',
             hasSuggestions ? 'Swipe left to apply all AI suggestions.' : '',
             hasFocusedSuggestion ? 'Swipe right to apply the focused AI suggestion.' : '',
-            canSkip ? 'Swipe up to skip.' : `Skip unavailable. ${skipBlockedReason}`,
+            'Swipe up to skip.',
             onUndo ? `Swipe down to undo ${undoLabel ?? 'the previous action'}.` : '',
           ].filter(Boolean).join(' ')}
-          title={!canSkip ? skipBlockedReason : undefined}
           onPanStart={handleDragStart}
           onPan={handleDrag}
           onPanEnd={handleDragEnd}
@@ -666,7 +651,7 @@ export default function QuickSortCard({
           <span className="h-1 w-8 flex-shrink-0 rounded-full bg-slate-600" aria-hidden="true" />
           <span className="truncate" aria-hidden="true">
             {hasSuggestions || hasFocusedSuggestion ? 'Left/right: AI · ' : ''}
-            {canSkip ? 'Up: skip' : 'Skip unavailable'}
+            Up: skip
             {onUndo ? ' · Down: undo' : ''}
           </span>
         </motion.div>

@@ -11,6 +11,7 @@ import {
 } from '@/db/schema';
 import { eq, and, isNull, notInArray, asc, desc, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
+import { QUICK_SORT_SKIP_MS } from '@/lib/quick-sort/constants';
 
 export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
@@ -55,6 +56,14 @@ export async function GET(request: Request) {
     isNull(tasks.snoozedUntil),
     lte(tasks.snoozedUntil, new Date().toISOString()),
   );
+  const skipCutoff = new Date(Date.now() - QUICK_SORT_SKIP_MS).toISOString();
+  const notRecentlySkippedCondition = sql`NOT EXISTS (
+    SELECT 1 FROM task_triage_log
+    WHERE task_id = ${tasks.id}
+      AND action = 'skipped'
+      AND reversed_at IS NULL
+      AND triaged_at > ${skipCutoff}
+  )`;
 
   // Return available sources for scope filter UI
   if (searchParams.get('sources') === 'true') {
@@ -67,7 +76,13 @@ export async function GET(request: Request) {
         count: sql<number>`COUNT(*)`.as('count'),
       })
       .from(tasks)
-      .where(and(activeConnectorCondition, openCondition, notSubtaskCondition, availableCondition))
+      .where(and(
+        activeConnectorCondition,
+        openCondition,
+        notSubtaskCondition,
+        availableCondition,
+        notRecentlySkippedCondition,
+      ))
       .groupBy(tasks.connectorType, tasks.connectorInstanceId, tasks.sourceListName)
       .orderBy(sql`COUNT(*) DESC`);
 
@@ -85,7 +100,13 @@ export async function GET(request: Request) {
   }
 
   // Build scope conditions
-  const scopeConditions = [activeConnectorCondition, openCondition, notSubtaskCondition, availableCondition];
+  const scopeConditions = [
+    activeConnectorCondition,
+    openCondition,
+    notSubtaskCondition,
+    availableCondition,
+    notRecentlySkippedCondition,
+  ];
   if (sourceFilter) {
     scopeConditions.push(eq(tasks.connectorType, sourceFilter));
   }

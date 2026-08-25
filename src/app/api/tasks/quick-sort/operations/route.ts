@@ -67,6 +67,13 @@ export async function POST(request: Request) {
     patch,
     aiAccepted = false,
   } = body;
+  const hasPatch = Boolean(
+    patch
+    && typeof patch === 'object'
+    && !Array.isArray(patch)
+    && Object.keys(patch).length > 0,
+  );
+  const mutatesTask = action !== 'skipped';
   if (
     !operationId
     || !taskId
@@ -80,7 +87,7 @@ export async function POST(request: Request) {
     || !patch
     || typeof patch !== 'object'
     || Array.isArray(patch)
-    || Object.keys(patch).length === 0
+    || (mutatesTask && !hasPatch)
   ) {
     return NextResponse.json({ error: 'Invalid Quick Sort operation' }, { status: 400 });
   }
@@ -110,36 +117,40 @@ export async function POST(request: Request) {
     label,
     contextKey,
     queueIndex,
-    beforeSnapshot: { ...before, originalPatch: patch },
+    beforeSnapshot: { ...before, originalPatch: mutatesTask ? patch : {} },
     afterSnapshot: before,
     state: 'applying',
     aiAccepted,
     createdAt: now,
   });
 
-  const patchResponse = await patchTask(
-    new Request(new URL(`/api/tasks/${taskId}`, request.url), {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-expected-task-updated-at': before.updatedAt,
-      },
-      body: JSON.stringify(patch),
-    }),
-    { params: Promise.resolve({ id: taskId }) },
-  );
-  if (!patchResponse.ok) {
-    await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
-    return new NextResponse(await patchResponse.text(), {
-      status: patchResponse.status,
-      headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
-    });
-  }
+  let after = before;
+  if (mutatesTask) {
+    const patchResponse = await patchTask(
+      new Request(new URL(`/api/tasks/${taskId}`, request.url), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-expected-task-updated-at': before.updatedAt,
+        },
+        body: JSON.stringify(patch),
+      }),
+      { params: Promise.resolve({ id: taskId }) },
+    );
+    if (!patchResponse.ok) {
+      await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
+      return new NextResponse(await patchResponse.text(), {
+        status: patchResponse.status,
+        headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
+      });
+    }
 
-  const after = await captureQuickSortTask(taskId);
-  if (!after) {
-    await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
-    return NextResponse.json({ error: 'Task disappeared after update' }, { status: 409 });
+    const capturedAfter = await captureQuickSortTask(taskId);
+    if (!capturedAfter) {
+      await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
+      return NextResponse.json({ error: 'Task disappeared after update' }, { status: 409 });
+    }
+    after = capturedAfter;
   }
   const requestedLogModes = body.logModes?.filter(isQuickSortMode) ?? [mode];
   const logModes = [...new Set(

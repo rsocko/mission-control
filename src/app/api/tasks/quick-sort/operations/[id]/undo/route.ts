@@ -26,13 +26,16 @@ export async function POST(
     return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
   }
 
-  const current = await captureQuickSortTask(operation.taskId);
-  const expected = operation.afterSnapshot;
-  if (!current || !snapshotsMatch(current, expected)) {
-    return NextResponse.json({
-      error: 'This task changed after the Quick Sort action. Undo was not applied.',
-      code: 'UNDO_CONFLICT',
-    }, { status: 409 });
+  const before = operation.beforeSnapshot;
+  const hasTaskPatch = Object.keys(before.originalPatch).length > 0;
+  if (hasTaskPatch) {
+    const current = await captureQuickSortTask(operation.taskId);
+    if (!current || !snapshotsMatch(current, operation.afterSnapshot)) {
+      return NextResponse.json({
+        error: 'This task changed after the Quick Sort action. Undo was not applied.',
+        code: 'UNDO_CONFLICT',
+      }, { status: 409 });
+    }
   }
 
   const claimed = await db.update(quickSortOperations)
@@ -48,27 +51,28 @@ export async function POST(
     return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
   }
 
-  const before = operation.beforeSnapshot;
-  const undoPatch = buildUndoPatch(before, before.originalPatch);
-  const patchResponse = await patchTask(
-    new Request(new URL(`/api/tasks/${operation.taskId}`, request.url), {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-expected-task-updated-at': expected.updatedAt,
-      },
-      body: JSON.stringify(undoPatch),
-    }),
-    { params: Promise.resolve({ id: operation.taskId }) },
-  );
-  if (!patchResponse.ok) {
-    await db.update(quickSortOperations)
-      .set({ state: 'applied' })
-      .where(eq(quickSortOperations.id, id));
-    return new NextResponse(await patchResponse.text(), {
-      status: patchResponse.status,
-      headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
-    });
+  if (hasTaskPatch) {
+    const undoPatch = buildUndoPatch(before, before.originalPatch);
+    const patchResponse = await patchTask(
+      new Request(new URL(`/api/tasks/${operation.taskId}`, request.url), {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-expected-task-updated-at': operation.afterSnapshot.updatedAt,
+        },
+        body: JSON.stringify(undoPatch),
+      }),
+      { params: Promise.resolve({ id: operation.taskId }) },
+    );
+    if (!patchResponse.ok) {
+      await db.update(quickSortOperations)
+        .set({ state: 'applied' })
+        .where(eq(quickSortOperations.id, id));
+      return new NextResponse(await patchResponse.text(), {
+        status: patchResponse.status,
+        headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
+      });
+    }
   }
 
   const undoneAt = new Date().toISOString();

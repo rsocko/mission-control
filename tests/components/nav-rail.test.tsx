@@ -33,6 +33,51 @@ function renderNavRail({
   );
 }
 
+function mockAdaptiveNavGeometry(initialFitLevel: number) {
+  let fitLevel = initialFitLevel;
+  let observedTarget: Element | null = null;
+  let observerCallback: ResizeObserverCallback | null = null;
+
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function () {
+    return this.hasAttribute('data-nav-scroll-region') ? 500 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function () {
+    const level = this.getAttribute('data-collapse-level');
+    if (level === null) return 0;
+    return Number(level) < fitLevel ? 560 : 470;
+  });
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      observerCallback = callback;
+    }
+
+    observe(target: Element) {
+      observedTarget = target;
+      observerCallback?.(
+        [{ target, contentRect: { height: 800 } as DOMRectReadOnly } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+
+    disconnect() {}
+    unobserve() {}
+  });
+
+  return {
+    fitAt(level: number, height: number) {
+      fitLevel = level;
+      if (!observerCallback || !observedTarget) throw new Error('Navigation observer is not ready');
+      observerCallback(
+        [{
+          target: observedTarget,
+          contentRect: { height } as DOMRectReadOnly,
+        } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    },
+  };
+}
+
 describe('NavRail', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -42,6 +87,7 @@ describe('NavRail', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('auto-expands after a deliberate hover', () => {
@@ -378,7 +424,7 @@ describe('NavRail', () => {
     const popover = screen.getByRole('dialog', { name: 'Sync status details' });
     expect(popover).toBeInTheDocument();
 
-    fireEvent.click(trigger);
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     expect(popover).toBeInTheDocument();
 
     fireEvent.mouseLeave(trigger);
@@ -401,7 +447,7 @@ describe('NavRail', () => {
     expect(screen.getByRole('group', { name: 'Operate' })).toHaveTextContent(
       'NotificationsRoutinesTriageQuick SortReconciliation'
     );
-    expect(screen.getByRole('group', { name: 'Understand' })).toHaveTextContent(
+    expect(screen.getByRole('group', { name: 'Explore' })).toHaveTextContent(
       'InsightsGraph'
     );
     expect(screen.getByRole('group', { name: 'Domains' })).toHaveTextContent(
@@ -410,6 +456,119 @@ describe('NavRail', () => {
     expect(screen.getByRole('group', { name: 'Assistant' })).toHaveTextContent(
       'Houston'
     );
+  });
+
+  it('groups only enough sections to fit, in the configured priority order', () => {
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [{
+        id: 'connector-1',
+        type: 'local',
+        name: 'Local',
+        status: 'healthy',
+        message: 'Healthy',
+        lastSyncAt: undefined,
+      }],
+    });
+
+    const content = screen.getByRole('group', { name: 'Plan' }).parentElement;
+    expect(content).toHaveAttribute('data-collapsed-groups', 'system operations');
+    expect(screen.getByRole('button', { name: 'Open System navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Operations navigation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Explore navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Insights' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Kanban' })).toBeInTheDocument();
+  });
+
+  it('restores direct items when the rail gains enough height', () => {
+    const geometry = mockAdaptiveNavGeometry(2);
+    renderNavRail({ isSyncing: true });
+
+    expect(screen.getByRole('button', { name: 'Open Operations navigation' })).toBeInTheDocument();
+
+    act(() => geometry.fitAt(0, 900));
+
+    expect(screen.queryByRole('button', { name: 'Open System navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Operations navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync status' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Routines' })).toBeInTheDocument();
+  });
+
+  it('does not replace a single visible Domain item with a flyout', () => {
+    mockAdaptiveNavGeometry(5);
+    render(
+      <TooltipProvider>
+        <NavRail
+          features={{ aiEnabled: true, financeEnabled: false }}
+          isAiActive={false}
+          isSyncing
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Open Domains navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Docs' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Money' })).not.toBeInTheDocument();
+  });
+
+  it('aggregates attention badges on a grouped section and keeps item badges in its menu', () => {
+    vi.useRealTimers();
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({
+      isSyncing: true,
+      counts: {
+        myDay: 0,
+        notifications: 0,
+        triage: 4,
+        quickSort: 0,
+        reconciliation: 2,
+        overdue: 0,
+        unreadNotifications: 0,
+        notificationTone: 'blue',
+      },
+    });
+
+    const trigger = screen.getByRole('button', { name: 'Open Operations navigation' });
+    expect(within(trigger).getByLabelText('6 items need attention')).toBeInTheDocument();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+
+    const menu = screen.getByRole('menu', { name: 'Operations navigation' });
+    expect(within(menu).getByRole('menuitem', { name: /^Triage/ })).toHaveAttribute('href', '/triage');
+    expect(within(menu).getByRole('menuitem', { name: /^Reconciliation/ })).toHaveAttribute(
+      'href',
+      '/scout/reconciliation',
+    );
+    expect(within(menu).getByLabelText('4 items need attention')).toBeInTheDocument();
+    expect(within(menu).getByLabelText('2 items need attention')).toBeInTheDocument();
+  });
+
+  it('keeps sync status reachable from the grouped System menu', () => {
+    vi.useRealTimers();
+    mockAdaptiveNavGeometry(1);
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [{
+        id: 'connector-1',
+        type: 'local',
+        name: 'Local',
+        status: 'healthy',
+        message: 'Healthy',
+        lastSyncAt: undefined,
+      }],
+    });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Open System navigation' }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    });
+    fireEvent.click(within(screen.getByRole('menu', { name: 'System navigation' }))
+      .getByRole('menuitem', { name: 'Sync status' }));
+
+    expect(screen.getByRole('dialog', { name: 'Sync status details' })).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
   });
 
   it('morphs a single element between collapsed bar and expanded badge', () => {

@@ -15,8 +15,8 @@ const PRIORITY_ORDER: Record<string, number> = {
 };
 
 const PLANNING_HORIZON_ORDER: Record<string, number> = {
-  now: 0,
-  next: 1,
+  next: 0,
+  soon: 1,
   later: 2,
   someday: 3,
 };
@@ -216,8 +216,8 @@ export function groupMyDayItems(
     result.sort((a, b) => (priorityOrder.get(a.label) ?? 5) - (priorityOrder.get(b.label) ?? 5));
   } else if (groupBy === 'planningHorizon') {
     const planningHorizonOrder = new Map([
-      ['Now', 0],
-      ['Next', 1],
+      ['Next', 0],
+      ['Soon', 1],
       ['Later', 2],
       ['Someday', 3],
       ['Not set', 4],

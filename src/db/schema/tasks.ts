@@ -19,7 +19,7 @@ export const tasks = sqliteTable('tasks', {
     .notNull()
     .default('active'),
   priority: text('priority').notNull().default('none'),
-  planningHorizon: text('planning_horizon').$type<'now' | 'next' | 'later' | 'someday'>(),
+  planningHorizon: text('planning_horizon').$type<'next' | 'soon' | 'later' | 'someday'>(),
 
   dueDate: text('due_date'),
   pushCount: integer('push_count').notNull().default(0),

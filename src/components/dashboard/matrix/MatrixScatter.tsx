@@ -77,8 +77,8 @@ const PRIORITY_RANK: Record<string, number> = {
 const HORIZON_RANK: Record<string, number> = {
   someday: 1,
   later: 2,
-  next: 3,
-  now: 4,
+  soon: 3,
+  next: 4,
 };
 
 function urgencyColor(urgency: number | null): string {

@@ -67,7 +67,7 @@ export function TodaySidebar({
             learnMoreHref={REPLANNING_SUGGESTION.insightsHref}
             {...interactionProps}
           />
-          <SuggestionGroup title="Planned for Now" icon={<TimerReset size={12} />} tasks={suggestions.planningNow} color="emerald" {...interactionProps} />
+          <SuggestionGroup title="Planned for Next" icon={<TimerReset size={12} />} tasks={suggestions.planningNext} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />

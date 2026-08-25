@@ -88,7 +88,7 @@ export interface SuggestionTask {
 
 export interface SuggestionGroups {
   planningSignals: SuggestionTask[];
-  planningNow: SuggestionTask[];
+  planningNext: SuggestionTask[];
   yesterday: SuggestionTask[];
   overdue: SuggestionTask[];
   dueToday: SuggestionTask[];
@@ -157,7 +157,7 @@ export interface SaveTemplateTask {
 
 export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
   planningSignals: [],
-  planningNow: [],
+  planningNext: [],
   yesterday: [],
   overdue: [],
   dueToday: [],

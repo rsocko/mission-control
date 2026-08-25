@@ -48,7 +48,7 @@ describe('Quick Sort operation snapshots', () => {
 
   it.each([
     [{ effort: 3 }, { effort: null }],
-    [{ planningHorizon: 'now' }, { planningHorizon: null }],
+    [{ planningHorizon: 'next' }, { planningHorizon: null }],
     [{ dueDate: '2026-08-20' }, { dueDate: null }],
     [{ snoozedUntil: '2026-08-16T12:30:00.000Z' }, { snoozedUntil: null }],
     [{ localDisposition: 'handled' }, { localDisposition: 'active' }],

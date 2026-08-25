@@ -27,7 +27,11 @@ import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
-import { PLANNING_HORIZON_LABELS, PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
+import {
+  PLANNING_HORIZON_LABELS,
+  PLANNING_HORIZONS,
+  PLANNING_HORIZON_VISUALS,
+} from '@/lib/tasks/planning-horizon';
 
 const PRIORITY_OPTIONS = [
   ...(['critical', 'high', 'medium', 'low'] as const).map((value) => ({
@@ -401,7 +405,10 @@ export default function QuickSortActions({
               }}
               disabled={busy || !canApplyMode}
               title={!canApplyMode ? modeBlockedReason : undefined}
-              className="flex min-h-[48px] items-center justify-center rounded-xl border border-emerald-700/50 bg-emerald-950/40 px-2 py-3 text-sm font-medium text-emerald-300 transition-all active:scale-95 disabled:opacity-50"
+              className={cn(
+                'flex min-h-[48px] items-center justify-center rounded-xl border px-2 py-3 text-sm font-medium transition-all active:scale-95 disabled:opacity-50',
+                PLANNING_HORIZON_VISUALS[planningHorizon].badgeClass,
+              )}
             >
               {PLANNING_HORIZON_LABELS[planningHorizon]}
             </button>

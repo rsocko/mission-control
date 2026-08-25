@@ -8,7 +8,7 @@ const TASK_PATCH_SCHEMA = z.strictObject({
   status: z.enum(['todo', 'in_progress', 'done', 'cancelled']),
   localDisposition: z.enum(['active', 'handled', 'dismissed']),
   priority: z.enum(['critical', 'high', 'medium', 'low', 'none']),
-  planningHorizon: z.enum(['now', 'next', 'later', 'someday']).nullable(),
+  planningHorizon: z.enum(['next', 'soon', 'later', 'someday']).nullable(),
   dueDate: z.string().nullable(),
   kanbanColumn: z.string().nullable(),
   kanbanOrder: z.number().finite().nullable(),

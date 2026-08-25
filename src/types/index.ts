@@ -516,7 +516,7 @@ export type TaskSourceModel =
 
 export type WriteBackMode = 'none' | 'direct' | 'queued' | 'pull';
 
-export type PlanningHorizon = 'now' | 'next' | 'later' | 'someday';
+export type PlanningHorizon = 'next' | 'soon' | 'later' | 'someday';
 
 export type TaskField =
   | 'title'

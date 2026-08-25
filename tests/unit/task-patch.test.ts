@@ -39,7 +39,7 @@ describe('parseTaskPatchInput', () => {
   });
 
   it('accepts planning horizons and clearing the field', () => {
-    expect(parseTaskPatchInput({ planningHorizon: 'now' })).toMatchObject({
+    expect(parseTaskPatchInput({ planningHorizon: 'next' })).toMatchObject({
       success: true,
       fields: ['planningHorizon'],
     });
@@ -48,6 +48,7 @@ describe('parseTaskPatchInput', () => {
       fields: ['planningHorizon'],
     });
     expect(parseTaskPatchInput({ planningHorizon: 'today' }).success).toBe(false);
+    expect(parseTaskPatchInput({ planningHorizon: 'now' }).success).toBe(false);
   });
 
   it('maps relative reminder configuration to reminder edit policy', () => {

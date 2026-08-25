@@ -3,8 +3,8 @@ import { parseTaskInput } from '@/lib/parse-task-input';
 
 describe('parseTaskInput planning horizons', () => {
   it.each([
-    ['~now', 'now'],
     ['~next', 'next'],
+    ['~soon', 'soon'],
     ['~later', 'later'],
     ['~someday', 'someday'],
   ] as const)('extracts %s', (token, expected) => {
@@ -22,10 +22,10 @@ describe('parseTaskInput planning horizons', () => {
   });
 
   it('does not confuse duration tokens with horizons', () => {
-    const result = parseTaskInput('Write proposal ~30m ~now');
+    const result = parseTaskInput('Write proposal ~30m ~soon');
 
     expect(result.estimatedDuration).toBe(30);
-    expect(result.planningHorizon).toBe('now');
+    expect(result.planningHorizon).toBe('soon');
   });
 
   it('preserves an escaped horizon as literal title text', () => {
@@ -33,5 +33,12 @@ describe('parseTaskInput planning horizons', () => {
 
     expect(result.planningHorizon).toBeNull();
     expect(result.title).toBe('Discuss ~later naming');
+  });
+
+  it('does not recognize the removed now horizon', () => {
+    const result = parseTaskInput('Write proposal ~now');
+
+    expect(result.planningHorizon).toBeNull();
+    expect(result.title).toBe('Write proposal ~now');
   });
 });

@@ -2,6 +2,14 @@ import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { getTaskStatusGroupLabel } from './task-status-groups';
 
 export const NO_EFFORT_GROUP_LABEL = 'No Effort';
+export const NO_PLANNING_HORIZON_GROUP_LABEL = 'Not set';
+
+const PLANNING_HORIZON_GROUP_LABELS = {
+  now: 'Now',
+  next: 'Next',
+  later: 'Later',
+  someday: 'Someday',
+} as const;
 
 export function getTaskGroupLabels(task: Task, groupBy: string, today: string): string[] {
   switch (groupBy) {
@@ -13,6 +21,10 @@ export function getTaskGroupLabels(task: Task, groupBy: string, today: string): 
       return [getTaskStatusGroupLabel(task.status)];
     case 'priority':
       return [task.priority || 'none'];
+    case 'planningHorizon':
+      return [task.planningHorizon
+        ? PLANNING_HORIZON_GROUP_LABELS[task.planningHorizon]
+        : NO_PLANNING_HORIZON_GROUP_LABEL];
     case 'effort':
       return [task.effort == null ? NO_EFFORT_GROUP_LABEL : String(task.effort)];
     case 'dueDate':

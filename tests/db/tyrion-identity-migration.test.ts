@@ -263,12 +263,12 @@ describe('Tyrion connector identity migration', () => {
     sqlite.close();
   });
 
-  it('is the latest recorded migration', () => {
+  it('is recorded in the migration journal', () => {
     const journal = JSON.parse(readFileSync(
       resolve(process.cwd(), 'drizzle/meta/_journal.json'),
       'utf8',
     )) as { entries: Array<{ idx: number; tag: string }> };
-    expect(journal.entries.at(-1)).toEqual({
+    expect(journal.entries).toContainEqual({
       idx: 117,
       version: '6',
       when: 1787505600000,

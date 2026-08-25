@@ -20,6 +20,7 @@ import {
   tasks,
 } from '@/db/schema';
 import { parseFilterQuery, type FilterToken } from '@/lib/utils/parseFilterQuery';
+import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import { getAnyTagSlugFilterCondition } from './filter-factory';
 import {
   containsLiteral,
@@ -37,6 +38,7 @@ export async function getFilterQueryConditions(
   const parsed = parseFilterQuery(filterQuery);
   const conditions: SQL[] = [];
   const priorityTokens = unique(parsed.priorityTokens);
+  const horizonTokens = unique(parsed.horizonTokens);
   const statusTokens = unique(parsed.statusTokens);
   const sourceTokens = unique(parsed.sourceTokens);
   const titleTokens = unique(parsed.titleTokens);
@@ -57,6 +59,16 @@ export async function getFilterQueryConditions(
         ? inArray(tasks.priority, includedPriorities)
         : sql`1 = 0`
     );
+  }
+  if (horizonTokens.length > 0) {
+    const includesNone = horizonTokens.includes('none');
+    const values = horizonTokens.filter((value) => (
+      value === 'now' || value === 'next' || value === 'later' || value === 'someday'
+    ));
+    conditions.push(or(
+      ...(values.length > 0 ? [inArray(tasks.planningHorizon, values)] : []),
+      ...(includesNone ? [isNull(tasks.planningHorizon)] : []),
+    ) ?? sql`1 = 0`);
   }
 
   if (statusTokens.length > 0) {
@@ -113,6 +125,13 @@ export async function getFilterQueryConditions(
   const excludedPriorities = expandPriorityValues(negatedByType.priority);
   if (excludedPriorities.length > 0) {
     conditions.push(notInArray(tasks.priority, excludedPriorities));
+  }
+  for (const value of negatedByType.horizon) {
+    if (value === 'none') {
+      conditions.push(isNotNull(tasks.planningHorizon));
+    } else if (isPlanningHorizon(value)) {
+      conditions.push(or(isNull(tasks.planningHorizon), not(eq(tasks.planningHorizon, value)))!);
+    }
   }
   if (negatedByType.status.length > 0) {
     conditions.push(notInArray(tasks.status, negatedByType.status));
@@ -332,6 +351,7 @@ function groupNegatedTokens(tokensToGroup: FilterToken[]) {
     title: [] as string[],
     tag: [] as string[],
     priority: [] as string[],
+    horizon: [] as string[],
     status: [] as string[],
     source: [] as string[],
     list: [] as string[],

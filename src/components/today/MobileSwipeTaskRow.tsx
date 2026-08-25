@@ -22,6 +22,7 @@ import {
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition } from '@/types';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 
 const SWIPE_THRESHOLD = 80;
 const FULL_SWIPE_THRESHOLD = 160;
@@ -333,6 +334,7 @@ export function MobileSwipeTaskRow({
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
+            <PlanningHorizonBadge planningHorizon={item.planningHorizon} />
             {/* Project tag (hub project name) */}
             {item.hubProjectIds && item.hubProjectIds.length > 0 && projects.length > 0 && (() => {
               const matched = projects.filter((p) => item.hubProjectIds!.includes(p.id));

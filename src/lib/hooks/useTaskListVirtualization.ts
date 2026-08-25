@@ -55,6 +55,13 @@ const EFFORT_ORDER: Record<string, number> = {
   '5': 4,
   [NO_EFFORT_GROUP_LABEL]: 5,
 };
+const PLANNING_HORIZON_ORDER: Record<string, number> = {
+  Now: 0,
+  Next: 1,
+  Later: 2,
+  Someday: 3,
+  'Not set': 4,
+};
 
 function getCanonicalGroupOrder(groupBy: string): ((a: string, b: string) => number) | null {
   if (groupBy === 'priority') {
@@ -65,6 +72,11 @@ function getCanonicalGroupOrder(groupBy: string): ((a: string, b: string) => num
   }
   if (groupBy === 'effort') {
     return (a, b) => (EFFORT_ORDER[a] ?? 99) - (EFFORT_ORDER[b] ?? 99);
+  }
+  if (groupBy === 'planningHorizon') {
+    return (a, b) => (
+      (PLANNING_HORIZON_ORDER[a] ?? 99) - (PLANNING_HORIZON_ORDER[b] ?? 99)
+    );
   }
   if (groupBy === 'source') {
     // Keep sources in a stable alphabetical order, with 'local' last

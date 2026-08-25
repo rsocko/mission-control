@@ -1037,7 +1037,7 @@ function seedDatabaseContents(db: Database.Database): void {
     // ─── QUICK SORT ACTIVITY ───
     const quickSortEvents = [
       { id: 'qs-1', taskId: 't-8d', mode: 'no_priority', action: 'suggestion_accepted', at: daysAgo(1) },
-      { id: 'qs-2', taskId: 't-14', mode: 'no_due_date', action: 'skipped', at: hoursAgo(6) },
+      { id: 'qs-2', taskId: 't-14', mode: 'no_planning_horizon', action: 'skipped', at: hoursAgo(6) },
       { id: 'qs-3', taskId: 't-16', mode: 'no_effort', action: 'applied', at: hoursAgo(3) },
     ];
     const insertQuickSort = db.prepare(`

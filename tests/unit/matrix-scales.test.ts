@@ -58,6 +58,27 @@ describe('matrix scales', () => {
     expect(urgencyScore('not-a-date', TODAY)).toMatchObject({ value: null, state: 'invalid' });
   });
 
+  it('uses planning horizons only when no due date is present', () => {
+    expect(urgencyScore(null, TODAY, 'now')).toMatchObject({
+      value: 85,
+      state: 'horizon',
+      source: 'planning-horizon',
+    });
+    expect(urgencyScore(null, TODAY, 'next').value).toBe(55);
+    expect(urgencyScore(null, TODAY, 'later').value).toBe(25);
+    expect(urgencyScore(null, TODAY, 'someday').value).toBe(5);
+    expect(urgencyScore(TODAY, TODAY, 'someday')).toMatchObject({
+      value: 95,
+      state: 'today',
+      source: 'due-date',
+    });
+    expect(urgencyScore('not-a-date', TODAY, 'now')).toMatchObject({
+      value: null,
+      state: 'invalid',
+      source: 'due-date',
+    });
+  });
+
   it('maps marker area from the selected metric and exposes missing values', () => {
     expect(markerDiameter(task(), 50, 'uniform')).toEqual({ diameter: 12, missing: false });
     expect(markerDiameter(task({ effort: 1 }), 50, 'effort')).toEqual({ diameter: 8, missing: false });
@@ -81,13 +102,20 @@ describe('matrix projection', () => {
       task({ id: 'effort', effort: null }),
       task({ id: 'date', dueDate: 'invalid' }),
       task({ id: 'no-date', dueDate: null }),
+      task({ id: 'horizon', dueDate: null, planningHorizon: 'now' }),
     ];
     const urgency = projectTasks(tasks, 'priority-urgency', TODAY);
     expect(urgency.tasks.map((item) => item.task.id)).toContain('no-date');
     expect(urgency.needsData.missingPriority).toHaveLength(1);
     expect(urgency.needsData.missingEffort).toHaveLength(2);
-    expect(urgency.needsData.missingDueDate).toHaveLength(2);
+    expect(urgency.needsData.missingPlanningSignal).toHaveLength(2);
     expect(urgency.needsData.invalidDueDate).toHaveLength(1);
+    expect(urgency.horizonFallback.map((item) => item.id)).toEqual(['horizon']);
+    expect(urgency.tasks.find((item) => item.task.id === 'horizon')).toMatchObject({
+      x: 85,
+      urgency: 85,
+      urgencyState: 'horizon',
+    });
 
     const effort = projectTasks(tasks, 'priority-effort', TODAY);
     expect(effort.needsData.missingEffort).toHaveLength(2);

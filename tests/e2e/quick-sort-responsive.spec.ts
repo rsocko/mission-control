@@ -20,6 +20,7 @@ const longTask = {
   sourceListId: null,
   sourceListName: null,
   dueDate: null,
+  planningHorizon: null,
   createdAt: '2026-07-31T12:00:00.000Z',
   projects: [],
   phases: [],
@@ -61,7 +62,7 @@ test.beforeEach(async ({ browserName, page }) => {
     if (url.searchParams.get('counts') === 'true') {
       await route.fulfill({
         json: {
-          counts: { no_priority: 2, quadrant: 2, no_effort: 2, no_tags: 2, no_due_date: 0 },
+          counts: { no_priority: 2, quadrant: 2, no_effort: 2, no_tags: 2, no_planning_horizon: 0 },
         },
       });
       return;
@@ -75,7 +76,7 @@ test.beforeEach(async ({ browserName, page }) => {
       json: {
         thisWeek: {
           total: 0,
-          byMode: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 0, no_due_date: 0 },
+          byMode: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 0, no_planning_horizon: 0 },
         },
         streak: 0,
       },

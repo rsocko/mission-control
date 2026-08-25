@@ -15,6 +15,13 @@ import {
 } from '@/components/ui/select';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
+import {
+  PLANNING_HORIZONS,
+  PLANNING_HORIZON_LABELS,
+  type PlanningHorizonFilter,
+} from '@/lib/tasks/planning-horizon';
+import { parseFilterQuery, replacePositiveFilterValues } from '@/lib/utils/parseFilterQuery';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import {
   getQuickFilterDefinition,
@@ -53,6 +60,7 @@ function taskToMyDayItem(task: Task): MyDayItem {
     title: task.title,
     status: task.status,
     priority: task.priority,
+    planningHorizon: task.planningHorizon,
     dueDate: task.dueDate,
     connectorType: task.connectorType,
     connectorInstanceId: task.connectorInstanceId,
@@ -82,6 +90,8 @@ function taskToMyDayItem(task: Task): MyDayItem {
  */
 export function MobileAllTasksList() {
   const { state, actions, computed } = useDashboardData();
+  const textFilter = useDashboardViewStore((viewState) => viewState.textFilter);
+  const setTextFilter = useDashboardViewStore((viewState) => viewState.setTextFilter);
   const selectedTaskId = state.selectedTaskId;
   const setSelectedTaskId = actions.setSelectedTaskId;
   const activeFilter = getQuickFilterDefinition(state.quickFilter)?.id ?? 'all';
@@ -194,10 +204,19 @@ export function MobileAllTasksList() {
     () => state.enabledSources.find((source) => source.type === state.sourceFilter)?.name ?? state.sourceFilter,
     [state.enabledSources, state.sourceFilter]
   );
+  const planningHorizonFilters = useMemo(
+    () => parseFilterQuery(textFilter).horizonTokens.filter(isPlanningHorizonFilter),
+    [textFilter],
+  );
   const activeFilterCount = Number(activeFilter !== 'all')
     + Number(Boolean(state.sourceFilter))
-    + Number(Boolean(state.listFilter));
-  const filterSummary = activeListName
+    + Number(Boolean(state.listFilter))
+    + planningHorizonFilters.length;
+  const planningHorizonSummary = planningHorizonFilters
+    .map((horizon) => horizon === 'none' ? 'Not set' : PLANNING_HORIZON_LABELS[horizon])
+    .join(', ');
+  const filterSummary = planningHorizonSummary
+    || activeListName
     || activeSourceName
     || getQuickFilterDefinition(activeFilter)?.label
     || 'All tasks';
@@ -206,7 +225,15 @@ export function MobileAllTasksList() {
     actions.setQuickFilter(null);
     actions.setSourceFilter(null);
     actions.setListFilter(null);
-  }, [actions]);
+    setTextFilter('');
+  }, [actions, setTextFilter]);
+
+  const togglePlanningHorizon = useCallback((horizon: PlanningHorizonFilter) => {
+    const next = planningHorizonFilters.includes(horizon)
+      ? planningHorizonFilters.filter((value) => value !== horizon)
+      : [...planningHorizonFilters, horizon];
+    setTextFilter(replacePositiveFilterValues(textFilter, 'horizon', next));
+  }, [planningHorizonFilters, setTextFilter, textFilter]);
 
   if (state.loading) {
     return (
@@ -362,6 +389,7 @@ export function MobileAllTasksList() {
           activeFilter={activeFilter}
           sourceFilter={state.sourceFilter}
           listFilter={state.listFilter}
+          planningHorizonFilters={planningHorizonFilters}
           sources={state.enabledSources}
           sourceLists={state.sourceLists}
           syncStatus={state.syncStatus}
@@ -380,6 +408,8 @@ export function MobileAllTasksList() {
             actions.setSourceFilter(source);
             actions.setListFilter(list);
           }}
+          onPlanningHorizonToggle={togglePlanningHorizon}
+          onPlanningHorizonClear={() => setTextFilter(replacePositiveFilterValues(textFilter, 'horizon', []))}
           onClear={clearFilters}
         />
       </MobileSheet>
@@ -391,6 +421,7 @@ interface MobileTaskFiltersProps {
   activeFilter: string;
   sourceFilter: string | null;
   listFilter: string | null;
+  planningHorizonFilters: PlanningHorizonFilter[];
   sources: EnabledSource[];
   sourceLists: SourceList[];
   syncStatus: SyncStatusEntry[];
@@ -403,6 +434,8 @@ interface MobileTaskFiltersProps {
   onQuickFilterVisibilityChange: (filter: string, visibility: QuickFilterVisibility) => void;
   onSourceFilterChange: (source: string | null) => void;
   onListFilterChange: (list: string | null, source: string | null) => void;
+  onPlanningHorizonToggle: (horizon: PlanningHorizonFilter) => void;
+  onPlanningHorizonClear: () => void;
   onClear: () => void;
 }
 
@@ -410,6 +443,7 @@ export function MobileTaskFilters({
   activeFilter,
   sourceFilter,
   listFilter,
+  planningHorizonFilters,
   sources,
   sourceLists,
   syncStatus,
@@ -422,6 +456,8 @@ export function MobileTaskFilters({
   onQuickFilterVisibilityChange,
   onSourceFilterChange,
   onListFilterChange,
+  onPlanningHorizonToggle,
+  onPlanningHorizonClear,
   onClear,
 }: MobileTaskFiltersProps) {
   const [search, setSearch] = useState('');
@@ -461,7 +497,10 @@ export function MobileTaskFilters({
         || (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
         || a.name.localeCompare(b.name);
     });
-  const hasActiveFilters = activeFilter !== 'all' || Boolean(sourceFilter) || Boolean(listFilter);
+  const hasActiveFilters = activeFilter !== 'all'
+    || Boolean(sourceFilter)
+    || Boolean(listFilter)
+    || planningHorizonFilters.length > 0;
   const visibleQuickFilters = QUICK_FILTERS.filter((filter) => isQuickFilterVisible(
     filter,
     stats,
@@ -515,6 +554,25 @@ export function MobileTaskFilters({
                   label={filter.label}
                   detail={filter.description}
                   onClick={() => onQuickFilterChange(filter.id)}
+                />
+              ))}
+            </div>
+          </FilterSection>
+          <FilterSection title="Planning horizon">
+            <div className="grid grid-cols-2 gap-2">
+              <FilterOptionButton
+                active={planningHorizonFilters.length === 0}
+                label="Any horizon"
+                detail="Do not limit by plan"
+                onClick={onPlanningHorizonClear}
+              />
+              {[...PLANNING_HORIZONS, 'none' as const].map((horizon) => (
+                <FilterOptionButton
+                  key={horizon}
+                  active={planningHorizonFilters.includes(horizon)}
+                  label={horizon === 'none' ? 'Not set' : PLANNING_HORIZON_LABELS[horizon]}
+                  detail={horizon === 'none' ? 'Needs planning' : `Planned for ${PLANNING_HORIZON_LABELS[horizon].toLowerCase()}`}
+                  onClick={() => onPlanningHorizonToggle(horizon)}
                 />
               ))}
             </div>
@@ -657,4 +715,8 @@ function FilterOptionButton({
 function matchesSourceListFilter(sourceList: SourceList, listFilter: string | null): boolean {
   return listFilter === sourceList.sourceId
     || listFilter === `${sourceList.connectorInstanceId}:${sourceList.sourceId}`;
+}
+
+function isPlanningHorizonFilter(value: string): value is PlanningHorizonFilter {
+  return value === 'none' || (PLANNING_HORIZONS as readonly string[]).includes(value);
 }

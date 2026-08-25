@@ -42,14 +42,15 @@ import {
   taskDispositionBlockedReason,
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
-import type { LocalDisposition, TaskField } from '@/types';
+import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
+import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 
 const MODE_LABELS: Record<QuickSortQueueMode, string> = {
   no_priority: 'Set Priority',
   quadrant: 'Pick Quadrant',
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
-  no_due_date: 'Plan / Schedule',
+  no_planning_horizon: 'Set Time Horizon',
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
@@ -250,7 +251,7 @@ export default function QuickSortMode() {
 
   const handleModeSelect = useCallback((nextMode: QuickSortQueueMode) => {
     if (busy) return;
-    setOrder(nextMode === 'no_due_date' ? 'priority' : 'smart');
+    setOrder(nextMode === 'no_planning_horizon' ? 'priority' : 'smart');
     setMode(nextMode);
     setSelectedTaskId(null);
   }, [busy]);
@@ -366,8 +367,8 @@ export default function QuickSortMode() {
         message: string;
       }> = {
         do_first: {
-          fields: ['priority', 'dueDate'],
-          patch: { priority: 'high', dueDate: today },
+          fields: ['priority', 'planningHorizon'],
+          patch: { priority: 'high', planningHorizon: 'now' },
           label: 'Do first',
           message: 'Moved to Do first',
         },
@@ -378,10 +379,9 @@ export default function QuickSortMode() {
           message: 'Moved to Schedule',
         },
         delegate: {
-          fields: ['priority', 'dueDate', 'microStatus'],
+          fields: ['planningHorizon', 'microStatus'],
           patch: {
-            priority: 'low',
-            dueDate: today,
+            planningHorizon: 'now',
             microStatus: 'waiting_on_someone',
           },
           label: 'Delegate',
@@ -523,29 +523,29 @@ export default function QuickSortMode() {
     [topTask, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
-  const handleApplyDueDate = useCallback(
-    async (dueDate: string) => {
+  const handleApplyPlanningHorizon = useCallback(
+    async (planningHorizon: PlanningHorizon) => {
       if (!topTask || busy) return;
-      if (!canEditTaskField(topTask.editPolicy, 'dueDate')) {
-        toast.error(taskFieldBlockedReason(topTask.editPolicy, 'dueDate'));
+      if (!canEditTaskField(topTask.editPolicy, 'planningHorizon')) {
+        toast.error(taskFieldBlockedReason(topTask.editPolicy, 'planningHorizon'));
         return;
       }
       setBusy(true);
       try {
         await runOperation({
           task: topTask,
-          patch: { dueDate },
-          operationMode: 'no_due_date',
+          patch: { planningHorizon },
+          operationMode: 'no_planning_horizon',
           action: 'applied',
-          label: 'Set due date',
+          label: 'Set planning horizon',
         });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
-        toast.success(`Due date set to ${dueDate}`);
+        toast.success(`Planning horizon set to ${planningHorizon}`);
       } catch {
-        toast.error('Failed to set due date');
+        toast.error('Failed to set planning horizon');
       }
       setBusy(false);
     },
@@ -593,10 +593,7 @@ export default function QuickSortMode() {
         && typeof fields.priority === 'string'
         && fields.priority !== 'none')
       || (mode === 'no_effort' && typeof fields.effort === 'number')
-      || (mode === 'no_due_date' && (
-        typeof fields.dueDate === 'string'
-        || (typeof fields.priority === 'string' && !['critical', 'high'].includes(fields.priority))
-      ));
+      || (mode === 'no_planning_horizon' && isPlanningHorizon(fields.planningHorizon));
 
     if (resolvesCurrentQueue) {
       dismiss(selectedTaskId);
@@ -609,6 +606,9 @@ export default function QuickSortMode() {
     if (typeof fields.status === 'string') patch.status = fields.status;
     if (typeof fields.effort === 'number' || fields.effort === null) patch.effort = fields.effort;
     if (typeof fields.dueDate === 'string' || fields.dueDate === null) patch.dueDate = fields.dueDate;
+    if (isPlanningHorizon(fields.planningHorizon) || fields.planningHorizon === null) {
+      patch.planningHorizon = fields.planningHorizon;
+    }
     updateTask(selectedTaskId, patch);
   }, [dismiss, mode, refreshCounts, refreshQueue, selectedTaskId, updateTask]);
 
@@ -708,7 +708,7 @@ export default function QuickSortMode() {
         quadrant: 'priority',
         no_effort: 'effort',
         no_tags: 'tags',
-        no_due_date: 'dueDate',
+        no_planning_horizon: 'planningHorizon',
       };
       const modeField = fieldByMode[mode];
       if (!canEditTaskField(task.editPolicy, modeField)) {
@@ -1186,7 +1186,7 @@ export default function QuickSortMode() {
                         onApplyPriority={handleApplyPriority}
                         onApplyEffort={handleApplyEffort}
                         onApplyTag={handleApplyTag}
-                        onApplyDueDate={handleApplyDueDate}
+                        onApplyPlanningHorizon={handleApplyPlanningHorizon}
                         allTags={allTags}
                         tagsLoading={tagsLoading}
                         recentTagIds={recentTagIds}

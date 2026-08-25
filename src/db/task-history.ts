@@ -10,6 +10,7 @@ export const TASK_HISTORY_EVENT_TYPES = [
   'micro_status_changed',
   'kanban_column_changed',
   'effort_changed',
+  'planning_horizon_changed',
   'local_disposition_changed',
   'reopened',
   'project_added',

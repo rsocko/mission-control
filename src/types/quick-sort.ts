@@ -4,6 +4,7 @@ export interface QuickSortTaskSnapshot {
   statusReason: string | null;
   localDisposition: string;
   priority: string;
+  planningHorizon: string | null;
   dueDate: string | null;
   completedAt: string | null;
   microStatus: string | null;

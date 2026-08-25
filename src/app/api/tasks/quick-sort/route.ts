@@ -12,7 +12,7 @@ import {
 import { eq, and, isNull, notInArray, asc, desc, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 
-export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_due_date';
+export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
 const LIMIT = 50;
@@ -22,7 +22,7 @@ const PRIORITY_ORDER = sql`CASE ${tasks.priority}
   WHEN 'low' THEN 4 ELSE 5 END`;
 
 /**
- * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_due_date
+ * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_planning_horizon
  *    &counts=true                         (return badge counts only)
  *    &source=connectorType                (optional scope filter)
  *    &sourceList=sourceListName           (optional scope filter)
@@ -33,7 +33,7 @@ const PRIORITY_ORDER = sql`CASE ${tasks.priority}
  *   quadrant    → most recent first (same candidates, guided decision)
  *   no_effort   → highest priority first, then most recent
  *   no_tags     → grouped by source list, then most recent within group
- *   no_due_date → highest priority first, then most recent
+ *   no_planning_horizon → highest priority first, then most recent
  */
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -97,7 +97,7 @@ export async function GET(request: Request) {
   }
 
   if (countsOnly) {
-    const [noPriorityCount, noEffortCount, noTagsCount, noDueDateCount] = await Promise.all([
+    const [noPriorityCount, noEffortCount, noTagsCount, noPlanningHorizonCount] = await Promise.all([
       db
         .select({ count: sql<number>`COUNT(*)`.as('count') })
         .from(tasks)
@@ -124,8 +124,7 @@ export async function GET(request: Request) {
         .where(
           and(
             ...scopeConditions,
-            inArray(tasks.priority, ['critical', 'high']),
-            isNull(tasks.dueDate)
+            isNull(tasks.planningHorizon)
           )
         )
         .then((r) => r[0]?.count ?? 0),
@@ -137,12 +136,12 @@ export async function GET(request: Request) {
         quadrant: noPriorityCount,
         no_effort: noEffortCount,
         no_tags: noTagsCount,
-        no_due_date: noDueDateCount,
+        no_planning_horizon: noPlanningHorizonCount,
       },
     });
   }
 
-  if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_due_date'].includes(mode)) {
+  if (!mode || !['no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon'].includes(mode)) {
     return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
   }
 
@@ -154,8 +153,8 @@ export async function GET(request: Request) {
     conditions.push(isNull(tasks.effort));
   } else if (mode === 'no_tags') {
     conditions.push(sql`${tasks.id} NOT IN (SELECT task_id FROM task_tags)`);
-  } else if (mode === 'no_due_date') {
-    conditions.push(inArray(tasks.priority, ['critical', 'high']), isNull(tasks.dueDate));
+  } else if (mode === 'no_planning_horizon') {
+    conditions.push(isNull(tasks.planningHorizon));
   }
 
   // Smart sort per mode (default), or user-selected order
@@ -173,7 +172,7 @@ export async function GET(request: Request) {
     orderClauses =
       mode === 'no_priority' || mode === 'quadrant'
         ? [desc(tasks.createdAt)]                           // newest first
-        : mode === 'no_effort' || mode === 'no_due_date'
+        : mode === 'no_effort' || mode === 'no_planning_horizon'
           ? [PRIORITY_ORDER, desc(tasks.createdAt)]         // highest priority, then newest
           : [asc(tasks.sourceListName), desc(tasks.createdAt)]; // group by list, newest within
   }
@@ -192,6 +191,7 @@ export async function GET(request: Request) {
       sourceListId: tasks.sourceListId,
       sourceListName: tasks.sourceListName,
       dueDate: tasks.dueDate,
+      planningHorizon: tasks.planningHorizon,
       createdAt: tasks.createdAt,
       localDisposition: tasks.localDisposition,
     })

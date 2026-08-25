@@ -15,6 +15,7 @@ const task: QuickSortQueueTask = {
   sourceListId: null,
   sourceListName: null,
   dueDate: null,
+  planningHorizon: null,
   createdAt: '2026-07-31T12:00:00.000Z',
   projects: [],
   phases: [],
@@ -35,7 +36,7 @@ describe('useQuickSortData background revalidation', () => {
       const url = String(input);
       if (url.includes('counts=true')) {
         return new Response(JSON.stringify({
-          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_due_date: 0 },
+          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0 },
         }));
       }
       if (url.includes('/suggestions?')) {
@@ -72,7 +73,7 @@ describe('useQuickSortData background revalidation', () => {
       const url = String(input);
       if (url.includes('counts=true')) {
         return new Response(JSON.stringify({
-          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_due_date: 0 },
+          counts: { no_priority: 0, quadrant: 0, no_effort: 0, no_tags: 1, no_planning_horizon: 0 },
         }));
       }
       if (url.includes('/suggestions?')) {

@@ -21,13 +21,13 @@ import {
   TASK_DISPOSITION_OPTIONS,
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
-import type { LocalDisposition, TaskField } from '@/types';
+import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { triggerHaptic, triggerHapticFeedback } from '@/lib/utils/haptics';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import { DatePicker } from '@/components/ui/date-picker';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
+import { PLANNING_HORIZON_LABELS, PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 
 const PRIORITY_OPTIONS = [
   ...(['critical', 'high', 'medium', 'low'] as const).map((value) => ({
@@ -170,7 +170,7 @@ interface QuickSortActionsProps {
   onApplyPriority: (priority: string) => void;
   onApplyEffort: (effort: number) => void;
   onApplyTag: (tagId: string, tagName: string) => void;
-  onApplyDueDate: (dueDate: string) => void;
+  onApplyPlanningHorizon: (planningHorizon: PlanningHorizon) => void;
   allTags: TagOption[];
   tagsLoading: boolean;
   recentTagIds: string[];
@@ -189,7 +189,7 @@ export default function QuickSortActions({
   onApplyPriority,
   onApplyEffort,
   onApplyTag,
-  onApplyDueDate,
+  onApplyPlanningHorizon,
   allTags,
   tagsLoading,
   recentTagIds,
@@ -205,7 +205,7 @@ export default function QuickSortActions({
     quadrant: 'priority',
     no_effort: 'effort',
     no_tags: 'tags',
-    no_due_date: 'dueDate',
+    no_planning_horizon: 'planningHorizon',
   };
   const modeField = fieldByMode[mode];
   const canApplyMode = canEditTaskField(task.editPolicy, modeField);
@@ -217,8 +217,9 @@ export default function QuickSortActions({
       reason: blockedField ? taskFieldBlockedReason(task.editPolicy, blockedField) : undefined,
     };
   };
-  const doFirstPermission = quadrantPermission(['priority', 'dueDate']);
-  const delegatePermission = quadrantPermission(['priority', 'dueDate', 'microStatus']);
+  const doFirstPermission = quadrantPermission(['priority', 'planningHorizon']);
+  const schedulePermission = quadrantPermission(['priority', 'dueDate']);
+  const delegatePermission = quadrantPermission(['planningHorizon', 'microStatus']);
   const eliminatePermission = quadrantPermission(['status', 'statusReason']);
   const canMarkDone = canEditTaskField(task.editPolicy, 'status');
   const canSkip = canEditTaskField(task.editPolicy, 'snoozedUntil');
@@ -319,8 +320,8 @@ export default function QuickSortActions({
                 }}
                 placeholder="Schedule"
                 aria-label="Schedule important task"
-                disabled={busy || !doFirstPermission.allowed}
-                title={doFirstPermission.reason}
+                disabled={busy || !schedulePermission.allowed}
+                title={schedulePermission.reason}
                 className="quick-sort-primary-button min-h-[64px] justify-center rounded-xl border-blue-700/60 bg-blue-950/45 px-2 py-2 text-sm font-semibold text-blue-300"
               />
               <button
@@ -388,38 +389,23 @@ export default function QuickSortActions({
           />
         )}
 
-        {mode === 'no_due_date' && (
-          <div className="grid grid-cols-3 gap-2">
-          <button
-            onClick={() => { triggerHaptic('light'); onApplyDueDate(getLocalToday()); }}
-            disabled={busy || !canApplyMode}
-            title={!canApplyMode ? modeBlockedReason : undefined}
-            className="flex min-h-[48px] items-center justify-center rounded-xl border border-emerald-700/50 bg-emerald-950/40 px-2 py-3 text-sm font-medium text-emerald-300 transition-all active:scale-95 disabled:opacity-50"
-          >
-            Today
-          </button>
-          <button
-            onClick={() => { triggerHaptic('light'); onApplyDueDate(getLocalTomorrow()); }}
-            disabled={busy || !canApplyMode}
-            title={!canApplyMode ? modeBlockedReason : undefined}
-            className="flex min-h-[48px] items-center justify-center rounded-xl border border-sky-700/50 bg-sky-950/40 px-2 py-3 text-sm font-medium text-sky-300 transition-all active:scale-95 disabled:opacity-50"
-          >
-            Tomorrow
-          </button>
-          <DatePicker
-            value={null}
-            onChange={(date) => {
-              if (date) {
+        {mode === 'no_planning_horizon' && (
+          <div className="grid grid-cols-4 gap-2">
+          {PLANNING_HORIZONS.map((planningHorizon) => (
+            <button
+              key={planningHorizon}
+              type="button"
+              onClick={() => {
                 triggerHaptic('light');
-                onApplyDueDate(date);
-              }
-            }}
-            placeholder="Pick date"
-            aria-label="Pick a due date"
-            disabled={busy || !canApplyMode}
-            title={!canApplyMode ? modeBlockedReason : undefined}
-            className="min-h-[48px] justify-center rounded-xl border-violet-700/50 bg-violet-950/40 px-2 py-3 text-sm font-medium text-violet-300"
-          />
+                onApplyPlanningHorizon(planningHorizon);
+              }}
+              disabled={busy || !canApplyMode}
+              title={!canApplyMode ? modeBlockedReason : undefined}
+              className="flex min-h-[48px] items-center justify-center rounded-xl border border-emerald-700/50 bg-emerald-950/40 px-2 py-3 text-sm font-medium text-emerald-300 transition-all active:scale-95 disabled:opacity-50"
+            >
+              {PLANNING_HORIZON_LABELS[planningHorizon]}
+            </button>
+          ))}
           </div>
         )}
 

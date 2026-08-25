@@ -5,6 +5,7 @@
  *   title:text       – title substring match
  *   tag:slug         – exact tag slug match
  *   priority:level   – priority value (high / medium / low / critical / urgent)
+ *   horizon:value    – planning horizon (now / next / later / someday / none)
  *   status:value     – status value (todo / in_progress / done / cancelled …)
  *   source:type      – connector type (github-issues / todoist …)
  *   list:name        – source list name substring
@@ -25,6 +26,7 @@ export type FilterTokenType =
   | 'title'
   | 'tag'
   | 'priority'
+  | 'horizon'
   | 'status'
   | 'source'
   | 'list'
@@ -53,6 +55,7 @@ export interface ParsedFilterQuery {
   titleTokens: string[];
   tagTokens: string[];
   priorityTokens: string[];
+  horizonTokens: string[];
   statusTokens: string[];
   sourceTokens: string[];
   listTokens: string[];
@@ -72,6 +75,7 @@ const RECOGNISED_PREFIXES: FilterTokenType[] = [
   'title',
   'tag',
   'priority',
+  'horizon',
   'status',
   'source',
   'list',
@@ -151,6 +155,19 @@ export function removeFilterQueryToken(
     .join(' ');
 }
 
+export function replacePositiveFilterValues(
+  query: string,
+  type: FilterTokenType,
+  values: readonly string[],
+): string {
+  return [
+    ...parseFilterQuery(query).tokens
+      .filter((token) => token.type !== type || token.negated)
+      .map((token) => token.raw),
+    ...values.map((value) => `${type}:${value}`),
+  ].join(' ');
+}
+
 function sameToken(
   token: FilterToken | undefined,
   expected: Pick<FilterToken, 'type' | 'value' | 'raw' | 'negated'>,
@@ -168,6 +185,7 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
   const titleTokens: string[] = [];
   const tagTokens: string[] = [];
   const priorityTokens: string[] = [];
+  const horizonTokens: string[] = [];
   const statusTokens: string[] = [];
   const sourceTokens: string[] = [];
   const listTokens: string[] = [];
@@ -190,6 +208,7 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
       case 'title':    titleTokens.push(t.value); break;
       case 'tag':      tagTokens.push(t.value); break;
       case 'priority': priorityTokens.push(t.value); break;
+      case 'horizon': horizonTokens.push(t.value); break;
       case 'status':   statusTokens.push(t.value); break;
       case 'source':   sourceTokens.push(t.value); break;
       case 'list':     listTokens.push(t.value); break;
@@ -210,6 +229,7 @@ function buildResult(tokens: FilterToken[]): ParsedFilterQuery {
     titleTokens,
     tagTokens,
     priorityTokens,
+    horizonTokens,
     statusTokens,
     sourceTokens,
     listTokens,

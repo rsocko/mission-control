@@ -827,6 +827,13 @@
       "when": 1787505600000,
       "tag": "0117_simplify_tyrion_identities",
       "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1787616000000,
+      "tag": "0118_add_planning_horizon",
+      "breakpoints": true
     }
   ]
 }

@@ -29,7 +29,7 @@ import { taskLogger } from '@/lib/client-logger';
 // ─── Token Node ─────────────────────────────────────────────────────────────
 // A custom TextNode subclass that renders with colored styles based on token type.
 
-type TokenType = 'slash' | 'destination' | 'priority-critical' | 'priority-high' | 'priority-medium' | 'priority-low' | 'tag' | 'project' | 'duration' | 'date' | 'effort';
+type TokenType = 'slash' | 'destination' | 'priority-critical' | 'priority-high' | 'priority-medium' | 'priority-low' | 'tag' | 'project' | 'duration' | 'horizon' | 'date' | 'effort';
 
 const TOKEN_STYLES: Record<TokenType, { color: string; fontWeight: string }> = {
   slash: { color: 'var(--accent)', fontWeight: '500' },
@@ -41,6 +41,7 @@ const TOKEN_STYLES: Record<TokenType, { color: string; fontWeight: string }> = {
   tag: { color: '#c084fc', fontWeight: '500' },
   project: { color: '#f472b6', fontWeight: '500' },
   duration: { color: '#22d3ee', fontWeight: '500' },
+  horizon: { color: 'var(--success)', fontWeight: '600' },
   date: { color: '#4ade80', fontWeight: '500' },
   effort: { color: '#a78bfa', fontWeight: '500' },
 };
@@ -144,6 +145,11 @@ function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
   const durRegex = /(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi;
   while ((m = durRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'duration' });
+  }
+
+  const horizonRegex = /(?<!\\)~(?:now|next|later|someday)\b/gi;
+  while ((m = horizonRegex.exec(text)) !== null) {
+    tokens.push({ start: m.index, end: m.index + m[0].length, type: 'horizon' });
   }
 
   // ^effort (^1 through ^5, not escaped with \)

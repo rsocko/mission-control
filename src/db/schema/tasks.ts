@@ -19,6 +19,7 @@ export const tasks = sqliteTable('tasks', {
     .notNull()
     .default('active'),
   priority: text('priority').notNull().default('none'),
+  planningHorizon: text('planning_horizon').$type<'now' | 'next' | 'later' | 'someday'>(),
 
   dueDate: text('due_date'),
   pushCount: integer('push_count').notNull().default(0),
@@ -70,6 +71,7 @@ export const tasks = sqliteTable('tasks', {
 }, (table) => [
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
   index('idx_tasks_local_disposition').on(table.localDisposition),
+  index('idx_tasks_planning_horizon').on(table.planningHorizon),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
   index('idx_tasks_due_reminder')
@@ -446,7 +448,7 @@ export const quickSortLog = sqliteTable('task_triage_log', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),
   operationId: text('operation_id'),
-  /** 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_due_date' */
+  /** 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon' */
   mode: text('mode').notNull(),
   /** 'applied' | 'suggestion_accepted' | 'skipped' */
   action: text('action').notNull(),

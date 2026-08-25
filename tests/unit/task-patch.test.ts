@@ -38,6 +38,18 @@ describe('parseTaskPatchInput', () => {
     if (!parsed.success) expect(parsed.error).toContain('Invalid effort');
   });
 
+  it('accepts planning horizons and clearing the field', () => {
+    expect(parseTaskPatchInput({ planningHorizon: 'now' })).toMatchObject({
+      success: true,
+      fields: ['planningHorizon'],
+    });
+    expect(parseTaskPatchInput({ planningHorizon: null })).toMatchObject({
+      success: true,
+      fields: ['planningHorizon'],
+    });
+    expect(parseTaskPatchInput({ planningHorizon: 'today' }).success).toBe(false);
+  });
+
   it('maps relative reminder configuration to reminder edit policy', () => {
     const parsed = parseTaskPatchInput({
       reminderRelative: '1_day_before',

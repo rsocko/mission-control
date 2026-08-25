@@ -23,7 +23,7 @@ describe('Quick Sort activity banner', () => {
             quadrant: 1,
             no_effort: 3,
             no_tags: 2,
-            no_due_date: 1,
+            no_planning_horizon: 1,
           },
         },
         streak: 5,

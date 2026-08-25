@@ -1,5 +1,6 @@
 import type {
   LocalDisposition,
+  PlanningHorizon,
   TaskEditPolicy,
   TaskStatus,
   TaskSourceModel,
@@ -37,6 +38,7 @@ export interface TaskDetail {
   microStatus: string | null;
   statusReason: string | null;
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;

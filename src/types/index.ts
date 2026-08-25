@@ -106,6 +106,7 @@ export interface TaskItem {
   /** Reason a task was closed: 'completed' | 'not_planned' | 'duplicate' | 'moved' */
   statusReason?: 'completed' | 'not_planned' | 'duplicate' | 'moved';
   priority: TaskPriority;
+  planningHorizon?: PlanningHorizon | null;
 
   dueDate?: string;
   pushCount?: number;
@@ -515,12 +516,15 @@ export type TaskSourceModel =
 
 export type WriteBackMode = 'none' | 'direct' | 'queued' | 'pull';
 
+export type PlanningHorizon = 'now' | 'next' | 'later' | 'someday';
+
 export type TaskField =
   | 'title'
   | 'description'
   | 'status'
   | 'statusReason'
   | 'priority'
+  | 'planningHorizon'
   | 'dueDate'
   | 'effort'
   | 'estimatedDuration'

@@ -19,7 +19,7 @@ import {
   ProjectHierarchyClientError,
 } from '@/lib/projects/hierarchy-client';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
-import type { LocalDisposition, TaskField } from '@/types';
+import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
@@ -408,6 +408,13 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? { ...prev, priority } : prev);
   }, [saveField, setTask]);
 
+  const handlePlanningHorizonChange = useCallback(async (
+    planningHorizon: PlanningHorizon | null,
+  ) => {
+    if (!(await saveField('planningHorizon', planningHorizon))) return;
+    setTask((prev) => prev ? { ...prev, planningHorizon } : prev);
+  }, [saveField, setTask]);
+
   const handleLocalDispositionChange = useCallback(async (localDisposition: LocalDisposition) => {
     if (!task || !canSetTaskLocalDisposition(
       task.editPolicy,
@@ -708,6 +715,7 @@ export function useTaskDetailMutations({
     handleToggleMyDay,
     handleDelete,
     handlePriorityChange,
+    handlePlanningHorizonChange,
     handleLocalDispositionChange,
     handleEffortChange,
     handleDurationChange,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Flame, Target, AlertCircle, CalendarClock, Grid2X2, Sigma, Tag } from 'lucide-react';
+import { Flame, Target, AlertCircle, Layers3, Grid2X2, Sigma, Tag } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 
 interface TriageStats {
@@ -12,7 +12,7 @@ interface TriageStats {
       quadrant: number;
       no_effort: number;
       no_tags: number;
-      no_due_date: number;
+      no_planning_horizon: number;
     };
   };
   streak: number;
@@ -37,7 +37,7 @@ export default function ActivityBanner() {
     quadrant = 0,
     no_effort,
     no_tags,
-    no_due_date,
+    no_planning_horizon,
   } = thisWeek.byMode;
 
   return (
@@ -94,10 +94,10 @@ export default function ActivityBanner() {
               <AnimatedCounter value={no_tags} className="tabular-nums" /> tagged
             </span>
           )}
-          {no_due_date > 0 && (
+          {no_planning_horizon > 0 && (
             <span className="flex items-center gap-1">
-              <CalendarClock size={11} className="text-emerald-400" />
-              <AnimatedCounter value={no_due_date} className="tabular-nums" /> scheduled
+              <Layers3 size={11} className="text-emerald-400" />
+              <AnimatedCounter value={no_planning_horizon} className="tabular-nums" /> planned
             </span>
           )}
         </div>

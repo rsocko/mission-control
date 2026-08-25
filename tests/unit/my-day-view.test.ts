@@ -72,6 +72,19 @@ describe('My Day view helpers', () => {
     expect(items.map((item) => item.taskId)).toEqual(['low', 'critical']);
   });
 
+  it('sorts and groups planning horizons with unreviewed tasks last', () => {
+    const items = [
+      makeItem({ taskId: 'unset', planningHorizon: null }),
+      makeItem({ taskId: 'later', planningHorizon: 'later' }),
+      makeItem({ taskId: 'now', planningHorizon: 'now' }),
+    ];
+
+    expect(sortMyDayItems(items, 'planningHorizon', 'asc').map((item) => item.taskId))
+      .toEqual(['now', 'later', 'unset']);
+    expect(groupMyDayItems(items, 'planningHorizon', []).map((group) => group.label))
+      .toEqual(['Now', 'Later', 'Not set']);
+  });
+
   it('sorts completed tasks by most recent completion without mutating the source array', () => {
     const items = [
       makeItem({

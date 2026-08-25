@@ -10,7 +10,7 @@ export const QUICK_SORT_MODES = [
   'quadrant',
   'no_effort',
   'no_tags',
-  'no_due_date',
+  'no_planning_horizon',
 ] as const;
 
 export type QuickSortMode = (typeof QUICK_SORT_MODES)[number];
@@ -23,6 +23,7 @@ export async function captureQuickSortTask(taskId: string): Promise<QuickSortTas
       statusReason: tasks.statusReason,
       localDisposition: tasks.localDisposition,
       priority: tasks.priority,
+      planningHorizon: tasks.planningHorizon,
       dueDate: tasks.dueDate,
       completedAt: tasks.completedAt,
       microStatus: tasks.microStatus,
@@ -50,6 +51,7 @@ export function snapshotsMatch(
     && current.statusReason === expected.statusReason
     && current.localDisposition === expected.localDisposition
     && current.priority === expected.priority
+    && current.planningHorizon === expected.planningHorizon
     && current.dueDate === expected.dueDate
     && current.completedAt === expected.completedAt
     && current.microStatus === expected.microStatus
@@ -69,6 +71,7 @@ export function buildUndoPatch(
     statusReason: before.statusReason,
     localDisposition: before.localDisposition,
     priority: before.priority,
+    planningHorizon: before.planningHorizon,
     dueDate: before.dueDate,
     microStatus: before.microStatus,
     snoozedUntil: before.snoozedUntil,

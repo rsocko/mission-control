@@ -12,6 +12,7 @@ import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
+import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
@@ -204,6 +205,7 @@ export function SortableTaskRow({
           <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
         </div>
         <div className="flex items-center gap-2 mt-0.5">
+          <PlanningHorizonBadge planningHorizon={item.planningHorizon} />
           {item.sourceListName && <span className="text-xs text-[var(--text-muted)]">{item.sourceListName}</span>}
           {taskSchedule?.scheduledTime && (
             <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded flex items-center gap-0.5">

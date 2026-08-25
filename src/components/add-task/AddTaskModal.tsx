@@ -22,6 +22,8 @@ import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import { EffortSelect } from '@/components/EffortBadge';
 import type { QuickAddDestination } from './quick-add-types';
+import type { PlanningHorizon } from '@/types';
+import { PLANNING_HORIZONS, PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
 
 interface Tag {
   id: string;
@@ -69,6 +71,7 @@ export interface TaskPrefill {
   sourceUrl?: string;
   priority?: ParsedTask['priority'];
   dueDate?: string;
+  planningHorizon?: PlanningHorizon;
   projectId?: string;
 }
 
@@ -135,6 +138,9 @@ export function AddTaskModal({
   const [dueDate, setDueDate] = useState(prefill?.dueDate || initialParsed?.dueDate || '');
   const [dueDateText, setDueDateText] = useState(initialParsed?.dueDateLabel || '');
   const [priority, setPriority] = useState(prefill?.priority || initialParsed?.priority || 'none');
+  const [planningHorizon, setPlanningHorizon] = useState<PlanningHorizon | null>(
+    prefill?.planningHorizon ?? initialParsed?.planningHorizon ?? null,
+  );
   const [destination, setDestination] = useState(initialDestination);
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [prefillTagSlugs, setPrefillTagSlugs] = useState<string[]>(prefill?.tags || []);
@@ -298,6 +304,7 @@ export function AddTaskModal({
           description: description.trim() || undefined,
           dueDate: dueDate || undefined,
           priority,
+          planningHorizon,
           connectorType: destination.connectorType,
           connectorInstanceId: destination.connectorType === 'local'
             ? undefined
@@ -339,6 +346,7 @@ export function AddTaskModal({
           setDueDate('');
           setDueDateText('');
           setPriority('none');
+          setPlanningHorizon(null);
           setSelectedTags([]);
           setPrefillTagSlugs([]);
           setSelectedProjectId('');
@@ -716,8 +724,9 @@ export function AddTaskModal({
               )}
             </div>
 
-            {/* Priority */}
-            <div>
+            {/* Priority and planning horizon */}
+            <div className="space-y-3">
+              <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Priority</label>
               <Select value={priority} onValueChange={(v) => setPriority(v)}>
                 <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
@@ -731,6 +740,31 @@ export function AddTaskModal({
                   <SelectItem value="critical">🔥 Critical</SelectItem>
                 </SelectContent>
               </Select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Planning horizon</label>
+                <Select
+                  value={planningHorizon ?? 'none'}
+                  onValueChange={(value) => setPlanningHorizon(
+                    value === 'none' ? null : value as PlanningHorizon,
+                  )}
+                >
+                  <SelectTrigger
+                    aria-label="Planning horizon"
+                    className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Not set</SelectItem>
+                    {PLANNING_HORIZONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {PLANNING_HORIZON_LABELS[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Effort & Duration — stacked */}

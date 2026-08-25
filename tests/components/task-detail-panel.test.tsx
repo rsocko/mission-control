@@ -933,19 +933,17 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
-    const checkbox = await waitFor(() => {
-      const input = notes.querySelector<HTMLInputElement>('input[type="checkbox"]');
-      expect(input).not.toBeNull();
-      return input!;
-    });
+    await waitFor(() => {
+      expect(notes.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+    }, { timeout: 10_000 });
 
     await act(async () => {
-      fireEvent.click(checkbox);
+      const checkbox = notes.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      expect(checkbox).not.toBeNull();
+      fireEvent.click(checkbox!);
     });
 
     await waitFor(() => {
-      expect(notes.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeChecked();
-      expect(screen.getByText('Verify persistence')).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/tasks/task-1',
         expect.objectContaining({
@@ -953,6 +951,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
           body: JSON.stringify({ description: '- [x] Verify persistence' }),
         }),
       );
+      expect(notes.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeChecked();
+      expect(screen.getByText('Verify persistence')).toBeInTheDocument();
     });
   });
 

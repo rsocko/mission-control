@@ -16,14 +16,22 @@ import type {
   DocStatsResponse,
 } from './document-client';
 import {
+  isActionAwaitingReview,
+  isActionReady,
   isTaskAction,
   isSinceMatch,
+  mapActionToReviewNotification,
   mapActionToTask,
   mapActionToTriageItem,
   mapMissingStatementToNotification,
   mapUnmatchedEobToNotification,
 } from './document-parser';
-import type { DocAction, MissingStatement, UnmatchedEob } from './document-parser';
+import type {
+  DocAction,
+  DocSourceAction,
+  MissingStatement,
+  UnmatchedEob,
+} from './document-parser';
 import { DOCUMENT_INTELLIGENCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
 import { DOCUMENT_INTELLIGENCE_TASK_AUTHORITY } from '../task-source-profiles';
 
@@ -166,6 +174,7 @@ export class DocumentIntelligenceConnector implements IConnector {
 
     yield actions
       .filter((action) => isTaskAction(action))
+      .filter((action) => isActionReady(action))
       // Legacy OWL responses have no updated_at. Include them on incremental pulls
       // so a later completion or dismissal cannot remain stale in Mission Control.
       .filter((action) => !action.updated_at || isSinceMatch(action.updated_at, since))
@@ -174,6 +183,23 @@ export class DocumentIntelligenceConnector implements IConnector {
 
   async fetchNotifications(since?: Date): Promise<InboundNotification[]> {
     const notifications: InboundNotification[] = [];
+
+    if (this.settings.modules.actionQueue) {
+      const actions = await this.client!.fetchAllActions<DocAction>(
+        'all',
+        { includeNotReady: true },
+      );
+      for (const action of actions) {
+        if (
+          isActionAwaitingReview(action)
+          && isSinceMatch(action.updated_at || action.created_at, since)
+        ) {
+          notifications.push(
+            mapActionToReviewNotification(action, this.type, this.id, this.settings.baseUrl),
+          );
+        }
+      }
+    }
 
     if (this.settings.modules.statements) {
       const missing = await this.client!.fetchJson<MissingStatement[]>('/api/statements/missing');
@@ -209,6 +235,7 @@ export class DocumentIntelligenceConnector implements IConnector {
 
     return actions
       .filter((action) => isTaskAction(action))
+      .filter((action) => isActionReady(action))
       .filter((action) => action.status === 'pending')
       .filter((action) => isSinceMatch(action.created_at, since))
       .map((action) => mapActionToTriageItem(action, this.type, this.id, this.settings.paperlessBaseUrl, this.settings.baseUrl));
@@ -272,8 +299,38 @@ export class DocumentIntelligenceConnector implements IConnector {
     await this.client!.snoozeAction(sourceId, until);
   }
 
-  async submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void> {
-    await this.client!.submitActionFeedback(sourceId, feedback);
+  async submitActionFeedback(
+    sourceId: string,
+    feedback: DocActionFeedback,
+  ): Promise<TaskItem | null> {
+    const payload = await this.client!.submitActionFeedback(sourceId, feedback);
+    const action = unwrapActionPayload(payload);
+    return action
+      ? mapActionToTask(action, this.type, this.id, this.settings.baseUrl)
+      : null;
+  }
+
+  async fetchActionTask(sourceId: string): Promise<TaskItem | null> {
+    const actions = await this.client!.fetchAllActions<DocAction>(
+      'all',
+      { includeNotReady: true },
+    );
+    const action = actions.find((candidate) => candidate.id === sourceId);
+    return action
+      ? mapActionToTask(action, this.type, this.id, this.settings.baseUrl)
+      : null;
+  }
+
+  async executeSourceAction(
+    sourceId: string,
+    sourceAction: DocSourceAction,
+  ): Promise<TaskItem | null> {
+    const path = resolveSourceActionPath(this.settings.baseUrl, sourceId, sourceAction);
+    const payload = await this.client!.executeSourceAction(path);
+    const action = unwrapActionPayload(payload);
+    return action
+      ? mapActionToTask(action, this.type, this.id, this.settings.baseUrl)
+      : null;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -439,3 +496,39 @@ export const documentIntelligenceFactory: ConnectorFactory = {
   create: () => new DocumentIntelligenceConnector(),
   notificationTypes: DOCUMENT_INTELLIGENCE_NOTIFICATION_TYPES,
 };
+
+function unwrapActionPayload(value: unknown): DocAction | null {
+  if (isDocAction(value)) return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  return isDocAction(record.action) ? record.action : null;
+}
+
+function isDocAction(value: unknown): value is DocAction {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const action = value as Partial<DocAction>;
+  return typeof action.id === 'string'
+    && typeof action.document_id === 'number'
+    && typeof action.document_title === 'string'
+    && typeof action.action_type === 'string'
+    && typeof action.urgency === 'string'
+    && typeof action.summary === 'string'
+    && typeof action.status === 'string';
+}
+
+function resolveSourceActionPath(
+  baseUrl: string,
+  sourceId: string,
+  sourceAction: DocSourceAction,
+): string {
+  if (sourceAction.method !== 'POST') {
+    throw new Error(`OWL source action "${sourceAction.id}" does not use POST`);
+  }
+  const base = new URL(baseUrl);
+  const actionUrl = new URL(sourceAction.url, `${base.toString().replace(/\/$/, '')}/`);
+  const expectedPrefix = `/api/action-queue/actions/${encodeURIComponent(sourceId)}/`;
+  if (actionUrl.origin !== base.origin || !actionUrl.pathname.startsWith(expectedPrefix)) {
+    throw new Error(`OWL source action "${sourceAction.id}" has an invalid action URL`);
+  }
+  return `${actionUrl.pathname}${actionUrl.search}`;
+}

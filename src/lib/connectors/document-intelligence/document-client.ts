@@ -40,10 +40,11 @@ export interface DocActionPage<T> {
 
 export interface DocClient {
   fetchJson<T>(path: string, params?: Record<string, string | undefined>): Promise<T>;
-  fetchAllActions<T>(status?: string): Promise<T[]>;
+  fetchAllActions<T>(status?: string, options?: { includeNotReady?: boolean }): Promise<T[]>;
   patchActionStatus(sourceId: string, status: DocActionStatus): Promise<void>;
   snoozeAction(sourceId: string, until: string): Promise<void>;
-  submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void>;
+  submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<unknown | null>;
+  executeSourceAction(path: string): Promise<unknown | null>;
   fetchHealth(): Promise<DocHealthResponse>;
   fetchStats(): Promise<DocStatsResponse>;
 }
@@ -96,12 +97,19 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
     return response;
   }
 
-  async function postJson(path: string, body: unknown): Promise<void> {
-    await request(path, {
+  async function postJson(path: string, body: unknown): Promise<unknown | null> {
+    const response = await request(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    const text = await response.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch (error) {
+      throw new Error('OWL returned an invalid JSON response', { cause: error });
+    }
   }
 
   return {
@@ -110,7 +118,10 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
       return response.json() as Promise<T>;
     },
 
-    async fetchAllActions<T>(status = 'all'): Promise<T[]> {
+    async fetchAllActions<T>(
+      status = 'all',
+      options?: { includeNotReady?: boolean },
+    ): Promise<T[]> {
       const all: T[] = [];
       let cursor: string | undefined;
       let page = 1;
@@ -122,6 +133,7 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
         const response = await request('/api/action-queue/actions', {}, {
           status,
           limit: '100',
+          include_not_ready: options?.includeNotReady ? 'true' : undefined,
           cursor,
           page: paginationMode === 'envelope' && !cursor ? String(page) : undefined,
           offset: paginationMode !== 'envelope' && !cursor ? String(offset) : undefined,
@@ -181,11 +193,15 @@ export function createDocumentClient(options: DocClientOptions): DocClient {
       );
     },
 
-    async submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void> {
-      await postJson(
+    async submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<unknown | null> {
+      return postJson(
         `/api/action-queue/actions/${encodeURIComponent(sourceId)}/feedback`,
         feedback,
       );
+    },
+
+    async executeSourceAction(path: string): Promise<unknown | null> {
+      return postJson(path, {});
     },
 
     async fetchHealth(): Promise<DocHealthResponse> {

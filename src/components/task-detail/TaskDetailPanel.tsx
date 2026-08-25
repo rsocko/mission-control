@@ -1050,7 +1050,7 @@ export function TaskDetailPanel({
           onDelete={mutations.handleDelete}
           sourceSpecificActions={task.connectorType === 'document-intelligence' ? (
             <OwlTaskActions
-              key={task.id}
+              key={`${task.id}:${parsedMetadata.owlUpdatedAt || task.updatedAt}`}
               taskId={task.id}
               metadata={parsedMetadata}
               snoozedUntil={task.snoozedUntil}

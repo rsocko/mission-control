@@ -36,6 +36,9 @@ export interface OwlTaskActionUpdate {
   metadata: Record<string, unknown>;
   updatedAt: string;
   syncStatus: string;
+  title?: string;
+  description?: string | null;
+  dueDate?: string | null;
 }
 
 export interface OwlTaskActionResult {
@@ -55,7 +58,10 @@ function isOwlTaskActionUpdate(value: unknown): value is OwlTaskActionUpdate {
     && typeof task.metadata === 'object'
     && !Array.isArray(task.metadata)
     && typeof task.updatedAt === 'string'
-    && typeof task.syncStatus === 'string';
+    && typeof task.syncStatus === 'string'
+    && (task.title === undefined || typeof task.title === 'string')
+    && (task.description === undefined || typeof task.description === 'string' || task.description === null)
+    && (task.dueDate === undefined || typeof task.dueDate === 'string' || task.dueDate === null);
 }
 
 /** Apply one source-backed OWL lifecycle or extraction-feedback action. */

@@ -319,6 +319,16 @@ OWL `pending`, `completed`, and `dismissed`. `in_progress` and `blocked` are not
 valid OWL source states; working or blocked context remains MC-local in
 `microStatus` and `statusReason`.
 
+OWL is also the authority for whether an Action Queue item is trusted.
+`action_ready=true` is required for modern records to become MC tasks or triage
+items; explicit false records become Needs Review notifications linked to the
+exact OWL item. Missing readiness fields are treated as legacy responses and
+retain pre-readiness behavior. MC keeps its cross-source Do Next model and uses
+the dedicated OWL workspace only as a deadline-first projection for lightweight
+execution. It does not duplicate OWL's document correction or pipeline
+administration. See the
+[OWL/MC integration contract](../design/proposed/INTEGRATION-API-CONTRACT.md).
+
 OWL pulls request every lifecycle state and every page. Inbound states normalize
 as follows:
 

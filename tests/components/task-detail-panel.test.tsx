@@ -2122,11 +2122,12 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
-    const checkboxes = await waitFor(() => {
-      const inputs = notes.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-      expect(inputs).toHaveLength(1);
-      return inputs;
-    });
+    const checkboxes = await within(notes).findAllByRole(
+      'checkbox',
+      undefined,
+      { timeout: 10_000 },
+    );
+    expect(checkboxes).toHaveLength(1);
 
     await act(async () => {
       fireEvent.click(checkboxes[0]);

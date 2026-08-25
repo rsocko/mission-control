@@ -6,7 +6,6 @@ import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
-import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus } from '@/types';
 import type { LocalDisposition } from '@/types';
@@ -16,20 +15,17 @@ import type {
   DashboardProjectViewModel as HubProject,
   DashboardTaskViewModel as Task,
 } from '@/types/dashboard';
-import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
-import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { CONNECTOR_ICONS } from '@/types/dashboard';
+import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
 import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
-import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import {
   isReminderRelativeRule,
   REMINDER_RELATIVE_RULES,
 } from '@/lib/tasks/relative-reminder';
-
-const EFFORT_LABELS = EFFORT_MEASURE_LABELS[DEFAULT_EFFORT_MEASURE];
 
 /**
  * Responsive visibility priority for task row attribute badges.
@@ -169,7 +165,14 @@ export function TaskRow({
   isCompleting = false,
   isSelected = false,
 }: TaskRowProps) {
-  const { tagFilter, setTagFilter, priorityFilter, setPriorityFilter, statusFilter, setStatusFilter, projectFilter, setProjectFilter, groupBy } = useDashboardViewStore();
+  const {
+    tagFilter,
+    setTagFilter,
+    setPriorityFilter,
+    setStatusFilter,
+    projectFilter,
+    setProjectFilter,
+  } = useDashboardViewStore();
   const isDone = task.status === 'done' || isCompleting;
   const isInactive = isInactiveTaskStatus(task.status) || isCompleting;
   const taskMeta = task.metadata ? (() => { try { return JSON.parse(task.metadata); } catch { return null; } })() : null;
@@ -271,9 +274,9 @@ export function TaskRow({
           />
         </div>
         {!compact && (
-          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+          <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
             {task.sourceListName && !hideSourceListName && (
-              <span className="text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
+              <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
             )}
             {task.tags?.filter(tag => !isSyntheticTag(tag.name)).map((tag) => (
               <button
@@ -306,106 +309,56 @@ export function TaskRow({
                 setProjectFilter={setProjectFilter}
               />
             )}
+            {recurrence && (
+              <Tooltip content={`Repeats: ${recurrence}`}>
+                <span className={`text-xs flex-shrink-0 ${ATTR_P1} items-center text-blue-400`}>
+                  <Repeat size={10} />
+                </span>
+              </Tooltip>
+            )}
+            {(task.pushCount ?? 0) >= 2 && (
+              <span
+                className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-amber-400`}
+                title={`Rescheduled ${task.pushCount ?? 0} times`}
+              >
+                <RotateCcw size={10} aria-hidden="true" /> {task.pushCount ?? 0}
+              </span>
+            )}
+            {isSnoozed && (
+              <span className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-1 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-amber-400`}>
+                <Clock size={10} />
+                <span className="hidden @lg:inline">snoozed until {formatSnoozeUntil(task.snoozedUntil!)}</span>
+              </span>
+            )}
+            {hasReminder && (
+              <span
+                className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-1 rounded border border-purple-800/30 bg-purple-900/20 px-1.5 py-0.5 text-purple-400`}
+                title={`Reminder: ${reminderLabel}`}
+              >
+                <Bell size={10} />
+                <span className="hidden @lg:inline">{reminderLabel}</span>
+              </span>
+            )}
+            {task.estimatedDuration && (
+              <span
+                className={`text-xs flex-shrink-0 ${ATTR_P1} items-center gap-0.5 rounded border border-blue-800/30 bg-blue-900/20 px-1.5 py-0.5 text-blue-400 tabular-nums`}
+                title={`Estimated: ${task.estimatedDuration}min`}
+              >
+                <Timer size={10} />
+                <span className="hidden @lg:inline">
+                  {task.estimatedDuration >= 60 ? `${Math.floor(task.estimatedDuration / 60)}h${task.estimatedDuration % 60 ? ` ${task.estimatedDuration % 60}m` : ''}` : `${task.estimatedDuration}m`}
+                </span>
+              </span>
+            )}
           </div>
         )}
       </div>
 
-      <PlanningHorizonBadge planningHorizon={task.planningHorizon} />
-
-      {task.priority !== 'none' && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setPriorityFilter(
-              priorityFilter.includes(task.priority)
-                ? priorityFilter.filter((p) => p !== task.priority)
-                : [...priorityFilter, task.priority]
-            );
-          }}
-          className={`text-xs px-1.5 py-0.5 rounded border font-semibold cursor-pointer transition-opacity hover:opacity-80 flex-shrink-0 ${PRIORITY_COLORS[task.priority]} ${
-            priorityFilter.includes(task.priority) ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : ''
-          }`}
-          title={`Filter by ${task.priority} priority`}
-        >
-          {PRIORITY_LABELS[task.priority]}
-        </button>
-      )}
-
-      {groupBy !== 'status' && STATUS_LABELS[task.status] && task.status !== 'todo' && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            setStatusFilter(
-              statusFilter.includes(task.status)
-                ? statusFilter.filter((s) => s !== task.status)
-                : [...statusFilter, task.status]
-            );
-          }}
-          className={`text-xs px-1.5 py-0.5 rounded border font-medium cursor-pointer transition-opacity hover:opacity-80 flex-shrink-0 ${ATTR_P2} ${STATUS_COLORS[task.status] || ''} ${
-            statusFilter.includes(task.status) ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : ''
-          }`}
-          title={`Filter by ${STATUS_LABELS[task.status]}`}
-        >
-          {STATUS_LABELS[task.status]}
-        </button>
-      )}
-
-      {task.effort != null && task.effort >= 1 && task.effort <= 5 && (
-        <span className={`text-xs px-1.5 py-0.5 rounded border font-semibold flex-shrink-0 ${ATTR_P2} ${EFFORT_BADGE_COLORS[task.effort]}`}
-              title={`Effort: ${EFFORT_LABELS[task.effort]}`}>
-          {EFFORT_LABELS[task.effort]}
-        </span>
-      )}
-
-      {recurrence && (
-        <span className={`text-xs flex-shrink-0 ${ATTR_P1} items-center gap-0.5 text-blue-400`} title={`Repeats: ${recurrence}`}>
-          <Repeat size={10} />
-        </span>
-      )}
-
-      {(task.pushCount ?? 0) >= 2 && (
-        <span
-          className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-amber-400`}
-          title={`Rescheduled ${task.pushCount ?? 0} times`}
-        >
-          <RotateCcw size={10} aria-hidden="true" /> {task.pushCount ?? 0}
-        </span>
-      )}
-
-      {isSnoozed && (
-        <span className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-1 px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-400 border border-amber-800/30`}>
-          <Clock size={10} />
-          <span className="hidden @lg:inline">snoozed until {formatSnoozeUntil(task.snoozedUntil!)}</span>
-        </span>
-      )}
-
-      {hasReminder && (
-        <span className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-1 px-1.5 py-0.5 rounded bg-purple-900/20 text-purple-400 border border-purple-800/30`}
-              title={`Reminder: ${reminderLabel}`}>
-          <Bell size={10} />
-          <span className="hidden @lg:inline">{reminderLabel}</span>
-        </span>
-      )}
-
-      {task.estimatedDuration && (
-        <span
-          className={`text-xs flex-shrink-0 ${ATTR_P1} items-center gap-0.5 px-1.5 py-0.5 rounded border border-blue-800/30 bg-blue-900/20 text-blue-400 tabular-nums`}
-          title={`Estimated: ${task.estimatedDuration}min`}
-        >
-          <Timer size={10} />
-          <span className="hidden @lg:inline">
-            {task.estimatedDuration >= 60 ? `${Math.floor(task.estimatedDuration / 60)}h${task.estimatedDuration % 60 ? ` ${task.estimatedDuration % 60}m` : ''}` : `${task.estimatedDuration}m`}
-          </span>
-        </span>
-      )}
-
-      {task.smartScore != null && (
-        <span className="hidden shrink-0 @min-[640px]:block">
-          <SmartScoreBadge score={task.smartScore} breakdown={task.scoreBreakdown ?? undefined} size="sm" />
-        </span>
-      )}
-
       <TaskRowActions
+        smartScore={task.smartScore}
+        scoreBreakdown={task.scoreBreakdown ?? undefined}
+        planningHorizon={task.planningHorizon}
+        effort={task.effort}
         dueDate={task.dueDate}
         hasDescription={task.hasDescription}
         isInMyDay={isInMyDay}
@@ -418,8 +371,11 @@ export function TaskRow({
         onSetDueDate={onSetDueDate}
         onSetPriority={onSetPriority}
         onSetStatus={onSetStatus}
+        onFilterPriority={(priority) => setPriorityFilter([priority])}
+        onFilterStatus={(status) => setStatusFilter([status])}
         onSetLocalDisposition={onSetLocalDisposition}
         onSnoozeUntil={onSnoozeUntil}
+        showMoreActions
         onToggleMyDay={isInMyDay ? onRemoveFromMyDay : onAddToMyDay}
         onOpenNotes={onOpenNotes}
       />

@@ -14,7 +14,7 @@ describe('planning horizon visuals', () => {
       </TooltipProvider>,
     );
 
-    fireEvent.focus(screen.getByLabelText(/About planning horizon/));
+    fireEvent.focus(screen.getByLabelText(/About horizon/));
 
     expect(await screen.findAllByText('Broad planning intent, independent of due dates.'))
       .not.toHaveLength(0);
@@ -23,8 +23,8 @@ describe('planning horizon visuals', () => {
   it('uses a consistent temporal palette for values and badges', () => {
     const { container } = render(
       <>
-        <PlanningHorizonOption value="now" />
         <PlanningHorizonOption value="next" />
+        <PlanningHorizonOption value="soon" />
         <PlanningHorizonOption value="later" />
         <PlanningHorizonOption value="someday" />
         <PlanningHorizonOption value={null} />
@@ -32,12 +32,12 @@ describe('planning horizon visuals', () => {
       </>,
     );
 
-    expect(screen.getByText('Now').previousElementSibling).toHaveClass('bg-emerald-400');
-    expect(screen.getByText('Next').previousElementSibling).toHaveClass('bg-blue-400');
+    expect(screen.getByText('Next').previousElementSibling).toHaveClass('bg-emerald-400');
+    expect(screen.getByText('Soon').previousElementSibling).toHaveClass('bg-blue-400');
     expect(screen.getAllByText('Later')[0].previousElementSibling).toHaveClass('bg-violet-400');
     expect(screen.getByText('Someday').previousElementSibling).toHaveClass('bg-slate-400');
     expect(screen.getByText('Not set').previousElementSibling).toHaveClass('border');
-    expect(screen.getByTitle('Planning horizon: Later')).toHaveClass('text-violet-400');
+    expect(screen.getByTitle('Horizon: Later')).toHaveClass('text-violet-400');
     expect(container.querySelector('.lucide-telescope')).toBeInTheDocument();
     expect(container.querySelector('.lucide-clock-3')).not.toBeInTheDocument();
     expect(container.querySelector('.lucide-layers-3')).not.toBeInTheDocument();

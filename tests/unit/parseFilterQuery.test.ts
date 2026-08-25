@@ -40,9 +40,9 @@ describe('parseFilterQuery', () => {
   });
 
   it('parses positive and negated planning horizon tokens', () => {
-    const result = parseFilterQuery('horizon:now -horizon:none');
+    const result = parseFilterQuery('horizon:next -horizon:none');
 
-    expect(result.horizonTokens).toEqual(['now']);
+    expect(result.horizonTokens).toEqual(['next']);
     expect(result.negatedTokens).toEqual([
       expect.objectContaining({ type: 'horizon', value: 'none' }),
     ]);
@@ -50,7 +50,7 @@ describe('parseFilterQuery', () => {
 
   it('replaces positive horizon filters while preserving other and negated tokens', () => {
     const query = replacePositiveFilterValues(
-      'release horizon:now -horizon:none priority:high horizon:later',
+      'release horizon:next -horizon:none priority:high horizon:later',
       'horizon',
       ['next', 'someday'],
     );

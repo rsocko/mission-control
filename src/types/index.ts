@@ -516,7 +516,7 @@ export type TaskSourceModel =
 
 export type WriteBackMode = 'none' | 'direct' | 'queued' | 'pull';
 
-export type PlanningHorizon = 'now' | 'next' | 'later' | 'someday';
+export type PlanningHorizon = 'next' | 'soon' | 'later' | 'someday';
 
 export type TaskField =
   | 'title'
@@ -720,15 +720,15 @@ export interface DomainSyncResult {
 
 // ─── MICRO-STATUS CONFIG ────────────────────────────────────────────────────
 
-export const MICRO_STATUS_CONFIG: Record<MicroStatus, { label: string; emoji: string; color: string; description: string }> = {
-  waiting_on_someone: { label: 'Waiting on someone', emoji: '⏳', color: '#f59e0b', description: 'Blocked waiting for a response or action from another person' },
-  need_to_think: { label: 'Need to think', emoji: '🤔', color: '#8b5cf6', description: 'Requires reflection or planning before acting' },
-  started_but_stuck: { label: 'Started but stuck', emoji: '🧱', color: '#ef4444', description: 'Work began but hit a wall — needs unblocking' },
-  ready_but_unmotivated: { label: 'Ready but unmotivated', emoji: '😐', color: '#64748b', description: 'Could start anytime, just not feeling it' },
-  done_needs_review: { label: 'Done, needs review', emoji: '👀', color: '#06b6d4', description: 'Work complete, awaiting review or confirmation' },
-  blocked_external: { label: 'Blocked (external)', emoji: '🚧', color: '#dc2626', description: 'Blocked by external dependency or system' },
-  in_research: { label: 'In research', emoji: '🔬', color: '#3b82f6', description: 'Actively researching or exploring approaches' },
-  on_hold: { label: 'On hold', emoji: '⏸️', color: '#94a3b8', description: 'Intentionally paused — will resume later' },
+export const MICRO_STATUS_CONFIG: Record<MicroStatus, { label: string; color: string; description: string }> = {
+  waiting_on_someone: { label: 'Waiting on someone', color: '#f59e0b', description: 'Blocked waiting for a response or action from another person' },
+  need_to_think: { label: 'Need to think', color: '#8b5cf6', description: 'Requires reflection or planning before acting' },
+  started_but_stuck: { label: 'Started but stuck', color: '#ef4444', description: 'Work began but hit a wall — needs unblocking' },
+  ready_but_unmotivated: { label: 'Ready but unmotivated', color: '#64748b', description: 'Could start anytime, just not feeling it' },
+  done_needs_review: { label: 'Done, needs review', color: '#06b6d4', description: 'Work complete, awaiting review or confirmation' },
+  blocked_external: { label: 'Blocked (external)', color: '#dc2626', description: 'Blocked by external dependency or system' },
+  in_research: { label: 'In research', color: '#3b82f6', description: 'Actively researching or exploring approaches' },
+  on_hold: { label: 'On hold', color: '#94a3b8', description: 'Intentionally paused — will resume later' },
 };
 
 // ─── TASK TEMPLATES ─────────────────────────────────────────────────────────

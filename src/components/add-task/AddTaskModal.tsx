@@ -725,7 +725,7 @@ export function AddTaskModal({
               )}
             </div>
 
-            {/* Priority and planning horizon */}
+            {/* Priority and horizon */}
             <div className="space-y-3">
               <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Priority</label>
@@ -751,7 +751,7 @@ export function AddTaskModal({
                   )}
                 >
                   <SelectTrigger
-                    aria-label="Planning horizon"
+                    aria-label="Horizon"
                     className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
                   >
                     <PlanningHorizonOption value={planningHorizon} />

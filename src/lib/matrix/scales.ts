@@ -20,8 +20,8 @@ export interface UrgencyResult {
 }
 
 const PLANNING_HORIZON_URGENCY: Record<PlanningHorizon, number> = {
-  now: 85,
-  next: 55,
+  next: 85,
+  soon: 55,
   later: 25,
   someday: 5,
 };

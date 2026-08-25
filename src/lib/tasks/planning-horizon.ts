@@ -1,11 +1,11 @@
 import type { PlanningHorizon } from '@/types';
 
-export const PLANNING_HORIZONS = ['now', 'next', 'later', 'someday'] as const satisfies readonly PlanningHorizon[];
+export const PLANNING_HORIZONS = ['next', 'soon', 'later', 'someday'] as const satisfies readonly PlanningHorizon[];
 export type PlanningHorizonFilter = PlanningHorizon | 'none';
 
 export const PLANNING_HORIZON_LABELS: Record<PlanningHorizon, string> = {
-  now: 'Now',
   next: 'Next',
+  soon: 'Soon',
   later: 'Later',
   someday: 'Someday',
 };
@@ -16,13 +16,13 @@ export const PLANNING_HORIZON_VISUALS: Record<PlanningHorizon, {
   textClass: string;
   badgeClass: string;
 }> = {
-  now: {
+  next: {
     color: 'var(--success)',
     dotClass: 'bg-emerald-400',
     textClass: 'text-emerald-400',
     badgeClass: 'border-emerald-800/30 bg-emerald-900/20 text-emerald-400',
   },
-  next: {
+  soon: {
     color: 'var(--accent-400)',
     dotClass: 'bg-blue-400',
     textClass: 'text-blue-400',

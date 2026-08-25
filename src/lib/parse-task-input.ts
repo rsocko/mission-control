@@ -6,7 +6,7 @@
  *   "jun 25", "end of month", "aug 15 2025", "3pm tomorrow", etc.
  * - Priority: "!critical", "!high", "!medium", "!low", "!0" (critical), "!1" (high), "!2" (medium), "!3" (low)
  * - Effort: "^1" (XS), "^2" (S), "^3" (M), "^4" (L), "^5" (XL)
- * - Planning horizon: "~now", "~next", "~later", "~someday"
+ * - Planning horizon: "~next", "~soon", "~later", "~someday"
  * - Tags: "#tagname"
  * - Destination: "@work", "@personal", "@github"
  * - Project: "/project-name"
@@ -286,12 +286,12 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   }
 
   // Extract planning horizon. All recognized tokens are consumed; the last one wins.
-  const horizonMatches = [...remaining.matchAll(/(?<!\\)~(now|next|later|someday)\b/gi)];
+  const horizonMatches = [...remaining.matchAll(/(?<!\\)~(next|soon|later|someday)\b/gi)];
   if (horizonMatches.length > 0) {
     planningHorizon = horizonMatches[horizonMatches.length - 1][1].toLowerCase() as PlanningHorizon;
-    remaining = remaining.replace(/(?<!\\)~(?:now|next|later|someday)\b/gi, '').trim();
+    remaining = remaining.replace(/(?<!\\)~(?:next|soon|later|someday)\b/gi, '').trim();
     if (!preserveText) {
-      title = title.replace(/(?<!\\)~(?:now|next|later|someday)\b/gi, '').trim();
+      title = title.replace(/(?<!\\)~(?:next|soon|later|someday)\b/gi, '').trim();
     }
   }
 

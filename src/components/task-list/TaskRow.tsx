@@ -21,6 +21,7 @@ import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isI
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import {
@@ -252,14 +253,15 @@ export function TaskRow({
             <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="hidden @md:inline-flex" />
           ) : task.microStatus && MICRO_STATUS_CONFIG[task.microStatus as MicroStatus] && (
             <span
-              className={`text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap hidden @md:inline`}
+              className="hidden flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium @md:inline-flex"
               style={{
                 backgroundColor: `${MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].color}20`,
                 color: MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].color,
               }}
               title={MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].description}
             >
-              {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].emoji} {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].label}
+              <MicroStatusIcon status={task.microStatus as MicroStatus} size={11} />
+              {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].label}
             </span>
           )}
           <SubtaskPill

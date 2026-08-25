@@ -63,7 +63,7 @@ export async function getFilterQueryConditions(
   if (horizonTokens.length > 0) {
     const includesNone = horizonTokens.includes('none');
     const values = horizonTokens.filter((value) => (
-      value === 'now' || value === 'next' || value === 'later' || value === 'someday'
+      value === 'next' || value === 'soon' || value === 'later' || value === 'someday'
     ));
     conditions.push(or(
       ...(values.length > 0 ? [inArray(tasks.planningHorizon, values)] : []),

@@ -105,7 +105,7 @@ const HELP_ROWS: Array<{ token: string; description: string }> = [
   { token: 'tag:slug',             description: 'Exact tag slug' },
   { token: 'priority:high',        description: 'Priority level' },
   { token: 'priority:>=high',      description: 'Priority threshold' },
-  { token: 'horizon:now',          description: 'Planning horizon' },
+  { token: 'horizon:next',         description: 'Horizon' },
   { token: 'horizon:none',         description: 'Tasks without a horizon' },
   { token: 'status:todo',          description: 'Status value' },
   { token: 'source:github-issues', description: 'Connector type' },

@@ -111,9 +111,9 @@ describe('MobileTaskFilters', () => {
   });
 
   it('shows and toggles canonical planning horizon filters', () => {
-    const props = renderFilters({ planningHorizonFilters: ['now'] });
+    const props = renderFilters({ planningHorizonFilters: ['next'] });
 
-    expect(screen.getByRole('button', { name: /Now Planned for now/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Next Planned for next/ })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: /Not set Needs planning/ })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /Later Planned for later/ }));

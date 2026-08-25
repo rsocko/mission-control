@@ -56,8 +56,8 @@ const EFFORT_ORDER: Record<string, number> = {
   [NO_EFFORT_GROUP_LABEL]: 5,
 };
 const PLANNING_HORIZON_ORDER: Record<string, number> = {
-  Now: 0,
-  Next: 1,
+  Next: 0,
+  Soon: 1,
   Later: 2,
   Someday: 3,
   'Not set': 4,

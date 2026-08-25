@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { computeSmartScore, createScoreInput, type PriorityEntity } from '@/lib/smart-score';
 
 const task = {
@@ -16,6 +16,8 @@ const task = {
   assignee: 'Alex',
   snoozedUntil: '2026-07-15T00:00:00.000Z',
   effort: 2,
+  planningHorizon: 'soon' as const,
+  estimatedDuration: 30,
 };
 
 describe('createScoreInput', () => {
@@ -42,6 +44,105 @@ describe('createScoreInput', () => {
       ],
       snoozedUntil: '2026-07-15T00:00:00.000Z',
       effort: 2,
+      planningHorizon: 'soon',
+      estimatedDuration: 30,
+    });
+  });
+
+  describe('computeSmartScore', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('uses a true 100-point factor budget without counting priority twice', () => {
+      const input = createScoreInput({
+        ...task,
+        priority: 'critical',
+        planningHorizon: 'next',
+        dueDate: '2026-07-31T00:00:00.000Z',
+        updatedAt: '2026-08-01T11:00:00.000Z',
+        estimatedDuration: 15,
+        snoozedUntil: null,
+      }, [{ id: 'tag-1', name: 'customer' }]);
+      const entity: PriorityEntity = {
+        id: 'priority-1',
+        name: 'customer',
+        type: 'tag',
+        referenceId: 'tag-1',
+        tier: 'critical',
+        color: '#3b82f6',
+        rank: 1,
+        activeTaskCount: 0,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+      };
+
+      vi.useFakeTimers();
+      vi.setSystemTime('2026-08-01T12:00:00.000Z');
+      const result = computeSmartScore(input, [entity], [{
+        id: 'work',
+        connectorType: 'microsoft-todo',
+        name: 'Work',
+        rank: 1,
+        updatedAt: task.updatedAt,
+      }]);
+
+      expect(result.score).toEqual({
+        priorityBase: 20,
+        entityTier: 25,
+        urgency: 20,
+        planningHorizon: 10,
+        sourceRank: 10,
+        freshness: 10,
+        executionFit: 5,
+        snoozePenalty: 0,
+        total: 100,
+      });
+    });
+
+    it('uses duration before effort and scores planning horizon independently of due dates', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime('2026-08-01T12:00:00.000Z');
+      const result = computeSmartScore(createScoreInput({
+        ...task,
+        priority: 'none',
+        dueDate: null,
+        planningHorizon: 'soon',
+        estimatedDuration: 300,
+        effort: 1,
+        updatedAt: 'invalid',
+        snoozedUntil: 'invalid',
+      }), [], []);
+
+      expect(result.score.priorityBase).toBe(0);
+      expect(result.score.urgency).toBe(0);
+      expect(result.score.planningHorizon).toBe(7);
+      expect(result.score.executionFit).toBe(0);
+      expect(result.score.freshness).toBe(0);
+      expect(result.score.snoozePenalty).toBe(0);
+    });
+
+    it('keeps a date-only deadline urgent rather than overdue until that day ends', () => {
+      vi.useFakeTimers();
+      vi.setSystemTime('2026-08-01T12:00:00.000Z');
+      const result = computeSmartScore(createScoreInput({
+        ...task,
+        dueDate: '2026-08-01',
+        snoozedUntil: null,
+      }), [], []);
+
+      expect(result.score.urgency).toBe(18);
+    });
+
+    it('falls back to effort when duration is unavailable', () => {
+      const result = computeSmartScore(createScoreInput({
+        ...task,
+        estimatedDuration: null,
+        effort: 2,
+        snoozedUntil: null,
+      }), [], []);
+
+      expect(result.score.executionFit).toBe(4);
     });
   });
 
@@ -66,7 +167,7 @@ describe('createScoreInput', () => {
       type: 'project',
       referenceId: 'project-1',
       tier: 'critical',
-      color: '#fff',
+      color: '#3b82f6',
       rank: 1,
       activeTaskCount: 0,
       createdAt: task.createdAt,
@@ -92,7 +193,7 @@ describe('createScoreInput', () => {
       name: 'Jordan',
       type: 'person',
       tier: 'high',
-      color: '#fff',
+      color: '#3b82f6',
       rank: 1,
       activeTaskCount: 0,
       createdAt: task.createdAt,
@@ -116,7 +217,7 @@ describe('createScoreInput', () => {
       name: 'Ann',
       type: 'person',
       tier: 'high',
-      color: '#fff',
+      color: '#3b82f6',
       rank: 1,
       activeTaskCount: 0,
       createdAt: task.createdAt,
@@ -139,7 +240,7 @@ describe('createScoreInput', () => {
       name: 'Ann',
       type: 'person',
       tier: 'high',
-      color: '#fff',
+      color: '#3b82f6',
       rank: 1,
       activeTaskCount: 0,
       createdAt: task.createdAt,

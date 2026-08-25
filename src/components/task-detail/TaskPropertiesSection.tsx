@@ -30,6 +30,7 @@ import { Tooltip } from '@/components/ui/Tooltip';
 import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EffortSelect } from '@/components/EffortBadge';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus, PlanningHorizon, TaskStatus } from '@/types';
 import { cn } from '@/lib/utils';
@@ -207,9 +208,12 @@ export function TaskStatusField({
               border: `1px solid ${microStatusConfig.color}30`,
             } : undefined}
           >
-            {microStatusConfig
-              ? `${microStatusConfig.emoji} ${microStatusConfig.label}`
-              : 'Add reason'}
+            {microStatusConfig && microStatus ? (
+              <span className="flex items-center gap-1.5">
+                <MicroStatusIcon status={microStatus as MicroStatus} size={13} />
+                {microStatusConfig.label}
+              </span>
+            ) : 'Add reason'}
             <ChevronDown size={11} />
           </button>
 
@@ -240,7 +244,8 @@ export function TaskStatusField({
                   onClick={() => onMicroStatusChange(microStatusSuggestion.status)}
                   className="text-xs text-[var(--accent)] hover:underline font-medium"
                 >
-                  {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].emoji} {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].label}
+                  <MicroStatusIcon status={microStatusSuggestion.status as MicroStatus} size={12} className="mr-1 inline" />
+                  {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].label}
                 </button>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5 leading-tight">{microStatusSuggestion.reason}</p>
               </div>
@@ -285,7 +290,7 @@ export function TaskStatusField({
                         microStatus === key ? 'bg-[var(--surface-0)]' : ''
                       }`}
                     >
-                      <span className="text-sm flex-shrink-0 mt-px">{config.emoji}</span>
+                      <MicroStatusIcon status={key} size={14} className="mt-px" style={{ color: config.color }} />
                       <div className="min-w-0 flex-1">
                         <span className="block text-xs font-medium" style={{ color: config.color }}>{config.label}</span>
                         <span className="block text-xs text-[var(--text-muted)] leading-tight">{config.description}</span>
@@ -398,7 +403,7 @@ export function TaskPriorityField({
           disabled={!canEditPlanningHorizon}
         >
           <SelectTrigger
-            aria-label="Planning horizon"
+            aria-label="Horizon"
             title={!canEditPlanningHorizon
               ? planningHorizonBlockedReason
               : planningHorizonSaveLabel}

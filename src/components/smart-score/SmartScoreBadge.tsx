@@ -3,7 +3,11 @@
 import React from 'react';
 import * as RadixTooltip from '@radix-ui/react-tooltip';
 import { motion, AnimatePresence } from 'motion/react';
-import { getScoreTier, type ScoreBreakdown } from '@/lib/smart-score';
+import {
+  getScoreTier,
+  SMART_SCORE_FACTOR_MAX,
+  type ScoreBreakdown,
+} from '@/lib/smart-score';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 
 interface SmartScoreBadgeProps {
@@ -29,7 +33,7 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
   return (
     <RadixTooltip.Root delayDuration={200}>
       <RadixTooltip.Trigger asChild>
-        <div tabIndex={0} role="group" aria-label={`Smart score: ${score}`}>
+        <div tabIndex={0} role="group" aria-label={`Smart score: ${score} out of 100`}>
           <div className={`${sizeClass} ${colorClass} flex items-center justify-center font-bold tabular-nums shadow-inner`}>
             <AnimatedCounter value={score} />
           </div>
@@ -53,23 +57,22 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
               >
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <div className="text-xs font-semibold">Score Breakdown</div>
-                    <div className="text-xs text-slate-400 mt-0.5">Why this surfaced here</div>
+                    <div className="text-xs font-semibold">Smart Score</div>
+                    <div className="text-xs text-slate-400 mt-0.5">Each factor uses its own maximum</div>
                   </div>
                   <div className="text-lg font-bold text-blue-400">{breakdown.total}</div>
                 </div>
 
                 <div className="space-y-2.5">
-                  <BreakdownRow label="Priority" value={breakdown.priorityBase ?? 0} max={20} color="bg-rose-400" />
-                  <BreakdownRow label="Entity tier" value={breakdown.entityTier} max={30} color="bg-blue-400" />
-                  <BreakdownRow label="Urgency" value={breakdown.urgency} max={25} color="bg-sky-400" />
-                  <BreakdownRow label="Source rank" value={breakdown.sourceRank} max={12} color="bg-cyan-400" />
-                  <BreakdownRow label="Freshness" value={breakdown.freshness} max={13} color="bg-emerald-400" />
-                  {(breakdown.effortBonus ?? 0) !== 0 && (
-                    <BreakdownRow label={breakdown.effortBonus > 0 ? 'Quick-win bonus' : 'Heavy-lift penalty'} value={breakdown.effortBonus} max={5} color={breakdown.effortBonus > 0 ? 'bg-emerald-400' : 'bg-amber-400'} isPenalty={breakdown.effortBonus < 0} />
-                  )}
+                  <BreakdownRow label="Priority" value={breakdown.priorityBase} max={SMART_SCORE_FACTOR_MAX.priorityBase} color="bg-rose-400" />
+                  <BreakdownRow label="Entity tier" value={breakdown.entityTier} max={SMART_SCORE_FACTOR_MAX.entityTier} color="bg-blue-400" />
+                  <BreakdownRow label="Due-date urgency" value={breakdown.urgency} max={SMART_SCORE_FACTOR_MAX.urgency} color="bg-sky-400" />
+                  <BreakdownRow label="Planning horizon" value={breakdown.planningHorizon} max={SMART_SCORE_FACTOR_MAX.planningHorizon} color="bg-violet-400" />
+                  <BreakdownRow label="Source rank" value={breakdown.sourceRank} max={SMART_SCORE_FACTOR_MAX.sourceRank} color="bg-cyan-400" />
+                  <BreakdownRow label="Freshness" value={breakdown.freshness} max={SMART_SCORE_FACTOR_MAX.freshness} color="bg-emerald-400" />
+                  <BreakdownRow label="Execution fit" value={breakdown.executionFit} max={SMART_SCORE_FACTOR_MAX.executionFit} color="bg-lime-400" />
                   {breakdown.snoozePenalty < 0 && (
-                    <BreakdownRow label="Snooze penalty" value={breakdown.snoozePenalty} max={15} color="bg-amber-400" isPenalty />
+                    <BreakdownRow label="Snooze penalty" value={breakdown.snoozePenalty} max={SMART_SCORE_FACTOR_MAX.snoozePenalty} color="bg-amber-400" isPenalty />
                   )}
                 </div>
 
@@ -87,17 +90,25 @@ export function SmartScoreBadge({ score, breakdown, size = 'md' }: SmartScoreBad
 }
 
 function BreakdownRow({ label, value, max, color, isPenalty }: { label: string; value: number; max: number; color: string; isPenalty?: boolean }) {
-  const pct = isPenalty ? Math.min(100, (Math.abs(value) / max) * 100) : Math.min(100, (value / max) * 100);
+  const magnitude = isPenalty ? Math.abs(value) : value;
+  const pct = Math.max(0, Math.min(100, (magnitude / max) * 100));
   return (
     <div>
       <div className="flex items-center justify-between text-xs mb-1">
         <span className="text-slate-400">{label}</span>
-        <span className={`font-medium tabular-nums ${isPenalty ? 'text-amber-400' : 'text-slate-300'}`}>{isPenalty && value < 0 ? value : value}</span>
+        <span className={`font-medium tabular-nums ${isPenalty ? 'text-amber-400' : 'text-slate-300'}`}>
+          {value} / {max}
+        </span>
       </div>
       <div className="h-1.5 rounded-full bg-slate-800 overflow-hidden">
         <div
           className={`h-full rounded-full ${color}`}
           style={{ width: `${pct}%` }}
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={max}
+          aria-valuenow={magnitude}
         />
       </div>
     </div>

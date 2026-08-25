@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
 import db from '@/db';
-import { tasks, taskTags, tags, taskProjects, hubProjects, sourceRankings } from '@/db/schema';
+import {
+  tasks,
+  taskTags,
+  tags,
+  taskProjects,
+  hubProjects,
+  sourceRankings,
+  taskSchedules,
+} from '@/db/schema';
 import { asc, eq, inArray } from 'drizzle-orm';
 import {
   computeBatchSmartScores,
@@ -66,9 +74,26 @@ export async function GET(request: Request) {
       projectsByTaskId.set(row.taskId, arr);
     }
 
+    const scheduleRows = taskIds.length > 0
+      ? db.select({
+          taskId: taskSchedules.taskId,
+          estimatedDuration: taskSchedules.estimatedDuration,
+        })
+          .from(taskSchedules)
+          .where(inArray(taskSchedules.taskId, taskIds))
+          .all()
+      : [];
+    const durationByTaskId = new Map(
+      scheduleRows.map((row) => [row.taskId, row.estimatedDuration]),
+    );
+
     // Build score inputs with linked entity names
     const scoreInputs = allTasks.map((task) => createScoreInput(
-      { ...task, priority: task.priority as ScoreInputTask['priority'] },
+      {
+        ...task,
+        priority: task.priority as ScoreInputTask['priority'],
+        estimatedDuration: durationByTaskId.get(task.id),
+      },
       tagsByTaskId.get(task.id),
       projectsByTaskId.get(task.id),
     ));
@@ -95,8 +120,10 @@ export async function GET(request: Request) {
           status: task.status,
           microStatus: task.microStatus,
           priority: task.priority,
+          planningHorizon: task.planningHorizon,
           dueDate: task.dueDate,
           effort: task.effort,
+          estimatedDuration: durationByTaskId.get(task.id) ?? null,
           connectorType: task.connectorType,
           sourceListName: task.sourceListName,
           updatedAt: task.updatedAt,

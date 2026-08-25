@@ -355,6 +355,7 @@ export async function GET(request: Request) {
         title: tasks.title,
         description: tasks.description,
         priority: tasks.priority,
+        planningHorizon: tasks.planningHorizon,
         effort: tasks.effort,
         dueDate: tasks.dueDate,
         createdAt: tasks.createdAt,
@@ -398,8 +399,20 @@ export async function GET(request: Request) {
           .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
           .where(inArray(taskProjects.taskId, candidateIds))
           .all();
+      const candidateScheduleRows = candidateIds.length === 0
+        ? []
+        : db.select({
+            taskId: taskSchedules.taskId,
+            estimatedDuration: taskSchedules.estimatedDuration,
+          })
+          .from(taskSchedules)
+          .where(inArray(taskSchedules.taskId, candidateIds))
+          .all();
       const linkedTagsByTask = new Map<string, Array<{ id: string; name: string }>>();
       const linkedProjectsByTask = new Map<string, Array<{ id: string; name: string }>>();
+      const durationByCandidate = new Map(
+        candidateScheduleRows.map((row) => [row.taskId, row.estimatedDuration]),
+      );
       for (const row of linkedTagRows) {
         if (!linkedTagsByTask.has(row.taskId)) linkedTagsByTask.set(row.taskId, []);
         linkedTagsByTask.get(row.taskId)!.push({ id: row.unifiedInto || row.id, name: row.name });
@@ -409,7 +422,11 @@ export async function GET(request: Request) {
         linkedProjectsByTask.get(row.taskId)!.push({ id: row.id, name: row.name });
       }
       const scoreInputs = candidateTasks.map((task) => createScoreInput(
-        { ...task, priority: task.priority as ScoreInputTask['priority'] },
+        {
+          ...task,
+          priority: task.priority as ScoreInputTask['priority'],
+          estimatedDuration: durationByCandidate.get(task.id),
+        },
         linkedTagsByTask.get(task.id),
         linkedProjectsByTask.get(task.id),
       ));
@@ -649,7 +666,11 @@ export async function GET(request: Request) {
       const entities = getResolvedPriorityEntities();
       const rankings = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all() as unknown as SourceRanking[];
       const scoreInputs = result.map((task) => createScoreInput(
-        { ...task, priority: task.priority as ScoreInputTask['priority'] },
+        {
+          ...task,
+          priority: task.priority as ScoreInputTask['priority'],
+          estimatedDuration: durationByTask.get(task.id),
+        },
         (tagsByTask.get(task.id) || []).map((taskTag) => ({
           id: taskTag.tagUnifiedInto || taskTag.tagId,
           name: taskTag.tagName,

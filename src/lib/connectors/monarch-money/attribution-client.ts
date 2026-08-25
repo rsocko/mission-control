@@ -20,6 +20,7 @@ import {
   financeConnectorScopedReference,
   financeIdentityNamespaceFromCredentials,
 } from './identity';
+export { normalizeAttributionMerchant } from '@/lib/finance/attribution-merchant';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 30_000;
@@ -132,15 +133,6 @@ export function createAttributionAccountRef(
     'account',
     accountId,
   );
-}
-
-export function normalizeAttributionMerchant(value: string | null): string {
-  const normalized = (value ?? '')
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return (normalized || 'Unknown merchant').slice(0, 160);
 }
 
 export function createAttributionHeaders(

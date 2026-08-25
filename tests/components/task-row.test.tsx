@@ -7,6 +7,11 @@ import React from 'react';
 import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
+const dashboardStoreSpies = vi.hoisted(() => ({
+  setPriorityFilter: vi.fn(),
+  setStatusFilter: vi.fn(),
+}));
+
 // Mock lucide-react icons
 vi.mock('lucide-react', () => {
   const Stub = ({
@@ -58,7 +63,27 @@ vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
 }));
 
 vi.mock('@/components/task-row/TaskRowActions', () => ({
-  TaskRowActions: () => <span data-testid="task-row-actions" />,
+  TaskRowActions: (props: {
+    smartScore?: number | null;
+    planningHorizon?: string | null;
+    effort?: number | null;
+    priority: string;
+    status: string;
+    onFilterPriority?: (priority: string) => void;
+    onFilterStatus?: (status: string) => void;
+  }) => (
+    <span
+      data-testid="task-row-actions"
+      data-score={props.smartScore}
+      data-horizon={props.planningHorizon}
+      data-effort={props.effort}
+      data-priority={props.priority}
+      data-status={props.status}
+    >
+      <button type="button" onClick={() => props.onFilterPriority?.(props.priority)}>Filter row priority</button>
+      <button type="button" onClick={() => props.onFilterStatus?.(props.status)}>Filter row status</button>
+    </span>
+  ),
 }));
 
 vi.mock('@/components/task-list/MicroStatusIcon', () => ({
@@ -116,9 +141,9 @@ vi.mock('@/lib/stores/dashboardViewStore', () => ({
     tagFilter: [],
     setTagFilter: vi.fn(),
     priorityFilter: [],
-    setPriorityFilter: vi.fn(),
+    setPriorityFilter: dashboardStoreSpies.setPriorityFilter,
     statusFilter: [],
-    setStatusFilter: vi.fn(),
+    setStatusFilter: dashboardStoreSpies.setStatusFilter,
     projectFilter: null,
     setProjectFilter: vi.fn(),
     groupBy: 'priority',
@@ -135,6 +160,7 @@ const baseTask: Task = {
   taskSourceModel: 'remote-managed',
   microStatus: null,
   priority: 'none',
+  planningHorizon: null,
   dueDate: null,
   connectorType: 'microsoft-todo',
   connectorInstanceId: 'inst-1',
@@ -259,23 +285,34 @@ describe('TaskRow', () => {
       expect(row?.className).toContain('@container');
     });
 
-    it('keeps filterable value badges before the right-anchored action rail', () => {
-      const { container } = render(
+    it('routes aligned properties and explicit filter commands through the shared grid', () => {
+      render(
         <TaskRow
-          task={{ ...baseTask, priority: 'high', status: 'in-progress' }}
+          task={{
+            ...baseTask,
+            priority: 'high',
+            status: 'in_progress',
+            effort: 3,
+            planningHorizon: 'soon',
+            smartScore: 72,
+          }}
           onComplete={noop}
           {...actionProps}
           onAddToMyDay={noop}
           onRemoveFromMyDay={noop}
         />
       );
-      const children = Array.from(container.firstElementChild?.children ?? []);
-      const actionIndex = children.indexOf(screen.getByTestId('task-row-actions'));
-      const priorityIndex = children.indexOf(screen.getByTitle('Filter by high priority'));
-      const statusIndex = children.indexOf(screen.getByTitle('Filter by In Progress'));
+      const properties = screen.getByTestId('task-row-actions');
+      expect(properties).toHaveAttribute('data-score', '72');
+      expect(properties).toHaveAttribute('data-horizon', 'soon');
+      expect(properties).toHaveAttribute('data-effort', '3');
+      expect(properties).toHaveAttribute('data-priority', 'high');
+      expect(properties).toHaveAttribute('data-status', 'in_progress');
 
-      expect(priorityIndex).toBeLessThan(actionIndex);
-      expect(statusIndex).toBeLessThan(actionIndex);
+      fireEvent.click(screen.getByRole('button', { name: 'Filter row priority' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Filter row status' }));
+      expect(dashboardStoreSpies.setPriorityFilter).toHaveBeenCalledWith(['high']);
+      expect(dashboardStoreSpies.setStatusFilter).toHaveBeenCalledWith(['in_progress']);
     });
   });
 

@@ -105,7 +105,7 @@
     .control:hover { color: var(--text); background: var(--surface-2); }
     .control.active { color: white; background: var(--surface-3); box-shadow: inset 0 0 0 1px #344b6a; }
 
-    main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 60px; }
+    main { width: min(1420px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 60px; }
     .intro {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -162,7 +162,7 @@
     .task-list {
       position: relative;
       width: 100%;
-      max-width: 880px;
+      max-width: 1100px;
       margin: 0 auto;
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -170,7 +170,7 @@
       overflow: visible;
       transition: max-width .25s ease;
     }
-    body[data-width="full"] .task-list { max-width: 880px; }
+    body[data-width="full"] .task-list { max-width: 1100px; }
     body[data-width="medium"] .task-list { max-width: 620px; }
     body[data-width="narrow"] .task-list { max-width: 410px; }
     .list-header {
@@ -259,6 +259,8 @@
       transition: opacity .13s;
     }
     body:not([data-state="rest"]) .demo .actions { opacity: 1; pointer-events: auto; }
+    .task-row:hover .actions,
+    body:not([data-state="rest"]) .task-row.sample-hover .actions { opacity: 1; pointer-events: auto; }
     .action, .state-button {
       position: relative;
       display: grid;
@@ -307,7 +309,9 @@
     }
     button.pill { cursor: pointer; }
     button.pill:hover { background: rgba(251, 146, 60, .18); }
-    .status-pill { border-color: rgba(192, 132, 252, .3); background: rgba(192, 132, 252, .1); color: #d8b4fe; }
+    .status-icon-control.progress { color: var(--accent); }
+    .status-icon-control.blocked { color: var(--amber); }
+    .status-icon-control svg { width: 16px; height: 16px; }
     .due-control {
       min-height: 28px;
       padding: 0 6px;
@@ -329,8 +333,7 @@
     body[data-width="narrow"] .myday-only,
     body[data-width="narrow"] .dashboard-only { display: none; }
     body[data-width="narrow"] .actions { display: none; }
-    body[data-width="narrow"] .meta .tag,
-    body[data-width="narrow"] .status-pill { display: none; }
+    body[data-width="narrow"] .meta .tag { display: none; }
     body[data-width="narrow"] .state-strip { gap: 2px; }
     body[data-width="narrow"] .pill { padding-inline: 4px; }
     body[data-width="narrow"] .due-control { max-width: 66px; overflow: hidden; text-overflow: ellipsis; }
@@ -364,6 +367,7 @@
     }
     .menu-item:hover, .menu-item.selected { background: var(--surface-2); color: var(--text); }
     .menu-item svg { color: var(--accent); }
+    .menu-item.filter-command { color: var(--accent); }
     .menu-item .shortcut { margin-left: auto; color: var(--muted); font-size: 10px; }
     .menu-separator { height: 1px; margin: 5px 7px; background: var(--border-soft); }
     .option-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
@@ -371,8 +375,6 @@
     .option-dot.high { background: var(--orange); }
     .option-dot.medium { background: var(--amber); }
     .option-dot.low { background: #60a5fa; }
-    .option-dot.progress { background: var(--purple); }
-    .option-dot.done { background: var(--green); }
 
     .guide-card { padding: 17px; }
     .guide-card h2 { margin: 0 0 13px; font-size: 13px; }
@@ -402,6 +404,251 @@
       font-size: 11px;
     }
     .state-caption code { padding: 3px 6px; border-radius: 5px; background: var(--surface-2); color: #aac8f7; }
+
+    .alignment-study {
+      width: 100%;
+      max-width: 1100px;
+      margin: 24px auto 0;
+    }
+    .study-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 10px;
+    }
+    .study-heading h2 { margin: 0 0 4px; font-size: 14px; }
+    .study-heading p { max-width: 650px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .study-badge {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border: 1px solid var(--accent);
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .study-frame {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--surface-0);
+    }
+    .study-grid {
+      --study-columns: 20px 18px minmax(150px, 1fr) 36px 52px 30px 30px 24px 68px 30px 30px 64px;
+      min-width: 0;
+    }
+    .study-row {
+      display: grid;
+      grid-template-columns: var(--study-columns);
+      gap: 6px;
+      align-items: center;
+      padding: 0 10px;
+    }
+    .study-row {
+      min-height: 58px;
+      border-bottom: 1px solid var(--border-soft);
+      transition: background-color .14s;
+    }
+    .study-row:last-child { border-bottom: 0; }
+    .completion.status-progress { border-color: #3b82f6; }
+    .completion.status-blocked {
+      border-color: #3b82f6;
+    }
+    .completion.status-blocked::after {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border: 1px solid var(--surface-0);
+      border-radius: 999px;
+      background: #f59e0b;
+      box-shadow: inset 2px 0 0 #78350f, inset -2px 0 0 #78350f;
+      content: "";
+      transform: translate(7px, 7px);
+    }
+    .study-row:hover,
+    body:not([data-state="rest"]) .study-row.hovered {
+      background: var(--surface-1);
+      box-shadow: inset 0 0 0 1px var(--accent);
+    }
+    .study-copy { min-width: 0; }
+    .study-copy .task-title { font-size: 12px; }
+    .study-copy .meta { margin-top: 2px; }
+    .study-score {
+      display: grid;
+      width: 36px;
+      height: 28px;
+      place-items: center;
+      border-radius: 8px;
+      background: color-mix(in srgb, #f59e0b 12%, transparent);
+      color: #fcd34d;
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      box-shadow: inset 0 0 0 1px color-mix(in srgb, #f59e0b 12%, transparent);
+    }
+    .study-horizon, .study-priority, .study-effort {
+      display: inline-flex;
+      width: 100%;
+      height: 22px;
+      box-sizing: border-box;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid;
+      border-radius: 6px;
+      padding: 0 4px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    button.study-priority { cursor: pointer; }
+    .study-horizon.next { border-color: color-mix(in srgb, #34d399 30%, transparent); background: color-mix(in srgb, #34d399 12%, transparent); color: #34d399; }
+    .study-horizon.soon { border-color: color-mix(in srgb, #60a5fa 30%, transparent); background: color-mix(in srgb, #60a5fa 12%, transparent); color: #60a5fa; }
+    .study-horizon.later { border-color: color-mix(in srgb, #c084fc 30%, transparent); background: color-mix(in srgb, #c084fc 12%, transparent); color: #c084fc; }
+    .study-horizon.empty, .study-effort.empty { visibility: hidden; }
+    .study-priority.p0 { border-color: color-mix(in srgb, #f43f5e 50%, transparent); background: color-mix(in srgb, #f43f5e 18%, transparent); color: #f43f5e; }
+    .study-priority.p1 { border-color: color-mix(in srgb, #fb923c 40%, transparent); background: color-mix(in srgb, #fb923c 14%, transparent); color: #fb923c; }
+    .study-priority.p2 { border-color: color-mix(in srgb, #fbbf24 35%, transparent); background: color-mix(in srgb, #fbbf24 10%, transparent); color: #fbbf24; }
+    .study-priority.p3 { border-color: color-mix(in srgb, #38bdf8 35%, transparent); background: color-mix(in srgb, #38bdf8 10%, transparent); color: #38bdf8; }
+    .study-priority.none { border-color: transparent; background: transparent; color: var(--muted); }
+    .study-effort.xs { border-color: color-mix(in srgb, #4ade80 40%, transparent); background: color-mix(in srgb, #4ade80 14%, transparent); color: #4ade80; }
+    .study-effort.s { border-color: color-mix(in srgb, #34d399 35%, transparent); background: color-mix(in srgb, #34d399 10%, transparent); color: #34d399; }
+    .study-effort.m { border-color: color-mix(in srgb, #facc15 35%, transparent); background: color-mix(in srgb, #facc15 10%, transparent); color: #facc15; }
+    .study-effort.l { border-color: color-mix(in srgb, #fb923c 40%, transparent); background: color-mix(in srgb, #fb923c 14%, transparent); color: #fb923c; }
+    .study-property {
+      min-width: 0;
+      color: var(--text-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .study-status {
+      display: flex;
+      overflow: hidden;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      font-family: inherit;
+      padding: 0;
+      text-align: left;
+      text-overflow: ellipsis;
+    }
+    .study-status-icon { display: block; width: 16px; height: 16px; }
+    .study-status-label { display: none; }
+    .status-menu-icon { width: 16px; height: 16px; }
+    .status-menu-icon.todo { color: var(--muted); }
+    .status-menu-icon.progress { color: var(--accent); }
+    .status-menu-icon.blocked { color: var(--amber); }
+    .status-menu-icon.done { color: var(--green); }
+    .status-menu-icon.cancelled { color: var(--muted); }
+    .study-status.todo { color: var(--muted); }
+    .study-status.progress { color: var(--accent); }
+    .study-status.blocked { color: var(--amber); }
+    .study-due {
+      display: flex;
+      min-height: 30px;
+      align-items: center;
+      justify-content: flex-start;
+    }
+    .study-date {
+      border: 0;
+      background: transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .study-date.overdue { color: var(--red); }
+    .study-empty-action {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      opacity: 0;
+    }
+    .study-row:hover .study-empty-action,
+    body:not([data-state="rest"]) .study-row.hovered .study-empty-action { opacity: 1; }
+    .study-note {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--accent);
+    }
+    .study-note.empty { opacity: 0; }
+    .study-row:hover .study-note.empty,
+    body:not([data-state="rest"]) .study-row.hovered .study-note.empty { opacity: 1; color: var(--purple); }
+    .study-myday {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--amber);
+      cursor: pointer;
+    }
+    .study-myday.active { background: color-mix(in srgb, var(--amber) 10%, transparent); }
+    .study-myday.empty { opacity: 0; }
+    .study-row:hover .study-myday.empty,
+    body:not([data-state="rest"]) .study-row.hovered .study-myday.empty,
+    .study-myday.empty:focus-visible { opacity: 1; }
+    .study-toolbar {
+      display: flex;
+      min-width: 0;
+      justify-content: flex-end;
+      gap: 2px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .study-row:hover .study-toolbar,
+    body:not([data-state="rest"]) .study-row.hovered .study-toolbar {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .study-action {
+      display: grid;
+      width: 29px;
+      height: 29px;
+      flex: 0 0 29px;
+      place-items: center;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .study-action:hover { background: var(--surface-2); color: var(--text); }
+    .study-action.snooze { color: var(--accent); }
+    .study-action.more { color: var(--text-2); }
+    body[data-width="medium"] .alignment-study { max-width: 620px; }
+    body[data-width="medium"] .study-grid {
+      --study-columns: 20px 18px minmax(130px, 1fr) 36px 30px 30px 24px 62px 30px 30px 64px;
+      min-width: 0;
+    }
+    body[data-width="medium"] .study-horizon { display: none; }
+    body[data-width="narrow"] .alignment-study { max-width: 410px; }
+    body[data-width="narrow"] .study-grid {
+      --study-columns: 20px 18px minmax(90px, 1fr) 36px 30px 24px 30px 30px 30px;
+      min-width: 0;
+    }
+    body[data-width="narrow"] .study-horizon,
+    body[data-width="narrow"] .study-effort,
+    body[data-width="narrow"] .study-due { display: none; }
+    body[data-width="narrow"] .study-toolbar .snooze { display: none; }
+    body[data-width="narrow"] .study-heading { align-items: start; flex-direction: column; gap: 8px; }
 
     .notes-overlay {
       position: fixed;
@@ -469,6 +716,8 @@
       .intro { grid-template-columns: 1fr; }
     }
     @media (max-width: 620px) {
+      main { width: calc(100% - 16px); }
+      .stage { padding: 24px 8px 60px; }
       .notes-edit { grid-template-columns: 1fr; }
       .notes-preview { display: none; }
     }
@@ -485,16 +734,23 @@
     <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></symbol>
     <symbol id="i-note" viewBox="0 0 24 24"><path d="M5 4h14v12H9l-4 4z"/><path d="M8 8h8M8 12h6"/></symbol>
     <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 5h11l-2 4 2 4H5"/></symbol>
+    <symbol id="i-filter" viewBox="0 0 24 24"><path d="M4 5h16l-6 7v6l-4 2v-8z"/></symbol>
     <symbol id="i-status" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-status-todo" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></symbol>
+    <symbol id="i-status-progress" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-status-blocked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M9.5 9v6M14.5 9v6"/></symbol>
+    <symbol id="i-status-done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m8.5 12 2.2 2.2 4.8-5"/></symbol>
+    <symbol id="i-status-cancelled" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
     <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 2v3M22 12h-3"/></symbol>
     <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="7" r="1"/><circle cx="15" cy="7" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="17" r="1"/><circle cx="15" cy="17" r="1"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
     <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   </svg>
 
   <header class="prototype-bar">
     <div class="prototype-title">
       <div class="prototype-mark"><svg><use href="#i-satellite"></use></svg></div>
-      <div><strong>Revised task row actions</strong><span>Issue #1257 - state first, actions on demand</span></div>
+      <div><strong>Revised task row actions</strong><span>Issue #1262 - aligned properties, actions on demand</span></div>
     </div>
     <div class="controls" aria-label="Prototype controls">
       <div class="control-group">
@@ -538,16 +794,16 @@
     <div class="workspace">
       <section class="canvas-card">
         <div class="canvas-head">
-          <div><strong id="surface-title">Dashboard task list</strong><span id="surface-subtitle">Priority and Status badges continue to filter</span></div>
+          <div><strong id="surface-title">Dashboard task list</strong><span id="surface-subtitle">Priority and Status values open their pickers</span></div>
           <div class="width-readout" id="width-readout">Container >= 768px</div>
         </div>
         <div class="stage">
           <div class="task-list">
-            <div class="list-header"><strong id="list-title">Tasks</strong><span>3 open</span></div>
+            <div class="list-header"><strong id="list-title">Tasks</strong><span>6 open</span></div>
 
             <div class="task-row demo">
               <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
-              <button class="completion" aria-label="Complete task"></button>
+              <button class="completion status-progress" aria-label="Complete task"></button>
               <span class="source" aria-label="GitHub">GH</span>
               <div class="task-copy">
                 <span class="task-title">Prepare launch readiness review with the mobile team</span>
@@ -560,15 +816,13 @@
                 <button class="action myday-only schedule" aria-label="Time-block task" title="Time-block"><svg><use href="#i-clock"></use></svg></button>
                 <button class="action calendar" aria-label="Add due date" title="Add due date" data-action="date"><svg><use href="#i-calendar"></use></svg></button>
                 <button class="action add-notes" aria-label="Add notes" title="Add notes" data-action="notes"><svg><use href="#i-note"></use></svg></button>
-                <button class="action secondary" aria-label="Set status" title="Set status" data-action="status"><svg><use href="#i-status"></use></svg></button>
-                <button class="action secondary" aria-label="Set priority" title="Set priority" data-action="priority"><svg><use href="#i-flag"></use></svg></button>
               </div>
 
               <div class="state-strip" aria-label="Task state">
                 <button class="state-button myday" aria-label="Remove from My Day" title="In My Day"><svg><use href="#i-sun"></use></svg></button>
                 <button class="state-button notes-indicator persistent" aria-label="Open notes" title="Open notes" data-action="notes"><svg><use href="#i-note"></use></svg><span class="dot"></span></button>
-                <button class="pill status-pill" title="Filter by In Progress">In progress</button>
-                <button class="pill" title="Filter by High priority">P1</button>
+                <button class="state-button status-icon-control progress" aria-label="Change status: In progress" title="Change status" data-action="status" data-filter-label="In Progress"><svg><use href="#i-status-progress"></use></svg></button>
+                <button class="pill" title="Change priority" data-action="priority" data-filter-label="P1 · High">P1</button>
                 <button class="due-control" aria-label="Change due date" title="Change due date" data-action="date">Mon, Aug 3</button>
               </div>
 
@@ -592,10 +846,13 @@
 
               <div class="popover" id="status-popover" hidden>
                 <div class="popover-title">Set status</div>
-                <button class="menu-item"><span class="option-dot"></span>To Do</button>
-                <button class="menu-item selected"><span class="option-dot progress"></span>In Progress</button>
-                <button class="menu-item"><span class="option-dot done"></span>Done</button>
-                <button class="menu-item"><span class="option-dot critical"></span>Cancelled</button>
+                <button class="menu-item"><svg class="status-menu-icon todo"><use href="#i-status-todo"></use></svg>To Do</button>
+                <button class="menu-item selected"><svg class="status-menu-icon progress"><use href="#i-status-progress"></use></svg>In Progress</button>
+                <button class="menu-item"><svg class="status-menu-icon blocked"><use href="#i-status-blocked"></use></svg>Blocked</button>
+                <button class="menu-item"><svg class="status-menu-icon done"><use href="#i-status-done"></use></svg>Done</button>
+                <button class="menu-item"><svg class="status-menu-icon cancelled"><use href="#i-status-cancelled"></use></svg>Cancelled</button>
+                <div class="menu-separator"></div>
+                <button class="menu-item filter-command" data-filter-command="status"><svg><use href="#i-filter"></use></svg><span class="filter-command-label">Filter by In Progress</span></button>
               </div>
 
               <div class="popover" id="priority-popover" hidden>
@@ -605,19 +862,72 @@
                 <button class="menu-item"><span class="option-dot medium"></span>Medium <span class="shortcut">P2</span></button>
                 <button class="menu-item"><span class="option-dot low"></span>Low <span class="shortcut">P3</span></button>
                 <button class="menu-item"><span class="option-dot"></span>None</button>
+                <div class="menu-separator"></div>
+                <button class="menu-item filter-command" data-filter-command="priority"><svg><use href="#i-filter"></use></svg><span class="filter-command-label">Filter by P1 · High</span></button>
               </div>
             </div>
 
-            <div class="task-row">
+            <div class="task-row sample-hover">
               <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
-              <button class="completion" aria-label="Complete task"></button><span class="source">MC</span>
+              <button class="completion status-progress" aria-label="Complete task"></button><span class="source">MC</span>
               <div class="task-copy"><span class="task-title">Review connector retry telemetry</span><div class="meta"><span>Engineering</span><span class="tag">observability</span></div></div>
-              <div class="state-strip"><span class="pill">P2</span><span class="due-control">Tue, Aug 4</span></div>
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action schedule" aria-label="Add due date" title="Add due date"><svg><use href="#i-calendar"></use></svg></button>
+                <button class="action" aria-label="Add notes" title="Add notes"><svg><use href="#i-note"></use></svg></button>
+              </div>
+              <div class="state-strip"><button class="state-button status-icon-control progress" aria-label="Change status: In progress" title="Change status"><svg><use href="#i-status-progress"></use></svg></button><button class="pill" title="Change priority">P2</button></div>
             </div>
             <div class="task-row">
               <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
               <button class="completion" aria-label="Complete task"></button><span class="source">TD</span>
               <div class="task-copy"><span class="task-title">Draft August planning notes</span><div class="meta"><span>Personal</span></div></div>
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action schedule" aria-label="Add due date" title="Add due date"><svg><use href="#i-calendar"></use></svg></button>
+              </div>
+              <div class="state-strip"><button class="state-button notes-indicator" aria-label="Open notes" title="Open notes"><svg><use href="#i-note"></use></svg><span class="dot"></span></button></div>
+            </div>
+            <div class="task-row">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion" aria-label="Complete task"></button><span class="source">GH</span>
+              <div class="task-copy"><span class="task-title">Submit reimbursement documentation</span><div class="meta"><span>Action Queue</span><span class="tag">finance</span></div></div>
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze"><svg><use href="#i-clock"></use></svg></button>
+              </div>
+              <div class="state-strip">
+                <button class="state-button notes-indicator" aria-label="Open notes" title="Open notes"><svg><use href="#i-note"></use></svg><span class="dot"></span></button>
+                <button class="pill" title="Change priority">P0</button>
+                <button class="due-control" aria-label="Change due date">Fri, Sep 4</button>
+              </div>
+            </div>
+            <div class="task-row">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion status-blocked" aria-label="Complete task"></button><span class="source">MC</span>
+              <div class="task-copy"><span class="task-title">Contact contractor about plaster repair</span><div class="meta"><span>Pool</span><span class="tag">waiting</span></div></div>
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action schedule" aria-label="Add due date" title="Add due date"><svg><use href="#i-calendar"></use></svg></button>
+              </div>
+              <div class="state-strip">
+                <button class="state-button notes-indicator" aria-label="Open notes" title="Open notes"><svg><use href="#i-note"></use></svg><span class="dot"></span></button>
+                <button class="state-button status-icon-control blocked" aria-label="Change status: Blocked" title="Change status"><svg><use href="#i-status-blocked"></use></svg></button>
+                <button class="pill" title="Change priority">P1</button>
+              </div>
+            </div>
+            <div class="task-row">
+              <button class="drag" aria-label="Drag task"><svg><use href="#i-grip"></use></svg></button>
+              <button class="completion status-progress" aria-label="Complete task"></button><span class="source">TD</span>
+              <div class="task-copy"><span class="task-title">Book annual physical</span><div class="meta"><span>Medical</span></div></div>
+              <div class="actions" aria-label="Task shortcuts">
+                <button class="action dashboard-only" aria-label="Snooze task" title="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                <button class="action" aria-label="Add notes" title="Add notes"><svg><use href="#i-note"></use></svg></button>
+              </div>
+              <div class="state-strip">
+                <button class="state-button status-icon-control progress" aria-label="Change status: In progress" title="Change status"><svg><use href="#i-status-progress"></use></svg></button>
+                <button class="pill" title="Change priority">P3</button>
+                <button class="due-control" aria-label="Change due date">Mon, Oct 12</button>
+              </div>
             </div>
           </div>
 
@@ -625,6 +935,127 @@
             <span id="state-description">Hover reveals mutation shortcuts while state remains visible.</span>
             <code id="state-token">dashboard / full / hover</code>
           </div>
+
+          <section class="alignment-study" aria-labelledby="alignment-study-title">
+            <div class="study-heading">
+              <div>
+                <h2 id="alignment-study-title">Mixed-state alignment stress test</h2>
+                <p>Score, Horizon, Priority, and Effort use fixed columns even when adjacent tasks have different data. Property badges edit their value; the highlighted row also shows empty-cell affordances and the right-anchored command toolbar.</p>
+              </div>
+              <span class="study-badge">Issue #1262 direction</span>
+            </div>
+            <div class="study-frame">
+              <div class="study-grid">
+                <div class="study-row">
+                  <button class="completion" aria-label="Complete Prepare inspection checklist"></button>
+                  <span class="source" aria-label="Microsoft To Do">TD</span>
+                  <div class="study-copy"><span class="task-title">Prepare inspection checklist</span><div class="meta"><span>Car</span></div></div>
+                  <span class="study-score" title="Smart Score: 60">60</span>
+                  <span class="study-horizon next" title="Horizon: Next">Next</span>
+                  <button class="study-priority p1" aria-label="Change priority: High" title="Change priority" data-action="priority" data-filter-label="P1 · High">P1</button>
+                  <span class="study-effort s" title="Effort: Small">S</span>
+                  <button class="study-property study-status todo" aria-label="Change status: To do" title="Change status" data-action="status" data-filter-label="To Do"><svg class="study-status-icon"><use href="#i-status-todo"></use></svg><span class="study-status-label">To do</span></button>
+                  <div class="study-property study-due"><button class="study-date overdue">Aug 20</button></div>
+                  <button class="study-myday active" aria-label="Remove from My Day" title="In My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note" aria-label="Open notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+
+                <div class="study-row hovered">
+                  <button class="completion status-progress" aria-label="Complete Review renewal options"></button>
+                  <span class="source" aria-label="Mission Control">MC</span>
+                  <div class="study-copy"><span class="task-title">Review renewal options with the finance team</span><div class="meta"><span>Finance</span><span class="tag">review</span></div></div>
+                  <span class="study-score" title="Smart Score: 54">54</span>
+                  <span class="study-horizon empty" aria-hidden="true">None</span>
+                  <button class="study-priority p2" aria-label="Change priority: Medium" title="Change priority" data-action="priority" data-filter-label="P2 · Medium">P2</button>
+                  <span class="study-effort m" title="Effort: Medium">M</span>
+                  <button class="study-property study-status progress" aria-label="Change status: In progress" title="Change status" data-action="status" data-filter-label="In Progress"><svg class="study-status-icon"><use href="#i-status-progress"></use></svg><span class="study-status-label">In progress</span></button>
+                  <div class="study-property study-due"><button class="study-empty-action" aria-label="Add due date"><svg><use href="#i-calendar"></use></svg></button></div>
+                  <button class="study-myday empty" aria-label="Add to My Day" title="Add to My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note empty" aria-label="Add notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+
+                <div class="study-row">
+                  <button class="completion" aria-label="Complete Replace air filter"></button>
+                  <span class="source" aria-label="Microsoft To Do">TD</span>
+                  <div class="study-copy"><span class="task-title">Replace air filter</span><div class="meta"><span>Maintenance</span></div></div>
+                  <span class="study-score" title="Smart Score: 51">51</span>
+                  <span class="study-horizon later" title="Horizon: Later">Later</span>
+                  <button class="study-priority none" aria-label="Set priority" title="Set priority" data-action="priority" data-filter-label="No priority">--</button>
+                  <span class="study-effort empty" aria-hidden="true">--</span>
+                  <button class="study-property study-status todo" aria-label="Change status: To do" title="Change status" data-action="status" data-filter-label="To Do"><svg class="study-status-icon"><use href="#i-status-todo"></use></svg><span class="study-status-label">To do</span></button>
+                  <div class="study-property study-due"><button class="study-empty-action" aria-label="Add due date"><svg><use href="#i-calendar"></use></svg></button></div>
+                  <button class="study-myday empty" aria-label="Add to My Day" title="Add to My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note empty" aria-label="Add notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+
+                <div class="study-row">
+                  <button class="completion" aria-label="Complete Submit reimbursement"></button>
+                  <span class="source" aria-label="GitHub">GH</span>
+                  <div class="study-copy"><span class="task-title">Submit reimbursement documentation</span><div class="meta"><span>Action Queue</span></div></div>
+                  <span class="study-score" title="Smart Score: 49">49</span>
+                  <span class="study-horizon empty" aria-hidden="true">None</span>
+                  <button class="study-priority p0" aria-label="Change priority: Critical" title="Change priority" data-action="priority" data-filter-label="P0 · Critical">P0</button>
+                  <span class="study-effort xs" title="Effort: Extra small">XS</span>
+                  <button class="study-property study-status todo" aria-label="Change status: To do" title="Change status" data-action="status" data-filter-label="To Do"><svg class="study-status-icon"><use href="#i-status-todo"></use></svg><span class="study-status-label">To do</span></button>
+                  <div class="study-property study-due"><button class="study-date">Sep 4</button></div>
+                  <button class="study-myday active" aria-label="Remove from My Day" title="In My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note" aria-label="Open notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+
+                <div class="study-row">
+                  <button class="completion status-blocked" aria-label="Complete Contact contractor"></button>
+                  <span class="source" aria-label="Mission Control">MC</span>
+                  <div class="study-copy"><span class="task-title">Contact contractor about plaster repair</span><div class="meta"><span>Pool</span><span class="tag">waiting</span></div></div>
+                  <span class="study-score" title="Smart Score: 49">49</span>
+                  <span class="study-horizon soon" title="Horizon: Soon">Soon</span>
+                  <button class="study-priority p1" aria-label="Change priority: High" title="Change priority" data-action="priority" data-filter-label="P1 · High">P1</button>
+                  <span class="study-effort xs" title="Effort: Extra small">XS</span>
+                  <button class="study-property study-status blocked" aria-label="Change status: Blocked" title="Change status" data-action="status" data-filter-label="Blocked"><svg class="study-status-icon"><use href="#i-status-blocked"></use></svg><span class="study-status-label">Blocked</span></button>
+                  <div class="study-property study-due"><button class="study-empty-action" aria-label="Add due date"><svg><use href="#i-calendar"></use></svg></button></div>
+                  <button class="study-myday empty" aria-label="Add to My Day" title="Add to My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note" aria-label="Open notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+
+                <div class="study-row">
+                  <button class="completion status-progress" aria-label="Complete Book annual physical"></button>
+                  <span class="source" aria-label="Microsoft To Do">TD</span>
+                  <div class="study-copy"><span class="task-title">Book annual physical</span><div class="meta"><span>Medical</span></div></div>
+                  <span class="study-score" title="Smart Score: 47">47</span>
+                  <span class="study-horizon empty" aria-hidden="true">None</span>
+                  <button class="study-priority p3" aria-label="Change priority: Low" title="Change priority" data-action="priority" data-filter-label="P3 · Low">P3</button>
+                  <span class="study-effort l" title="Effort: Large">L</span>
+                  <button class="study-property study-status progress" aria-label="Change status: In progress" title="Change status" data-action="status" data-filter-label="In Progress"><svg class="study-status-icon"><use href="#i-status-progress"></use></svg><span class="study-status-label">In progress</span></button>
+                  <div class="study-property study-due"><button class="study-date">Oct 12</button></div>
+                  <button class="study-myday empty" aria-label="Add to My Day" title="Add to My Day"><svg><use href="#i-sun"></use></svg></button>
+                  <button class="study-note empty" aria-label="Add notes"><svg><use href="#i-note"></use></svg></button>
+                  <div class="study-toolbar" aria-label="Task actions">
+                    <button class="study-action snooze" aria-label="Snooze"><svg><use href="#i-clock"></use></svg></button>
+                    <button class="study-action more" aria-label="More actions"><svg><use href="#i-more"></use></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -633,7 +1064,8 @@
         <div class="legend">
           <div class="legend-item"><div class="legend-icon"><svg><use href="#i-calendar"></use></svg></div><div><strong>Date is the trigger</strong><span>Existing date pill opens the picker; calendar appears only when undated.</span></div></div>
           <div class="legend-item"><div class="legend-icon"><svg><use href="#i-note"></use></svg></div><div><strong>Reuse Notes dialog</strong><span>Existing notes open Read; empty notes open Edit.</span></div></div>
-          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-status"></use></svg></div><div><strong>Status picker</strong><span>To Do, In Progress, Done, and Cancelled.</span></div></div>
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-status"></use></svg></div><div><strong>Status picker</strong><span>Change state above the divider; filter by the current state below it.</span></div></div>
+          <div class="legend-item"><div class="legend-icon"><svg><use href="#i-flag"></use></svg></div><div><strong>Priority picker</strong><span>Change P0-P3 above the divider; filter by the current value below it.</span></div></div>
           <div class="legend-item"><div class="legend-icon"><svg><use href="#i-clock"></use></svg></div><div><strong>Snooze picker</strong><span>Explicit timing replaces one-click tomorrow.</span></div></div>
         </div>
         <div class="contract">
@@ -642,7 +1074,7 @@
             <li>No inline title-edit action</li>
             <li>No duplicate calendar beside a date</li>
             <li>No new notes preview surface</li>
-            <li>No changed badge-filter semantics</li>
+            <li>No duplicate Priority or Status actions beside their editable property controls</li>
           </ul>
         </div>
       </aside>
@@ -692,6 +1124,8 @@ Confirm the remaining mobile release checks and collect sign-off from each owner
     const notesRead = document.getElementById('notes-read');
     const notesEdit = document.getElementById('notes-edit');
     const notesFooter = document.getElementById('notes-footer');
+    const requestedWidth = new URLSearchParams(window.location.search).get('width');
+    if (['full', 'medium', 'narrow'].includes(requestedWidth)) body.dataset.width = requestedWidth;
 
     const descriptions = {
       hover: 'Hover reveals mutation shortcuts while state remains visible.',
@@ -699,14 +1133,14 @@ Confirm the remaining mobile release checks and collect sign-off from each owner
       rest: 'At rest, only applicable task state remains visible.',
       date: 'The existing date pill and the undated calendar action share one picker.',
       snooze: 'Snooze now asks when instead of immediately choosing tomorrow.',
-      status: 'Status editing is separate from the Dashboard filter badge.',
-      priority: 'Priority editing is separate from the Dashboard filter badge.',
+      status: 'The visible Status value opens its picker; filtering stays in the list filter controls.',
+      priority: 'The visible Priority value opens its picker; filtering stays in the list filter controls.',
       notes: 'The row opens the established expanded Notes dialog directly.'
     };
 
     function closePopovers() {
       Object.values(popovers).forEach((popover) => { popover.hidden = true; });
-      document.querySelectorAll('.active.action, .active.state-button, .active.due-control').forEach((element) => element.classList.remove('active'));
+      document.querySelectorAll('.active.action, .active.state-button, .active.due-control, .active.pill, .active.study-priority, .active.study-status').forEach((element) => element.classList.remove('active'));
     }
 
     function positionPopover(popover, trigger) {
@@ -741,11 +1175,11 @@ Confirm the remaining mobile release checks and collect sign-off from each owner
       const width = body.dataset.width;
       const surface = body.dataset.surface;
       const state = body.dataset.state;
-      const widthText = { full: 'Container >= 768px', medium: 'Container 480-767px', narrow: 'Container < 480px' };
+      const widthText = { full: 'Container >= 960px', medium: 'Container 480-959px', narrow: 'Container < 480px' };
       document.getElementById('width-readout').textContent = widthText[width];
       document.getElementById('surface-title').textContent = surface === 'dashboard' ? 'Dashboard task list' : 'My Day task list';
       document.getElementById('surface-subtitle').textContent = surface === 'dashboard'
-        ? 'Priority and Status badges continue to filter'
+        ? 'Priority and Status values open their pickers'
         : 'Focus, time-block, and drag behavior remain';
       document.getElementById('list-title').textContent = surface === 'dashboard' ? 'Tasks' : 'My Day';
       document.getElementById('state-description').textContent = descriptions[state];
@@ -793,6 +1227,12 @@ Confirm the remaining mobile release checks and collect sign-off from each owner
       update();
     }
 
+    function updateFilterCommand(action, label) {
+      const command = popovers[action].querySelector('[data-filter-command]');
+      command.dataset.filterLabel = label;
+      command.querySelector('.filter-command-label').textContent = `Filter by ${label}`;
+    }
+
     document.querySelectorAll('[data-notes-mode]').forEach((button) => {
       button.addEventListener('click', () => setNotesMode(button.dataset.notesMode));
     });
@@ -813,10 +1253,25 @@ Confirm the remaining mobile release checks and collect sign-off from each owner
         }
         closePopovers();
         body.dataset.state = action;
+        if (action === 'status' || action === 'priority') {
+          updateFilterCommand(action, button.dataset.filterLabel);
+        }
         popovers[action].hidden = false;
         button.classList.add('active');
         update();
         positionPopover(popovers[action], button);
+      });
+    });
+
+    document.querySelectorAll('[data-filter-command]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const label = button.dataset.filterLabel;
+        closePopovers();
+        body.dataset.state = 'focus';
+        update();
+        document.getElementById('state-description').textContent = `Filter by ${label} selected. Production applies this through the existing list filter.`;
+        document.getElementById('state-token').textContent = `${body.dataset.surface} / filter / ${label.toLowerCase()}`;
       });
     });
 

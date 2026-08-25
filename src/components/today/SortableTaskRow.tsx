@@ -12,6 +12,7 @@ import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
@@ -192,14 +193,15 @@ export function SortableTaskRow({
             <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
           ) : item.microStatus && MICRO_STATUS_CONFIG[item.microStatus as MicroStatus] && (
             <span
-              className="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap"
+              className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium"
               style={{
                 backgroundColor: `${MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].color}20`,
                 color: MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].color,
               }}
               title={MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].description}
             >
-              {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].emoji} {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
+              <MicroStatusIcon status={item.microStatus as MicroStatus} size={11} />
+              {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
             </span>
           )}
           <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />

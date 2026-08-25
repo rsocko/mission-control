@@ -61,11 +61,16 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
   TaskRowActions: () => <span data-testid="task-row-actions" />,
 }));
 
+vi.mock('@/components/task-list/MicroStatusIcon', () => ({
+  MicroStatusIcon: ({ status }: { status: string }) => (
+    <span data-micro-status-icon={status} />
+  ),
+}));
+
 vi.mock('@/types', () => ({
   MICRO_STATUS_CONFIG: {
     waiting_on_someone: {
       label: 'Waiting on someone',
-      emoji: 'hourglass',
       color: '#f59e0b',
       description: 'Waiting for another person',
     },

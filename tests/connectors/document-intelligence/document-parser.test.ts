@@ -78,7 +78,7 @@ const mockUnmatchedEob: UnmatchedEob = {
 
 describe('isTaskAction', () => {
   it('returns true for all valid action types', () => {
-    const actionTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'review'];
+    const actionTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'archive', 'review'];
     for (const type of actionTypes) {
       expect(isTaskAction({ ...mockPayAction, action_type: type })).toBe(true);
     }

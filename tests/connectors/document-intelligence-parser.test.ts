@@ -9,8 +9,12 @@ import {
   mapActionToTask,
   mapMissingStatementToNotification,
   mapUnmatchedEobToNotification,
+  mapActionToReviewNotification,
+  isActionReady,
+  isActionAwaitingReview,
   isTaskAction,
   isSinceMatch,
+  resolveActionCta,
 } from '@/lib/connectors/document-intelligence/document-parser';
 import type {
   DocAction,
@@ -101,7 +105,7 @@ describe('mapActionToTask', () => {
   });
 
   it('maps all action types correctly', () => {
-    const types: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'review'];
+    const types: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'archive', 'review'];
     for (const actionType of types) {
       const task = mapActionToTask(makeAction({ action_type: actionType }), CONNECTOR_TYPE, CONNECTOR_ID);
       expect(task.metadata.actionType).toBe(actionType);
@@ -154,6 +158,83 @@ describe('mapActionToTask', () => {
     expect(noAction.metadata).toMatchObject({
       owlStatus: 'not_an_action',
       owlDisposition: 'not_an_action',
+    });
+  });
+
+  it('maps contextual CTA, category, and source actions without coupling CTA opening to completion', () => {
+    const task = mapActionToTask(makeAction({
+      category: 'finance',
+      action_ready: true,
+      review_state: 'ready',
+      recommended_cta: {
+        id: 'pay_portal',
+        label: 'Pay Acme',
+        url: 'https://billing.example/pay/123',
+        metadata: { kind: 'payment' },
+      },
+      source_actions: [{
+        id: 'send_to_review',
+        label: 'Send to Needs Review',
+        method: 'POST',
+        url: '/api/action-queue/actions/act-1/review',
+      }],
+    }), CONNECTOR_TYPE, CONNECTOR_ID);
+
+    expect(task.metadata).toMatchObject({
+      category: 'finance',
+      actionReady: true,
+      primaryActionId: 'pay_portal',
+      primaryActionLabel: 'Pay Acme',
+      primaryActionUrl: 'https://billing.example/pay/123',
+      sourceActions: [{
+        id: 'send_to_review',
+        method: 'POST',
+      }],
+    });
+    expect(task.status).toBe('todo');
+  });
+});
+
+describe('OWL action readiness and review', () => {
+  it('uses explicit action_ready while preserving legacy responses that omit it', () => {
+    expect(isActionReady(makeAction({ action_ready: true, review_state: 'needs_review' }))).toBe(true);
+    expect(isActionReady(makeAction({ action_ready: false, review_state: 'ready' }))).toBe(false);
+    expect(isActionReady(makeAction({ action_ready: undefined, review_state: undefined }))).toBe(true);
+  });
+
+  it('creates an exact OWL review notification only for active needs-review records', () => {
+    const action = makeAction({
+      action_ready: false,
+      review_state: 'needs_review',
+      needs_review_url: 'https://owl.example/needs-review/act-1',
+    });
+
+    expect(isActionAwaitingReview(action)).toBe(true);
+    expect(mapActionToReviewNotification(action, CONNECTOR_TYPE, CONNECTOR_ID)).toMatchObject({
+      id: 'docintel-review-act-1',
+      templateKey: 'owl_needs_review',
+      actionUrl: 'https://owl.example/needs-review/act-1',
+      metadata: {
+        reviewState: 'needs_review',
+        reviewUrl: 'https://owl.example/needs-review/act-1',
+      },
+    });
+    expect(isActionAwaitingReview({
+      ...action,
+      review_state: 'resolved_no_action',
+    })).toBe(false);
+  });
+
+  it('rejects unsafe CTA URLs and accepts safe extracted action links', () => {
+    expect(resolveActionCta(makeAction({
+      recommended_cta: { id: 'bad', label: 'Bad', url: 'javascript:alert(1)' },
+    }))).toBeNull();
+    expect(resolveActionCta(makeAction({
+      recommended_cta: null,
+      extracted_data: { payment_url: 'https://billing.example/pay' },
+    }))).toMatchObject({
+      label: 'Pay now',
+      url: 'https://billing.example/pay',
     });
   });
 });
@@ -263,7 +344,7 @@ describe('mapUnmatchedEobToNotification', () => {
 
 describe('isTaskAction', () => {
   it('returns true for all task action types', () => {
-    const taskTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'review'];
+    const taskTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'archive', 'review'];
     for (const t of taskTypes) {
       expect(isTaskAction(makeAction({ action_type: t }))).toBe(true);
     }

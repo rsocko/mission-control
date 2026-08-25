@@ -4,6 +4,9 @@ const {
   currentTask,
   getConnector,
   initializeConnectorFromDb,
+  completeTask,
+  executeSourceAction,
+  fetchActionTask,
   snoozeAction,
   submitActionFeedback,
   updateSet,
@@ -14,14 +17,17 @@ const {
     connectorType: 'document-intelligence',
     connectorInstanceId: 'owl-1',
     status: 'todo',
-    statusReason: null,
+    statusReason: null as string | null,
     priority: 'high',
-    snoozedUntil: null,
-    completedAt: null,
-    metadata: { actionType: 'pay', urgency: 'high', amount: 50 },
+    snoozedUntil: null as string | null,
+    completedAt: null as string | null,
+    metadata: { actionType: 'pay', urgency: 'high', amount: 50 } as Record<string, unknown>,
   },
   getConnector: vi.fn(),
   initializeConnectorFromDb: vi.fn(),
+  completeTask: vi.fn(),
+  executeSourceAction: vi.fn(),
+  fetchActionTask: vi.fn(),
   snoozeAction: vi.fn(),
   submitActionFeedback: vi.fn(),
   updateSet: vi.fn(),
@@ -68,11 +74,32 @@ describe('OWL task action service', () => {
     currentTask.metadata = { actionType: 'pay', urgency: 'high', amount: 50 };
     getConnector.mockReturnValue({
       type: 'document-intelligence',
+      completeTask,
+      executeSourceAction,
+      fetchActionTask,
       snoozeAction,
       submitActionFeedback,
     });
+    completeTask.mockResolvedValue(undefined);
+    executeSourceAction.mockResolvedValue(null);
+    fetchActionTask.mockResolvedValue({
+      title: 'Pay: Acme',
+      description: 'Pay invoice',
+      status: 'todo',
+      priority: 'high',
+      dueDate: '2026-08-30',
+      snoozedUntil: null,
+      completedAt: null,
+      metadata: {
+        actionType: 'pay',
+        urgency: 'high',
+        amount: 50,
+        primaryActionLabel: 'Pay Acme',
+        primaryActionUrl: 'https://billing.example/pay',
+      },
+    });
     snoozeAction.mockResolvedValue(undefined);
-    submitActionFeedback.mockResolvedValue(undefined);
+    submitActionFeedback.mockResolvedValue(null);
   });
 
   it('validates future snoozes and supported correction values', () => {
@@ -156,6 +183,75 @@ describe('OWL task action service', () => {
       status: 'cancelled',
       statusReason: 'not_planned',
     }));
+    const noActionUpdate = updateSet.mock.calls[0]?.[0];
+    expect(noActionUpdate.metadata).not.toHaveProperty('actionType');
+    expect(noActionUpdate.metadata).not.toHaveProperty('amount');
+    expect(updateSet.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+      title: 'Pay: Acme',
+      dueDate: '2026-08-30',
+      metadata: expect.objectContaining({
+        primaryActionLabel: 'Pay Acme',
+        primaryActionUrl: 'https://billing.example/pay',
+      }),
+    }));
+  });
+
+  it('keeps explicit completion separate from contextual CTA navigation', async () => {
+    const result = await performOwlTaskAction('task-1', { action: 'complete' });
+
+    expect(completeTask).toHaveBeenCalledWith('owl-action-1');
+    expect(result.status).toBe('done');
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'done',
+      statusReason: 'completed',
+    }));
+  });
+
+  it('executes a declared generic source action and refreshes source-controlled fields', async () => {
+    currentTask.metadata = {
+      actionType: 'file',
+      sourceActions: [{
+        id: 'file_document',
+        label: 'File in Paperless',
+        method: 'POST',
+        url: '/api/action-queue/actions/owl-action-1/file',
+      }],
+    };
+    executeSourceAction.mockResolvedValue({
+      title: 'File: Invoice',
+      description: 'Filed',
+      status: 'done',
+      priority: 'low',
+      dueDate: null,
+      snoozedUntil: null,
+      completedAt: '2026-08-24T12:00:00.000Z',
+      metadata: {
+        actionType: 'file',
+        actionReady: true,
+        sourceActions: [],
+      },
+    });
+
+    const result = await performOwlTaskAction('task-1', {
+      action: 'source_action',
+      sourceActionId: 'file_document',
+    });
+
+    expect(executeSourceAction).toHaveBeenCalledWith(
+      'owl-action-1',
+      expect.objectContaining({ id: 'file_document', method: 'POST' }),
+    );
+    expect(result).toMatchObject({
+      status: 'done',
+      title: 'File: Invoice',
+      description: 'Filed',
+      dueDate: null,
+    });
+    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+      status: 'done',
+      title: 'File: Invoice',
+      metadata: expect.objectContaining({ sourceActions: [] }),
+    }));
   });
 
   it('preserves concurrent lifecycle changes when saving a correction', async () => {
@@ -180,7 +276,7 @@ describe('OWL task action service', () => {
     expect(update).not.toHaveProperty('statusReason');
     expect(update).not.toHaveProperty('completedAt');
     expect(update).not.toHaveProperty('snoozedUntil');
-    expect(update).not.toHaveProperty('priority');
+    expect(update.priority).toBe('high');
     expect(result.status).toBe('done');
     expect(result.statusReason).toBe('completed');
   });

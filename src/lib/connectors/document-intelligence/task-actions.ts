@@ -2,18 +2,22 @@ import db from '@/db';
 import { tasks } from '@/db/schema';
 import { eq } from 'drizzle-orm';
 import type { IConnector } from '@/lib/connectors';
+import type { TaskItem } from '@/types';
 import { connectorRegistry } from '@/lib/connectors';
 import { syncScheduler } from '@/lib/sync';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 import type { DocActionFeedback } from './document-client';
+import type { DocSourceAction } from './document-parser';
 
-const ACTION_TYPES = ['pay', 'respond', 'file', 'review', 'sign', 'schedule'] as const;
+const ACTION_TYPES = ['pay', 'respond', 'file', 'archive', 'review', 'sign', 'schedule'] as const;
 const URGENCY_VALUES = ['critical', 'high', 'medium', 'low'] as const;
 
 type OwlActionType = (typeof ACTION_TYPES)[number];
 type OwlUrgency = (typeof URGENCY_VALUES)[number];
 
 export type OwlTaskActionInput =
+  | { action: 'complete' }
+  | { action: 'source_action'; sourceActionId: string }
   | { action: 'snooze'; until: string }
   | { action: 'not_an_action' }
   | { action: 'correct'; field: 'action_type'; value: OwlActionType }
@@ -28,12 +32,15 @@ export interface OwlTaskActionResult {
   metadata: Record<string, unknown>;
   updatedAt: string;
   syncStatus: string;
+  title?: string;
+  description?: string | null;
+  dueDate?: string | null;
 }
 
 export class OwlTaskActionError extends Error {
   constructor(
     message: string,
-    readonly code: 'NOT_FOUND' | 'NOT_OWL' | 'CONNECTOR_UNAVAILABLE' | 'REMOTE_WRITE_FAILED' | 'TASK_CHANGED',
+    readonly code: 'NOT_FOUND' | 'NOT_OWL' | 'CONNECTOR_UNAVAILABLE' | 'REMOTE_WRITE_FAILED' | 'SOURCE_ACTION_UNAVAILABLE' | 'TASK_CHANGED',
     readonly status: number,
     options?: ErrorOptions,
   ) {
@@ -43,8 +50,11 @@ export class OwlTaskActionError extends Error {
 }
 
 interface OwlActionConnector extends IConnector {
+  completeTask(sourceId: string): Promise<void>;
   snoozeAction(sourceId: string, until: string): Promise<void>;
-  submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<void>;
+  submitActionFeedback(sourceId: string, feedback: DocActionFeedback): Promise<TaskItem | null>;
+  fetchActionTask(sourceId: string): Promise<TaskItem | null>;
+  executeSourceAction(sourceId: string, sourceAction: DocSourceAction): Promise<TaskItem | null>;
 }
 
 const taskActionQueues = new Map<string, Promise<void>>();
@@ -52,14 +62,27 @@ const taskActionQueues = new Map<string, Promise<void>>();
 function isOwlActionConnector(connector: IConnector | null): connector is OwlActionConnector {
   if (!connector || connector.type !== 'document-intelligence') return false;
   const candidate = connector as Partial<OwlActionConnector>;
-  return typeof candidate.snoozeAction === 'function'
-    && typeof candidate.submitActionFeedback === 'function';
+  return typeof candidate.completeTask === 'function'
+    && typeof candidate.snoozeAction === 'function'
+    && typeof candidate.submitActionFeedback === 'function'
+    && typeof candidate.fetchActionTask === 'function'
+    && typeof candidate.executeSourceAction === 'function';
 }
 
 export function parseOwlTaskActionInput(value: unknown): OwlTaskActionInput | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const body = value as Record<string, unknown>;
 
+  if (body.action === 'complete') {
+    return { action: 'complete' };
+  }
+  if (
+    body.action === 'source_action'
+    && typeof body.sourceActionId === 'string'
+    && body.sourceActionId.trim()
+  ) {
+    return { action: 'source_action', sourceActionId: body.sourceActionId.trim() };
+  }
   if (body.action === 'not_an_action') {
     return { action: 'not_an_action' };
   }
@@ -115,6 +138,15 @@ function localMetadataAfter(
   input: OwlTaskActionInput,
   now: string,
 ): Record<string, unknown> {
+  if (input.action === 'complete') {
+    const withoutSnooze = { ...current };
+    delete withoutSnooze.owlSnoozedUntil;
+    return {
+      ...withoutSnooze,
+      owlStatus: 'completed',
+      owlUpdatedAt: now,
+    };
+  }
   if (input.action === 'snooze') {
     return {
       ...current,
@@ -123,11 +155,32 @@ function localMetadataAfter(
       owlUpdatedAt: now,
     };
   }
-  if (input.action === 'not_an_action') {
-    const withoutSnooze = { ...current };
-    delete withoutSnooze.owlSnoozedUntil;
+  if (input.action === 'source_action') {
     return {
-      ...withoutSnooze,
+      ...current,
+      owlUpdatedAt: now,
+    };
+  }
+  if (input.action === 'not_an_action') {
+    const withoutRejectedAction = { ...current };
+    for (const key of [
+      'actionType',
+      'category',
+      'amount',
+      'urgency',
+      'confidence',
+      'actionReady',
+      'reviewState',
+      'reviewUrl',
+      'primaryActionId',
+      'primaryActionLabel',
+      'primaryActionUrl',
+      'owlSnoozedUntil',
+    ]) {
+      delete withoutRejectedAction[key];
+    }
+    return {
+      ...withoutRejectedAction,
       owlStatus: 'not_an_action',
       owlDisposition: 'not_an_action',
       owlUpdatedAt: now,
@@ -164,15 +217,40 @@ async function performOwlTaskActionNow(
     );
   }
 
+  let refreshedTask: TaskItem | null = null;
   try {
-    if (input.action === 'snooze') {
+    if (input.action === 'complete') {
+      await connector.completeTask(task.sourceId);
+    } else if (input.action === 'source_action') {
+      const sourceAction = findSourceAction(
+        parseTaskMetadataCompat(task.metadata).metadata,
+        input.sourceActionId,
+      );
+      if (!sourceAction) {
+        throw new OwlTaskActionError(
+          'This OWL source action is no longer available; refresh the task',
+          'SOURCE_ACTION_UNAVAILABLE',
+          409,
+        );
+      }
+      refreshedTask = await connector.executeSourceAction(task.sourceId, sourceAction);
+      refreshedTask ??= await connector.fetchActionTask(task.sourceId);
+      if (!refreshedTask) {
+        throw new Error('OWL accepted the source action but did not return the refreshed action');
+      }
+    } else if (input.action === 'snooze') {
       await connector.snoozeAction(task.sourceId, input.until);
     } else if (input.action === 'not_an_action') {
       await connector.submitActionFeedback(task.sourceId, { feedback_type: 'not_an_action' });
     } else {
-      await connector.submitActionFeedback(task.sourceId, feedbackFor(input));
+      refreshedTask = await connector.submitActionFeedback(task.sourceId, feedbackFor(input));
+      refreshedTask ??= await connector.fetchActionTask(task.sourceId);
+      if (!refreshedTask) {
+        throw new Error('OWL accepted the correction but did not return the refreshed action');
+      }
     }
   } catch (error) {
+    if (error instanceof OwlTaskActionError) throw error;
     throw new OwlTaskActionError(
       error instanceof Error ? error.message : 'OWL write-back failed',
       'REMOTE_WRITE_FAILED',
@@ -197,28 +275,47 @@ async function performOwlTaskActionNow(
     );
   }
   const metadata = localMetadataAfter(
-    parseTaskMetadataCompat(latestTask.metadata).metadata,
+    refreshedTask?.metadata
+      ?? parseTaskMetadataCompat(latestTask.metadata).metadata,
     input,
     now,
   );
-  const status = input.action === 'not_an_action'
+  const sourceActionReady = refreshedTask?.metadata.actionReady !== false;
+  const status = input.action === 'complete'
+    ? 'done'
+    : input.action === 'source_action'
+      ? sourceActionReady
+        ? refreshedTask?.status ?? latestTask.status
+        : 'cancelled'
+    : input.action === 'not_an_action'
     ? 'cancelled'
     : input.action === 'snooze'
       ? 'todo'
       : latestTask.status;
-  const statusReason = input.action === 'not_an_action'
+  const statusReason = input.action === 'complete'
+    ? 'completed'
+    : input.action === 'source_action'
+      ? status === 'done'
+        ? 'completed'
+        : status === 'cancelled'
+          ? 'not_planned'
+          : latestTask.statusReason
+    : input.action === 'not_an_action'
     ? 'not_planned'
     : input.action === 'snooze'
       ? null
       : latestTask.statusReason;
   const snoozedUntil = input.action === 'snooze'
     ? input.until
-    : input.action === 'not_an_action'
+    : input.action === 'complete' || input.action === 'not_an_action'
       ? null
+      : input.action === 'source_action'
+        ? refreshedTask?.snoozedUntil ?? null
       : latestTask.snoozedUntil;
-  const priority = input.action === 'correct' && input.field === 'urgency'
-    ? input.value
-    : latestTask.priority;
+  const priority = refreshedTask?.priority
+    ?? (input.action === 'correct' && input.field === 'urgency'
+      ? input.value
+      : latestTask.priority);
 
   const updates: Partial<typeof tasks.$inferInsert> = {
     metadata,
@@ -226,7 +323,31 @@ async function performOwlTaskActionNow(
     lastSyncedAt: now,
     syncStatus: 'synced',
   };
-  if (input.action === 'snooze') {
+  if (refreshedTask) {
+    Object.assign(updates, {
+      title: refreshedTask.title,
+      description: refreshedTask.description ?? null,
+      dueDate: refreshedTask.dueDate ?? null,
+      priority,
+    });
+  }
+  if (input.action === 'source_action') {
+    Object.assign(updates, {
+      status,
+      statusReason,
+      snoozedUntil,
+      completedAt: status === 'done' || status === 'cancelled'
+        ? refreshedTask?.completedAt || now
+        : null,
+    });
+  } else if (input.action === 'complete') {
+    Object.assign(updates, {
+      status,
+      statusReason,
+      snoozedUntil,
+      completedAt: now,
+    });
+  } else if (input.action === 'snooze') {
     Object.assign(updates, {
       status,
       statusReason,
@@ -244,6 +365,32 @@ async function performOwlTaskActionNow(
     updates.priority = priority;
   }
 
+  function findSourceAction(
+    metadata: Record<string, unknown>,
+    sourceActionId: string,
+  ): DocSourceAction | null {
+    if (!Array.isArray(metadata.sourceActions)) return null;
+    const action = metadata.sourceActions.find((candidate) => (
+      !!candidate
+      && typeof candidate === 'object'
+      && !Array.isArray(candidate)
+      && (candidate as Record<string, unknown>).id === sourceActionId
+    ));
+    if (!action || typeof action !== 'object' || Array.isArray(action)) return null;
+    const record = action as Record<string, unknown>;
+    return typeof record.id === 'string'
+      && typeof record.label === 'string'
+      && record.method === 'POST'
+      && typeof record.url === 'string'
+      ? {
+          id: record.id,
+          label: record.label,
+          method: 'POST',
+          url: record.url,
+        }
+      : null;
+  }
+
   await db.update(tasks).set(updates).where(eq(tasks.id, taskId));
 
   return {
@@ -254,6 +401,9 @@ async function performOwlTaskActionNow(
     metadata,
     updatedAt: now,
     syncStatus: 'synced',
+    title: refreshedTask?.title,
+    description: refreshedTask ? refreshedTask.description ?? null : undefined,
+    dueDate: refreshedTask ? refreshedTask.dueDate ?? null : undefined,
   };
 }
 

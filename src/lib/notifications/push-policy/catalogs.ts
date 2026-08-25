@@ -128,6 +128,16 @@ export const GITHUB_NOTIFICATION_TYPES = [
 
 export const DOCUMENT_INTELLIGENCE_NOTIFICATION_TYPES = [
   {
+    key: 'owl_needs_review',
+    label: 'OWL item needs review',
+    description: 'OWL needs document-specific review before an action is ready for execution.',
+    defaultLevel: 'heads_up',
+    pushEligible: true,
+    pushRecommendation: 'off',
+    sensitivity: 'sensitive',
+    defaultPreview: 'title_only',
+  },
+  {
     key: 'missing_statement',
     label: 'Missing statement',
     description: 'An expected document statement has not arrived.',

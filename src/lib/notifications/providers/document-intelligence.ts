@@ -54,6 +54,61 @@ export const documentIntelligenceNotificationProvider: NotificationSourceProvide
   displayName: 'OWL',
   signatures: [
     {
+      key: 'owl-needs-review',
+      matches(notification) {
+        return typeof metadataOf(notification).reviewState === 'string';
+      },
+      present(notification) {
+        const metadata = metadataOf(notification);
+        const reviewUrl = normalizeNotificationUrl(metadata.reviewUrl);
+        const previewUrl = normalizeNotificationUrl(metadata.previewUrl);
+        const actions: NotificationActionDraft[] = [
+          ...(reviewUrl ? [{
+            actionType: 'open_url',
+            label: 'Review/correct in OWL',
+            icon: 'external-link',
+            variant: 'primary' as const,
+            isPrimary: true,
+            payload: { url: reviewUrl },
+            opensExternal: true,
+            createdBy: 'connector' as const,
+          }] : []),
+          ...(previewUrl ? [{
+            actionType: 'open_url',
+            label: 'View in Paperless-ngx',
+            icon: 'external-link',
+            variant: 'secondary' as const,
+            payload: { url: previewUrl },
+            opensExternal: true,
+            createdBy: 'connector' as const,
+          }] : []),
+        ];
+
+        return {
+          title: notification.title,
+          body: notification.body ?? null,
+          category: notification.category,
+          templateKey: 'owl_needs_review',
+          metadata,
+          presentation: {
+            sourceName: 'OWL',
+            providerSignature: 'owl-needs-review',
+            richContent: {
+              primaryText: typeof metadata.documentTitle === 'string'
+                ? metadata.documentTitle
+                : undefined,
+              secondaryText: 'Not executable in Mission Control yet',
+              links: actions.map(action => ({
+                label: action.label,
+                url: String(action.payload?.url),
+              })),
+            },
+          },
+          actions,
+        };
+      },
+    },
+    {
       key: 'missing-statement',
       matches(notification) {
         return typeof metadataOf(notification).daysOverdue === 'number';

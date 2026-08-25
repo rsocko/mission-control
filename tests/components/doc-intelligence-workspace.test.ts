@@ -60,6 +60,7 @@ describe('document workspace semantics', () => {
     const filtered = filterDocumentTasks(tasks, {
       view: 'review-sign',
       actionType: 'all',
+      category: 'all',
       urgency: 'medium',
       correspondent: 'all',
       query: 'beta',
@@ -68,16 +69,48 @@ describe('document workspace semantics', () => {
     expect(filtered.map((item) => item.id)).toEqual(['review']);
   });
 
-  it('sorts missing values last and groups by document metadata', () => {
+  it('keeps deadlines first regardless of the selected secondary sort', () => {
     const sorted = sortDocumentTasks(tasks, 'amount', 'asc');
     const descending = sortDocumentTasks(tasks, 'amount', 'desc');
     const grouped = groupDocumentTasks(sorted, 'correspondent');
 
-    expect(sorted.map((item) => item.id)).toEqual(['sign', 'pay', 'review']);
-    expect(descending.map((item) => item.id)).toEqual(['pay', 'sign', 'review']);
+    expect(sorted.map((item) => item.id)).toEqual(['pay', 'review', 'sign']);
+    expect(descending.map((item) => item.id)).toEqual(['pay', 'review', 'sign']);
     expect(grouped.map((group) => [group.label, group.tasks.length])).toEqual([
       ['Acme', 2],
       ['Beta', 1],
+    ]);
+  });
+
+  it('uses action type and category only after deadlines tie', () => {
+    const tied = [
+      task('archive', { actionType: 'archive', category: 'records' }, { dueDate: '2026-08-25' }),
+      task('pay-tied', { actionType: 'pay', category: 'finance' }, { dueDate: '2026-08-25' }),
+      task('respond-tied', { actionType: 'respond', category: 'correspondence' }, { dueDate: '2026-08-25' }),
+    ];
+
+    expect(sortDocumentTasks(tied, 'priority', 'asc').map((item) => item.id)).toEqual([
+      'respond-tied',
+      'pay-tied',
+      'archive',
+    ]);
+  });
+
+  it('groups deadlines into the planning horizon buckets', () => {
+    const horizonTasks = [
+      task('overdue', {}, { dueDate: '2026-08-20' }),
+      task('today', {}, { dueDate: '2026-08-21' }),
+      task('week', {}, { dueDate: '2026-08-28' }),
+      task('later', {}, { dueDate: '2026-08-29' }),
+      task('none', {}, { dueDate: null }),
+    ];
+
+    expect(groupDocumentTasks(horizonTasks, 'dueDate', NOW).map((group) => group.label)).toEqual([
+      'Overdue',
+      'Due today',
+      'Next 7 days',
+      'Later',
+      'No due date',
     ]);
   });
 
@@ -89,6 +122,7 @@ describe('document workspace semantics', () => {
       correspondent: { name: 'Acme' },
     }))).toEqual({
       actionType: undefined,
+      category: undefined,
       urgency: undefined,
       amount: undefined,
       correspondent: undefined,

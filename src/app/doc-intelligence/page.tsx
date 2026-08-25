@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Archive,
   CalendarClock,
   CalendarPlus,
   CheckCircle2,
@@ -11,6 +12,7 @@ import {
   FileText,
   Filter,
   FolderOpen,
+  ExternalLink,
   Inbox,
   Loader2,
   MessageSquareText,
@@ -48,7 +50,7 @@ import {
   type SortDirection,
 } from './document-workspace';
 
-type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'review' | 'sign' | 'schedule';
+type ActionTypeFilter = 'all' | 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
 type UrgencyFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
 
 interface ViewDefinition {
@@ -61,6 +63,7 @@ const ACTION_TYPE_META: Record<string, { label: string; icon: LucideIcon; color:
   pay: { label: 'Pay', icon: CreditCard, color: 'text-green-400' },
   respond: { label: 'Respond', icon: PenLine, color: 'text-blue-400' },
   file: { label: 'File', icon: FolderOpen, color: 'text-amber-400' },
+  archive: { label: 'Archive', icon: Archive, color: 'text-slate-400' },
   review: { label: 'Review', icon: FileText, color: 'text-purple-400' },
   sign: { label: 'Sign', icon: FileCheck2, color: 'text-cyan-400' },
   schedule: { label: 'Schedule', icon: CalendarPlus, color: 'text-orange-400' },
@@ -110,15 +113,18 @@ export default function DocIntelligencePage() {
   const [tasks, setTasks] = useState<DocumentTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reviewAlerts, setReviewAlerts] = useState<Array<{ id: string; title: string; reviewUrl: string }>>([]);
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [selectedView, setSelectedView] = useState<DocumentView>('all');
   const [actionTypeFilter, setActionTypeFilter] = useState<ActionTypeFilter>('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>('all');
   const [correspondentFilter, setCorrespondentFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<DocumentSort>('priority');
+  const [sortBy, setSortBy] = useState<DocumentSort>('dueDate');
   const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [groupBy, setGroupBy] = useState<DocumentGroup>('none');
+  const [groupBy, setGroupBy] = useState<DocumentGroup>('dueDate');
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const taskSelection = useTaskSelection({
     selectedTaskId,
@@ -142,13 +148,46 @@ export default function DocIntelligencePage() {
   const fetchTasks = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
+    setLoadError(null);
 
     try {
-      const res = await fetch('/api/tasks?source=document-intelligence&openOnly=true&sortBy=priority&sortDirection=asc&limit=200');
+      const [res, notificationsResponse] = await Promise.all([
+        fetch('/api/tasks?source=document-intelligence&openOnly=true&sortBy=dueDate&sortDirection=asc&limit=200'),
+        fetch('/api/notifications?source=document-intelligence&limit=200').catch(() => null),
+      ]);
       if (!res.ok) throw new Error(`Failed to fetch: ${res.status}`);
       const data = await res.json();
       setTasks(data.tasks || []);
+      if (notificationsResponse?.ok) {
+        const notificationData = await notificationsResponse.json() as {
+          notifications?: Array<{
+            id?: unknown;
+            title?: unknown;
+            templateKey?: unknown;
+            metadata?: unknown;
+          }>;
+        };
+        setReviewAlerts((notificationData.notifications || []).flatMap((notification) => {
+          if (
+            notification.templateKey !== 'owl_needs_review'
+            || typeof notification.id !== 'string'
+            || typeof notification.title !== 'string'
+            || !notification.metadata
+            || typeof notification.metadata !== 'object'
+            || Array.isArray(notification.metadata)
+          ) {
+            return [];
+          }
+          const reviewUrl = normalizeExternalUrl(
+            (notification.metadata as Record<string, unknown>).reviewUrl,
+          );
+          return reviewUrl ? [{ id: notification.id, title: notification.title, reviewUrl }] : [];
+        }));
+      } else {
+        setReviewAlerts([]);
+      }
     } catch {
+      setLoadError('OWL document actions could not be loaded. Check the connector and try again.');
       toast.error('OWL could not load Paperless-ngx document actions');
     } finally {
       setLoading(false);
@@ -165,10 +204,11 @@ export default function DocIntelligencePage() {
   const filteredTasks = useMemo(() => filterDocumentTasks(tasks, {
     view: selectedView,
     actionType: actionTypeFilter,
+    category: categoryFilter,
     urgency: urgencyFilter,
     correspondent: correspondentFilter,
     query: searchQuery,
-  }), [tasks, selectedView, actionTypeFilter, urgencyFilter, correspondentFilter, searchQuery]);
+  }), [tasks, selectedView, actionTypeFilter, categoryFilter, urgencyFilter, correspondentFilter, searchQuery]);
 
   const sortedTasks = useMemo(
     () => sortDocumentTasks(filteredTasks, sortBy, sortDirection),
@@ -177,11 +217,16 @@ export default function DocIntelligencePage() {
   const taskGroups = useMemo(() => groupDocumentTasks(sortedTasks, groupBy), [sortedTasks, groupBy]);
   const viewCounts = useMemo(() => countDocumentViews(tasks), [tasks]);
   const actionTypeCounts = useMemo(() => countByMetadata(tasks, 'actionType'), [tasks]);
+  const categoryCounts = useMemo(() => countByMetadata(tasks, 'category'), [tasks]);
   const urgencyCounts = useMemo(() => countByMetadata(tasks, 'urgency'), [tasks]);
   const correspondentCounts = useMemo(() => countByMetadata(tasks, 'correspondent'), [tasks]);
   const correspondents = useMemo(
     () => Object.entries(correspondentCounts).sort(([left], [right]) => left.localeCompare(right)),
     [correspondentCounts],
+  );
+  const categories = useMemo(
+    () => Object.entries(categoryCounts).sort(([left], [right]) => left.localeCompare(right)),
+    [categoryCounts],
   );
   const selectedTask = useMemo(
     () => tasks.find((task) => task.id === selectedTaskId) ?? null,
@@ -194,6 +239,7 @@ export default function DocIntelligencePage() {
 
   const activeFilters = [
     actionTypeFilter !== 'all' ? ACTION_TYPE_META[actionTypeFilter]?.label : null,
+    categoryFilter !== 'all' ? categoryFilter : null,
     urgencyFilter !== 'all' ? `${urgencyFilter} urgency` : null,
     correspondentFilter !== 'all' ? correspondentFilter : null,
   ].filter((value): value is string => !!value);
@@ -221,6 +267,7 @@ export default function DocIntelligencePage() {
   function clearFilters() {
     setSelectedView('all');
     setActionTypeFilter('all');
+    setCategoryFilter('all');
     setUrgencyFilter('all');
     setCorrespondentFilter('all');
     setSearchQuery('');
@@ -252,8 +299,33 @@ export default function DocIntelligencePage() {
           </button>
         </div>
         <p className="mt-2 text-xs text-[var(--text-muted)]">
-          Review pending OWL actions with their Paperless-ngx document context.
+          Execute trusted OWL actions here; review document uncertainty in OWL.
         </p>
+
+        {reviewAlerts.length > 0 && (
+          <aside
+            aria-label="OWL items needing review"
+            className="mt-3 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2"
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="text-xs font-semibold text-amber-300">
+                {reviewAlerts.length} item{reviewAlerts.length === 1 ? '' : 's'} need review in OWL
+              </span>
+              {reviewAlerts.slice(0, 3).map((alert) => (
+                <a
+                  key={alert.id}
+                  href={alert.reviewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-amber-200 underline-offset-2 hover:underline"
+                >
+                  <ExternalLink size={11} aria-hidden="true" />
+                  {alert.title.replace(/^Needs review in OWL:\s*/i, '')}
+                </a>
+              ))}
+            </div>
+          </aside>
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <div className="relative min-w-[180px] max-w-md flex-1">
@@ -317,6 +389,9 @@ export default function DocIntelligencePage() {
             actionTypeFilter={actionTypeFilter}
             onActionTypeChange={setActionTypeFilter}
             actionTypeCounts={actionTypeCounts}
+            categoryFilter={categoryFilter}
+            onCategoryChange={setCategoryFilter}
+            categories={categories}
             urgencyFilter={urgencyFilter}
             onUrgencyChange={setUrgencyFilter}
             urgencyCounts={urgencyCounts}
@@ -336,6 +411,9 @@ export default function DocIntelligencePage() {
             actionTypeFilter={actionTypeFilter}
             onActionTypeChange={setActionTypeFilter}
             actionTypeCounts={actionTypeCounts}
+            categoryFilter={categoryFilter}
+            onCategoryChange={setCategoryFilter}
+            categories={categories}
             urgencyFilter={urgencyFilter}
             onUrgencyChange={setUrgencyFilter}
             urgencyCounts={urgencyCounts}
@@ -353,6 +431,19 @@ export default function DocIntelligencePage() {
             <div className="flex items-center justify-center py-16">
               <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />
               <span className="ml-2 text-sm text-[var(--text-muted)]">OWL is loading document actions...</span>
+            </div>
+          ) : loadError ? (
+            <div role="alert" className="mx-auto flex max-w-md flex-col items-center px-6 py-16 text-center">
+              <ShieldAlert size={24} className="text-amber-400" aria-hidden="true" />
+              <p className="mt-3 text-sm font-medium text-[var(--text-primary)]">OWL actions unavailable</p>
+              <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{loadError}</p>
+              <button
+                type="button"
+                onClick={() => void fetchTasks()}
+                className="mt-4 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              >
+                Try again
+              </button>
             </div>
           ) : filteredTasks.length === 0 ? (
             <EmptyState hasFilters={hasFilters} onClearFilters={clearFilters} />
@@ -435,6 +526,9 @@ function DocumentFilters({
   actionTypeFilter,
   onActionTypeChange,
   actionTypeCounts,
+  categoryFilter,
+  onCategoryChange,
+  categories,
   urgencyFilter,
   onUrgencyChange,
   urgencyCounts,
@@ -448,6 +542,9 @@ function DocumentFilters({
   actionTypeFilter: ActionTypeFilter;
   onActionTypeChange: (filter: ActionTypeFilter) => void;
   actionTypeCounts: Record<string, number>;
+  categoryFilter: string;
+  onCategoryChange: (filter: string) => void;
+  categories: Array<[string, number]>;
   urgencyFilter: UrgencyFilter;
   onUrgencyChange: (filter: UrgencyFilter) => void;
   urgencyCounts: Record<string, number>;
@@ -480,6 +577,34 @@ function DocumentFilters({
           ))}
         </div>
       </CollapsibleSection>
+
+      {categories.length > 0 && (
+        <CollapsibleSection
+          title="Category"
+          collapsed={!!collapsedSections.category}
+          onToggle={() => toggleSection('category')}
+        >
+          <div className="space-y-0.5 px-1 pb-2">
+            <FilterRow
+              label="All categories"
+              count={categories.reduce((sum, [, count]) => sum + count, 0)}
+              active={categoryFilter === 'all'}
+              icon={<Filter size={13} />}
+              onClick={() => onCategoryChange('all')}
+            />
+            {categories.map(([category, count]) => (
+              <FilterRow
+                key={category}
+                label={category}
+                count={count}
+                active={categoryFilter === category}
+                icon={<Filter size={13} />}
+                onClick={() => onCategoryChange(category)}
+              />
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
 
       <CollapsibleSection
         title="Action type"
@@ -564,6 +689,16 @@ function DocumentFilters({
       )}
     </div>
   );
+}
+
+function normalizeExternalUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 function FilterRow({

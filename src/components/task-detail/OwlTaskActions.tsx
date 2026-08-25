@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Loader2, Moon, Save } from 'lucide-react';
+import { AlertTriangle, Check, CheckCircle2, ExternalLink, Loader2, Moon, Save } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -18,6 +18,7 @@ const ACTION_TYPES = [
   ['sign', 'Sign'],
   ['schedule', 'Schedule'],
   ['file', 'File'],
+  ['archive', 'Archive'],
   ['review', 'Review'],
 ] as const;
 
@@ -61,6 +62,8 @@ export function OwlTaskActions({
   const [amount, setAmount] = useState(
     typeof metadata.amount === 'number' ? String(metadata.amount) : '',
   );
+  const primaryActionUrl = normalizeActionUrl(metadata.primaryActionUrl);
+  const reviewUrl = normalizeActionUrl(metadata.reviewUrl || metadata.docHubUrl);
 
   const snoozeLabel = useMemo(() => {
     if (!snoozedUntil) return null;
@@ -105,6 +108,72 @@ export function OwlTaskActions({
           These actions update OWL and its Paperless-backed action queue.
         </p>
       </div>
+
+      {(primaryActionUrl || reviewUrl) && (
+        <div className="flex flex-wrap gap-2">
+          {primaryActionUrl && (
+            <a
+              href={primaryActionUrl}
+              target={primaryActionUrl.startsWith('http') ? '_blank' : undefined}
+              rel={primaryActionUrl.startsWith('http') ? 'noopener noreferrer' : undefined}
+              className="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white transition-colors hover:bg-[var(--accent-hover)]"
+            >
+              <ExternalLink size={13} aria-hidden="true" />
+              {metadata.primaryActionLabel || 'Open action'}
+            </a>
+          )}
+          {reviewUrl && (
+            <a
+              href={reviewUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonClass}
+            >
+              <ExternalLink size={13} aria-hidden="true" />
+              Review/correct in OWL
+            </a>
+          )}
+        </div>
+      )}
+
+      {metadata.sourceActions && metadata.sourceActions.length > 0 && (
+        <div className="flex flex-wrap gap-2" aria-label="OWL source actions">
+          {metadata.sourceActions.map((sourceAction) => (
+            <button
+              key={sourceAction.id}
+              type="button"
+              disabled={busyAction !== null}
+              onClick={() => void submit(
+                `source:${sourceAction.id}`,
+                { action: 'source_action', sourceActionId: sourceAction.id },
+                'OWL refreshed the source action.',
+              )}
+              className={buttonClass}
+            >
+              {busyAction === `source:${sourceAction.id}`
+                ? <Loader2 size={13} className="animate-spin" />
+                : <CheckCircle2 size={13} />}
+              {sourceAction.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <button
+        type="button"
+        disabled={busyAction !== null}
+        onClick={() => void submit(
+          'complete',
+          { action: 'complete' },
+          'Marked done in OWL.',
+        )}
+        className={`${buttonClass} border-emerald-500/30 text-emerald-300`}
+      >
+        {busyAction === 'complete'
+          ? <Loader2 size={13} className="animate-spin" />
+          : <CheckCircle2 size={13} />}
+        Mark done in OWL
+      </button>
 
       <div className="flex flex-wrap gap-2">
         <button
@@ -190,7 +259,7 @@ export function OwlTaskActions({
 
       <details className="rounded-lg border border-[var(--border-subtle)]">
         <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
-          Correct extraction
+          Quick source feedback
         </summary>
         <div className="grid gap-3 border-t border-[var(--border-subtle)] p-3 sm:grid-cols-3">
           <div className="flex flex-col gap-1">
@@ -315,4 +384,16 @@ export function OwlTaskActions({
       </div>
     </div>
   );
+}
+
+function normalizeActionUrl(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' || url.protocol === 'tel:'
+      ? url.toString()
+      : null;
+  } catch {
+    return null;
+  }
 }

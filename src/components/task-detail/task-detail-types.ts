@@ -149,7 +149,21 @@ export interface TaskDetailMetadata {
   correspondent?: string;
   amount?: number;
   actionType?: string;
+  category?: string;
   urgency?: string;
+  confidence?: number;
+  actionReady?: boolean;
+  reviewState?: string;
+  reviewUrl?: string;
+  primaryActionId?: string;
+  primaryActionLabel?: string;
+  primaryActionUrl?: string;
+  sourceActions?: Array<{
+    id: string;
+    label: string;
+    method: 'POST';
+    url: string;
+  }>;
   owlStatus?: string;
   owlDisposition?: string;
   owlSnoozedUntil?: string;

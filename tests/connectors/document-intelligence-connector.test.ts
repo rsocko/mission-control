@@ -198,6 +198,29 @@ describe('DocumentIntelligenceConnector', () => {
       expect(tasks[0].metadata.previewLabel).toBe('View in Paperless-ngx');
     });
 
+    it('gates explicit not-ready actions while preserving legacy rows without readiness fields', async () => {
+      const baseAction = {
+        document_id: 42,
+        document_title: 'Invoice #123',
+        action_type: 'pay',
+        urgency: 'high',
+        summary: 'Pay invoice',
+        status: 'pending',
+        created_at: '2026-07-20T12:00:00Z',
+      };
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([
+        { ...baseAction, id: 'ready', action_ready: true, review_state: 'ready' },
+        { ...baseAction, id: 'review', action_ready: false, review_state: 'needs_review' },
+        { ...baseAction, id: 'legacy' },
+      ]), { status: 200 }));
+      const connector = await createConnector();
+
+      const tasks = (await Array.fromAsync(connector.fetchTasks())).flat();
+
+      expect(tasks.map((task) => task.sourceId)).toEqual(['ready', 'legacy']);
+      expect(String(fetchMock.mock.calls[0][0])).not.toContain('include_not_ready');
+    });
+
     it('paginates the flat OWL response by offset and uses updated_at freshness', async () => {
       const firstPage = Array.from({ length: 100 }, (_, index) => ({
         id: `act-${index + 1}`,
@@ -289,6 +312,39 @@ describe('DocumentIntelligenceConnector', () => {
         corrected_amount: 125.5,
       });
     });
+
+    it('executes only same-action source mutations declared by OWL', async () => {
+      fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 'act-1',
+        document_id: 42,
+        document_title: 'Invoice',
+        action_type: 'file',
+        urgency: 'low',
+        summary: 'File invoice',
+        status: 'completed',
+        action_ready: true,
+        review_state: 'ready',
+        created_at: '2026-08-20T12:00:00Z',
+      }), { status: 200 }));
+      const connector = await createConnector();
+
+      const task = await connector.executeSourceAction('act-1', {
+        id: 'file_document',
+        label: 'File in Paperless',
+        method: 'POST',
+        url: '/api/action-queue/actions/act-1/file',
+      });
+
+      expect(task?.status).toBe('done');
+      expect(String(fetchMock.mock.calls[0][0])).toContain('/api/action-queue/actions/act-1/file');
+      expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+      await expect(connector.executeSourceAction('act-1', {
+        id: 'bad',
+        label: 'Bad',
+        method: 'POST',
+        url: 'https://attacker.example/api/action-queue/actions/act-1/file',
+      })).rejects.toThrow('invalid action URL');
+    });
   });
 
   describe('fetchTriageItems', () => {
@@ -321,6 +377,34 @@ describe('DocumentIntelligenceConnector', () => {
   });
 
   describe('fetchNotifications', () => {
+    it('maps not-ready action candidates to exact OWL review notifications', async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify([{
+          id: 'review-1',
+          document_id: 42,
+          document_title: 'Uncertain invoice',
+          action_type: 'pay',
+          urgency: 'medium',
+          summary: 'Confirm whether this is payable',
+          status: 'pending',
+          action_ready: false,
+          review_state: 'needs_review',
+          needs_review_url: 'https://owl.example/needs-review/review-1',
+          created_at: '2026-08-20T12:00:00Z',
+        }]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
+      const connector = await createConnector();
+
+      const notifications = await connector.fetchNotifications();
+
+      expect(String(fetchMock.mock.calls[0][0])).toContain('include_not_ready=true');
+      expect(notifications).toContainEqual(expect.objectContaining({
+        templateKey: 'owl_needs_review',
+        actionUrl: 'https://owl.example/needs-review/review-1',
+      }));
+    });
+
     it('maps missing statements to notifications with preview metadata', async () => {
       const statements = [{
         id: 1,
@@ -334,6 +418,7 @@ describe('DocumentIntelligenceConnector', () => {
 
       // First call returns statements, second returns empty EOBs
       fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify(statements), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }));
 
@@ -361,6 +446,7 @@ describe('DocumentIntelligenceConnector', () => {
 
       // First call returns empty statements, second returns EOBs
       fetchMock
+        .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify([]), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify(eobs), { status: 200 }));
 

@@ -65,7 +65,7 @@ describe('OWL task lifecycle controls', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('Correct extraction'));
+    fireEvent.click(screen.getByText('Quick source feedback'));
     fireEvent.change(screen.getByLabelText('Urgency'), { target: { value: 'low' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save urgency' }));
 
@@ -73,5 +73,61 @@ describe('OWL task lifecycle controls', () => {
       expect(screen.getByText('Paperless mutation failed')).toBeInTheDocument();
     });
     expect(screen.queryByText('Urgency correction sent to OWL.')).not.toBeInTheDocument();
+  });
+
+  it('renders contextual CTA and source actions without coupling CTA to completion', async () => {
+    const onTaskUpdate = vi.fn();
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      task: {
+        status: 'done',
+        statusReason: 'completed',
+        snoozedUntil: null,
+        priority: 'low',
+        metadata: { owlStatus: 'completed' },
+        updatedAt: '2026-08-24T13:00:00.000Z',
+        syncStatus: 'synced',
+      },
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <OwlTaskActions
+        taskId="task-1"
+        metadata={{
+          actionType: 'file',
+          primaryActionLabel: 'Open filing instructions',
+          primaryActionUrl: 'https://owl.example/instructions',
+          reviewUrl: 'https://owl.example/needs-review/task-1',
+          sourceActions: [{
+            id: 'file_document',
+            label: 'File in Paperless',
+            method: 'POST',
+            url: '/api/action-queue/actions/task-1/file',
+          }],
+        }}
+        onTaskUpdate={onTaskUpdate}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'Open filing instructions' })).toHaveAttribute(
+      'href',
+      'https://owl.example/instructions',
+    );
+    expect(screen.getByRole('link', { name: 'Review/correct in OWL' })).toHaveAttribute(
+      'href',
+      'https://owl.example/needs-review/task-1',
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'File in Paperless' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1/owl',
+      expect.objectContaining({
+        body: JSON.stringify({
+          action: 'source_action',
+          sourceActionId: 'file_document',
+        }),
+      }),
+    ));
   });
 });

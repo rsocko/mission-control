@@ -16,6 +16,7 @@ export interface DocumentTask {
 
 export interface DocumentTaskMetadata {
   actionType?: string;
+  category?: string;
   urgency?: string;
   amount?: number;
   correspondent?: string;
@@ -45,6 +46,7 @@ export type SortDirection = 'asc' | 'desc';
 export interface DocumentFilters {
   view: DocumentView;
   actionType: string;
+  category: string;
   urgency: string;
   correspondent: string;
   query: string;
@@ -79,6 +81,7 @@ export function parseDocumentTaskMetadata(metadata: string | null | undefined): 
     const value = parsed as Record<string, unknown>;
     return {
       actionType: typeof value.actionType === 'string' ? value.actionType : undefined,
+      category: typeof value.category === 'string' ? value.category : undefined,
       urgency: typeof value.urgency === 'string' ? value.urgency : undefined,
       amount: typeof value.amount === 'number' && Number.isFinite(value.amount) ? value.amount : undefined,
       correspondent: typeof value.correspondent === 'string' ? value.correspondent : undefined,
@@ -115,14 +118,18 @@ function startOfLocalDay(date: Date): number {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-export function dueDateBucket(task: DocumentTask, now = new Date()): 'overdue' | 'today' | 'upcoming' | 'no-date' {
+export function dueDateBucket(
+  task: DocumentTask,
+  now = new Date(),
+): 'overdue' | 'today' | 'next-7-days' | 'later' | 'no-date' {
   const dueAt = localDateTimestamp(task.dueDate);
   if (dueAt === null) return 'no-date';
   const today = startOfLocalDay(now);
   const dueDay = startOfLocalDay(new Date(dueAt));
   if (dueDay < today) return 'overdue';
   if (dueDay === today) return 'today';
-  return 'upcoming';
+  if (dueDay <= today + (7 * 24 * 60 * 60 * 1000)) return 'next-7-days';
+  return 'later';
 }
 
 function matchesView(task: DocumentTask, view: DocumentView, now: Date): boolean {
@@ -150,6 +157,7 @@ export function filterDocumentTasks(
     const metadata = parseDocumentTaskMetadata(task.metadata);
     if (!matchesView(task, filters.view, now)) return false;
     if (filters.actionType !== 'all' && metadata.actionType !== filters.actionType) return false;
+    if (filters.category !== 'all' && metadata.category !== filters.category) return false;
     if (filters.urgency !== 'all' && metadata.urgency !== filters.urgency) return false;
     if (filters.correspondent !== 'all' && metadata.correspondent !== filters.correspondent) return false;
     if (!query) return true;
@@ -184,6 +192,26 @@ export function sortDocumentTasks(
   return [...tasks].sort((left, right) => {
     const leftMetadata = parseDocumentTaskMetadata(left.metadata);
     const rightMetadata = parseDocumentTaskMetadata(right.metadata);
+    const dueDateComparison = compareNullable(
+      localDateTimestamp(left.dueDate),
+      localDateTimestamp(right.dueDate),
+      (a, b) => a - b,
+      'asc',
+    );
+    if (dueDateComparison) return dueDateComparison;
+
+    const actionComparison = actionTypeRank(leftMetadata.actionType)
+      - actionTypeRank(rightMetadata.actionType);
+    if (actionComparison) return actionComparison;
+
+    const categoryComparison = compareNullable(
+      leftMetadata.category,
+      rightMetadata.category,
+      (a, b) => a.localeCompare(b),
+      'asc',
+    );
+    if (categoryComparison) return categoryComparison;
+
     let comparison = 0;
     if (sortBy === 'priority') {
       comparison = (PRIORITY_ORDER[leftMetadata.urgency ?? left.priority] ?? 5)
@@ -214,7 +242,11 @@ export function sortDocumentTasks(
   });
 }
 
-function groupValue(task: DocumentTask, groupBy: Exclude<DocumentGroup, 'none'>): { id: string; label: string } {
+function groupValue(
+  task: DocumentTask,
+  groupBy: Exclude<DocumentGroup, 'none'>,
+  now: Date,
+): { id: string; label: string } {
   const metadata = parseDocumentTaskMetadata(task.metadata);
   if (groupBy === 'actionType') {
     const value = metadata.actionType || 'other';
@@ -228,21 +260,26 @@ function groupValue(task: DocumentTask, groupBy: Exclude<DocumentGroup, 'none'>)
     const value = metadata.correspondent || 'Unknown correspondent';
     return { id: value, label: value };
   }
-  const bucket = dueDateBucket(task);
+  const bucket = dueDateBucket(task, now);
   const labels = {
     overdue: 'Overdue',
     today: 'Due today',
-    upcoming: 'Upcoming',
+    'next-7-days': 'Next 7 days',
+    later: 'Later',
     'no-date': 'No due date',
   };
   return { id: bucket, label: labels[bucket] };
 }
 
-export function groupDocumentTasks(tasks: DocumentTask[], groupBy: DocumentGroup): DocumentTaskGroup[] {
+export function groupDocumentTasks(
+  tasks: DocumentTask[],
+  groupBy: DocumentGroup,
+  now = new Date(),
+): DocumentTaskGroup[] {
   if (groupBy === 'none') return [{ id: 'all', label: null, tasks }];
   const groups = new Map<string, DocumentTaskGroup>();
   for (const task of tasks) {
-    const value = groupValue(task, groupBy);
+    const value = groupValue(task, groupBy, now);
     const group = groups.get(value.id) ?? { id: value.id, label: value.label, tasks: [] };
     group.tasks.push(task);
     groups.set(value.id, group);
@@ -252,7 +289,7 @@ export function groupDocumentTasks(tasks: DocumentTask[], groupBy: DocumentGroup
 
 export function countByMetadata(
   tasks: DocumentTask[],
-  key: 'actionType' | 'urgency' | 'correspondent',
+  key: 'actionType' | 'category' | 'urgency' | 'correspondent',
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const task of tasks) {
@@ -260,6 +297,17 @@ export function countByMetadata(
     if (typeof value === 'string' && value) counts[value] = (counts[value] ?? 0) + 1;
   }
   return counts;
+}
+
+function actionTypeRank(actionType: string | undefined): number {
+  if (actionType === 'pay'
+    || actionType === 'respond'
+    || actionType === 'sign'
+    || actionType === 'schedule') {
+    return 0;
+  }
+  if (actionType === 'file' || actionType === 'archive') return 2;
+  return 1;
 }
 
 export function countDocumentViews(tasks: DocumentTask[], now = new Date()): Record<DocumentView, number> {

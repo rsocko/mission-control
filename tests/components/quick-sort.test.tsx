@@ -66,7 +66,7 @@ describe('Quick Sort planning horizon queue', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Set Time Horizon/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Set Horizon/i }));
 
     expect(screen.getByText('Tasks not yet placed in Next, Soon, Later, or Someday')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))

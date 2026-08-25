@@ -403,7 +403,7 @@ export function TaskPriorityField({
           disabled={!canEditPlanningHorizon}
         >
           <SelectTrigger
-            aria-label="Planning horizon"
+            aria-label="Horizon"
             title={!canEditPlanningHorizon
               ? planningHorizonBlockedReason
               : planningHorizonSaveLabel}

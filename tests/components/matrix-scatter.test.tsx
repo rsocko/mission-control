@@ -150,9 +150,9 @@ describe('MatrixScatter', () => {
       />,
     );
 
-    expect(screen.getByText('1 using planning horizon')).toBeInTheDocument();
+    expect(screen.getByText('1 using horizon')).toBeInTheDocument();
     expect(screen.getByRole('button', {
-      name: /Plan next, High priority, Next planning horizon/,
+      name: /Plan next, High priority, Next horizon/,
     })).toBeInTheDocument();
     expect(screen.queryByText(/missing date and horizon/)).not.toBeInTheDocument();
   });

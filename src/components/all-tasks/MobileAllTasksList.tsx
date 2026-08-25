@@ -558,7 +558,7 @@ export function MobileTaskFilters({
               ))}
             </div>
           </FilterSection>
-          <FilterSection title="Planning horizon">
+          <FilterSection title="Horizon">
             <div className="grid grid-cols-2 gap-2">
               <FilterOptionButton
                 active={planningHorizonFilters.length === 0}

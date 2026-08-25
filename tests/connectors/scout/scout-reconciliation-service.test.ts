@@ -49,6 +49,7 @@ function testDatabase() {
       id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, connector_type TEXT NOT NULL,
       connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
       status TEXT DEFAULT 'todo' NOT NULL, priority TEXT DEFAULT 'none' NOT NULL,
+      planning_horizon TEXT,
       due_date TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
       parent_id TEXT, depth INTEGER DEFAULT 0 NOT NULL, is_checklist_item INTEGER DEFAULT 0 NOT NULL,
       source_list_id TEXT, source_list_name TEXT, assignee TEXT, micro_status TEXT, status_reason TEXT,

@@ -112,7 +112,7 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
           >
             <div className="px-4 pb-4 space-y-2">
               {GROUPS.map(({ key, title, icon, color, sortable, description, learnMoreHref }) => {
-                const tasks = suggestions[key];
+                const tasks = suggestions[key] ?? [];
                 if (tasks.length === 0) return null;
                 return (
                   <MobileSuggestionAccordion

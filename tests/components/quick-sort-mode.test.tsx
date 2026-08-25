@@ -426,8 +426,7 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
   });
 
-  it('snoozes skipped tasks for 30 minutes before dismissing them', async () => {
-    const now = Date.now();
+  it('records skipped tasks without mutating task fields', async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ success: true })),
     );
@@ -439,17 +438,15 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
-    if (!patchCall) throw new Error('Expected task snooze request');
+    if (!patchCall) throw new Error('Expected Quick Sort skip request');
     const body = JSON.parse(String(patchCall[1]?.body));
-    const snoozedUntil = new Date(body.patch.snoozedUntil).getTime();
-    expect(snoozedUntil).toBeGreaterThanOrEqual(now + 30 * 60 * 1000);
-    expect(snoozedUntil).toBeLessThanOrEqual(Date.now() + 30 * 60 * 1000);
+    expect(body).toMatchObject({ action: 'skipped', patch: {} });
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
 
     unmount();
   });
 
-  it('keeps a task visible when snoozing it fails', async () => {
+  it('keeps a task visible when recording its skip fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
     render(<QuickSortMode />);
 
@@ -460,23 +457,51 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.dismiss).not.toHaveBeenCalled();
   });
 
-  it('surfaces policy feedback when a skip gesture is blocked', async () => {
-    const blockedReason = 'Snooze is controlled by the upstream task source';
+  it('allows skip when the upstream source blocks snooze', async () => {
     mocks.taskEditPolicy = makeTaskEditPolicy({
       sourceModel: 'remote-mirror',
       mutations: { snoozedUntil: 'blocked' },
-      reasons: { snoozedUntil: blockedReason },
+      reasons: { snoozedUntil: 'Snooze is controlled by the upstream task source' },
     });
-    const fetchMock = vi.fn<typeof fetch>();
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ operation: { state: 'applied' } })),
+    );
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickSortMode />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
     fireEvent.click(screen.getByRole('button', { name: 'Simulate swipe up' }));
 
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith(blockedReason));
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(mocks.dismiss).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+    const operationCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/tasks/quick-sort/operations',
+    );
+    expect(JSON.parse(String(operationCall?.[1]?.body))).toMatchObject({
+      action: 'skipped',
+      patch: {},
+    });
+  });
+
+  it('reloads authoritative queue membership when undoing a skip', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith('/undo')) {
+        return new Response(JSON.stringify({ undone: true }));
+      }
+      return new Response(JSON.stringify({ operation: { state: 'applied' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
+    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+
+    const undoButton = await screen.findByRole('button', { name: 'Undo Skip' });
+    await waitFor(() => expect(undoButton).toBeEnabled());
+    fireEvent.click(undoButton);
+
+    await waitFor(() => expect(mocks.reloadQueue).toHaveBeenCalledOnce());
+    expect(mocks.restoreTask).not.toHaveBeenCalled();
   });
 
   it('undoes the latest operation with Ctrl+Z and restores its queue position', async () => {

@@ -226,7 +226,6 @@ export default function QuickSortActions({
   const delegatePermission = quadrantPermission(['planningHorizon', 'microStatus']);
   const eliminatePermission = quadrantPermission(['status', 'statusReason']);
   const canMarkDone = canEditTaskField(task.editPolicy, 'status');
-  const canSkip = canEditTaskField(task.editPolicy, 'snoozedUntil');
   const dispositionOptions = TASK_DISPOSITION_OPTIONS.filter((option) => (
     option.value !== 'active'
     && option.value !== task.localDisposition
@@ -461,8 +460,7 @@ export default function QuickSortActions({
         </button>
         <button
           onClick={() => { triggerHaptic('light'); onSkip(); }}
-          disabled={busy || !canSkip}
-          title={!canSkip ? taskFieldBlockedReason(task.editPolicy, 'snoozedUntil') : undefined}
+          disabled={busy}
           className="flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-2 py-2 text-sm text-[var(--text-secondary)] transition-colors active:bg-[var(--surface-3)] disabled:opacity-50"
         >
           <SkipForward size={14} />

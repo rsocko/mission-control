@@ -11,7 +11,7 @@ export interface SortOption {
 
 export const DEFAULT_SORT_OPTIONS: readonly SortOption[] = [
   { value: 'priority', label: 'Priority' },
-  { value: 'planningHorizon', label: 'Planning Horizon' },
+  { value: 'planningHorizon', label: 'Horizon' },
   { value: 'effort', label: 'Effort' },
   { value: 'smartScore', label: 'Smart Score' },
   { value: 'dueDate', label: 'Due Date' },

@@ -146,9 +146,9 @@ function taskColor(
 
 function formatTimingSignal(item: ProjectedMatrixTask): string {
   if (item.urgencyState === 'invalid') return 'Invalid due date';
-  if (item.urgencyState === 'none') return 'No due date or planning horizon';
+  if (item.urgencyState === 'none') return 'No due date or horizon';
   if (item.urgencyState === 'horizon' && item.task.planningHorizon) {
-    return `${PLANNING_HORIZON_LABELS[item.task.planningHorizon]} planning horizon`;
+    return `${PLANNING_HORIZON_LABELS[item.task.planningHorizon]} horizon`;
   }
   if (item.urgencyState === 'overdue') return `${Math.abs(item.daysUntilDue ?? 0)}d overdue`;
   if (item.urgencyState === 'today') return 'Due today';
@@ -315,7 +315,7 @@ function TaskTable({
     { key: 'priority', label: 'Priority' },
     { key: 'urgency', label: 'Urgency' },
     { key: 'dueDate', label: 'Due date' },
-    { key: 'planningHorizon', label: 'Planning horizon' },
+    { key: 'planningHorizon', label: 'Horizon' },
     { key: 'effort', label: 'Effort' },
     { key: 'smartScore', label: 'Smart score' },
     { key: 'project', label: 'Project' },
@@ -604,7 +604,7 @@ export function MatrixScatter({
               <SelectItem value="urgency">Urgency</SelectItem>
               <SelectItem value="status">Status</SelectItem>
               <SelectItem value="priority">Priority</SelectItem>
-              <SelectItem value="planning-horizon">Planning horizon</SelectItem>
+              <SelectItem value="planning-horizon">Horizon</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -654,7 +654,7 @@ export function MatrixScatter({
           <span>{projection.needsData.missingEffort.length} missing effort</span>
         )}
         {projection.horizonFallback.length > 0 && (
-          <span>{projection.horizonFallback.length} using planning horizon</span>
+          <span>{projection.horizonFallback.length} using horizon</span>
         )}
         {projection.needsData.missingPlanningSignal.length > 0 && (
           <span>{projection.needsData.missingPlanningSignal.length} missing date and horizon</span>
@@ -955,7 +955,7 @@ export function MatrixScatter({
             {([
               ['Missing priority', projection.needsData.missingPriority],
               ['Missing effort', projection.needsData.missingEffort],
-              ['Missing date and planning horizon', projection.needsData.missingPlanningSignal],
+              ['Missing date and horizon', projection.needsData.missingPlanningSignal],
               ['Invalid due date', projection.needsData.invalidDueDate],
             ] satisfies Array<[string, Task[]]>).map(([label, groupTasks]) => {
               if (!groupTasks.length) return null;

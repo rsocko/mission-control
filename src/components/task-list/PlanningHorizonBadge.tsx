@@ -1,4 +1,4 @@
-import { Clock3 } from 'lucide-react';
+import { Telescope } from 'lucide-react';
 import type { PlanningHorizon } from '@/types';
 import {
   PLANNING_HORIZON_LABELS,
@@ -21,7 +21,7 @@ export function PlanningHorizonBadge({
       className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${visual.badgeClass} ${className}`}
       title={`Planning horizon: ${label}`}
     >
-      <Clock3 size={10} aria-hidden="true" />
+      <Telescope size={10} aria-hidden="true" />
       {label}
     </span>
   );

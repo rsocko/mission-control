@@ -38,7 +38,8 @@ describe('planning horizon visuals', () => {
     expect(screen.getByText('Someday').previousElementSibling).toHaveClass('bg-slate-400');
     expect(screen.getByText('Not set').previousElementSibling).toHaveClass('border');
     expect(screen.getByTitle('Planning horizon: Later')).toHaveClass('text-violet-400');
-    expect(container.querySelector('.lucide-clock-3')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-telescope')).toBeInTheDocument();
+    expect(container.querySelector('.lucide-clock-3')).not.toBeInTheDocument();
     expect(container.querySelector('.lucide-layers-3')).not.toBeInTheDocument();
   });
 });

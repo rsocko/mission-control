@@ -1,6 +1,6 @@
 'use client';
 
-import { Clock3 } from 'lucide-react';
+import { Telescope } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
   PLANNING_HORIZON_LABELS,
@@ -20,7 +20,7 @@ export function PlanningHorizonFieldLabel({ className }: { className?: string })
           aria-label={`About planning horizon. ${PLANNING_HORIZON_HELP}`}
           className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
         >
-          <Clock3 size={13} aria-hidden="true" />
+          <Telescope size={13} aria-hidden="true" />
         </span>
       </Tooltip>
       <span>Planning horizon</span>

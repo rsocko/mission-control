@@ -57,7 +57,7 @@ const CATEGORIES: CategoryDefinition[] = [
   { type: 'assignee', label: 'Assignee', icon: CircleUserRound },
   { type: 'tag', label: 'Tag', icon: Tag },
   { type: 'priority', label: 'Priority', icon: Zap },
-  { type: 'horizon', label: 'Planning Horizon', icon: Telescope },
+  { type: 'horizon', label: 'Horizon', icon: Telescope },
   { type: 'status', label: 'Status', icon: Check },
   { type: 'source', label: 'Source', icon: Unplug },
   { type: 'list', label: 'List', icon: List },

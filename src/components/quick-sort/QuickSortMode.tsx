@@ -50,7 +50,7 @@ const MODE_LABELS: Record<QuickSortQueueMode, string> = {
   quadrant: 'Pick Quadrant',
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
-  no_planning_horizon: 'Set Time Horizon',
+  no_planning_horizon: 'Set Horizon',
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
@@ -537,15 +537,15 @@ export default function QuickSortMode() {
           patch: { planningHorizon },
           operationMode: 'no_planning_horizon',
           action: 'applied',
-          label: 'Set planning horizon',
+          label: 'Set horizon',
         });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
-        toast.success(`Planning horizon set to ${planningHorizon}`);
+        toast.success(`Horizon set to ${planningHorizon}`);
       } catch {
-        toast.error('Failed to set planning horizon');
+        toast.error('Failed to set horizon');
       }
       setBusy(false);
     },

@@ -19,7 +19,7 @@ export function PlanningHorizonBadge({
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-xs font-medium ${visual.badgeClass} ${className}`}
-      title={`Planning horizon: ${label}`}
+      title={`Horizon: ${label}`}
     >
       <Telescope size={10} aria-hidden="true" />
       {label}

@@ -28,7 +28,7 @@ export function getFilterTokenDisplayValue(token: FilterToken, projects: HubProj
       list: 'No list',
       phase: 'No phase',
       priority: 'No priority',
-      horizon: 'No planning horizon',
+      horizon: 'No horizon',
       project: 'No project',
       tag: 'No tags',
     };

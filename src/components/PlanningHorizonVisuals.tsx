@@ -14,16 +14,16 @@ const PLANNING_HORIZON_HELP = 'Broad planning intent, independent of due dates.'
 export function PlanningHorizonFieldLabel({ className }: { className?: string }) {
   return (
     <span className={cn('flex items-center gap-1.5', className)}>
-      <Tooltip content="Planning horizon" subtitle={PLANNING_HORIZON_HELP}>
+      <Tooltip content="Horizon" subtitle={PLANNING_HORIZON_HELP}>
         <span
           tabIndex={0}
-          aria-label={`About planning horizon. ${PLANNING_HORIZON_HELP}`}
+          aria-label={`About horizon. ${PLANNING_HORIZON_HELP}`}
           className="inline-flex rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
         >
           <Telescope size={13} aria-hidden="true" />
         </span>
       </Tooltip>
-      <span>Planning horizon</span>
+      <span>Horizon</span>
     </span>
   );
 }

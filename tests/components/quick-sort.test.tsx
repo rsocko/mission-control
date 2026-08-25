@@ -488,7 +488,7 @@ describe('Quick Sort planning horizon queue', () => {
     expect(getQuickSortSwipeAction({ ...gesture, hasUndo: false })).toBe('snapBack');
   });
 
-  it('blocks skip gestures during updates and routes policy-blocked skips to feedback', () => {
+  it('blocks skip gestures only during updates', () => {
     const gesture = {
       axis: 'y' as const,
       offsetX: 0,
@@ -500,11 +500,10 @@ describe('Quick Sort planning horizon queue', () => {
     };
 
     expect(getQuickSortSwipeAction({ ...gesture, busy: true })).toBe('snapBack');
-    expect(getQuickSortSwipeAction({ ...gesture, canSkip: false })).toBe('blockedSkip');
+    expect(getQuickSortSwipeAction(gesture)).toBe('skip');
   });
 
-  it('describes unavailable skip gestures and disables the handle while busy', () => {
-    const blockedReason = 'Snooze is controlled by the upstream task source';
+  it('keeps skip available for source-owned tasks and disables the handle while busy', () => {
     const { rerender } = render(
       <QuickSortCard
         task={{
@@ -512,7 +511,7 @@ describe('Quick Sort planning horizon queue', () => {
           editPolicy: makeTaskEditPolicy({
             sourceModel: 'remote-mirror',
             mutations: { snoozedUntil: 'blocked' },
-            reasons: { snoozedUntil: blockedReason },
+            reasons: { snoozedUntil: 'Snooze is controlled by the upstream task source' },
           }),
         }}
         mode="no_priority"
@@ -524,8 +523,8 @@ describe('Quick Sort planning horizon queue', () => {
     );
 
     const handle = screen.getByTestId('quick-sort-swipe-handle');
-    expect(handle).toHaveAccessibleName(expect.stringContaining(`Skip unavailable. ${blockedReason}`));
-    expect(handle).toHaveAttribute('title', blockedReason);
+    expect(handle).toHaveAccessibleName(expect.stringContaining('Swipe up to skip.'));
+    expect(handle).not.toHaveAttribute('title');
 
     rerender(
       <QuickSortCard

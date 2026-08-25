@@ -54,13 +54,13 @@ const MODE_LABELS: Record<QuickSortQueueMode, string> = {
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
-const SKIP_SNOOZE_MS = 30 * 60 * 1000;
 const QUEUE_REVALIDATE_MS = 60 * 1000;
 
 interface QuickSortHistoryEntry {
   operationId: string;
   task: QuickSortQueueTask;
   queueIndex: number;
+  action: 'applied' | 'suggestion_accepted' | 'skipped';
   label: string;
   contextKey: string;
   counted: boolean;
@@ -183,6 +183,7 @@ export default function QuickSortMode() {
       operationId,
       task,
       queueIndex,
+      action,
       label,
       contextKey: historyContextKey,
       counted: action !== 'skipped',
@@ -206,7 +207,11 @@ export default function QuickSortMode() {
         const data = await response.json().catch(() => null) as { error?: string } | null;
         throw new Error(data?.error ?? `Failed to undo ${operation.label}`);
       }
-      restoreTask(operation.task, operation.queueIndex);
+      if (operation.action === 'skipped') {
+        await reloadQueue();
+      } else {
+        restoreTask(operation.task, operation.queueIndex);
+      }
       setHistory((current) => current.filter(
         (entry) => entry.operationId !== operation.operationId,
       ));
@@ -230,7 +235,7 @@ export default function QuickSortMode() {
       undoInFlightRef.current = false;
       setBusy(false);
     }
-  }, [busy, lastOperation, refreshCounts, restoreTask]);
+  }, [busy, lastOperation, refreshCounts, reloadQueue, restoreTask]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -291,16 +296,12 @@ export default function QuickSortMode() {
     async (taskId: string) => {
       if (busy || !mode) return;
       const task = tasks.find((candidate) => candidate.id === taskId);
-      if (!canEditTaskField(task?.editPolicy, 'snoozedUntil')) {
-        toast.error(taskFieldBlockedReason(task?.editPolicy, 'snoozedUntil'));
-        return;
-      }
+      if (!task) return;
       setBusy(true);
       try {
-        const snoozedUntil = new Date(Date.now() + SKIP_SNOOZE_MS).toISOString();
         await runOperation({
-          task: task!,
-          patch: { snoozedUntil },
+          task,
+          patch: {},
           operationMode: mode,
           action: 'skipped',
           label: 'Skip',

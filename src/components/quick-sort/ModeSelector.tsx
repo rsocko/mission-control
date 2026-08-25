@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, Grid2X2, Layers3, Loader2, Sigma, Tag, Zap } from 'lucide-react';
+import { AlertCircle, Clock3, Grid2X2, Loader2, Sigma, Tag, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import type { QuickSortModeCounts, QuickSortQueueMode } from '@/lib/hooks/useQuickSortData';
@@ -49,7 +49,7 @@ const MODES: Array<{
     id: 'no_planning_horizon',
     label: 'Set Time Horizon',
     description: 'Tasks not yet placed in Now, Next, Later, or Someday',
-    icon: Layers3,
+    icon: Clock3,
     accentClass: 'border-emerald-700/60 bg-emerald-950/40 hover:bg-emerald-950/70',
     badgeClass: 'bg-emerald-900/60 text-emerald-300',
   },

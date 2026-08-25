@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
@@ -23,7 +24,7 @@ import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-forma
 import { EffortSelect } from '@/components/EffortBadge';
 import type { QuickAddDestination } from './quick-add-types';
 import type { PlanningHorizon } from '@/types';
-import { PLANNING_HORIZONS, PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
+import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 
 interface Tag {
   id: string;
@@ -742,7 +743,7 @@ export function AddTaskModal({
               </Select>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Planning horizon</label>
+                <PlanningHorizonFieldLabel className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
                 <Select
                   value={planningHorizon ?? 'none'}
                   onValueChange={(value) => setPlanningHorizon(
@@ -753,13 +754,13 @@ export function AddTaskModal({
                     aria-label="Planning horizon"
                     className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
                   >
-                    <SelectValue />
+                    <PlanningHorizonOption value={planningHorizon} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Not set</SelectItem>
+                    <SelectItem value="none"><PlanningHorizonOption value={null} /></SelectItem>
                     {PLANNING_HORIZONS.map((value) => (
                       <SelectItem key={value} value={value}>
-                        {PLANNING_HORIZON_LABELS[value]}
+                        <PlanningHorizonOption value={value} />
                       </SelectItem>
                     ))}
                   </SelectContent>

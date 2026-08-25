@@ -30,7 +30,10 @@ import {
 import { cn } from '@/lib/utils';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getTaskPriorityVisual, getTaskStatusVisual } from '@/lib/constants/task-formatting';
-import { PLANNING_HORIZON_LABELS } from '@/lib/tasks/planning-horizon';
+import {
+  PLANNING_HORIZON_LABELS,
+  PLANNING_HORIZON_VISUALS,
+} from '@/lib/tasks/planning-horizon';
 import type {
   DashboardProjectViewModel as HubProject,
   DashboardTaskViewModel as Task,
@@ -76,13 +79,6 @@ const HORIZON_RANK: Record<string, number> = {
   later: 2,
   next: 3,
   now: 4,
-};
-
-const HORIZON_COLORS: Record<string, string> = {
-  now: '#ef4444',
-  next: '#f59e0b',
-  later: '#3b82f6',
-  someday: '#64748b',
 };
 
 function urgencyColor(urgency: number | null): string {
@@ -140,7 +136,11 @@ function taskColor(
   if (mode === 'urgency') return urgencyColor(item.urgency);
   if (mode === 'status') return item.task.status === 'waiting' ? '#f59e0b' : getTaskStatusVisual(item.task.status).color;
   if (mode === 'priority') return getTaskPriorityVisual(item.task.priority).color;
-  if (mode === 'planning-horizon') return HORIZON_COLORS[item.task.planningHorizon ?? ''] ?? '#64748b';
+  if (mode === 'planning-horizon') {
+    return item.task.planningHorizon
+      ? PLANNING_HORIZON_VISUALS[item.task.planningHorizon].color
+      : 'var(--text-tertiary)';
+  }
   return projectColors(item.task, projects)[0] ?? '#64748b';
 }
 

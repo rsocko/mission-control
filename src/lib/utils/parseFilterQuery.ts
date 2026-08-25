@@ -5,7 +5,7 @@
  *   title:text       – title substring match
  *   tag:slug         – exact tag slug match
  *   priority:level   – priority value (high / medium / low / critical / urgent)
- *   horizon:value    – planning horizon (now / next / later / someday / none)
+ *   horizon:value    – planning horizon (next / soon / later / someday / none)
  *   status:value     – status value (todo / in_progress / done / cancelled …)
  *   source:type      – connector type (github-issues / todoist …)
  *   list:name        – source list name substring

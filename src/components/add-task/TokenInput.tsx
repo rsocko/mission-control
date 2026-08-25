@@ -147,7 +147,7 @@ function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'duration' });
   }
 
-  const horizonRegex = /(?<!\\)~(?:now|next|later|someday)\b/gi;
+  const horizonRegex = /(?<!\\)~(?:next|soon|later|someday)\b/gi;
   while ((m = horizonRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'horizon' });
   }

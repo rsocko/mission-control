@@ -356,8 +356,8 @@ function getOptions(
       ];
     case 'horizon':
       return [
-        { value: 'now', label: 'Now' },
         { value: 'next', label: 'Next' },
+        { value: 'soon', label: 'Soon' },
         { value: 'later', label: 'Later' },
         { value: 'someday', label: 'Someday' },
         { value: 'none', label: 'Not set' },

@@ -20,6 +20,7 @@ function task(overrides: Partial<Task> = {}): Task {
     status: 'todo',
     microStatus: null,
     priority: 'high',
+    planningHorizon: overrides.planningHorizon ?? null,
     dueDate: TODAY,
     connectorType: 'local',
     connectorInstanceId: 'local',
@@ -30,7 +31,6 @@ function task(overrides: Partial<Task> = {}): Task {
     sourceId: null,
     effort: 3,
     smartScore: 64,
-    hasDescription: false,
     editPolicy: editableTaskPolicy,
     ...overrides,
     localDisposition: overrides.localDisposition ?? 'active',
@@ -59,12 +59,12 @@ describe('matrix scales', () => {
   });
 
   it('uses planning horizons only when no due date is present', () => {
-    expect(urgencyScore(null, TODAY, 'now')).toMatchObject({
+    expect(urgencyScore(null, TODAY, 'next')).toMatchObject({
       value: 85,
       state: 'horizon',
       source: 'planning-horizon',
     });
-    expect(urgencyScore(null, TODAY, 'next').value).toBe(55);
+    expect(urgencyScore(null, TODAY, 'soon').value).toBe(55);
     expect(urgencyScore(null, TODAY, 'later').value).toBe(25);
     expect(urgencyScore(null, TODAY, 'someday').value).toBe(5);
     expect(urgencyScore(TODAY, TODAY, 'someday')).toMatchObject({
@@ -72,7 +72,7 @@ describe('matrix scales', () => {
       state: 'today',
       source: 'due-date',
     });
-    expect(urgencyScore('not-a-date', TODAY, 'now')).toMatchObject({
+    expect(urgencyScore('not-a-date', TODAY, 'next')).toMatchObject({
       value: null,
       state: 'invalid',
       source: 'due-date',
@@ -102,7 +102,7 @@ describe('matrix projection', () => {
       task({ id: 'effort', effort: null }),
       task({ id: 'date', dueDate: 'invalid' }),
       task({ id: 'no-date', dueDate: null }),
-      task({ id: 'horizon', dueDate: null, planningHorizon: 'now' }),
+      task({ id: 'horizon', dueDate: null, planningHorizon: 'next' }),
     ];
     const urgency = projectTasks(tasks, 'priority-urgency', TODAY);
     expect(urgency.tasks.map((item) => item.task.id)).toContain('no-date');

@@ -68,7 +68,7 @@ describe('Quick Sort planning horizon queue', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Set Time Horizon/i }));
 
-    expect(screen.getByText('Tasks not yet placed in Now, Next, Later, or Someday')).toBeDefined();
+    expect(screen.getByText('Tasks not yet placed in Next, Soon, Later, or Someday')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
       .toEqual(['1', '1', '2', '3', '4']);
     expect(onSelect).toHaveBeenCalledWith('no_planning_horizon');
@@ -131,14 +131,18 @@ describe('Quick Sort planning horizon queue', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Now' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Soon' }));
     fireEvent.click(screen.getByRole('button', { name: 'Later' }));
     fireEvent.click(screen.getByRole('button', { name: 'Someday' }));
 
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveClass('text-emerald-400');
+    expect(screen.getByRole('button', { name: 'Soon' })).toHaveClass('text-blue-400');
+    expect(screen.getByRole('button', { name: 'Later' })).toHaveClass('text-violet-400');
+    expect(screen.getByRole('button', { name: 'Someday' })).toHaveClass('text-slate-400');
     expect(onApplyPlanningHorizon.mock.calls).toEqual([
-      ['now'],
       ['next'],
+      ['soon'],
       ['later'],
       ['someday'],
     ]);

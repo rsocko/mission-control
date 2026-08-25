@@ -182,9 +182,9 @@ export async function GET(request: Request) {
             : eq(tasks.priority, groupValue));
           break;
         case 'planningHorizon': {
-          const horizonByLabel: Record<string, 'now' | 'next' | 'later' | 'someday'> = {
-            Now: 'now',
+          const horizonByLabel: Record<string, 'next' | 'soon' | 'later' | 'someday'> = {
             Next: 'next',
+            Soon: 'soon',
             Later: 'later',
             Someday: 'someday',
           };

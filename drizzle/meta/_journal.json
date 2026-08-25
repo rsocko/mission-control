@@ -834,6 +834,13 @@
       "when": 1787616000000,
       "tag": "0118_add_planning_horizon",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1787624700000,
+      "tag": "0119_replace_now_horizon_with_soon",
+      "breakpoints": true
     }
   ]
 }

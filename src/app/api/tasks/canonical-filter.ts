@@ -26,7 +26,7 @@ import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 
 const VALID_STATUSES = new Set(['todo', 'in_progress', 'done', 'cancelled']);
 const VALID_PRIORITIES = new Set(['critical', 'high', 'medium', 'low', 'none']);
-const VALID_PLANNING_HORIZONS = new Set(['now', 'next', 'later', 'someday']);
+const VALID_PLANNING_HORIZONS = new Set(['next', 'soon', 'later', 'someday']);
 const VALID_LOCAL_DISPOSITIONS = new Set(['active', 'handled', 'dismissed']);
 
 export interface CanonicalTaskFilterConditions {

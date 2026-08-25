@@ -76,13 +76,13 @@ describe('My Day view helpers', () => {
     const items = [
       makeItem({ taskId: 'unset', planningHorizon: null }),
       makeItem({ taskId: 'later', planningHorizon: 'later' }),
-      makeItem({ taskId: 'now', planningHorizon: 'now' }),
+      makeItem({ taskId: 'next', planningHorizon: 'next' }),
     ];
 
     expect(sortMyDayItems(items, 'planningHorizon', 'asc').map((item) => item.taskId))
-      .toEqual(['now', 'later', 'unset']);
+      .toEqual(['next', 'later', 'unset']);
     expect(groupMyDayItems(items, 'planningHorizon', []).map((group) => group.label))
-      .toEqual(['Now', 'Later', 'Not set']);
+      .toEqual(['Next', 'Later', 'Not set']);
   });
 
   it('sorts completed tasks by most recent completion without mutating the source array', () => {

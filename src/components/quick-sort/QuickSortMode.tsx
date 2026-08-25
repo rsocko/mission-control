@@ -368,7 +368,7 @@ export default function QuickSortMode() {
       }> = {
         do_first: {
           fields: ['priority', 'planningHorizon'],
-          patch: { priority: 'high', planningHorizon: 'now' },
+          patch: { priority: 'high', planningHorizon: 'next' },
           label: 'Do first',
           message: 'Moved to Do first',
         },
@@ -381,7 +381,7 @@ export default function QuickSortMode() {
         delegate: {
           fields: ['planningHorizon', 'microStatus'],
           patch: {
-            planningHorizon: 'now',
+            planningHorizon: 'next',
             microStatus: 'waiting_on_someone',
           },
           label: 'Delegate',

@@ -5,8 +5,8 @@ export const NO_EFFORT_GROUP_LABEL = 'No Effort';
 export const NO_PLANNING_HORIZON_GROUP_LABEL = 'Not set';
 
 const PLANNING_HORIZON_GROUP_LABELS = {
-  now: 'Now',
   next: 'Next',
+  soon: 'Soon',
   later: 'Later',
   someday: 'Someday',
 } as const;

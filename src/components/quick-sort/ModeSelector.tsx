@@ -48,7 +48,7 @@ const MODES: Array<{
   {
     id: 'no_planning_horizon',
     label: 'Set Time Horizon',
-    description: 'Tasks not yet placed in Now, Next, Later, or Someday',
+    description: 'Tasks not yet placed in Next, Soon, Later, or Someday',
     icon: Telescope,
     accentClass: 'border-emerald-700/60 bg-emerald-950/40 hover:bg-emerald-950/70',
     badgeClass: 'bg-emerald-900/60 text-emerald-300',

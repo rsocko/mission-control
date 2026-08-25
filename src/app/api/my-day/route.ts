@@ -403,7 +403,7 @@ export async function GET(request: Request) {
       overdueRows,
       dueTodayRows,
       dueThisWeekRows,
-      planningNowRows,
+      planningNextRows,
       highPriorityRows,
       aiRows,
       recentlyAddedRows,
@@ -477,12 +477,12 @@ export async function GET(request: Request) {
           )
         )
         .limit(SUGGESTION_LIMIT),
-      // Broad planning intent for the current active window
+      // Tasks explicitly queued to be done next
       db.select()
         .from(tasks)
         .where(
           and(
-            eq(tasks.planningHorizon, 'now'),
+            eq(tasks.planningHorizon, 'next'),
             ne(tasks.status, 'done'),
             ne(tasks.status, 'cancelled'),
             isTopLevelTask,
@@ -574,7 +574,7 @@ export async function GET(request: Request) {
       .filter(t => !myDayTaskIds.includes(t.id))
       .map(pickSuggestionFields);
 
-    const planningNowSuggestions = planningNowRows
+    const planningNextSuggestions = planningNextRows
       .filter(t => !myDayTaskIds.includes(t.id))
       .map(pickSuggestionFields);
 
@@ -674,7 +674,7 @@ export async function GET(request: Request) {
 
     const suggestionGroups = {
       planningSignals: planningSignalSuggestions,
-      planningNow: planningNowSuggestions,
+      planningNext: planningNextSuggestions,
       yesterday: yesterdaySuggestions,
       overdue: overdueSuggestions,
       dueToday: dueTodaySuggestions,

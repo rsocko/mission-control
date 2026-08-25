@@ -1,10 +1,12 @@
+import type { PlanningHorizon } from '@/types';
+
 export interface QuickSortTaskSnapshot {
   updatedAt: string;
   status: string;
   statusReason: string | null;
   localDisposition: string;
   priority: string;
-  planningHorizon: string | null;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   completedAt: string | null;
   microStatus: string | null;

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { Sparkles, X, AlertCircle, ChevronDown } from 'lucide-react';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus } from '@/types';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { useClickOutside } from '@/lib/hooks/useClickOutside';
 
 export interface MicroStatusPickerProps {
@@ -67,7 +68,7 @@ export function MicroStatusPicker({
         >
           {currentConfig ? (
             <>
-              <span>{currentConfig.emoji}</span>
+              <MicroStatusIcon status={value as MicroStatus} size={13} />
               <span style={{ color: currentConfig.color }}>{currentConfig.label}</span>
             </>
           ) : (
@@ -100,7 +101,8 @@ export function MicroStatusPicker({
               onClick={() => handleChange(suggestion.status)}
               className="text-xs text-[var(--accent)] hover:underline font-medium"
             >
-              {MICRO_STATUS_CONFIG[suggestion.status as MicroStatus].emoji} {MICRO_STATUS_CONFIG[suggestion.status as MicroStatus].label}
+              <MicroStatusIcon status={suggestion.status as MicroStatus} size={12} className="mr-1 inline" />
+              {MICRO_STATUS_CONFIG[suggestion.status as MicroStatus].label}
             </button>
             <p className="text-xs text-[var(--text-muted)] mt-0.5 leading-tight">{suggestion.reason}</p>
           </div>
@@ -145,7 +147,7 @@ export function MicroStatusPicker({
                     value === key ? 'bg-[var(--surface-0)]' : ''
                   }`}
                 >
-                  <span className="text-sm flex-shrink-0 mt-px">{config.emoji}</span>
+                  <MicroStatusIcon status={key} size={14} className="mt-px" style={{ color: config.color }} />
                   <div className="min-w-0 flex-1">
                     <span className="block text-xs font-medium" style={{ color: config.color }}>{config.label}</span>
                     <span className="block text-xs text-[var(--text-muted)] leading-tight">{config.description}</span>

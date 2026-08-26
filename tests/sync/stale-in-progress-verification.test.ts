@@ -102,7 +102,7 @@ vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
 }));
 
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('@/lib/sync/connector-lock', () => ({

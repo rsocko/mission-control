@@ -21,8 +21,8 @@ const queueMocks = vi.hoisted(() => ({
   })),
   isSyncJobCancellationRequested: vi.fn(() => false),
   linkSyncLogToJob: vi.fn(),
-  persistSyncJobEvent: vi.fn(),
-  pruneSyncJobs: vi.fn(),
+  persistSyncJobEvent: vi.fn(() => Promise.resolve()),
+  pruneSyncJobs: vi.fn(() => Promise.resolve()),
   releaseSyncJob: vi.fn(() => true),
   renewSyncJobLease: vi.fn(() => true),
 }));
@@ -30,7 +30,31 @@ const eventMocks = vi.hoisted(() => ({
   setSyncEventPersistence: vi.fn(),
 }));
 
-vi.mock('@/lib/sync/job-queue', () => queueMocks);
+vi.mock('@/lib/sync/job-queue', () => ({
+  // Raw SQLite-only exports still used directly by SyncWorker (unchanged
+  // behavior; getSyncQueueMetrics powers the SQLite fast-path in
+  // hasPendingWork, getSyncLeaseMs is a pure config helper).
+  getSyncQueueMetrics: queueMocks.getSyncQueueMetrics,
+  getSyncLeaseMs: queueMocks.getSyncLeaseMs,
+  // Backend-selected repository (see @/db/runtime): all of SyncWorker's
+  // queue/lease operations go through this in the current implementation.
+  // The same underlying mock functions back both the raw exports above and
+  // the repository methods below, so existing assertions against
+  // `queueMocks.*` keep working unchanged.
+  getSyncJobRepository: () => Promise.resolve({
+    claimNext: queueMocks.claimNextSyncJob,
+    complete: queueMocks.completeSyncJob,
+    enqueueDueSchedules: queueMocks.enqueueDueSyncSchedules,
+    fail: queueMocks.failSyncJob,
+    getMetrics: queueMocks.getSyncQueueMetrics,
+    isCancellationRequested: queueMocks.isSyncJobCancellationRequested,
+    linkSyncLog: queueMocks.linkSyncLogToJob,
+    persistEvent: queueMocks.persistSyncJobEvent,
+    prune: queueMocks.pruneSyncJobs,
+    release: queueMocks.releaseSyncJob,
+    renewLease: queueMocks.renewSyncJobLease,
+  }),
+}));
 vi.mock('@/lib/sync/events', () => eventMocks);
 vi.mock('@/lib/logger', () => ({
   syncLogger: {
@@ -329,10 +353,10 @@ describe('sync worker runtime', () => {
       connectorName: 'To Do',
       phase: 'tasks',
     });
-    expect(queueMocks.persistSyncJobEvent).toHaveBeenCalledWith(
+    await waitFor(() => expect(queueMocks.persistSyncJobEvent).toHaveBeenCalledWith(
       'job-1',
       expect.objectContaining({ connectorId: 'todo-1' }),
-    );
+    ));
 
     finishAbandoned?.(result(true));
     await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalled());

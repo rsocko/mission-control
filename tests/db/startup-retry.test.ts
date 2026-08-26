@@ -63,6 +63,26 @@ describe('database startup', () => {
     expect(sleep).toHaveBeenCalledTimes(1);
   });
 
+  it('awaits and retries transient PostgreSQL startup failures', async () => {
+    const unavailable = Object.assign(new Error('database unavailable'), {
+      code: '57P03',
+    });
+    const initialize = vi.fn()
+      .mockRejectedValueOnce(unavailable)
+      .mockResolvedValueOnce('ready');
+    const sleep = vi.fn().mockResolvedValue(undefined);
+
+    await expect(initializeDatabaseWithRetry({
+      initialize,
+      maxAttempts: 2,
+      retryBaseMs: 10,
+      sleep,
+    })).resolves.toBe('ready');
+
+    expect(initialize).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(10);
+  });
+
   it('recovers from a real competing SQLite writer', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'mc-startup-lock-'));
     const databasePath = join(directory, 'startup.db');

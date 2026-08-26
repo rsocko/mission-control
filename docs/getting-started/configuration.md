@@ -13,7 +13,9 @@ All configuration is via environment variables in `.env.local`. Copy from `.env.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOG_LEVEL` | `info` (prod), `debug` (dev) | Logging verbosity: trace, debug, info, warn, error, fatal |
+| `MC_DATABASE_BACKEND` | `sqlite` | Relational backend: `sqlite` or `postgres` |
 | `MC_DB_PATH` | `./data/mission-control.db` | Path to SQLite database file |
+| `MC_POSTGRES_URL` | — | Server-only PostgreSQL connection secret; required for the PostgreSQL backend |
 | `MC_ALERTMANAGER_WEBHOOK_TOKEN` | — | Required scoped bearer token of at least 32 characters for Alertmanager webhook intake |
 | `MC_ALERTMANAGER_INTEGRATION_ID` | `homelab` | Stable namespace used in Alertmanager incident identity |
 
@@ -28,6 +30,13 @@ retained. Initial review thresholds are 100 ms at p95, 500 ms at p99, a 5-second
 busy timeout, 64 MiB/256 MiB WAL warning/critical sizes, and checkpoint
 starvation after 60 seconds with at least 1,000 pending frames. Configure these
 with the `MC_DB_*` variables documented in `.env.example`.
+
+### PostgreSQL
+
+PostgreSQL uses an asynchronous connection pool and PostgreSQL-specific
+migrations, search, queue, and health implementations. See
+[PostgreSQL deployment](../operations/postgresql.md) for secret handling, TLS,
+least-privilege roles, pool sizing, startup, backup, and rollback requirements.
 
 ## Microsoft Graph (Todo, Email, Calendar)
 

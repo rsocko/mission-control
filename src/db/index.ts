@@ -13,6 +13,7 @@ import {
   DatabaseTelemetryCollector,
   type DatabaseTelemetrySnapshot,
 } from '@/lib/telemetry/database';
+import { resolveDatabaseBackend } from './runtime-backend';
 
 // Keep connection creation lazy so Next.js build workers do not race to open
 // the database during static analysis.
@@ -36,6 +37,11 @@ function initDatabase(): {
   sqlite: Database.Database;
   db: BetterSQLite3Database<typeof schema>;
 } {
+  if (resolveDatabaseBackend() === 'postgres') {
+    throw new Error(
+      'This workflow still uses the SQLite compatibility API and is not supported by the PostgreSQL backend',
+    );
+  }
   if (_observedSqlite && _db) return { sqlite: _observedSqlite, db: _db };
   if (_sqlite || _observedSqlite || _db) resetPartialDatabaseInitialization();
 

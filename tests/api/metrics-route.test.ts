@@ -11,7 +11,7 @@ describe('GET /api/metrics', () => {
 
   it('returns uncached Prometheus text exposition', async () => {
     const { GET } = await import('@/app/api/metrics/route');
-    const response = GET();
+    const response = await GET();
 
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type'))

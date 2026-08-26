@@ -34,8 +34,11 @@ function validateTrace(fileList, warnings) {
 
   const unexpectedWarnings = [...warnings].filter((warning) => {
     const message = warning instanceof Error ? warning.message : String(warning);
-    return !message.includes('Failed to resolve dependency "canvas"')
-      || !/node_modules[\\/]+jsdom[\\/]+/.test(message);
+    const optionalCanvas = message.includes('Failed to resolve dependency "canvas"')
+      && /node_modules[\\/]+jsdom[\\/]+/.test(message);
+    const optionalPgNative = message.includes('Failed to resolve dependency "pg-native"')
+      && /dist[\\/]+(?:sync-worker|github-identity-operator)\.cjs/.test(message);
+    return !optionalCanvas && !optionalPgNative;
   });
   if (unexpectedWarnings.length > 0) {
     throw new AggregateError(unexpectedWarnings, 'Worker runtime dependency tracing failed');

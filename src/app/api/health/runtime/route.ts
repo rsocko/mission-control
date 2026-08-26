@@ -25,7 +25,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'limit must be an integer from 1 to 10000' }, { status: 400 });
   }
 
-  const samples = getRuntimeTelemetryHistory({
+  const samples = await getRuntimeTelemetryHistory({
     role: roleValue as RuntimeRole | undefined,
     since,
     limit,

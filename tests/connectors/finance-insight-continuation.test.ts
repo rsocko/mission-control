@@ -62,18 +62,18 @@ afterAll(() => {
 });
 
 describe.sequential('finance insight durable continuation', () => {
-  it('deduplicates delayed work and survives worker restart under the connector lease', () => {
+  it('deduplicates delayed work and survives worker restart under the connector lease', async () => {
     const active = queue.enqueueSyncJob('finance-continuation');
     expect(queue.claimNextSyncJob('worker-before-restart')?.id).toBe(active.id);
     const now = new Date();
 
-    const first = enqueueFinanceInsightContinuation({
+    const first = await enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: active.id,
       now,
       environment: { TYRION_FINANCE_INSIGHTS_CONTINUATION_DELAY_MS: '60000' },
     });
-    const replay = enqueueFinanceInsightContinuation({
+    const replay = await enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: active.id,
       now,
@@ -100,11 +100,11 @@ describe.sequential('finance insight durable continuation', () => {
     });
   });
 
-  it('rejects continuation without the active durable lease', () => {
-    expect(() => enqueueFinanceInsightContinuation({
+  it('rejects continuation without the active durable lease', async () => {
+    await expect(enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: 'not-the-active-job',
-    })).toThrow('finance_insight_continuation_lease_unavailable');
+    })).rejects.toThrow('finance_insight_continuation_lease_unavailable');
     expect(queue.getSyncQueueMetrics().queued).toBe(0);
   });
 

@@ -140,7 +140,7 @@ describe('runtime telemetry', () => {
     async (role) => {
       const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
       const monitor = new RuntimeTelemetryMonitor(role);
-      const metrics = monitor.sample(performance.now() + 20_000);
+      const metrics = await monitor.sampleAndPersist(performance.now() + 20_000);
 
       expect(metrics.buildSha).toBe('sha-test');
       expect(metrics.eventLoop.degraded).toBe(true);
@@ -206,7 +206,7 @@ describe('runtime telemetry', () => {
       expect(prepare.mock.calls.some(([sql]) =>
         String(sql).includes('ON CONFLICT(instance_id, sampled_at, resolution_seconds)'),
       )).toBe(true);
-      monitor.stop();
+      await monitor.stop();
     },
   );
 
@@ -232,7 +232,7 @@ describe('runtime telemetry', () => {
       memoryLimitBytes: 1048576,
       memoryUtilizationPercent: 50,
     });
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('records configured restart-count provenance without guessing invalid values', async () => {
@@ -243,7 +243,7 @@ describe('runtime telemetry', () => {
       restartCount: 4,
       restartCountSource: 'environment',
     });
-    configured.stop();
+    await configured.stop();
 
     process.env.MC_CONTAINER_RESTART_COUNT = 'unknown';
     const unavailable = new RuntimeTelemetryMonitor('worker');
@@ -254,7 +254,7 @@ describe('runtime telemetry', () => {
         'restartCount: MC_CONTAINER_RESTART_COUNT is not a non-negative integer',
       ]),
     });
-    unavailable.stop();
+    await unavailable.stop();
   });
 
   it('warns before requesting a restart after sustained critical memory pressure', async () => {
@@ -272,7 +272,7 @@ describe('runtime telemetry', () => {
       }),
       'Container memory pressure warning',
     );
-    warningMonitor.stop();
+    await warningMonitor.stop();
 
     writeFileSync(join(cgroupRoot, 'memory.current'), '1887437');
     process.env.MC_MEMORY_CRITICAL_SAMPLES = '2';
@@ -291,7 +291,7 @@ describe('runtime telemetry', () => {
       containerLimitBytes: 2097152,
       containerOomKillEvents: 1,
     }));
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('ignores malformed cgroup event values without emitting NaN diagnostics', async () => {
@@ -308,7 +308,7 @@ describe('runtime telemetry', () => {
     expect(metrics.container.unavailable).toEqual(
       expect.arrayContaining([expect.stringContaining('memory.events: invalid entry')]),
     );
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('keeps monitoring when telemetry persistence fails', async () => {
@@ -319,12 +319,12 @@ describe('runtime telemetry', () => {
     const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
     const monitor = new RuntimeTelemetryMonitor('worker');
 
-    expect(() => monitor.sample(performance.now() + 20_000)).not.toThrow();
+    await expect(monitor.sampleAndPersist(performance.now() + 20_000)).resolves.not.toThrow();
     expect(logger.error).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'worker' }),
       'Runtime telemetry persistence failed',
     );
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('returns parsed historical samples in query order', async () => {
@@ -345,7 +345,7 @@ describe('runtime telemetry', () => {
     }]);
     const { getRuntimeTelemetryHistory } = await import('@/lib/telemetry/runtime');
 
-    const samples = getRuntimeTelemetryHistory({
+    const samples = await getRuntimeTelemetryHistory({
       role: 'web',
       since: '2026-08-03T00:00:00.000Z',
       limit: 10,
@@ -372,7 +372,7 @@ describe('runtime telemetry', () => {
   it('releases request concurrency on completion and disconnect', async () => {
     const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
     const monitor = new RuntimeTelemetryMonitor('worker');
-    monitor.start();
+    await monitor.start();
     const requestChannel = channel('http.server.request.start');
 
     const abortedResponse = new EventEmitter();
@@ -385,7 +385,7 @@ describe('runtime telemetry', () => {
     requestChannel.publish({ response: completedResponse });
     completedResponse.emit('finish');
     expect(monitor.sample().requests).toMatchObject({ active: 0, completed: 1 });
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('retains a short-lived external-memory spike in interval high-water metrics', async () => {
@@ -405,7 +405,7 @@ describe('runtime telemetry', () => {
       .toBeGreaterThanOrEqual(current.external + 48 * 1024 ** 2);
     expect(metrics.memory.intervalHighWater.arrayBuffersBytes)
       .toBeGreaterThanOrEqual(current.arrayBuffers + 32 * 1024 ** 2);
-    monitor.stop();
+    await monitor.stop();
   });
 
   it('deserializes records written before external-memory fields were added', async () => {
@@ -480,7 +480,7 @@ describe('runtime telemetry', () => {
     `);
     const monitor = new RuntimeTelemetryMonitor('worker');
     const base = monitor.sample(performance.now() + 20_000);
-    monitor.stop();
+    await monitor.stop();
     const now = new Date('2026-08-06T12:00:00.000Z');
     const insert = database.prepare(`
       INSERT INTO runtime_telemetry_samples
@@ -524,8 +524,8 @@ describe('runtime telemetry', () => {
   it('persists a terminal sample and restart reason on shutdown', async () => {
     const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
     const monitor = new RuntimeTelemetryMonitor('worker');
-    monitor.start();
-    monitor.stop('SIGTERM');
+    await monitor.start();
+    await monitor.stop('SIGTERM');
 
     expect(run.mock.calls.some((call) => call.includes('SIGTERM'))).toBe(true);
   });
@@ -536,12 +536,12 @@ describe('runtime telemetry', () => {
     const { startRuntimeTelemetry, stopRuntimeTelemetry } =
       await import('@/lib/telemetry/runtime');
 
-    startRuntimeTelemetry('web');
+    await startRuntimeTelemetry('web');
 
     expect(process.listenerCount('SIGTERM')).toBe(sigtermListeners + 1);
     expect(process.listenerCount('SIGINT')).toBe(sigintListeners + 1);
 
-    stopRuntimeTelemetry('test_shutdown');
+    await stopRuntimeTelemetry('test_shutdown');
 
     expect(process.listenerCount('SIGTERM')).toBe(sigtermListeners);
     expect(process.listenerCount('SIGINT')).toBe(sigintListeners);

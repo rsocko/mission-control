@@ -150,7 +150,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
     // Wait for hydration to complete
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = scheduler.getLastResult('github-1');
+    const result = await scheduler.getLastResult('github-1');
     expect(result).toBeDefined();
     // Should use the real sync time (08:00), NOT the write-through time (10:00)
     expect(result!.syncedAt).toBe('2026-07-27T08:00:00Z');
@@ -181,7 +181,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
     const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = scheduler.getLastResult('github-1');
+    const result = await scheduler.getLastResult('github-1');
     expect(result).toBeDefined();
     expect(result!.syncedAt).toBe('2026-07-27T06:00:00Z');
   });
@@ -205,7 +205,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
     const scheduler = new SyncExecutionPipeline();
     await new Promise(resolve => setTimeout(resolve, 50));
 
-    const result = scheduler.getLastResult('github-1');
+    const result = await scheduler.getLastResult('github-1');
     expect(result).toBeDefined();
     expect(result!.syncedAt).toBe('2026-07-27T07:00:00Z');
   });

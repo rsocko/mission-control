@@ -170,7 +170,7 @@ export class FinanceManagerConnector implements IConnector {
             const { enqueueFinanceInsightContinuation } = await import(
               '@/lib/finance-insights/continuation'
             );
-            enqueueFinanceInsightContinuation({
+            await enqueueFinanceInsightContinuation({
               connectorId: config.id,
               jobId: context.jobId,
             });

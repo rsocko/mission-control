@@ -14,6 +14,7 @@ import {
   sqlite,
   withoutDatabaseObservation,
 } from '@/db';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import logger from '@/lib/logger';
 import {
   getRuntimeLifecycleSnapshot,
@@ -176,6 +177,7 @@ interface RuntimeGlobalState {
   lastHandlerDurationMs: number | null;
   startupProbeMissed: boolean;
   monitor: RuntimeTelemetryMonitor | null;
+  startPromise: Promise<RuntimeTelemetryMonitor> | null;
   shutdownHandlers: {
     SIGTERM?: () => void;
     SIGINT?: () => void;
@@ -199,10 +201,12 @@ const globalState = runtimeGlobal[GLOBAL_KEY] ?? {
   lastHandlerDurationMs: null,
   startupProbeMissed: false,
   monitor: null,
+  startPromise: null,
   shutdownHandlers: {},
 };
 runtimeGlobal[GLOBAL_KEY] = globalState;
 globalState.shutdownHandlers ??= {};
+globalState.startPromise ??= null;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -495,8 +499,7 @@ function compatibilityMemory(metrics: Partial<RuntimeMetrics>): RuntimeMemoryVal
   };
 }
 
-export function deserializeRuntimeMetrics(serialized: string): RuntimeMetrics {
-  const parsed = JSON.parse(serialized) as Partial<RuntimeMetrics>;
+export function normalizeRuntimeMetrics(parsed: Partial<RuntimeMetrics>): RuntimeMetrics {
   const memory = compatibilityMemory(parsed);
   const restartCount = parsed.container?.restartCount ?? null;
   const restartCountSource = parsed.container?.restartCountSource
@@ -562,7 +565,11 @@ export function deserializeRuntimeMetrics(serialized: string): RuntimeMetrics {
   } as RuntimeMetrics;
 }
 
-function aggregateSamples(samples: RuntimeTelemetrySample[]): RuntimeMetrics {
+export function deserializeRuntimeMetrics(serialized: string): RuntimeMetrics {
+  return normalizeRuntimeMetrics(JSON.parse(serialized) as Partial<RuntimeMetrics>);
+}
+
+export function aggregateSamples(samples: RuntimeTelemetrySample[]): RuntimeMetrics {
   const latest = samples[samples.length - 1].metrics;
   return samples.reduce<RuntimeMetrics>((aggregate, sample) => ({
     ...aggregate,
@@ -794,6 +801,7 @@ export class RuntimeTelemetryMonitor {
   private rssHighWaterOperationCategories: string[] = [];
   private readonly rssSamples: number[] = [];
   private snapshot: RuntimeMetrics | null = null;
+  private persistenceChain: Promise<void> = Promise.resolve();
   private intervalHighWater = memoryValues(process.memoryUsage());
   private intervalFloor = this.intervalHighWater;
   private instanceHighWater = this.intervalHighWater;
@@ -898,22 +906,24 @@ export class RuntimeTelemetryMonitor {
     });
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.timer) return;
-    this.registerInstance();
-    withoutDatabaseObservation(() => maintainRuntimeTelemetryHistory(sqlite));
+    await this.registerInstance();
+    await this.maintainHistory();
     this.histogram.enable();
     this.gcObserver.observe({ entryTypes: ['gc'] });
     this.requestStartChannel.subscribe(this.onRequestStart);
     this.expectedSampleAt = performance.now() + this.intervalMs;
-    this.timer = setInterval(() => this.sample(), this.intervalMs);
+    this.timer = setInterval(() => {
+      void this.sampleAndPersist();
+    }, this.intervalMs);
     this.timer.unref();
     this.highWaterTimer = setInterval(
       () => this.observeMemoryUsage(),
       this.highWaterIntervalMs,
     );
     this.highWaterTimer.unref();
-    this.sample();
+    await this.sampleAndPersist();
 
     if (this.role === 'web') {
       const deadlineMs = positiveInteger(
@@ -933,7 +943,7 @@ export class RuntimeTelemetryMonitor {
     }
   }
 
-  stop(reason = 'graceful_shutdown'): void {
+  async stop(reason = 'graceful_shutdown'): Promise<void> {
     const wasStarted = this.timer !== null;
     if (this.timer) clearInterval(this.timer);
     if (this.highWaterTimer) clearInterval(this.highWaterTimer);
@@ -943,20 +953,8 @@ export class RuntimeTelemetryMonitor {
     this.startupProbeTimer = null;
     try {
       if (wasStarted) {
-        const terminalMetrics = this.sample();
-        withoutDatabaseObservation(() => {
-          sqlite.prepare(`
-            UPDATE runtime_telemetry_instances
-            SET stopped_at = ?, last_seen_at = ?, terminal_reason = ?, terminal_metrics = ?
-            WHERE instance_id = ?
-          `).run(
-            terminalMetrics.sampledAt,
-            terminalMetrics.sampledAt,
-            reason,
-            JSON.stringify(terminalMetrics),
-            this.instanceId,
-          );
-        });
+        const terminalMetrics = await this.sampleAndPersist();
+        await this.recordStop(terminalMetrics, reason);
       }
     } finally {
       this.histogram.disable();
@@ -974,6 +972,37 @@ export class RuntimeTelemetryMonitor {
     this.intervalHighWater = mergeMemoryMaximum(this.intervalHighWater, current);
     this.intervalFloor = mergeMemoryMinimum(this.intervalFloor, current);
     this.instanceHighWater = mergeMemoryMaximum(this.instanceHighWater, current);
+  }
+
+  /**
+   * Computes a fresh metrics snapshot (pure, synchronous, in-process — no
+   * database access) and asynchronously persists it, swallowing/logging any
+   * persistence failure exactly as the previous synchronous
+   * `sample()`-calls-`persist()` design did. Split out so callers
+   * (the heartbeat timer, `start()`, `stop()`) can choose whether to await
+   * the persistence (`start()`/`stop()` do; the heartbeat timer fires and
+   * forgets). Public so callers (and tests) that need a deterministic
+   * "compute and persist" round-trip — rather than the pure, synchronous
+   * `sample()` — can await it directly.
+   */
+  sampleAndPersist(now?: number): Promise<RuntimeMetrics> {
+    const pending = this.persistenceChain.then(async () => {
+      const metrics = this.sample(now ?? performance.now());
+      try {
+        await this.persist(metrics);
+      } catch (error) {
+        logger.error(
+          { err: error, role: this.role },
+          'Runtime telemetry persistence failed',
+        );
+      }
+      return metrics;
+    });
+    this.persistenceChain = pending.then(
+      () => undefined,
+      () => undefined,
+    );
+    return pending;
   }
 
   sample(now = performance.now()): RuntimeMetrics {
@@ -1026,13 +1055,17 @@ export class RuntimeTelemetryMonitor {
       active: this.activeRequests,
       peakActive: this.peakActiveRequests,
     };
-    const database = getDatabaseTelemetry();
-    const eventLoopCorrelation = {
-      eventLoopP99Ms: p99Ms,
-      intervalDriftMs: roundMilliseconds(intervalDriftMs),
-      synchronousDatabaseTimeMs: database.sampleInterval.synchronousDatabaseTimeMs,
-      operationCount: database.sampleInterval.operationCount,
-    };
+    const database = resolveDatabaseBackend() === 'sqlite'
+      ? getDatabaseTelemetry()
+      : undefined;
+    const eventLoopCorrelation = database
+      ? {
+          eventLoopP99Ms: p99Ms,
+          intervalDriftMs: roundMilliseconds(intervalDriftMs),
+          synchronousDatabaseTimeMs: database.sampleInterval.synchronousDatabaseTimeMs,
+          operationCount: database.sampleInterval.operationCount,
+        }
+      : undefined;
     const container = readCgroupMetrics(
       this.memoryWarningPercent,
       this.memoryCriticalPercent,
@@ -1066,10 +1099,14 @@ export class RuntimeTelemetryMonitor {
         sustainedLagSamples: this.sustainedLagSamples,
         degraded,
       },
-      database: {
-        ...database,
-        eventLoopCorrelation,
-      },
+      ...(database && eventLoopCorrelation
+        ? {
+            database: {
+              ...database,
+              eventLoopCorrelation,
+            },
+          }
+        : {}),
       process: {
         pid: process.pid,
         uptimeSeconds: process.uptime(),
@@ -1129,14 +1166,6 @@ export class RuntimeTelemetryMonitor {
     this.gcDurationMs = 0;
     this.completedRequests = 0;
     this.peakActiveRequests = this.activeRequests;
-    try {
-      this.persist(metrics);
-    } catch (error) {
-      logger.error(
-        { err: error, role: this.role },
-        'Runtime telemetry persistence failed',
-      );
-    }
 
     if (degraded !== this.lastDegraded) {
       const details = {
@@ -1154,7 +1183,7 @@ export class RuntimeTelemetryMonitor {
       }
       this.lastDegraded = degraded;
     }
-    if (database.severity !== this.lastDatabaseSeverity) {
+    if (database && eventLoopCorrelation && database.severity !== this.lastDatabaseSeverity) {
       const details = {
         role: this.role,
         severity: database.severity,
@@ -1203,7 +1232,28 @@ export class RuntimeTelemetryMonitor {
     return metrics;
   }
 
-  private registerInstance(): void {
+  private async registerInstance(): Promise<void> {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { registerPostgresRuntimeInstance }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/telemetry-runtime'),
+      ]);
+      await registerPostgresRuntimeInstance(
+        getPostgresPersistenceBackend().context.pool,
+        {
+          instanceId: this.instanceId,
+          role: this.role,
+          pid: process.pid,
+          startedAt: this.startedAt,
+          restartCount: readCgroupMetrics().restartCount,
+          buildSha: runtimeRelease,
+          runtimeMode: runtimeMode(),
+          highWaterMetrics: this.instanceHighWater,
+          restartReason: process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced',
+        },
+      );
+      return;
+    }
     withoutDatabaseObservation(() => {
       const restartReason = process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced';
       sqlite.prepare(`
@@ -1231,7 +1281,73 @@ export class RuntimeTelemetryMonitor {
     });
   }
 
-  private persist(metrics: RuntimeMetrics): void {
+  private async maintainHistory(): Promise<void> {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { maintainPostgresRuntimeTelemetryHistory }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/telemetry-runtime'),
+      ]);
+      await maintainPostgresRuntimeTelemetryHistory(
+        getPostgresPersistenceBackend().context.pool,
+      );
+      return;
+    }
+    withoutDatabaseObservation(() => maintainRuntimeTelemetryHistory(sqlite));
+  }
+
+  private async recordStop(terminalMetrics: RuntimeMetrics, reason: string): Promise<void> {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { recordPostgresRuntimeTelemetryStop }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/telemetry-runtime'),
+      ]);
+      await recordPostgresRuntimeTelemetryStop(
+        getPostgresPersistenceBackend().context.pool,
+        { instanceId: this.instanceId, reason, terminalMetrics },
+      );
+      return;
+    }
+    withoutDatabaseObservation(() => {
+      sqlite.prepare(`
+        UPDATE runtime_telemetry_instances
+        SET stopped_at = ?, last_seen_at = ?, terminal_reason = ?, terminal_metrics = ?
+        WHERE instance_id = ?
+      `).run(
+        terminalMetrics.sampledAt,
+        terminalMetrics.sampledAt,
+        reason,
+        JSON.stringify(terminalMetrics),
+        this.instanceId,
+      );
+    });
+  }
+
+  private async persist(metrics: RuntimeMetrics): Promise<void> {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { persistPostgresRuntimeTelemetry }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/telemetry-runtime'),
+      ]);
+      const pool = getPostgresPersistenceBackend().context.pool;
+      await persistPostgresRuntimeTelemetry(pool, {
+        role: this.role,
+        instanceId: this.instanceId,
+        pid: process.pid,
+        startedAt: this.startedAt,
+        metrics,
+        resolutionSeconds: Math.max(1, Math.round(this.intervalMs / 1_000)),
+        highWaterMetrics: this.instanceHighWater,
+      });
+      const maintenanceIntervalMs = positiveInteger(
+        process.env.MC_TELEMETRY_MAINTENANCE_INTERVAL_MS,
+        60 * 60_000,
+      );
+      if (Date.now() - this.lastMaintenanceAt >= maintenanceIntervalMs) {
+        await this.maintainHistory();
+        this.lastMaintenanceAt = Date.now();
+      }
+      return;
+    }
     withoutDatabaseObservation(() => {
       const serialized = JSON.stringify(metrics);
       sqlite.prepare(`
@@ -1288,31 +1404,44 @@ export class RuntimeTelemetryMonitor {
   }
 }
 
-export function startRuntimeTelemetry(role: RuntimeRole): RuntimeTelemetryMonitor {
+export async function startRuntimeTelemetry(role: RuntimeRole): Promise<RuntimeTelemetryMonitor> {
   if (globalState.monitor) return globalState.monitor;
+  if (globalState.startPromise) return globalState.startPromise;
   const monitor = new RuntimeTelemetryMonitor(role);
-  monitor.start();
-  globalState.monitor = monitor;
-  if (role === 'web') {
-    const onSigterm = () => stopRuntimeTelemetry('SIGTERM');
-    const onSigint = () => stopRuntimeTelemetry('SIGINT');
-    globalState.shutdownHandlers = {
-      SIGTERM: onSigterm,
-      SIGINT: onSigint,
-    };
-    process.once('SIGTERM', onSigterm);
-    process.once('SIGINT', onSigint);
+  const startPromise = (async () => {
+    await monitor.start();
+    globalState.monitor = monitor;
+    if (role === 'web') {
+      const onSigterm = () => { void stopRuntimeTelemetry('SIGTERM'); };
+      const onSigint = () => { void stopRuntimeTelemetry('SIGINT'); };
+      globalState.shutdownHandlers = {
+        SIGTERM: onSigterm,
+        SIGINT: onSigint,
+      };
+      process.once('SIGTERM', onSigterm);
+      process.once('SIGINT', onSigint);
+    }
+    return monitor;
+  })();
+  globalState.startPromise = startPromise;
+  try {
+    return await startPromise;
+  } finally {
+    if (globalState.startPromise === startPromise) {
+      globalState.startPromise = null;
+    }
   }
-  return monitor;
 }
 
-export function stopRuntimeTelemetry(reason?: string): void {
+export async function stopRuntimeTelemetry(reason?: string): Promise<void> {
+  await globalState.startPromise;
   const { SIGTERM: onSigterm, SIGINT: onSigint } = globalState.shutdownHandlers;
   if (onSigterm) process.removeListener('SIGTERM', onSigterm);
   if (onSigint) process.removeListener('SIGINT', onSigint);
   globalState.shutdownHandlers = {};
-  globalState.monitor?.stop(reason);
+  const monitor = globalState.monitor;
   globalState.monitor = null;
+  await monitor?.stop(reason);
 }
 
 export function recordLivenessProbe(durationMs: number): void {
@@ -1322,7 +1451,14 @@ export function recordLivenessProbe(durationMs: number): void {
   globalState.lastHandlerDurationMs = roundMilliseconds(durationMs);
 }
 
-export function getRuntimeTelemetry(): RuntimeTelemetryRecord[] {
+export async function getRuntimeTelemetry(): Promise<RuntimeTelemetryRecord[]> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetry }] = await Promise.all([
+      import('@/db/runtime'),
+      import('@/db/postgres/telemetry-runtime'),
+    ]);
+    return getPostgresRuntimeTelemetry(getPostgresPersistenceBackend().context.pool);
+  }
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
       SELECT role, instance_id AS instanceId, pid, started_at AS startedAt,
         heartbeat_at AS heartbeatAt, metrics
@@ -1338,24 +1474,37 @@ export function getRuntimeTelemetry(): RuntimeTelemetryRecord[] {
 export function getRuntimeTelemetryHistory(
   hours?: number,
   role?: RuntimeRole,
-): RuntimeTelemetrySample[];
+): Promise<RuntimeTelemetrySample[]>;
 export function getRuntimeTelemetryHistory(options?: {
   role?: RuntimeRole;
   since?: string;
   limit?: number;
-}): RuntimeTelemetrySample[];
-export function getRuntimeTelemetryHistory(
+}): Promise<RuntimeTelemetrySample[]>;
+export async function getRuntimeTelemetryHistory(
   hoursOrOptions: number | {
     role?: RuntimeRole;
     since?: string;
     limit?: number;
   } = 72,
   role?: RuntimeRole,
-): RuntimeTelemetrySample[] {
+): Promise<RuntimeTelemetrySample[]> {
   if (typeof hoursOrOptions === 'object') {
     const since = hoursOrOptions.since
       ?? new Date(Date.now() - 6 * 60 * 60_000).toISOString();
     const limit = Math.min(10_000, Math.max(1, hoursOrOptions.limit ?? 1_000));
+
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryHistory }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/telemetry-runtime'),
+      ]);
+      return getPostgresRuntimeTelemetryHistory(getPostgresPersistenceBackend().context.pool, {
+        role: hoursOrOptions.role,
+        since,
+        limit,
+      });
+    }
+
     const roleFilter = hoursOrOptions.role ? 'AND role = ?' : '';
     const query = sqlite.prepare(`
       SELECT id, role, instanceId, pid, sampledAt, resolutionSeconds, metrics
@@ -1383,6 +1532,19 @@ export function getRuntimeTelemetryHistory(
 
   const boundedHours = Math.min(72, Math.max(1, hoursOrOptions));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
+
+  if (resolveDatabaseBackend() === 'postgres') {
+    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryHistory }] = await Promise.all([
+      import('@/db/runtime'),
+      import('@/db/postgres/telemetry-runtime'),
+    ]);
+    return getPostgresRuntimeTelemetryHistory(getPostgresPersistenceBackend().context.pool, {
+      role,
+      since: cutoff,
+      limit: 10_000,
+    });
+  }
+
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
       SELECT id, role, instance_id AS instanceId, pid, sampled_at AS sampledAt,
         resolution_seconds AS resolutionSeconds, metrics
@@ -1398,9 +1560,16 @@ export function getRuntimeTelemetryHistory(
   }));
 }
 
-export function getRuntimeTelemetryAlertHistory(
+export async function getRuntimeTelemetryAlertHistory(
   hours = 1,
-): RuntimeTelemetrySample[] {
+): Promise<RuntimeTelemetrySample[]> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryAlertHistory }] = await Promise.all([
+      import('@/db/runtime'),
+      import('@/db/postgres/telemetry-runtime'),
+    ]);
+    return getPostgresRuntimeTelemetryAlertHistory(getPostgresPersistenceBackend().context.pool, hours);
+  }
   const boundedHours = Math.min(72, Math.max(1, hours));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
@@ -1436,7 +1605,14 @@ export function getRuntimeTelemetryAlertHistory(
   }));
 }
 
-export function getRuntimeTelemetryInstances(hours = 72): RuntimeTelemetryInstance[] {
+export async function getRuntimeTelemetryInstances(hours = 72): Promise<RuntimeTelemetryInstance[]> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryInstances }] = await Promise.all([
+      import('@/db/runtime'),
+      import('@/db/postgres/telemetry-runtime'),
+    ]);
+    return getPostgresRuntimeTelemetryInstances(getPostgresPersistenceBackend().context.pool, hours);
+  }
   const boundedHours = Math.min(72, Math.max(1, hours));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`

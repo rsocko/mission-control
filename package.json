@@ -65,7 +65,7 @@
     "@tanstack/react-virtual": "^3.14.4",
     "@xyflow/react": "^12.11.2",
     "adm-zip": "^0.6.0",
-    "ai": "^6.0.208",
+    "ai": "^7.0.77",
     "better-sqlite3": "^12.11.1",
     "chrono-node": "^2.10.1",
     "class-variance-authority": "^0.7.1",

@@ -50,57 +50,60 @@ export function hasConnectorSyncJobLease(
 function recoverExpiredSyncJobsWithOutcome(
   nowIso: string,
 ): ConnectorOperationRecoveryOutcome {
-  const exhausted = sqlite.prepare(`
-    UPDATE sync_jobs
-    SET status = 'failed',
-        completed_at = ?,
-        updated_at = ?,
-        lease_owner = NULL,
-        lease_expires_at = NULL,
-        error = COALESCE(error, 'Worker lease expired after final attempt')
-    WHERE status = 'running'
-      AND lease_expires_at < ?
-      AND attempt >= max_attempts
-  `).run(nowIso, nowIso, nowIso).changes;
+  const recover = sqlite.transaction(() => {
+    const exhausted = sqlite.prepare(`
+      UPDATE sync_jobs
+      SET status = 'failed',
+          completed_at = ?,
+          updated_at = ?,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          error = COALESCE(error, 'Worker lease expired after final attempt')
+      WHERE status = 'running'
+        AND lease_expires_at < ?
+        AND attempt >= max_attempts
+    `).run(nowIso, nowIso, nowIso).changes;
 
-  const superseded = sqlite.prepare(`
-    UPDATE sync_jobs AS expired
-    SET status = 'failed',
-        completed_at = ?,
-        updated_at = ?,
-        lease_owner = NULL,
-        lease_expires_at = NULL,
-        error = COALESCE(error, 'Worker lease expired; queued follow-up superseded retry')
-    WHERE expired.status = 'running'
-      AND expired.lease_expires_at < ?
-      AND EXISTS (
-        SELECT 1 FROM sync_jobs AS follow_up
-        WHERE follow_up.connector_id = expired.connector_id
-          AND follow_up.status = 'queued'
-          AND follow_up.id <> expired.id
-      )
-  `).run(nowIso, nowIso, nowIso).changes;
+    const superseded = sqlite.prepare(`
+      UPDATE sync_jobs AS expired
+      SET status = 'failed',
+          completed_at = ?,
+          updated_at = ?,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          error = COALESCE(error, 'Worker lease expired; queued follow-up superseded retry')
+      WHERE expired.status = 'running'
+        AND expired.lease_expires_at < ?
+        AND EXISTS (
+          SELECT 1 FROM sync_jobs AS follow_up
+          WHERE follow_up.connector_id = expired.connector_id
+            AND follow_up.status = 'queued'
+            AND follow_up.id <> expired.id
+        )
+    `).run(nowIso, nowIso, nowIso).changes;
 
-  const requeued = sqlite.prepare(`
-    UPDATE sync_jobs
-    SET status = 'queued',
-        source = 'recovery',
-        available_at = ?,
-        updated_at = ?,
-        lease_owner = NULL,
-        lease_expires_at = NULL,
-        error = COALESCE(error, 'Worker lease expired; retrying')
-    WHERE status = 'running'
-      AND lease_expires_at < ?
-      AND attempt < max_attempts
-      AND NOT EXISTS (
-        SELECT 1 FROM sync_jobs AS follow_up
-        WHERE follow_up.connector_id = sync_jobs.connector_id
-          AND follow_up.status = 'queued'
-          AND follow_up.id <> sync_jobs.id
-      )
-  `).run(nowIso, nowIso, nowIso).changes;
-  return { exhausted, superseded, requeued };
+    const requeued = sqlite.prepare(`
+      UPDATE sync_jobs
+      SET status = 'queued',
+          source = 'recovery',
+          available_at = ?,
+          updated_at = ?,
+          lease_owner = NULL,
+          lease_expires_at = NULL,
+          error = COALESCE(error, 'Worker lease expired; retrying')
+      WHERE status = 'running'
+        AND lease_expires_at < ?
+        AND attempt < max_attempts
+        AND NOT EXISTS (
+          SELECT 1 FROM sync_jobs AS follow_up
+          WHERE follow_up.connector_id = sync_jobs.connector_id
+            AND follow_up.status = 'queued'
+            AND follow_up.id <> sync_jobs.id
+        )
+    `).run(nowIso, nowIso, nowIso).changes;
+    return { exhausted, superseded, requeued };
+  });
+  return recover.immediate();
 }
 
 export function recoverExpiredSyncJobs(nowIso: string): void {

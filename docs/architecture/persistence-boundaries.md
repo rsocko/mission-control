@@ -79,6 +79,10 @@ transaction boundary. A transaction-scoped collaborator:
 5. must not start fire-and-forget work.
 
 Repository APIs are Promise-based so asynchronous adapters can implement them.
+`PersistenceBackend` exposes the synchronous transaction-work capability common
+to all backends; an asynchronous backend can additionally expose
+`TransactionRunner` where a workflow explicitly supports yielding transaction
+work.
 The SQLite adapter still executes each atomic callback synchronously; it rejects
 a callback that yields a Promise because keeping a synchronous shared
 connection transaction open across an `await` could admit unrelated work.

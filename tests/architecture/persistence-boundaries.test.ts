@@ -75,8 +75,38 @@ function isSqliteAdapter(path: string): boolean {
     || path === 'src/lib/telemetry/database-health-runtime.ts';
 }
 
+function importsRawSqliteHandle(source: string): boolean {
+  const databaseImport = /import\s+([^'"]+?)\s+from\s+['"](?:@\/db(?:\/index)?|(?:\.\.?\/)+db(?:\/index)?)['"]/g;
+  return Array.from(source.matchAll(databaseImport), (match) => match[1])
+    .some((bindings) => {
+      if (/\bsqlite\b/.test(bindings)) return true;
+      const namespace = bindings.match(/^\*\s+as\s+([A-Za-z_$][\w$]*)$/);
+      if (namespace) {
+        return new RegExp(`\\b${namespace[1]}\\s*\\.\\s*sqlite\\b`).test(source);
+      }
+      const defaultImport = bindings.match(/^([A-Za-z_$][\w$]*)\s*(?:,|$)/);
+      return defaultImport
+        ? new RegExp(`\\b${defaultImport[1]}\\s*\\.\\s*sqlite\\b`).test(source)
+        : false;
+    });
+}
+
 describe('portable persistence dependency ratchet', () => {
   const sourceFiles = listTypeScriptFiles(join(process.cwd(), 'src'));
+
+  it('detects named, aliased, namespace, and default raw-handle imports', () => {
+    expect(importsRawSqliteHandle("import { sqlite } from '@/db';")).toBe(true);
+    expect(importsRawSqliteHandle("import { sqlite as database } from '@/db';")).toBe(true);
+    expect(importsRawSqliteHandle(
+      "import * as database from '@/db'; database.sqlite.prepare('SELECT 1');",
+    )).toBe(true);
+    expect(importsRawSqliteHandle(
+      "import database from '../db'; database.sqlite.prepare('SELECT 1');",
+    )).toBe(true);
+    expect(importsRawSqliteHandle(
+      "import * as database from '@/db'; database.db.query.tasks.findMany();",
+    )).toBe(false);
+  });
 
   it('keeps direct better-sqlite3 imports inside adapters or documented exceptions', () => {
     const unexpected = sourceFiles.flatMap((path) => {
@@ -96,11 +126,7 @@ describe('portable persistence dependency ratchet', () => {
     const unexpected = sourceFiles.flatMap((path) => {
       const source = readFileSync(path, 'utf8');
       const name = repoPath(path);
-      const importsRawHandle = Array.from(
-        source.matchAll(/import\s+([\s\S]*?)\s+from\s+['"]@\/db['"]/g),
-        (match) => match[1],
-      ).some((bindings) => /\bsqlite\b/.test(bindings));
-      return importsRawHandle
+      return importsRawSqliteHandle(source)
         && !isSqliteAdapter(name)
         && !LEGACY_RAW_SQLITE_IMPORTS.has(name)
         ? [name]

@@ -70,7 +70,7 @@ export interface PersistenceLifecycle {
 
 export interface PersistenceBackend<TTransactionContext>
 extends PersistenceLifecycle {
-  readonly transactions: TransactionRunner<TTransactionContext>;
+  readonly transactions: SynchronousTransactionRunner<TTransactionContext>;
 }
 
 export class UnsupportedTransactionWorkError extends Error {

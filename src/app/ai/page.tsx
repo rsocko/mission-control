@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEventHandler } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { parseJsonEventStream, type FlexibleSchema, type ParseResult } from '@ai-sdk/provider-utils';
-import { readUIMessageStream, uiMessageChunkSchema, type UIMessageChunk } from 'ai';
+import { parseJsonEventStream, readUIMessageStream, uiMessageChunkSchema, type UIMessageChunk } from 'ai';
 import { AIChatTab } from '@/components/ai/AIChatTab';
 import { AIInsightsPanel } from '@/components/ai/AIInsightsPanel';
 import { HoustonHomeScreen } from '@/components/houston';
@@ -86,7 +85,7 @@ export default function AIPage() {
         if (!response.body) throw new Error('The response body is empty.');
 
         setMessages(prev => [...prev, assistantMessage]);
-        const chunkStream = parseJsonEventStream({ stream: response.body, schema: uiMessageChunkSchema as FlexibleSchema<UIMessageChunk> }).pipeThrough(new TransformStream<ParseResult<UIMessageChunk>, UIMessageChunk>({ transform(chunk, controller) { if (!chunk.success) throw chunk.error; controller.enqueue(chunk.value); } }));
+        const chunkStream = parseJsonEventStream({ stream: response.body, schema: uiMessageChunkSchema }).pipeThrough(new TransformStream({ transform(chunk, controller) { if (!chunk.success) throw chunk.error; controller.enqueue(chunk.value); } }));
         const uiStream = readUIMessageStream({ message: assistantMessage, stream: chunkStream, terminateOnError: true });
 
         let latestMessage = assistantMessage;

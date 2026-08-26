@@ -21,11 +21,16 @@ export interface ProjectRepository {
 export interface ConnectorRepository {
   get(id: string): Promise<ConnectorConfig | null>;
   upsert(connector: ConnectorConfig): Promise<ConnectorConfig>;
+  /** Removes the connector from the active configuration set. */
   delete(id: string): Promise<boolean>;
 }
 
 export interface NotificationRepository {
   get(id: string): Promise<NotificationItem | null>;
+  /**
+   * Persists supplied pending actions without deleting unmentioned action
+   * history owned by notification execution.
+   */
   upsert(notification: NotificationItem): Promise<NotificationItem>;
   delete(id: string): Promise<boolean>;
 }

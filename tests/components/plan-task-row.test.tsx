@@ -1,0 +1,129 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { PlanTaskRow } from '@/app/projects/[id]/PlanTaskRow';
+import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
+import type { ProjectTaskViewModel } from '@/app/projects/[id]/types';
+import { editableTaskPolicy } from '../fixtures/task-edit-policy';
+
+vi.mock('next/image', () => ({
+  default: ({ alt, src }: { alt: string; src: string }) => (
+    <span role="img" aria-label={alt} data-src={src} />
+  ),
+}));
+
+vi.mock('@/components/task-list/TaskContextMenu', () => ({
+  TaskContextMenu: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock('@/components/ui/CompletionBurst', () => ({
+  CompletionBurst: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+const task: ProjectTaskViewModel = {
+  id: 'task-1',
+  title: 'Shared Plan task',
+  connectorType: 'github-issues',
+  connectorInstanceId: 'github',
+  localDisposition: 'active',
+  microStatus: null,
+  taskSourceModel: 'mc-owned',
+  editPolicy: editableTaskPolicy,
+  status: 'in_progress',
+  priority: 'high',
+  dueDate: '2026-08-28',
+  updatedAt: '2026-08-26T12:00:00.000Z',
+  sourceListName: 'Mission Control',
+  sourceId: '123',
+  metadata: JSON.stringify({ issueNumber: 123 }),
+  effort: 3,
+  subtaskDone: 1,
+  subtaskTotal: 2,
+};
+
+const contextMenuActions: TaskContextMenuActions = {
+  onComplete: vi.fn(),
+  onSetPriority: vi.fn(),
+  onDueToday: vi.fn(),
+  onDueTomorrow: vi.fn(),
+  onPickDate: vi.fn(),
+  onDelete: vi.fn(),
+};
+
+function renderRow(overrides: Partial<React.ComponentProps<typeof PlanTaskRow>> = {}) {
+  const props: React.ComponentProps<typeof PlanTaskRow> = {
+    task,
+    dragHandleProps: {},
+    dragLabel: 'Drag task to another phase',
+    isSelected: false,
+    isCompleting: false,
+    onSelect: vi.fn(),
+    onDoubleClick: vi.fn(),
+    onComplete: vi.fn(),
+    isInMyDay: false,
+    contextMenuActions,
+    phaseMenuItems: [],
+    projects: [],
+    ...overrides,
+  };
+
+  return {
+    ...render(<PlanTaskRow {...props} />),
+    props,
+  };
+}
+
+describe('PlanTaskRow', () => {
+  it('combines shared task identity with Plan-specific planning metadata', () => {
+    const { container } = renderRow();
+    const row = container.querySelector('[data-task-row-surface="plan"]');
+
+    expect(row).toHaveAttribute('data-task-row-variant', 'card');
+    expect(screen.getByText('Shared Plan task')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'github-issues' })).toBeInTheDocument();
+    expect(screen.getByText('Mission Control')).toBeInTheDocument();
+    expect(screen.getByText('Due Aug 28, 2026')).toBeInTheDocument();
+    expect(screen.getByTitle('1 of 2 subtasks complete')).toBeInTheDocument();
+    expect(screen.getByText(/In progress/i)).toBeInTheDocument();
+  });
+
+  it('shares click and double-click behavior while preserving Plan callbacks', () => {
+    const onSelect = vi.fn();
+    const onDoubleClick = vi.fn();
+    const { container } = renderRow({ onSelect, onDoubleClick });
+    const row = container.querySelector<HTMLElement>('[data-task-row-surface="plan"]');
+
+    fireEvent.click(row!);
+    fireEvent.doubleClick(row!);
+
+    expect(onSelect).toHaveBeenCalledWith('task-1');
+    expect(onDoubleClick).toHaveBeenCalledWith('task-1');
+  });
+
+  it('uses bulk selection instead of opening the task when bulk mode is active', () => {
+    const onBulkToggle = vi.fn();
+    const onDoubleClick = vi.fn();
+    const { container } = renderRow({
+      bulkMode: true,
+      bulkSelected: true,
+      onBulkToggle,
+      onDoubleClick,
+    });
+    const row = container.querySelector<HTMLElement>('[data-task-row-surface="plan"]');
+
+    fireEvent.click(row!);
+    fireEvent.doubleClick(row!);
+
+    expect(onBulkToggle).toHaveBeenCalledOnce();
+    expect(onDoubleClick).not.toHaveBeenCalled();
+    expect(screen.getByRole('checkbox', { name: 'Select Shared Plan task' })).toBeChecked();
+  });
+
+  it('keeps assignment rows compact without dropping the shared identity', () => {
+    const { container } = renderRow({ variant: 'compact' });
+    const row = container.querySelector('[data-task-row-surface="plan"]');
+
+    expect(row).toHaveAttribute('data-task-row-variant', 'compact');
+    expect(screen.getByText('Shared Plan task')).toHaveClass('text-xs');
+    expect(screen.queryByText('Mission Control')).not.toBeInTheDocument();
+  });
+});

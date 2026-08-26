@@ -194,6 +194,15 @@ latest heartbeat in `runtime_telemetry`. `GET /api/health` returns:
 - liveness handler latency and whether the first Docker health probe missed
   its configured startup deadline.
 
+`GET /api/metrics` exposes the current web and worker SQLite snapshots in
+Prometheus text format. It includes bounded role/category labels for rolling
+operation latency and failures, health severity, writer-lock contention, busy
+timeouts, WAL availability and state, configured latency thresholds, observation-window length,
+and runtime heartbeat age. It intentionally excludes SQL text, health-reason
+strings, connector identifiers, and other unbounded labels. Prometheus should
+alert on sustained p95/p99 threshold breaches or any busy timeout, then use the
+structured database logs for per-operation diagnosis.
+
 Health changes to `attention` for sustained event-loop lag, SQLite latency or
 contention, abnormal WAL growth with frames still awaiting checkpoint,
 checkpoint starvation, stale/missing worker telemetry, a missed schedule, an

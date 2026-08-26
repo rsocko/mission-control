@@ -9,7 +9,7 @@ export async function GET(request: Request) {
   try {
     const includeArchived = new URL(request.url).searchParams.get('includeArchived') === 'true';
     return NextResponse.json({
-      workspaces: ideationWorkspaceService.list(includeArchived),
+      workspaces: await ideationWorkspaceService.list(includeArchived),
     });
   } catch (error) {
     return workspaceRouteError('Failed to list Ideation workspaces', error);
@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   if (untrusted) return untrusted;
   try {
     const body = await request.json();
-    const workspace = ideationWorkspaceService.create({
+    const workspace = await ideationWorkspaceService.create({
       name: body.name,
       document: body.document,
       migrationSource: body.migrationSource,

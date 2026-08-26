@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server';
-import { sqlite, withoutDatabaseObservation } from '@/db';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { getRuntimeLifecycleSnapshot, isRuntimeReady } from '@/lib/runtime/lifecycle';
 import { runtimeRelease } from '@/lib/runtime/release';
+import { databaseHealthProbe } from '@/lib/telemetry/database-health-runtime';
 
 export async function GET() {
   try {
     const lifecycle = getRuntimeLifecycleSnapshot();
-    const seeded = withoutDatabaseObservation(() => {
-      sqlite.prepare('SELECT 1').get();
-      return !isPublicDemoMode() || Boolean(
-        sqlite.prepare("SELECT seeded_at FROM public_demo_runtime WHERE id = 'seed'").get(),
-      );
-    });
+    const database = await databaseHealthProbe.inspect();
+    const seeded = database.connected
+      && (!isPublicDemoMode() || await databaseHealthProbe.hasSeedMarker());
     const ready = seeded && isRuntimeReady();
     return NextResponse.json(
       {

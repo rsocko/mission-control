@@ -16,7 +16,7 @@ async function getScheduleHealth() {
   const jobRepository = await getSyncJobRepository();
   const schedules = await jobRepository.getScheduleHealth();
   const overdue = schedules.filter((schedule) => schedule.overdue);
-  const worker = getRuntimeTelemetry().find((runtime) => runtime.role === 'worker');
+  const worker = (await getRuntimeTelemetry()).find((runtime) => runtime.role === 'worker');
   const telemetryStaleMs = Math.max(
     30_000,
     Number(process.env.MC_TELEMETRY_STALE_MS) || 30_000,

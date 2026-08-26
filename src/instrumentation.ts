@@ -38,14 +38,14 @@ export async function register() {
       terminateFailedStartup(error);
     }
     const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-    startRuntimeTelemetry('web');
+    await startRuntimeTelemetry('web');
     markRuntimeReady();
     syncLogger.info('Instrumentation: public demo database reset and seeded');
     return;
   }
 
   const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-  startRuntimeTelemetry('web');
+  await startRuntimeTelemetry('web');
   const {
     pushNotificationScheduler,
     scheduledSummariesEnabled,

@@ -682,6 +682,10 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
       if (!lease) {
         throw new Error(`Sync job ${job.id} ownership was lost before failure was recorded`);
       }
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [job.connectorId],
+      );
 
       const [followUp] = await query(
         client,
@@ -735,20 +739,37 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         [jobId, owner],
       );
       if (!job) return false;
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [job.connectorId],
+      );
       const lockOwner = connectorSyncLeaseOwner(jobId, owner);
+      const [followUp] = await query(
+        client,
+        `SELECT 1 FROM sync_jobs WHERE connector_id = $1 AND status = 'queued' AND id <> $2 LIMIT 1`,
+        [job.connectorId, jobId],
+      );
       const updated = await client.query(
         `
           UPDATE sync_jobs
-          SET status = 'queued',
+          SET status = $1,
               source = 'recovery',
-              available_at = $1,
-              error = $2,
-              updated_at = $1,
+              available_at = $2,
+              error = $3,
+              completed_at = $4,
+              updated_at = $2,
               lease_owner = NULL,
               lease_expires_at = NULL
-          WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          WHERE id = $5 AND status = 'running' AND lease_owner = $6
         `,
-        [now, reason, jobId, owner],
+        [
+          followUp ? 'failed' : 'queued',
+          now,
+          followUp ? `${reason}; queued follow-up superseded recovery` : reason,
+          followUp ? now : null,
+          jobId,
+          owner,
+        ],
       );
       if (updated.rowCount !== 1) return false;
       await client.query(

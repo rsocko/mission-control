@@ -1,6 +1,7 @@
-import { and, eq, notInArray } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import type { NotificationAction, NotificationItem } from '@/types';
 import type { NotificationRepository } from '@/db/persistence/core-repositories';
+import { RepositoryError } from '@/db/persistence/contracts';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import { notificationActions, notifications } from '../schema';
 
@@ -85,39 +86,30 @@ async function loadActions(
   const rows = await client
     .select()
     .from(notificationActions)
-    .where(eq(notificationActions.notificationId, notificationId));
+    .where(and(
+      eq(notificationActions.notificationId, notificationId),
+      eq(notificationActions.executionState, 'pending'),
+    ))
+    .orderBy(asc(notificationActions.sortOrder), asc(notificationActions.id));
   return rows.map(toNotificationAction);
 }
 
 /**
- * Replaces the notification's action set with `actions`, preserving each
- * surviving action's execution-lifecycle columns (`executionState`,
- * `claimedAt`, `completedAt`, `lastError`) since those aren't part of the
- * portable `NotificationAction` domain type and are only ever mutated by the
- * action-execution pipeline, never by this repository.
+ * Upserts supplied pending actions without deleting unmentioned execution
+ * history. Execution-lifecycle columns are owned by the action pipeline.
  */
 async function syncActions(
   tx: PostgresTransaction,
   notificationId: string,
   actions: NotificationAction[],
 ): Promise<void> {
-  const keepIds = actions.map((action) => action.id);
-  if (keepIds.length > 0) {
-    await tx
-      .delete(notificationActions)
-      .where(
-        and(
-          eq(notificationActions.notificationId, notificationId),
-          notInArray(notificationActions.id, keepIds),
-        ),
-      );
-  } else {
-    await tx
-      .delete(notificationActions)
-      .where(eq(notificationActions.notificationId, notificationId));
-  }
-
   for (const action of actions) {
+    if (action.notificationId !== notificationId) {
+      throw new RepositoryError(
+        'constraint',
+        `Notification action ${action.id} belongs to another notification`,
+      );
+    }
     await tx
       .insert(notificationActions)
       .values({
@@ -137,7 +129,6 @@ async function syncActions(
       .onConflictDoUpdate({
         target: notificationActions.id,
         set: {
-          notificationId,
           actionType: action.actionType,
           label: action.label,
           icon: action.icon ?? null,
@@ -149,6 +140,10 @@ async function syncActions(
           requiresConfirmation: action.requiresConfirmation,
           createdBy: action.createdBy,
         },
+        setWhere: and(
+          eq(notificationActions.notificationId, notificationId),
+          eq(notificationActions.executionState, 'pending'),
+        ),
       });
   }
 }

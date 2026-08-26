@@ -11,14 +11,16 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export function GET(request: Request) {
+export async function GET(request: Request) {
   const requestedHours = Number(new URL(request.url).searchParams.get('hours'));
   const hours = Number.isFinite(requestedHours)
     ? Math.min(72, Math.max(1, Math.floor(requestedHours)))
     : 72;
-  const current = getRuntimeTelemetry();
-  const history = getRuntimeTelemetryHistory(hours);
-  const instances = getRuntimeTelemetryInstances(hours);
+  const [current, history, instances] = await Promise.all([
+    getRuntimeTelemetry(),
+    getRuntimeTelemetryHistory(hours),
+    getRuntimeTelemetryInstances(hours),
+  ]);
   const series = history.map((sample) => ({
     sampledAt: sample.sampledAt,
     role: sample.role,

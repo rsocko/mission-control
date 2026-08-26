@@ -280,16 +280,33 @@ export class PostgresKeywordSearchRepository implements KeywordSearchRepository 
   constructor(private readonly pool: Pool) {}
 
   async rebuild(): Promise<void> {
-    await this.pool.query('TRUNCATE task_search_documents');
-    await this.pool.query(`
-      INSERT INTO task_search_documents (id, title, description, source_list_name, connector_type)
-      SELECT id, title, description, source_list_name, connector_type FROM tasks
-    `);
-    await this.pool.query('TRUNCATE notification_search_documents');
-    await this.pool.query(`
-      INSERT INTO notification_search_documents (id, title, body, category, connector_type)
-      SELECT id, title, body, category, connector_type FROM notifications
-    `);
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('TRUNCATE task_search_documents');
+      await client.query(`
+        INSERT INTO task_search_documents (id, title, description, source_list_name, connector_type)
+        SELECT id, title, description, source_list_name, connector_type FROM tasks
+      `);
+      await client.query('TRUNCATE notification_search_documents');
+      await client.query(`
+        INSERT INTO notification_search_documents (id, title, body, category, connector_type)
+        SELECT id, title, body, category, connector_type FROM notifications
+      `);
+      await client.query('COMMIT');
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          'PostgreSQL search index rebuild and rollback both failed',
+        );
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async indexTask(task: SearchableTaskRecord): Promise<void> {

@@ -3,9 +3,9 @@ import { formatCurrentRuntimePrometheusMetrics } from '@/lib/telemetry/prometheu
 
 export const dynamic = 'force-dynamic';
 
-export function GET() {
+export async function GET() {
   return new Response(
-    formatCurrentRuntimePrometheusMetrics(getRuntimeTelemetry()),
+    formatCurrentRuntimePrometheusMetrics(await getRuntimeTelemetry()),
     {
       headers: {
         'Cache-Control': 'no-store',

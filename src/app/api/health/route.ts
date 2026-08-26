@@ -60,7 +60,7 @@ export async function GET() {
   const startedAt = performance.now();
   try {
     const snapshot = await readWorkerHealthSnapshot();
-    const currentProcesses = getRuntimeTelemetry();
+    const currentProcesses = await getRuntimeTelemetry();
     const webRuntime = currentProcesses.find((runtime) => runtime.role === 'web');
     const workerRuntime = currentProcesses.find((runtime) => runtime.role === 'worker');
     const telemetryStaleMs = positiveInteger(process.env.MC_TELEMETRY_STALE_MS, 30_000);

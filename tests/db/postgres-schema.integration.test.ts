@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { PostgresHealthSnapshotStore } from '@/lib/telemetry/postgres-health-snapshot-store';
+import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import {
   appSettings,
   connectorConfigs,
@@ -27,6 +28,7 @@ describePostgres('PostgreSQL schema integration', () => {
   });
 
   beforeAll(async () => {
+    assertSafeIntegrationTestTarget(connectionString!);
     await backend.initialize();
     initialized = true;
   }, 120_000);
@@ -39,9 +41,6 @@ describePostgres('PostgreSQL schema integration', () => {
     await backend.context.db.delete(connectorConfigs).where(
       eq(connectorConfigs.id, 'postgres-integration-connector'),
     );
-    await backend.context.db.delete(workerHealthSnapshot).where(
-      eq(workerHealthSnapshot.id, 'current'),
-    );
     await backend.shutdown();
   });
 
@@ -53,7 +52,7 @@ describePostgres('PostgreSQL schema integration', () => {
         AND table_type = 'BASE TABLE'
     `);
 
-    expect(Number(result.rows[0]?.count)).toBe(152);
+    expect(Number(result.rows[0]?.count)).toBe(154);
   });
 
   it('round-trips booleans and JSON through the PostgreSQL schema', async () => {
@@ -122,6 +121,7 @@ describePostgres('PostgreSQL schema integration', () => {
     const store = new PostgresHealthSnapshotStore<{ status: string }>(
       backend.context.db,
     );
+    const previous = await store.read();
     const snapshot = {
       schemaVersion: 1,
       generatedAt: '2026-01-01T00:00:00.000Z',
@@ -133,8 +133,17 @@ describePostgres('PostgreSQL schema integration', () => {
       summary: { status: 'healthy' },
     };
 
-    await store.write(snapshot);
-
-    await expect(store.read()).resolves.toEqual(snapshot);
+    try {
+      await store.write(snapshot);
+      await expect(store.read()).resolves.toEqual(snapshot);
+    } finally {
+      if (previous) {
+        await store.write(previous);
+      } else {
+        await backend.context.db.delete(workerHealthSnapshot).where(
+          eq(workerHealthSnapshot.id, 'current'),
+        );
+      }
+    }
   });
 });

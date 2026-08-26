@@ -261,7 +261,6 @@ export class PostgresTaskRepository implements TaskRepository {
 
   async upsert(task: TaskItem): Promise<TaskItem> {
     return this.db.transaction(async (tx) => {
-      const now = new Date().toISOString();
       const values = {
         id: task.id,
         sourceId: task.sourceId,
@@ -275,8 +274,8 @@ export class PostgresTaskRepository implements TaskRepository {
         planningHorizon: task.planningHorizon ?? null,
         dueDate: task.dueDate ?? null,
         pushCount: task.pushCount ?? 0,
-        createdAt: task.createdAt ?? now,
-        updatedAt: now,
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
         completedAt: task.completedAt ?? null,
         parentId: task.parentId ?? null,
         depth: task.depth,
@@ -288,7 +287,7 @@ export class PostgresTaskRepository implements TaskRepository {
         statusReason: task.statusReason ?? null,
         metadata: task.metadata,
         syncStatus: task.syncStatus,
-        lastSyncedAt: task.lastSyncedAt ?? now,
+        lastSyncedAt: task.lastSyncedAt,
         kanbanColumn: task.kanbanColumn ?? null,
         kanbanOrder: task.kanbanOrder ?? null,
         snoozedUntil: task.snoozedUntil ?? null,

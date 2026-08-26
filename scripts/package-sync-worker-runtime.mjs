@@ -37,7 +37,7 @@ function validateTrace(fileList, warnings) {
     const optionalCanvas = message.includes('Failed to resolve dependency "canvas"')
       && /node_modules[\\/]+jsdom[\\/]+/.test(message);
     const optionalPgNative = message.includes('Failed to resolve dependency "pg-native"')
-      && /dist[\\/]+sync-worker\.cjs/.test(message);
+      && /dist[\\/]+(?:sync-worker|github-identity-operator)\.cjs/.test(message);
     return !optionalCanvas && !optionalPgNative;
   });
   if (unexpectedWarnings.length > 0) {

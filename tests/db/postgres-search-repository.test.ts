@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeLimit,
   parseIssueNumberQuery,
+  PostgresKeywordSearchRepository,
   truncate,
 } from '@/db/postgres/search';
 
@@ -9,6 +10,40 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
   describe('normalizeLimit', () => {
     it('defaults to 20', () => {
       expect(normalizeLimit(undefined)).toBe(20);
+    });
+
+    describe('PostgreSQL keyword search repository', () => {
+      it('rebuilds both projections in one transaction', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const release = vi.fn();
+        const repository = new PostgresKeywordSearchRepository({
+          connect: vi.fn().mockResolvedValue({ query, release }),
+        } as never);
+
+        await repository.rebuild();
+
+        expect(query).toHaveBeenNthCalledWith(1, 'BEGIN');
+        expect(query).toHaveBeenLastCalledWith('COMMIT');
+        expect(release).toHaveBeenCalledOnce();
+      });
+
+      it('rolls back and releases when a rebuild fails', async () => {
+        const failure = new Error('backfill failed');
+        const query = vi.fn()
+          .mockResolvedValueOnce({ rows: [] })
+          .mockResolvedValueOnce({ rows: [] })
+          .mockRejectedValueOnce(failure)
+          .mockResolvedValueOnce({ rows: [] });
+        const release = vi.fn();
+        const repository = new PostgresKeywordSearchRepository({
+          connect: vi.fn().mockResolvedValue({ query, release }),
+        } as never);
+
+        await expect(repository.rebuild()).rejects.toBe(failure);
+
+        expect(query).toHaveBeenLastCalledWith('ROLLBACK');
+        expect(release).toHaveBeenCalledOnce();
+      });
     });
 
     it('clamps to a minimum of 1', () => {

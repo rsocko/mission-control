@@ -5,22 +5,11 @@
  * against anything that isn't unambiguously a local/test database, even if
  * `MC_TEST_POSTGRES_URL` is set.
  *
- * Not a test file itself — shared by `tests/db/postgres-*-repository*.test.ts`
- * integration suites (matches the `tests/contracts/postgres*.ts` naming
- * pattern reserved for this PostgreSQL adapter work).
- */
-
-/**
- * Safety guard for PostgreSQL integration tests that run against a real
- * database via `MC_TEST_POSTGRES_URL`. These tests execute destructive
- * DDL/DML (temporary tables, inserts, deletes) so this guard refuses to run
- * against anything that isn't unambiguously a local/test database, even if
- * `MC_TEST_POSTGRES_URL` is set.
- *
  * Being on `localhost`/`127.0.0.1` is NOT sufficient on its own — a
  * developer's local Postgres can just as easily host a restored production
  * snapshot. The *database name* must still be explicitly test-marked
- * (contain "test", "ci", "dev", "sandbox", or "local") regardless of host.
+ * (contain a delimited "test", "ci", "dev", "sandbox", or "local" token)
+ * regardless of host.
  *
  * Not a test file itself — shared by `tests/db/postgres-*-repository*.test.ts`
  * integration suites (matches the `tests/contracts/postgres*.ts` naming
@@ -37,7 +26,7 @@ function looksLikeProduction(host: string, database: string): boolean {
 }
 
 function looksLikeTestDatabase(database: string): boolean {
-  const needle = /(test|ci|dev|sandbox|local)/i;
+  const needle = /(?:^|[-_.])(test|tests|testing|ci|dev|sandbox|local)(?:[-_.]|$)/i;
   return needle.test(database);
 }
 
@@ -64,7 +53,12 @@ export function assertSafeIntegrationTestTarget(connectionString: string): void 
   }
 
   const host = url.hostname;
-  const database = url.pathname.replace(/^\//, '');
+  let database: string;
+  try {
+    database = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  } catch {
+    throw new Error('MC_TEST_POSTGRES_URL contains an invalid encoded database name');
+  }
 
   if (looksLikeProduction(host, database)) {
     throw new Error(
@@ -81,7 +75,7 @@ export function assertSafeIntegrationTestTarget(connectionString: string): void 
     throw new Error(
       `Refusing to run destructive PostgreSQL integration tests against a database that is not `
       + `clearly marked for testing (host="${host}", database="${database}"). The database name `
-      + 'must contain "test", "ci", "dev", "sandbox", or "local" — being on localhost/127.0.0.1 is '
+      + 'must contain a delimited "test", "ci", "dev", "sandbox", or "local" token — being on localhost/127.0.0.1 is '
       + 'not sufficient on its own.',
     );
   }

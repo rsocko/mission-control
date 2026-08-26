@@ -155,7 +155,6 @@ export class PostgresProjectRepository implements ProjectRepository {
 
   async upsert(project: HubProject): Promise<HubProject> {
     return this.db.transaction(async (tx) => {
-      const now = new Date().toISOString();
       const values = {
         id: project.id,
         name: project.name,
@@ -177,8 +176,8 @@ export class PostgresProjectRepository implements ProjectRepository {
         completedAt: project.completedAt ?? null,
         sortOrder: project.sortOrder,
         metadata: project.metadata,
-        createdAt: project.createdAt ?? now,
-        updatedAt: now,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
       };
 
       const [row] = await tx

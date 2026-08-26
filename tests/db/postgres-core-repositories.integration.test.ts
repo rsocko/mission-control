@@ -4,8 +4,10 @@ import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresCoreRepositories } from '@/db/postgres/repositories';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
+import { notificationActions } from '@/db/postgres/schema';
 import type { ConnectorConfig, HubProject, NotificationItem, TaskItem } from '@/types';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+import { eq } from 'drizzle-orm';
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const describePostgres = describe.skipIf(!connectionString);
@@ -70,7 +72,7 @@ describePostgres('PostgreSQL core repositories integration', () => {
     cleanupIds.projects.add(projectId);
 
     const parentId = `task-${randomUUID()}`;
-    const now = new Date().toISOString();
+    const now = '2025-01-02T03:04:05.000Z';
     const parent: TaskItem = {
       id: parentId,
       sourceId: 'source-1',
@@ -106,6 +108,7 @@ describePostgres('PostgreSQL core repositories integration', () => {
     expect(savedParent.tags).toHaveLength(1);
     expect(savedParent.tags[0]?.name).toBe('Integration');
     expect(savedParent.childIds).toEqual([]);
+    expect(savedParent.updatedAt).toBe(now);
 
     const childId = `task-${randomUUID()}`;
     const child: TaskItem = {
@@ -139,7 +142,7 @@ describePostgres('PostgreSQL core repositories integration', () => {
 
   it('round-trips a hub project including its tags', async () => {
     const projectId = `project-${randomUUID()}`;
-    const now = new Date().toISOString();
+    const now = '2025-02-03T04:05:06.000Z';
     const project: HubProject = {
       id: projectId,
       name: 'Tagged project',
@@ -168,6 +171,7 @@ describePostgres('PostgreSQL core repositories integration', () => {
     cleanupIds.projects.add(projectId);
 
     expect(saved.tags).toHaveLength(1);
+    expect(saved.updatedAt).toBe(now);
     const fetched = await repositories.projects.get(projectId);
     expect(fetched?.name).toBe('Tagged project');
     expect(fetched?.tags[0]?.slug).toBe('tagged');
@@ -255,9 +259,24 @@ describePostgres('PostgreSQL core repositories integration', () => {
     expect(saved.actions).toHaveLength(1);
 
     // Upsert without `actions` must leave the existing action row untouched.
-    const { actions: _omit, ...withoutActions } = notification;
-    const updated = await repositories.notifications.upsert(withoutActions as NotificationItem);
+    const withoutActions: NotificationItem = { ...notification };
+    delete withoutActions.actions;
+    const updated = await repositories.notifications.upsert(withoutActions);
     expect(updated.actions).toHaveLength(1);
+
+    const actionId = notification.actions![0].id;
+    await backend.context.db.update(notificationActions)
+      .set({ executionState: 'completed', completedAt: now })
+      .where(eq(notificationActions.id, actionId));
+    const afterCompletion = await repositories.notifications.upsert({
+      ...notification,
+      actions: [],
+    });
+    expect(afterCompletion.actions).toEqual([]);
+    const [completedAction] = await backend.context.db.select()
+      .from(notificationActions)
+      .where(eq(notificationActions.id, actionId));
+    expect(completedAction?.executionState).toBe('completed');
 
     expect(await repositories.notifications.delete(notificationId)).toBe(true);
     cleanupIds.notifications.delete(notificationId);

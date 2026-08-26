@@ -4,6 +4,7 @@ import {
   getSyncJobRepository,
   isDurableSyncMode,
 } from '@/lib/sync/job-queue';
+import logger from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -42,14 +43,26 @@ export async function GET(request: Request) {
         }
       }, 30_000);
 
-      const persistedEvents = jobRepository
-        ? setInterval(() => {
-            void jobRepository.getEventsAfter(persistedCursor).then((events) => {
+      let pollingPersistedEvents = false;
+      const pollPersistedEvents = async () => {
+        if (!jobRepository || pollingPersistedEvents) return;
+        pollingPersistedEvents = true;
+        try {
+          const events = await jobRepository.getEventsAfter(persistedCursor);
               for (const item of events) {
                 persistedCursor = item.id;
                 send(item.event, item.id);
               }
-            });
+        } catch (error) {
+          logger.warn({ err: error, persistedCursor }, 'Sync event stream polling failed');
+          cleanup();
+        } finally {
+          pollingPersistedEvents = false;
+        }
+      };
+      const persistedEvents = jobRepository
+        ? setInterval(() => {
+            void pollPersistedEvents();
           }, 500)
         : null;
 

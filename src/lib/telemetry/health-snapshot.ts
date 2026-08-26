@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import db, { withoutDatabaseObservation } from '@/db';
 import { connectorConfigs, syncLog } from '@/db/schema';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import { getProviderInfo } from '@/lib/ai/provider-factory';
 import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features';
@@ -119,6 +120,30 @@ export async function buildMaterializedHealthSummary(
     workerProcesses,
     syncQueue,
   } = await withoutDatabaseObservation(async () => {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { collectPostgresHealthSnapshotData }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/health-snapshot-data'),
+      ]);
+      const {
+        configs,
+        latestSyncPerConnector,
+        latestSuccessfulSyncPerConnector,
+        dependencyHealth,
+      } = await collectPostgresHealthSnapshotData(
+        getPostgresPersistenceBackend().context.db,
+        { maxConnectors: MAX_CONNECTORS, shouldDefer },
+      );
+      return {
+        configs,
+        latestSyncPerConnector,
+        latestSuccessfulSyncPerConnector,
+        dependencyHealth,
+        workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
+        syncQueue: await (await getSyncJobRepository()).getMetrics(),
+      };
+    }
+
     const configs = await db
       .select()
       .from(connectorConfigs)
@@ -167,7 +192,7 @@ export async function buildMaterializedHealthSummary(
       latestSyncPerConnector,
       latestSuccessfulSyncPerConnector,
       dependencyHealth,
-      workerProcesses: getRuntimeTelemetry().filter((runtime) => runtime.role === 'worker'),
+      workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
       syncQueue: await (await getSyncJobRepository()).getMetrics(),
     };
   });
@@ -191,9 +216,9 @@ export async function buildMaterializedHealthSummary(
   if (database.status !== 'error') {
     const severity = getFreshDatabaseSeverity(workerProcesses, Date.now(), telemetryStaleMs);
     if (severity === 'critical') {
-      database = { ...database, status: 'critical', message: 'Critical SQLite degradation detected' };
+      database = { ...database, status: 'critical', message: 'Critical database degradation detected' };
     } else if (severity === 'degraded') {
-      database = { ...database, status: 'degraded', message: 'SQLite degradation detected' };
+      database = { ...database, status: 'degraded', message: 'Database degradation detected' };
     }
   }
 

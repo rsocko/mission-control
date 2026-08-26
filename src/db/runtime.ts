@@ -2,6 +2,9 @@ import type { CorePersistenceRepositories } from './persistence/core-repositorie
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
+import {
+  registerCorePersistenceRepositories,
+} from '@/lib/persistence/runtime';
 import { initializeDatabase } from './index';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
@@ -15,6 +18,41 @@ let postgresRepositories: CorePersistenceRepositories | null = null;
 let postgresSyncJobRepository: SyncJobRepository | null = null;
 let postgresConnectorOperationLeaseRepository: ConnectorOperationLeaseRepository | null = null;
 let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
+
+function requirePostgresRepositories(): CorePersistenceRepositories {
+  if (!postgresRepositories) {
+    throw new Error('PostgreSQL core repositories have not been registered');
+  }
+  return postgresRepositories;
+}
+
+const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
+  tasks: {
+    get: (id) => requirePostgresRepositories().tasks.get(id),
+    upsert: (task) => requirePostgresRepositories().tasks.upsert(task),
+    delete: (id) => requirePostgresRepositories().tasks.delete(id),
+  },
+  projects: {
+    get: (id) => requirePostgresRepositories().projects.get(id),
+    upsert: (project) => requirePostgresRepositories().projects.upsert(project),
+    delete: (id) => requirePostgresRepositories().projects.delete(id),
+  },
+  connectors: {
+    get: (id) => requirePostgresRepositories().connectors.get(id),
+    upsert: (connector) => requirePostgresRepositories().connectors.upsert(connector),
+    delete: (id) => requirePostgresRepositories().connectors.delete(id),
+  },
+  notifications: {
+    get: (id) => requirePostgresRepositories().notifications.get(id),
+    upsert: (notification) => requirePostgresRepositories().notifications.upsert(notification),
+    delete: (id) => requirePostgresRepositories().notifications.delete(id),
+  },
+  settings: {
+    get: (key) => requirePostgresRepositories().settings.get(key),
+    set: (key, value) => requirePostgresRepositories().settings.set(key, value),
+    delete: (key) => requirePostgresRepositories().settings.delete(key),
+  },
+};
 
 /**
  * Initializes the selected persistence backend. For PostgreSQL, this also
@@ -34,6 +72,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   await postgresBackend.initialize();
   const { db, pool } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
+  registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
@@ -65,13 +104,11 @@ export function registerPostgresCoreRepositories(
   repositories: CorePersistenceRepositories,
 ): void {
   postgresRepositories = repositories;
+  registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
 }
 
 export function getPostgresCoreRepositories(): CorePersistenceRepositories {
-  if (!postgresRepositories) {
-    throw new Error('PostgreSQL core repositories have not been registered');
-  }
-  return postgresRepositories;
+  return requirePostgresRepositories();
 }
 
 /**

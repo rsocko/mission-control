@@ -20,12 +20,20 @@ describe('assertSafeIntegrationTestTarget', () => {
       .toThrow(/production/i);
     expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/mission_control_production'))
       .toThrow(/production/i);
+    expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/mission_control_%70roduction_test'))
+      .toThrow(/production/i);
   });
 
   it('rejects a localhost target whose database name is not test-marked', () => {
     expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/mission_control'))
       .toThrow(/not clearly marked for testing/i);
     expect(() => assertSafeIntegrationTestTarget('postgres://127.0.0.1:5432/mission_control'))
+      .toThrow(/not clearly marked for testing/i);
+    expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/latest'))
+      .toThrow(/not clearly marked for testing/i);
+    expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/contest'))
+      .toThrow(/not clearly marked for testing/i);
+    expect(() => assertSafeIntegrationTestTarget('postgres://localhost:5432/financial'))
       .toThrow(/not clearly marked for testing/i);
   });
 

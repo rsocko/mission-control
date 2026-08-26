@@ -59,8 +59,8 @@ function snapshotStateMessage(status: WorkerHealthSnapshotState): string {
 export async function GET() {
   const startedAt = performance.now();
   try {
-    const snapshot = readWorkerHealthSnapshot();
-    const currentProcesses = getRuntimeTelemetry();
+    const snapshot = await readWorkerHealthSnapshot();
+    const currentProcesses = await getRuntimeTelemetry();
     const webRuntime = currentProcesses.find((runtime) => runtime.role === 'web');
     const workerRuntime = currentProcesses.find((runtime) => runtime.role === 'worker');
     const telemetryStaleMs = positiveInteger(process.env.MC_TELEMETRY_STALE_MS, 30_000);
@@ -91,8 +91,8 @@ export async function GET() {
           ...summary.database,
           status: mergedDatabaseSeverity,
           message: mergedDatabaseSeverity === 'critical'
-            ? 'Critical SQLite degradation detected'
-            : 'SQLite degradation detected',
+            ? 'Critical database degradation detected'
+            : 'Database degradation detected',
         };
     const degradations = [
       ...summary.runtime.degradations,

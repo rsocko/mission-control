@@ -121,6 +121,68 @@ afterAll(() => {
 });
 
 describe('durable sync job queue', () => {
+  it('implements the async repository contract behind the compatibility facade', async () => {
+    const queued = await queue.sqliteSyncJobRepository.enqueue('github-1', {
+      availableAt: '2026-08-25T20:00:00.000Z',
+      scheduledFor: '2026-08-25T20:00:00.000Z',
+    });
+
+    await expect(queue.sqliteSyncJobRepository.get(queued.id)).resolves.toMatchObject({
+      id: queued.id,
+      connectorId: 'github-1',
+      availableAt: '2026-08-25T20:00:00.000Z',
+    });
+  });
+
+  it('exposes explicit connector operation lease outcomes', async () => {
+    const repository = connectorLock.sqliteConnectorOperationLeaseRepository;
+    const at = '2026-08-25T20:00:00.000Z';
+    const request = {
+      connectorId: 'github-1',
+      operationType: 'transfer' as const,
+      owner: 'owner-a',
+      leaseDurationMs: 60_000,
+      at,
+    };
+
+    await expect(repository.acquire(request)).resolves.toEqual({
+      status: 'acquired',
+      expiresAt: '2026-08-25T20:01:00.000Z',
+    });
+    await expect(repository.acquire({ ...request, owner: 'owner-b' }))
+      .resolves.toEqual({ status: 'conflict' });
+    await expect(repository.renew({
+      ...request,
+      owner: 'owner-b',
+      at: '2026-08-25T20:00:10.000Z',
+    })).resolves.toEqual({ status: 'lost' });
+    await expect(repository.renew({
+      ...request,
+      at: '2026-08-25T20:00:10.000Z',
+    })).resolves.toEqual({
+      status: 'renewed',
+      expiresAt: '2026-08-25T20:01:10.000Z',
+    });
+    await expect(repository.release({
+      connectorId: 'github-1',
+      owner: 'owner-b',
+    })).resolves.toEqual({ status: 'lost' });
+    await expect(repository.release({
+      connectorId: 'github-1',
+      owner: 'owner-a',
+    })).resolves.toEqual({ status: 'released' });
+    await expect(repository.hasActiveSyncJobLease({
+      connectorId: 'github-1',
+      jobId: 'missing-job',
+      at,
+    })).resolves.toBe(false);
+    await expect(repository.recoverExpiredJobs(at)).resolves.toEqual({
+      exhausted: 0,
+      superseded: 0,
+      requeued: 0,
+    });
+  });
+
   it('rejects enqueue and operation leases while maintenance is locked', () => {
     seedMaintenanceLock();
     expect(() => queue.enqueueSyncJob('github-1')).toThrow('locked for maintenance');

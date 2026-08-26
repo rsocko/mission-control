@@ -94,6 +94,21 @@ vi.mock('@/lib/sync/job-queue', () => ({
   getSyncScheduleHealth: vi.fn(() => []),
   isDurableSyncMode: vi.fn(() => true),
   requestSyncJobCancellation: vi.fn(),
+  getSyncJobRepository: vi.fn(() => Promise.resolve({
+    getMetrics: () => Promise.resolve({
+      queued: 0,
+      running: 0,
+      retrying: 0,
+      cancelled: 0,
+      oldestQueuedAgeMs: 0,
+      missedSchedules: 0,
+      oldestScheduleOverdueMs: 0,
+      overBudget: 0,
+      expiredLeases: 0,
+    }),
+    getScheduleHealth: () => Promise.resolve([]),
+    requestCancellation: vi.fn(() => Promise.resolve({ cancelled: 0, cancellationRequested: 0 })),
+  })),
 }));
 
 vi.mock('@/lib/sync/connector-lock', () => ({

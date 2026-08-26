@@ -43,7 +43,7 @@ export async function initializeFinanceManagerConnector(): Promise<void> {
   connectorRegistry.registerFactory('monarch-money', financeManagerFactory);
   connectorRegistry.registerFactory('finance', financeManagerFactory);
   await connectorRegistry.createConnector(FINANCE_MANAGER_CONNECTOR_CONFIG);
-  syncScheduler.schedule(FINANCE_MANAGER_CONNECTOR_CONFIG);
+  await syncScheduler.schedule(FINANCE_MANAGER_CONNECTOR_CONFIG);
 }
 
 export const MONARCH_CONNECTOR_CONFIG = FINANCE_MANAGER_CONNECTOR_CONFIG;

@@ -45,17 +45,15 @@ import {
   type CreateNotificationInput,
 } from '@/lib/notifications';
 import {
-  getActiveSyncJobConnectorIds,
-  getLatestDurableSyncResult,
   getSyncDurationBudgetMs,
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   isDurableSyncMode,
   type SyncJobSource,
 } from './job-queue';
-import { assertConnectorMaintenanceUnlocked } from './maintenance-lock';
+import { assertConnectorMaintenanceUnlockedAsync } from './maintenance-lock';
 import {
   ConnectorOperationBusyError,
-  hasConnectorSyncJobLease,
+  getConnectorOperationLeaseRepository,
   runWithConnectorOperationLease,
 } from './connector-lock';
 import { finalizePlanningSignalsIfDue } from '@/lib/planning-signals';
@@ -196,7 +194,7 @@ export class SyncExecutionPipeline {
         source?: SyncJobSource;
       }) => Promise<SyncResult>)
     | null = null;
-  private queueRemainingFromFacade: (() => number) | null = null;
+  private queueRemainingFromFacade: (() => Promise<number>) | null = null;
 
   constructor() {
     // Fire-and-forget hydration from sync_log so the first sync after restart
@@ -218,7 +216,7 @@ export class SyncExecutionPipeline {
         source?: SyncJobSource;
       },
     ) => Promise<SyncResult>;
-    getQueueRemaining: () => number;
+    getQueueRemaining: () => Promise<number>;
   }): void {
     this.requestSyncFromFacade = dependencies.requestSync;
     this.queueRemainingFromFacade = dependencies.getQueueRemaining;
@@ -327,7 +325,12 @@ export class SyncExecutionPipeline {
         () => this.runSyncLocallyWithLease(connectorId, options),
       );
     }
-    if (!hasConnectorSyncJobLease(connectorId, options.jobId)) {
+    const leaseRepository = await getConnectorOperationLeaseRepository();
+    if (!(await leaseRepository.hasActiveSyncJobLease({
+      connectorId,
+      jobId: options.jobId,
+      at: new Date().toISOString(),
+    }))) {
       throw new Error(`Sync job ${options.jobId} has no active connector operation lease`);
     }
     return this.runSyncLocallyWithLease(connectorId, options);
@@ -342,7 +345,7 @@ export class SyncExecutionPipeline {
       identityContext?: GitHubIdentityRunContext;
     },
   ): Promise<SyncResult> {
-    assertConnectorMaintenanceUnlocked(connectorId);
+    await assertConnectorMaintenanceUnlockedAsync(connectorId);
     // Ensure hydration is complete before checking lastSyncResults
     if (this.hydratePromise) await this.hydratePromise;
     throwIfSyncAborted(options?.signal);
@@ -873,7 +876,7 @@ export class SyncExecutionPipeline {
       syncEventBus.emitSyncEvent({
         type: 'sync:complete',
         connectorId,
-        queueRemaining: this.getQueueRemaining(),
+        queueRemaining: await this.getQueueRemaining(),
         result: {
           tasksAdded,
           tasksUpdated,
@@ -1001,7 +1004,7 @@ export class SyncExecutionPipeline {
       syncEventBus.emitSyncEvent({
         type: 'sync:error',
         connectorId,
-        queueRemaining: this.getQueueRemaining(),
+        queueRemaining: await this.getQueueRemaining(),
         error: err instanceof Error ? err.message : String(err),
         runtimeRelease: publicRuntimeRelease(),
       });
@@ -1722,28 +1725,26 @@ export class SyncExecutionPipeline {
   /**
    * Get the last sync result for a connector.
    */
-  getLastResult(connectorId: string): SyncResult | undefined {
-    return isDurableSyncMode()
-      ? getLatestDurableSyncResult(connectorId)
-      : this.lastSyncResults.get(connectorId);
+  async getLastResult(connectorId: string): Promise<SyncResult | undefined> {
+    if (!isDurableSyncMode()) return this.lastSyncResults.get(connectorId);
+    return (await getSyncJobRepository()).getLatestResult(connectorId);
   }
 
   /** Returns true if any connector is currently syncing. */
-  isSyncing(): boolean {
-    return isDurableSyncMode()
-      ? getSyncQueueMetrics().running > 0
-      : this.syncInProgress.size > 0;
+  async isSyncing(): Promise<boolean> {
+    if (!isDurableSyncMode()) return this.syncInProgress.size > 0;
+    const metrics = await (await getSyncJobRepository()).getMetrics();
+    return metrics.running > 0;
   }
 
   /** Returns the set of connector IDs currently syncing. */
-  getActiveSyncs(): string[] {
-    return isDurableSyncMode()
-      ? getActiveSyncJobConnectorIds()
-      : Array.from(this.syncInProgress);
+  async getActiveSyncs(): Promise<string[]> {
+    if (!isDurableSyncMode()) return Array.from(this.syncInProgress);
+    return (await getSyncJobRepository()).getActiveConnectorIds();
   }
 
-  private getQueueRemaining(): number {
-    return this.queueRemainingFromFacade?.() ?? 0;
+  private async getQueueRemaining(): Promise<number> {
+    return (await this.queueRemainingFromFacade?.()) ?? 0;
   }
 
   async stopAll(): Promise<void> {

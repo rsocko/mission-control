@@ -3,7 +3,7 @@ import type { ConnectorConfig, SyncResult } from '@/types';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { syncLogger } from '@/lib/logger';
-import { getActiveSyncJobConnectorIds, getSyncQueueMetrics, isDurableSyncMode } from './job-queue';
+import { isDurableSyncMode } from './job-queue';
 import { SyncCronScheduler } from './cron-scheduler';
 import { SyncExecutionPipeline } from './execution-pipeline';
 import { SyncQueue, type SyncRequestOptions } from './queue';
@@ -36,20 +36,20 @@ export class SyncScheduler {
     );
   }
 
-  schedule(config: ConnectorConfig, staggerIndex = 0): void {
-    this.cronScheduler.schedule(config, staggerIndex);
+  schedule(config: ConnectorConfig, staggerIndex = 0): Promise<void> {
+    return this.cronScheduler.schedule(config, staggerIndex);
   }
 
-  unschedule(connectorId: string): void {
-    this.cronScheduler.unschedule(connectorId);
+  unschedule(connectorId: string): Promise<void> {
+    return this.cronScheduler.unschedule(connectorId);
   }
 
   reconcileScheduleFromDb(connectorId: string): Promise<void> {
     return this.cronScheduler.reconcileScheduleFromDb(connectorId);
   }
 
-  queueFollowUpSync(connectorId: string): void {
-    this.queue.queueFollowUpSync(connectorId);
+  queueFollowUpSync(connectorId: string): Promise<void> {
+    return this.queue.queueFollowUpSync(connectorId);
   }
 
   runExclusiveConnectorOperation<T>(
@@ -93,7 +93,7 @@ export class SyncScheduler {
     return this.executionPipeline.runAll(full);
   }
 
-  getLastResult(connectorId: string): SyncResult | undefined {
+  getLastResult(connectorId: string): Promise<SyncResult | undefined> {
     return this.executionPipeline.getLastResult(connectorId);
   }
 
@@ -101,16 +101,12 @@ export class SyncScheduler {
     return this.cronScheduler.getStatus();
   }
 
-  isSyncing(): boolean {
-    return isDurableSyncMode()
-      ? getSyncQueueMetrics().running > 0
-      : this.executionPipeline.isSyncing();
+  isSyncing(): Promise<boolean> {
+    return this.executionPipeline.isSyncing();
   }
 
-  getActiveSyncs(): string[] {
-    return isDurableSyncMode()
-      ? getActiveSyncJobConnectorIds()
-      : this.executionPipeline.getActiveSyncs();
+  getActiveSyncs(): Promise<string[]> {
+    return this.executionPipeline.getActiveSyncs();
   }
 
   scheduleAll(): Promise<void> {

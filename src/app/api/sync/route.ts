@@ -7,17 +7,16 @@ import { syncLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { isDemoMode } from '@/lib/mode';
 import {
-  getSyncScheduleHealth,
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   isDurableSyncMode,
-  requestSyncJobCancellation,
 } from '@/lib/sync/job-queue';
 import { getRuntimeTelemetry } from '@/lib/telemetry/runtime';
 
-function getScheduleHealth() {
-  const schedules = getSyncScheduleHealth();
+async function getScheduleHealth() {
+  const jobRepository = await getSyncJobRepository();
+  const schedules = await jobRepository.getScheduleHealth();
   const overdue = schedules.filter((schedule) => schedule.overdue);
-  const worker = getRuntimeTelemetry().find((runtime) => runtime.role === 'worker');
+  const worker = (await getRuntimeTelemetry()).find((runtime) => runtime.role === 'worker');
   const telemetryStaleMs = Math.max(
     30_000,
     Number(process.env.MC_TELEMETRY_STALE_MS) || 30_000,
@@ -146,9 +145,10 @@ export async function GET(request: Request) {
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '15', 10), 1), 50);
     const before = url.searchParams.get('before'); // ISO date cursor
 
-    const status = syncScheduler.getStatus();
-    const isSyncing = syncScheduler.isSyncing();
-    const activeSyncs = syncScheduler.getActiveSyncs();
+    const status = await syncScheduler.getStatus();
+    const isSyncing = await syncScheduler.isSyncing();
+    const activeSyncs = await syncScheduler.getActiveSyncs();
+    const jobRepository = await getSyncJobRepository();
 
     const baseQuery = before
       ? db.select().from(syncLog).where(lt(syncLog.syncedAt, before))
@@ -162,8 +162,8 @@ export async function GET(request: Request) {
       status,
       isSyncing,
       activeSyncs,
-      queue: getSyncQueueMetrics(),
-      scheduleHealth: getScheduleHealth(),
+      queue: await jobRepository.getMetrics(),
+      scheduleHealth: await getScheduleHealth(),
       history,
       hasMore,
     });
@@ -187,7 +187,7 @@ export async function DELETE(request: Request) {
     connectorId?: string;
   };
   try {
-    const cancellation = requestSyncJobCancellation(body);
+    const cancellation = await (await getSyncJobRepository()).requestCancellation(body);
     if (cancellation.cancelled === 0 && cancellation.cancellationRequested === 0) {
       return NextResponse.json(
         {

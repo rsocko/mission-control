@@ -12,7 +12,9 @@ function payload() {
     truncatedAlerts: 0,
     status: 'firing',
     receiver: 'mission-control',
+    notification_reason: 'first notification',
     groupLabels: { alertname: 'NodeDown' },
+    routeLabels: { action_required: 'true' },
     commonLabels: { severity: 'critical' },
     commonAnnotations: {},
     externalURL: 'https://alertmanager.example',
@@ -74,6 +76,8 @@ describe('Alertmanager webhook contract', () => {
       ],
     });
     expect(JSON.stringify(event)).not.toContain('arbitrary_');
+    expect(JSON.stringify(event)).not.toContain('notification_reason');
+    expect(JSON.stringify(event)).not.toContain('routeLabels');
     expect(event.eventId).toMatch(/^[a-f0-9]{64}$/);
   });
 
@@ -87,6 +91,21 @@ describe('Alertmanager webhook contract', () => {
 
     expect(() => normalizeAlertmanagerWebhook(invalid, 'homelab'))
       .toThrow(/labels\.severity must be critical, warning, or info/);
+  });
+
+  it('bounds Alertmanager 0.34 envelope metadata', () => {
+    const invalidReason = payload();
+    invalidReason.notification_reason = 'x'.repeat(257);
+    expect(() => normalizeAlertmanagerWebhook(invalidReason, 'homelab'))
+      .toThrow(/Too big/);
+
+    const invalidRouteLabels = payload();
+    Object.assign(
+      invalidRouteLabels.routeLabels,
+      Object.fromEntries(Array.from({ length: 32 }, (_, index) => [`label_${index}`, 'value'])),
+    );
+    expect(() => normalizeAlertmanagerWebhook(invalidRouteLabels, 'homelab'))
+      .toThrow(/Labels must contain at most 32 entries/);
   });
 
   it('rejects unsafe approved links and incomplete metrics', () => {

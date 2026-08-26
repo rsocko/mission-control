@@ -465,4 +465,4 @@ jobs:
       - name: Run PostgreSQL integration tests
         env:
           MC_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
-        run: npm test -- --run tests/db/postgres-*.integration.test.ts
+        run: npm test -- --run --no-file-parallelism tests/db/postgres-*.integration.test.ts

@@ -120,9 +120,19 @@ type HoustonToolContext = {
   correlationId?: unknown;
 };
 
+type HoustonToolExecutionOptions = {
+  context?: unknown;
+  experimental_context?: unknown;
+};
+
 function correlationId(context: unknown): string {
   const value = (context as HoustonToolContext | undefined)?.correlationId;
   return typeof value === 'string' && value.length > 0 ? value : 'unavailable';
+}
+
+function resolveToolContext(options: unknown): unknown {
+  const value = options as HoustonToolExecutionOptions | undefined;
+  return value?.context ?? value?.experimental_context;
 }
 
 export function createFinanceMutationTools(approvalSecret: string) {
@@ -135,7 +145,7 @@ export function createFinanceMutationTools(approvalSecret: string) {
       execute: (input, options) => assignFinanceTransactionKid(input, {
         approvalSecret,
         toolCallId: options.toolCallId,
-        correlationId: correlationId(options.experimental_context),
+        correlationId: correlationId(resolveToolContext(options)),
         signal: options.abortSignal,
       }),
     }),
@@ -147,7 +157,7 @@ export function createFinanceMutationTools(approvalSecret: string) {
       execute: (input, options) => updateFinanceTransactionCategory(input, {
         approvalSecret,
         toolCallId: options.toolCallId,
-        correlationId: correlationId(options.experimental_context),
+        correlationId: correlationId(resolveToolContext(options)),
         signal: options.abortSignal,
       }),
     }),

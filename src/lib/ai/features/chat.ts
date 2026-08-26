@@ -98,7 +98,6 @@ export async function streamChat(
     tools,
     activeTools,
     experimental_toolApprovalSecret: approvalSecret,
-    experimental_context: { correlationId: route.context.correlationId },
     stopWhen: stepCountIs(5),
     prepareStep: restrictToolsAfterTriage,
     abortSignal: options?.abortSignal,

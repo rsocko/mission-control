@@ -8,7 +8,6 @@ import type {
   TaskPriority,
   TaskStatus,
 } from '@/types';
-import type { DashboardTaskTagViewModel as TaskTag } from '@/types/dashboard';
 import type { TaskListItemDto } from '@/types/api';
 
 type ProjectDetailDomainFields = Pick<
@@ -36,43 +35,15 @@ export type ProjectPhaseViewModel = CanonicalProjectPhase;
 
 export type ProjectPhaseItemViewModel = CanonicalProjectPhaseItem;
 
-type ProjectTaskDtoFields = Pick<
-  TaskListItemDto,
-  | 'id'
-  | 'title'
-  | 'connectorType'
-  | 'connectorInstanceId'
-  | 'localDisposition'
-  | 'microStatus'
-  | 'taskSourceModel'
-  | 'editPolicy'
->;
+type ProjectTaskDtoFields = Omit<TaskListItemDto, 'status' | 'priority'>;
 
 export type ProjectTaskViewModel = ProjectTaskDtoFields & {
   description?: string | null;
   status: TaskStatus;
   statusReason?: string | null;
   priority: TaskPriority;
-  dueDate?: string | null;
   completedAt?: string | null;
   updatedAt: string;
-  sourceListId?: string | null;
-  sourceListName?: string | null;
-  assignee?: string | null;
-  tags?: TaskTag[];
-  estimatedDuration?: number | null;
-  sourceId?: string | null;
-  metadata?: string | null;
-  effort?: number | null;
-  subtaskTotal?: number | null;
-  subtaskDone?: number | null;
-  hubProjectIds?: string[];
-  projectPhaseMemberships?: Array<{
-    projectId: string;
-    projectName: string;
-    phaseId: string | null;
-    phaseName: string | null;
-  }>;
 };
 
 export interface ProjectRuleMatch {

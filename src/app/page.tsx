@@ -34,6 +34,7 @@ import {
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
+import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
@@ -589,66 +590,60 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                       className={`absolute left-0 top-0 w-full ${state.bulkMode ? 'select-none' : ''}`}
                       key={task.id}
                       style={{ transform: `translateY(${virtualItem.start}px)` }}
-                      onMouseDown={(e) => {
-                        if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();
-                      }}
-                      onClick={(e) => {
-                        taskSelection.cancelPendingDeselect();
-                        if (e.shiftKey) {
-                          e.preventDefault();
-                          const enteringBulk = !state.bulkMode;
-                          if (enteringBulk) actions.setBulkMode(true);
-                          const currentIndex = virtualItem.index;
-                          const lastIndex = resolveSelectionAnchorIndex(
-                            virtualRows.map((row) => row.type === 'task' ? row.task.id : null),
-                            computed.lastClickedIndexRef.current,
-                            enteringBulk ? state.selectedTaskId : null,
-                          );
-                          if (lastIndex !== null && lastIndex !== currentIndex) {
-                            const start = Math.min(lastIndex, currentIndex);
-                            const end = Math.max(lastIndex, currentIndex);
-                            actions.setBulkSelected((prev) => {
-                              const next = new Set(prev);
-                              if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                              for (let i = start; i <= end; i++) {
-                                const r = virtualRows[i];
-                                if (r && r.type === 'task') next.add(r.task.id);
-                              }
-                              return next;
-                            });
+                      {...createTaskRowInteractionHandlers({
+                        taskId: task.id,
+                        bulkMode: state.bulkMode,
+                        onBeforeClick: taskSelection.cancelPendingDeselect,
+                        onSelect: taskSelection.handleTaskClick,
+                        onDoubleClick: taskSelection.handleTaskDoubleClick,
+                        onModifierClick: (_taskId, e) => {
+                          if (e.shiftKey) {
+                            const enteringBulk = !state.bulkMode;
+                            if (enteringBulk) actions.setBulkMode(true);
+                            const currentIndex = virtualItem.index;
+                            const lastIndex = resolveSelectionAnchorIndex(
+                              virtualRows.map((row) => row.type === 'task' ? row.task.id : null),
+                              computed.lastClickedIndexRef.current,
+                              enteringBulk ? state.selectedTaskId : null,
+                            );
+                            if (lastIndex !== null && lastIndex !== currentIndex) {
+                              const start = Math.min(lastIndex, currentIndex);
+                              const end = Math.max(lastIndex, currentIndex);
+                              actions.setBulkSelected((prev) => {
+                                const next = new Set(prev);
+                                if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
+                                for (let i = start; i <= end; i++) {
+                                  const r = virtualRows[i];
+                                  if (r && r.type === 'task') next.add(r.task.id);
+                                }
+                                return next;
+                              });
+                            } else {
+                              actions.setBulkSelected((prev) => {
+                                const next = new Set(prev);
+                                if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
+                                next.add(task.id);
+                                return next;
+                              });
+                            }
+                            computed.lastClickedIndexRef.current = currentIndex;
                           } else {
+                            const enteringBulk = !state.bulkMode;
+                            if (enteringBulk) actions.setBulkMode(true);
                             actions.setBulkSelected((prev) => {
                               const next = new Set(prev);
                               if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                              next.add(task.id);
+                              if (next.has(task.id)) next.delete(task.id);
+                              else next.add(task.id);
                               return next;
                             });
+                            computed.lastClickedIndexRef.current = virtualItem.index;
                           }
-                          computed.lastClickedIndexRef.current = currentIndex;
-                        } else if (e.ctrlKey || e.metaKey) {
-                          e.preventDefault();
-                          const enteringBulk = !state.bulkMode;
-                          if (enteringBulk) actions.setBulkMode(true);
-                          actions.setBulkSelected((prev) => {
-                            const next = new Set(prev);
-                            if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                            if (next.has(task.id)) next.delete(task.id);
-                            else next.add(task.id);
-                            return next;
-                          });
+                        },
+                        onBulkClick: () => {
                           computed.lastClickedIndexRef.current = virtualItem.index;
-                        } else if (state.bulkMode) {
-                          computed.lastClickedIndexRef.current = virtualItem.index;
-                        } else {
-                          taskSelection.handleTaskClick(task.id);
-                        }
-                      }}
-                      onDoubleClick={(e) => {
-                        if (!state.bulkMode) {
-                          e.stopPropagation();
-                          taskSelection.handleTaskDoubleClick(task.id);
-                        }
-                      }}
+                        },
+                      })}
                     >
                       <TaskRow
                         task={task}

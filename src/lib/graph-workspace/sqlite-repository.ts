@@ -1,4 +1,6 @@
 import type Database from 'better-sqlite3';
+import type { SynchronousTransactionRunner } from '@/db/persistence/contracts';
+import { SqliteTransactionRunner } from '@/db/persistence/sqlite-transaction-runner';
 import { ideationWorkspaceDocumentSchema } from './ideation-contract';
 import {
   IdeationWorkspaceConflictError,
@@ -69,9 +71,17 @@ function toVersion(row: VersionRow): IdeationWorkspaceVersion {
 }
 
 export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepository {
-  constructor(private readonly database: Database.Database) {}
+  private readonly transactions: SynchronousTransactionRunner<Database.Database>;
 
-  list(includeArchived: boolean): IdeationWorkspaceSummary[] {
+  constructor(
+    private readonly database: Database.Database,
+    transactions: SynchronousTransactionRunner<Database.Database> =
+      new SqliteTransactionRunner(database),
+  ) {
+    this.transactions = transactions;
+  }
+
+  async list(includeArchived: boolean): Promise<IdeationWorkspaceSummary[]> {
     const where = includeArchived ? '' : 'WHERE archived_at IS NULL';
     const rows = this.database.prepare(`
       SELECT * FROM graph_workspaces
@@ -81,23 +91,27 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
     return rows.map(toSummary);
   }
 
-  get(id: string): IdeationWorkspace | null {
+  async get(id: string): Promise<IdeationWorkspace | null> {
+    return this.getWorkspace(id);
+  }
+
+  private getWorkspace(id: string): IdeationWorkspace | null {
     const row = this.database.prepare(
       'SELECT * FROM graph_workspaces WHERE id = ?',
     ).get(id) as WorkspaceRow | undefined;
     return row ? toWorkspace(row) : null;
   }
 
-  findByMigrationSource(source: string): IdeationWorkspace | null {
+  async findByMigrationSource(source: string): Promise<IdeationWorkspace | null> {
     const row = this.database.prepare(
       'SELECT * FROM graph_workspaces WHERE migration_source = ?',
     ).get(source) as WorkspaceRow | undefined;
     return row ? toWorkspace(row) : null;
   }
 
-  create(input: CreateIdeationWorkspaceInput): IdeationWorkspace {
+  async create(input: CreateIdeationWorkspaceInput): Promise<IdeationWorkspace> {
     const document = JSON.stringify(input.document);
-    this.database.transaction(() => {
+    return this.transactions.run(() => {
       this.database.prepare(`
         INSERT INTO graph_workspaces (
           id, name, type, schema_version, content_revision, current_document,
@@ -119,8 +133,8 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
         input.reason,
         input.now,
       );
-    })();
-    return this.get(input.id)!;
+      return this.getWorkspace(input.id)!;
+    });
   }
 
   updateContent(
@@ -128,9 +142,9 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
     baseRevision: number,
     document: IdeationWorkspace['document'],
     now: string,
-  ): IdeationWorkspace | null {
-    return this.database.transaction(() => {
-      const current = this.get(id);
+  ): Promise<IdeationWorkspace | null> {
+    return this.transactions.run(() => {
+      const current = this.getWorkspace(id);
       if (!current) return null;
       if (current.contentRevision !== baseRevision) {
         throw new IdeationWorkspaceConflictError(current);
@@ -143,7 +157,7 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
         WHERE id = ? AND content_revision = ?
       `).run(revision, serialized, now, id, baseRevision);
       if (result.changes !== 1) {
-        const latest = this.get(id);
+        const latest = this.getWorkspace(id);
         if (!latest) return null;
         throw new IdeationWorkspaceConflictError(latest);
       }
@@ -159,33 +173,37 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
       ) {
         this.insertVersion(id, revision, current.name, serialized, 'checkpoint', now);
       }
-      return this.get(id)!;
-    })();
+      return this.getWorkspace(id)!;
+    });
   }
 
-  rename(id: string, name: string, now: string): IdeationWorkspace | null {
+  async rename(id: string, name: string, now: string): Promise<IdeationWorkspace | null> {
     const result = this.database.prepare(
       'UPDATE graph_workspaces SET name = ?, updated_at = ? WHERE id = ?',
     ).run(name, now, id);
-    return result.changes ? this.get(id) : null;
+    return result.changes ? this.getWorkspace(id) : null;
   }
 
-  setArchived(id: string, archived: boolean, now: string): IdeationWorkspace | null {
+  async setArchived(
+    id: string,
+    archived: boolean,
+    now: string,
+  ): Promise<IdeationWorkspace | null> {
     const result = this.database.prepare(`
       UPDATE graph_workspaces
       SET archived_at = ?, updated_at = ?
       WHERE id = ?
     `).run(archived ? now : null, now, id);
-    return result.changes ? this.get(id) : null;
+    return result.changes ? this.getWorkspace(id) : null;
   }
 
-  duplicate(
+  async duplicate(
     sourceId: string,
     id: string,
     name: string,
     now: string,
-  ): IdeationWorkspace | null {
-    const source = this.get(sourceId);
+  ): Promise<IdeationWorkspace | null> {
+    const source = await this.get(sourceId);
     if (!source) return null;
     return this.create({
       id,
@@ -196,15 +214,17 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
     });
   }
 
-  deleteArchived(id: string): 'deleted' | 'not-found' | 'not-archived' {
-    const workspace = this.get(id);
+  async deleteArchived(
+    id: string,
+  ): Promise<'deleted' | 'not-found' | 'not-archived'> {
+    const workspace = this.getWorkspace(id);
     if (!workspace) return 'not-found';
     if (!workspace.archivedAt) return 'not-archived';
     this.database.prepare('DELETE FROM graph_workspaces WHERE id = ?').run(id);
     return 'deleted';
   }
 
-  listVersions(id: string, limit: number): IdeationWorkspaceVersion[] {
+  async listVersions(id: string, limit: number): Promise<IdeationWorkspaceVersion[]> {
     const rows = this.database.prepare(`
       SELECT * FROM graph_workspace_versions
       WHERE workspace_id = ?
@@ -214,7 +234,17 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
     return rows.map(toVersion);
   }
 
-  getVersion(id: string, revision: number): IdeationWorkspaceVersion | null {
+  async getVersion(
+    id: string,
+    revision: number,
+  ): Promise<IdeationWorkspaceVersion | null> {
+    return this.getWorkspaceVersion(id, revision);
+  }
+
+  private getWorkspaceVersion(
+    id: string,
+    revision: number,
+  ): IdeationWorkspaceVersion | null {
     const row = this.database.prepare(`
       SELECT * FROM graph_workspace_versions
       WHERE workspace_id = ? AND revision = ?
@@ -227,14 +257,14 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
     historicalRevision: number,
     baseRevision: number,
     now: string,
-  ): IdeationWorkspace | null {
-    return this.database.transaction(() => {
-      const current = this.get(id);
+  ): Promise<IdeationWorkspace | null> {
+    return this.transactions.run(() => {
+      const current = this.getWorkspace(id);
       if (!current) return null;
       if (current.contentRevision !== baseRevision) {
         throw new IdeationWorkspaceConflictError(current);
       }
-      const historical = this.getVersion(id, historicalRevision);
+      const historical = this.getWorkspaceVersion(id, historicalRevision);
       if (!historical) return null;
       const revision = current.contentRevision + 1;
       const document = JSON.stringify(historical.document);
@@ -258,13 +288,13 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
         WHERE id = ? AND content_revision = ?
       `).run(revision, document, now, id, baseRevision);
       if (result.changes !== 1) {
-        const latest = this.get(id);
+        const latest = this.getWorkspace(id);
         if (!latest) return null;
         throw new IdeationWorkspaceConflictError(latest);
       }
       this.insertVersion(id, revision, current.name, document, 'restored', now);
-      return this.get(id)!;
-    })();
+      return this.getWorkspace(id)!;
+    });
   }
 
   private insertVersion(

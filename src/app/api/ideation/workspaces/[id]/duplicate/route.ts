@@ -14,7 +14,7 @@ export async function POST(
   if (untrusted) return untrusted;
   try {
     const body = await request.json();
-    const workspace = ideationWorkspaceService.duplicate((await params).id, body.name);
+    const workspace = await ideationWorkspaceService.duplicate((await params).id, body.name);
     return workspace
       ? NextResponse.json({ workspace }, { status: 201 })
       : ApiErrors.notFound('Ideation workspace');

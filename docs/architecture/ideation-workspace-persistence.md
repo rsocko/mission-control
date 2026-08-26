@@ -6,6 +6,7 @@ category: architecture
 related:
   - "[Structured Graph Workspace](../design/proposed/structured-graph-workspace/README.md)"
   - "[Architecture and Data Contracts](../design/proposed/structured-graph-workspace/architecture.md)"
+  - "[Portable Persistence Boundaries](./persistence-boundaries.md)"
   - "[Issue #1324](https://github.com/rsocko/mission-control/issues/1324)"
 ---
 
@@ -47,9 +48,11 @@ IdeationWorkspaceRepository
 SQLite workspace + checkpoint tables
 ```
 
-The repository interface keeps SQLite replaceable without introducing a
-service boundary or generic graph platform before a second authored consumer
-proves the contract.
+The Promise-based repository interface follows the shared portable persistence
+rules. SQLite owns row mapping, JSON serialization, compare-and-swap SQL, and
+atomic checkpoint writes; the application service and routes depend only on the
+repository port. This keeps SQLite replaceable without introducing a generic
+graph platform before a second authored consumer proves that broader contract.
 
 ## Canonical document
 

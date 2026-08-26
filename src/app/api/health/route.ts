@@ -59,7 +59,7 @@ function snapshotStateMessage(status: WorkerHealthSnapshotState): string {
 export async function GET() {
   const startedAt = performance.now();
   try {
-    const snapshot = readWorkerHealthSnapshot();
+    const snapshot = await readWorkerHealthSnapshot();
     const currentProcesses = getRuntimeTelemetry();
     const webRuntime = currentProcesses.find((runtime) => runtime.role === 'web');
     const workerRuntime = currentProcesses.find((runtime) => runtime.role === 'worker');

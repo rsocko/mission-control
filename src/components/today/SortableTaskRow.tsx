@@ -17,6 +17,7 @@ import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
+import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
@@ -133,20 +134,14 @@ export function SortableTaskRow({
       ref={setNodeRef}
       style={style}
       className={`@container px-4 ${compact ? 'py-1.5' : 'py-3 md:py-3'} flex items-center gap-3 hover:bg-[var(--surface-0)] group cursor-pointer transition-[background-color,opacity] duration-300 relative ${compact ? 'min-h-[40px]' : 'min-h-[48px] md:min-h-0'} ${isCompleting ? 'bg-green-900/10' : ''} ${bulkSelected ? 'bg-blue-900/20' : ''} ${isSelected ? 'ring-1 ring-inset ring-[var(--accent-400)] bg-[var(--accent-500)]/8 rounded-sm' : ''}`}
-      onMouseDown={(e) => {
-        if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();
-      }}
-      onClick={(e) => {
-        if ((e.shiftKey || e.ctrlKey || e.metaKey) && onModifierClick) {
-          e.preventDefault();
-          onModifierClick(item.taskId, e);
-        } else if (bulkMode && onBulkToggle) {
-          onBulkToggle();
-        } else {
-          onSelect(item.taskId);
-        }
-      }}
-      onDoubleClick={() => !bulkMode && onDoubleClick?.(item.taskId)}
+      {...createTaskRowInteractionHandlers({
+        taskId: item.taskId,
+        bulkMode,
+        onSelect,
+        onDoubleClick,
+        onModifierClick,
+        onBulkClick: onBulkToggle,
+      })}
     >
       {bulkMode ? (
         <label className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center flex-shrink-0 cursor-pointer">

@@ -72,8 +72,7 @@ import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CompletionBurst } from '@/components/ui/CompletionBurst';
-import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import {
   Select,
   SelectContent,
@@ -82,7 +81,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import { ProjectHierarchyClientError } from '@/lib/projects/hierarchy-client';
 import {
@@ -107,7 +105,6 @@ import {
   PriorityDot,
   SortablePhaseItem,
   TaskDisplayId,
-  TaskInfoBadges,
   TaskStatusBadge,
 } from '../components';
 import {
@@ -148,6 +145,7 @@ import type {
   RequestConfirmation,
 } from './contracts';
 import { AIPlanControl } from './AIPlanControl';
+import { PlanTaskRow } from '../PlanTaskRow';
 
 const ProjectStructureGraph = dynamic(
   () => import('@/components/graph/ProjectStructureGraph'),
@@ -1599,111 +1597,28 @@ export function ProjectPhasesTab({
                                       <SortableContext items={entries.map(({ task }) => `task:${task.id}`)} strategy={verticalListSortingStrategy}>
                                       <div className="space-y-2">
                                         {entries.map(({ item, task }) => {
-                                          const ConnectorIcon = getConnectorIcon(task.connectorType);
-                                          const isDone = task.status === 'done' || completingIds.has(task.id);
-                                          const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                                           const isBulkSelected = bulk.bulkSelected.has(task.id);
                                           return (
                                             <DraggableTaskItem key={item.id} taskId={task.id}>
                                               {(taskDragHandleProps) => (
-                                                <TaskContextMenu
-                                                 task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, sourceId: task.sourceId, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
-                                                 isInMyDay={myDayTaskIds.has(task.id)}
-                                                projectPhases={phaseMenuItems}
-                                                projects={allProjects}
-                                                taskProjectIds={task.hubProjectIds}
-                                                taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                                                actions={getTaskContextActions(task)}
-                                               >
-                                                <div
-                                                  className={cn(
-                                                    'flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                                    selectedTaskId === task.id && !bulk.bulkMode && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
-                                                    isBulkSelected && 'bg-blue-900/20 border-blue-500/30',
-                                                    isInactive && 'opacity-50',
-                                                  )}
-                                                  onMouseDown={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault(); }}
-                                                  onClick={(e) => {
-                                                    if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                                      handleBulkModifierClick(task.id, e);
-                                                    } else if (bulk.bulkMode) {
-                                                      bulk.toggleItem(task.id);
-                                                    } else {
-                                                      toggleTask(task.id);
-                                                    }
-                                                  }}
-                                                  onDoubleClick={(e) => {
-                                                    if (!bulk.bulkMode) {
-                                                      e.stopPropagation();
-                                                      handleTaskDoubleClick(task.id);
-                                                    }
-                                                  }}
-                                                >
-                                                  <div className="flex min-w-0 items-center gap-2">
-                                                    {bulk.bulkMode ? (
-                                                      <label className="flex items-center justify-center flex-shrink-0 cursor-pointer min-w-8 min-h-8">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={isBulkSelected}
-                                                          onChange={() => bulk.toggleItem(task.id)}
-                                                          onClick={(e) => e.stopPropagation()}
-                                                          aria-label={`Select ${task.title}`}
-                                                          className="w-4 h-4 rounded border-[var(--border-strong)] accent-[var(--accent-500)] cursor-pointer"
-                                                        />
-                                                      </label>
-                                                    ) : (
-                                                    <button
-                                                      type="button"
-                                                      {...taskDragHandleProps}
-                                                      className="inline-flex min-h-8 min-w-8 cursor-grab items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                                                      aria-label="Drag task to another phase"
-                                                      onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                      <GripVertical size={14} />
-                                                    </button>
-                                                    )}
-                                                    <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                                      <button
-                                                        type="button"
-                                                        onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
-                                                        disabled={completingIds.has(task.id)}
-                                                        className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
-                                                        aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                                      >
-                                                        <TaskStatusIndicator
-                                                          status={task.status}
-                                                          microStatus={task.microStatus}
-                                                          isCompleting={completingIds.has(task.id)}
-                                                          size="md"
-                                                          className="scale-90"
-                                                        />
-                                                      </button>
-                                                    </CompletionBurst>
-                                                    <div className="min-w-0">
-                                                      <div className="flex flex-wrap items-center gap-2">
-                                                        <PriorityDot priority={task.priority} />
-                                                        <ConnectorIcon size={14} className="text-[var(--text-tertiary)]" />
-                                                        <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
-                                                        <TaskDisplayId task={task} />
-                                                        <TaskInfoBadges task={task} />
-                                                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
-                                                      </div>
-                                                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
-                                                        <span>{PRIORITY_LABELS[task.priority]}</span>
-                                                        <span>•</span>
-                                                        <span>{task.sourceListName || task.connectorType}</span>
-                                                        {task.dueDate ? (
-                                                          <>
-                                                            <span>•</span>
-                                                            <span>Due {formatDateLabel(task.dueDate)}</span>
-                                                          </>
-                                                        ) : null}
-                                                      </div>
-                                                    </div>
-                                                  </div>
-                                                  <TaskStatusBadge status={task.status} statusReason={task.statusReason} />
-                                                </div>
-                                                </TaskContextMenu>
+                                                <PlanTaskRow
+                                                  task={task}
+                                                  dragHandleProps={taskDragHandleProps}
+                                                  dragLabel="Drag task to another phase"
+                                                  isSelected={selectedTaskId === task.id}
+                                                  isCompleting={completingIds.has(task.id)}
+                                                  bulkMode={bulk.bulkMode}
+                                                  bulkSelected={isBulkSelected}
+                                                  onBulkToggle={() => bulk.toggleItem(task.id)}
+                                                  onSelect={toggleTask}
+                                                  onDoubleClick={handleTaskDoubleClick}
+                                                  onModifierClick={handleBulkModifierClick}
+                                                  onComplete={handleCompleteTask}
+                                                  isInMyDay={myDayTaskIds.has(task.id)}
+                                                  contextMenuActions={getTaskContextActions(task)}
+                                                  phaseMenuItems={phaseMenuItems}
+                                                  projects={allProjects}
+                                                />
                                               )}
                                             </DraggableTaskItem>
                                           );
@@ -1772,111 +1687,28 @@ export function ProjectPhasesTab({
                       <SortableContext items={visibleUnassignedTasks.map((t) => `task:${t.id}`)} strategy={verticalListSortingStrategy}>
                         <div className="space-y-2">
                           {visibleUnassignedTasks.map((task) => {
-                            const ConnectorIcon = getConnectorIcon(task.connectorType);
-                            const isDone = task.status === 'done' || completingIds.has(task.id);
-                            const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                             const isBulkSelected = bulk.bulkSelected.has(task.id);
                             return (
                               <DraggableTaskItem key={task.id} taskId={task.id}>
                                 {(taskDragHandleProps) => (
-                                  <TaskContextMenu
-                                   task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, sourceId: task.sourceId, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
+                                  <PlanTaskRow
+                                    task={task}
+                                    dragHandleProps={taskDragHandleProps}
+                                    dragLabel="Drag task to a phase"
+                                    isSelected={selectedTaskId === task.id}
+                                    isCompleting={completingIds.has(task.id)}
+                                    bulkMode={bulk.bulkMode}
+                                    bulkSelected={isBulkSelected}
+                                    onBulkToggle={() => bulk.toggleItem(task.id)}
+                                    onSelect={toggleTask}
+                                    onDoubleClick={handleTaskDoubleClick}
+                                    onModifierClick={handleBulkModifierClick}
+                                    onComplete={handleCompleteTask}
                                     isInMyDay={myDayTaskIds.has(task.id)}
-                                    projectPhases={phaseMenuItems}
+                                    contextMenuActions={getTaskContextActions(task)}
+                                    phaseMenuItems={phaseMenuItems}
                                     projects={allProjects}
-                                    taskProjectIds={task.hubProjectIds}
-                                    taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                                    actions={getTaskContextActions(task)}
-                                  >
-                                  <div
-                                    className={cn(
-                                      'flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                      selectedTaskId === task.id && !bulk.bulkMode && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
-                                      isBulkSelected && 'bg-blue-900/20 border-blue-500/30',
-                                      isInactive && 'opacity-50',
-                                    )}
-                                    onMouseDown={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault(); }}
-                                    onClick={(e) => {
-                                      if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                        handleBulkModifierClick(task.id, e);
-                                      } else if (bulk.bulkMode) {
-                                        bulk.toggleItem(task.id);
-                                      } else {
-                                        toggleTask(task.id);
-                                      }
-                                    }}
-                                    onDoubleClick={(e) => {
-                                      if (!bulk.bulkMode) {
-                                        e.stopPropagation();
-                                        handleTaskDoubleClick(task.id);
-                                      }
-                                    }}
-                                  >
-                                    <div className="flex min-w-0 items-center gap-2">
-                                      {bulk.bulkMode ? (
-                                        <label className="flex items-center justify-center flex-shrink-0 cursor-pointer min-w-8 min-h-8">
-                                          <input
-                                            type="checkbox"
-                                            checked={isBulkSelected}
-                                            onChange={() => bulk.toggleItem(task.id)}
-                                            onClick={(e) => e.stopPropagation()}
-                                            aria-label={`Select ${task.title}`}
-                                            className="w-4 h-4 rounded border-[var(--border-strong)] accent-[var(--accent-500)] cursor-pointer"
-                                          />
-                                        </label>
-                                      ) : (
-                                      <button
-                                        type="button"
-                                        {...taskDragHandleProps}
-                                        className="inline-flex min-h-8 min-w-8 cursor-grab items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                                        aria-label="Drag task to a phase"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <GripVertical size={14} />
-                                      </button>
-                                      )}
-                                      <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
-                                          disabled={completingIds.has(task.id)}
-                                          className="group/status flex h-[18px] w-[18px] shrink-0 items-center justify-center"
-                                          aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                        >
-                                          <TaskStatusIndicator
-                                            status={task.status}
-                                            microStatus={task.microStatus}
-                                            isCompleting={completingIds.has(task.id)}
-                                            size="md"
-                                            className="scale-90"
-                                          />
-                                        </button>
-                                      </CompletionBurst>
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <PriorityDot priority={task.priority} />
-                                          <ConnectorIcon size={14} className="text-[var(--text-tertiary)]" />
-                                          <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
-                                          <TaskDisplayId task={task} />
-                                          <TaskInfoBadges task={task} />
-                                          <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
-                                          <span>{PRIORITY_LABELS[task.priority]}</span>
-                                          <span>•</span>
-                                          <span>{task.sourceListName || task.connectorType}</span>
-                                          {task.dueDate ? (
-                                            <>
-                                              <span>•</span>
-                                              <span>Due {formatDateLabel(task.dueDate)}</span>
-                                            </>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <TaskStatusBadge status={task.status} statusReason={task.statusReason} />
-                                  </div>
-                                  </TaskContextMenu>
+                                  />
                                 )}
                               </DraggableTaskItem>
                             );

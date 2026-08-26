@@ -1,26 +1,20 @@
 'use client';
 
-import Image from 'next/image';
-import { ArrowLeftRight, Bell, ChartNetwork, Clock, Globe, Repeat, RotateCcw, Timer } from 'lucide-react';
+import { ArrowLeftRight, Bell, ChartNetwork, Clock, Repeat, RotateCcw, Timer } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
-import { SubtaskPill } from '@/components/ui/SubtaskPill';
-import { MICRO_STATUS_CONFIG } from '@/types';
-import type { MicroStatus } from '@/types';
 import type { LocalDisposition } from '@/types';
-import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
   DashboardProjectViewModel as HubProject,
   DashboardTaskViewModel as Task,
 } from '@/types/dashboard';
-import { CONNECTOR_ICONS } from '@/types/dashboard';
 import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
-import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
-import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
+import { TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { TaskRowIdentity } from '@/components/task-list/TaskRowIdentity';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import {
   isReminderRelativeRule,
@@ -225,55 +219,19 @@ export function TaskRow({
         </CompletionBurst>
       )}
 
-      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center" title={task.connectorType}>
-        {CONNECTOR_ICONS[task.connectorType]
-          ? <Image src={CONNECTOR_ICONS[task.connectorType]} alt={task.connectorType} width={14} height={14} />
-          : <Globe size={14} className="text-[var(--text-muted)]" />
-        }
-      </span>
-
-      {(task.linkedSourceCount ?? 0) > 0 && (
-        <Tooltip content="Also tracked in another source">
-          <span className="flex-shrink-0 flex items-center gap-0.5 px-1 py-0.5 rounded text-[10px] font-medium bg-cyan-900/20 text-cyan-400 border border-cyan-800/30">
-            <ArrowLeftRight size={9} />
-            <span className="hidden @lg:inline">linked</span>
-          </span>
-        </Tooltip>
-      )}
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`text-sm font-medium truncate ${isDone ? 'line-through text-[var(--text-muted)]' : 'text-[var(--text-primary)]'}`}>
-            {task.title}
-          </span>
-          {(() => {
-            const displayId = getTaskDisplayId(task.connectorType, task.metadata, task.sourceId);
-            return displayId ? (
-              <span className="text-xs text-[var(--text-muted)] flex-shrink-0 font-mono tabular-nums">{displayId}</span>
-            ) : null;
-          })()}
-          {task.microStatus && isTaskBlocked(task.status, task.microStatus) ? (
-            <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="hidden @md:inline-flex" />
-          ) : task.microStatus && MICRO_STATUS_CONFIG[task.microStatus as MicroStatus] && (
-            <span
-              className="hidden flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium @md:inline-flex"
-              style={{
-                backgroundColor: `${MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].color}20`,
-                color: MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].color,
-              }}
-              title={MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].description}
-            >
-              <MicroStatusIcon status={task.microStatus as MicroStatus} size={11} />
-              {MICRO_STATUS_CONFIG[task.microStatus as MicroStatus].label}
+      <TaskRowIdentity
+        task={task}
+        isDone={isDone}
+        onOpenSubtasks={onOpenSubtasks}
+        afterConnector={(task.linkedSourceCount ?? 0) > 0 ? (
+          <Tooltip content="Also tracked in another source">
+            <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-[10px] font-medium text-cyan-400">
+              <ArrowLeftRight size={9} />
+              <span className="hidden @lg:inline">linked</span>
             </span>
-          )}
-          <SubtaskPill
-            done={task.subtaskDone ?? 0}
-            total={task.subtaskTotal ?? 0}
-            onClick={onOpenSubtasks}
-          />
-        </div>
-        {!compact && (
+          </Tooltip>
+        ) : null}
+        secondary={!compact ? (
           <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
             {task.sourceListName && !hideSourceListName && (
               <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
@@ -351,8 +309,8 @@ export function TaskRow({
               </span>
             )}
           </div>
-        )}
-      </div>
+        ) : null}
+      />
 
       <TaskRowActions
         smartScore={task.smartScore}

@@ -34,7 +34,9 @@ beforeEach(() => {
 describe('public demo health', () => {
   it('reports ready after the initialization marker is recorded', async () => {
     mockGet
-      .mockReturnValueOnce({ 1: 1 })
+      .mockReturnValueOnce({ ok: 1 })
+      .mockReturnValueOnce({ page_count: 1 })
+      .mockReturnValueOnce({ page_size: 4096 })
       .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
     const { GET } = await import('@/app/api/health/ready/route');
 
@@ -52,7 +54,9 @@ describe('public demo health', () => {
 
   it('does not report ready before initialization completes', async () => {
     mockGet
-      .mockReturnValueOnce({ 1: 1 })
+      .mockReturnValueOnce({ ok: 1 })
+      .mockReturnValueOnce({ page_count: 1 })
+      .mockReturnValueOnce({ page_size: 4096 })
       .mockReturnValueOnce(undefined);
     const { GET } = await import('@/app/api/health/ready/route');
 
@@ -64,7 +68,9 @@ describe('public demo health', () => {
 
   it('does not report ready while the runtime is draining', async () => {
     mockGet
-      .mockReturnValueOnce({ 1: 1 })
+      .mockReturnValueOnce({ ok: 1 })
+      .mockReturnValueOnce({ page_count: 1 })
+      .mockReturnValueOnce({ page_size: 4096 })
       .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
     mockIsRuntimeReady.mockReturnValueOnce(false);
     const { GET } = await import('@/app/api/health/ready/route');
@@ -80,7 +86,9 @@ describe('public demo health', () => {
     delete process.env.MC_DEPLOYMENT_REVISION;
     process.env.MC_BUILD_SHA = 'full-build-sha';
     mockGet
-      .mockReturnValueOnce({ 1: 1 })
+      .mockReturnValueOnce({ ok: 1 })
+      .mockReturnValueOnce({ page_count: 1 })
+      .mockReturnValueOnce({ page_size: 4096 })
       .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
 
     const { GET } = await import('@/app/api/health/ready/route');

@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import Image from 'next/image';
 import { ArrowLeftRight, Bell, ChartNetwork, Clock, Globe, Repeat, RotateCcw, Timer } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
@@ -38,11 +39,11 @@ import {
 const ATTR_P1 = 'hidden @min-[960px]:flex'; // recurrence, estimated duration
 const ATTR_P2 = 'hidden @min-[720px]:flex'; // effort, status, snoozed, reminder
 
-function ProjectBadge({ projectIds, projects, projectFilter, setProjectFilter }: {
+function ProjectBadge({ projectIds, projects, projectFilter, onToggleProject }: {
   projectIds: string[];
   projects: HubProject[];
   projectFilter: string | null;
-  setProjectFilter: (v: string | null) => void;
+  onToggleProject: (projectId: string) => void;
 }) {
   if (!projectIds.length) return null;
   const matched = projects.filter((p) => projectIds.includes(p.id));
@@ -64,7 +65,7 @@ function ProjectBadge({ projectIds, projects, projectFilter, setProjectFilter }:
             key={project.id}
             onClick={(e) => {
               e.stopPropagation();
-              setProjectFilter(projectFilter === project.id ? null : project.id);
+              onToggleProject(project.id);
             }}
             className={`text-xs inline-flex items-center gap-1 px-1.5 py-0.5 rounded border border-indigo-800/30 bg-indigo-900/20 text-indigo-400 flex-shrink-0 cursor-pointer transition-opacity hover:opacity-80 ${
               projectFilter === project.id ? 'ring-2 ring-[var(--accent)] border-[var(--accent)]' : ''
@@ -122,7 +123,7 @@ interface TaskRowProps {
   task: Task;
   projects?: HubProject[];
   onComplete: () => void;
-  onSnoozeUntil: (until: string | null) => void | Promise<void>;
+  onSnoozeUntil?: (until: string | null) => void | Promise<void>;
   onSetDueDate: (date: string | null) => void | Promise<void>;
   onSetPriority: (priority: string) => void | Promise<void>;
   onSetStatus: (status: string) => void | Promise<void>;
@@ -140,6 +141,15 @@ interface TaskRowProps {
   onBulkToggle?: () => void;
   isCompleting?: boolean;
   isSelected?: boolean;
+  secondaryMetadata?: ReactNode;
+  filterController?: {
+    tagSlugs: string[];
+    projectId: string | null;
+    onToggleTag: (slug: string) => void;
+    onToggleProject?: (projectId: string) => void;
+    onFilterPriority: (priority: string) => void;
+    onFilterStatus: (status: string) => void;
+  };
 }
 
 export function TaskRow({
@@ -164,6 +174,8 @@ export function TaskRow({
   onBulkToggle,
   isCompleting = false,
   isSelected = false,
+  secondaryMetadata,
+  filterController,
 }: TaskRowProps) {
   const {
     tagFilter,
@@ -173,6 +185,22 @@ export function TaskRow({
     projectFilter,
     setProjectFilter,
   } = useDashboardViewStore();
+  const rowFilters = filterController ?? {
+    tagSlugs: tagFilter,
+    projectId: projectFilter,
+    onToggleTag: (slug: string) => {
+      setTagFilter(
+        tagFilter.includes(slug)
+          ? tagFilter.filter((tag) => tag !== slug)
+          : [...tagFilter, slug],
+      );
+    },
+    onToggleProject: (nextProjectId: string) => {
+      setProjectFilter(projectFilter === nextProjectId ? null : nextProjectId);
+    },
+    onFilterPriority: (priority: string) => setPriorityFilter([priority]),
+    onFilterStatus: (status: string) => setStatusFilter([status]),
+  };
   const isDone = task.status === 'done' || isCompleting;
   const isInactive = isInactiveTaskStatus(task.status) || isCompleting;
   const taskMeta = task.metadata ? (() => { try { return JSON.parse(task.metadata); } catch { return null; } })() : null;
@@ -275,6 +303,7 @@ export function TaskRow({
         </div>
         {!compact && (
           <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
+            {secondaryMetadata}
             {task.sourceListName && !hideSourceListName && (
               <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
             )}
@@ -283,14 +312,10 @@ export function TaskRow({
                 key={tag.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  setTagFilter(
-                    tagFilter.includes(tag.slug)
-                      ? tagFilter.filter((t) => t !== tag.slug)
-                      : [...tagFilter, tag.slug]
-                  );
+                  rowFilters.onToggleTag(tag.slug);
                 }}
                 className={`rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-xs font-medium text-[var(--text-secondary)] transition-colors cursor-pointer hover:opacity-80 ${
-                  tagFilter.includes(tag.slug) ? 'ring-2 ring-[var(--accent)] border border-[var(--accent)]' : ''
+                  rowFilters.tagSlugs.includes(tag.slug) ? 'ring-2 ring-[var(--accent)] border border-[var(--accent)]' : ''
                 }`}
                 style={tag.color ? {
                   backgroundColor: `${tag.color}30`,
@@ -305,8 +330,8 @@ export function TaskRow({
               <ProjectBadge
                 projectIds={task.hubProjectIds}
                 projects={projects}
-                projectFilter={projectFilter}
-                setProjectFilter={setProjectFilter}
+                projectFilter={rowFilters.projectId}
+                onToggleProject={(projectId) => rowFilters.onToggleProject?.(projectId)}
               />
             )}
             {recurrence && (
@@ -371,8 +396,8 @@ export function TaskRow({
         onSetDueDate={onSetDueDate}
         onSetPriority={onSetPriority}
         onSetStatus={onSetStatus}
-        onFilterPriority={(priority) => setPriorityFilter([priority])}
-        onFilterStatus={(status) => setStatusFilter([status])}
+        onFilterPriority={rowFilters.onFilterPriority}
+        onFilterStatus={rowFilters.onFilterStatus}
         onSetLocalDisposition={onSetLocalDisposition}
         onSnoozeUntil={onSnoozeUntil}
         showMoreActions

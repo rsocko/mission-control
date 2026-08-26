@@ -75,6 +75,32 @@ describe('task grouping', () => {
 
     expect(getTaskGroupLabels(value, 'tag', '')).toEqual(['Work']);
     expect(getTaskGroupLabels(value, 'project', '')).toEqual(['Mission Control › Build']);
+    expect(getTaskGroupLabels(value, 'phase', '', { projectId: 'project-1' }))
+      .toEqual(['Build']);
+  });
+
+  it('groups a project-scoped list by only that project phase', () => {
+    const value = task({
+      projectPhaseMemberships: [
+        {
+          projectId: 'project-1',
+          projectName: 'Mission Control',
+          phaseId: 'phase-1',
+          phaseName: 'Build',
+        },
+        {
+          projectId: 'project-2',
+          projectName: 'Other',
+          phaseId: 'phase-2',
+          phaseName: 'Review',
+        },
+      ],
+    });
+
+    expect(getTaskGroupLabels(value, 'phase', '', { projectId: 'project-1' }))
+      .toEqual(['Build']);
+    expect(getTaskGroupLabels(value, 'phase', '', { projectId: 'missing' }))
+      .toEqual(['Unassigned']);
   });
 
   it('does not treat tasks loaded through another group as an initial group prefix', () => {

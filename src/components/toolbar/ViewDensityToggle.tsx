@@ -8,19 +8,29 @@ const STORAGE_KEY = 'mission-control:view-density';
 
 export type ViewDensity = 'compact' | 'comfortable';
 
-export function ViewDensityToggle() {
-  const [density, setDensity] = useState<ViewDensity>('comfortable');
+interface ViewDensityToggleProps {
+  value?: ViewDensity;
+  onChange?: (density: ViewDensity) => void;
+}
+
+export function ViewDensityToggle({ value, onChange }: ViewDensityToggleProps = {}) {
+  const [internalDensity, setInternalDensity] = useState<ViewDensity>('comfortable');
+  const density = value ?? internalDensity;
 
   useEffect(() => {
+    if (value !== undefined) return;
     const stored = localStorage.getItem(STORAGE_KEY) as ViewDensity | null;
-    if (stored) setDensity(stored);
-  }, []);
+    if (stored) setInternalDensity(stored);
+  }, [value]);
 
   const toggle = () => {
     const next: ViewDensity = density === 'comfortable' ? 'compact' : 'comfortable';
-    setDensity(next);
-    localStorage.setItem(STORAGE_KEY, next);
-    window.dispatchEvent(new CustomEvent('mission-control:density-change', { detail: next }));
+    if (value === undefined) {
+      setInternalDensity(next);
+      localStorage.setItem(STORAGE_KEY, next);
+      window.dispatchEvent(new CustomEvent('mission-control:density-change', { detail: next }));
+    }
+    onChange?.(next);
   };
 
   const tooltipText = density === 'comfortable' ? 'Switch to compact view' : 'Switch to expanded view';

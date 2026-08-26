@@ -87,4 +87,36 @@ describe('grouped task rows', () => {
 
     expect(rows.at(-1)).toEqual({ type: 'load-more' });
   });
+
+  it('builds phase groups for a specific project', () => {
+    const projectTask = task('task-1', 'todo');
+    projectTask.projectPhaseMemberships = [
+      {
+        projectId: 'project-1',
+        projectName: 'Project 1',
+        phaseId: 'phase-1',
+        phaseName: 'Build',
+      },
+      {
+        projectId: 'project-2',
+        projectName: 'Project 2',
+        phaseId: 'phase-2',
+        phaseName: 'Review',
+      },
+    ];
+
+    const rows = buildTaskListRows({
+      taskResponse: response([projectTask], 1, false),
+      groupBy: 'phase',
+      collapsedGroups: new Set(),
+      groupProjectId: 'project-1',
+    });
+
+    expect(rows[0]).toEqual({
+      type: 'header',
+      label: 'Build',
+      count: 1,
+      totalCount: undefined,
+    });
+  });
 });

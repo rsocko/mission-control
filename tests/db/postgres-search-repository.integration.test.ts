@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { PostgresKeywordSearchRepository } from '@/db/postgres/search';
@@ -7,6 +7,8 @@ import { createPostgresCoreRepositories } from '@/db/postgres/repositories';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { TaskItem } from '@/types';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+
+vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const describePostgres = describe.skipIf(!connectionString);

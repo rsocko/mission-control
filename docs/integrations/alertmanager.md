@@ -52,10 +52,12 @@ Mission Control availability.
 ## Payload contract
 
 The endpoint accepts the standard Alertmanager v4 grouped webhook object,
-including `version`, `groupKey`, `status`, `receiver`, group/common label and
-annotation maps, and one to 100 `alerts`. Each alert must contain `status`,
-`labels`, `annotations`, `startsAt`, `endsAt`, `generatorURL`, and a hexadecimal
-`fingerprint`.
+including `version`, `groupKey`, `status`, `receiver`, `notification_reason`,
+`routeLabels`, group/common label and annotation maps, and one to 100 `alerts`.
+Each alert must contain `status`, `labels`, `annotations`, `startsAt`, `endsAt`,
+`generatorURL`, and a hexadecimal `fingerprint`. Alertmanager 0.34 adds
+`notification_reason` and `routeLabels`; Mission Control validates their bounds
+but does not persist them.
 
 Every alert also requires:
 

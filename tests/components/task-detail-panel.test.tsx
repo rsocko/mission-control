@@ -2130,7 +2130,9 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(checkboxes).toHaveLength(1);
 
     await act(async () => {
-      fireEvent.click(checkboxes[0]);
+      const liveCheckboxes = within(notes).getAllByRole('checkbox');
+      expect(liveCheckboxes).toHaveLength(1);
+      fireEvent.click(liveCheckboxes[0]);
     });
 
     await waitFor(() => expect(update).toHaveBeenCalledWith({

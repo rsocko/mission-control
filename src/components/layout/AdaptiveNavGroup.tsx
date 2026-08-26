@@ -12,7 +12,9 @@ import type {
 } from '@/lib/navigation/badges';
 import { cn } from '@/lib/utils';
 
-import type { ComponentType } from 'react';
+import { useEffect, useRef, type ComponentType } from 'react';
+
+const HOVER_CLOSE_DELAY_MS = 120;
 
 export interface AdaptiveNavItem {
   href: string;
@@ -104,6 +106,30 @@ export function AdaptiveNavGroup({
 }) {
   const active = items.some((item) => isActive(item.href));
   const aggregateBadge = aggregateBadges(items, counts, preferences);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelPendingClose = () => {
+    if (!closeTimer.current) return;
+    clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+
+  const openOnHover = () => {
+    cancelPendingClose();
+    onOpenChange(true);
+  };
+
+  const closeAfterHover = () => {
+    cancelPendingClose();
+    closeTimer.current = setTimeout(() => {
+      onOpenChange(false);
+      closeTimer.current = null;
+    }, HOVER_CLOSE_DELAY_MS);
+  };
+
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={onOpenChange} modal={false}>
@@ -113,6 +139,13 @@ export function AdaptiveNavGroup({
           aria-label={`Open ${label} navigation`}
           title={expanded ? undefined : label}
           data-active-child={active || undefined}
+          onMouseEnter={openOnHover}
+          onMouseLeave={closeAfterHover}
+          onPointerDown={(event) => {
+            if (open && event.pointerType === 'mouse' && event.button === 0 && !event.ctrlKey) {
+              event.preventDefault();
+            }
+          }}
           className={cn(
             'relative mx-2 flex h-10 w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]',
             active
@@ -129,23 +162,29 @@ export function AdaptiveNavGroup({
             <span
               className={cn(
                 'overflow-hidden text-ellipsis whitespace-nowrap transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-                expanded ? 'max-w-[112px] opacity-100' : 'max-w-0 opacity-0',
+                expanded
+                  ? aggregateBadge
+                    ? 'max-w-[72px] opacity-100'
+                    : 'max-w-[112px] opacity-100'
+                  : 'max-w-0 opacity-0',
               )}
             >
               {label}
             </span>
-            {expanded && !aggregateBadge && (
-              <ChevronRight
-                size={14}
-                aria-hidden="true"
-                className="ml-auto flex-shrink-0 text-[var(--text-muted)]"
-              />
-            )}
+            <ChevronRight
+              size={14}
+              aria-hidden="true"
+              className={cn(
+                'flex-shrink-0 text-[var(--text-muted)]',
+                expanded ? 'ml-auto' : 'absolute right-0.5',
+              )}
+            />
             {aggregateBadge && (
               <NavigationRailMorph
                 count={aggregateBadge.count}
                 tone={aggregateBadge.tone}
                 expanded={expanded}
+                expandedEndOffset={20}
                 pulse={aggregateBadge.pulse}
                 morphId={`group-${groupKey}`}
               />
@@ -161,6 +200,8 @@ export function AdaptiveNavGroup({
           collisionPadding={12}
           aria-label={`${label} navigation`}
           aria-labelledby={undefined}
+          onMouseEnter={openOnHover}
+          onMouseLeave={closeAfterHover}
           className="z-50 w-60 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl"
         >
           <DropdownMenu.Label className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">

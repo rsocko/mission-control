@@ -481,6 +481,30 @@ describe('NavRail', () => {
     expect(screen.getByRole('link', { name: 'Kanban' })).toBeInTheDocument();
   });
 
+  it('opens grouped navigation on hover and stays open while crossing into the menu', () => {
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({ isSyncing: true });
+    const trigger = screen.getByRole('button', { name: 'Open Operations navigation' });
+
+    fireEvent.mouseEnter(trigger);
+
+    const menu = screen.getByRole('menu', { name: 'Operations navigation' });
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(trigger);
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(menu);
+    act(() => vi.advanceTimersByTime(100));
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu);
+    act(() => vi.advanceTimersByTime(120));
+    expect(screen.queryByRole('menu', { name: 'Operations navigation' })).not.toBeInTheDocument();
+  });
+
   it('restores direct items when the rail gains enough height', () => {
     const geometry = mockAdaptiveNavGeometry(2);
     renderNavRail({ isSyncing: true });
@@ -531,6 +555,7 @@ describe('NavRail', () => {
 
     const trigger = screen.getByRole('button', { name: 'Open Operations navigation' });
     expect(within(trigger).getByLabelText('6 items need attention')).toBeInTheDocument();
+    expect(trigger.querySelector('.lucide-chevron-right')).toBeInTheDocument();
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
 

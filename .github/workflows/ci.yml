@@ -70,7 +70,7 @@ jobs:
                   workflow_policy_changed=true
                   ;;
               esac
-            done < <(git diff --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}")
+            done < <(git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}")
           fi
 
           if [[ "${found_change}" != "true" ]]; then

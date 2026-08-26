@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { parse } from 'yaml';
 
+const execFileAsync = promisify(execFile);
 const workflowsDirectory = path.resolve('.github', 'workflows');
 const workflowFiles = (await readdir(workflowsDirectory))
   .filter((file) => /\.ya?ml$/u.test(file))
@@ -43,6 +47,86 @@ function collectUses(value, results = []) {
     }
   }
   return results;
+}
+
+function isDocumentationPath(file) {
+  return file.startsWith('docs/') ||
+    new Set([
+      'README.md',
+      'CODE_OF_CONDUCT.md',
+      'CONTRIBUTING.md',
+      'DESIGN.md',
+      'PRODUCT.md',
+      'SECURITY.md',
+      'SUPPORT.md',
+    ]).has(file);
+}
+
+async function validateRenameClassification() {
+  const repository = await mkdtemp(path.join(os.tmpdir(), 'mission-control-workflow-'));
+  try {
+    await mkdir(path.join(repository, '.github', 'workflows'), { recursive: true });
+    await mkdir(path.join(repository, 'docs'), { recursive: true });
+    await mkdir(path.join(repository, 'src'), { recursive: true });
+    await writeFile(path.join(repository, 'src', 'feature.ts'), 'export const feature = true;\n');
+    await writeFile(path.join(repository, '.github', 'workflows', 'example.yml'), 'name: Example\n');
+    await writeFile(path.join(repository, 'docs', 'old.md'), '# Old\n');
+
+    const git = (...args) => execFileAsync('git', args, { cwd: repository });
+    await git('init', '--quiet');
+    await git('config', 'user.email', 'workflow-validator@example.invalid');
+    await git('config', 'user.name', 'Workflow validator');
+    await git('add', '.');
+    await git('commit', '--quiet', '-m', 'Base fixtures');
+    const { stdout: baseOutput } = await git('rev-parse', 'HEAD');
+    const base = baseOutput.trim();
+
+    await git('mv', 'src/feature.ts', 'docs/feature.ts');
+    await git('mv', '.github/workflows/example.yml', 'docs/example.yml');
+    await git('mv', 'docs/old.md', 'docs/new.md');
+    await git('commit', '--quiet', '-m', 'Rename fixtures');
+    const { stdout: headOutput } = await git('rev-parse', 'HEAD');
+    const head = headOutput.trim();
+    const { stdout } = await git(
+      'diff',
+      '--no-renames',
+      '--name-only',
+      '--diff-filter=ACDMRTUXB',
+      base,
+      head,
+    );
+    const changedPaths = stdout.trim().split(/\r?\n/u).sort();
+
+    assert.deepEqual(
+      changedPaths,
+      [
+        '.github/workflows/example.yml',
+        'docs/example.yml',
+        'docs/feature.ts',
+        'docs/new.md',
+        'docs/old.md',
+        'src/feature.ts',
+      ],
+      'rename-safe classification must inspect both source and destination paths',
+    );
+    assert.equal(
+      ['src/feature.ts', 'docs/feature.ts'].every(isDocumentationPath),
+      false,
+      'moving code into docs must not be documentation-only',
+    );
+    assert.equal(
+      ['.github/workflows/example.yml', 'docs/example.yml'].every(isDocumentationPath),
+      false,
+      'moving a workflow into docs must not be documentation-only',
+    );
+    assert.equal(
+      ['docs/old.md', 'docs/new.md'].every(isDocumentationPath),
+      true,
+      'moving documentation within docs must remain documentation-only',
+    );
+  } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
 }
 
 for (const file of workflowFiles) {
@@ -126,7 +210,7 @@ for (const file of workflowFiles) {
       'github.event.pull_request.head.sha || github.sha',
       '0000000000000000000000000000000000000000',
       'git cat-file -e "${BASE_SHA}^{commit}"',
-      'git diff --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
+      'git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
       '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
@@ -549,5 +633,6 @@ for (const file of workflowFiles) {
   }
 }
 
+await validateRenameClassification();
 assert.ok(hasPullRequestWorkflow, 'At least one workflow must validate pull requests');
 console.log(`Validated ${workflowFiles.length} workflow files`);

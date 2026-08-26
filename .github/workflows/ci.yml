@@ -82,12 +82,12 @@ jobs:
           echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"
           echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"
 
-  impeccable:
-    name: Impeccable integration
+  impeccable-worker:
+    name: Impeccable integration worker
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
-      needs.changes.outputs.impeccable_changed == 'true')
+      needs.changes.outputs.impeccable_changed != 'false')
     needs:
       - changes
     runs-on: ubuntu-24.04
@@ -108,8 +108,36 @@ jobs:
       - name: Validate Impeccable integration
         run: node scripts/validate-impeccable.mjs
 
-  validate:
-    name: ${{ matrix.name }}
+  impeccable:
+    name: Impeccable integration
+    if: always()
+    needs:
+      - changes
+      - impeccable-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm Impeccable integration result
+        env:
+          CHANGE_REQUIRED: ${{ needs.changes.outputs.impeccable_changed }}
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          WORKER_RESULT: ${{ needs.impeccable-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${CHANGE_REQUIRED}" in
+            true) test "${WORKER_RESULT}" = "success" ;;
+            false) test "${WORKER_RESULT}" = "skipped" ;;
+            *) echo "Invalid Impeccable classification." >&2; exit 1 ;;
+          esac
+
+  lint-worker:
+    name: Lint worker
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -120,14 +148,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Lint
-            command: npm run lint
-          - name: Production build
-            command: npm run build
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -153,43 +173,127 @@ jobs:
 
       - name: Validate workflow policy
         if: >-
-          matrix.name == 'Lint' &&
           (needs.changes.result != 'success' ||
-          needs.changes.outputs.workflow_policy_changed == 'true')
+          needs.changes.outputs.workflow_policy_changed != 'false')
         run: npm run ci:workflows
 
-      - name: Run ${{ matrix.name }}
-        if: matrix.name != 'Production build'
-        run: ${{ matrix.command }}
-
-      - name: Run Production build
-        if: matrix.name == 'Production build'
-        env:
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: ${{ matrix.command }}
-
-      - name: Smoke-test production worker runtime
-        if: matrix.name == 'Production build'
-        run: MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs
+      - name: Run lint
+        run: npm run lint
 
       - name: Save npm download cache
         if: >-
           needs.changes.outputs.docs_only != 'true' &&
           github.ref == 'refs/heads/main' &&
-          matrix.name == 'Lint' &&
           steps.npm-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.npm
           key: ${{ steps.npm-cache.outputs.cache-primary-key }}
 
-  workflow-policy:
-    name: Workflow policy
+  production-build-worker:
+    name: Production build worker
     if: >-
       always() &&
-      needs.validate.result != 'skipped'
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
     needs:
-      - validate
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Restore npm download cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run production build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: npm run build
+
+      - name: Smoke-test production worker runtime
+        run: MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs
+
+  lint:
+    name: Lint
+    if: always()
+    needs:
+      - changes
+      - lint-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm lint result
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.lint-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  production-build:
+    name: Production build
+    if: always()
+    needs:
+      - changes
+      - production-build-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm production build result
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.production-build-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  workflow-policy:
+    name: Workflow policy
+    if: always()
+    needs:
+      - changes
+      - lint-worker
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -197,16 +301,27 @@ jobs:
     steps:
       - name: Confirm workflow policy passed
         env:
-          VALIDATE_RESULT: ${{ needs.validate.result }}
-        run: test "${VALIDATE_RESULT}" = "success"
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.lint-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
 
   worker-runtime:
     name: Worker runtime
-    if: >-
-      always() &&
-      needs.validate.result != 'skipped'
+    if: always()
     needs:
-      - validate
+      - changes
+      - production-build-worker
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -214,8 +329,20 @@ jobs:
     steps:
       - name: Confirm worker runtime passed
         env:
-          VALIDATE_RESULT: ${{ needs.validate.result }}
-        run: test "${VALIDATE_RESULT}" = "success"
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.production-build-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
 
   unit-test-shards:
     name: Unit tests (${{ matrix.shard }}/4)
@@ -261,10 +388,9 @@ jobs:
 
   unit-tests:
     name: Unit tests
-    if: >-
-      always() &&
-      needs.unit-test-shards.result != 'skipped'
+    if: always()
     needs:
+      - changes
       - unit-test-shards
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -273,8 +399,20 @@ jobs:
     steps:
       - name: Confirm all unit-test shards passed
         env:
-          SHARD_RESULT: ${{ needs.unit-test-shards.result }}
-        run: test "${SHARD_RESULT}" = "success"
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.unit-test-shards.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
 
   postgres-integration:
     name: PostgreSQL integration

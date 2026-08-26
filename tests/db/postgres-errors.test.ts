@@ -20,4 +20,3 @@ describe('PostgreSQL startup error classification', () => {
     expect(isRetryablePostgresError({ code: '42P01' })).toBe(false);
   });
 });
-

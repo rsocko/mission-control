@@ -47,4 +47,3 @@ export function isRetryablePostgresError(error: unknown): boolean {
 
   return false;
 }
-

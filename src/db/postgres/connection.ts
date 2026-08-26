@@ -11,4 +11,3 @@ export function createPostgresPool(config: PostgresConfig): pg.Pool {
   });
   return pool;
 }
-

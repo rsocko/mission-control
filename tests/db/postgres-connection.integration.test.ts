@@ -52,4 +52,3 @@ describePostgres('PostgreSQL connection integration', () => {
     }
   });
 });
-

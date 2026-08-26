@@ -7,4 +7,3 @@ export function resolveDatabaseBackend(
   if (value === 'postgres') return 'postgres';
   throw new Error('MC_DATABASE_BACKEND must be sqlite or postgres');
 }
-

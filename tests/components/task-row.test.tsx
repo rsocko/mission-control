@@ -270,6 +270,45 @@ describe('TaskRow', () => {
     });
   });
 
+  it('renders contextual metadata and routes row filters through a supplied controller', () => {
+    const onToggleTag = vi.fn();
+    const onFilterPriority = vi.fn();
+    const onFilterStatus = vi.fn();
+
+    render(
+      <TaskRow
+        task={{
+          ...baseTask,
+          priority: 'high',
+          tags: [{ id: 'tag-1', name: 'Design', slug: 'design', type: 'hub', color: null }],
+        }}
+        onComplete={noop}
+        {...actionProps}
+        onAddToMyDay={noop}
+        onRemoveFromMyDay={noop}
+        secondaryMetadata={<span>Phase: Build</span>}
+        filterController={{
+          tagSlugs: [],
+          projectId: null,
+          onToggleTag,
+          onFilterPriority,
+          onFilterStatus,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Phase: Build')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Design' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter row priority' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter row status' }));
+
+    expect(onToggleTag).toHaveBeenCalledWith('design');
+    expect(onFilterPriority).toHaveBeenCalledWith('high');
+    expect(onFilterStatus).toHaveBeenCalledWith('todo');
+    expect(dashboardStoreSpies.setPriorityFilter).not.toHaveBeenCalled();
+    expect(dashboardStoreSpies.setStatusFilter).not.toHaveBeenCalled();
+  });
+
   describe('responsive attribute classes', () => {
     it('applies @container to the root row element', () => {
       const { container } = render(

@@ -23,6 +23,7 @@ interface UseTaskListVirtualizationOptions {
   viewDensity: 'compact' | 'comfortable';
   listRef: React.RefObject<HTMLDivElement | null>;
   groupTotalCounts?: Record<string, number>;
+  groupProjectId?: string;
 }
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -99,10 +100,10 @@ function getCanonicalGroupOrder(groupBy: string): ((a: string, b: string) => num
       return a.localeCompare(b);
     };
   }
-  if (groupBy === 'list' || groupBy === 'tag') {
+  if (groupBy === 'list' || groupBy === 'tag' || groupBy === 'phase') {
     return (a, b) => {
-      const aEmpty = a === 'No List' || a === 'Untagged';
-      const bEmpty = b === 'No List' || b === 'Untagged';
+      const aEmpty = a === 'No List' || a === 'Untagged' || a === 'Unassigned';
+      const bEmpty = b === 'No List' || b === 'Untagged' || b === 'Unassigned';
       if (aEmpty && bEmpty) return 0;
       if (aEmpty) return 1;
       if (bEmpty) return -1;
@@ -127,10 +128,24 @@ export function useTaskListVirtualization({
   viewDensity,
   listRef,
   groupTotalCounts,
+  groupProjectId,
 }: UseTaskListVirtualizationOptions) {
   const virtualRows = useMemo(
-    () => buildTaskListRows({ taskResponse, groupBy, collapsedGroups, groupTotalCounts }),
-    [taskResponse.tasks, taskResponse.hasMore, groupBy, collapsedGroups, groupTotalCounts],
+    () => buildTaskListRows({
+      taskResponse,
+      groupBy,
+      collapsedGroups,
+      groupTotalCounts,
+      groupProjectId,
+    }),
+    [
+      taskResponse.tasks,
+      taskResponse.hasMore,
+      groupBy,
+      collapsedGroups,
+      groupTotalCounts,
+      groupProjectId,
+    ],
   );
 
   const rowVirtualizer = useVirtualizer({
@@ -157,7 +172,7 @@ export function useTaskListVirtualization({
 
 type BuildTaskListRowsOptions = Pick<
   UseTaskListVirtualizationOptions,
-  'taskResponse' | 'groupBy' | 'collapsedGroups' | 'groupTotalCounts'
+  'taskResponse' | 'groupBy' | 'collapsedGroups' | 'groupTotalCounts' | 'groupProjectId'
 >;
 
 export function buildTaskListRows({
@@ -165,6 +180,7 @@ export function buildTaskListRows({
   groupBy,
   collapsedGroups,
   groupTotalCounts,
+  groupProjectId,
 }: BuildTaskListRowsOptions): VirtualRow[] {
   const tasks = taskResponse.tasks;
   if (groupBy === 'none' || !tasks.length) {
@@ -176,7 +192,9 @@ export function buildTaskListRows({
   const today = groupBy === 'dueDate' ? getClientToday() : '';
   const groups = new Map<string, Task[]>();
   for (const task of tasks) {
-    for (const label of getTaskGroupLabels(task, groupBy, today)) {
+    for (const label of getTaskGroupLabels(task, groupBy, today, {
+      projectId: groupProjectId,
+    })) {
       if (!groups.has(label)) groups.set(label, []);
       groups.get(label)!.push(task);
     }

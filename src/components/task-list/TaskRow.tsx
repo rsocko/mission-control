@@ -21,6 +21,8 @@ import {
   isReminderRelativeRule,
   REMINDER_RELATIVE_RULES,
 } from '@/lib/tasks/relative-reminder';
+import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
+import { cn } from '@/lib/utils';
 
 /**
  * Responsive visibility priority for task row attribute badges.
@@ -113,9 +115,22 @@ function formatReminderAt(isoDate: string): string {
   return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` ${timeStr}`;
 }
 
+export interface TaskRowFilterController {
+  tagSlugs: string[];
+  projectId: string | null;
+  onToggleTag: (slug: string) => void;
+  onToggleProject?: (projectId: string) => void;
+  onFilterPriority: (priority: string) => void;
+  onFilterStatus: (status: string) => void;
+}
+
 interface TaskRowProps {
   task: Task;
   projects?: HubProject[];
+  leading?: ReactNode;
+  surface?: 'dashboard' | 'plan';
+  variant?: 'list' | 'card' | 'compact';
+  className?: string;
   onComplete: () => void;
   onSnoozeUntil?: (until: string | null) => void | Promise<void>;
   onSetDueDate: (date: string | null) => void | Promise<void>;
@@ -136,19 +151,22 @@ interface TaskRowProps {
   isCompleting?: boolean;
   isSelected?: boolean;
   secondaryMetadata?: ReactNode;
-  filterController?: {
-    tagSlugs: string[];
-    projectId: string | null;
-    onToggleTag: (slug: string) => void;
-    onToggleProject?: (projectId: string) => void;
-    onFilterPriority: (priority: string) => void;
-    onFilterStatus: (status: string) => void;
-  };
+  onSelect?: (taskId: string) => void;
+  onDoubleClickTask?: (taskId: string) => void;
+  onModifierClick?: (
+    taskId: string,
+    event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
+  ) => void;
+  filterController?: false | TaskRowFilterController;
 }
 
 export function TaskRow({
   task,
   projects = [],
+  leading,
+  surface = 'dashboard',
+  variant = 'list',
+  className,
   onComplete,
   onSnoozeUntil,
   onSetDueDate,
@@ -169,6 +187,9 @@ export function TaskRow({
   isCompleting = false,
   isSelected = false,
   secondaryMetadata,
+  onSelect,
+  onDoubleClickTask,
+  onModifierClick,
   filterController,
 }: TaskRowProps) {
   const {
@@ -179,7 +200,7 @@ export function TaskRow({
     projectFilter,
     setProjectFilter,
   } = useDashboardViewStore();
-  const rowFilters = filterController ?? {
+  const rowFilters = filterController === false ? null : filterController ?? {
     tagSlugs: tagFilter,
     projectId: projectFilter,
     onToggleTag: (slug: string) => {
@@ -218,33 +239,63 @@ export function TaskRow({
 
   return (
     <div
-      className={`@container px-4 ${compact ? 'py-1.5' : 'py-3'} flex items-center gap-3 hover:bg-[var(--surface-0)] transition-[background-color,opacity] duration-300 group ${isInactive ? 'opacity-50' : ''} ${isCompleting ? 'bg-green-900/10' : ''} ${showDivider ? 'border-b border-[var(--border-subtle)]' : ''} ${bulkSelected ? 'bg-blue-900/20' : ''} ${isSelected ? 'ring-1 ring-inset ring-[var(--accent-400)] bg-[var(--accent-500)]/8 rounded-sm' : ''}`}
+      data-task-row-surface={surface}
+      data-task-row-variant={variant}
+      data-task-id={task.id}
+      className={cn(
+        '@container group flex items-center gap-3 px-4 transition-[background-color,opacity] duration-300 hover:bg-[var(--surface-0)]',
+        compact ? 'py-1.5' : 'py-3',
+        isInactive && 'opacity-50',
+        isCompleting && 'bg-green-900/10',
+        showDivider && 'border-b border-[var(--border-subtle)]',
+        bulkSelected && 'bg-blue-900/20',
+        isSelected && 'rounded-sm bg-[var(--accent-500)]/8 ring-1 ring-inset ring-[var(--accent-400)]',
+        (onSelect || onDoubleClickTask) && 'cursor-pointer',
+        className,
+      )}
+      {...(
+        onSelect || onDoubleClickTask || (bulkMode && onBulkToggle)
+          ? createTaskRowInteractionHandlers({
+              taskId: task.id,
+              bulkMode,
+              onSelect: onSelect ?? (() => {}),
+              onDoubleClick: onDoubleClickTask,
+              onModifierClick,
+              onBulkClick: onBulkToggle,
+            })
+          : {}
+      )}
     >
       {bulkMode ? (
         <input
           type="checkbox"
           checked={bulkSelected}
           onChange={onBulkToggle}
+          onClick={(event) => event.stopPropagation()}
+          aria-label={`Select ${task.title}`}
           className="w-4 h-4 rounded border-[var(--border-strong)] accent-[var(--accent-500)] flex-shrink-0 cursor-pointer"
         />
       ) : (
-        <CompletionBurst celebrating={isCompleting}>
-          <Tooltip content={canComplete ? 'Mark complete' : completionBlockedReason}
-          >
-            <button
-              onClick={(e) => { e.stopPropagation(); onComplete(); }}
-              disabled={isCompleting || !canComplete}
-              aria-label={canComplete ? (isDone ? 'Completed' : 'Mark task complete') : completionBlockedReason}
-              className="group/status flex h-5 w-5 shrink-0 items-center justify-center"
+        <>
+          {leading}
+          <CompletionBurst celebrating={isCompleting}>
+            <Tooltip content={canComplete ? 'Mark complete' : completionBlockedReason}
             >
-              <TaskStatusIndicator
-                status={task.status}
-                microStatus={task.microStatus}
-                isCompleting={isCompleting}
-              />
-            </button>
-          </Tooltip>
-        </CompletionBurst>
+              <button
+                onClick={(e) => { e.stopPropagation(); onComplete(); }}
+                disabled={isCompleting || !canComplete}
+                aria-label={canComplete ? (isDone ? 'Completed' : 'Mark task complete') : completionBlockedReason}
+                className="group/status flex h-5 w-5 shrink-0 items-center justify-center"
+              >
+                <TaskStatusIndicator
+                  status={task.status}
+                  microStatus={task.microStatus}
+                  isCompleting={isCompleting}
+                />
+              </button>
+            </Tooltip>
+          </CompletionBurst>
+        </>
       )}
 
       <TaskRowIdentity
@@ -265,26 +316,37 @@ export function TaskRow({
             {task.sourceListName && !hideSourceListName && (
               <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
             )}
-            {task.tags?.filter(tag => !isSyntheticTag(tag.name)).map((tag) => (
-              <button
-                key={tag.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  rowFilters.onToggleTag(tag.slug);
-                }}
-                className={`rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-xs font-medium text-[var(--text-secondary)] transition-colors cursor-pointer hover:opacity-80 ${
-                  rowFilters.tagSlugs.includes(tag.slug) ? 'ring-2 ring-[var(--accent)] border border-[var(--accent)]' : ''
-                }`}
-                style={tag.color ? {
-                  backgroundColor: `${tag.color}30`,
-                  color: `color-mix(in oklch, ${tag.color} 60%, white)`,
-                } : undefined}
-                title={`Filter by "${tag.name}"`}
-              >
-                {tag.name}
-              </button>
-            ))}
-            {task.hubProjectIds && task.hubProjectIds.length > 0 && (
+            {task.tags?.filter(tag => !isSyntheticTag(tag.name)).map((tag) => {
+              const tagClassName = cn(
+                'rounded-full bg-[var(--surface-2)] px-1.5 py-0.5 text-xs font-medium text-[var(--text-secondary)]',
+                rowFilters && 'cursor-pointer transition-colors hover:opacity-80',
+                rowFilters?.tagSlugs.includes(tag.slug) && 'border border-[var(--accent)] ring-2 ring-[var(--accent)]',
+              );
+              const tagStyle = tag.color ? {
+                backgroundColor: `${tag.color}30`,
+                color: `color-mix(in oklch, ${tag.color} 60%, white)`,
+              } : undefined;
+
+              return rowFilters ? (
+                <button
+                  key={tag.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    rowFilters.onToggleTag(tag.slug);
+                  }}
+                  className={tagClassName}
+                  style={tagStyle}
+                  title={`Filter by "${tag.name}"`}
+                >
+                  {tag.name}
+                </button>
+              ) : (
+                <span key={tag.id} className={tagClassName} style={tagStyle}>
+                  {tag.name}
+                </span>
+              );
+            })}
+            {rowFilters && task.hubProjectIds && task.hubProjectIds.length > 0 && (
               <ProjectBadge
                 projectIds={task.hubProjectIds}
                 projects={projects}
@@ -354,8 +416,8 @@ export function TaskRow({
         onSetDueDate={onSetDueDate}
         onSetPriority={onSetPriority}
         onSetStatus={onSetStatus}
-        onFilterPriority={rowFilters.onFilterPriority}
-        onFilterStatus={rowFilters.onFilterStatus}
+        onFilterPriority={rowFilters?.onFilterPriority}
+        onFilterStatus={rowFilters?.onFilterStatus}
         onSetLocalDisposition={onSetLocalDisposition}
         onSnoozeUntil={onSnoozeUntil}
         showMoreActions

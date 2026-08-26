@@ -539,6 +539,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       <Activity mode={activeTab === 'phases' ? 'visible' : 'hidden'}>
         <ProjectPhasesTab
           active={activeTab === 'phases'}
+          connectorLabels={connectorLabels}
           stickyHeaderHeight={stickyHeaderHeight}
           revealPhaseId={revealPhaseId}
           onRevealComplete={handleRevealComplete}

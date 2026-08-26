@@ -454,7 +454,7 @@ describe('project phases (Plan) tab', () => {
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.change(screen.getByPlaceholderText('Filter tasks…'), {
+    fireEvent.change(screen.getByPlaceholderText(/Filter Plan tasks/), {
       target: { value: 'beta' },
     });
 
@@ -463,6 +463,12 @@ describe('project phases (Plan) tab', () => {
     });
     expect(within(phaseRegion('Discovery')).queryByText('Alpha migration')).not.toBeInTheDocument();
     expect(within(phaseRegion('Build')).getByText('Beta cleanup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Filter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand all phases' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse all phases' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to compact view' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Group by:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sort by:/ })).not.toBeInTheDocument();
   });
 
   it('bulk selects a range of plan tasks and moves them to another phase', async () => {

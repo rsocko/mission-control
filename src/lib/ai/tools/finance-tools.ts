@@ -1,4 +1,5 @@
 import { tool, zodSchema } from 'ai';
+import { z } from 'zod';
 import {
   getFinanceConnectorHealth,
   getFinanceObligations,
@@ -30,6 +31,9 @@ import {
 } from '@/lib/finance/houston-contracts';
 
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
+const financeMutationToolContextSchema = z.object({
+  correlationId: z.string().optional(),
+});
 
 async function executeFinanceTool<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -141,6 +145,7 @@ export function createFinanceMutationTools(approvalSecret: string) {
       description: 'Propose assigning one current finance transaction to a current household member. This always requires explicit user approval.',
       inputSchema: zodSchema(assignFinanceTransactionKidInputSchema),
       outputSchema: zodSchema(assignFinanceTransactionKidOutputSchema),
+      contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
       execute: (input, options) => assignFinanceTransactionKid(input, {
         approvalSecret,
@@ -153,6 +158,7 @@ export function createFinanceMutationTools(approvalSecret: string) {
       description: 'Propose changing one current finance transaction to a current finance category. This always requires explicit user approval.',
       inputSchema: zodSchema(updateFinanceTransactionCategoryInputSchema),
       outputSchema: zodSchema(updateFinanceTransactionCategoryOutputSchema),
+      contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
       execute: (input, options) => updateFinanceTransactionCategory(input, {
         approvalSecret,

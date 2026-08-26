@@ -44,6 +44,13 @@ Rules:
 - Format lists with bullet points for readability
 - After planning phases, direct the user to /projects to review and manage the plan`;
 
+function createHoustonToolsContext(correlationId: string) {
+  return {
+    assignFinanceTransactionKid: { correlationId },
+    updateFinanceTransactionCategory: { correlationId },
+  };
+}
+
 export async function chat(messages: Array<{ role: 'user' | 'assistant'; content: string }>) {
   const route = getAIModel('houston-chat');
   const approvalSecret = getHoustonToolApprovalSecret();
@@ -54,6 +61,7 @@ export async function chat(messages: Array<{ role: 'user' | 'assistant'; content
     system: SYSTEM_PROMPT,
     messages,
     tools,
+    toolsContext: createHoustonToolsContext(route.context.correlationId),
     experimental_toolApprovalSecret: approvalSecret,
     stopWhen: stepCountIs(5),
     prepareStep: restrictToolsAfterTriage,
@@ -96,6 +104,7 @@ export async function streamChat(
     system: systemPrompt,
     messages,
     tools,
+    toolsContext: createHoustonToolsContext(route.context.correlationId),
     activeTools,
     experimental_toolApprovalSecret: approvalSecret,
     stopWhen: stepCountIs(5),

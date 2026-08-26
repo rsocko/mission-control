@@ -154,7 +154,9 @@ export async function persistPostgresRuntimeTelemetry(
     await client.query(
       `
         UPDATE runtime_telemetry_instances
-        SET last_seen_at = $1, restart_count = $2, high_water_metrics = $3
+        SET last_seen_at = $1,
+          restart_count = COALESCE($2, restart_count),
+          high_water_metrics = $3
         WHERE instance_id = $4 AND last_seen_at <= $1
       `,
       [

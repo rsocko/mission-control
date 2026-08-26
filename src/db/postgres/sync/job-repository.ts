@@ -85,7 +85,7 @@ export function buildExclusionClause(
 const JOB_COLUMNS = `
   id,
   connector_id AS "connectorId",
-  full,
+  "full",
   source,
   status,
   attempt,
@@ -335,7 +335,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         await client.query(
           `
             UPDATE sync_jobs
-            SET full = $1, available_at = $2, scheduled_for = $3, updated_at = $4
+            SET "full" = $1, available_at = $2, scheduled_for = $3, updated_at = $4
             WHERE id = $5
           `,
           [nextFull, nextAvailableAt, nextScheduledFor, now, existing.id],
@@ -355,7 +355,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     await client.query(
       `
         INSERT INTO sync_jobs (
-          id, connector_id, full, source, status, attempt, max_attempts,
+          id, connector_id, "full", source, status, attempt, max_attempts,
           available_at, scheduled_for, duration_budget_ms,
           identity_mode, identity_mode_revision, created_at, updated_at
         ) VALUES ($1, $2, $3, $4, 'queued', 0, $5, $6, $7, $8, $9, $10, $11, $11)
@@ -457,7 +457,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
                 )
               )
             )
-          ORDER BY full DESC, scheduled_for ASC, created_at ASC
+          ORDER BY "full" DESC, scheduled_for ASC, created_at ASC
           LIMIT 1
           FOR UPDATE OF sync_jobs SKIP LOCKED
         `,

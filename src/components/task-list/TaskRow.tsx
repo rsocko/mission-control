@@ -115,6 +115,15 @@ function formatReminderAt(isoDate: string): string {
   return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ` ${timeStr}`;
 }
 
+export interface TaskRowFilterController {
+  tagSlugs: string[];
+  projectId: string | null;
+  onToggleTag: (slug: string) => void;
+  onToggleProject?: (projectId: string) => void;
+  onFilterPriority: (priority: string) => void;
+  onFilterStatus: (status: string) => void;
+}
+
 interface TaskRowProps {
   task: Task;
   projects?: HubProject[];
@@ -148,14 +157,7 @@ interface TaskRowProps {
     taskId: string,
     event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean },
   ) => void;
-  filterController?: false | {
-    tagSlugs: string[];
-    projectId: string | null;
-    onToggleTag: (slug: string) => void;
-    onToggleProject?: (projectId: string) => void;
-    onFilterPriority: (priority: string) => void;
-    onFilterStatus: (status: string) => void;
-  };
+  filterController?: false | TaskRowFilterController;
 }
 
 export function TaskRow({

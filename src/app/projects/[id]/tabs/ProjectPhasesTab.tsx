@@ -51,9 +51,7 @@ import {
   NotepadText,
   PencilLine,
   Plus,
-  Search,
   Trash2,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -67,12 +65,15 @@ import {
   resolveSelectionAnchorIndex,
   useBulkSelection,
 } from '@/components/bulk-actions';
+import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
-import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
+import {
+  ViewDensityToggle,
+  type ViewDensity,
+} from '@/components/toolbar/ViewDensityToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import {
   Select,
   SelectContent,
@@ -82,6 +83,12 @@ import {
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
+import {
+  countTaskFilters,
+  EMPTY_TASK_FILTER_CONTEXT,
+  updateTaskFilterContext,
+  type TaskFilterContext,
+} from '@/lib/task-filter-context';
 import { ProjectHierarchyClientError } from '@/lib/projects/hierarchy-client';
 import {
   filterCompletedTasks,
@@ -112,7 +119,6 @@ import {
   LEFT_GANTT_COLUMN_WIDTH,
   PHASE_STATUS_LABELS,
   PHASE_STATUS_ORDER,
-  PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   ZOOM_CELL_WIDTH,
 } from '../constants';
@@ -131,7 +137,7 @@ import type {
 import {
   buildGanttRows,
   buildTimelineSegments,
-  formatDateLabel,
+  filterProjectTasks,
   getConnectorIcon,
   getPhaseColor,
   getPhaseStatusColor,
@@ -146,6 +152,7 @@ import type {
 } from './contracts';
 import { AIPlanControl } from './AIPlanControl';
 import { PlanTaskRow } from '../PlanTaskRow';
+import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
 const ProjectStructureGraph = dynamic(
   () => import('@/components/graph/ProjectStructureGraph'),
@@ -156,6 +163,10 @@ const ProjectStructureGraph = dynamic(
 );
 
 const ALLOWED_PHASE_FIELDS = new Set(['name', 'description', 'status', 'color', 'estimatedDays', 'targetStart', 'targetEnd', 'startAfterPhaseId', 'sortOrder']);
+const DEFAULT_PLAN_FILTER_CONTEXT: TaskFilterContext = {
+  ...EMPTY_TASK_FILTER_CONTEXT,
+  completion: 'all',
+};
 
 interface ProjectPhasesTabProps {
   /** True while this tab is the visible Activity boundary. */
@@ -174,10 +185,13 @@ interface ProjectPhasesTabProps {
   requestConfirmation: RequestConfirmation;
   /** Route-level AI proposal controller owned by the shell. */
   proposalActions: ProjectProposalActions;
+  /** Display labels for connector types, keyed by connector type. */
+  connectorLabels: Record<string, string>;
 }
 
 export function ProjectPhasesTab({
   active,
+  connectorLabels,
   onGraphLayoutChange,
   onRevealComplete,
   proposalActions,
@@ -242,14 +256,23 @@ export function ProjectPhasesTab({
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [addTaskMenuPhaseId, setAddTaskMenuPhaseId] = useState<string | null>(null);
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
-  const [phaseTaskSearch, setPhaseTaskSearch] = useState('');
-  const [showCompletedTasks, setShowCompletedTasks] = useState(true);
+  const [planFilterContext, setPlanFilterContext] = useState<TaskFilterContext>(
+    DEFAULT_PLAN_FILTER_CONTEXT,
+  );
+  const [viewDensity, setViewDensity] = useState<ViewDensity>('comfortable');
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+  const planFilterProjectIdRef = useRef(projectId);
   const bulk = useBulkSelection();
   const visiblePhaseViewMode = revealPhaseId ? 'list' : phaseViewMode;
-  const normalizedPhaseTaskSearch = phaseTaskSearch.trim().toLowerCase();
+  const showCompletedTasks = planFilterContext.completion === 'all';
 
   useEffect(() => { setPortalContainer(document.body); }, []);
+
+  useEffect(() => {
+    if (planFilterProjectIdRef.current === projectId) return;
+    planFilterProjectIdRef.current = projectId;
+    setPlanFilterContext(DEFAULT_PLAN_FILTER_CONTEXT);
+  }, [projectId]);
 
   // Keep the shell's scroll container in step with the full-height graph view.
   useLayoutEffect(() => {
@@ -265,7 +288,7 @@ export function ProjectPhasesTab({
   useEffect(() => {
     if (!revealPhaseId) return;
     setPhaseViewMode('list');
-    setShowCompletedTasks(true);
+    setPlanFilterContext((current) => updateTaskFilterContext(current, { completion: 'all' }));
     setCollapsedPhaseIds((current) => {
       const next = current.filter((entry) => entry !== revealPhaseId);
       persistCollapsedPhaseIds(next);
@@ -321,6 +344,57 @@ export function ProjectPhasesTab({
   }, []);
 
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task] as const)), [tasks]);
+  const {
+    assignees: planTaskAssignees,
+    projects: planTaskFilterProjects,
+    sourceLists: planTaskSourceLists,
+    sources: planTaskSources,
+    tags: planTaskTags,
+  } = useProjectTaskFilterOptions({
+    connectorLabels,
+    phases,
+    project,
+    tasks,
+  });
+  const filteredPlanTasks = useMemo(
+    () => filterProjectTasks(tasks, planFilterContext, projectId),
+    [planFilterContext, projectId, tasks],
+  );
+  const filteredPlanTaskIds = useMemo(
+    () => new Set(filteredPlanTasks.map((task) => task.id)),
+    [filteredPlanTasks],
+  );
+  const hasPlanTaskFilters = (
+    countTaskFilters(planFilterContext)
+    - (planFilterContext.completion === 'all' ? 1 : 0)
+  ) > 0;
+  const clearPlanTaskFilters = useCallback(() => {
+    setPlanFilterContext((current) => ({
+      ...EMPTY_TASK_FILTER_CONTEXT,
+      completion: current.completion,
+    }));
+  }, []);
+  const planRowFilterController = useMemo(() => ({
+    tagSlugs: planFilterContext.tagSlugs,
+    projectId: null,
+    onToggleTag: (slug: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        tagSlugs: current.tagSlugs.includes(slug)
+          ? current.tagSlugs.filter((tagSlug) => tagSlug !== slug)
+          : [...current.tagSlugs, slug],
+      }));
+    },
+    onFilterPriority: (priority: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        priorities: [priority],
+      }));
+    },
+    onFilterStatus: (status: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        statuses: [status],
+      }));
+    },
+  }), [planFilterContext.tagSlugs]);
 
   const graphRefreshKey = useMemo(() => JSON.stringify({
     phases: phases.map((phase) => [
@@ -343,32 +417,20 @@ export function ProjectPhasesTab({
   }, [tasks, taskToPhase, phases]);
 
   const visibleUnassignedTasks = useMemo(() => {
-    const completionFiltered = filterCompletedTasks(
-      unassignedTasks,
-      showCompletedTasks,
-      (task) => task.status,
-    );
-    return normalizedPhaseTaskSearch
-      ? completionFiltered.filter((task) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
-      : completionFiltered;
-  }, [normalizedPhaseTaskSearch, showCompletedTasks, unassignedTasks]);
+    return unassignedTasks.filter((task) => filteredPlanTaskIds.has(task.id));
+  }, [filteredPlanTaskIds, unassignedTasks]);
 
   // Flat ordered list of all task IDs shown in the Plan list view (for shift-click range selection)
   const planListTaskIds = useMemo(() => {
     const ids: string[] = [];
     for (const phase of phases) {
-      const entries = filterCompletedTasks(
-        phaseEntries[phase.id] ?? [],
-        showCompletedTasks,
-        ({ task }) => task.status,
-      ).filter(({ task }) => (
-        !normalizedPhaseTaskSearch || task.title.toLowerCase().includes(normalizedPhaseTaskSearch)
-      ));
+      const entries = (phaseEntries[phase.id] ?? [])
+        .filter(({ task }) => filteredPlanTaskIds.has(task.id));
       for (const { task } of entries) ids.push(task.id);
     }
     for (const task of visibleUnassignedTasks) ids.push(task.id);
     return ids;
-  }, [normalizedPhaseTaskSearch, phaseEntries, phases, showCompletedTasks, visibleUnassignedTasks]);
+  }, [filteredPlanTaskIds, phaseEntries, phases, visibleUnassignedTasks]);
 
   const handleBulkModifierClick = useCallback((taskId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const clickedIndex = planListTaskIds.indexOf(taskId);
@@ -796,128 +858,143 @@ export function ProjectPhasesTab({
         <CardHeader
           ref={planToolbarRef}
           className={cn(
-            'z-10 gap-4 rounded-t-[var(--radius-lg)] border-b border-[var(--border-subtle)] bg-[var(--surface-1)] sm:flex-row sm:items-center sm:justify-between sm:space-y-0',
+            'z-10 gap-3 rounded-t-[var(--radius-lg)] border-b border-[var(--border-subtle)] bg-[var(--surface-1)]',
             isGraphView ? 'relative shrink-0' : 'sticky',
           )}
           style={isGraphView ? undefined : { top: stickyHeaderHeight }}
         >
-          <div>
-            <CardTitle>Plan</CardTitle>
-            <CardDescription>Organize tasks into phases. Right-click tasks for actions.</CardDescription>
-            <p className="sr-only" aria-live="polite" aria-atomic="true">
-              {hierarchyAnnouncement}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {visiblePhaseViewMode !== 'assign' && visiblePhaseViewMode !== 'graph' && (
-            <div className="input-glow flex items-center gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-3 h-9">
-              <Search size={14} className="text-[var(--text-tertiary)]" />
-              <input
-                type="text"
-                placeholder="Filter tasks…"
-                value={phaseTaskSearch}
-                onChange={(e) => setPhaseTaskSearch(e.target.value)}
-                className="bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none w-28"
-              />
-              {phaseTaskSearch && (
-                <button type="button" onClick={() => setPhaseTaskSearch('')} className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
-                  <X size={12} />
-                </button>
-              )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Plan</CardTitle>
+              <CardDescription>Organize tasks into phases. Right-click tasks for actions.</CardDescription>
+              <p className="sr-only" aria-live="polite" aria-atomic="true">
+                {hierarchyAnnouncement}
+              </p>
             </div>
-            )}
-            <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-              {(['list', 'gantt', 'graph', 'assign'] as const).map((viewMode) => (
-                <button
-                  key={viewMode}
-                  type="button"
-                  onClick={() => { setPhaseViewMode(viewMode); if (viewMode !== 'list') bulk.clearSelection(); }}
-                  className={cn(
-                    'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
-                    BUTTON_TRANSITION,
-                    visiblePhaseViewMode === viewMode
-                      ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
-                  )}
-                >
-                  {viewMode === 'graph' ? <Network size={14} className="mr-1.5 inline" /> : null}
-                  {viewMode}
-                </button>
-              ))}
-            </div>
-            {visiblePhaseViewMode === 'gantt' ? (
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-                {(['day', 'week', 'month'] as const).map((zoom) => (
+                {(['list', 'gantt', 'graph', 'assign'] as const).map((viewMode) => (
                   <button
-                    key={zoom}
+                    key={viewMode}
                     type="button"
-                    onClick={() => setGanttZoom(zoom)}
+                    onClick={() => { setPhaseViewMode(viewMode); if (viewMode !== 'list') bulk.clearSelection(); }}
                     className={cn(
                       'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
                       BUTTON_TRANSITION,
-                      ganttZoom === zoom
+                      visiblePhaseViewMode === viewMode
                         ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
                         : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
                     )}
                   >
-                    {zoom}
+                    {viewMode === 'graph' ? <Network size={14} className="mr-1.5 inline" /> : null}
+                    {viewMode}
                   </button>
                 ))}
               </div>
-            ) : null}
-            {visiblePhaseViewMode !== 'assign' && (
-            <>
-            {visiblePhaseViewMode === 'list' && phases.length > 0 && (
-              <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-                <Tooltip content="Expand all phases">
-                  <button
-                    type="button"
-                    onClick={expandAllPhases}
-                    disabled={collapsedPhaseIds.length === 0}
-                    className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:opacity-40 disabled:pointer-events-none', BUTTON_TRANSITION)}
-                    aria-label="Expand all phases"
-                  >
-                    <ChevronsUpDown size={16} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Collapse all phases">
-                  <button
-                    type="button"
-                    onClick={collapseAllPhases}
-                    disabled={collapsedPhaseIds.length === phases.length}
-                    className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:opacity-40 disabled:pointer-events-none', BUTTON_TRANSITION)}
-                    aria-label="Collapse all phases"
-                  >
-                    <ChevronsDownUp size={16} />
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {visiblePhaseViewMode === 'list' && !bulk.bulkMode && tasks.some((task) => task.status === 'done') && (
-              <ShowCompletedToggle
-                showCompleted={showCompletedTasks}
-                onShowCompletedChange={setShowCompletedTasks}
-              />
-            )}
-            {visiblePhaseViewMode === 'list' && tasks.length > 0 && !bulk.bulkMode && (
-              <button
-                type="button"
-                onClick={bulk.enterBulkMode}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              >
-                Select
-              </button>
-            )}
-            {phases.length > 0 ? (
-              <AIPlanControl hasPhases proposalActions={proposalActions} />
-            ) : null}
-            <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
-              {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
-              Add phase
-            </Button>
-            </>
-            )}
+              {visiblePhaseViewMode === 'gantt' ? (
+                <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
+                  {(['day', 'week', 'month'] as const).map((zoom) => (
+                    <button
+                      key={zoom}
+                      type="button"
+                      onClick={() => setGanttZoom(zoom)}
+                      className={cn(
+                        'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
+                        BUTTON_TRANSITION,
+                        ganttZoom === zoom
+                          ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
+                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
+                      )}
+                    >
+                      {zoom}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {visiblePhaseViewMode !== 'assign' ? (
+                <>
+                  {phases.length > 0 ? (
+                    <AIPlanControl hasPhases proposalActions={proposalActions} />
+                  ) : null}
+                  <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
+                    {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
+                    Add phase
+                  </Button>
+                </>
+              ) : null}
+            </div>
           </div>
+          {visiblePhaseViewMode === 'list' ? (
+            <TaskKeywordFilter
+              filteredCount={filteredPlanTasks.length}
+              sources={planTaskSources}
+              sourceLists={planTaskSourceLists}
+              tags={planTaskTags}
+              assignees={planTaskAssignees}
+              projects={planTaskFilterProjects}
+              listGroups={[]}
+              controller={{
+                context: planFilterContext,
+                setContext: setPlanFilterContext,
+                clear: clearPlanTaskFilters,
+              }}
+              hiddenBuilderFilters={['project']}
+              placeholder="Filter Plan tasks... (press / to focus, ? for help)"
+              className="mb-0"
+              secondaryContent={(
+                <div className="flex items-center gap-1">
+                  {phases.length > 0 ? (
+                    <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
+                      <Tooltip content="Expand all phases">
+                        <button
+                          type="button"
+                          onClick={expandAllPhases}
+                          disabled={collapsedPhaseIds.length === 0}
+                          className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40', BUTTON_TRANSITION)}
+                          aria-label="Expand all phases"
+                        >
+                          <ChevronsUpDown size={16} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Collapse all phases">
+                        <button
+                          type="button"
+                          onClick={collapseAllPhases}
+                          disabled={collapsedPhaseIds.length === phases.length}
+                          className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40', BUTTON_TRANSITION)}
+                          aria-label="Collapse all phases"
+                        >
+                          <ChevronsDownUp size={16} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  ) : null}
+                  {!bulk.bulkMode && tasks.some((task) => task.status === 'done') ? (
+                    <ShowCompletedToggle
+                      showCompleted={showCompletedTasks}
+                      onShowCompletedChange={(showCompleted) => {
+                        setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                          completion: showCompleted ? 'all' : 'open',
+                        }));
+                      }}
+                    />
+                  ) : null}
+                  {!bulk.bulkMode ? (
+                    <ViewDensityToggle value={viewDensity} onChange={setViewDensity} />
+                  ) : null}
+                  {tasks.length > 0 && !bulk.bulkMode ? (
+                    <button
+                      type="button"
+                      onClick={bulk.enterBulkMode}
+                      className="px-2 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+                    >
+                      Select
+                    </button>
+                  ) : null}
+                </div>
+              )}
+            />
+          ) : null}
           {/* Bulk action bar inside sticky header so it stays visible when scrolled */}
           {bulk.bulkMode && visiblePhaseViewMode === 'list' && (
             <div className="border-t border-[var(--border-subtle)]">
@@ -1206,9 +1283,8 @@ export function ProjectPhasesTab({
                       showCompletedTasks,
                       ({ task }) => task.status,
                     );
-                    const entries = normalizedPhaseTaskSearch
-                      ? completionFilteredEntries.filter(({ task }) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
-                      : completionFilteredEntries;
+                    const entries = completionFilteredEntries
+                      .filter(({ task }) => filteredPlanTaskIds.has(task.id));
                     const isCollapsed = collapsedPhaseIds.includes(phase.id);
                     const isEditing = editingPhaseId === phase.id;
                     const isSaving = savingPhaseIds.has(phase.id);
@@ -1270,7 +1346,11 @@ export function ProjectPhasesTab({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setShowCompletedTasks(true)}
+                                onClick={() => {
+                                  setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                                    completion: 'all',
+                                  }));
+                                }}
                                 className="ml-auto text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
                               >
                                 Show tasks
@@ -1369,7 +1449,7 @@ export function ProjectPhasesTab({
                                       {/* Task count — read-only pill, visually distinct */}
                                       <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
                                         <Layers3 size={11} />
-                                        {normalizedPhaseTaskSearch || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {hasPlanTaskFilters || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
                                       </span>
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
@@ -1550,14 +1630,18 @@ export function ProjectPhasesTab({
                                         <p className="text-sm text-[var(--text-tertiary)]">
                                           {!showCompletedTasks && allEntries.length > 0 && completionFilteredEntries.length === 0
                                             ? 'Completed tasks are hidden.'
-                                            : normalizedPhaseTaskSearch && completionFilteredEntries.length > 0
+                                            : hasPlanTaskFilters && completionFilteredEntries.length > 0
                                               ? 'No tasks match this filter.'
                                               : 'No tasks in this phase yet.'}
                                         </p>
                                         {!showCompletedTasks && completionFilteredEntries.length === 0 && allEntries.length > 0 ? (
                                           <button
                                             type="button"
-                                            onClick={() => setShowCompletedTasks(true)}
+                                            onClick={() => {
+                                              setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                                                completion: 'all',
+                                              }));
+                                            }}
                                             className="mt-2 text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
                                           >
                                             Show completed tasks
@@ -1603,6 +1687,7 @@ export function ProjectPhasesTab({
                                               {(taskDragHandleProps) => (
                                                 <PlanTaskRow
                                                   task={task}
+                                                  variant={viewDensity === 'compact' ? 'compact' : 'card'}
                                                   dragHandleProps={taskDragHandleProps}
                                                   dragLabel="Drag task to another phase"
                                                   isSelected={selectedTaskId === task.id}
@@ -1618,6 +1703,7 @@ export function ProjectPhasesTab({
                                                   contextMenuActions={getTaskContextActions(task)}
                                                   phaseMenuItems={phaseMenuItems}
                                                   projects={allProjects}
+                                                  filterController={planRowFilterController}
                                                 />
                                               )}
                                             </DraggableTaskItem>
@@ -1693,6 +1779,7 @@ export function ProjectPhasesTab({
                                 {(taskDragHandleProps) => (
                                   <PlanTaskRow
                                     task={task}
+                                    variant={viewDensity === 'compact' ? 'compact' : 'card'}
                                     dragHandleProps={taskDragHandleProps}
                                     dragLabel="Drag task to a phase"
                                     isSelected={selectedTaskId === task.id}
@@ -1708,6 +1795,7 @@ export function ProjectPhasesTab({
                                     contextMenuActions={getTaskContextActions(task)}
                                     phaseMenuItems={phaseMenuItems}
                                     projects={allProjects}
+                                    filterController={planRowFilterController}
                                   />
                                 )}
                               </DraggableTaskItem>

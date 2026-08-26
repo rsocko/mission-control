@@ -2,7 +2,10 @@
 
 import { GripVertical } from 'lucide-react';
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
-import { TaskRow } from '@/components/task-list/TaskRow';
+import {
+  TaskRow,
+  type TaskRowFilterController,
+} from '@/components/task-list/TaskRow';
 import { cn } from '@/lib/utils';
 import type { ProjectTaskViewModel as ProjectTask } from './types';
 
@@ -28,6 +31,7 @@ interface PlanTaskRowProps {
   contextMenuActions: TaskContextMenuActions;
   phaseMenuItems: { id: string; name: string }[];
   projects: HubProject[];
+  filterController?: TaskRowFilterController;
 }
 
 export function PlanTaskRow({
@@ -49,6 +53,7 @@ export function PlanTaskRow({
   contextMenuActions,
   phaseMenuItems,
   projects,
+  filterController,
 }: PlanTaskRowProps) {
   const compact = variant === 'compact';
 
@@ -123,7 +128,7 @@ export function PlanTaskRow({
         onSelect={onSelect}
         onDoubleClickTask={onDoubleClick}
         onModifierClick={onModifierClick}
-        filterController={false}
+        filterController={filterController ?? false}
       />
     </TaskContextMenu>
   );

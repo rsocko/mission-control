@@ -105,6 +105,15 @@ Backend-specific behavior is named explicitly:
 Existing import paths remain compatibility facades while consumers migrate.
 Facades expose domain values and operations, never the backend handle.
 
+Core task, project, connector, notification, and settings CRUD is composed once
+through `registerCorePersistenceRepositories(repositories)` and consumed through
+`getCorePersistenceRepositories()`. SQLite is the compatibility default. A
+runtime backend selector may register another complete
+`CorePersistenceRepositories` composition before request handling; consumers
+must not select repositories individually because that can split one workflow
+across backends. Registration is one-time and cannot replace a composition after
+it has been registered or consumed.
+
 ## Domain migration sequence
 
 Migrate one correctness-sensitive workflow at a time:

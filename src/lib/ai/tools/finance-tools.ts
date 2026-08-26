@@ -33,7 +33,7 @@ import {
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
 const financeMutationToolContextSchema = z.object({
   correlationId: z.string().optional(),
-});
+}).optional();
 
 async function executeFinanceTool<T>(
   operation: (signal: AbortSignal) => Promise<T>,

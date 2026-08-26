@@ -1,5 +1,9 @@
 import { performance } from 'node:perf_hooks';
 import type { Pool } from 'pg';
+import type {
+  DatabaseHealthProbe,
+  DatabaseHealthProbeResult,
+} from '@/lib/telemetry/database-health-probe';
 
 export interface PostgresHealthSnapshot {
   connected: boolean;
@@ -17,10 +21,10 @@ export interface PostgresHealthSnapshot {
   };
 }
 
-export class PostgresDatabaseHealthProbe {
+export class PostgresDatabaseHealthProbe implements DatabaseHealthProbe {
   constructor(private readonly pool: Pool) {}
 
-  async inspect(): Promise<PostgresHealthSnapshot> {
+  async inspect(): Promise<PostgresHealthSnapshot & DatabaseHealthProbeResult> {
     const startedAt = performance.now();
     try {
       const result = await this.pool.query<{ size_bytes: string }>(

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import type { Pool } from 'pg';
+import type { DatabaseBootstrapAdapter } from '@/db/bootstrap/contracts';
 
 const MIGRATION_LOCK_NAMESPACE = 1_296_250_820;
 const MIGRATION_LOCK_ID = 1_619;
@@ -10,7 +11,7 @@ export interface PostgresMigrationOptions {
   migrationsFolder?: string;
 }
 
-export class PostgresDatabaseBootstrapAdapter {
+export class PostgresDatabaseBootstrapAdapter implements DatabaseBootstrapAdapter {
   constructor(
     private readonly pool: Pool,
     private readonly options: PostgresMigrationOptions = {},

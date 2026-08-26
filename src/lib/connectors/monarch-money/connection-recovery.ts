@@ -21,7 +21,7 @@ import {
 import { syncFinanceProviderPresentation } from '@/lib/finance-insights/notification-ingestion';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import { resolveTyrionReconnectUrl } from '@/lib/finance/tyrion-reconnect';
-import { isConnectorSyncQuarantined } from '@/lib/sync/control-state';
+import { isConnectorSyncQuarantinedAsync } from '@/lib/sync/control-state';
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
@@ -495,7 +495,7 @@ export async function verifyFinanceConnectionRecovery(input: {
   signal?: AbortSignal;
 }): Promise<{ recovered: boolean; reason?: string }> {
   const now = input.now ?? new Date();
-  if (isConnectorSyncQuarantined(input.config.id)) {
+  if (await isConnectorSyncQuarantinedAsync(input.config.id)) {
     return { recovered: false, reason: 'connector_sync_quarantined' };
   }
   const client = new MonarchBridgeClient(input.config);

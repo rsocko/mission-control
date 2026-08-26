@@ -1,8 +1,7 @@
 import { syncEventBus } from '@/lib/sync/events';
 import type { SyncStreamEvent } from '@/lib/sync/events';
 import {
-  getLatestSyncJobEventId,
-  getSyncJobEventsAfter,
+  getSyncJobRepository,
   isDurableSyncMode,
 } from '@/lib/sync/job-queue';
 
@@ -16,11 +15,12 @@ export async function GET(request: Request) {
   const parsedCursor = suppliedCursor === null ? Number.NaN : Number(suppliedCursor);
 
   const stream = new ReadableStream({
-    start(controller) {
-      let persistedCursor = isDurableSyncMode()
+    async start(controller) {
+      const jobRepository = isDurableSyncMode() ? await getSyncJobRepository() : null;
+      let persistedCursor = jobRepository
         ? Number.isSafeInteger(parsedCursor) && parsedCursor >= 0
           ? parsedCursor
-          : getLatestSyncJobEventId()
+          : await jobRepository.getLatestEventId()
         : 0;
       const send = (event: SyncStreamEvent, eventId?: number) => {
         const id = eventId === undefined ? '' : `id: ${eventId}\n`;
@@ -42,12 +42,14 @@ export async function GET(request: Request) {
         }
       }, 30_000);
 
-      const persistedEvents = isDurableSyncMode()
+      const persistedEvents = jobRepository
         ? setInterval(() => {
-            for (const item of getSyncJobEventsAfter(persistedCursor)) {
-              persistedCursor = item.id;
-              send(item.event, item.id);
-            }
+            void jobRepository.getEventsAfter(persistedCursor).then((events) => {
+              for (const item of events) {
+                persistedCursor = item.id;
+                send(item.event, item.id);
+              }
+            });
           }, 500)
         : null;
 

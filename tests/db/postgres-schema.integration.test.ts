@@ -2,10 +2,12 @@ import { eq, sql } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
+import { PostgresHealthSnapshotStore } from '@/lib/telemetry/postgres-health-snapshot-store';
 import {
   appSettings,
   connectorConfigs,
   tasks,
+  workerHealthSnapshot,
 } from '@/db/postgres/schema';
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
@@ -36,6 +38,9 @@ describePostgres('PostgreSQL schema integration', () => {
     );
     await backend.context.db.delete(connectorConfigs).where(
       eq(connectorConfigs.id, 'postgres-integration-connector'),
+    );
+    await backend.context.db.delete(workerHealthSnapshot).where(
+      eq(workerHealthSnapshot.id, 'current'),
     );
     await backend.shutdown();
   });
@@ -80,7 +85,7 @@ describePostgres('PostgreSQL schema integration', () => {
   it('rolls back failed asynchronous transactions', async () => {
     const failure = new Error('rollback probe');
 
-    await expect(backend.transactions.run(async (transaction) => {
+    await expect(backend.asyncTransactions.run(async (transaction) => {
       await transaction.insert(appSettings).values({
         key: 'postgres-integration-setting',
         value: { persisted: false },
@@ -111,5 +116,25 @@ describePostgres('PostgreSQL schema integration', () => {
     ]);
 
     expect(tasks.searchVector).toBeDefined();
+  });
+
+  it('round-trips the worker health snapshot through PostgreSQL', async () => {
+    const store = new PostgresHealthSnapshotStore<{ status: string }>(
+      backend.context.db,
+    );
+    const snapshot = {
+      schemaVersion: 1,
+      generatedAt: '2026-01-01T00:00:00.000Z',
+      worker: {
+        instanceId: 'postgres-integration-worker',
+        revision: 'test',
+      },
+      generationDurationMs: 12,
+      summary: { status: 'healthy' },
+    };
+
+    await store.write(snapshot);
+
+    await expect(store.read()).resolves.toEqual(snapshot);
   });
 });

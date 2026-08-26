@@ -140,7 +140,7 @@ describe('PostgreSQL persistence runtime', () => {
     await backend.initialize();
 
     await expect(backend.transactions.run(
-      async (context) => (context as unknown as { marker: string }).marker,
+      (context) => (context as unknown as { marker: string }).marker,
       { access: 'read' },
     )).resolves.toBe('read only');
     expect(transaction).toHaveBeenCalledWith(

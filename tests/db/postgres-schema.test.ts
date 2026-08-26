@@ -16,10 +16,29 @@ function exportedTables(schema: Record<string, unknown>) {
   );
 }
 
+/**
+ * PostgreSQL-only additive tables with no SQLite counterpart. SQLite's
+ * equivalent keyword-search mirror (`tasks_fts`/`alerts_fts`) is a raw FTS5
+ * virtual table created via `sqlite.exec(...)` in
+ * `src/lib/search/sqlite-fts-repository.ts` — it is never represented in
+ * `src/db/schema/**`, so there is nothing on the SQLite side for these two
+ * tables to have parity with. They are excluded from the strict 1:1
+ * SQLite<->PostgreSQL schema-parity checks below and instead validated by
+ * their own dedicated structural assertions (see
+ * "adds PostgreSQL-only search-index tables..." below).
+ */
+const POSTGRES_ONLY_TABLE_EXPORTS = new Set(['taskSearchDocuments', 'notificationSearchDocuments']);
+
+function sharedTables(schema: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(exportedTables(schema)).filter(([exportName]) => !POSTGRES_ONLY_TABLE_EXPORTS.has(exportName)),
+  );
+}
+
 describe('PostgreSQL schema', () => {
   it('has a table and column equivalent for every SQLite schema export', () => {
     const sqliteTables = exportedTables(sqliteSchema);
-    const postgresTables = exportedTables(postgresSchema);
+    const postgresTables = sharedTables(postgresSchema);
 
     expect(Object.keys(postgresTables)).toHaveLength(152);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
@@ -160,13 +179,47 @@ describe('PostgreSQL schema', () => {
     ).toBe('gin');
   });
 
+  it('adds PostgreSQL-only search-index tables that are excluded from SQLite parity', () => {
+    for (const exportName of POSTGRES_ONLY_TABLE_EXPORTS) {
+      expect(postgresSchema[exportName as keyof typeof postgresSchema], exportName).toBeDefined();
+      expect(
+        (sqliteSchema as Record<string, unknown>)[exportName],
+        `${exportName} must have no SQLite counterpart`,
+      ).toBeUndefined();
+    }
+
+    const taskDocs = getPostgresTableConfig(postgresSchema.taskSearchDocuments);
+    expect(getTableName(postgresSchema.taskSearchDocuments)).toBe('task_search_documents');
+    expect(
+      taskDocs.indexes.find((index) => index.config.name === 'idx_task_search_documents_vector')
+        ?.config.method,
+    ).toBe('gin');
+    expect(taskDocs.foreignKeys).toHaveLength(1);
+    expect(taskDocs.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(taskDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.tasks);
+
+    const notificationDocs = getPostgresTableConfig(postgresSchema.notificationSearchDocuments);
+    expect(getTableName(postgresSchema.notificationSearchDocuments)).toBe('notification_search_documents');
+    expect(
+      notificationDocs.indexes.find(
+        (index) => index.config.name === 'idx_notification_search_documents_vector',
+      )?.config.method,
+    ).toBe('gin');
+    expect(notificationDocs.foreignKeys).toHaveLength(1);
+    expect(notificationDocs.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(notificationDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.notifications);
+  });
+
   it('ships one clean PostgreSQL baseline migration', () => {
     const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
     const migrations = readdirSync(migrationDirectory).filter((file) => file.endsWith('.sql'));
     expect(migrations).toHaveLength(1);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
-    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(152);
+    // 152 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
+    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(154);
+    expect(sql).toContain('CREATE TABLE "task_search_documents"');
+    expect(sql).toContain('CREATE TABLE "notification_search_documents"');
     expect(sql).toContain('"id" serial PRIMARY KEY NOT NULL');
     expect(sql).toContain('"metadata" jsonb');
     expect(sql).toContain('"is_checklist_item" boolean');

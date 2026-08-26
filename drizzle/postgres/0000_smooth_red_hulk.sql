@@ -1478,6 +1478,15 @@ CREATE TABLE "notification_saved_views" (
 	"updated_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "notification_search_documents" (
+	"id" text PRIMARY KEY NOT NULL,
+	"title" text NOT NULL,
+	"body" text,
+	"category" text,
+	"connector_type" text,
+	"search_vector" "tsvector" GENERATED ALWAYS AS (setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(body, '')), 'B') || setweight(to_tsvector('english', coalesce(category, '') || ' ' || coalesce(connector_type, '')), 'C')) STORED
+);
+--> statement-breakpoint
 CREATE TABLE "notification_writeback_jobs" (
 	"id" text PRIMARY KEY NOT NULL,
 	"notification_id" text NOT NULL,
@@ -2129,6 +2138,15 @@ CREATE TABLE "task_schedules" (
 	"recurrence_mode" text DEFAULT 'schedule' NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "task_search_documents" (
+	"id" text PRIMARY KEY NOT NULL,
+	"title" text NOT NULL,
+	"description" text,
+	"source_list_name" text,
+	"connector_type" text,
+	"search_vector" "tsvector" GENERATED ALWAYS AS (setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(description, '')), 'B') || setweight(to_tsvector('english', coalesce(source_list_name, '') || ' ' || coalesce(connector_type, '')), 'C')) STORED
+);
+--> statement-breakpoint
 CREATE TABLE "task_source_write_lease_targets" (
 	"lease_id" text NOT NULL,
 	"role" text NOT NULL,
@@ -2393,6 +2411,7 @@ ALTER TABLE "github_write_outcome_events" ADD CONSTRAINT "github_write_outcome_e
 ALTER TABLE "github_write_outcome_events" ADD CONSTRAINT "github_write_outcome_events_lease_id_task_source_write_leases_id_fk" FOREIGN KEY ("lease_id") REFERENCES "public"."task_source_write_leases"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "graph_workspace_versions" ADD CONSTRAINT "graph_workspace_versions_workspace_id_graph_workspaces_id_fk" FOREIGN KEY ("workspace_id") REFERENCES "public"."graph_workspaces"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_delivery_events" ADD CONSTRAINT "notification_delivery_events_notification_id_notifications_id_fk" FOREIGN KEY ("notification_id") REFERENCES "public"."notifications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "notification_search_documents" ADD CONSTRAINT "notification_search_documents_notification_id_fk" FOREIGN KEY ("id") REFERENCES "public"."notifications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "notification_writeback_jobs" ADD CONSTRAINT "notification_writeback_jobs_notification_id_notifications_id_fk" FOREIGN KEY ("notification_id") REFERENCES "public"."notifications"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scout_reconciliation_evaluations" ADD CONSTRAINT "scout_reconciliation_evaluations_run_id_scout_reconciliation_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."scout_reconciliation_runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scout_reconciliation_suggestions" ADD CONSTRAINT "scout_reconciliation_suggestions_run_id_scout_reconciliation_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."scout_reconciliation_runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -2406,6 +2425,7 @@ ALTER TABLE "task_linked_source_entities" ADD CONSTRAINT "task_linked_source_ent
 ALTER TABLE "task_linked_source_entities" ADD CONSTRAINT "task_linked_source_entities_connector_instance_id_connector_configs_id_fk" FOREIGN KEY ("connector_instance_id") REFERENCES "public"."connector_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_linked_source_entities" ADD CONSTRAINT "task_linked_source_entities_external_entity_id_external_entities_id_fk" FOREIGN KEY ("external_entity_id") REFERENCES "public"."external_entities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_reminder_occurrences" ADD CONSTRAINT "task_reminder_occurrences_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "task_search_documents" ADD CONSTRAINT "task_search_documents_task_id_fk" FOREIGN KEY ("id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_source_write_lease_targets" ADD CONSTRAINT "task_source_write_lease_targets_lease_id_task_source_write_leases_id_fk" FOREIGN KEY ("lease_id") REFERENCES "public"."task_source_write_leases"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_source_write_lease_targets" ADD CONSTRAINT "task_source_write_lease_targets_external_entity_id_external_entities_id_fk" FOREIGN KEY ("external_entity_id") REFERENCES "public"."external_entities"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_source_write_lease_targets" ADD CONSTRAINT "task_source_write_lease_targets_repository_entity_id_external_entities_id_fk" FOREIGN KEY ("repository_entity_id") REFERENCES "public"."external_entities"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
@@ -2579,6 +2599,7 @@ CREATE INDEX "idx_notification_push_rules_connector" ON "notification_push_rules
 CREATE UNIQUE INDEX "idx_notification_push_rules_connector_template" ON "notification_push_rules" USING btree ("connector_instance_id","template_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_notification_saved_views_name" ON "notification_saved_views" USING btree ("name");--> statement-breakpoint
 CREATE INDEX "idx_notification_saved_views_updated_at" ON "notification_saved_views" USING btree ("updated_at");--> statement-breakpoint
+CREATE INDEX "idx_notification_search_documents_vector" ON "notification_search_documents" USING gin ("search_vector");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_notification_writeback_jobs_dedupe" ON "notification_writeback_jobs" USING btree ("dedupe_key");--> statement-breakpoint
 CREATE INDEX "idx_notification_writeback_jobs_dispatch" ON "notification_writeback_jobs" USING btree ("status","next_attempt_at","lease_expires_at");--> statement-breakpoint
 CREATE INDEX "idx_notification_writeback_jobs_connector" ON "notification_writeback_jobs" USING btree ("connector_instance_id","status");--> statement-breakpoint
@@ -2655,6 +2676,7 @@ CREATE UNIQUE INDEX "idx_task_linked_sources_source_identity" ON "task_linked_so
 CREATE UNIQUE INDEX "idx_task_projects_task_project" ON "task_projects" USING btree ("task_id","project_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_task_reminder_occurrences_task_schedule" ON "task_reminder_occurrences" USING btree ("task_id","scheduled_at");--> statement-breakpoint
 CREATE INDEX "idx_task_reminder_occurrences_claim" ON "task_reminder_occurrences" USING btree ("state","next_attempt_at","lease_expires_at");--> statement-breakpoint
+CREATE INDEX "idx_task_search_documents_vector" ON "task_search_documents" USING gin ("search_vector");--> statement-breakpoint
 CREATE INDEX "idx_task_source_write_lease_targets_entity" ON "task_source_write_lease_targets" USING btree ("external_entity_id","repository_entity_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_task_source_write_leases_token" ON "task_source_write_leases" USING btree ("token");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_task_source_write_leases_task_operation_active" ON "task_source_write_leases" USING btree ("connector_instance_id","task_id","operation") WHERE "task_source_write_leases"."state" IN ('claimed', 'authorized', 'dispatched', 'unknown');--> statement-breakpoint

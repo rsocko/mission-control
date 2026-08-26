@@ -91,8 +91,8 @@ export async function GET() {
           ...summary.database,
           status: mergedDatabaseSeverity,
           message: mergedDatabaseSeverity === 'critical'
-            ? 'Critical SQLite degradation detected'
-            : 'SQLite degradation detected',
+            ? 'Critical database degradation detected'
+            : 'Database degradation detected',
         };
     const degradations = [
       ...summary.runtime.degradations,

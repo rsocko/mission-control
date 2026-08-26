@@ -18,6 +18,7 @@ export interface PostgresConfig {
 }
 
 interface PostgresEnvironment {
+  [key: string]: string | undefined;
   MC_POSTGRES_URL?: string;
   MC_POSTGRES_SSL_MODE?: string;
   MC_POSTGRES_MIN_CONNECTIONS?: string;

@@ -102,6 +102,14 @@ export {
   notificationSavedViews,
 } from './notifications';
 
+// PostgreSQL-only keyword search-index projections for tasks/notifications
+// (no SQLite counterpart — see src/db/postgres/schema/search-index.ts for
+// why these are excluded from the SQLite<->PostgreSQL schema-parity checks).
+export {
+  taskSearchDocuments,
+  notificationSearchDocuments,
+} from './search-index';
+
 // Scout reconciliation runs, evidence, proposals, and task policy state
 export {
   scoutReconciliationRuns,

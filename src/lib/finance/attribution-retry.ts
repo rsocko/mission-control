@@ -1,5 +1,6 @@
 import 'server-only';
 
+import { syncLogger } from '@/lib/logger';
 import { syncScheduler } from '@/lib/sync';
 import {
   isDurableSyncMode,
@@ -10,5 +11,7 @@ export function requestFinanceAttributionRetry(connectorId: string): void {
     return;
   }
 
-  syncScheduler.queueFollowUpSync(connectorId);
+  void syncScheduler.queueFollowUpSync(connectorId).catch((err) => {
+    syncLogger.warn({ err, connectorId }, 'Failed to queue finance attribution retry sync');
+  });
 }

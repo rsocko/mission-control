@@ -2,18 +2,11 @@ import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { syncLogger } from '@/lib/logger';
 import type { SyncResult } from '@/types';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import {
-  claimNextSyncJob,
-  completeSyncJob,
-  failSyncJob,
-  enqueueDueSyncSchedules,
   getSyncLeaseMs,
+  getSyncJobRepository,
   getSyncQueueMetrics,
-  isSyncJobCancellationRequested,
-  linkSyncLogToJob,
-  persistSyncJobEvent,
-  pruneSyncJobs,
-  renewSyncJobLease,
   type SyncJob,
 } from './job-queue';
 import { setSyncEventPersistence } from './events';
@@ -68,6 +61,7 @@ export class SyncWorker {
     job: SyncJob;
     promise: Promise<void>;
   }>();
+  private lastKnownQueuedCount = 0;
 
   constructor(
     execute: SyncJobExecutor,
@@ -88,12 +82,27 @@ export class SyncWorker {
       const activeJob = this.active?.job.connectorId === event.connectorId
         ? this.active.job
         : this.abandoned.get(event.connectorId)?.job;
-      if (activeJob) persistSyncJobEvent(activeJob.id, event);
+      if (!activeJob) return;
+      void getSyncJobRepository()
+        .then((repository) => repository.persistEvent(activeJob.id, event))
+        .catch((error) => {
+          syncLogger.warn(
+            { err: error, jobId: activeJob.id, connectorId: activeJob.connectorId },
+            'Sync worker could not persist a sync progress event',
+          );
+        });
     });
     const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
-    pruneSyncJobs(retentionDays);
+    const pruneOnce = () => {
+      void getSyncJobRepository()
+        .then((repository) => repository.prune(retentionDays))
+        .catch((error) => {
+          syncLogger.error({ err: error }, 'Sync worker could not prune completed jobs');
+        });
+    };
+    pruneOnce();
     this.pruneTimer = setInterval(
-      () => pruneSyncJobs(retentionDays),
+      pruneOnce,
       positiveInteger(process.env.MC_SYNC_JOB_PRUNE_INTERVAL_MS, 6 * 60 * 60_000),
     );
     this.pruneTimer.unref();
@@ -105,9 +114,12 @@ export class SyncWorker {
   }
 
   private async runLoop(): Promise<void> {
+    const repository = await getSyncJobRepository();
     while (!this.stopping) {
-      const recoveredSchedules = enqueueDueSyncSchedules();
-      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+      const recoveredSchedules = await repository.enqueueDueSchedules();
+      const metrics = await repository.getMetrics();
+      this.lastKnownQueuedCount = metrics.queued;
+      setQueuedExpensiveOperations(metrics.queued);
       if (recoveredSchedules.length > 0) {
         syncLogger.warn(
           {
@@ -117,7 +129,7 @@ export class SyncWorker {
           'Recovered overdue sync schedules',
         );
       }
-      const job = claimNextSyncJob(
+      const job = await repository.claimNext(
         this.ownerId,
         getSyncLeaseMs(),
         new Set(this.abandoned.keys()),
@@ -131,25 +143,30 @@ export class SyncWorker {
       this.active = { job, controller, promise };
       await this.waitForJob(job, controller, promise);
       if (this.active?.job.id === job.id) this.active = null;
-      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+      const refreshedMetrics = await repository.getMetrics();
+      this.lastKnownQueuedCount = refreshedMetrics.queued;
+      setQueuedExpensiveOperations(refreshedMetrics.queued);
     }
   }
 
   private async executeJob(job: SyncJob, controller: AbortController): Promise<void> {
+    const repository = await getSyncJobRepository();
     const leaseMs = getSyncLeaseMs();
     const heartbeatMs = Math.max(1, Math.floor(leaseMs / 3));
     const heartbeat = setInterval(() => {
-      try {
-        if (isSyncJobCancellationRequested(job.id, this.ownerId)) {
-          controller.abort(new Error('Sync cancellation requested'));
-          return;
+      void (async () => {
+        try {
+          if (await repository.isCancellationRequested(job.id, this.ownerId)) {
+            controller.abort(new Error('Sync cancellation requested'));
+            return;
+          }
+          if (!(await repository.renewLease(job.id, this.ownerId, leaseMs))) {
+            controller.abort(new Error('Sync job lease ownership lost'));
+          }
+        } catch (error) {
+          controller.abort(error instanceof Error ? error : new Error(String(error)));
         }
-        if (!renewSyncJobLease(job.id, this.ownerId, leaseMs)) {
-          controller.abort(new Error('Sync job lease ownership lost'));
-        }
-      } catch (error) {
-        controller.abort(error instanceof Error ? error : new Error(String(error)));
-      }
+      })();
     }, heartbeatMs);
     heartbeat.unref();
     const executionTimeout = setTimeout(() => {
@@ -189,8 +206,8 @@ export class SyncWorker {
             }),
       });
       if (controller.signal.aborted) {
-        const cancelled = isSyncJobCancellationRequested(job.id, this.ownerId);
-        failSyncJob(
+        const cancelled = await repository.isCancellationRequested(job.id, this.ownerId);
+        await repository.fail(
           job,
           this.ownerId,
           controller.signal.reason instanceof Error
@@ -199,8 +216,8 @@ export class SyncWorker {
           { retry: !cancelled, cancelled },
         );
       } else if (!result.success) {
-        linkSyncLogToJob(job, result);
-        const status = failSyncJob(
+        await repository.linkSyncLog(job, result);
+        const status = await repository.fail(
           job,
           this.ownerId,
           result.errors.join('; ') || 'Connector sync failed',
@@ -210,8 +227,8 @@ export class SyncWorker {
           'Sync worker job failed',
         );
       } else {
-        linkSyncLogToJob(job, result);
-        completeSyncJob(job.id, this.ownerId, result);
+        await repository.linkSyncLog(job, result);
+        await repository.complete(job.id, this.ownerId, result);
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
           'Sync worker job completed',
@@ -222,8 +239,8 @@ export class SyncWorker {
       try {
         const staleIdentityContext = error instanceof StaleGitHubIdentityContextError;
         const cancelled = !staleIdentityContext
-          && isSyncJobCancellationRequested(job.id, this.ownerId);
-        failSyncJob(job, this.ownerId, message, {
+          && await repository.isCancellationRequested(job.id, this.ownerId);
+        await repository.fail(job, this.ownerId, message, {
           retry: !staleIdentityContext && !cancelled,
           cancelled,
           terminal: staleIdentityContext,
@@ -314,7 +331,16 @@ export class SyncWorker {
   }
 
   hasPendingWork(): boolean {
-    return this.active !== null || getSyncQueueMetrics().queued > 0;
+    if (this.active !== null) return true;
+    // SQLite's queue metrics are a synchronous, always-fresh in-process
+    // query, so keep calling it directly (unchanged) rather than the
+    // async, backend-selected repository. PostgreSQL has no synchronous
+    // equivalent, so it falls back to the last value observed by the poll
+    // loop (`runLoop`), which is at most one `pollIntervalMs` stale.
+    if (resolveDatabaseBackend() === 'sqlite') {
+      return getSyncQueueMetrics().queued > 0;
+    }
+    return this.lastKnownQueuedCount > 0;
   }
 
   private delay(ms: number): Promise<void> {

@@ -1,6 +1,13 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type { Pool } from 'pg';
+import type {
+  PersistenceBackend,
+  SynchronousTransactionResult,
+  SynchronousTransactionRunner,
+  TransactionOptions,
+  TransactionRunner,
+} from '@/db/persistence/contracts';
 import * as schema from './schema';
 import {
   resolvePostgresConfig,
@@ -26,17 +33,28 @@ export interface PostgresContext {
   pool: Pool;
 }
 
-export class PostgresPersistenceBackend {
+export class PostgresPersistenceBackend
+implements PersistenceBackend<PostgresTransaction> {
   private contextValue: PostgresContext | null = null;
   private initializePromise: Promise<void> | null = null;
   private shutdownPromise: Promise<void> | null = null;
 
-  readonly transactions = {
-    run: async <T>(
-      work: (context: PostgresTransaction) => Promise<T>,
-      options: { access: 'read' | 'write' },
+  readonly transactions: SynchronousTransactionRunner<PostgresTransaction> = {
+    run: <T>(
+      work: (context: PostgresTransaction) => SynchronousTransactionResult<T>,
+      options: TransactionOptions = {},
     ): Promise<T> => this.context.db.transaction(
-      work,
+      async (context) => work(context),
+      { accessMode: options.access === 'read' ? 'read only' : 'read write' },
+    ),
+  };
+
+  readonly asyncTransactions: TransactionRunner<PostgresTransaction> = {
+    run: <T>(
+      work: (context: PostgresTransaction) => T | Promise<T>,
+      options: TransactionOptions = {},
+    ): Promise<T> => this.context.db.transaction(
+      async (context) => work(context),
       { accessMode: options.access === 'read' ? 'read only' : 'read write' },
     ),
   };

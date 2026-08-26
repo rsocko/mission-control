@@ -206,7 +206,7 @@ vi.mock('@/lib/sync/job-queue', () => ({
   waitForSyncJob: vi.fn(),
 }));
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/lib/telemetry/operations', () => ({
   setQueuedExpensiveOperations: vi.fn(),

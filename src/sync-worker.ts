@@ -50,9 +50,8 @@ async function main(): Promise<void> {
     'Sync worker starting',
   );
   const { initializeDatabaseWithRetry } = await import('@/db/startup');
-  const telemetry = await initializeDatabaseWithRetry({
-    initialize: () => startRuntimeTelemetry('worker'),
-  });
+  await initializeDatabaseWithRetry();
+  const telemetry = startRuntimeTelemetry('worker');
   writeFileSync(instanceFile, telemetry.instanceId, { encoding: 'utf8', mode: 0o600 });
   const worker = new SyncWorker((connectorId, options) =>
     syncScheduler.runSyncLocally(connectorId, options)
@@ -107,6 +106,8 @@ async function main(): Promise<void> {
         aiRunWorker.stop(),
       ]);
       stopRuntimeTelemetry(signal);
+      const { shutdownRuntimeDatabase } = await import('@/db/runtime');
+      await shutdownRuntimeDatabase();
       rmSync(instanceFile, { force: true });
     })().then(
       () => process.exit(0),

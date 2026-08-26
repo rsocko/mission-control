@@ -8,7 +8,7 @@ import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features
 import logger from '@/lib/logger';
 import { getDependencyRelationshipDegradation } from '@/lib/sync/dependency-health';
 import {
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   type SyncQueueMetrics,
 } from '@/lib/sync/job-queue';
 import {
@@ -168,7 +168,7 @@ export async function buildMaterializedHealthSummary(
       latestSuccessfulSyncPerConnector,
       dependencyHealth,
       workerProcesses: getRuntimeTelemetry().filter((runtime) => runtime.role === 'worker'),
-      syncQueue: getSyncQueueMetrics(),
+      syncQueue: await (await getSyncJobRepository()).getMetrics(),
     };
   });
 

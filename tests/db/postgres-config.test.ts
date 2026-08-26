@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Client } from 'pg';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 
 describe('PostgreSQL configuration', () => {
@@ -69,6 +70,8 @@ describe('PostgreSQL configuration', () => {
       ssl: { rejectUnauthorized: true },
     });
     expect(config.pool.connectionString).toBeUndefined();
+    const client = new Client(config.pool);
+    expect(client.connectionParameters.ssl).not.toBe(false);
   });
 
   it('accepts sslmode from the connection URL for local integration tests', () => {

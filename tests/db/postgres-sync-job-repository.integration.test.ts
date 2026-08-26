@@ -1,0 +1,148 @@
+import { randomUUID } from 'node:crypto';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resolvePostgresConfig } from '@/db/postgres/config';
+import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
+import { PostgresSyncJobRepository } from '@/db/postgres/sync/job-repository';
+import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+
+const connectionString = process.env.MC_TEST_POSTGRES_URL;
+const describePostgres = describe.skipIf(!connectionString);
+
+describePostgres('PostgreSQL sync job repository integration', () => {
+  const backend = new PostgresPersistenceBackend({
+    ...(connectionString
+      ? {
+          config: resolvePostgresConfig({
+            MC_POSTGRES_URL: connectionString,
+            MC_POSTGRES_APPLICATION_NAME: 'mission-control-sync-job-repository-test',
+          }),
+        }
+      : {}),
+  });
+  let repository: PostgresSyncJobRepository;
+  const connectorIds = new Set<string>();
+
+  beforeAll(async () => {
+    if (connectionString) assertSafeIntegrationTestTarget(connectionString);
+    await backend.initialize();
+    repository = new PostgresSyncJobRepository(backend.context.pool);
+  }, 120_000);
+
+  afterAll(async () => {
+    for (const id of connectorIds) {
+      await backend.context.pool.query('DELETE FROM sync_jobs WHERE connector_id = $1', [id]);
+      await backend.context.pool.query('DELETE FROM connector_operation_leases WHERE connector_id = $1', [id]);
+      await backend.context.pool.query('DELETE FROM connector_configs WHERE id = $1', [id]);
+    }
+    await backend.shutdown();
+  });
+
+  async function createConnector(): Promise<string> {
+    const id = `connector-${randomUUID()}`;
+    const now = new Date().toISOString();
+    await backend.context.pool.query(
+      `
+        INSERT INTO connector_configs (id, type, name, enabled, capabilities, credentials, settings, synced_lists, created_at, updated_at)
+        VALUES ($1, 'test', 'Sync job integration', true, '{}', '{}', '{}', '[]', $2, $2)
+      `,
+      [id, now],
+    );
+    connectorIds.add(id);
+    return id;
+  }
+
+  it('enqueues a job and claims it exactly once under concurrent claim attempts', async () => {
+    const connectorId = await createConnector();
+    const job = await repository.enqueue(connectorId);
+    expect(job.status).toBe('queued');
+
+    const [first, second, third] = await Promise.all([
+      repository.claimNext('worker-a', 60_000),
+      repository.claimNext('worker-b', 60_000),
+      repository.claimNext('worker-c', 60_000),
+    ]);
+    const claimed = [first, second, third].filter((result) => result?.id === job.id);
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.status).toBe('running');
+    expect(claimed[0]?.attempt).toBe(1);
+
+    const owner = [first, second, third].find((result) => result !== null)?.leaseOwner;
+    expect(owner).toBeTruthy();
+  });
+
+  it('completes a claimed job and releases its connector lease', async () => {
+    const connectorId = await createConnector();
+    const job = await repository.enqueue(connectorId);
+    const claimed = await repository.claimNext('worker-complete', 60_000);
+    expect(claimed?.id).toBe(job.id);
+
+    await repository.complete(job.id, 'worker-complete', {
+      connectorId,
+      success: true,
+      tasksAdded: 1,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      notificationsAdded: 0,
+      errors: [],
+      syncedAt: new Date().toISOString(),
+    });
+
+    const final = await repository.get(job.id);
+    expect(final?.status).toBe('succeeded');
+    expect(final?.result?.success).toBe(true);
+    expect(final?.leaseOwner).toBeNull();
+
+    // The connector lease must be released so the connector can be claimed again.
+    const nextJob = await repository.enqueue(connectorId);
+    const nextClaim = await repository.claimNext('worker-complete-2', 60_000);
+    expect(nextClaim?.id).toBe(nextJob.id);
+    await repository.release(nextJob.id, 'worker-complete-2', 'test cleanup');
+  });
+
+  it('requeues a failed job for retry and marks the retry available in the future', async () => {
+    const connectorId = await createConnector();
+    const job = await repository.enqueue(connectorId);
+    await repository.claimNext('worker-fail', 60_000);
+
+    const status = await repository.fail(
+      { ...job, attempt: 1, maxAttempts: 3 },
+      'worker-fail',
+      'simulated failure',
+    );
+    expect(status).toBe('queued');
+
+    const retried = await repository.get(job.id);
+    expect(retried?.status).toBe('queued');
+    expect(new Date(retried!.availableAt).getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('reports queue metrics reflecting queued and running jobs', async () => {
+    const connectorId = await createConnector();
+    await repository.enqueue(connectorId);
+    const metrics = await repository.getMetrics();
+    expect(metrics.queued).toBeGreaterThanOrEqual(1);
+  });
+
+  it('excludes connector ids passed to claimNext and still claims a non-excluded job', async () => {
+    const excludedConnectorId = await createConnector();
+    const claimableConnectorId = await createConnector();
+    const excludedJob = await repository.enqueue(excludedConnectorId);
+    const claimableJob = await repository.enqueue(claimableConnectorId);
+
+    // A regression here (the exclusion clause's placeholders binding to the
+    // wrong parameter index) would either throw a parameter-count error or
+    // silently ignore the exclusion set and claim the excluded job instead.
+    const claimed = await repository.claimNext(
+      'worker-exclusion',
+      60_000,
+      new Set([excludedConnectorId]),
+    );
+    expect(claimed?.id).toBe(claimableJob.id);
+    expect(claimed?.connectorId).toBe(claimableConnectorId);
+
+    const stillQueued = await repository.get(excludedJob.id);
+    expect(stillQueued?.status).toBe('queued');
+
+    await repository.release(claimableJob.id, 'worker-exclusion', 'test cleanup');
+  });
+});

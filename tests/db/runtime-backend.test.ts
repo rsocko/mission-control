@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import db from '@/db';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 describe('database backend selection', () => {
@@ -17,5 +18,17 @@ describe('database backend selection', () => {
       'MC_DATABASE_BACKEND must be sqlite or postgres',
     );
   });
-});
 
+  it('rejects SQLite compatibility access when PostgreSQL is selected', () => {
+    const previous = process.env.MC_DATABASE_BACKEND;
+    process.env.MC_DATABASE_BACKEND = 'postgres';
+    try {
+      expect(() => db.select).toThrow(
+        'This workflow still uses the SQLite compatibility API',
+      );
+    } finally {
+      if (previous === undefined) delete process.env.MC_DATABASE_BACKEND;
+      else process.env.MC_DATABASE_BACKEND = previous;
+    }
+  });
+});

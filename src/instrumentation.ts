@@ -72,7 +72,7 @@ export async function register() {
       try {
         await syncScheduler.scheduleAll();
         syncLogger.info(
-          { attempt, scheduledJobs: syncScheduler.getStatus().length },
+          { attempt, scheduledJobs: (await syncScheduler.getStatus()).length },
           'Instrumentation: sync scheduler initialized'
         );
         initialized = true;

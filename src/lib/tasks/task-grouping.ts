@@ -11,7 +11,16 @@ const PLANNING_HORIZON_GROUP_LABELS = {
   someday: 'Someday',
 } as const;
 
-export function getTaskGroupLabels(task: Task, groupBy: string, today: string): string[] {
+interface TaskGroupingContext {
+  projectId?: string;
+}
+
+export function getTaskGroupLabels(
+  task: Task,
+  groupBy: string,
+  today: string,
+  context: TaskGroupingContext = {},
+): string[] {
   switch (groupBy) {
     case 'source':
       return [task.connectorType || 'local'];
@@ -44,6 +53,16 @@ export function getTaskGroupLabels(task: Task, groupBy: string, today: string): 
               : `${membership.projectName} › Unphased`
           )))]
         : ['No Project'];
+    case 'phase': {
+      const memberships = context.projectId
+        ? task.projectPhaseMemberships?.filter((membership) => (
+            membership.projectId === context.projectId
+          ))
+        : task.projectPhaseMemberships;
+      return memberships?.length
+        ? [...new Set(memberships.map((membership) => membership.phaseName || 'Unassigned'))]
+        : ['Unassigned'];
+    }
     default:
       return ['All'];
   }

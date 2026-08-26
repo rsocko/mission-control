@@ -330,7 +330,7 @@ describe('project task action orchestration', () => {
     const actions = await renderTaskActions();
     vi.useFakeTimers();
 
-    const completeButton = within(actions).getByRole('button', { name: 'Mark complete' });
+    const completeButton = within(actions).getByRole('button', { name: 'Mark task complete' });
     fireEvent.click(completeButton);
 
     expect(completeButton).toBeDisabled();

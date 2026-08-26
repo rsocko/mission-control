@@ -74,7 +74,7 @@ Validate the bounded product before adding a general graph schema.
 ## Phase 1 — Ideation Canvas Editing
 
 Tracking issue:
-[#2216](https://github.com/rsocko/mission-control/issues/2216)
+[#1204](https://github.com/rsocko/mission-control/issues/1204)
 
 ### Goal
 
@@ -168,7 +168,7 @@ independent implementations reveal genuinely common contracts.
 ## Phase 3 — Account Map MVP
 
 Tracking issue:
-[#2213](https://github.com/rsocko/mission-control/issues/2213)
+[#1201](https://github.com/rsocko/mission-control/issues/1201)
 
 ### Goal
 

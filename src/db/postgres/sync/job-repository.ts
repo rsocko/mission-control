@@ -890,7 +890,10 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
               AND started_at IS NOT NULL
               AND (EXTRACT(EPOCH FROM ($1::timestamptz - started_at::timestamptz)) * 1000) > duration_budget_ms
             THEN 1 ELSE 0 END) AS "overBudget",
-          SUM(CASE WHEN status = 'running' AND lease_expires_at < $1 THEN 1 ELSE 0 END) AS "expiredLeases"
+          SUM(CASE
+            WHEN status = 'running'
+              AND lease_expires_at::timestamptz < $1::timestamptz
+            THEN 1 ELSE 0 END) AS "expiredLeases"
         FROM sync_jobs
       `,
       [nowIso],

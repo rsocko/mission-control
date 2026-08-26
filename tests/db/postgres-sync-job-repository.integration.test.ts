@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { PostgresSyncJobRepository } from '@/db/postgres/sync/job-repository';
@@ -30,12 +30,16 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     repository = new PostgresSyncJobRepository(backend.context.pool);
   }, 120_000);
 
-  afterAll(async () => {
+  afterEach(async () => {
     for (const id of connectorIds) {
       await backend.context.pool.query('DELETE FROM sync_jobs WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_operation_leases WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_configs WHERE id = $1', [id]);
     }
+    connectorIds.clear();
+  });
+
+  afterAll(async () => {
     await backend.shutdown();
   });
 
@@ -104,10 +108,11 @@ describePostgres('PostgreSQL sync job repository integration', () => {
   it('requeues a failed job for retry and marks the retry available in the future', async () => {
     const connectorId = await createConnector();
     const job = await repository.enqueue(connectorId);
-    await repository.claimNext('worker-fail', 60_000);
+    const claimed = await repository.claimNext('worker-fail', 60_000);
+    expect(claimed?.id).toBe(job.id);
 
     const status = await repository.fail(
-      { ...job, attempt: 1, maxAttempts: 3 },
+      claimed!,
       'worker-fail',
       'simulated failure',
     );

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { motion } from 'motion/react';
 import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
@@ -11,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { EffortBadge } from '@/components/EffortBadge';
-import { dropdownVariants, fadeSlideUp } from '@/lib/motion';
+import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
@@ -351,91 +352,50 @@ export function DroppablePhaseZone({ phaseId, children }: { phaseId: string; chi
 // ─── Phase Add Task Menu ────────────────────────────────────────────
 
 export function PhaseAddTaskMenu({
+  open,
+  onOpenChange,
+  trigger,
   onCreateNew,
   onLinkExisting,
-  onClose,
 }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  trigger: React.ReactElement;
   onCreateNew: () => void;
   onLinkExisting: () => void;
-  onClose: () => void;
 }) {
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      const target = e.target;
-      if (!(target instanceof Element) || !target.closest('[data-phase-add-menu]')) {
-        onClose();
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [onClose]);
-
-  useEffect(() => {
-    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus();
-  }, []);
-
-  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
-    const items = Array.from(
-      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
-    );
-    if (items.length === 0) return;
-
-    const currentIndex = items.indexOf(document.activeElement as HTMLButtonElement);
-    let nextIndex: number | null = null;
-    if (event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % items.length;
-    if (event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + items.length) % items.length;
-    if (event.key === 'Home') nextIndex = 0;
-    if (event.key === 'End') nextIndex = items.length - 1;
-
-    if (nextIndex !== null) {
-      event.preventDefault();
-      items[nextIndex].focus();
-      return;
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      const trigger = menuRef.current
-        ?.parentElement
-        ?.closest('[data-phase-add-menu]')
-        ?.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]');
-      onClose();
-      queueMicrotask(() => trigger?.focus());
-    }
-  }
-
   return (
-    <motion.div
-      ref={menuRef}
-      data-phase-add-menu
-      role="menu"
-      aria-label="Add task"
-      onKeyDown={handleKeyDown}
-      className="absolute left-1/2 top-full z-50 mt-1.5 w-52 -translate-x-1/2 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_8px_24px_rgba(0,0,0,0.3)]"
-      variants={dropdownVariants}
-      initial="hidden"
-      animate="show"
-      exit="exit"
-    >
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onCreateNew}
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100"
-      >
-        <FilePlus2 size={14} className="text-[var(--accent)]" />
-        Create new task
-      </button>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onLinkExisting}
-        className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100"
-      >
-        <Search size={14} className="text-[var(--text-secondary)]" />
-        Link existing task
-      </button>
-    </motion.div>
+    <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
+      <DropdownMenu.Trigger asChild>
+        {trigger}
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          aria-label="Add task"
+          align="center"
+          side="bottom"
+          sideOffset={6}
+          avoidCollisions
+          collisionPadding={12}
+          sticky="partial"
+          className="z-50 w-52 origin-[var(--radix-dropdown-menu-content-transform-origin)] overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-1)] shadow-[0_8px_24px_rgba(0,0,0,0.3)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95"
+        >
+          <DropdownMenu.Item
+            onSelect={onCreateNew}
+            className="flex cursor-default items-center gap-2.5 px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none transition-colors duration-100 focus:bg-[var(--surface-2)]"
+          >
+            <FilePlus2 size={14} className="text-[var(--accent)]" />
+            Create new task
+          </DropdownMenu.Item>
+          <DropdownMenu.Item
+            onSelect={onLinkExisting}
+            className="flex cursor-default items-center gap-2.5 px-3 py-2.5 text-sm text-[var(--text-primary)] outline-none transition-colors duration-100 focus:bg-[var(--surface-2)]"
+          >
+            <Search size={14} className="text-[var(--text-secondary)]" />
+            Link existing task
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }

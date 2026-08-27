@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   DndContext,
   DragOverlay,
@@ -1648,32 +1648,26 @@ export function ProjectPhasesTab({
                                             Show completed tasks
                                           </button>
                                         ) : null}
-                                        <div className="relative mt-3 inline-flex" data-phase-add-menu>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAddTaskMenuPhaseId(addTaskMenuPhaseId === phase.id ? null : phase.id)}
-                                            aria-expanded={addTaskMenuPhaseId === phase.id}
-                                            aria-haspopup="menu"
-                                            className={cn('inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] active:scale-[0.96]', BUTTON_TRANSITION)}
-                                          >
-                                            <Plus size={14} />
-                                            Add task
-                                          </button>
-                                          <AnimatePresence>
-                                            {addTaskMenuPhaseId === phase.id && (
-                                              <PhaseAddTaskMenu
-                                                onCreateNew={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestCreateTask({ phaseId: phase.id });
-                                                }}
-                                                onLinkExisting={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
-                                                }}
-                                                onClose={() => setAddTaskMenuPhaseId(null)}
-                                              />
+                                        <div className="mt-3 inline-flex">
+                                          <PhaseAddTaskMenu
+                                            open={addTaskMenuPhaseId === phase.id}
+                                            onOpenChange={(open) => setAddTaskMenuPhaseId(open ? phase.id : null)}
+                                            trigger={(
+                                              <button
+                                                type="button"
+                                                className={cn('inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] active:scale-[0.96]', BUTTON_TRANSITION)}
+                                              >
+                                                <Plus size={14} />
+                                                Add task
+                                              </button>
                                             )}
-                                          </AnimatePresence>
+                                            onCreateNew={() => {
+                                              taskOverlayActions.requestCreateTask({ phaseId: phase.id });
+                                            }}
+                                            onLinkExisting={() => {
+                                              taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
+                                            }}
+                                          />
                                         </div>
                                       </div>
                                     </DroppablePhaseZone>
@@ -1711,32 +1705,26 @@ export function ProjectPhasesTab({
                                           );
                                         })}
                                         {/* Add task button at bottom of populated phase */}
-                                        <div className="relative pt-1" data-phase-add-menu>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAddTaskMenuPhaseId(addTaskMenuPhaseId === phase.id ? null : phase.id)}
-                                            aria-expanded={addTaskMenuPhaseId === phase.id}
-                                            aria-haspopup="menu"
-                                            className={cn('inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] bg-transparent px-3 py-2 text-xs text-[var(--text-tertiary)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] active:scale-[0.98]', BUTTON_TRANSITION)}
-                                          >
-                                            <Plus size={12} />
-                                            Add task
-                                          </button>
-                                          <AnimatePresence>
-                                            {addTaskMenuPhaseId === phase.id && (
-                                              <PhaseAddTaskMenu
-                                                onCreateNew={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestCreateTask({ phaseId: phase.id });
-                                                }}
-                                                onLinkExisting={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
-                                                }}
-                                                onClose={() => setAddTaskMenuPhaseId(null)}
-                                              />
+                                        <div className="pt-1">
+                                          <PhaseAddTaskMenu
+                                            open={addTaskMenuPhaseId === phase.id}
+                                            onOpenChange={(open) => setAddTaskMenuPhaseId(open ? phase.id : null)}
+                                            trigger={(
+                                              <button
+                                                type="button"
+                                                className={cn('inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] bg-transparent px-3 py-2 text-xs text-[var(--text-tertiary)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] active:scale-[0.98]', BUTTON_TRANSITION)}
+                                              >
+                                                <Plus size={12} />
+                                                Add task
+                                              </button>
                                             )}
-                                          </AnimatePresence>
+                                            onCreateNew={() => {
+                                              taskOverlayActions.requestCreateTask({ phaseId: phase.id });
+                                            }}
+                                            onLinkExisting={() => {
+                                              taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
+                                            }}
+                                          />
                                         </div>
                                       </div>
                                       </SortableContext>

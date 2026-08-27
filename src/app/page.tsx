@@ -312,7 +312,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 value={state.viewName}
                 onChange={(e) => actions.setViewName(e.target.value)}
                 placeholder="e.g. No project assigned"
-                className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20"
+                className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)] focus:shadow-[var(--shadow-focus-glow)]"
                 autoFocus
               />
             </label>

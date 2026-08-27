@@ -222,7 +222,7 @@ describe('project tasks tab', () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add task' }));
     const menu = screen.getByRole('menu', { name: 'Add task' });
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Create new task' }));
 
@@ -245,7 +245,7 @@ describe('project tasks tab', () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Link existing task' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Add tasks to Tasks Project' });

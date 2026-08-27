@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
@@ -168,32 +168,23 @@ export function ProjectTasksTab({
                 : `Showing ${filteredTasks.length} of ${tasks.length} project tasks.`}
             </CardDescription>
           </div>
-          <div className="relative" data-phase-add-menu>
-            <Button
-              onClick={() => setAddTaskMenuOpen((current) => !current)}
-              aria-expanded={addTaskMenuOpen}
-              aria-haspopup="menu"
-            >
-              <Plus size={14} />
-              Add task
-              <ChevronDown size={14} />
-            </Button>
-            <AnimatePresence>
-              {addTaskMenuOpen && (
-                <PhaseAddTaskMenu
-                  onCreateNew={() => {
-                    setAddTaskMenuOpen(false);
-                    taskOverlayActions.requestCreateTask({ phaseId: null });
-                  }}
-                  onLinkExisting={() => {
-                    setAddTaskMenuOpen(false);
-                    taskOverlayActions.requestLinkTasks({ phaseId: null });
-                  }}
-                  onClose={() => setAddTaskMenuOpen(false)}
-                />
-              )}
-            </AnimatePresence>
-          </div>
+          <PhaseAddTaskMenu
+            open={addTaskMenuOpen}
+            onOpenChange={setAddTaskMenuOpen}
+            trigger={(
+              <Button>
+                <Plus size={14} />
+                Add task
+                <ChevronDown size={14} />
+              </Button>
+            )}
+            onCreateNew={() => {
+              taskOverlayActions.requestCreateTask({ phaseId: null });
+            }}
+            onLinkExisting={() => {
+              taskOverlayActions.requestLinkTasks({ phaseId: null });
+            }}
+          />
         </CardHeader>
         <CardContent>
           <TaskKeywordFilter

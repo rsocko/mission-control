@@ -26,15 +26,25 @@ vi.mock('@/components/ui/Tooltip', () => ({
 vi.mock('@/components/task-row/TaskRowActions', () => ({
   TaskRowActions: (props: {
     effort?: number | null;
+    hasDescription?: boolean;
     priority: string;
     status: string;
+    onOpenNotes: (mode: 'read' | 'edit') => void;
   }) => (
-    <div
-      data-testid="task-row-actions"
-      data-effort={props.effort}
-      data-priority={props.priority}
-      data-status={props.status}
-    />
+    <>
+      <div
+        data-testid="task-row-actions"
+        data-effort={props.effort}
+        data-priority={props.priority}
+        data-status={props.status}
+      />
+      <button
+        type="button"
+        onClick={() => props.onOpenNotes(props.hasDescription ? 'read' : 'edit')}
+      >
+        {props.hasDescription ? 'Open notes' : 'Add notes'}
+      </button>
+    </>
   ),
 }));
 
@@ -81,6 +91,7 @@ function renderRow(overrides: Partial<React.ComponentProps<typeof PlanTaskRow>> 
     isCompleting: false,
     onSelect: vi.fn(),
     onDoubleClick: vi.fn(),
+    onOpenNotes: vi.fn(),
     onComplete: vi.fn(),
     isInMyDay: false,
     contextMenuActions,
@@ -121,6 +132,27 @@ describe('PlanTaskRow', () => {
 
     expect(onSelect).toHaveBeenCalledWith('task-1');
     expect(onDoubleClick).toHaveBeenCalledWith('task-1');
+  });
+
+  it('opens the expanded notes surface instead of the task dialog', () => {
+    const onOpenNotes = vi.fn();
+    renderRow({ onOpenNotes });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add notes' }));
+
+    expect(onOpenNotes).toHaveBeenCalledWith('task-1', 'edit');
+  });
+
+  it('opens existing notes in read mode', () => {
+    const onOpenNotes = vi.fn();
+    renderRow({
+      task: { ...task, hasDescription: true },
+      onOpenNotes,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open notes' }));
+
+    expect(onOpenNotes).toHaveBeenCalledWith('task-1', 'read');
   });
 
   it('uses bulk selection instead of opening the task when bulk mode is active', () => {

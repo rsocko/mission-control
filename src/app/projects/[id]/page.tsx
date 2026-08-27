@@ -134,10 +134,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     setTasks,
   } = useProjectPageMutations();
   const {
+    clearTaskNotesRequest,
     detailMode,
     handleAddToMyDay,
     handleRemoveFromMyDay,
     myDayTaskIds,
+    notesOpenRequest,
     selectedTaskId,
     setDetailMode,
     setSelectedTaskId,
@@ -644,7 +646,10 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         >
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => setSelectedTaskId(null)}
+            onClose={() => {
+              clearTaskNotesRequest();
+              setSelectedTaskId(null);
+            }}
             onUpdate={(fields) => {
               if (fields && selectedTaskId) {
                 setTasks((current) =>
@@ -673,6 +678,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
             animatePanel={false}
             portalDialog
             focusPanelOnMount
+            notesOpenRequest={notesOpenRequest}
           />
         </motion.div>
       ) : null}

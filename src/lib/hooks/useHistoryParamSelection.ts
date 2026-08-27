@@ -82,7 +82,10 @@ export function useHistoryParamSelection(param: string) {
       }
     } else {
       if (closingRef.current) return;
+      url.searchParams.delete(param);
+      const parentHref = `${url.pathname}${url.search}${url.hash}`;
       const openedHere = existingDetail?.param === param
+        && existingDetail.parentHref === parentHref
         && getAppHistorySnapshot().canGoBack;
       if (openedHere) {
         closingRef.current = true;
@@ -90,9 +93,8 @@ export function useHistoryParamSelection(param: string) {
         return;
       }
 
-      url.searchParams.delete(param);
       replaceAppHistoryDetail(
-        `${url.pathname}${url.search}${url.hash}`,
+        parentHref,
         null,
       );
     }

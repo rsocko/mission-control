@@ -59,6 +59,29 @@ describe('useHistoryParamSelection', () => {
     expect(window.location.search).toBe('?keep=1');
   });
 
+  it('does not navigate back when the detail marker belongs to another page', async () => {
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => {
+      window.history.replaceState({
+        ...window.history.state,
+        __missionControlDetail: {
+          kind: 'detail',
+          param: 'taskId',
+          parentHref: '/projects/another-project',
+        },
+      }, '', '/projects/current-project?taskId=task-1');
+    });
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+    act(() => result.current[1](null));
+
+    await waitFor(() => expect(result.current[0]).toBeNull());
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('http://localhost:3000/projects/current-project');
+  });
+
   it('restores trigger focus without scrolling when Back closes detail', async () => {
     const trigger = document.createElement('button');
     document.body.appendChild(trigger);

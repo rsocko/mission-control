@@ -469,7 +469,13 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
               <div key={view.id} className="flex items-center group">
                 <div className="flex-1">
                   <SidebarNavItem
-                    icon={view.icon}
+                    icon={(
+                      <IconRenderer
+                        value={view.icon}
+                        size={14}
+                        fallback={<Bookmark size={14} />}
+                      />
+                    )}
                     label={view.name}
                     count={0}
                     onClick={() => applyView(view)}

@@ -100,6 +100,7 @@ interface ProjectPageTaskInteractionsContextValue {
   detailMode: Exclude<TaskDetailMode, 'mobile'>;
   setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
   toggleTask: (taskId: string) => void;
+  handleTaskClick: (taskId: string) => void;
   handleTaskDoubleClick: (taskId: string) => void;
   cancelPendingDeselect: () => void;
   handleGraphTaskSelect: (taskId: string | null) => void;
@@ -172,6 +173,7 @@ export function ProjectPageProvider({
 
   const {
     cancelPendingDeselect,
+    handleTaskClick,
     handleTaskDoubleClick,
     toggleTask,
   } = useTaskSelection({
@@ -537,6 +539,7 @@ export function ProjectPageProvider({
     detailMode,
     setDetailMode,
     toggleTask,
+    handleTaskClick,
     handleTaskDoubleClick,
     cancelPendingDeselect,
     handleGraphTaskSelect,
@@ -551,6 +554,7 @@ export function ProjectPageProvider({
     allProjects,
     detailMode,
     handleGraphTaskSelect,
+    handleTaskClick,
     handleTaskDoubleClick,
     selectedTaskId,
     taskActions.completingIds,

@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PhaseAssignView } from '@/app/projects/[id]/PhaseAssignView';
+import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type {
   ProjectPhaseViewModel as ProjectPhase,
   ProjectTaskViewModel as ProjectTask,
@@ -39,6 +40,23 @@ vi.mock('@/components/task-list/TaskContextMenu', () => ({
   TaskContextMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
+vi.mock('@/components/ui/Tooltip', () => ({
+  Tooltip: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+vi.mock('@/components/task-row/TaskRowActions', () => ({
+  TaskRowActions: () => null,
+}));
+
+const taskContextActions: TaskContextMenuActions = {
+  onComplete: vi.fn(),
+  onSetPriority: vi.fn(),
+  onDueToday: vi.fn(),
+  onDueTomorrow: vi.fn(),
+  onPickDate: vi.fn(),
+  onDelete: vi.fn(),
+};
+
 const phase: ProjectPhase = {
   id: 'phase-1',
   projectId: 'project-1',
@@ -69,6 +87,13 @@ const task: ProjectTask = {
   microStatus: null,
   taskSourceModel: 'mc-owned',
   editPolicy: editableTaskPolicy,
+  tags: [],
+  planningHorizon: null,
+  sourceId: null,
+  sourceListName: null,
+  assignee: null,
+  hasDescription: false,
+  metadata: null,
 };
 
 function renderView(onRenamePhase = vi.fn()) {
@@ -96,7 +121,7 @@ function renderView(onRenamePhase = vi.fn()) {
       onCreateNewTask={vi.fn()}
       onLinkExistingTask={vi.fn()}
       activeDragId={null}
-      getTaskContextActions={vi.fn()}
+      getTaskContextActions={() => taskContextActions}
       phaseMenuItems={[{ id: phase.id, name: phase.name }]}
     />,
   );
@@ -130,7 +155,7 @@ describe('PhaseAssignView phase names', () => {
         onCreateNewTask={vi.fn()}
         onLinkExistingTask={vi.fn()}
         activeDragId={null}
-        getTaskContextActions={vi.fn()}
+        getTaskContextActions={() => taskContextActions}
         phaseMenuItems={[{ id: phase.id, name: phase.name }]}
       />,
     );
@@ -199,7 +224,7 @@ describe('PhaseAssignView phase names', () => {
         onCreateNewTask={vi.fn()}
         onLinkExistingTask={vi.fn()}
         activeDragId={null}
-        getTaskContextActions={vi.fn()}
+        getTaskContextActions={() => taskContextActions}
         phaseMenuItems={[{ id: phase.id, name: phase.name }]}
       />,
     );

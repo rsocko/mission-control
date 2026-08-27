@@ -154,7 +154,7 @@ describe('project overview tab', () => {
     expect(initialKey).toContain('task-alpha:todo');
 
     await openProjectTab('Plan');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Mark complete' })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Mark task complete' })[0]);
     await openProjectTab('Overview');
 
     await waitFor(() => {

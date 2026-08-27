@@ -3,6 +3,7 @@
 import { Telescope } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
+  PLANNING_HORIZON_CODES,
   PLANNING_HORIZON_LABELS,
   PLANNING_HORIZON_VISUALS,
 } from '@/lib/tasks/planning-horizon';
@@ -41,10 +42,14 @@ export function PlanningHorizonOption({
       <span
         aria-hidden="true"
         className={cn(
-          'size-2 shrink-0 rounded-full',
-          visual?.dotClass ?? 'border border-[var(--text-muted)]',
+          value
+            ? 'inline-flex min-w-6 shrink-0 items-center justify-center rounded border px-1 py-0.5 font-mono text-xs font-semibold leading-none'
+            : 'size-2 shrink-0 rounded-full border border-[var(--text-muted)]',
+          visual?.badgeClass,
         )}
-      />
+      >
+        {value ? PLANNING_HORIZON_CODES[value] : null}
+      </span>
       <span className={visual?.textClass ?? 'text-[var(--text-muted)]'}>
         {value ? PLANNING_HORIZON_LABELS[value] : 'Not set'}
       </span>

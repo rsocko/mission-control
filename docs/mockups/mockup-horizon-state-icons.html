@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Horizon State Icon Study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #020617;
+      --chrome: #0b1120;
+      --panel: #111827;
+      --raised: #1e293b;
+      --pressed: #334155;
+      --border: #1e293b;
+      --border-strong: #334155;
+      --text: #f8fafc;
+      --secondary: #94a3b8;
+      --muted: #8190a6;
+      --next: #34d399;
+      --soon: #60a5fa;
+      --later: #a78bfa;
+      --someday: #94a3b8;
+      --accent: #3b82f6;
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 15% 0%, rgb(37 99 235 / 10%), transparent 28rem),
+        var(--canvas);
+      font-family: "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button { font: inherit; }
+    .page { width: min(1440px, 100%); margin: 0 auto; }
+    .eyebrow {
+      margin-bottom: 10px;
+      color: #60a5fa;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; font-size: 20px; letter-spacing: -.02em; }
+    h2 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
+    h3 { margin: 0; font-size: 14px; }
+    p { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.6; }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(280px, 410px);
+      gap: 24px;
+      padding: 26px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgb(11 17 32 / 88%);
+    }
+    .hero-copy p { max-width: 72ch; margin-top: 12px; }
+    .recommendation {
+      padding: 16px;
+      border: 1px solid #065f46;
+      border-radius: 12px;
+      background: var(--chrome);
+    }
+    .recommendation strong { display: block; margin-bottom: 6px; color: var(--next); font-size: 12px; }
+    .recommendation code {
+      color: var(--text);
+      font-family: "Geist Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+
+    .section { margin-top: 28px; }
+    .section-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 14px;
+    }
+    .section-head p { max-width: 72ch; margin-top: 5px; }
+
+    .strategy-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .strategy {
+      position: relative;
+      min-width: 0;
+      padding: 16px;
+      color: inherit;
+      text-align: left;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+      cursor: pointer;
+      transition: border-color 120ms ease, background 120ms ease, transform 120ms ease;
+    }
+    .strategy:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+    .strategy[aria-pressed="true"] {
+      border-color: rgb(96 165 250 / 65%);
+      background: rgb(30 58 138 / 22%);
+      box-shadow: inset 0 0 0 1px rgb(96 165 250 / 10%);
+    }
+    .strategy-top { display: flex; justify-content: space-between; gap: 12px; }
+    .tag {
+      flex: none;
+      padding: 3px 7px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+    }
+    .tag.best { color: #10b981; border-color: #065f46; background: var(--chrome); }
+    .strategy p { min-height: 42px; margin-top: 7px; font-size: 12px; }
+
+    .state-row {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 7px;
+      margin-top: 14px;
+    }
+    .state {
+      min-width: 0;
+      padding: 10px 7px 8px;
+      text-align: center;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgb(2 6 23 / 50%);
+    }
+    .state-icon {
+      width: 24px;
+      height: 24px;
+      margin: 0 auto 6px;
+      display: grid;
+      place-items: center;
+    }
+    .state-icon svg { display: block; width: 22px; height: 22px; }
+    .state-icon.code {
+      width: auto;
+      font-family: "Geist Mono", ui-monospace, monospace;
+      font-size: 14px;
+      font-weight: 750;
+      letter-spacing: -.06em;
+    }
+    .state-name { overflow: hidden; color: var(--secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .next { color: var(--next); }
+    .soon { color: var(--soon); }
+    .later { color: var(--later); }
+    .someday { color: var(--someday); }
+
+    .preview {
+      display: grid;
+      grid-template-columns: minmax(300px, .85fr) minmax(420px, 1.15fr);
+      gap: 14px;
+    }
+    .panel {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 13px 15px;
+      border-bottom: 1px solid var(--border);
+      background: var(--chrome);
+    }
+    .field-label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+    .field-label svg { width: 15px; height: 15px; color: var(--muted); }
+    .selected-name { color: var(--muted); font-size: 12px; }
+
+    .menu { padding: 7px; }
+    .menu-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 40px;
+      padding: 7px 10px;
+      border-radius: 8px;
+    }
+    .menu-item:hover { background: var(--raised); }
+    .menu-icon {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      flex: none;
+      place-items: center;
+    }
+    .menu-icon svg { width: 20px; height: 20px; }
+    .menu-icon.code { font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; font-weight: 750; }
+    .menu-copy { min-width: 0; flex: 1; }
+    .menu-title { font-size: 13px; }
+    .menu-subtitle { margin-top: 1px; color: var(--muted); font-size: 12px; }
+
+    .tasks { padding: 7px; }
+    .task {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 44px;
+      padding: 6px 8px;
+      border-bottom: 1px solid rgb(30 41 59 / 70%);
+    }
+    .task:last-child { border-bottom: 0; }
+    .check { width: 15px; height: 15px; border: 1px solid var(--pressed); border-radius: 50%; }
+    .task-title { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .task-meta { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 7px;
+      border: 1px solid currentColor;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 650;
+      background: rgb(2 6 23 / 35%);
+    }
+    .badge svg { width: 13px; height: 13px; }
+    .badge .code { font-family: "Geist Mono", ui-monospace, monospace; font-size: 12px; font-weight: 800; }
+    .badge-label { color: currentColor; }
+
+    .library-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .library-card { padding: 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+    .library-card p { min-height: 42px; margin-top: 6px; font-size: 12px; }
+    .library-card .state { padding-inline: 4px; }
+    .icon-name {
+      min-height: 25px;
+      margin-top: 5px;
+      color: var(--muted);
+      font-family: "Geist Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.3;
+      overflow-wrap: anywhere;
+    }
+
+    .notes {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .note { padding: 14px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--chrome); }
+    .note strong { display: block; margin-bottom: 5px; font-size: 12px; }
+    .note p { font-size: 12px; }
+
+    @media (max-width: 980px) {
+      body { padding: 20px; }
+      .hero, .preview { grid-template-columns: 1fr; }
+      .strategy-grid, .library-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      body { padding: 12px; }
+      .hero { padding: 18px; }
+      .strategy-grid, .library-grid, .notes { grid-template-columns: 1fr; }
+      .section-head { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="hero-copy">
+        <div class="eyebrow">Mission Control / Horizon concept</div>
+        <h1>Planning horizon state icons</h1>
+        <p>Four broad planning intents—not due-date promises. This study compares compact horizon codes, a coherent signal metaphor, and literal icons from Lucide, Phosphor, and Material Design Icons.</p>
+      </div>
+      <aside class="recommendation">
+        <strong>Recommended direction</strong>
+        <p>Use <code>H1 / H2 / H3 / ∞</code> as compact row badges and as markers beside the full labels in menus. It is distinctive, compact, and preserves “Someday” as intentionally unbounded. Code-only row badges expose the full label in a tooltip.</p>
+      </aside>
+    </header>
+
+    <section class="section" aria-labelledby="strategies-title">
+      <div class="section-head">
+        <div>
+          <h2 id="strategies-title">Strategy comparison</h2>
+          <p>Click a strategy to apply it to the live control and task-row previews below.</p>
+        </div>
+      </div>
+      <div class="strategy-grid">
+        <button class="strategy" type="button" aria-pressed="true" data-strategy="h-infinity">
+          <span class="strategy-top"><h3>Horizon code + infinity</h3><span class="tag best">Recommended</span></span>
+          <p>Explicit hierarchy with a memorable unbounded endpoint. Best fit for a dense operational UI.</p>
+          <span class="state-row">
+            <span class="state"><span class="state-icon code next">H1</span><span class="state-name">Next</span></span>
+            <span class="state"><span class="state-icon code soon">H2</span><span class="state-name">Soon</span></span>
+            <span class="state"><span class="state-icon code later">H3</span><span class="state-name">Later</span></span>
+            <span class="state"><span class="state-icon code someday">∞</span><span class="state-name">Someday</span></span>
+          </span>
+        </button>
+
+        <button class="strategy" type="button" aria-pressed="false" data-strategy="h-four">
+          <span class="strategy-top"><h3>Horizon levels 1–4</h3><span class="tag">Most literal</span></span>
+          <p>Predictable and easy to teach, but H4 can imply a firmer rank than “Someday” really has.</p>
+          <span class="state-row">
+            <span class="state"><span class="state-icon code next">H1</span><span class="state-name">Next</span></span>
+            <span class="state"><span class="state-icon code soon">H2</span><span class="state-name">Soon</span></span>
+            <span class="state"><span class="state-icon code later">H3</span><span class="state-name">Later</span></span>
+            <span class="state"><span class="state-icon code someday">H4</span><span class="state-name">Someday</span></span>
+          </span>
+        </button>
+
+        <button class="strategy" type="button" aria-pressed="false" data-strategy="signals">
+          <span class="strategy-top"><h3>Decreasing signal</h3><span class="tag">Best icon set</span></span>
+          <p>A single coherent visual grammar. It communicates proximity well after one brief learning moment.</p>
+          <span class="state-row">
+            <span class="state"><span class="state-icon next"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4m5 4v-8m5 8V8"/></svg></span><span class="state-name">Next</span></span>
+            <span class="state"><span class="state-icon soon"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4m5 4v-8"/></svg></span><span class="state-name">Soon</span></span>
+            <span class="state"><span class="state-icon later"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4"/></svg></span><span class="state-name">Later</span></span>
+            <span class="state"><span class="state-icon someday"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01"/></svg></span><span class="state-name">Someday</span></span>
+          </span>
+        </button>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="preview-title">
+      <div class="section-head">
+        <div>
+          <h2 id="preview-title">In-context preview</h2>
+          <p>Dropdowns retain the full label for selection clarity. Dense task rows use a code-only badge with the full horizon name in its tooltip and accessible label.</p>
+        </div>
+        <span class="selected-name" data-selected-name>Showing: H1 / H2 / H3 / ∞</span>
+      </div>
+      <div class="preview">
+        <article class="panel">
+          <div class="panel-head">
+            <span class="field-label">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44m-2.875 6.493l4.332-.924M16 21l-3.105-6.21"/><path d="M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455zM6.158 8.633l1.114 4.456M8 21l3.105-6.21"/><circle cx="12" cy="13" r="2"/></g></svg>
+              Horizon
+            </span>
+            <span class="selected-name">Broad planning intent</span>
+          </div>
+          <div class="menu" data-menu></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h3>Tasks</h3>
+            <span class="selected-name">Compact row badges</span>
+          </div>
+          <div class="tasks" data-tasks></div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="literal-title">
+      <div class="section-head">
+        <div>
+          <h2 id="literal-title">Literal library candidates</h2>
+          <p>These are individually recognizable, but the metaphor changes at every step. They work better in a spacious picker than in repeated task-row badges.</p>
+        </div>
+      </div>
+      <div class="library-grid">
+        <article class="library-card">
+          <h3>Lucide</h3>
+          <p>Best implementation fit: already installed, visually consistent with the application, and outline-light at 16–20px.</p>
+          <div class="state-row">
+            <div class="state"><span class="state-icon next"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m6 17 5-5-5-5m7 10 5-5-5-5"/></svg></span><span class="state-name">Next</span><div class="icon-name">ChevronsRight</div></div>
+            <div class="state"><span class="state-icon soon"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6h4"/></g></svg></span><span class="state-name">Soon</span><div class="icon-name">Clock3</div></div>
+            <div class="state"><span class="state-icon later"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M16 14v2.2l1.6 1M16 2v3m5 2.338V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2.338M3 9h5.859M8 2v3"/><circle cx="16" cy="16" r="6"/></g></svg></span><span class="state-name">Later</span><div class="icon-name">CalendarClock</div></div>
+            <div class="state"><span class="state-icon someday"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="m10.065 12.493-6.18 1.318a.934.934 0 0 1-1.108-.702l-.537-2.15a1.07 1.07 0 0 1 .691-1.265l13.504-4.44m-2.875 6.493l4.332-.924M16 21l-3.105-6.21"/><path d="M16.485 5.94a2 2 0 0 1 1.455-2.425l1.09-.272a1 1 0 0 1 1.212.727l1.515 6.06a1 1 0 0 1-.727 1.213l-1.09.272a2 2 0 0 1-2.425-1.455zM6.158 8.633l1.114 4.456M8 21l3.105-6.21"/><circle cx="12" cy="13" r="2"/></g></svg></span><span class="state-name">Someday</span><div class="icon-name">Telescope</div></div>
+          </div>
+        </article>
+
+        <article class="library-card">
+          <h3>Phosphor</h3>
+          <p>Most expressive and friendly. Filled shapes remain legible small, but feel heavier than Mission Control’s current icon language.</p>
+          <div class="state-row">
+            <div class="state"><span class="state-icon next"><svg viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="m237.66 122.34-96-96A8 8 0 0 0 128 32v40h-24a8 8 0 0 0-8 8v96a8 8 0 0 0 8 8h24v40a8 8 0 0 0 13.66 5.66l96-96a8 8 0 0 0 0-11.32M144 204.69V176a8 8 0 0 0-8-8h-24V88h24a8 8 0 0 0 8-8V51.31L220.69 128ZM48 80v96a8 8 0 0 1-16 0V80a8 8 0 0 1 16 0m32 0v96a8 8 0 0 1-16 0V80a8 8 0 0 1 16 0"/></svg></span><span class="state-name">Next</span><div class="icon-name">ArrowFatLinesRight</div></div>
+            <div class="state"><span class="state-icon soon"><svg viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M200 75.64V40a16 16 0 0 0-16-16H72a16 16 0 0 0-16 16v36a16.07 16.07 0 0 0 6.4 12.8l52.27 39.2-52.27 39.2A16.07 16.07 0 0 0 56 180v36a16 16 0 0 0 16 16h112a16 16 0 0 0 16-16v-35.64a16.09 16.09 0 0 0-6.35-12.77L141.27 128l52.38-39.6A16.05 16.05 0 0 0 200 75.64M72 40h112v35.64L178.23 80H77.33L72 76Zm56 78L98.67 96h58.4Zm56 98H72v-36l48-36v24a8 8 0 0 0 16 0v-23.92l48 36.28Z"/></svg></span><span class="state-name">Soon</span><div class="icon-name">HourglassMedium</div></div>
+            <div class="state"><span class="state-icon later"><svg viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M208 32h-24v-8a8 8 0 0 0-16 0v8H88v-8a8 8 0 0 0-16 0v8H48a16 16 0 0 0-16 16v160a16 16 0 0 0 16 16h160a16 16 0 0 0 16-16V48a16 16 0 0 0-16-16M72 48v8a8 8 0 0 0 16 0v-8h80v8a8 8 0 0 0 16 0v-8h24v32H48V48Zm136 160H48V96h160zm-68-76a12 12 0 1 1-12-12a12 12 0 0 1 12 12m44 0a12 12 0 1 1-12-12a12 12 0 0 1 12 12m-88 40a12 12 0 1 1-12-12a12 12 0 0 1 12 12m44 0a12 12 0 1 1-12-12a12 12 0 0 1 12 12m44 0a12 12 0 1 1-12-12a12 12 0 0 1 12 12"/></svg></span><span class="state-name">Later</span><div class="icon-name">CalendarDots</div></div>
+            <div class="state"><span class="state-icon someday"><svg viewBox="0 0 256 256" aria-hidden="true"><path fill="currentColor" d="M237.2 151.87a47 47 0 0 0-2.35-5.45L193.26 51.8a7.8 7.8 0 0 0-1.66-2.44a32 32 0 0 0-45.26 0A8 8 0 0 0 144 55v25h-32V55a8 8 0 0 0-2.34-5.66a32 32 0 0 0-45.26 0a7.8 7.8 0 0 0-1.66 2.44L21.15 146.4a47 47 0 0 0-2.35 5.45A48 48 0 1 0 112 168V96h32v72a48 48 0 1 0 93.2-16.13M76.71 59.75a16 16 0 0 1 19.29-1v73.51a47.9 47.9 0 0 0-46.79-9.92ZM64 200a32 32 0 1 1 32-32a32 32 0 0 1-32 32m96-141.26a16 16 0 0 1 19.29 1l27.5 62.58a47.9 47.9 0 0 0-46.79 9.93ZM192 200a32 32 0 1 1 32-32a32 32 0 0 1-32 32"/></svg></span><span class="state-name">Someday</span><div class="icon-name">Binoculars</div></div>
+          </div>
+        </article>
+
+        <article class="library-card">
+          <h3>Material Design Icons</h3>
+          <p>Strong at tiny sizes and highly familiar, though the mixed solid silhouettes are less refined beside Lucide controls.</p>
+          <div class="state-row">
+            <div class="state"><span class="state-icon next"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M4 15V9h8V4.16L19.84 12 12 19.84V15z"/></svg></span><span class="state-name">Next</span><div class="icon-name">arrow-right-bold</div></div>
+            <div class="state"><span class="state-icon soon"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 20a8 8 0 0 0 8-8 8 8 0 0 0-8-8 8 8 0 0 0-8 8 8 8 0 0 0 8 8m0-18a10 10 0 0 1 10 10 10 10 0 0 1-10 10C6.47 22 2 17.5 2 12A10 10 0 0 1 12 2m.5 5v5.25l4.5 2.67-.75 1.23L11 13V7z"/></svg></span><span class="state-name">Soon</span><div class="icon-name">clock-outline</div></div>
+            <div class="state"><span class="state-icon later"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 1v2H5c-1.11 0-2 .89-2 2v14a2 2 0 0 0 2 2h6.1c1.26 1.24 2.99 2 4.9 2 3.87 0 7-3.13 7-7 0-1.91-.76-3.64-2-4.9V5a2 2 0 0 0-2-2h-1V1h-2v2H8V1M5 5h14v2H5m0 2h14v.67c-.91-.43-1.93-.67-3-.67-3.87 0-7 3.13-7 7 0 1.07.24 2.09.67 3H5m11-7.85c2.68 0 4.85 2.17 4.85 4.85s-2.17 4.85-4.85 4.85-4.85-2.17-4.85-4.85 2.17-4.85 4.85-4.85M15 13v3.69l3.19 1.84.75-1.3-2.44-1.41V13Z"/></svg></span><span class="state-name">Later</span><div class="icon-name">calendar-clock-outline</div></div>
+            <div class="state"><span class="state-icon someday"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="m21.9 8.9-1.7 1-4-6.9 1.7-1zm-12.1-1 3 5.2 6.1-3.5-3-5.2zm1.6 4.8-2-3.5-4.3 2.5 2 3.5zm-9.3 1.9 1 1.7 2.6-1.5-1-1.7zm10-.6-.3-.4-4.3 2.5.3.4c.2.3.5.6.8.8L7 22h2l1.4-4.3h.1L12 22h2l-1.9-5.6c.5-.7.5-1.6 0-2.4"/></svg></span><span class="state-name">Someday</span><div class="icon-name">telescope</div></div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="section notes" aria-label="Adoption notes">
+      <article class="note"><strong>Field icon</strong><p>Keep Lucide Telescope for the Horizon field itself. It describes the concept without competing with the value marker.</p></article>
+      <article class="note"><strong>Not set</strong><p>Use a dashed or hollow circle only in pickers. Omit the badge entirely in task rows, matching current behavior.</p></article>
+      <article class="note"><strong>Do not imply urgency</strong><p>Retain the existing green → blue → violet → slate palette; avoid amber and red, which already signal warning and danger.</p></article>
+    </section>
+  </main>
+
+  <template id="signal-next"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4m5 4v-8m5 8V8"/></svg></template>
+  <template id="signal-soon"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4m5 4v-8"/></svg></template>
+  <template id="signal-later"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01M7 20v-4"/></svg></template>
+  <template id="signal-someday"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2 20h.01"/></svg></template>
+
+  <script>
+    const states = [
+      { key: "next", label: "Next", description: "The next work to pull", task: "Prepare Q3 planning brief", meta: "Strategy / due Friday" },
+      { key: "soon", label: "Soon", description: "Near-term, after Next", task: "Review connector telemetry", meta: "Platform / no due date" },
+      { key: "later", label: "Later", description: "Worth retaining, not near-term", task: "Consolidate design tokens", meta: "Design system / backlog" },
+      { key: "someday", label: "Someday", description: "Uncommitted future possibility", task: "Explore offline-first capture", meta: "Incubator / someday" }
+    ];
+
+    const strategies = {
+      "h-infinity": { name: "H1 / H2 / H3 / ∞", marks: ["H1", "H2", "H3", "∞"], type: "code" },
+      "h-four": { name: "H1 / H2 / H3 / H4", marks: ["H1", "H2", "H3", "H4"], type: "code" },
+      signals: { name: "Lucide signal strength", marks: ["signal-next", "signal-soon", "signal-later", "signal-someday"], type: "icon" }
+    };
+
+    const menu = document.querySelector("[data-menu]");
+    const tasks = document.querySelector("[data-tasks]");
+    const selectedName = document.querySelector("[data-selected-name]");
+
+    function mark(strategy, index, className) {
+      if (strategy.type === "code") {
+        return `<span class="${className} code">${strategy.marks[index]}</span>`;
+      }
+      return `<span class="${className}">${document.getElementById(strategy.marks[index]).innerHTML}</span>`;
+    }
+
+    function render(strategyKey) {
+      const strategy = strategies[strategyKey];
+      selectedName.textContent = `Showing: ${strategy.name}`;
+      menu.innerHTML = states.map((state, index) => `
+        <div class="menu-item">
+          ${mark(strategy, index, `menu-icon ${state.key}`)}
+          <div class="menu-copy">
+            <div class="menu-title">${state.label}</div>
+            <div class="menu-subtitle">${state.description}</div>
+          </div>
+        </div>
+      `).join("");
+      tasks.innerHTML = states.map((state, index) => `
+        <div class="task">
+          <span class="check" aria-hidden="true"></span>
+          <div>
+            <div class="task-title">${state.task}</div>
+            <div class="task-meta">${state.meta}</div>
+          </div>
+          <span class="badge ${state.key}" title="Horizon: ${state.label}" aria-label="Horizon: ${state.label}">
+            ${mark(strategy, index, strategy.type === "code" ? "code" : "")}
+          </span>
+        </div>
+      `).join("");
+    }
+
+    document.querySelectorAll("[data-strategy]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll("[data-strategy]").forEach((candidate) => candidate.setAttribute("aria-pressed", "false"));
+        button.setAttribute("aria-pressed", "true");
+        render(button.dataset.strategy);
+      });
+    });
+
+    render("h-infinity");
+  </script>
+</body>
+</html>

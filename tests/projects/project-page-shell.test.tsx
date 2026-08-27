@@ -160,7 +160,7 @@ describe('project detail shell', () => {
     await renderProjectTab('Plan');
     const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.click(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Create new task' }));
     expect(await screen.findByRole('dialog', { name: 'Create task' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel new task' }));
@@ -169,7 +169,7 @@ describe('project detail shell', () => {
     });
 
     await openProjectTab('Project Tasks');
-    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Create new task' }));
 
     expect(await screen.findAllByRole('dialog', { name: 'Create task' })).toHaveLength(1);

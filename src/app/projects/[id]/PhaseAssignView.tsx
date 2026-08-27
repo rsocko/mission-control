@@ -19,7 +19,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  FilePlus2,
   GripVertical,
 Layers,
 LoaderCircle,
@@ -360,38 +359,26 @@ export function PhaseAssignView({
                 {filteredUnassigned.length}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative" data-phase-add-menu>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAddTaskMenuOpen((v) => !v)}
-                  aria-expanded={addTaskMenuOpen}
-                  aria-haspopup="menu"
-                  className={cn(
-                    'gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--accent)]',
-                    BUTTON_TRANSITION,
-                  )}
-                >
-                  <Plus size={14} />
-                  Add task
-                </Button>
-                <AnimatePresence>
-                  {addTaskMenuOpen && (
-                    <PhaseAddTaskMenu
-                      onCreateNew={() => {
-                        setAddTaskMenuOpen(false);
-                        onCreateNewTask();
-                      }}
-                      onLinkExisting={() => {
-                        setAddTaskMenuOpen(false);
-                        onLinkExistingTask();
-                      }}
-                      onClose={() => setAddTaskMenuOpen(false)}
-                    />
-                  )}
-                </AnimatePresence>
-              </div>
+             <div className="flex items-center gap-2">
+              <PhaseAddTaskMenu
+                open={addTaskMenuOpen}
+                onOpenChange={setAddTaskMenuOpen}
+                trigger={(
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--accent)]',
+                      BUTTON_TRANSITION,
+                    )}
+                  >
+                    <Plus size={14} />
+                    Add task
+                  </Button>
+                )}
+                onCreateNew={onCreateNewTask}
+                onLinkExisting={onLinkExistingTask}
+              />
               <div className={cn(
                 'input-glow flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1',
                 isDragging && 'opacity-50 pointer-events-none',

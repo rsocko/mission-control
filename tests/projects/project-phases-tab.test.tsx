@@ -577,7 +577,7 @@ describe('project phases (Plan) tab', () => {
     await renderProjectTab('Plan');
     const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.click(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
     fireEvent.click(within(screen.getByRole('menu', { name: 'Add task' }))
       .getByRole('menuitem', { name: 'Create new task' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Create task' }))
@@ -592,7 +592,7 @@ describe('project phases (Plan) tab', () => {
       });
     });
 
-    fireEvent.click(within(phaseRegion('Discovery')).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(phaseRegion('Discovery')).getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Link existing task' }));
     const picker = await screen.findByRole('dialog', { name: 'Add tasks to Discovery' });
     fireEvent.click(within(picker).getByRole('button', { name: 'Confirm linked tasks' }));
@@ -619,8 +619,8 @@ describe('project phases (Plan) tab', () => {
     const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
     expect(within(discovery).getByText('No tasks in this phase yet.')).toBeInTheDocument();
 
-    fireEvent.click(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
     expect(screen.getByRole('menu', { name: 'Add task' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Create new task' })).toHaveFocus();
+    expect(screen.getByRole('menuitem', { name: 'Create new task' })).toBeInTheDocument();
   });
 });

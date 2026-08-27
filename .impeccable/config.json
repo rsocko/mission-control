@@ -38,6 +38,27 @@
         "value": "#ec4899",
         "createdAt": "2026-08-23T15:05:05.385Z",
         "reason": "Existing test fixture color predates this task and is not production UI."
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist sans",
+        "createdAt": "2026-08-27T00:48:06.360Z",
+        "reason": "DESIGN.md requires Geist Sans as Mission Control's shipped interface family."
+      },
+      {
+        "rule": "overused-font",
+        "value": "geist mono",
+        "createdAt": "2026-08-27T00:48:06.420Z",
+        "reason": "DESIGN.md requires Geist Mono for compact codes and operational values."
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "docs/mockups/mockup-horizon-state-icons.html"
+        ],
+        "createdAt": "2026-08-27T00:48:27.226Z",
+        "reason": "This comparison mockup intentionally uses the exact 12px, 13px, 14px, and 20px Mission Control type ramp documented in DESIGN.md."
       }
     ]
   },

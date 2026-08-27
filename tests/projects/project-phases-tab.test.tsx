@@ -73,7 +73,7 @@ function planScenario() {
       'phase-build': [makePhaseItem('phase-build', 'task-beta', 0)],
     },
     tasks: [
-      makeTask('task-alpha', { title: 'Alpha migration' }),
+      makeTask('task-alpha', { title: 'Alpha migration', hasDescription: true }),
       makeTask('task-beta', { title: 'Beta cleanup', status: 'done' }),
       makeTask('task-gamma', { title: 'Gamma rollout' }),
     ],
@@ -138,6 +138,17 @@ describe('project phases (Plan) tab', () => {
     fireEvent.doubleClick(taskRow!);
 
     await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
+  });
+
+  it('opens the expanded Notes dialog from a Plan list row', async () => {
+    await renderProjectTab('Plan');
+
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    fireEvent.click(within(discovery).getByRole('button', { name: 'Open notes' }));
+
+    const notesDialog = await screen.findByRole('dialog', { name: 'Notes' });
+    expect(notesDialog).toHaveAttribute('data-mode', 'read');
     expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
   });
 

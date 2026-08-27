@@ -228,6 +228,7 @@ export function ProjectPhasesTab({
     handleTaskClick,
     handleTaskDoubleClick,
     myDayTaskIds,
+    openTaskNotes,
     selectedTaskId,
     setSelectedTaskId,
     toggleTask,
@@ -1692,6 +1693,7 @@ export function ProjectPhasesTab({
                                                   onBulkToggle={() => bulk.toggleItem(task.id)}
                                                   onSelect={handleTaskClick}
                                                   onDoubleClick={handleTaskDoubleClick}
+                                                  onOpenNotes={openTaskNotes}
                                                   onModifierClick={handleBulkModifierClick}
                                                   onComplete={handleCompleteTask}
                                                   isInMyDay={myDayTaskIds.has(task.id)}
@@ -1778,6 +1780,7 @@ export function ProjectPhasesTab({
                                     onBulkToggle={() => bulk.toggleItem(task.id)}
                                     onSelect={handleTaskClick}
                                     onDoubleClick={handleTaskDoubleClick}
+                                    onOpenNotes={openTaskNotes}
                                     onModifierClick={handleBulkModifierClick}
                                     onComplete={handleCompleteTask}
                                     isInMyDay={myDayTaskIds.has(task.id)}
@@ -1840,6 +1843,7 @@ export function ProjectPhasesTab({
               onDragEnd={handleDragEnd}
               onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : handleTaskClick(taskId)}
               onDoubleClickTask={handleTaskDoubleClick}
+              onOpenTaskNotes={openTaskNotes}
               onCompleteTask={handleCompleteTask}
               onRenamePhase={renamePhase}
               savingPhaseIds={savingPhaseIds}

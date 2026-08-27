@@ -14,7 +14,10 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
-import type { TaskDetailMode } from '@/components/task-detail/task-detail-types';
+import type {
+  TaskDetailMode,
+  TaskNotesOpenRequest,
+} from '@/components/task-detail/task-detail-types';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
@@ -99,6 +102,9 @@ interface ProjectPageTaskInteractionsContextValue {
   setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
   detailMode: Exclude<TaskDetailMode, 'mobile'>;
   setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
+  notesOpenRequest: TaskNotesOpenRequest | null;
+  openTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  clearTaskNotesRequest: () => void;
   toggleTask: (taskId: string) => void;
   handleTaskClick: (taskId: string) => void;
   handleTaskDoubleClick: (taskId: string) => void;
@@ -163,11 +169,13 @@ export function ProjectPageProvider({
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
   const [detailMode, setDetailMode] =
     useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
+  const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const hierarchyRevisionRef = useRef(0);
   const hierarchyProjectIdRef = useRef<string | null>(null);
   const hierarchyUndoTrackerRef = useRef(new ProjectHierarchyUndoTracker());
   const loadRequestIdRef = useRef(0);
+  const notesRequestIdRef = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
 
@@ -179,6 +187,7 @@ export function ProjectPageProvider({
   } = useTaskSelection({
     selectedTaskId,
     onSelectionChange: (taskId) => {
+      setNotesOpenRequest(null);
       setDetailMode('panel');
       setSelectedTaskId(taskId);
     },
@@ -187,9 +196,26 @@ export function ProjectPageProvider({
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
     cancelPendingDeselect();
+    setNotesOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
   }, [cancelPendingDeselect]);
+
+  const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
+    cancelPendingDeselect();
+    setDetailMode('panel');
+    setSelectedTaskId(taskId);
+    notesRequestIdRef.current += 1;
+    setNotesOpenRequest({
+      requestId: notesRequestIdRef.current,
+      taskId,
+      mode,
+    });
+  }, [cancelPendingDeselect, setSelectedTaskId]);
+
+  const clearTaskNotesRequest = useCallback(() => {
+    setNotesOpenRequest(null);
+  }, []);
 
   const applyHierarchySnapshot = useCallback((snapshot: ProjectHierarchySnapshot) => {
     if (snapshot.projectId !== currentProjectIdRef.current) return;
@@ -538,6 +564,9 @@ export function ProjectPageProvider({
     setSelectedTaskId,
     detailMode,
     setDetailMode,
+    notesOpenRequest,
+    openTaskNotes,
+    clearTaskNotesRequest,
     toggleTask,
     handleTaskClick,
     handleTaskDoubleClick,
@@ -552,10 +581,13 @@ export function ProjectPageProvider({
     handleRemoveFromMyDay: taskActions.handleRemoveFromMyDay,
   }), [
     allProjects,
+    clearTaskNotesRequest,
     detailMode,
     handleGraphTaskSelect,
     handleTaskClick,
     handleTaskDoubleClick,
+    notesOpenRequest,
+    openTaskNotes,
     selectedTaskId,
     taskActions.completingIds,
     taskActions.getTaskContextActions,

@@ -59,6 +59,7 @@ describe('View in Graph collection surfaces', () => {
 
   it('opens a saved view in Graph without applying it to Dashboard', () => {
     const applyView = vi.fn();
+    const editView = vi.fn();
     const originContext = serializeTaskFilterContext(
       normalizeTaskFilterContext({ tagSlugs: ['current'] }),
     );
@@ -120,6 +121,7 @@ describe('View in Graph collection surfaces', () => {
           setTagSearch: vi.fn(),
           setTagsExpanded: vi.fn(),
           applyView,
+          editView,
           deleteView: vi.fn(),
           setQuickFilterVisibility: vi.fn(),
         }}
@@ -131,8 +133,10 @@ describe('View in Graph collection surfaces', () => {
       />,
     );
 
-    expect(screen.getByAltText('lucide:pin')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'lucide:pin' })).toBeInTheDocument();
     expect(screen.queryByText('pin')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Planning' }));
+    expect(editView).toHaveBeenCalledWith(expect.objectContaining({ id: 'planning' }));
     const graphLink = screen.getByRole('link', { name: 'View Planning in Graph' });
     fireEvent.click(graphLink);
     expect(applyView).not.toHaveBeenCalled();

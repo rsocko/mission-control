@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect, memo, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import type { EmojiClickData } from 'emoji-picker-react';
 import emojilib from 'emojilib';
-import { Search, X, Loader2 } from 'lucide-react';
+import { Search, X, Loader2, SunMoon } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import {
   type IconSource,
@@ -394,6 +394,21 @@ export const IconPicker = memo(function IconPicker({
       {onColorChange && (
       <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-[var(--border)]">
         <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider font-medium mr-0.5">Color</span>
+        <button
+          type="button"
+          onClick={() => onColorChange('')}
+          className={cn(
+            'flex h-6 items-center gap-1 rounded-md border px-1.5 text-xs transition-colors',
+            !color
+              ? 'border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]'
+              : 'border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]',
+          )}
+          title="Use theme color"
+          aria-label="Use theme color"
+        >
+          <SunMoon size={11} />
+          Auto
+        </button>
         {ICON_COLORS.map((c) => (
           <button
             key={c}

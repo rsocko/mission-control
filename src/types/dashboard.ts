@@ -59,6 +59,7 @@ export interface SavedView {
   id: string;
   name: string;
   icon: string;
+  iconColor?: string;
   filters: Record<string, string>;
   filterContext?: TaskFilterContext;
 }

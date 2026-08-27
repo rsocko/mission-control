@@ -39,8 +39,10 @@ export function useDashboardSavedViews({
 }: UseDashboardSavedViewsOptions) {
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [savingView, setSavingView] = useState(false);
+  const [editingViewId, setEditingViewId] = useState<string | null>(null);
   const [viewName, setViewName] = useState('');
   const [viewIcon, setViewIcon] = useState(DEFAULT_SAVED_VIEW_ICON);
+  const [viewIconColor, setViewIconColor] = useState('');
 
   useEffect(() => {
     try {
@@ -51,22 +53,54 @@ export function useDashboardSavedViews({
     }
   }, []);
 
-  const saveCurrentView = useCallback(() => {
-    if (!viewName.trim()) return;
-    const newView: SavedView = {
-      id: `custom-${Date.now()}`,
-      name: viewName.trim(),
-      icon: viewIcon,
-      filters: taskFilterContextToSavedView(taskFilterContext),
-      filterContext: taskFilterContext,
-    };
-    const updated = [...savedViews, newView];
-    localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
-    setSavedViews(updated);
+  const resetViewEditor = useCallback(() => {
     setSavingView(false);
+    setEditingViewId(null);
     setViewName('');
     setViewIcon(DEFAULT_SAVED_VIEW_ICON);
-  }, [savedViews, taskFilterContext, viewIcon, viewName]);
+    setViewIconColor('');
+  }, []);
+
+  const startNewView = useCallback(() => {
+    resetViewEditor();
+    setSavingView(true);
+  }, [resetViewEditor]);
+
+  const editView = useCallback((view: SavedView) => {
+    setEditingViewId(view.id);
+    setViewName(view.name);
+    setViewIcon(view.icon || DEFAULT_SAVED_VIEW_ICON);
+    setViewIconColor(view.iconColor ?? '');
+    setSavingView(true);
+  }, []);
+
+  const saveCurrentView = useCallback(() => {
+    if (!viewName.trim()) return;
+    const iconColor = viewIconColor || undefined;
+    const updated = editingViewId
+      ? savedViews.map((view) => view.id === editingViewId
+        ? { ...view, name: viewName.trim(), icon: viewIcon, iconColor }
+        : view)
+      : [...savedViews, {
+          id: `custom-${Date.now()}`,
+          name: viewName.trim(),
+          icon: viewIcon,
+          iconColor,
+          filters: taskFilterContextToSavedView(taskFilterContext),
+          filterContext: taskFilterContext,
+        }];
+    localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
+    setSavedViews(updated);
+    resetViewEditor();
+  }, [
+    editingViewId,
+    resetViewEditor,
+    savedViews,
+    taskFilterContext,
+    viewIcon,
+    viewIconColor,
+    viewName,
+  ]);
 
   const applyView = useCallback((view: SavedView) => {
     const dashboardFilters = taskFilterContextToDashboard(
@@ -95,23 +129,29 @@ export function useDashboardSavedViews({
     const updated = savedViews.filter((view) => view.id !== id);
     localStorage.setItem(SAVED_VIEWS_STORAGE_KEY, JSON.stringify(updated));
     setSavedViews(updated);
-  }, [savedViews]);
+    if (editingViewId === id) resetViewEditor();
+  }, [editingViewId, resetViewEditor, savedViews]);
 
   const state = useMemo(() => ({
     savedViews,
     savingView,
+    editingViewId,
     viewName,
     viewIcon,
-  }), [savedViews, savingView, viewIcon, viewName]);
+    viewIconColor,
+  }), [editingViewId, savedViews, savingView, viewIcon, viewIconColor, viewName]);
 
   const actions = useMemo(() => ({
-    setSavingView,
+    startNewView,
+    cancelViewEditor: resetViewEditor,
+    editView,
     setViewName,
     setViewIcon,
+    setViewIconColor,
     saveCurrentView,
     applyView,
     deleteView,
-  }), [applyView, deleteView, saveCurrentView]);
+  }), [applyView, deleteView, editView, resetViewEditor, saveCurrentView, startNewView]);
 
   return { state, actions };
 }

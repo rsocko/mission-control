@@ -35,7 +35,7 @@ export const IconRenderer = memo(function IconRenderer({
   className,
   fallback = null,
 }: IconRendererProps) {
-  const [loadError, setLoadError] = useState(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const parsed = parseIconValue(value);
   if (!parsed) return <>{fallback}</>;
 
@@ -53,7 +53,29 @@ export const IconRenderer = memo(function IconRenderer({
   }
 
   const url = getIconUrl(parsed, color);
-  if (!url || loadError) return <>{fallback}</>;
+  if (!url || failedUrl === url) return <>{fallback}</>;
+
+  if (!color && ['lucide', 'mdi', 'ph'].includes(parsed.source)) {
+    return (
+      <span
+        role="img"
+        aria-label={`${parsed.source}:${parsed.name}`}
+        className={cn('inline-block flex-shrink-0 bg-current', className)}
+        style={{
+          width: size,
+          height: size,
+          maskImage: `url("${url}")`,
+          WebkitMaskImage: `url("${url}")`,
+          maskPosition: 'center',
+          WebkitMaskPosition: 'center',
+          maskRepeat: 'no-repeat',
+          WebkitMaskRepeat: 'no-repeat',
+          maskSize: 'contain',
+          WebkitMaskSize: 'contain',
+        }}
+      />
+    );
+  }
 
   return (
     <img
@@ -62,13 +84,9 @@ export const IconRenderer = memo(function IconRenderer({
       width={size}
       height={size}
       loading="lazy"
-      className={cn(
-        'inline-block flex-shrink-0',
-        !color && ['lucide', 'mdi', 'ph', 'dash'].includes(parsed.source) && 'dark:invert',
-        className,
-      )}
+      className={cn('inline-block flex-shrink-0', className)}
       style={{ width: size, height: size }}
-      onError={() => setLoadError(true)}
+      onError={() => setFailedUrl(url)}
     />
   );
 });

@@ -67,12 +67,18 @@ describe('dashboard state modules', () => {
 
     act(() => {
       result.current.actions.setViewName('Planning');
+      result.current.actions.setViewIcon('lucide:clipboard-check');
     });
     act(() => {
       result.current.actions.saveCurrentView();
     });
 
     expect(result.current.state.savedViews).toHaveLength(1);
+    expect(result.current.state.savedViews[0]).toMatchObject({
+      name: 'Planning',
+      icon: 'lucide:clipboard-check',
+    });
+    expect(result.current.state.viewIcon).toBe('bookmark');
     expect(JSON.parse(localStorage.getItem('mission-control:saved-views') ?? '[]')).toHaveLength(1);
 
     act(() => result.current.actions.applyView(result.current.state.savedViews[0]));

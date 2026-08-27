@@ -148,6 +148,7 @@ export interface DashboardState {
   // View saving
   savingView: boolean;
   viewName: string;
+  viewIcon: string;
 }
 
 export interface DashboardActions {
@@ -214,6 +215,7 @@ export interface DashboardActions {
   // View save actions
   setSavingView: (v: boolean) => void;
   setViewName: (v: string) => void;
+  setViewIcon: (v: string) => void;
   saveCurrentView: () => void;
   applyView: (view: SavedView) => void;
   deleteView: (id: string) => void;
@@ -521,9 +523,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     pathname,
     replaceUrl: replaceDashboardUrl,
   });
-  const { savedViews, savingView, viewName } = savedViewsState.state;
+  const { savedViews, savingView, viewName, viewIcon } = savedViewsState.state;
   const {
-    setSavingView, setViewName, saveCurrentView, applyView, deleteView,
+    setSavingView, setViewName, setViewIcon, saveCurrentView, applyView, deleteView,
   } = savedViewsState.actions;
   const completionScopeKey = JSON.stringify({
     taskFilterContext,
@@ -999,7 +1001,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
       collapsedSections, expandedSourceLists, collapsedListGroups, listSearch,
       tagSearch, tagsExpanded, allSourceCounts,
-      savingView, viewName,
+      savingView, viewName, viewIcon,
     },
     actions: {
       fetchData, loadMoreForGroup, setRefreshTrigger, patchTaskInList, updateSubtaskCount,
@@ -1015,7 +1017,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setShowAddTaskModal, setAddTaskInitialDest, setAddTaskInitialListId,
       toggleSection, setExpandedSourceLists, setCollapsedListGroups, setListSearch,
       setTagSearch, setTagsExpanded,
-      setSavingView, setViewName, saveCurrentView, applyView, deleteView,
+      setSavingView, setViewName, setViewIcon, saveCurrentView, applyView, deleteView,
       animateTaskExit,
     },
     computed: {

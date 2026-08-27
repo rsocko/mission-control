@@ -131,6 +131,8 @@ describe('View in Graph collection surfaces', () => {
       />,
     );
 
+    expect(screen.getByAltText('lucide:pin')).toBeInTheDocument();
+    expect(screen.queryByText('pin')).not.toBeInTheDocument();
     const graphLink = screen.getByRole('link', { name: 'View Planning in Graph' });
     fireEvent.click(graphLink);
     expect(applyView).not.toHaveBeenCalled();

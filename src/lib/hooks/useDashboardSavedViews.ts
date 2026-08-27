@@ -11,6 +11,7 @@ import type { SavedView } from '@/types/dashboard';
 import type { DashboardFilterActions } from '@/lib/hooks/useDashboardFilterState';
 
 const SAVED_VIEWS_STORAGE_KEY = 'mission-control:saved-views';
+const DEFAULT_SAVED_VIEW_ICON = 'bookmark';
 
 function setOptionalSearchParam(
   searchParams: URLSearchParams,
@@ -39,6 +40,7 @@ export function useDashboardSavedViews({
   const [savedViews, setSavedViews] = useState<SavedView[]>([]);
   const [savingView, setSavingView] = useState(false);
   const [viewName, setViewName] = useState('');
+  const [viewIcon, setViewIcon] = useState(DEFAULT_SAVED_VIEW_ICON);
 
   useEffect(() => {
     try {
@@ -53,8 +55,8 @@ export function useDashboardSavedViews({
     if (!viewName.trim()) return;
     const newView: SavedView = {
       id: `custom-${Date.now()}`,
-      name: viewName,
-      icon: 'pin',
+      name: viewName.trim(),
+      icon: viewIcon,
       filters: taskFilterContextToSavedView(taskFilterContext),
       filterContext: taskFilterContext,
     };
@@ -63,7 +65,8 @@ export function useDashboardSavedViews({
     setSavedViews(updated);
     setSavingView(false);
     setViewName('');
-  }, [savedViews, taskFilterContext, viewName]);
+    setViewIcon(DEFAULT_SAVED_VIEW_ICON);
+  }, [savedViews, taskFilterContext, viewIcon, viewName]);
 
   const applyView = useCallback((view: SavedView) => {
     const dashboardFilters = taskFilterContextToDashboard(
@@ -98,11 +101,13 @@ export function useDashboardSavedViews({
     savedViews,
     savingView,
     viewName,
-  }), [savedViews, savingView, viewName]);
+    viewIcon,
+  }), [savedViews, savingView, viewIcon, viewName]);
 
   const actions = useMemo(() => ({
     setSavingView,
     setViewName,
+    setViewIcon,
     saveCurrentView,
     applyView,
     deleteView,

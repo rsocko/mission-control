@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import Image from 'next/image';
 import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconPickerButton, IconRenderer } from '@/components/ui/icon-picker';
 import { toast } from 'sonner';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import {
@@ -282,21 +282,57 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           onSaveView={() => actions.setSavingView(true)}
         />
         {state.savingView && (
-          <div className="mb-4 p-2 bg-blue-900/30 border border-blue-800/30 rounded-md max-w-sm">
-            <input
-              type="text"
-              value={state.viewName}
-              onChange={(e) => actions.setViewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') actions.saveCurrentView(); if (e.key === 'Escape') actions.setSavingView(false); }}
-              placeholder="View name..."
-              className="w-full text-xs bg-[var(--surface-1)] border border-[var(--border)] rounded px-2 py-1 mb-1.5 outline-none focus:border-blue-400"
-              autoFocus
-            />
-            <div className="flex gap-1">
-              <button onClick={actions.saveCurrentView} className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded font-medium">Save</button>
-              <button onClick={() => actions.setSavingView(false)} className="text-xs text-[var(--text-tertiary)] px-2 py-0.5">Cancel</button>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              actions.saveCurrentView();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') actions.setSavingView(false);
+            }}
+            className="mb-4 flex max-w-md items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2"
+          >
+            <div className="shrink-0">
+              <label className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
+                Icon
+              </label>
+              <IconPickerButton
+                value={state.viewIcon}
+                onChange={actions.setViewIcon}
+                size="sm"
+                className="w-9 rounded-md"
+              />
             </div>
-          </div>
+            <label className="min-w-0 flex-1">
+              <span className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
+                View name
+              </span>
+              <input
+                type="text"
+                value={state.viewName}
+                onChange={(e) => actions.setViewName(e.target.value)}
+                placeholder="e.g. No project assigned"
+                className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:ring-2 focus:ring-[var(--accent)]/20"
+                autoFocus
+              />
+            </label>
+            <div className="flex h-8 items-center gap-1">
+              <button
+                type="submit"
+                disabled={!state.viewName.trim()}
+                className="h-8 rounded-md bg-[var(--accent-action)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => actions.setSavingView(false)}
+                className="h-8 rounded-md px-2 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         )}
 
         <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] rounded-lg border border-[var(--border)] ${

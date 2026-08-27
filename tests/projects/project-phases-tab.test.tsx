@@ -126,6 +126,21 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByRole('button', { name: 'Drag task to a phase' })).toBeInTheDocument();
   });
 
+  it('keeps task detail open when a Plan list row is double-clicked', async () => {
+    await renderProjectTab('Plan');
+
+    const taskRow = (await screen.findByText('Alpha migration'))
+      .closest<HTMLElement>('[data-task-row-surface="plan"]');
+    expect(taskRow).not.toBeNull();
+
+    fireEvent.click(taskRow!);
+    fireEvent.click(taskRow!);
+    fireEvent.doubleClick(taskRow!);
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
+  });
+
   it('switches plan views and drops bulk selection when the list is left', async () => {
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });

@@ -225,6 +225,7 @@ export function ProjectPhasesTab({
     getTaskContextActions,
     handleCompleteTask,
     handleGraphTaskSelect,
+    handleTaskClick,
     handleTaskDoubleClick,
     myDayTaskIds,
     selectedTaskId,
@@ -1695,7 +1696,7 @@ export function ProjectPhasesTab({
                                                   bulkMode={bulk.bulkMode}
                                                   bulkSelected={isBulkSelected}
                                                   onBulkToggle={() => bulk.toggleItem(task.id)}
-                                                  onSelect={toggleTask}
+                                                  onSelect={handleTaskClick}
                                                   onDoubleClick={handleTaskDoubleClick}
                                                   onModifierClick={handleBulkModifierClick}
                                                   onComplete={handleCompleteTask}
@@ -1787,7 +1788,7 @@ export function ProjectPhasesTab({
                                     bulkMode={bulk.bulkMode}
                                     bulkSelected={isBulkSelected}
                                     onBulkToggle={() => bulk.toggleItem(task.id)}
-                                    onSelect={toggleTask}
+                                    onSelect={handleTaskClick}
                                     onDoubleClick={handleTaskDoubleClick}
                                     onModifierClick={handleBulkModifierClick}
                                     onComplete={handleCompleteTask}
@@ -1849,7 +1850,7 @@ export function ProjectPhasesTab({
               selectedTaskId={selectedTaskId}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
-              onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : toggleTask(taskId)}
+              onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : handleTaskClick(taskId)}
               onDoubleClickTask={handleTaskDoubleClick}
               onCompleteTask={handleCompleteTask}
               onRenamePhase={renamePhase}

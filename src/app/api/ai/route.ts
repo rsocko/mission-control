@@ -80,6 +80,7 @@ export async function POST(request: Request) {
   let chatAdmission: AIAdmission | null = null;
   const requestCorrelationId = randomUUID();
   let operationFinished = false;
+  let requestApprovalSecret: string | undefined;
   const finishOperation = () => {
     if (operationFinished) return;
     operationFinished = true;
@@ -118,8 +119,9 @@ export async function POST(request: Request) {
       chatAdmission = await acquireOllamaAdmissionWithTimeout(operationSignal);
     }
 
+    requestApprovalSecret = getOptionalHoustonToolApprovalSecret();
     const normalized = await normalizeMessages(messages);
-    const approvalSecret = getOptionalHoustonToolApprovalSecret();
+    const approvalSecret = requestApprovalSecret;
     const deniedCalls = financeApprovalParts(normalized.uiMessages, false);
     const approvedCalls = financeApprovalParts(normalized.uiMessages, true);
     if ((deniedCalls.length > 0 || approvedCalls.length > 0) && !approvalSecret) {
@@ -129,6 +131,7 @@ export async function POST(request: Request) {
       throw new HoustonToolApprovalConfigurationError();
     }
     const recordDeniedApprovals = () => {
+      if (!approvalSecret) return;
       for (const denied of deniedCalls) {
         recordHoustonFinanceApprovalAudit({
           correlationId: requestCorrelationId,
@@ -137,7 +140,7 @@ export async function POST(request: Request) {
           decision: 'deny',
           outcome: 'denied',
           durationMs: 0,
-          approvalSecret: approvalSecret as string,
+          approvalSecret,
           toolInput: denied.toolInput,
         });
       }
@@ -151,7 +154,7 @@ export async function POST(request: Request) {
       onFinish: finishOperation,
       onAbort: finishOperation,
       onError: (error) => {
-        if (InvalidToolApprovalSignatureError.isInstance(error)) {
+        if (InvalidToolApprovalSignatureError.isInstance(error) && approvalSecret) {
           for (const responded of approvedCalls) {
             recordHoustonFinanceApprovalAudit({
               correlationId: requestCorrelationId,
@@ -160,7 +163,7 @@ export async function POST(request: Request) {
               decision: 'approve',
               outcome: 'invalid-approval',
               durationMs: 0,
-              approvalSecret: approvalSecret as string,
+              approvalSecret,
               toolInput: responded.toolInput,
             });
           }
@@ -184,16 +187,18 @@ export async function POST(request: Request) {
   } catch (error) {
     finishOperation();
     if (error instanceof InvalidFinanceApprovalError) {
-      recordHoustonFinanceApprovalAudit({
-        correlationId: requestCorrelationId,
-        toolName: error.toolName,
-        toolCallId: error.toolCallId,
-        decision: error.decision,
-        outcome: 'invalid-approval',
-        durationMs: 0,
-        approvalSecret: getOptionalHoustonToolApprovalSecret() as string,
-        toolInput: error.toolInput,
-      });
+      if (requestApprovalSecret) {
+        recordHoustonFinanceApprovalAudit({
+          correlationId: requestCorrelationId,
+          toolName: error.toolName,
+          toolCallId: error.toolCallId,
+          decision: error.decision,
+          outcome: 'invalid-approval',
+          durationMs: 0,
+          approvalSecret: requestApprovalSecret,
+          toolInput: error.toolInput,
+        });
+      }
       return Response.json({ error: error.message }, { status: 400 });
     }
     if (error instanceof InvalidAIChatMessagesError) {

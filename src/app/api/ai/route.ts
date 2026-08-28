@@ -26,7 +26,7 @@ import {
 } from 'ai';
 import { createHoustonTools } from '@/lib/ai/tools';
 import {
-  getHoustonToolApprovalSecret,
+  getOptionalHoustonToolApprovalSecret,
   HoustonToolApprovalConfigurationError,
   verifyHoustonToolApprovalSignature,
 } from '@/lib/ai/tool-approval-config';
@@ -119,9 +119,15 @@ export async function POST(request: Request) {
     }
 
     const normalized = await normalizeMessages(messages);
-    const approvalSecret = getHoustonToolApprovalSecret();
+    const approvalSecret = getOptionalHoustonToolApprovalSecret();
     const deniedCalls = financeApprovalParts(normalized.uiMessages, false);
     const approvedCalls = financeApprovalParts(normalized.uiMessages, true);
+    if ((deniedCalls.length > 0 || approvedCalls.length > 0) && !approvalSecret) {
+      // A finance mutation approval/denial is present, but approvals cannot be
+      // verified without a configured secret — fail closed for this request
+      // only, not for unrelated non-finance chat.
+      throw new HoustonToolApprovalConfigurationError();
+    }
     const recordDeniedApprovals = () => {
       for (const denied of deniedCalls) {
         recordHoustonFinanceApprovalAudit({
@@ -131,7 +137,7 @@ export async function POST(request: Request) {
           decision: 'deny',
           outcome: 'denied',
           durationMs: 0,
-          approvalSecret,
+          approvalSecret: approvalSecret as string,
           toolInput: denied.toolInput,
         });
       }
@@ -154,14 +160,14 @@ export async function POST(request: Request) {
               decision: 'approve',
               outcome: 'invalid-approval',
               durationMs: 0,
-              approvalSecret,
+              approvalSecret: approvalSecret as string,
               toolInput: responded.toolInput,
             });
           }
         }
         finishOperation();
       },
-      financeMutationsAllowed: deniedCalls.length === 0 && approvedCalls.length === 0,
+      financeMutationsAllowed: Boolean(approvalSecret) && deniedCalls.length === 0 && approvedCalls.length === 0,
       correlationId: requestCorrelationId,
     });
     return result.toUIMessageStreamResponse({
@@ -185,7 +191,7 @@ export async function POST(request: Request) {
         decision: error.decision,
         outcome: 'invalid-approval',
         durationMs: 0,
-        approvalSecret: getHoustonToolApprovalSecret(),
+        approvalSecret: getOptionalHoustonToolApprovalSecret() as string,
         toolInput: error.toolInput,
       });
       return Response.json({ error: error.message }, { status: 400 });
@@ -247,11 +253,34 @@ async function buildContextPrefix(): Promise<{ contextPrefix?: string; sources: 
   };
 }
 
+/**
+ * Defensively scans raw, not-yet-validated request messages for any finance
+ * mutation tool part. Schema validation below only recognizes tools that
+ * exist in the active tool set, so a missing approval secret (which drops
+ * the finance mutation tools entirely) would otherwise surface as a generic
+ * "invalid messages" error instead of the actionable configuration error.
+ */
+function referencesFinanceMutationTool(messages: unknown): boolean {
+  if (!Array.isArray(messages)) return false;
+  return messages.some(message => {
+    const parts = (message as { parts?: unknown } | null)?.parts;
+    if (!Array.isArray(parts)) return false;
+    return parts.some(part => {
+      const type = (part as { type?: unknown } | null)?.type;
+      return typeof type === 'string'
+        && [...FINANCE_MUTATION_TOOLS].some(toolName => type === `tool-${toolName}`);
+    });
+  });
+}
+
 export async function normalizeMessages(messages: unknown): Promise<{
   uiMessages: HoustonUIMessage[];
   modelMessages: ModelMessage[];
 }> {
-  const approvalSecret = getHoustonToolApprovalSecret();
+  const approvalSecret = getOptionalHoustonToolApprovalSecret();
+  if (!approvalSecret && referencesFinanceMutationTool(messages)) {
+    throw new HoustonToolApprovalConfigurationError();
+  }
   const tools = createHoustonTools(approvalSecret);
   const validated = await safeValidateUIMessages<HoustonUIMessage>({ messages, tools });
   if (!validated.success || validated.data.some(message =>
@@ -270,13 +299,14 @@ export async function normalizeMessages(messages: unknown): Promise<{
 
 function validateFinanceApprovalParts(
   messages: HoustonUIMessage[],
-  approvalSecret: string,
+  approvalSecret: string | undefined,
 ): void {
   for (const message of messages) {
     for (const part of message.parts) {
       if (!isToolUIPart(part)) continue;
       const toolName = getToolName(part);
       if (!FINANCE_MUTATION_TOOLS.has(toolName)) continue;
+      if (!approvalSecret) throw new HoustonToolApprovalConfigurationError();
       const parsed = toolName === 'assignFinanceTransactionKid'
         ? assignFinanceTransactionKidInputSchema.safeParse(part.input)
         : updateFinanceTransactionCategoryInputSchema.safeParse(part.input);

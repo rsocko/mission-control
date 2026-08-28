@@ -77,6 +77,7 @@ export function computeFieldMappings(
     assignee?: string | null;
     status?: string;
     statusReason?: string | null;
+    planningHorizon?: string | null;
     effort?: number | null;
     microStatus?: string | null;
     kanbanColumn?: string | null;
@@ -257,6 +258,7 @@ export function computeFieldMappings(
   // ── Mission Control planning fields ──────────────────────────────────────
   addMissionControlOnlyMapping(mappings, 'microStatus', task.microStatus);
   addMissionControlOnlyMapping(mappings, 'statusReason', task.statusReason);
+  addMissionControlOnlyMapping(mappings, 'planningHorizon', task.planningHorizon);
   addMissionControlOnlyMapping(mappings, 'kanbanColumn', task.kanbanColumn);
   addMissionControlOnlyMapping(mappings, 'reminderAt', task.reminderAt);
   addMissionControlOnlyMapping(mappings, 'snoozedUntil', task.snoozedUntil);

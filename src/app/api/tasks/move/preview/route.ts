@@ -178,6 +178,7 @@ export async function POST(request: Request) {
         assignee: task.assignee,
         status: task.status,
         statusReason: task.statusReason,
+        planningHorizon: task.planningHorizon,
         effort: task.effort,
         microStatus: task.microStatus,
         kanbanColumn: task.kanbanColumn,

@@ -2,7 +2,7 @@
  * API Route Tests - Sync, Triage, AI paths
  * Tests #111
  */
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
@@ -29,6 +29,38 @@ vi.mock('@/db', () => ({
     delete: vi.fn(() => chainable(undefined)),
   },
   runTransaction: vi.fn(),
+}));
+
+vi.mock('@/lib/ai/finance-approval-store', () => {
+  class InvalidHoustonFinanceApprovalError extends Error {
+    constructor(
+      readonly approvalId: string,
+      readonly toolName?: 'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory',
+      readonly decision?: 'approve' | 'deny',
+    ) {
+      super('The finance approval is invalid, expired, or has already been used.');
+      this.name = 'InvalidHoustonFinanceApprovalError';
+    }
+  }
+  return {
+    FINANCE_MUTATION_TOOL_NAMES: [
+      'assignFinanceTransactionKid',
+      'updateFinanceTransactionCategory',
+    ],
+    InvalidHoustonFinanceApprovalError,
+    consumeHoustonFinanceApproval: vi.fn((approval: {
+      approvalId: string;
+      toolName: 'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory';
+    }) => {
+      throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
+    }),
+    persistHoustonFinanceApproval: vi.fn(),
+  };
+});
+
+const recordHoustonFinanceApprovalAudit = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/finance/houston-tools', () => ({
+  recordHoustonFinanceApprovalAudit,
 }));
 
 vi.mock('@/db/schema', () => ({
@@ -404,17 +436,6 @@ describe('PATCH /api/triage/[id]', () => {
 // ─── AI API ────────────────────────────────────────────────────────────────
 
 describe('POST /api/ai', () => {
-  beforeEach(() => {
-    vi.stubEnv(
-      'MC_HOUSTON_TOOL_APPROVAL_SECRET',
-      'invented-route-test-approval-secret-32-bytes',
-    );
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('should stream a response for valid messages', async () => {
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
@@ -432,34 +453,7 @@ describe('POST /api/ai', () => {
     expect(response.status).toBe(200);
   });
 
-  it.each([
-    ['missing', ''],
-    ['short', 'too-short'],
-  ])('should still serve non-finance chat when the approval secret is %s', async (_case, secret) => {
-    vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
-    const { POST } = await import('@/app/api/ai/route');
-    const request = new Request('http://localhost:3099/api/ai', {
-      method: 'POST',
-      body: JSON.stringify({
-        messages: [{
-          id: 'invented-user-message',
-          role: 'user',
-          parts: [{ type: 'text', text: 'Hello' }],
-        }],
-      }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-
-    const response = await POST(request);
-
-    expect(response.status).toBe(200);
-  });
-
-  it.each([
-    ['missing', ''],
-    ['short', 'too-short'],
-  ])('should fail closed for finance approval decisions when the approval secret is %s', async (_case, secret) => {
-    vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
+  it('should reject finance approval decisions without a pending server record', async () => {
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
       method: 'POST',
@@ -485,7 +479,6 @@ describe('POST /api/ai', () => {
             },
             approval: {
               id: 'invented-approval-id',
-              signature: 'invented-signature',
               approved: true,
               reason: 'User approved.',
             },
@@ -497,9 +490,17 @@ describe('POST /api/ai', () => {
 
     const response = await POST(request);
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: 'Houston finance approvals are unavailable because the server approval secret is not configured correctly.',
+      error: 'The finance approval is invalid, expired, or has already been used.',
+    });
+    expect(recordHoustonFinanceApprovalAudit).toHaveBeenCalledWith({
+      approvalId: 'invented-approval-id',
+      correlationId: expect.any(String),
+      toolName: 'assignFinanceTransactionKid',
+      decision: 'approve',
+      outcome: 'invalid-approval',
+      durationMs: 0,
     });
   });
 

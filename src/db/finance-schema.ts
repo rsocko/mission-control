@@ -405,6 +405,20 @@ export const houstonFinanceActionAudit = sqliteTable('houston_finance_action_aud
   index('idx_houston_finance_action_correlation').on(table.correlationId, table.createdAt),
 ]);
 
+export const houstonFinancePendingApprovals = sqliteTable('houston_finance_pending_approvals', {
+  approvalId: text('approval_id').primaryKey(),
+  toolCallId: text('tool_call_id').notNull(),
+  tool: text('tool')
+    .$type<'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory'>()
+    .notNull(),
+  toolInput: text('tool_input').notNull(),
+  correlationId: text('correlation_id').notNull(),
+  expiresAt: text('expires_at').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  index('idx_houston_finance_pending_expiry').on(table.expiresAt),
+]);
+
 export const financeAttributionSubjects = sqliteTable('finance_attribution_subjects', {
   id: text('id').primaryKey(),
   connectorId: text('connector_id').notNull(),

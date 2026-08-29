@@ -275,6 +275,7 @@ export {
   financeBudgetSnapshots,
   financeMutationAudit,
   houstonFinanceActionAudit,
+  houstonFinancePendingApprovals,
   financeAttributionSubjects,
   financeAttributionExceptions,
   financeAttributionAudit,

@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { sqlite } from '@/db';
 import type { FinanceFreshnessState } from '@/db/finance-schema';
 import { listAttributionExceptions } from '@/lib/connectors/monarch-money/attribution-service';
@@ -904,29 +904,13 @@ export type HoustonFinanceApprovalAuditOutcome =
   | 'stale'
   | 'invalid-approval';
 
-export function financeApprovalCallHash(
-  approvalSecret: string,
-  toolName: string,
-  toolCallId: string,
-  toolInput: unknown,
-): string {
-  const inputDigest = createHash('sha256')
-    .update(JSON.stringify(toolInput))
-    .digest('base64url');
-  return createHmac('sha256', approvalSecret)
-    .update(`houston-finance-approval-v2\0${toolName}\0${toolCallId}\0${inputDigest}`)
-    .digest('base64url');
-}
-
 export function recordHoustonFinanceApprovalAudit(input: {
+  approvalId: string;
   correlationId: string;
   toolName: string;
-  toolCallId: string;
-  toolInput: unknown;
   decision: 'approve' | 'deny';
   outcome: HoustonFinanceApprovalAuditOutcome;
   durationMs: number;
-  approvalSecret: string;
 }): void {
   sqlite.prepare(`
     INSERT INTO houston_finance_action_audit (
@@ -935,12 +919,7 @@ export function recordHoustonFinanceApprovalAudit(input: {
   `).run(
     randomUUID(),
     safeText(input.correlationId, 'unavailable', 128),
-    financeApprovalCallHash(
-      input.approvalSecret,
-      input.toolName,
-      input.toolCallId,
-      input.toolInput,
-    ),
+    input.approvalId,
     input.toolName,
     input.decision,
     input.outcome,
@@ -950,8 +929,7 @@ export function recordHoustonFinanceApprovalAudit(input: {
 }
 
 type MutationExecutionOptions = {
-  approvalSecret: string;
-  toolCallId: string;
+  approvalId: string;
   correlationId: string;
   signal?: AbortSignal;
   now?: Date;
@@ -1082,15 +1060,8 @@ function resolveProjectedCategory(connectorId: string, categoryName: string) {
 
 function mutationIdempotencyKey(
   options: MutationExecutionOptions,
-  toolName: string,
-  toolInput: unknown,
 ): string {
-  return `houston:${financeApprovalCallHash(
-    options.approvalSecret,
-    toolName,
-    options.toolCallId,
-    toolInput,
-  )}`;
+  return `houston:${options.approvalId}`;
 }
 
 function mutationFailure(
@@ -1192,11 +1163,7 @@ export async function assignFinanceTransactionKid(
   let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
   try {
     throwIfAborted(options.signal);
-    const idempotencyKey = mutationIdempotencyKey(
-      options,
-      'assignFinanceTransactionKid',
-      input,
-    );
+    const idempotencyKey = mutationIdempotencyKey(options);
     const replayedKidName = replayedKidAssignment(idempotencyKey);
     if (replayedKidName) {
       outcome = 'succeeded';
@@ -1259,14 +1226,12 @@ export async function assignFinanceTransactionKid(
     );
   } finally {
     recordHoustonFinanceApprovalAudit({
+      approvalId: options.approvalId,
       correlationId: options.correlationId,
       toolName: 'assignFinanceTransactionKid',
-      toolCallId: options.toolCallId,
       decision: 'approve',
       outcome,
       durationMs: performance.now() - startedAt,
-      approvalSecret: options.approvalSecret,
-      toolInput: input,
     });
   }
 }
@@ -1279,11 +1244,7 @@ export async function updateFinanceTransactionCategory(
   let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
   try {
     throwIfAborted(options.signal);
-    const idempotencyKey = mutationIdempotencyKey(
-      options,
-      'updateFinanceTransactionCategory',
-      input,
-    );
+    const idempotencyKey = mutationIdempotencyKey(options);
     const replayedCategoryName = replayedCategoryUpdate(idempotencyKey);
     if (replayedCategoryName) {
       outcome = 'succeeded';
@@ -1347,14 +1308,12 @@ export async function updateFinanceTransactionCategory(
     );
   } finally {
     recordHoustonFinanceApprovalAudit({
+      approvalId: options.approvalId,
       correlationId: options.correlationId,
       toolName: 'updateFinanceTransactionCategory',
-      toolCallId: options.toolCallId,
       decision: 'approve',
       outcome,
       durationMs: performance.now() - startedAt,
-      approvalSecret: options.approvalSecret,
-      toolInput: input,
     });
   }
 }

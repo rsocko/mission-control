@@ -361,6 +361,8 @@ describe('connector settings refresh before sync', () => {
         parentTasksAdded: 1,
         subtasksAdded: 0,
         remoteSourceIds: new Set<string>(),
+        identityBlocked: 0,
+        identityBlockedOutcomes: {},
       };
     });
   });

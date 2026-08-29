@@ -32,9 +32,15 @@ import {
 } from '@/lib/finance/houston-contracts';
 
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
+// Intentionally NOT wrapped in `.optional()`: the AI SDK's `InferToolContext`
+// requires a context type that does not include `undefined` for a finance
+// mutation tool's context to become a *required* key of the combined
+// `toolsContext` type (see `RequiredToolSetContext`/`ToolsContextParameter`
+// in the `ai` package). `correlationId` itself is optional, which is enough
+// to make providing it non-mandatory for callers.
 const financeMutationToolContextSchema = z.object({
   correlationId: z.string().optional(),
-}).optional();
+});
 
 async function executeFinanceTool<T>(
   operation: (signal: AbortSignal) => Promise<T>,

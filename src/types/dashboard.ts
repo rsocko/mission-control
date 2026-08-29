@@ -59,6 +59,7 @@ export interface SavedView {
   id: string;
   name: string;
   icon: string;
+  iconColor?: string;
   filters: Record<string, string>;
   filterContext?: TaskFilterContext;
 }
@@ -190,6 +191,10 @@ export const NOTIFICATION_CATEGORY_ICONS: Record<string, string> = {
   social: 'at-sign',
   ai_insights: 'sparkles',
   packages: 'package',
+  infrastructure: 'server',
+  backup: 'archive',
+  automation: 'workflow',
+  security: 'shield-alert',
 };
 
 export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
@@ -205,6 +210,7 @@ export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
   'custom-rest': '/icons/connectors/custom-rest.svg',
   'home-assistant': '/icons/connectors/custom-rest.svg',
   'monarch-money': '/icons/agents/tyrion.svg',
+  homelab: '/icons/connectors/custom-rest.svg',
 };
 
 export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
@@ -221,4 +227,5 @@ export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
   scout: 'Scout',
   'home-assistant': 'Home Assistant',
   'monarch-money': 'Tyrion',
+  homelab: 'Homelab',
 };

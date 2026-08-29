@@ -13,6 +13,7 @@ import {
   Plus,
   Search,
   Tag,
+  Telescope,
   Unplug,
   Zap,
   type LucideIcon,
@@ -56,6 +57,7 @@ const CATEGORIES: CategoryDefinition[] = [
   { type: 'assignee', label: 'Assignee', icon: CircleUserRound },
   { type: 'tag', label: 'Tag', icon: Tag },
   { type: 'priority', label: 'Priority', icon: Zap },
+  { type: 'horizon', label: 'Horizon', icon: Telescope },
   { type: 'status', label: 'Status', icon: Check },
   { type: 'source', label: 'Source', icon: Unplug },
   { type: 'list', label: 'List', icon: List },
@@ -351,6 +353,14 @@ function getOptions(
           ? 'No priority'
           : `${PRIORITY_LABELS[value] || ''} ${capitalize(value)}`.trim(),
         })),
+      ];
+    case 'horizon':
+      return [
+        { value: 'next', label: 'Next' },
+        { value: 'soon', label: 'Soon' },
+        { value: 'later', label: 'Later' },
+        { value: 'someday', label: 'Someday' },
+        { value: 'none', label: 'Not set' },
       ];
     case 'status':
       return ['todo', 'in_progress', 'done', 'cancelled'].map((value) => ({

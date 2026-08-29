@@ -22,6 +22,7 @@ const {
     write: false,
     taskSourceModel: 'ingested',
     statusWriteBack: 'pull',
+    supportedTaskStatuses: undefined as import('@/types').TaskStatus[] | undefined,
   },
   suppressAutoCompletionAfterReopen: vi.fn(),
   supersedePendingReconciliationSuggestions: vi.fn(),
@@ -31,7 +32,7 @@ const {
 const transaction = {
   update: vi.fn(() => ({
     set: vi.fn(() => ({
-      where: vi.fn(() => ({ run: vi.fn() })),
+      where: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
     })),
   })),
   delete: vi.fn(() => ({
@@ -105,6 +106,7 @@ describe('task reopen reconciliation suppression', () => {
     connectorCapabilities.write = false;
     connectorCapabilities.taskSourceModel = 'ingested';
     connectorCapabilities.statusWriteBack = 'pull';
+    connectorCapabilities.supportedTaskStatuses = undefined;
     transaction.update.mockClear();
   });
 
@@ -168,6 +170,27 @@ describe('task reopen reconciliation suppression', () => {
       blockedFields: {
         title: expect.stringContaining('upstream task source'),
       },
+    });
+    expect(transaction.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects lifecycle values the source cannot represent before updating locally', async () => {
+    currentTask.connectorType = 'document-intelligence';
+    currentTask.connectorInstanceId = 'owl-1';
+    currentTask.sourceId = 'owl-action-1';
+    connectorCapabilities.write = true;
+    connectorCapabilities.taskSourceModel = 'remote-managed';
+    connectorCapabilities.statusWriteBack = 'direct';
+    connectorCapabilities.supportedTaskStatuses = ['todo', 'done', 'cancelled'];
+
+    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'in_progress' }),
+    }), { params: Promise.resolve({ id: 'task-1' }) });
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'This task source does not support status "in_progress"',
     });
     expect(transaction.update).not.toHaveBeenCalled();
   });

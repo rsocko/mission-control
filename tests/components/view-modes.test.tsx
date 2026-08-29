@@ -49,6 +49,10 @@ vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
   ),
 }));
 
+vi.mock('@/components/task-list/MicroStatusIcon', () => ({
+  MicroStatusIcon: () => <span data-testid="micro-status-icon" />,
+}));
+
 // ─── useViewMode Hook Tests ─────────────────────────────────────────────────
 
 import { renderHook, act } from '@testing-library/react';

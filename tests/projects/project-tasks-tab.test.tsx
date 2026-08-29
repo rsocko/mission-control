@@ -154,23 +154,16 @@ describe('project tasks tab', () => {
     await waitFor(() => expect(renderedTaskTitles()).toEqual(['Alpha migration', 'Gamma rollout']));
   });
 
-  it('filters by effort and clears the effort choice with the other filters', async () => {
+  it('uses the shared group toolbar with project-scoped phase grouping', async () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });
 
-    const effort = screen.getByText('Effort').closest('label')!;
-    fireEvent.click(within(effort).getByRole('combobox'));
-    fireEvent.click(within(effort).getByText('XL'));
+    fireEvent.click(screen.getByRole('button', { name: 'Group by: None' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Phase' }));
 
-    await waitFor(() => expect(renderedTaskTitles()).toEqual(['Gamma rollout']));
-    expect(screen.getByText('Showing 1 of 3 project tasks.')).toBeInTheDocument();
-    expect(within(effort).getByRole('combobox')).toHaveTextContent('XL');
-
-    fireEvent.change(keywordInput(), { target: { value: 'zzz' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Clear filters' }));
-
-    await waitFor(() => expect(renderedTaskTitles()).toEqual(['Alpha migration', 'Gamma rollout']));
-    expect(within(effort).getByRole('combobox')).toHaveTextContent('All');
+    expect(screen.getByRole('button', { name: 'Group by: Phase' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Discovery \(1\)/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Unassigned \(1\)/ })).toBeInTheDocument();
   });
 
   it('reorders the list when the sort direction changes', async () => {
@@ -179,10 +172,10 @@ describe('project tasks tab', () => {
 
     expect(renderedTaskTitles()).toEqual(['Alpha migration', 'Gamma rollout']);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sort descending' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sort direction: ascending' }));
 
     await waitFor(() => expect(renderedTaskTitles()).toEqual(['Gamma rollout', 'Alpha migration']));
-    expect(screen.getByRole('button', { name: 'Sort ascending' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort direction: descending' })).toBeInTheDocument();
   });
 
   it('keeps filter and sort state while the user visits another tab', async () => {
@@ -190,7 +183,7 @@ describe('project tasks tab', () => {
     await screen.findByRole('heading', { name: 'Project tasks' });
 
     fireEvent.change(keywordInput(), { target: { value: 'Alpha' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Sort descending' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sort direction: ascending' }));
     await waitFor(() => expect(renderedTaskTitles()).toEqual(['Alpha migration']));
 
     await openProjectTab('Plan');
@@ -198,7 +191,7 @@ describe('project tasks tab', () => {
     await openProjectTab('Project Tasks');
 
     expect(keywordInput()).toHaveValue('Alpha');
-    expect(screen.getByRole('button', { name: 'Sort ascending' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sort direction: descending' })).toBeInTheDocument();
     expect(renderedTaskTitles()).toEqual(['Alpha migration']);
   });
 
@@ -229,7 +222,7 @@ describe('project tasks tab', () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add task' }));
     const menu = screen.getByRole('menu', { name: 'Add task' });
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Create new task' }));
 
@@ -252,7 +245,7 @@ describe('project tasks tab', () => {
     await renderProjectTab('Project Tasks');
     await screen.findByRole('heading', { name: 'Project tasks' });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Link existing task' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Add tasks to Tasks Project' });

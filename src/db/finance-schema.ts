@@ -50,7 +50,7 @@ export const financeTransactions = sqliteTable('finance_transactions', {
     .default('pending'),
   attributionConfidence: text('attribution_confidence').$type<'definite' | 'likely' | 'none'>(),
   attributionMethod: text('attribution_method')
-    .$type<'manual' | 'card-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
+    .$type<'manual' | 'account-rule' | 'merchant-rule' | 'historical-pattern' | 'unassigned' | 'unavailable'>(),
   attributionExplanation: text('attribution_explanation'),
   attributionReasons: text('attribution_reasons', { mode: 'json' })
     .$type<string[]>()
@@ -140,6 +140,29 @@ export const financeSyncState = sqliteTable('finance_sync_state', {
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   index('idx_finance_sync_state_status').on(table.status, table.updatedAt),
+]);
+
+export const financeConnectionOutages = sqliteTable('finance_connection_outages', {
+  connectorId: text('connector_id').primaryKey(),
+  episodeId: text('episode_id').notNull(),
+  status: text('status')
+    .$type<'transient' | 'degraded' | 'authentication_expired' | 'recovery_pending' | 'recovered'>()
+    .notNull(),
+  authState: text('auth_state')
+    .$type<'connected' | 'unauthenticated' | 'expired' | 'degraded' | 'unavailable'>()
+    .notNull(),
+  startedAt: text('started_at').notNull(),
+  lastObservedAt: text('last_observed_at').notNull(),
+  notificationCreatedAt: text('notification_created_at'),
+  taskCreatedAt: text('task_created_at'),
+  recoverySyncSucceededAt: text('recovery_sync_succeeded_at'),
+  recoveredAt: text('recovered_at'),
+  lastErrorCode: text('last_error_code'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_finance_connection_outages_status')
+    .on(table.status, table.updatedAt),
 ]);
 
 export const financeInsightTransactionBackfillPlans = sqliteTable(
@@ -450,6 +473,30 @@ export const financeAttributionAudit = sqliteTable('finance_attribution_audit', 
     .on(table.connectorId, table.transactionId, table.createdAt),
 ]);
 
+export const financeAttentionRepairAudit = sqliteTable('finance_attention_repair_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id').notNull(),
+  mode: text('mode').$type<'dry-run' | 'apply'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  dryRunId: text('dry_run_id'),
+  reasonCode: text('reason_code').notNull(),
+  targetDigest: text('target_digest').notNull(),
+  occurrenceCount: integer('occurrence_count').notNull(),
+  notificationCount: integer('notification_count').notNull(),
+  actionCount: integer('action_count').notNull(),
+  deliveryCount: integer('delivery_count').notNull(),
+  taskCount: integer('task_count').notNull(),
+  myDayCount: integer('my_day_count').notNull(),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_attention_repair_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_attention_repair_connector')
+    .on(table.connectorId, table.createdAt),
+]);
+
 // ─── KID PROFILES ───────────────────────────────────────────────────────────
 
 export const kidProfiles = sqliteTable('kid_profiles', {
@@ -698,6 +745,29 @@ export const financeInsightCutovers = sqliteTable('finance_insight_cutovers', {
 }, (table) => [
   index('idx_finance_insight_cutover_delivery')
     .on(table.deliveryEnabled, table.updatedAt),
+]);
+
+export const financeInsightCutoverAudit = sqliteTable('finance_insight_cutover_audit', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  operation: text('operation').$type<'enable' | 'rollback'>().notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  sourceGeneration: text('source_generation'),
+  resultCode: text('result_code').notNull(),
+  blockerCodes: text('blocker_codes', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+  legacyExpiredCount: integer('legacy_expired_count').notNull().default(0),
+  importedCount: integer('imported_count').notNull().default(0),
+  suppressedDeliveryCount: integer('suppressed_delivery_count').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_finance_insight_cutover_audit_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  index('idx_finance_insight_cutover_audit_connector')
+    .on(table.connectorId, table.createdAt),
 ]);
 
 // ─── KID CARD RULES ─────────────────────────────────────────────────────────

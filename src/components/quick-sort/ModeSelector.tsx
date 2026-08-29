@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, CalendarClock, Loader2, Sigma, Tag, Zap } from 'lucide-react';
+import { AlertCircle, Grid2X2, Loader2, Sigma, Tag, Telescope, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import type { QuickSortModeCounts, QuickSortQueueMode } from '@/lib/hooks/useQuickSortData';
@@ -22,6 +22,14 @@ const MODES: Array<{
     badgeClass: 'bg-amber-900/60 text-amber-300',
   },
   {
+    id: 'quadrant',
+    label: 'Pick Quadrant',
+    description: 'Decide what to do, schedule, delegate, or eliminate',
+    icon: Grid2X2,
+    accentClass: 'border-rose-700/60 bg-rose-950/40 hover:bg-rose-950/70',
+    badgeClass: 'bg-rose-900/60 text-rose-300',
+  },
+  {
     id: 'no_effort',
     label: 'Estimate Effort',
     description: 'Tasks with no effort level set',
@@ -38,10 +46,10 @@ const MODES: Array<{
     badgeClass: 'bg-violet-900/60 text-violet-300',
   },
   {
-    id: 'no_due_date',
-    label: 'Plan / Schedule',
-    description: 'P0 and P1 tasks without a due date',
-    icon: CalendarClock,
+    id: 'no_planning_horizon',
+    label: 'Set Horizon',
+    description: 'Tasks not yet placed in Next, Soon, Later, or Someday',
+    icon: Telescope,
     accentClass: 'border-emerald-700/60 bg-emerald-950/40 hover:bg-emerald-950/70',
     badgeClass: 'bg-emerald-900/60 text-emerald-300',
   },

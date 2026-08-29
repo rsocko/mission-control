@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  preserveFinanceConnectorIdentityCredentials,
+  protectNewFinanceConnectorCredentials,
   redactFinanceConnector,
   sanitizeFinanceConnectorWrite,
 } from '@/lib/connectors/monarch-money/config';
 import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
 import { defaultTyrionBridgeUrlForEnvironment } from '@/lib/connectors/monarch-money/constants';
+import {
+  financeConnectorScopedReference,
+  validateFinanceConnectorScopedReference,
+} from '@/lib/connectors/monarch-money/identity';
 
 describe('Tyrion connector configuration boundary', () => {
   it('defaults local setup to loopback and production to the protected gateway', () => {
@@ -32,6 +38,48 @@ describe('Tyrion connector configuration boundary', () => {
       credentials: { serviceToken: 'canonical-setup-token' },
       settings: { bridgeUrl: 'http://tyrion-bridge:8100/bridge/v1', timeoutMs: 5000 },
     });
+  });
+
+  it('creates and preserves protected connector identity state without exposing it', () => {
+    const created = protectNewFinanceConnectorCredentials({
+      serviceToken: 'canonical-setup-token',
+    });
+    expect(created.identityNamespace).toMatch(/^[a-f0-9]{64}$/);
+    const updated = preserveFinanceConnectorIdentityCredentials(
+      { serviceToken: 'replacement-token' },
+      created,
+    );
+    expect(updated).toEqual({
+      serviceToken: 'replacement-token',
+      identityNamespace: created.identityNamespace,
+    });
+    expect(redactFinanceConnector({
+      type: 'finance-manager',
+      credentials: updated,
+      settings: {},
+    }).credentials).toEqual({});
+  });
+
+  it('drops obsolete fingerprint rollout settings from writes', () => {
+    expect(sanitizeFinanceConnectorWrite({
+      type: 'finance-manager',
+      credentials: {},
+      settings: {
+        householdCurrency: 'USD',
+        cardRuleFingerprintParityProven: true,
+        cardRuleFingerprintParityProvenAt: '2026-08-22T00:00:00.000Z',
+      },
+    }).settings).toEqual({ householdCurrency: 'USD' });
+  });
+
+  it('always derives raw identifiers even when they resemble scoped references', () => {
+    const namespace = 'a'.repeat(64);
+    const raw = `account-v1:${'B'.repeat(43)}`;
+    const derived = financeConnectorScopedReference(namespace, 'account', raw);
+
+    expect(derived).not.toBe(raw);
+    expect(validateFinanceConnectorScopedReference('account', derived)).toBe(derived);
+    expect(() => validateFinanceConnectorScopedReference('account', 'raw-account-id')).toThrow();
   });
 
   it('redacts legacy token aliases and suppresses unsafe legacy URLs from public DTOs', () => {

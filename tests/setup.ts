@@ -31,7 +31,7 @@ vi.mock('drizzle-orm', () => ({
   gte: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'gte', col, val })),
   ne: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'ne', col, val })),
   not: vi.fn((col: unknown): MockSqlExpression => ({ type: 'not', col })),
-  sql: vi.fn(() => ({})),
+  sql: vi.fn(() => ({ as: vi.fn(() => ({})) })),
   like: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'like', col, val })),
   notLike: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'notLike', col, val })),
 }));

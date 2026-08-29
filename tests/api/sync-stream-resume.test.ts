@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-const getEvents = vi.fn(() => [{
+const getEvents = vi.fn(() => Promise.resolve([{
   id: 5,
   jobId: 'job-1',
   connectorId: 'github-1',
@@ -19,11 +19,14 @@ const getEvents = vi.fn(() => [{
     },
   },
   createdAt: '2026-08-03T00:00:00.000Z',
-}]);
+}]));
+const getLatestEventId = vi.fn(() => Promise.resolve(99));
 
 vi.mock('@/lib/sync/job-queue', () => ({
-  getLatestSyncJobEventId: vi.fn(() => 99),
-  getSyncJobEventsAfter: getEvents,
+  getSyncJobRepository: () => ({
+    getLatestEventId,
+    getEventsAfter: getEvents,
+  }),
   isDurableSyncMode: vi.fn(() => true),
 }));
 vi.mock('@/lib/sync/events', () => ({

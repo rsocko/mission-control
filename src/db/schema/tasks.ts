@@ -19,12 +19,15 @@ export const tasks = sqliteTable('tasks', {
     .notNull()
     .default('active'),
   priority: text('priority').notNull().default('none'),
+  planningHorizon: text('planning_horizon').$type<'next' | 'soon' | 'later' | 'someday'>(),
 
   dueDate: text('due_date'),
   pushCount: integer('push_count').notNull().default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+  // Set only on locally generated recurring occurrences. One successor per occurrence.
+  recurrenceGeneratedFromTaskId: text('recurrence_generated_from_task_id'),
 
   // Hierarchy
   parentId: text('parent_id'),
@@ -68,6 +71,7 @@ export const tasks = sqliteTable('tasks', {
 }, (table) => [
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
   index('idx_tasks_local_disposition').on(table.localDisposition),
+  index('idx_tasks_planning_horizon').on(table.planningHorizon),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
   index('idx_tasks_due_reminder')
@@ -76,6 +80,9 @@ export const tasks = sqliteTable('tasks', {
   index('idx_tasks_push_count')
     .on(table.pushCount)
     .where(sql`${table.pushCount} >= 2`),
+  uniqueIndex('idx_tasks_recurrence_generated_from')
+    .on(table.recurrenceGeneratedFromTaskId)
+    .where(sql`${table.recurrenceGeneratedFromTaskId} IS NOT NULL`),
 ]);
 
 // ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────
@@ -115,6 +122,10 @@ export const taskSchedules = sqliteTable('task_schedules', {
   estimatedDuration: integer('estimated_duration'), // minutes
   isTimeBlocked: integer('is_time_blocked', { mode: 'boolean' }).notNull().default(false),
   recurrence: text('recurrence'),
+  recurrenceMode: text('recurrence_mode')
+    .$type<'schedule' | 'completion'>()
+    .notNull()
+    .default('schedule'),
 });
 
 // ─── TAGS ───────────────────────────────────────────────────────────────────
@@ -437,7 +448,7 @@ export const quickSortLog = sqliteTable('task_triage_log', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),
   operationId: text('operation_id'),
-  /** 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date' */
+  /** 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon' */
   mode: text('mode').notNull(),
   /** 'applied' | 'suggestion_accepted' | 'skipped' */
   action: text('action').notNull(),

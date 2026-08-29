@@ -5,15 +5,13 @@ import { connectorConfigs } from '@/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { ConnectorConfig, SyncResult } from '@/types';
 import { syncLogger } from '@/lib/logger';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import {
-  getActiveSyncJobConnectorIds,
-  getSyncSchedules,
+  getSyncJobRepository,
   isDurableSyncMode,
-  markSyncScheduleEnqueued,
-  registerSyncSchedule,
-  unregisterSyncSchedule,
 } from './job-queue';
 import type { SyncRequestOptions } from './queue';
+import { isConnectorSyncQuarantinedAsync } from './control-state';
 
 interface ScheduledJob {
   connectorId: string;
@@ -25,6 +23,87 @@ const STAGGER_DELAY_MS = 30_000;
 const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_THRESHOLD_MS = 20 * 60 * 1000;
 
+function configFromRow(row: {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean | null;
+  syncMode: string | null;
+  pollIntervalMinutes: number | null;
+  capabilities: unknown;
+  credentials: unknown;
+  settings: unknown;
+  syncedLists: unknown;
+}): ConnectorConfig {
+  return {
+    id: row.id,
+    type: row.type,
+    name: row.name,
+    enabled: row.enabled ?? true,
+    syncMode: (row.syncMode as ConnectorConfig['syncMode']) || 'poll',
+    pollIntervalMinutes: row.pollIntervalMinutes ?? 5,
+    capabilities: (typeof row.capabilities === 'string'
+      ? JSON.parse(row.capabilities)
+      : row.capabilities) as ConnectorConfig['capabilities'],
+    credentials: (typeof row.credentials === 'string'
+      ? JSON.parse(row.credentials)
+      : row.credentials) || {},
+    settings: (typeof row.settings === 'string'
+      ? JSON.parse(row.settings)
+      : row.settings) || {},
+    syncedLists: (typeof row.syncedLists === 'string'
+      ? JSON.parse(row.syncedLists)
+      : row.syncedLists) || [],
+  };
+}
+
+/**
+ * Fetches a single connector's config. SQLite keeps its existing direct
+ * `connector_configs` query; PostgreSQL uses the portable `ConnectorRepository`
+ * contract (`get`), dynamically imported so SQLite-only callers never pull in
+ * the PostgreSQL schema/driver graph.
+ */
+async function fetchConnectorConfig(connectorId: string): Promise<ConnectorConfig | null> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    const { getPostgresCoreRepositories } = await import('@/db/runtime');
+    return getPostgresCoreRepositories().connectors.get(connectorId);
+  }
+  const [row] = await db.select()
+    .from(connectorConfigs)
+    .where(eq(connectorConfigs.id, connectorId))
+    .limit(1);
+  if (!row || row.deletedAt) return null;
+  return configFromRow(row);
+}
+
+/**
+ * Lists every enabled, non-deleted connector's config. There is no portable
+ * "list connectors" operation on the shared `ConnectorRepository` contract
+ * (only get/upsert/delete by id), so PostgreSQL queries `connector_configs`
+ * directly here (dynamically imported), matching the SQLite branch's
+ * existing direct query rather than routing through a repository that
+ * cannot express this yet.
+ */
+async function listEnabledConnectorConfigs(): Promise<ConnectorConfig[]> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    const [{ getPostgresPersistenceBackend }, pgSchema] = await Promise.all([
+      import('@/db/runtime'),
+      import('@/db/postgres/schema'),
+    ]);
+    const rows = await getPostgresPersistenceBackend().context.db
+      .select()
+      .from(pgSchema.connectorConfigs)
+      .where(and(
+        eq(pgSchema.connectorConfigs.enabled, true),
+        isNull(pgSchema.connectorConfigs.deletedAt),
+      ));
+    return rows.map(configFromRow);
+  }
+  const rows = await db.select().from(connectorConfigs)
+    .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
+  return rows.map(configFromRow);
+}
+
 export class SyncCronScheduler {
   private readonly jobs = new Map<string, ScheduledJob>();
   private nightlyFullSyncTask: ScheduledTask | null = null;
@@ -35,30 +114,35 @@ export class SyncCronScheduler {
       connectorId: string,
       options?: SyncRequestOptions,
     ) => Promise<SyncResult>,
-    private readonly getLastResult: (connectorId: string) => SyncResult | undefined,
-    private readonly getInlineActiveSyncs: () => string[],
+    private readonly getLastResult: (connectorId: string) => Promise<SyncResult | undefined>,
+    private readonly getInlineActiveSyncs: () => Promise<string[]>,
   ) {}
 
-  schedule(config: ConnectorConfig, staggerIndex = 0): void {
+  async schedule(config: ConnectorConfig, staggerIndex = 0): Promise<void> {
+    if (await isConnectorSyncQuarantinedAsync(config.id)) {
+      await this.unschedule(config.id);
+      return;
+    }
+    const repository = await getSyncJobRepository();
     if (isDurableSyncMode()) {
       if (!config.enabled || config.syncMode === 'manual') {
-        unregisterSyncSchedule(config.id);
+        await repository.unregisterSchedule(config.id);
         return;
       }
       if (config.syncMode === 'poll' && config.pollIntervalMinutes) {
-        registerSyncSchedule(config.id, config.pollIntervalMinutes);
+        await repository.registerSchedule(config.id, config.pollIntervalMinutes);
       }
       return;
     }
 
-    this.unschedule(config.id);
+    await this.unschedule(config.id);
     if (!config.enabled || config.syncMode === 'manual') return;
 
     if (config.syncMode === 'poll' && config.pollIntervalMinutes) {
-      registerSyncSchedule(config.id, config.pollIntervalMinutes);
+      await repository.registerSchedule(config.id, config.pollIntervalMinutes);
       const staggerMs = staggerIndex * STAGGER_DELAY_MS;
       const task = cron.schedule(this.intervalToCron(config.pollIntervalMinutes), () => {
-        markSyncScheduleEnqueued(config.id);
+        void repository.markScheduleEnqueued(config.id);
         if (staggerMs > 0) {
           setTimeout(() => {
             void this.requestSync(config.id, { source: 'schedule' });
@@ -76,36 +160,32 @@ export class SyncCronScheduler {
     }
   }
 
-  unschedule(connectorId: string): void {
+  async unschedule(connectorId: string): Promise<void> {
     const job = this.jobs.get(connectorId);
     if (job) {
       job.task.stop();
       this.jobs.delete(connectorId);
     }
-    unregisterSyncSchedule(connectorId);
+    await (await getSyncJobRepository()).unregisterSchedule(connectorId);
   }
 
   async reconcileScheduleFromDb(connectorId: string): Promise<void> {
-    const [row] = await db.select()
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, connectorId))
-      .limit(1);
-    if (!row || row.deletedAt) {
-      this.unschedule(connectorId);
+    const config = await fetchConnectorConfig(connectorId);
+    if (!config) {
+      await this.unschedule(connectorId);
       return;
     }
-    this.schedule(this.configFromRow(row));
+    await this.schedule(config);
   }
 
   async scheduleAll(): Promise<void> {
     try {
-      const rows = await db.select().from(connectorConfigs)
-        .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
+      const rows = await listEnabledConnectorConfigs();
       let scheduled = 0;
       for (const row of rows) {
         if (this.jobs.has(row.id)) continue;
         try {
-          this.schedule(this.configFromRow(row), scheduled);
+          await this.schedule(row, scheduled);
           scheduled++;
         } catch (connectorErr) {
           syncLogger.error(
@@ -129,10 +209,9 @@ export class SyncCronScheduler {
     this.nightlyFullSyncTask = cron.schedule('0 3 * * *', async () => {
       syncLogger.info('Nightly full sync starting');
       try {
-        const rows = await db.select({ id: connectorConfigs.id })
-          .from(connectorConfigs)
-          .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
+        const rows = await listEnabledConnectorConfigs();
         for (const row of rows) {
+          if (await isConnectorSyncQuarantinedAsync(row.id)) continue;
           try {
             await this.requestSync(row.id, { full: true, source: 'nightly' });
           } catch (err) {
@@ -155,8 +234,7 @@ export class SyncCronScheduler {
     if (this.watchdogTimer) return;
     this.watchdogTimer = setInterval(async () => {
       try {
-        const rows = await db.select().from(connectorConfigs)
-          .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
+        const rows = await listEnabledConnectorConfigs();
         const pollConnectors = rows.filter((row) => (row.syncMode || 'poll') === 'poll');
         if (!isDurableSyncMode() && pollConnectors.length > 0 && this.jobs.size === 0) {
           syncLogger.warn(
@@ -166,14 +244,11 @@ export class SyncCronScheduler {
           await this.scheduleAll();
         }
 
-        const activeConnectorIds = new Set(
-          isDurableSyncMode()
-            ? getActiveSyncJobConnectorIds()
-            : this.getInlineActiveSyncs(),
-        );
+        const activeConnectorIds = new Set(await this.getInlineActiveSyncs());
         for (const row of pollConnectors) {
+          if (await isConnectorSyncQuarantinedAsync(row.id)) continue;
           if (activeConnectorIds.has(row.id)) continue;
-          const lastResult = this.getLastResult(row.id);
+          const lastResult = await this.getLastResult(row.id);
           if (!lastResult) continue;
           const elapsed = Date.now() - new Date(lastResult.syncedAt).getTime();
           const expectedInterval = (row.pollIntervalMinutes ?? 5) * 60 * 1000;
@@ -197,26 +272,27 @@ export class SyncCronScheduler {
     }, WATCHDOG_INTERVAL_MS);
   }
 
-  getStatus(): Array<{
+  async getStatus(): Promise<Array<{
     connectorId: string;
     intervalMinutes: number;
     isRunning: boolean;
     lastResult?: SyncResult;
-  }> {
+  }>> {
+    const repository = await getSyncJobRepository();
     const activeConnectorIds = new Set(
       isDurableSyncMode()
-        ? getActiveSyncJobConnectorIds()
-        : this.getInlineActiveSyncs(),
+        ? await repository.getActiveConnectorIds()
+        : await this.getInlineActiveSyncs(),
     );
     const schedules = isDurableSyncMode()
-      ? getSyncSchedules()
+      ? await repository.getSchedules()
       : Array.from(this.jobs.values());
-    return schedules.map((job) => ({
+    return Promise.all(schedules.map(async (job) => ({
       connectorId: job.connectorId,
       intervalMinutes: job.intervalMinutes,
       isRunning: activeConnectorIds.has(job.connectorId),
-      lastResult: this.getLastResult(job.connectorId),
-    }));
+      lastResult: await this.getLastResult(job.connectorId),
+    })));
   }
 
   stopAll(): void {
@@ -230,29 +306,6 @@ export class SyncCronScheduler {
       this.nightlyFullSyncTask.stop();
       this.nightlyFullSyncTask = null;
     }
-  }
-
-  private configFromRow(row: typeof connectorConfigs.$inferSelect): ConnectorConfig {
-    return {
-      id: row.id,
-      type: row.type,
-      name: row.name,
-      enabled: row.enabled ?? true,
-      syncMode: (row.syncMode as ConnectorConfig['syncMode']) || 'poll',
-      pollIntervalMinutes: row.pollIntervalMinutes ?? 5,
-      capabilities: (typeof row.capabilities === 'string'
-        ? JSON.parse(row.capabilities)
-        : row.capabilities) as ConnectorConfig['capabilities'],
-      credentials: (typeof row.credentials === 'string'
-        ? JSON.parse(row.credentials)
-        : row.credentials) || {},
-      settings: (typeof row.settings === 'string'
-        ? JSON.parse(row.settings)
-        : row.settings) || {},
-      syncedLists: (typeof row.syncedLists === 'string'
-        ? JSON.parse(row.syncedLists)
-        : row.syncedLists) || [],
-    };
   }
 
   private intervalToCron(minutes: number): string {

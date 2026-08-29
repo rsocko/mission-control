@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   Check,
+  CheckSquare,
   ChevronRight,
   CircleX,
   ExternalLink,
@@ -28,6 +29,12 @@ import type {
   AttributionSubject,
   FinanceOverviewData,
 } from './types';
+import {
+  GROUPED_ASSIGNMENT_CONCURRENCY,
+  groupAttributionExceptions,
+  MAX_GROUPED_SELECTION,
+  runWithBoundedConcurrency,
+} from './finance-review-batch';
 
 interface ExceptionPage {
   exceptions: AttributionException[];
@@ -42,9 +49,26 @@ type ExceptionAction = 'approve' | 'manual-resolve' | 'dismiss' | 'retry';
 interface PendingConfirmation {
   action: Exclude<ExceptionAction, 'retry'>;
   kidId?: string | null;
+  exceptionIds?: string[];
   title: string;
   message: string;
   label: string;
+}
+
+type ActionOutcome = 'succeeded' | 'conflicted' | 'failed';
+
+interface ActionResult {
+  exceptionId: string;
+  identity: string;
+  outcome: ActionOutcome;
+  retryable: boolean;
+  status?: number;
+  code?: string;
+}
+
+interface RetryIdentity {
+  idempotencyKey: string;
+  expectedUpdatedAt: string;
 }
 
 class ResponseStatusError extends Error {
@@ -65,21 +89,35 @@ function formatDate(value: string) {
   });
 }
 
+function retainCurrentSubject(
+  current: string,
+  subjects: AttributionSubject[],
+): string {
+  return current === '__parent__' || subjects.some((subject) => subject.kidId === current)
+    ? current
+    : '';
+}
+
 export function FinanceReview() {
   const [overview, setOverview] = useState<FinanceOverviewData | null>(null);
   const [exceptions, setExceptions] = useState<AttributionException[]>([]);
   const [subjects, setSubjects] = useState<AttributionSubject[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedExceptionIds, setSelectedExceptionIds] = useState<Set<string>>(new Set());
   const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [pageCursor, setPageCursor] = useState<string | null>(null);
+  const [previousPageCursors, setPreviousPageCursors] = useState<Array<string | null>>([]);
   const [manualKidId, setManualKidId] = useState('');
+  const [bulkKidId, setBulkKidId] = useState('');
   const [loading, setLoading] = useState(true);
   const [paginating, setPaginating] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [pageError, setPageError] = useState<{ status: number; message: string } | null>(null);
   const [actionStatus, setActionStatus] = useState('');
   const [confirmation, setConfirmation] = useState<PendingConfirmation | null>(null);
-  const idempotencyKeys = useRef(new Map<string, string>());
+  const retryIdentities = useRef(new Map<string, RetryIdentity>());
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
+  const emptyStateRef = useRef<HTMLHeadingElement>(null);
   const focusAfterRefresh = useRef<string | null>(null);
   const confirmationTrigger = useRef<HTMLButtonElement | null>(null);
 
@@ -91,12 +129,19 @@ export function FinanceReview() {
     () => new Map(subjects.map((subject) => [subject.kidId, subject.name])),
     [subjects],
   );
+  const merchantGroups = useMemo(
+    () => groupAttributionExceptions(exceptions),
+    [exceptions],
+  );
 
   const fetchExceptions = useCallback(async (
     connectorId: string,
     cursor?: string | null,
   ): Promise<ExceptionPage> => {
-    const query = new URLSearchParams({ status: 'current', limit: '20' });
+    const query = new URLSearchParams({
+      status: 'current',
+      limit: String(MAX_GROUPED_SELECTION),
+    });
     if (cursor) query.set('cursor', cursor);
     const response = await fetch(
       `/api/connectors/${encodeURIComponent(connectorId)}/finance/attribution-exceptions?${query}`,
@@ -117,7 +162,12 @@ export function FinanceReview() {
       setOverview(nextOverview);
       setExceptions(page.exceptions);
       setSubjects(page.subjects);
+      setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
+      setManualKidId((current) => retainCurrentSubject(current, page.subjects));
       setNextCursor(page.nextCursor);
+      setPageCursor(null);
+      setPreviousPageCursors([]);
+      setSelectedExceptionIds(new Set());
       setSelectedId((current) => (
         current && page.exceptions.some((item) => item.id === current)
           ? current
@@ -151,7 +201,8 @@ export function FinanceReview() {
     focusAfterRefresh.current = null;
     window.requestAnimationFrame(() => {
       const nextItem = itemRefs.current.get(focusId) ?? itemRefs.current.values().next().value;
-      nextItem?.focus();
+      if (nextItem) nextItem.focus();
+      else emptyStateRef.current?.focus();
     });
   }, [exceptions]);
 
@@ -160,10 +211,17 @@ export function FinanceReview() {
     setPaginating(true);
     setPageError(null);
     try {
-      const page = await fetchExceptions(overview.connector.id, nextCursor);
-      setExceptions((current) => [...current, ...page.exceptions]);
+      const requestedCursor = nextCursor;
+      const page = await fetchExceptions(overview.connector.id, requestedCursor);
+      setExceptions(page.exceptions);
       setSubjects(page.subjects);
+      setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
+      setPreviousPageCursors((current) => [...current, pageCursor]);
+      setPageCursor(requestedCursor);
       setNextCursor(page.nextCursor);
+      setSelectedExceptionIds(new Set());
+      setSelectedId(page.exceptions[0]?.id ?? null);
+      setManualKidId('');
     } catch (error) {
       setActionStatus(error instanceof ResponseStatusError && error.status === 403
         ? 'You no longer have permission to load more exceptions.'
@@ -173,56 +231,141 @@ export function FinanceReview() {
     }
   };
 
+  const loadPrevious = async () => {
+    if (!overview || previousPageCursors.length === 0 || paginating) return;
+    setPaginating(true);
+    setPageError(null);
+    const previousCursor = previousPageCursors[previousPageCursors.length - 1];
+    try {
+      const page = await fetchExceptions(overview.connector.id, previousCursor);
+      setExceptions(page.exceptions);
+      setSubjects(page.subjects);
+      setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
+      setPreviousPageCursors((current) => current.slice(0, -1));
+      setPageCursor(previousCursor);
+      setNextCursor(page.nextCursor);
+      setSelectedExceptionIds(new Set());
+      setSelectedId(page.exceptions[0]?.id ?? null);
+      setManualKidId('');
+    } catch (error) {
+      setActionStatus(error instanceof ResponseStatusError && error.status === 403
+        ? 'You no longer have permission to load the previous page.'
+        : 'The previous exception page could not be loaded. Try again.');
+    } finally {
+      setPaginating(false);
+    }
+  };
+
+  const refreshCurrentPage = async () => {
+    if (!overview) return;
+    const page = await fetchExceptions(overview.connector.id, pageCursor);
+    const currentIds = new Set(page.exceptions.map((item) => item.id));
+    setExceptions(page.exceptions);
+    setSubjects(page.subjects);
+    setBulkKidId((current) => retainCurrentSubject(current, page.subjects));
+    setManualKidId((current) => retainCurrentSubject(current, page.subjects));
+    setNextCursor(page.nextCursor);
+    setSelectedExceptionIds((current) => new Set(
+      [...current].filter((id) => currentIds.has(id)),
+    ));
+    setSelectedId((current) => (
+      current && currentIds.has(current) ? current : page.exceptions[0]?.id ?? null
+    ));
+  };
+
+  const submitExceptionAction = async (
+    item: AttributionException,
+    action: ExceptionAction,
+    kidId?: string | null,
+  ): Promise<ActionResult> => {
+    if (!overview) {
+      return {
+        exceptionId: item.id,
+        identity: '',
+        outcome: 'failed',
+        retryable: false,
+      };
+    }
+    const identity = `${item.id}:${action}:${kidId ?? ''}`;
+    const retryIdentity = retryIdentities.current.get(identity) ?? {
+      idempotencyKey: crypto.randomUUID(),
+      expectedUpdatedAt: item.updatedAt,
+    };
+    retryIdentities.current.set(identity, retryIdentity);
+    try {
+      const response = await fetch(
+        `/api/connectors/${encodeURIComponent(overview.connector.id)}/finance/attribution-exceptions/${encodeURIComponent(item.id)}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Idempotency-Key': retryIdentity.idempotencyKey,
+          },
+          body: JSON.stringify(action === 'manual-resolve'
+            ? {
+                action,
+                kidId: kidId ?? null,
+                expectedUpdatedAt: retryIdentity.expectedUpdatedAt,
+              }
+            : { action, expectedUpdatedAt: retryIdentity.expectedUpdatedAt }),
+        },
+      );
+      const body = await response.json().catch(() => ({})) as { code?: string };
+      if (response.ok) {
+        return { exceptionId: item.id, identity, outcome: 'succeeded', retryable: false };
+      }
+      return {
+        exceptionId: item.id,
+        identity,
+        outcome: response.status === 409 ? 'conflicted' : 'failed',
+        retryable: response.status >= 500,
+        status: response.status,
+        code: body.code,
+      };
+    } catch {
+      return {
+        exceptionId: item.id,
+        identity,
+        outcome: 'failed',
+        retryable: true,
+      };
+    }
+  };
+
   const performAction = async (
     action: ExceptionAction,
     kidId?: string | null,
   ) => {
     if (!overview || !selected || actionPending) return;
-    const identity = `${selected.id}:${action}:${kidId ?? ''}`;
-    const idempotencyKey = idempotencyKeys.current.get(identity) ?? crypto.randomUUID();
-    idempotencyKeys.current.set(identity, idempotencyKey);
     setActionPending(true);
     setActionStatus(`${friendly(action)} in progress...`);
 
     try {
-      const response = await fetch(
-        `/api/connectors/${encodeURIComponent(overview.connector.id)}/finance/attribution-exceptions/${encodeURIComponent(selected.id)}`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Idempotency-Key': idempotencyKey,
-          },
-          body: JSON.stringify(action === 'manual-resolve'
-            ? { action, kidId: kidId ?? null, expectedUpdatedAt: selected.updatedAt }
-            : { action, expectedUpdatedAt: selected.updatedAt }),
-        },
-      );
-      const body = await response.json().catch(() => ({})) as { code?: string };
-      if (!response.ok) {
-        if (response.status === 409) {
-          setActionStatus(
-            body.code === 'unknown_attribution_subject'
-              ? 'The Tyrion subject projection changed. The review list has been refreshed.'
-              : 'A newer decision already changed this item. The review list has been refreshed.',
-          );
-          focusAfterRefresh.current = selected.id;
-          await loadInitial();
-          return;
-        }
-        if (response.status === 403) {
-          setActionStatus('You do not have permission to update this exception.');
-          return;
-        }
-        if (response.status >= 500) {
-          setActionStatus('The action failed temporarily. Try again; the same request will be reused safely.');
-          return;
-        }
-        setActionStatus('The action could not be completed.');
+      const result = await submitExceptionAction(selected, action, kidId);
+      if (result.outcome === 'conflicted') {
+        retryIdentities.current.delete(result.identity);
+        setActionStatus(
+          result.code === 'unknown_attribution_subject'
+            ? 'The Tyrion subject projection changed. The review list has been refreshed.'
+            : 'A newer decision already changed this item. The review list has been refreshed.',
+        );
+        focusAfterRefresh.current = selected.id;
+        await loadInitial();
+        return;
+      }
+      if (result.outcome === 'failed') {
+        if (!result.retryable) retryIdentities.current.delete(result.identity);
+        setActionStatus(
+          result.status === 403
+            ? 'You do not have permission to update this exception.'
+            : result.retryable
+              ? 'The action failed temporarily. Try again; the same request will be reused safely.'
+              : 'The action could not be completed.',
+        );
         return;
       }
 
-      idempotencyKeys.current.delete(identity);
+      retryIdentities.current.delete(result.identity);
       const completedLabel = action === 'retry'
         ? 'Retry requested.'
         : action === 'dismiss'
@@ -234,10 +377,74 @@ export function FinanceReview() {
       setActionStatus(completedLabel);
       await loadInitial();
     } catch {
-      setActionStatus('The action failed temporarily. Try again; the same request will be reused safely.');
+      setActionStatus('The action succeeded, but the review list could not be refreshed.');
     } finally {
       setActionPending(false);
     }
+  };
+
+  const performBulkAssignment = async (
+    exceptionIds: string[],
+    kidId: string | null,
+  ) => {
+    if (!overview || actionPending) return;
+    const requestedIds = new Set(exceptionIds);
+    const items = exceptions.filter((item) => requestedIds.has(item.id));
+    if (items.length === 0) {
+      setActionStatus('No current exceptions are selected.');
+      return;
+    }
+    setActionPending(true);
+    setActionStatus(`Assigning ${items.length} selected exceptions...`);
+    const results = await runWithBoundedConcurrency(
+      items,
+      GROUPED_ASSIGNMENT_CONCURRENCY,
+      (item) => submitExceptionAction(item, 'manual-resolve', kidId),
+    );
+    const succeeded = results.filter((result) => result.outcome === 'succeeded');
+    const conflicted = results.filter((result) => result.outcome === 'conflicted');
+    const failed = results.filter((result) => result.outcome === 'failed');
+    const unresolvedIds = new Set(
+      results
+        .filter((result) => result.outcome !== 'succeeded')
+        .map((result) => result.exceptionId),
+    );
+    for (const result of results) {
+      if (result.outcome !== 'failed' || !result.retryable) {
+        retryIdentities.current.delete(result.identity);
+      }
+    }
+    setSelectedExceptionIds(unresolvedIds);
+    setActionStatus(
+      `Assignment complete: ${succeeded.length} succeeded, ${conflicted.length} conflicted, ${failed.length} failed.`,
+    );
+    focusAfterRefresh.current = unresolvedIds.values().next().value ?? items[0].id;
+    try {
+      await refreshCurrentPage();
+    } catch {
+      setActionStatus(
+        `Assignment complete: ${succeeded.length} succeeded, ${conflicted.length} conflicted, ${failed.length} failed. The review list could not be refreshed.`,
+      );
+    } finally {
+      setActionPending(false);
+    }
+  };
+
+  const toggleExceptionSelection = (ids: string[], select: boolean) => {
+    const next = new Set(selectedExceptionIds);
+    if (!select) {
+      ids.forEach((id) => next.delete(id));
+      setSelectedExceptionIds(next);
+      setActionStatus('');
+      return;
+    }
+    const additions = ids.filter((id) => !next.has(id));
+    const available = MAX_GROUPED_SELECTION - next.size;
+    additions.slice(0, available).forEach((id) => next.add(id));
+    setSelectedExceptionIds(next);
+    setActionStatus(additions.length > available
+      ? `Selection is limited to ${MAX_GROUPED_SELECTION} exceptions on this page.`
+      : '');
   };
 
   const requestConfirmation = (
@@ -307,8 +514,30 @@ export function FinanceReview() {
       {exceptions.length === 0 ? (
         <main className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <Check size={30} className="mb-3 text-emerald-400" />
-          <h2 className="text-base font-semibold text-[var(--text-primary)]">No exceptions need review</h2>
-          <p className="mt-1 max-w-md text-sm text-[var(--text-muted)]">Tyrion attribution has no current ambiguous or failed items.</p>
+          <h2
+            ref={emptyStateRef}
+            tabIndex={-1}
+            className="text-base font-semibold text-[var(--text-primary)]"
+          >
+            {previousPageCursors.length > 0
+              ? 'No exceptions remain on this page'
+              : 'No exceptions need review'}
+          </h2>
+          <p className="mt-1 max-w-md text-sm text-[var(--text-muted)]">
+            {previousPageCursors.length > 0
+              ? 'Return to the previous bounded page to continue reviewing exceptions.'
+              : 'Tyrion attribution has no current ambiguous or failed items.'}
+          </p>
+          {previousPageCursors.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void loadPrevious()}
+              disabled={paginating}
+              className="mt-4 min-h-10 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60"
+            >
+              Previous page
+            </button>
+          )}
         </main>
       ) : (
         <main className="mx-auto grid min-h-0 w-full max-w-7xl flex-1 lg:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)]">
@@ -317,48 +546,154 @@ export function FinanceReview() {
               <h2 id="exception-list-heading" className="text-sm font-semibold text-[var(--text-primary)]">
                 Current exceptions
               </h2>
-              <p className="mt-0.5 text-xs text-[var(--text-muted)]">{exceptions.length} loaded</p>
-            </div>
-            <div role="list" className="divide-y divide-[var(--border-subtle)]">
-              {exceptions.map((item) => (
-                <div key={item.id} role="listitem">
-                  <button
-                    ref={(node) => {
-                      if (node) itemRefs.current.set(item.id, node);
-                      else itemRefs.current.delete(item.id);
-                    }}
-                    type="button"
-                    aria-pressed={selected?.id === item.id}
-                    onClick={() => {
-                      setSelectedId(item.id);
-                      setManualKidId('');
-                      setActionStatus('');
-                    }}
-                    className={cn(
-                      'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
-                      selected?.id === item.id ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface-1)]',
-                    )}
-                  >
-                    <AlertTriangle size={16} className="shrink-0 text-amber-400" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
-                        {item.merchantName || 'Merchant unavailable'}
-                      </span>
-                      <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">
-                        {formatDate(item.date)} · {friendly(item.reasonCode)}
-                      </span>
-                    </span>
-                    <ChevronRight size={15} className="shrink-0 text-[var(--text-muted)]" />
-                  </button>
-                </div>
-              ))}
-            </div>
-            {nextCursor && (
-              <div className="p-4">
-                <button type="button" onClick={() => void loadMore()} disabled={paginating} className="flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60">
-                  {paginating && <Loader2 size={14} className="motion-safe:animate-spin" />}
-                  {paginating ? 'Loading more...' : 'Load more'}
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                {exceptions.length} loaded on this page, grouped by exact normalized merchant name
+              </p>
+              <div className="mt-3 grid gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3">
+                <p className="text-xs font-medium text-[var(--text-secondary)]">
+                  {selectedExceptionIds.size} selected
+                </p>
+                <label htmlFor="bulk-subject" className="text-xs font-medium text-[var(--text-secondary)]">
+                  Assign selected to
+                </label>
+                <Select
+                  value={bulkKidId || NO_MANUAL_SUBJECT_VALUE}
+                  onValueChange={(value) => setBulkKidId(
+                    value === NO_MANUAL_SUBJECT_VALUE ? '' : value,
+                  )}
+                  disabled={actionPending}
+                >
+                  <SelectTrigger id="bulk-subject" className="min-h-10 w-full bg-[var(--surface-1)]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_MANUAL_SUBJECT_VALUE}>Choose a current subject</SelectItem>
+                    <SelectItem value="__parent__">Parent expense</SelectItem>
+                    {subjects.map((subject) => (
+                      <SelectItem key={subject.kidId} value={subject.kidId}>{subject.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <button
+                  type="button"
+                  disabled={selectedExceptionIds.size === 0 || !bulkKidId || actionPending}
+                  onClick={(event) => {
+                    const recipient = bulkKidId === '__parent__'
+                      ? 'parent expense'
+                      : subjectNames.get(bulkKidId) || 'selected household member';
+                    requestConfirmation({
+                      action: 'manual-resolve',
+                      kidId: bulkKidId === '__parent__' ? null : bulkKidId,
+                      exceptionIds: [...selectedExceptionIds],
+                      title: 'Confirm grouped assignment',
+                      message: `Assign ${selectedExceptionIds.size} selected exceptions to ${recipient}? This manual decision takes precedence over future automated attribution.`,
+                      label: 'Assign selected',
+                    }, event.currentTarget);
+                  }}
+                  className="min-h-10 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+                >
+                  Assign selected
                 </button>
+              </div>
+            </div>
+            <div className="divide-y divide-[var(--border-subtle)]">
+              {merchantGroups.map((group) => {
+                const groupIds = group.exceptions.map((item) => item.id);
+                const selectedCount = groupIds.filter((id) => selectedExceptionIds.has(id)).length;
+                const allSelected = selectedCount === groupIds.length;
+                return (
+                  <section
+                    key={group.key}
+                    aria-label={`${group.merchantName} merchant group`}
+                    className="py-2"
+                  >
+                    <div className="flex items-center gap-2 px-4 py-2">
+                      <button
+                        type="button"
+                        role="checkbox"
+                        aria-checked={allSelected ? true : selectedCount > 0 ? 'mixed' : false}
+                        aria-label={`${allSelected ? 'Deselect' : 'Select'} all ${group.exceptions.length} ${group.merchantName} exceptions`}
+                        disabled={actionPending}
+                        onClick={() => toggleExceptionSelection(groupIds, !allSelected)}
+                        className="flex size-8 shrink-0 items-center justify-center rounded border border-[var(--border)] text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
+                      >
+                        {selectedCount > 0 && <CheckSquare size={16} />}
+                      </button>
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">
+                          {group.merchantName}
+                        </p>
+                        <p className="text-xs text-[var(--text-muted)]">
+                          {group.exceptions.length} {group.exceptions.length === 1 ? 'exception' : 'exceptions'}
+                        </p>
+                      </div>
+                    </div>
+                    <div role="list">
+                      {group.exceptions.map((item) => {
+                        const isChecked = selectedExceptionIds.has(item.id);
+                        const merchantName = item.merchantName || 'Merchant unavailable';
+                        return (
+                          <div key={item.id} role="listitem" className="flex items-stretch">
+                            <button
+                              type="button"
+                              role="checkbox"
+                              aria-checked={isChecked}
+                              aria-label={`${isChecked ? 'Deselect' : 'Select'} ${merchantName} on ${formatDate(item.date)}`}
+                              disabled={actionPending}
+                              onClick={() => toggleExceptionSelection([item.id], !isChecked)}
+                              className="ml-4 flex w-8 shrink-0 items-center justify-center rounded text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] disabled:opacity-50"
+                            >
+                              {isChecked && <Check size={15} />}
+                            </button>
+                            <button
+                              ref={(node) => {
+                                if (node) itemRefs.current.set(item.id, node);
+                                else itemRefs.current.delete(item.id);
+                              }}
+                              type="button"
+                              aria-pressed={selected?.id === item.id}
+                              onClick={() => {
+                                setSelectedId(item.id);
+                                setManualKidId('');
+                                setActionStatus('');
+                              }}
+                              className={cn(
+                                'flex min-w-0 flex-1 items-center gap-3 px-3 py-3 text-left transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
+                                selected?.id === item.id ? 'bg-[var(--surface-2)]' : 'hover:bg-[var(--surface-1)]',
+                              )}
+                            >
+                              <AlertTriangle size={16} className="shrink-0 text-amber-400" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-[var(--text-primary)]">
+                                  {merchantName}
+                                </span>
+                                <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">
+                                  {formatDate(item.date)} · {friendly(item.reasonCode)}
+                                </span>
+                              </span>
+                              <ChevronRight size={15} className="shrink-0 text-[var(--text-muted)]" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
+            </div>
+            {(previousPageCursors.length > 0 || nextCursor) && (
+              <div className="flex gap-2 p-4">
+                {previousPageCursors.length > 0 && (
+                  <button type="button" onClick={() => void loadPrevious()} disabled={paginating} className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60">
+                    Previous page
+                  </button>
+                )}
+                {nextCursor && (
+                  <button type="button" onClick={() => void loadMore()} disabled={paginating} className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-60">
+                  {paginating && <Loader2 size={14} className="motion-safe:animate-spin" />}
+                  {paginating ? 'Loading next page...' : 'Load next page'}
+                  </button>
+                )}
               </div>
             )}
           </section>
@@ -407,14 +742,18 @@ export function FinanceReview() {
                         Manual correction
                       </label>
                       <Select
-                        value={manualKidId || NO_MANUAL_SUBJECT_VALUE}
+                        value={manualKidId}
                         onValueChange={(value) => setManualKidId(
                           value === NO_MANUAL_SUBJECT_VALUE ? '' : value,
                         )}
                         disabled={actionPending}
                       >
                         <SelectTrigger id="manual-subject" className="min-h-10 w-full bg-[var(--surface-2)]">
-                          <SelectValue />
+                          <span>
+                            {manualKidId === '__parent__'
+                              ? 'Parent expense'
+                              : subjectNames.get(manualKidId) || 'Choose a current subject'}
+                          </span>
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value={NO_MANUAL_SUBJECT_VALUE}>Choose a current subject</SelectItem>
@@ -502,7 +841,11 @@ export function FinanceReview() {
           const pending = confirmation;
           confirmationTrigger.current = null;
           setConfirmation(null);
-          if (pending) void performAction(pending.action, pending.kidId);
+          if (pending?.exceptionIds) {
+            void performBulkAssignment(pending.exceptionIds, pending.kidId ?? null);
+          } else if (pending) {
+            void performAction(pending.action, pending.kidId);
+          }
         }}
         onCancel={cancelConfirmation}
       />

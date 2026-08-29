@@ -1,10 +1,9 @@
 import type { SyncResult } from '@/types';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
-import { assertConnectorMaintenanceUnlocked } from './maintenance-lock';
+import { assertConnectorMaintenanceUnlockedAsync } from './maintenance-lock';
+import { assertConnectorSyncEnqueueAllowedAsync } from './control-state';
 import {
-  countRemainingSyncJobs,
-  enqueueSyncJob,
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   isDurableSyncMode,
   waitForSyncJob,
   type SyncJobSource,
@@ -55,12 +54,16 @@ export class SyncQueue {
     connectorId: string,
     options?: SyncRequestOptions,
   ): Promise<SyncResult> {
-    assertConnectorMaintenanceUnlocked(connectorId);
+    await assertConnectorMaintenanceUnlockedAsync(connectorId);
+    await assertConnectorSyncEnqueueAllowedAsync(
+      connectorId,
+      options?.source ?? 'api',
+    );
     if (!isDurableSyncMode()) {
       return this.enqueueSync(connectorId, options);
     }
 
-    const job = enqueueSyncJob(connectorId, {
+    const job = await (await getSyncJobRepository()).enqueue(connectorId, {
       full: options?.full,
       source: options?.source ?? 'api',
     });
@@ -93,9 +96,10 @@ export class SyncQueue {
     });
   }
 
-  queueFollowUpSync(connectorId: string): void {
+  async queueFollowUpSync(connectorId: string): Promise<void> {
+    await assertConnectorSyncEnqueueAllowedAsync(connectorId, 'api');
     if (isDurableSyncMode()) {
-      enqueueSyncJob(connectorId, { full: true, source: 'api' });
+      await (await getSyncJobRepository()).enqueue(connectorId, { full: true, source: 'api' });
       return;
     }
 
@@ -116,9 +120,10 @@ export class SyncQueue {
     void this.enqueueSync(connectorId, { full: true });
   }
 
-  getRemaining(): number {
+  async getRemaining(): Promise<number> {
     if (isDurableSyncMode()) {
-      return countRemainingSyncJobs(getSyncQueueMetrics());
+      const metrics = await (await getSyncJobRepository()).getMetrics();
+      return metrics.queued + Math.max(0, metrics.running - 1);
     }
     return this.queue.length + Math.max(0, this.activeSyncCount - 1);
   }

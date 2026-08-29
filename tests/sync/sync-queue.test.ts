@@ -4,18 +4,23 @@ import type { SyncResult } from '@/types';
 const mocks = vi.hoisted(() => ({
   isDurableSyncMode: vi.fn(() => false),
   setQueuedExpensiveOperations: vi.fn(),
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
+  assertConnectorSyncEnqueueAllowedAsync: vi.fn(() => Promise.resolve()),
 }));
 
 vi.mock('@/lib/sync/job-queue', () => ({
-  countRemainingSyncJobs: vi.fn(() => 0),
-  enqueueSyncJob: vi.fn(),
-  getSyncQueueMetrics: vi.fn(() => ({ queued: 0, running: 0 })),
   isDurableSyncMode: mocks.isDurableSyncMode,
   waitForSyncJob: vi.fn(),
+  getSyncJobRepository: () => Promise.resolve({
+    enqueue: vi.fn(),
+    getMetrics: vi.fn(() => Promise.resolve({ queued: 0, running: 0 })),
+  }),
 }));
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: mocks.assertConnectorMaintenanceUnlocked,
+  assertConnectorMaintenanceUnlockedAsync: mocks.assertConnectorMaintenanceUnlockedAsync,
+}));
+vi.mock('@/lib/sync/control-state', () => ({
+  assertConnectorSyncEnqueueAllowedAsync: mocks.assertConnectorSyncEnqueueAllowedAsync,
 }));
 vi.mock('@/lib/telemetry/operations', () => ({
   setQueuedExpensiveOperations: mocks.setQueuedExpensiveOperations,
@@ -75,7 +80,7 @@ describe('SyncQueue', () => {
 
     runs.get('third')!.resolve(result('third'));
     await third;
-    expect(queue.getRemaining()).toBe(0);
+    expect(await queue.getRemaining()).toBe(0);
   });
 
   it('deduplicates queued work and upgrades a follow-up to a full sync', async () => {
@@ -94,7 +99,7 @@ describe('SyncQueue', () => {
       errors: ['Sync already in progress'],
     });
     const queued = queue.enqueueSync('follow-up');
-    queue.queueFollowUpSync('follow-up');
+    await queue.queueFollowUpSync('follow-up');
     await expect(queue.enqueueSync('follow-up')).resolves.toMatchObject({
       success: false,
       errors: ['Sync already queued'],
@@ -111,7 +116,7 @@ describe('SyncQueue', () => {
 
   it('returns maintenance lock failures as rejected promises', async () => {
     const failure = new Error('connector is under maintenance');
-    mocks.assertConnectorMaintenanceUnlocked.mockImplementationOnce(() => {
+    mocks.assertConnectorMaintenanceUnlockedAsync.mockImplementationOnce(() => {
       throw failure;
     });
     const queue = new SyncQueue(
@@ -121,5 +126,20 @@ describe('SyncQueue', () => {
 
     const request = queue.requestSync('locked');
     await expect(request).rejects.toBe(failure);
+  });
+
+  it('rejects direct sync requests while connector quarantine is active', async () => {
+    const failure = new Error('connector_sync_quarantined');
+    mocks.assertConnectorSyncEnqueueAllowedAsync.mockImplementationOnce(() => {
+      throw failure;
+    });
+    const queue = new SyncQueue(
+      async (connectorId) => result(connectorId),
+      () => false,
+    );
+
+    await expect(queue.requestSync('quarantined', { source: 'api' })).rejects.toBe(failure);
+    expect(mocks.assertConnectorSyncEnqueueAllowedAsync)
+      .toHaveBeenCalledWith('quarantined', 'api');
   });
 });

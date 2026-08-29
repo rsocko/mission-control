@@ -11,6 +11,7 @@ const TASK_FIELDS = [
   'status',
   'statusReason',
   'priority',
+  'planningHorizon',
   'dueDate',
   'effort',
   'estimatedDuration',

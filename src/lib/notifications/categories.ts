@@ -10,6 +10,10 @@ const CATEGORY_LABELS = {
   social: 'Social',
   ai_insights: 'AI Insights',
   packages: 'Packages',
+  infrastructure: 'Infrastructure',
+  backup: 'Backup',
+  automation: 'Automation',
+  security: 'Security',
 } satisfies Record<NotificationCategory, string>;
 
 export function formatNotificationCategoryLabel(category: string): string {

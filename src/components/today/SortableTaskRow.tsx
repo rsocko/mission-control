@@ -6,17 +6,18 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
 import { TaskContextMenu, type TaskContextMenuActions, type HubProject } from '@/components/task-list/TaskContextMenu';
-import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { TaskRowActions } from '@/components/task-row/TaskRowActions';
 import { TaskBlockedBadge, TaskStatusIndicator, isTaskBlocked } from '@/components/task-list/TaskStatusIndicator';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { getTagPillStyle } from '@/lib/constants/colors';
-import { EFFORT_BADGE_COLORS, EFFORT_MEASURE_LABELS, DEFAULT_EFFORT_MEASURE, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
+import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
@@ -24,8 +25,6 @@ import type { ListGroup } from '@/types/dashboard';
 import { MICRO_STATUS_CONFIG } from '@/types';
 import type { MicroStatus } from '@/types';
 import type { MyDayItem, ScheduledTask, SourceList } from './types';
-
-const EFFORT_LABELS = EFFORT_MEASURE_LABELS[DEFAULT_EFFORT_MEASURE];
 
 export function ConnectorIcon({ type, size = 14 }: { type: string; size?: number }) {
   const src = CONNECTOR_ICONS[type];
@@ -55,6 +54,8 @@ interface SortableTaskRowProps {
   onSetDueDate: (date: string | null) => void | Promise<void>;
   onSetPriority: (priority: string) => void | Promise<void>;
   onSetStatus: (status: string) => void | Promise<void>;
+  onFilterPriority?: (priority: string) => void;
+  onFilterStatus?: (status: string) => void;
   onOpenNotes: (mode: 'read' | 'edit') => void;
   compact?: boolean;
   draggable?: boolean;
@@ -85,6 +86,8 @@ export function SortableTaskRow({
   onSetDueDate,
   onSetPriority,
   onSetStatus,
+  onFilterPriority,
+  onFilterStatus,
   onOpenNotes,
   compact = false,
   draggable = true,
@@ -131,20 +134,14 @@ export function SortableTaskRow({
       ref={setNodeRef}
       style={style}
       className={`@container px-4 ${compact ? 'py-1.5' : 'py-3 md:py-3'} flex items-center gap-3 hover:bg-[var(--surface-0)] group cursor-pointer transition-[background-color,opacity] duration-300 relative ${compact ? 'min-h-[40px]' : 'min-h-[48px] md:min-h-0'} ${isCompleting ? 'bg-green-900/10' : ''} ${bulkSelected ? 'bg-blue-900/20' : ''} ${isSelected ? 'ring-1 ring-inset ring-[var(--accent-400)] bg-[var(--accent-500)]/8 rounded-sm' : ''}`}
-      onMouseDown={(e) => {
-        if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();
-      }}
-      onClick={(e) => {
-        if ((e.shiftKey || e.ctrlKey || e.metaKey) && onModifierClick) {
-          e.preventDefault();
-          onModifierClick(item.taskId, e);
-        } else if (bulkMode && onBulkToggle) {
-          onBulkToggle();
-        } else {
-          onSelect(item.taskId);
-        }
-      }}
-      onDoubleClick={() => !bulkMode && onDoubleClick?.(item.taskId)}
+      {...createTaskRowInteractionHandlers({
+        taskId: item.taskId,
+        bulkMode,
+        onSelect,
+        onDoubleClick,
+        onModifierClick,
+        onBulkClick: onBulkToggle,
+      })}
     >
       {bulkMode ? (
         <label className="min-w-[44px] min-h-[44px] md:min-w-0 md:min-h-0 flex items-center justify-center flex-shrink-0 cursor-pointer">
@@ -191,20 +188,23 @@ export function SortableTaskRow({
             <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
           ) : item.microStatus && MICRO_STATUS_CONFIG[item.microStatus as MicroStatus] && (
             <span
-              className="text-xs px-1.5 py-0.5 rounded-full font-medium flex-shrink-0 whitespace-nowrap"
+              className="flex flex-shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs font-medium"
               style={{
                 backgroundColor: `${MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].color}20`,
                 color: MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].color,
               }}
               title={MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].description}
             >
-              {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].emoji} {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
+              <MicroStatusIcon status={item.microStatus as MicroStatus} size={11} />
+              {MICRO_STATUS_CONFIG[item.microStatus as MicroStatus].label}
             </span>
           )}
           <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          {item.sourceListName && <span className="text-xs text-[var(--text-muted)]">{item.sourceListName}</span>}
+        <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
+          {item.sourceListName && (
+            <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
+          )}
           {taskSchedule?.scheduledTime && (
             <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded flex items-center gap-0.5">
               <Clock size={9} /> {taskSchedule.scheduledTime} ({taskSchedule.estimatedDuration || 30}m)
@@ -234,43 +234,36 @@ export function SortableTaskRow({
               {tag.name}
             </button>
           ))}
+          {(item.pushCount ?? 0) >= 2 && (
+            <span
+              className="hidden flex-shrink-0 items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-xs text-amber-400 @min-[640px]:flex"
+              title={`Rescheduled ${item.pushCount ?? 0} times`}
+            >
+              <RotateCcw size={10} aria-hidden="true" /> {item.pushCount ?? 0}
+            </span>
+          )}
+          {item.estimatedDuration && !taskSchedule?.scheduledTime && (
+            <span
+              className="hidden flex-shrink-0 items-center gap-0.5 rounded border border-blue-800/30 bg-blue-900/20 px-1.5 py-0.5 text-xs text-blue-400 tabular-nums @min-[640px]:flex"
+              title={`Estimated: ${item.estimatedDuration}min`}
+            >
+              ⏱ {item.estimatedDuration >= 60 ? `${Math.floor(item.estimatedDuration / 60)}h${item.estimatedDuration % 60 ? ` ${item.estimatedDuration % 60}m` : ''}` : `${item.estimatedDuration}m`}
+            </span>
+          )}
+          {recurrence && (
+            <Tooltip content={`Repeats: ${recurrence}`}>
+              <span className="hidden flex-shrink-0 items-center text-xs text-blue-400 @min-[640px]:flex">
+                <Repeat size={10} />
+              </span>
+            </Tooltip>
+          )}
         </div>
       </div>
-      {item.effort != null && item.effort >= 1 && item.effort <= 5 && (
-        <span className={`hidden text-xs px-1.5 py-0.5 rounded border font-semibold flex-shrink-0 @min-[640px]:inline ${EFFORT_BADGE_COLORS[item.effort]}`}
-              title={`Effort: ${EFFORT_LABELS[item.effort]}`}>
-          {EFFORT_LABELS[item.effort]}
-        </span>
-      )}
-      {(item.pushCount ?? 0) >= 2 && (
-        <span
-          className="hidden flex-shrink-0 items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-xs text-amber-400 @min-[640px]:flex"
-          title={`Rescheduled ${item.pushCount ?? 0} times`}
-        >
-          <RotateCcw size={10} aria-hidden="true" /> {item.pushCount ?? 0}
-        </span>
-      )}
-      {item.estimatedDuration && !taskSchedule?.scheduledTime && (
-        <span
-          className="hidden text-xs flex-shrink-0 items-center gap-0.5 px-1.5 py-0.5 rounded border border-blue-800/30 bg-blue-900/20 text-blue-400 tabular-nums @min-[640px]:flex"
-          title={`Estimated: ${item.estimatedDuration}min`}
-        >
-          ⏱ {item.estimatedDuration >= 60 ? `${Math.floor(item.estimatedDuration / 60)}h${item.estimatedDuration % 60 ? ` ${item.estimatedDuration % 60}m` : ''}` : `${item.estimatedDuration}m`}
-        </span>
-      )}
-      {recurrence && (
-        <span className="hidden text-xs flex-shrink-0 items-center gap-0.5 text-blue-400 @min-[640px]:flex">
-          <Tooltip content={`Repeats: ${recurrence}`}>
-            <span className="flex items-center"><Repeat size={10} /></span>
-          </Tooltip>
-        </span>
-      )}
-      {item.smartScore != null && (
-        <span className="hidden shrink-0 @min-[640px]:block">
-          <SmartScoreBadge score={item.smartScore} breakdown={item.scoreBreakdown ?? undefined} size="sm" />
-        </span>
-      )}
       <TaskRowActions
+        smartScore={item.smartScore}
+        scoreBreakdown={item.scoreBreakdown ?? undefined}
+        planningHorizon={item.planningHorizon}
+        effort={item.effort}
         dueDate={item.dueDate}
         hasDescription={item.hasDescription}
         isInMyDay
@@ -281,8 +274,11 @@ export function SortableTaskRow({
         onSetDueDate={onSetDueDate}
         onSetPriority={onSetPriority}
         onSetStatus={onSetStatus}
+        onFilterPriority={onFilterPriority}
+        onFilterStatus={onFilterStatus}
         onToggleMyDay={() => onRemove(item.taskId)}
         onOpenNotes={onOpenNotes}
+        showMoreActions={Boolean(contextMenuActions)}
         surfaceActions={(
           <>
             <Tooltip content="Focus on this" subtitle="Enter focus mode with a timer">

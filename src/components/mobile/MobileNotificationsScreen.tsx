@@ -884,7 +884,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     [fetchNotifications]
   );
 
-  const executeAction = useCallback(async (notificationId: string, actionId: string) => {
+  const executeAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
     const action = notifications
       .find(notification => notification.id === notificationId)
       ?.actions?.find(candidate => candidate.id === actionId);
@@ -893,7 +897,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       const response = await fetch(`/api/notifications/${notificationId}/actions/${actionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(params ?? {}),
       });
       if (!response.ok) {
         cancelExternalNavigation(externalWindow);
@@ -1061,7 +1065,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
           {selectedNotification && (
             <NotificationDetail
               notification={selectedNotification}
-              onExecuteAction={(actionId) => executeAction(selectedNotification.id, actionId)}
+              onExecuteAction={(actionId, params) => executeAction(selectedNotification.id, actionId, params)}
               onMarkRead={async () => {
                 const nextState = isNotificationUnread(selectedNotification) ? 'read' : 'unread';
                 if (nextState === 'read') {

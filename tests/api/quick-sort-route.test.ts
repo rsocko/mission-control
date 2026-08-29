@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { desc, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { desc, inArray, isNull, lte } from 'drizzle-orm';
 
 const mocks = vi.hoisted(() => {
   const terminals: unknown[] = [];
@@ -49,6 +49,7 @@ vi.mock('@/db/schema', () => ({
     sourceListId: 'sourceListId',
     sourceListName: 'sourceListName',
     dueDate: 'dueDate',
+    planningHorizon: 'planningHorizon',
     createdAt: 'createdAt',
     parentId: 'parentId',
     snoozedUntil: 'snoozedUntil',
@@ -70,10 +71,9 @@ describe('GET /api/tasks/quick-sort', () => {
     vi.mocked(isNull).mockClear();
     vi.mocked(lte).mockClear();
     vi.mocked(desc).mockClear();
-    vi.mocked(sql).mockImplementation(() => ({ as: vi.fn(() => ({})) }));
   });
 
-  it('returns only P0/P1 tasks without due dates in priority-first order', async () => {
+  it('returns tasks without planning horizons in priority-first order', async () => {
     mocks.terminals.push([
       {
         id: 'critical-task',
@@ -87,6 +87,7 @@ describe('GET /api/tasks/quick-sort', () => {
         sourceListId: null,
         sourceListName: null,
         dueDate: null,
+        planningHorizon: null,
         createdAt: '2026-07-30T12:00:00.000Z',
       },
     ],
@@ -105,7 +106,7 @@ describe('GET /api/tasks/quick-sort', () => {
     }]);
 
     const { GET } = await import('@/app/api/tasks/quick-sort/route');
-    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?mode=no_due_date'));
+    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?mode=no_planning_horizon'));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -116,8 +117,7 @@ describe('GET /api/tasks/quick-sort', () => {
       phases: [{ id: 'phase-1', name: 'Delivery', projectId: 'project-1' }],
     });
     expect(body.tasks[0].description).toBeUndefined();
-    expect(inArray).toHaveBeenCalledWith('priority', ['critical', 'high']);
-    expect(isNull).toHaveBeenCalledWith('dueDate');
+    expect(isNull).toHaveBeenCalledWith('planningHorizon');
     expect(isNull).toHaveBeenCalledWith('snoozedUntil');
     expect(lte).toHaveBeenCalledWith('snoozedUntil', expect.any(String));
     expect(desc).toHaveBeenCalledWith('createdAt');
@@ -138,9 +138,10 @@ describe('GET /api/tasks/quick-sort', () => {
 
     expect(body.counts).toEqual({
       no_priority: 1,
+      quadrant: 1,
       no_effort: 2,
       no_tags: 3,
-      no_due_date: 4,
+      no_planning_horizon: 4,
     });
   });
 });

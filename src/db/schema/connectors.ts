@@ -135,7 +135,8 @@ export const syncLog = sqliteTable('sync_log', {
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),
-  trigger: text('trigger').$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery'>(),
+  trigger: text('trigger')
+    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
   scheduledFor: text('scheduled_for'),
   startedAt: text('started_at'),
   attempt: integer('attempt'),
@@ -154,7 +155,9 @@ export const syncJobs = sqliteTable('sync_jobs', {
   id: text('id').primaryKey(),
   connectorId: text('connector_id').notNull(),
   full: integer('full', { mode: 'boolean' }).notNull().default(false),
-  source: text('source').$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery'>().notNull(),
+  source: text('source')
+    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
+    .notNull(),
   status: text('status')
     .$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>()
     .notNull(),
@@ -269,6 +272,48 @@ export const syncSchedules = sqliteTable('sync_schedules', {
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   index('idx_sync_schedules_next_due').on(table.nextDueAt),
+]);
+
+export const connectorSyncControls = sqliteTable('connector_sync_controls', {
+  connectorId: text('connector_id')
+    .primaryKey()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  schedulerState: text('scheduler_state')
+    .$type<'scheduled' | 'quarantined'>()
+    .notNull()
+    .default('scheduled'),
+  quarantineId: text('quarantine_id'),
+  quarantinedAt: text('quarantined_at'),
+  releasedAt: text('released_at'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_connector_sync_controls_state').on(table.schedulerState, table.updatedAt),
+]);
+
+export const connectorSyncOperatorRuns = sqliteTable('connector_sync_operator_runs', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  quarantineId: text('quarantine_id'),
+  operation: text('operation')
+    .$type<'quarantine' | 'canary' | 'release' | 'rollback'>()
+    .notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  jobId: text('job_id').references(() => syncJobs.id, { onDelete: 'set null' }),
+  resultCode: text('result_code').notNull(),
+  cancelledQueuedCount: integer('cancelled_queued_count').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at'),
+}, (table) => [
+  uniqueIndex('idx_connector_sync_operator_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  uniqueIndex('idx_connector_sync_operator_canary')
+    .on(table.connectorId, table.quarantineId, table.operation)
+    .where(sql`${table.operation} = 'canary'`),
+  index('idx_connector_sync_operator_connector')
+    .on(table.connectorId, table.createdAt),
 ]);
 
 export const syncDeletionCandidates = sqliteTable('sync_deletion_candidates', {

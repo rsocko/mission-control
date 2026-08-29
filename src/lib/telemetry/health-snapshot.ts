@@ -1,14 +1,15 @@
 import { performance } from 'node:perf_hooks';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import db, { sqlite, withoutDatabaseObservation } from '@/db';
+import db, { withoutDatabaseObservation } from '@/db';
 import { connectorConfigs, syncLog } from '@/db/schema';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import { getProviderInfo } from '@/lib/ai/provider-factory';
 import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features';
 import logger from '@/lib/logger';
 import { getDependencyRelationshipDegradation } from '@/lib/sync/dependency-health';
 import {
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   type SyncQueueMetrics,
 } from '@/lib/sync/job-queue';
 import {
@@ -30,6 +31,10 @@ import {
   ensureHealthSnapshotCanRun,
   type WorkerHealthSnapshotIdentity,
 } from './health-snapshot-status';
+import {
+  createHealthSnapshotStore,
+  databaseHealthProbe,
+} from './database-health-runtime';
 
 export type ConnectorHealthStatus =
   | 'healthy'
@@ -79,8 +84,8 @@ export interface WorkerHealthSnapshot extends WorkerHealthSnapshotIdentity {
   summary: MaterializedHealthSummary;
 }
 
-const SNAPSHOT_ID = 'current';
 const MAX_CONNECTORS = 1_000;
+const healthSnapshotStore = createHealthSnapshotStore<MaterializedHealthSummary>();
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -92,19 +97,14 @@ export async function buildMaterializedHealthSummary(
 ): Promise<MaterializedHealthSummary> {
   let database: MaterializedHealthSummary['database'];
   try {
-    const { result, pageCount, pageSize } = withoutDatabaseObservation(() => ({
-      result: sqlite.prepare('SELECT 1 as ok').get() as { ok: number } | undefined,
-      pageCount: sqlite.prepare('PRAGMA page_count').get() as
-        | { page_count: number }
-        | undefined,
-      pageSize: sqlite.prepare('PRAGMA page_size').get() as
-        | { page_size: number }
-        | undefined,
-    }));
-    const sizeBytes = (pageCount?.page_count ?? 0) * (pageSize?.page_size ?? 0);
-    database = result?.ok === 1
-      ? { status: 'healthy', message: 'Connected', sizeBytes }
-      : { status: 'error', message: 'Query returned unexpected result' };
+    const result = await databaseHealthProbe.inspect();
+    database = result.connected
+      ? {
+          status: result.severity,
+          message: result.message,
+          sizeBytes: result.sizeBytes,
+        }
+      : { status: result.severity, message: result.message };
   } catch (error) {
     database = {
       status: 'error',
@@ -120,6 +120,30 @@ export async function buildMaterializedHealthSummary(
     workerProcesses,
     syncQueue,
   } = await withoutDatabaseObservation(async () => {
+    if (resolveDatabaseBackend() === 'postgres') {
+      const [{ getPostgresPersistenceBackend }, { collectPostgresHealthSnapshotData }] = await Promise.all([
+        import('@/db/runtime'),
+        import('@/db/postgres/health-snapshot-data'),
+      ]);
+      const {
+        configs,
+        latestSyncPerConnector,
+        latestSuccessfulSyncPerConnector,
+        dependencyHealth,
+      } = await collectPostgresHealthSnapshotData(
+        getPostgresPersistenceBackend().context.db,
+        { maxConnectors: MAX_CONNECTORS, shouldDefer },
+      );
+      return {
+        configs,
+        latestSyncPerConnector,
+        latestSuccessfulSyncPerConnector,
+        dependencyHealth,
+        workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
+        syncQueue: await (await getSyncJobRepository()).getMetrics(),
+      };
+    }
+
     const configs = await db
       .select()
       .from(connectorConfigs)
@@ -168,8 +192,8 @@ export async function buildMaterializedHealthSummary(
       latestSyncPerConnector,
       latestSuccessfulSyncPerConnector,
       dependencyHealth,
-      workerProcesses: getRuntimeTelemetry().filter((runtime) => runtime.role === 'worker'),
-      syncQueue: getSyncQueueMetrics(),
+      workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
+      syncQueue: await (await getSyncJobRepository()).getMetrics(),
     };
   });
 
@@ -192,9 +216,9 @@ export async function buildMaterializedHealthSummary(
   if (database.status !== 'error') {
     const severity = getFreshDatabaseSeverity(workerProcesses, Date.now(), telemetryStaleMs);
     if (severity === 'critical') {
-      database = { ...database, status: 'critical', message: 'Critical SQLite degradation detected' };
+      database = { ...database, status: 'critical', message: 'Critical database degradation detected' };
     } else if (severity === 'degraded') {
-      database = { ...database, status: 'degraded', message: 'SQLite degradation detected' };
+      database = { ...database, status: 'degraded', message: 'Database degradation detected' };
     }
   }
 
@@ -306,59 +330,15 @@ export async function generateWorkerHealthSnapshot(
     generationDurationMs: Math.round(performance.now() - startedAt),
     summary,
   };
-  withoutDatabaseObservation(() => {
-    const upsert = sqlite.prepare(`
-      INSERT INTO worker_health_snapshot (
-        id, schema_version, generated_at, worker_instance_id,
-        worker_revision, generation_duration_ms, payload
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        schema_version = excluded.schema_version,
-        generated_at = excluded.generated_at,
-        worker_instance_id = excluded.worker_instance_id,
-        worker_revision = excluded.worker_revision,
-        generation_duration_ms = excluded.generation_duration_ms,
-        payload = excluded.payload
-    `);
-    sqlite.transaction(() => {
-      ensureHealthSnapshotCanRun(shouldDefer);
-      upsert.run(
-        SNAPSHOT_ID,
-        snapshot.schemaVersion,
-        snapshot.generatedAt,
-        snapshot.worker.instanceId,
-        snapshot.worker.revision,
-        snapshot.generationDurationMs,
-        JSON.stringify(snapshot.summary),
-      );
-    }).immediate();
-  });
+  await healthSnapshotStore.write(
+    snapshot,
+    () => ensureHealthSnapshotCanRun(shouldDefer),
+  );
   return snapshot;
 }
 
-export function readWorkerHealthSnapshot(): WorkerHealthSnapshot | null {
-  const row = withoutDatabaseObservation(() => sqlite.prepare(`
-    SELECT schema_version AS schemaVersion, generated_at AS generatedAt,
-      worker_instance_id AS workerInstanceId, worker_revision AS workerRevision,
-      generation_duration_ms AS generationDurationMs, payload
-    FROM worker_health_snapshot
-    WHERE id = ?
-  `).get(SNAPSHOT_ID)) as {
-    schemaVersion: number;
-    generatedAt: string;
-    workerInstanceId: string;
-    workerRevision: string;
-    generationDurationMs: number;
-    payload: string;
-  } | undefined;
-  if (!row) return null;
-  return {
-    schemaVersion: row.schemaVersion,
-    generatedAt: row.generatedAt,
-    worker: { instanceId: row.workerInstanceId, revision: row.workerRevision },
-    generationDurationMs: row.generationDurationMs,
-    summary: JSON.parse(row.payload) as MaterializedHealthSummary,
-  };
+export async function readWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot | null> {
+  return healthSnapshotStore.read();
 }
 
 export class WorkerHealthSnapshotScheduler {

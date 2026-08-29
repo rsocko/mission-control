@@ -88,7 +88,7 @@ function renderHighlightedText(value: string) {
     return (
       <mark
         key={`${marked[1]}-${index}`}
-        className="rounded-[4px] bg-yellow-500/20 px-0.5 text-[var(--text-primary)]"
+        className="rounded-[4px] bg-yellow-300 px-0.5 font-semibold text-yellow-950"
       >
         {marked[1]}
       </mark>
@@ -468,6 +468,15 @@ export function SearchCommand() {
                       <kbd className="hidden shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] sm:inline-block">
                         ESC
                       </kbd>
+                      <Dialog.Close asChild>
+                        <button
+                          type="button"
+                          aria-label="Close search"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-1)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+                        >
+                          <X size={16} />
+                        </button>
+                      </Dialog.Close>
                     </div>
 
                     {/* Mode and filter row */}

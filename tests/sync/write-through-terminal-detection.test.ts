@@ -39,7 +39,11 @@ vi.mock('@/db', () => {
     },
     runTransaction: vi.fn((fn: (tx: unknown) => void) => {
       const tx = {
-        update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => ({ run: vi.fn() })) })) })),
+        update: vi.fn(() => ({
+          set: vi.fn(() => ({
+            where: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
+          })),
+        })),
         delete: vi.fn(() => ({ where: vi.fn(() => ({ run: vi.fn() })) })),
         insert: vi.fn(() => ({ values: vi.fn(() => ({ run: vi.fn() })) })),
       };

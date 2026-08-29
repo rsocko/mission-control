@@ -27,12 +27,15 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
 import { DatePicker } from '@/components/ui/date-picker';
 import { EffortSelect } from '@/components/EffortBadge';
+import { MicroStatusIcon } from '@/components/task-list/MicroStatusIcon';
 import { MICRO_STATUS_CONFIG } from '@/types';
-import type { MicroStatus } from '@/types';
+import type { MicroStatus, PlanningHorizon, TaskStatus } from '@/types';
 import { cn } from '@/lib/utils';
 import { PRIORITY_TEXT_COLORS, TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
+import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 import type { MicroStatusSuggestion, TaskDetailMode } from './task-detail-types';
 
 const DURATION_OPTIONS = [
@@ -52,6 +55,7 @@ export interface TaskStatusFieldProps {
   microStatus: string | null;
   /** GitHub issues expose extra "close as…" options. */
   connectorType: string;
+  supportedStatusValues?: TaskStatus[];
   canEditStatus: boolean;
   canEditMicroStatus: boolean;
   statusBlockedReason?: string;
@@ -71,12 +75,36 @@ export interface TaskStatusFieldProps {
   onCancelCloseReason: () => void;
 }
 
+const DEFAULT_STATUS_OPTIONS = [
+  { value: 'todo', label: 'To Do', className: TASK_STATUS_VISUALS.todo.textClass },
+  { value: 'in_progress', label: 'In Progress', className: TASK_STATUS_VISUALS.in_progress.textClass },
+  { value: 'blocked', label: 'Blocked', className: TASK_STATUS_VISUALS.blocked.textClass },
+  { value: 'done', label: 'Done', className: TASK_STATUS_VISUALS.done.textClass },
+  { value: 'cancelled', label: 'Cancelled', className: TASK_STATUS_VISUALS.cancelled.textClass },
+] as const;
+
+export function getTaskStatusOptions(
+  connectorType: string,
+  supportedStatusValues?: readonly TaskStatus[],
+) {
+  const supported = supportedStatusValues ? new Set<string>(supportedStatusValues) : null;
+  return DEFAULT_STATUS_OPTIONS
+    .filter((option) => !supported || supported.has(option.value))
+    .map((option) => ({
+      ...option,
+      label: connectorType === 'document-intelligence' && option.value === 'cancelled'
+        ? "Won't do"
+        : option.label,
+    }));
+}
+
 /** Status select, status reason badge, micro-status, and GitHub close reasons. */
 export function TaskStatusField({
   status,
   statusReason,
   microStatus,
   connectorType,
+  supportedStatusValues,
   canEditStatus,
   canEditMicroStatus,
   statusBlockedReason,
@@ -97,6 +125,7 @@ export function TaskStatusField({
 }: TaskStatusFieldProps) {
   const microStatusConfig = microStatus ? MICRO_STATUS_CONFIG[microStatus as MicroStatus] : undefined;
   const isClosed = status === 'done' || status === 'cancelled';
+  const statusOptions = getTaskStatusOptions(connectorType, supportedStatusValues);
 
   return (
     <div className="relative flex min-h-28 flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
@@ -129,11 +158,11 @@ export function TaskStatusField({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="todo" className={TASK_STATUS_VISUALS.todo.textClass}>To Do</SelectItem>
-            <SelectItem value="in_progress" className={TASK_STATUS_VISUALS.in_progress.textClass}>In Progress</SelectItem>
-            <SelectItem value="blocked" className={TASK_STATUS_VISUALS.blocked.textClass}>Blocked</SelectItem>
-            <SelectItem value="done" className={TASK_STATUS_VISUALS.done.textClass}>Done</SelectItem>
-            <SelectItem value="cancelled" className={TASK_STATUS_VISUALS.cancelled.textClass}>Cancelled</SelectItem>
+            {statusOptions.map((option) => (
+              <SelectItem key={option.value} value={option.value} className={option.className}>
+                {option.label}
+              </SelectItem>
+            ))}
             {connectorType === 'github-issues' && (
               <>
                 <SelectItem value="cancelled:not_planned" className="text-rose-400">Close as Not Planned</SelectItem>
@@ -179,9 +208,12 @@ export function TaskStatusField({
               border: `1px solid ${microStatusConfig.color}30`,
             } : undefined}
           >
-            {microStatusConfig
-              ? `${microStatusConfig.emoji} ${microStatusConfig.label}`
-              : 'Add reason'}
+            {microStatusConfig && microStatus ? (
+              <span className="flex items-center gap-1.5">
+                <MicroStatusIcon status={microStatus as MicroStatus} size={13} />
+                {microStatusConfig.label}
+              </span>
+            ) : 'Add reason'}
             <ChevronDown size={11} />
           </button>
 
@@ -212,7 +244,8 @@ export function TaskStatusField({
                   onClick={() => onMicroStatusChange(microStatusSuggestion.status)}
                   className="text-xs text-[var(--accent)] hover:underline font-medium"
                 >
-                  {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].emoji} {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].label}
+                  <MicroStatusIcon status={microStatusSuggestion.status as MicroStatus} size={12} className="mr-1 inline" />
+                  {MICRO_STATUS_CONFIG[microStatusSuggestion.status as MicroStatus].label}
                 </button>
                 <p className="text-xs text-[var(--text-muted)] mt-0.5 leading-tight">{microStatusSuggestion.reason}</p>
               </div>
@@ -257,7 +290,7 @@ export function TaskStatusField({
                         microStatus === key ? 'bg-[var(--surface-0)]' : ''
                       }`}
                     >
-                      <span className="text-sm flex-shrink-0 mt-px">{config.emoji}</span>
+                      <MicroStatusIcon status={key} size={14} className="mt-px" style={{ color: config.color }} />
                       <div className="min-w-0 flex-1">
                         <span className="block text-xs font-medium" style={{ color: config.color }}>{config.label}</span>
                         <span className="block text-xs text-[var(--text-muted)] leading-tight">{config.description}</span>
@@ -318,19 +351,29 @@ export function TaskStatusField({
 
 export interface TaskPriorityFieldProps {
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   canEditPriority: boolean;
+  canEditPlanningHorizon: boolean;
   priorityBlockedReason?: string;
+  planningHorizonBlockedReason?: string;
   prioritySaveLabel?: string;
+  planningHorizonSaveLabel?: string;
   onPriorityChange: (priority: string) => void;
+  onPlanningHorizonChange: (planningHorizon: PlanningHorizon | null) => void;
 }
 
-/** Priority select. */
+/** Priority and broad planning intent. */
 export function TaskPriorityField({
   priority,
+  planningHorizon,
   canEditPriority,
+  canEditPlanningHorizon,
   priorityBlockedReason,
+  planningHorizonBlockedReason,
   prioritySaveLabel,
+  planningHorizonSaveLabel,
   onPriorityChange,
+  onPlanningHorizonChange,
 }: TaskPriorityFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
@@ -350,6 +393,35 @@ export function TaskPriorityField({
           ))}
         </SelectContent>
       </Select>
+      <div className="mt-auto w-full space-y-1.5">
+        <PlanningHorizonFieldLabel className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
+        <Select
+          value={planningHorizon ?? 'none'}
+          onValueChange={(value) => onPlanningHorizonChange(
+            value === 'none' ? null : value as PlanningHorizon,
+          )}
+          disabled={!canEditPlanningHorizon}
+        >
+          <SelectTrigger
+            aria-label="Horizon"
+            title={!canEditPlanningHorizon
+              ? planningHorizonBlockedReason
+              : planningHorizonSaveLabel}
+            variant="inline"
+            className="min-h-8 w-full justify-between rounded-lg border border-[var(--border-subtle)] px-2 text-xs"
+          >
+            <PlanningHorizonOption value={planningHorizon} />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none"><PlanningHorizonOption value={null} /></SelectItem>
+            {PLANNING_HORIZONS.map((value) => (
+              <SelectItem key={value} value={value}>
+                <PlanningHorizonOption value={value} />
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
-  ArrowRight,
   CheckCircle2,
   Keyboard,
   Loader2,
@@ -18,7 +17,10 @@ import ModeSelector from './ModeSelector';
 import OrderSelector from './OrderSelector';
 import ScopeFilter from './ScopeFilter';
 import QuickSortCard from './QuickSortCard';
-import QuickSortActions, { type TagOption } from './QuickSortActions';
+import QuickSortActions, {
+  type QuadrantChoice,
+  type TagOption,
+} from './QuickSortActions';
 import ActivityBanner from './ActivityBanner';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { TaskDetailPanel, type TaskFieldUpdate } from '@/components/task-detail/TaskDetailPanel';
@@ -27,6 +29,7 @@ import { useQuickSortData } from '@/lib/hooks/useQuickSortData';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { getLocalToday } from '@/lib/utils/client-date';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -39,23 +42,25 @@ import {
   taskDispositionBlockedReason,
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
-import type { LocalDisposition, TaskField } from '@/types';
+import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
+import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 
 const MODE_LABELS: Record<QuickSortQueueMode, string> = {
   no_priority: 'Set Priority',
+  quadrant: 'Pick Quadrant',
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
-  no_due_date: 'Plan / Schedule',
+  no_planning_horizon: 'Set Horizon',
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };
-const SKIP_SNOOZE_MS = 30 * 60 * 1000;
 const QUEUE_REVALIDATE_MS = 60 * 1000;
 
 interface QuickSortHistoryEntry {
   operationId: string;
   task: QuickSortQueueTask;
   queueIndex: number;
+  action: 'applied' | 'suggestion_accepted' | 'skipped';
   label: string;
   contextKey: string;
   counted: boolean;
@@ -178,6 +183,7 @@ export default function QuickSortMode() {
       operationId,
       task,
       queueIndex,
+      action,
       label,
       contextKey: historyContextKey,
       counted: action !== 'skipped',
@@ -201,7 +207,11 @@ export default function QuickSortMode() {
         const data = await response.json().catch(() => null) as { error?: string } | null;
         throw new Error(data?.error ?? `Failed to undo ${operation.label}`);
       }
-      restoreTask(operation.task, operation.queueIndex);
+      if (operation.action === 'skipped') {
+        await reloadQueue();
+      } else {
+        restoreTask(operation.task, operation.queueIndex);
+      }
       setHistory((current) => current.filter(
         (entry) => entry.operationId !== operation.operationId,
       ));
@@ -225,7 +235,7 @@ export default function QuickSortMode() {
       undoInFlightRef.current = false;
       setBusy(false);
     }
-  }, [busy, lastOperation, refreshCounts, restoreTask]);
+  }, [busy, lastOperation, refreshCounts, reloadQueue, restoreTask]);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -246,7 +256,7 @@ export default function QuickSortMode() {
 
   const handleModeSelect = useCallback((nextMode: QuickSortQueueMode) => {
     if (busy) return;
-    setOrder(nextMode === 'no_due_date' ? 'priority' : 'smart');
+    setOrder(nextMode === 'no_planning_horizon' ? 'priority' : 'smart');
     setMode(nextMode);
     setSelectedTaskId(null);
   }, [busy]);
@@ -286,16 +296,12 @@ export default function QuickSortMode() {
     async (taskId: string) => {
       if (busy || !mode) return;
       const task = tasks.find((candidate) => candidate.id === taskId);
-      if (!canEditTaskField(task?.editPolicy, 'snoozedUntil')) {
-        toast.error(taskFieldBlockedReason(task?.editPolicy, 'snoozedUntil'));
-        return;
-      }
+      if (!task) return;
       setBusy(true);
       try {
-        const snoozedUntil = new Date(Date.now() + SKIP_SNOOZE_MS).toISOString();
         await runOperation({
-          task: task!,
-          patch: { snoozedUntil },
+          task,
+          patch: {},
           operationMode: mode,
           action: 'skipped',
           label: 'Skip',
@@ -351,6 +357,83 @@ export default function QuickSortMode() {
     [busy, dismiss, mode, refreshCounts, runOperation, topTask],
   );
 
+  const handleApplyQuadrant = useCallback(
+    async (quadrant: QuadrantChoice, dueDate?: string) => {
+      if (!topTask || busy) return;
+      const today = getLocalToday();
+      const config: Record<QuadrantChoice, {
+        fields: TaskField[];
+        patch: Record<string, unknown>;
+        label: string;
+        message: string;
+      }> = {
+        do_first: {
+          fields: ['priority', 'planningHorizon'],
+          patch: { priority: 'high', planningHorizon: 'next' },
+          label: 'Do first',
+          message: 'Moved to Do first',
+        },
+        schedule: {
+          fields: ['priority', 'dueDate'],
+          patch: { priority: 'high', dueDate },
+          label: 'Schedule',
+          message: 'Moved to Schedule',
+        },
+        delegate: {
+          fields: ['planningHorizon', 'microStatus'],
+          patch: {
+            planningHorizon: 'next',
+            microStatus: 'waiting_on_someone',
+          },
+          label: 'Delegate',
+          message: 'Marked for delegation',
+        },
+        eliminate: {
+          fields: ['status', 'statusReason'],
+          patch: { status: 'cancelled', statusReason: 'not_planned' },
+          label: 'Eliminate',
+          message: 'Closed as not planned',
+        },
+      };
+      const selection = config[quadrant];
+      const blockedField = selection.fields.find(
+        (field) => !canEditTaskField(topTask.editPolicy, field),
+      );
+      if (blockedField) {
+        toast.error(taskFieldBlockedReason(topTask.editPolicy, blockedField));
+        return;
+      }
+      if (quadrant === 'schedule' && !dueDate) {
+        toast.error('Choose a date for this quadrant');
+        return;
+      }
+      if (quadrant === 'schedule' && dueDate! <= today) {
+        toast.error('Schedule requires a future date; use Do first for today');
+        return;
+      }
+      setBusy(true);
+      try {
+        await runOperation({
+          task: topTask,
+          patch: selection.patch,
+          operationMode: 'quadrant',
+          action: 'applied',
+          label: selection.label,
+        });
+        dismiss(topTask.id);
+        refreshCounts();
+        setStatsKey((key) => key + 1);
+        setSessionSorted((count) => count + 1);
+        toast.success(selection.message);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : `Failed to apply ${selection.label}`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, dismiss, refreshCounts, runOperation, topTask],
+  );
+
   const handleApplyPriority = useCallback(
     async (priority: string) => {
       if (!topTask || busy) return;
@@ -369,15 +452,16 @@ export default function QuickSortMode() {
         });
         dismiss(topTask.id);
         refreshCounts();
-        setStatsKey((k) => k + 1);
-        setSessionSorted((n) => n + 1);
+        setStatsKey((key) => key + 1);
+        setSessionSorted((count) => count + 1);
         toast.success(`Priority set to ${priority}`);
-      } catch {
-        toast.error('Failed to update priority');
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'Failed to update priority');
+      } finally {
+        setBusy(false);
       }
-      setBusy(false);
     },
-    [topTask, busy, dismiss, refreshCounts, runOperation]
+    [busy, dismiss, refreshCounts, runOperation, topTask],
   );
 
   const handleApplyEffort = useCallback(
@@ -440,29 +524,29 @@ export default function QuickSortMode() {
     [topTask, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
-  const handleApplyDueDate = useCallback(
-    async (dueDate: string) => {
+  const handleApplyPlanningHorizon = useCallback(
+    async (planningHorizon: PlanningHorizon) => {
       if (!topTask || busy) return;
-      if (!canEditTaskField(topTask.editPolicy, 'dueDate')) {
-        toast.error(taskFieldBlockedReason(topTask.editPolicy, 'dueDate'));
+      if (!canEditTaskField(topTask.editPolicy, 'planningHorizon')) {
+        toast.error(taskFieldBlockedReason(topTask.editPolicy, 'planningHorizon'));
         return;
       }
       setBusy(true);
       try {
         await runOperation({
           task: topTask,
-          patch: { dueDate },
-          operationMode: 'no_due_date',
+          patch: { planningHorizon },
+          operationMode: 'no_planning_horizon',
           action: 'applied',
-          label: 'Set due date',
+          label: 'Set horizon',
         });
         dismiss(topTask.id);
         refreshCounts();
         setStatsKey((k) => k + 1);
         setSessionSorted((n) => n + 1);
-        toast.success(`Due date set to ${dueDate}`);
+        toast.success(`Horizon set to ${planningHorizon}`);
       } catch {
-        toast.error('Failed to set due date');
+        toast.error('Failed to set horizon');
       }
       setBusy(false);
     },
@@ -506,12 +590,11 @@ export default function QuickSortMode() {
     const resolvesCurrentQueue =
       fields.status === 'done'
       || fields.status === 'cancelled'
-      || (mode === 'no_priority' && typeof fields.priority === 'string' && fields.priority !== 'none')
+      || ((mode === 'no_priority' || mode === 'quadrant')
+        && typeof fields.priority === 'string'
+        && fields.priority !== 'none')
       || (mode === 'no_effort' && typeof fields.effort === 'number')
-      || (mode === 'no_due_date' && (
-        typeof fields.dueDate === 'string'
-        || (typeof fields.priority === 'string' && !['critical', 'high'].includes(fields.priority))
-      ));
+      || (mode === 'no_planning_horizon' && isPlanningHorizon(fields.planningHorizon));
 
     if (resolvesCurrentQueue) {
       dismiss(selectedTaskId);
@@ -524,6 +607,9 @@ export default function QuickSortMode() {
     if (typeof fields.status === 'string') patch.status = fields.status;
     if (typeof fields.effort === 'number' || fields.effort === null) patch.effort = fields.effort;
     if (typeof fields.dueDate === 'string' || fields.dueDate === null) patch.dueDate = fields.dueDate;
+    if (isPlanningHorizon(fields.planningHorizon) || fields.planningHorizon === null) {
+      patch.planningHorizon = fields.planningHorizon;
+    }
     updateTask(selectedTaskId, patch);
   }, [dismiss, mode, refreshCounts, refreshQueue, selectedTaskId, updateTask]);
 
@@ -620,9 +706,10 @@ export default function QuickSortMode() {
       if (!task) return;
       const fieldByMode: Record<QuickSortQueueMode, TaskField> = {
         no_priority: 'priority',
+        quadrant: 'priority',
         no_effort: 'effort',
         no_tags: 'tags',
-        no_due_date: 'dueDate',
+        no_planning_horizon: 'planningHorizon',
       };
       const modeField = fieldByMode[mode];
       if (!canEditTaskField(task.editPolicy, modeField)) {
@@ -688,11 +775,11 @@ export default function QuickSortMode() {
     [suggestions, tasks, mode, busy, dismiss, refreshCounts, recordRecentTag, runOperation]
   );
 
-  const hasAnySuggestion = !!(
+  const hasAnySuggestion = mode !== 'quadrant' && !!(
     topSuggestion
     && (topSuggestion.priority || topSuggestion.effort || topSuggestion.tags.length > 0)
   );
-  const hasFocusedSuggestion = !!(
+  const hasFocusedSuggestion = mode !== 'quadrant' && !!(
     topSuggestion
     && (
       (mode === 'no_priority' && topSuggestion.priority)
@@ -749,6 +836,7 @@ export default function QuickSortMode() {
 
       const isLocalShortcut = (
         (mode === 'no_priority' && ['1', '2', '3', '4'].includes(key))
+        || (mode === 'quadrant' && ['1', '3'].includes(key))
         || (mode === 'no_effort' && ['1', '2', '3', '4', '5'].includes(key))
         || ['a', 'k', 'd', 'v'].includes(key)
       );
@@ -761,6 +849,10 @@ export default function QuickSortMode() {
       if (mode === 'no_priority' && ['1', '2', '3', '4'].includes(key)) {
         const priorities = ['critical', 'high', 'medium', 'low'];
         void handleApplyPriority(priorities[Number(key) - 1]);
+      } else if (mode === 'quadrant' && key === '1') {
+        void handleApplyQuadrant('do_first');
+      } else if (mode === 'quadrant' && key === '3') {
+        void handleApplyQuadrant('delegate');
       } else if (mode === 'no_effort' && ['1', '2', '3', '4', '5'].includes(key)) {
         void handleApplyEffort(Number(key));
       } else if (key === 'a' && event.shiftKey && hasAnySuggestion) {
@@ -788,6 +880,7 @@ export default function QuickSortMode() {
     handleAcceptSuggestions,
     handleApplyEffort,
     handleApplyPriority,
+    handleApplyQuadrant,
     handleMarkDone,
     handleSkip,
     handleUndo,
@@ -843,13 +936,13 @@ export default function QuickSortMode() {
       ) : (
         <div className="flex min-h-0 min-w-0">
           <section
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+            className="quick-sort-mode flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
             data-testid="quick-sort-mode"
           >
-            <div className="flex flex-shrink-0 items-center gap-3 border-b border-transparent px-4 pb-3 pt-4 lg:border-[var(--border-subtle)] lg:px-6">
+            <div className="quick-sort-mode-header flex min-h-11 flex-shrink-0 items-center gap-2 border-b border-transparent px-4 py-2 lg:gap-3 lg:border-[var(--border-subtle)] lg:px-6 lg:py-3">
               <button
                 onClick={() => setMode(null)}
-                className="p-2 -ml-2 rounded-lg text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors lg:hidden"
+                className="-ml-2 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] lg:hidden"
                 aria-label="Back"
               >
                 <ArrowLeft size={18} />
@@ -860,30 +953,41 @@ export default function QuickSortMode() {
                   Choose an action below or use the keyboard shortcuts.
                 </p>
               </div>
+              <div className="quick-sort-landscape-order hidden min-w-0">
+                <OrderSelector value={order} onChange={setOrder} />
+              </div>
               <button
                 type="button"
                 onClick={() => void handleUndo()}
                 disabled={!lastOperation || busy}
-                className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-3)] disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={lastOperation ? `Undo ${lastOperation.label}` : 'Nothing to undo'}
               >
                 <RotateCcw size={15} />
                 <span className="hidden sm:inline">Undo</span>
               </button>
               {remaining > 0 && (
-                <span className="rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
+                <span className="quick-sort-remaining rounded-full bg-[var(--surface-2)] px-2 py-1 text-xs font-medium text-[var(--text-secondary)]">
                   <AnimatedCounter value={remaining} className="tabular-nums" /> left
                 </span>
               )}
             </div>
 
-            <div className="flex flex-shrink-0 items-center gap-3 px-4 pb-3 lg:px-6 lg:py-3">
+            <div className="quick-sort-order-row flex flex-shrink-0 items-center gap-3 px-4 pb-2 lg:px-6 lg:py-3">
               <div className="min-w-0 flex-1">
                 <OrderSelector value={order} onChange={setOrder} />
               </div>
               <div className="hidden flex-wrap items-center justify-end gap-1.5 text-[11px] text-[var(--text-muted)] lg:flex">
                 <Keyboard size={13} />
-                <span>{mode === 'no_priority' ? '1–4 choose' : mode === 'no_effort' ? '1–5 choose' : 'Choose below'}</span>
+                <span>
+                  {mode === 'no_priority'
+                    ? '1-4 choose'
+                    : mode === 'quadrant'
+                      ? '1 do first · 3 delegate'
+                      : mode === 'no_effort'
+                        ? '1-5 choose'
+                        : 'Choose below'}
+                </span>
                 <span>·</span>
                 <span>A apply AI</span>
                 <span>·</span>
@@ -941,7 +1045,7 @@ export default function QuickSortMode() {
               </div>
             ) : (
               <>
-                <div className="relative flex min-h-[19rem] flex-1 flex-col overflow-hidden px-4 lg:px-6">
+                <div className="quick-sort-card-region relative flex min-h-0 flex-1 flex-col overflow-hidden px-4 lg:min-h-[19rem] lg:px-6">
                   {tasks.length === 0 ? (
                     <div className="flex h-full flex-col items-center justify-center gap-5 px-6 py-12">
                       <CheckCircle2 size={48} className="text-green-400" />
@@ -1003,6 +1107,7 @@ export default function QuickSortMode() {
                           onAcceptSuggestions={handleAcceptSuggestions}
                           onAcceptFocused={handleAcceptFocused}
                           onSkip={handleSkip}
+                          busy={busy}
                         />
                       ))}
 
@@ -1020,13 +1125,14 @@ export default function QuickSortMode() {
                             <QuickSortCard
                               task={topTask}
                               mode={mode}
-                              suggestion={topSuggestion}
+                              suggestion={mode === 'quadrant' ? undefined : topSuggestion}
                               stackIndex={0}
                               onAcceptSuggestions={handleAcceptSuggestions}
                               onAcceptFocused={handleAcceptFocused}
                               onSkip={handleSkip}
                               onUndo={lastOperation ? handleUndo : undefined}
                               undoLabel={lastOperation?.label}
+                              busy={busy}
                             />
                           </motion.div>
                         )}
@@ -1037,22 +1143,6 @@ export default function QuickSortMode() {
 
                 {topTask && (
                   <>
-                    <div className="mx-4 mb-3 flex-shrink-0 rounded-[22px] bg-white/[0.03] px-4 py-3 ring-1 ring-inset ring-white/[0.06] lg:hidden">
-                      <div className="flex items-center justify-center gap-3 text-[13px]">
-                        {mode !== 'no_due_date' && (
-                          <>
-                            <span className="inline-flex items-center gap-1 text-violet-300"><ArrowLeft className="w-3.5 h-3.5" /> Accept AI</span>
-                            <span className="text-slate-600">·</span>
-                            <span className="inline-flex items-center gap-1 text-sky-300"><ArrowRight className="w-3.5 h-3.5" /> Override</span>
-                            <span className="text-slate-600">·</span>
-                          </>
-                        )}
-                        <span className="text-slate-400">
-                          Swipe up to skip{lastOperation ? ' · down to undo' : ''}
-                        </span>
-                      </div>
-                    </div>
-
                     {hasAnySuggestion && (
                       <div className="mx-6 mb-3 hidden items-center gap-3 rounded-xl border border-violet-400/20 bg-violet-500/10 px-4 py-3 lg:flex">
                         <Sparkles size={16} className="text-violet-300" />
@@ -1082,21 +1172,22 @@ export default function QuickSortMode() {
                     )}
 
                     <div
-                      className="flex-shrink-0 border-t border-[var(--border-subtle)] pb-2 pt-3 lg:px-2 lg:pb-4"
+                      className="quick-sort-action-region min-h-0 flex-shrink-0 overflow-hidden border-t border-[var(--border-subtle)] pb-2 pt-2 lg:px-2 lg:pb-4 lg:pt-3"
                       data-testid="quick-sort-actions"
                     >
                       <QuickSortActions
                         task={topTask}
                         mode={mode}
-                        suggestion={topSuggestion}
+                        suggestion={mode === 'quadrant' ? undefined : topSuggestion}
                         onViewTask={() => setSelectedTaskId(topTask.id)}
                         onSkip={() => handleSkip(topTask.id)}
                         onMarkDone={handleMarkDone}
                         onSetLocalDisposition={handleSetLocalDisposition}
+                        onApplyQuadrant={handleApplyQuadrant}
                         onApplyPriority={handleApplyPriority}
                         onApplyEffort={handleApplyEffort}
                         onApplyTag={handleApplyTag}
-                        onApplyDueDate={handleApplyDueDate}
+                        onApplyPlanningHorizon={handleApplyPlanningHorizon}
                         allTags={allTags}
                         tagsLoading={tagsLoading}
                         recentTagIds={recentTagIds}

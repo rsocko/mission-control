@@ -61,12 +61,14 @@ export function NavigationRailMorph({
   count,
   tone,
   expanded,
+  expandedEndOffset = 0,
   pulse = false,
   morphId,
 }: {
   count: number;
   tone: NavBadgeTone;
   expanded: boolean;
+  expandedEndOffset?: number;
   pulse?: boolean;
   morphId?: string;
 }) {
@@ -81,7 +83,7 @@ export function NavigationRailMorph({
   const height = expanded ? BADGE_HEIGHT : BAR_HEIGHT;
   const bottomOffset = expanded ? BADGE_BOTTOM_OFFSET : BAR_BOTTOM_OFFSET;
   const targetLeft = expanded
-    ? RAIL_EXPANDED_ROW_WIDTH - RAIL_ROW_PADDING_X - width
+    ? RAIL_EXPANDED_ROW_WIDTH - RAIL_ROW_PADDING_X - expandedEndOffset - width
     : RAIL_ROW_PADDING_X + RAIL_ICON_WIDTH / 2 - width / 2;
 
   return (

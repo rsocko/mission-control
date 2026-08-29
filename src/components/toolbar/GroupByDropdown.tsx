@@ -3,13 +3,19 @@
 import { useState, useEffect, useRef } from 'react';
 import { Layers } from 'lucide-react';
 
-const GROUP_OPTIONS = [
+export interface GroupOption {
+  value: string;
+  label: string;
+}
+
+export const DEFAULT_GROUP_OPTIONS: readonly GroupOption[] = [
   { value: 'none', label: 'None' },
   { value: 'source', label: 'Source' },
   { value: 'list', label: 'List' },
   { value: 'status', label: 'Status' },
   { value: 'tag', label: 'Tag' },
   { value: 'priority', label: 'Priority' },
+  { value: 'planningHorizon', label: 'Horizon' },
   { value: 'effort', label: 'Effort' },
   { value: 'dueDate', label: 'Due Date' },
   { value: 'project', label: 'Project + Phase' },
@@ -18,11 +24,16 @@ const GROUP_OPTIONS = [
 const STORAGE_KEY = 'mission-control:group-by';
 
 interface GroupByDropdownProps {
+  options?: readonly GroupOption[];
   value?: string;
   onChange?: (groupBy: string) => void;
 }
 
-export function GroupByDropdown({ value, onChange }: GroupByDropdownProps = {}) {
+export function GroupByDropdown({
+  options = DEFAULT_GROUP_OPTIONS,
+  value,
+  onChange,
+}: GroupByDropdownProps = {}) {
   const [open, setOpen] = useState(false);
   const [internalGroupBy, setInternalGroupBy] = useState('none');
   const ref = useRef<HTMLDivElement>(null);
@@ -30,10 +41,12 @@ export function GroupByDropdown({ value, onChange }: GroupByDropdownProps = {}) 
   const groupBy = value ?? internalGroupBy;
 
   useEffect(() => {
-    if (value === undefined) {
+    if (value !== undefined) return;
+    const restoreFrame = requestAnimationFrame(() => {
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) setInternalGroupBy(stored);
-    }
+    });
+    return () => cancelAnimationFrame(restoreFrame);
   }, [value]);
 
   useEffect(() => {
@@ -80,7 +93,7 @@ export function GroupByDropdown({ value, onChange }: GroupByDropdownProps = {}) 
     }
   };
 
-  const currentLabel = GROUP_OPTIONS.find((o) => o.value === groupBy)?.label || 'None';
+  const currentLabel = options.find((o) => o.value === groupBy)?.label || 'None';
 
   return (
     <div ref={ref} className="relative" onKeyDown={handleKeyDown}>
@@ -101,7 +114,7 @@ export function GroupByDropdown({ value, onChange }: GroupByDropdownProps = {}) 
           aria-label="Group by options"
           className="absolute right-0 top-full mt-1 z-50 w-40 bg-[var(--surface-2)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-[var(--shadow-lg)] py-1"
         >
-          {GROUP_OPTIONS.map((option) => (
+          {options.map((option) => (
             <button
               key={option.value}
               role="menuitem"

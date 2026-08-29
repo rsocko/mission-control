@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('demo mode banner layout', () => {
-  it('keeps the banner at the top of the content column', () => {
+  it('keeps the banner below the safe-area-aware mobile header', () => {
     const source = readFileSync(
       resolve(process.cwd(), 'src/components/layout/AppShell.tsx'),
       'utf8',
@@ -15,8 +15,8 @@ describe('demo mode banner layout', () => {
     const mobileHeader = source.indexOf('<MobileHeader');
 
     expect(contentColumn).toBeGreaterThan(-1);
-    expect(banner).toBeGreaterThan(contentColumn);
-    expect(banner).toBeLessThan(mobileHeader);
+    expect(mobileHeader).toBeGreaterThan(contentColumn);
+    expect(banner).toBeGreaterThan(mobileHeader);
   });
 
   it('keeps banner content compact on narrow screens', () => {

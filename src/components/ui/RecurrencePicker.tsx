@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Select,
   SelectTrigger,
@@ -8,6 +8,7 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
+import { getCompletionAnchoredDueDate } from '@/lib/utils/recurrence';
 
 const PRESET_OPTIONS = [
   { value: 'none', label: 'Does not repeat' },
@@ -116,13 +117,24 @@ function parseExistingValue(value: string): { intervalN: number; intervalUnit: s
 interface RecurrencePickerProps {
   value: string;
   onChange: (value: string) => void;
+  mode?: 'schedule' | 'completion';
+  onModeChange?: (mode: 'schedule' | 'completion') => void;
+  completionModeAvailable?: boolean;
   /** Compact inline style for detail panel vs. full-width for add-task modal */
   variant?: 'full' | 'compact';
   /** When true, the picker is non-interactive */
   disabled?: boolean;
 }
 
-export default function RecurrencePicker({ value, onChange, variant = 'full', disabled = false }: RecurrencePickerProps) {
+export default function RecurrencePicker({
+  value,
+  onChange,
+  mode = 'schedule',
+  onModeChange,
+  completionModeAvailable = false,
+  variant = 'full',
+  disabled = false,
+}: RecurrencePickerProps) {
   const isPreset = PRESET_OPTIONS.some(o => o.value === value) && value !== 'custom';
   const isCustom = !isPreset && value !== 'none';
 
@@ -143,6 +155,19 @@ export default function RecurrencePicker({ value, onChange, variant = 'full', di
       setShowCustom(false);
     }
   }, [value, isCustom]);
+
+  const completionPreview = useMemo(() => {
+    if (mode !== 'completion' || value === 'none') return null;
+    const nextDate = getCompletionAnchoredDueDate(
+      new Date().toISOString(),
+      value,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+      false,
+    );
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+    }).format(new Date(`${nextDate}T12:00:00`));
+  }, [mode, value]);
 
   const selectValue = isCustom ? 'custom' : value;
 
@@ -197,6 +222,28 @@ export default function RecurrencePicker({ value, onChange, variant = 'full', di
           ))}
         </SelectContent>
       </Select>
+
+      {value !== 'none' && completionModeAvailable && onModeChange && (
+        <div className="space-y-1">
+          <Select value={mode} onValueChange={(next) => onModeChange(next as 'schedule' | 'completion')} disabled={disabled}>
+            <SelectTrigger
+              aria-label="Recurrence anchor"
+              className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="schedule">On the fixed schedule</SelectItem>
+              <SelectItem value="completion">After I complete it</SelectItem>
+            </SelectContent>
+          </Select>
+          {mode === 'completion' && (
+            <p suppressHydrationWarning className="text-xs text-[var(--text-muted)]">
+              If completed today, the next task is due {completionPreview ?? 'one interval later'}.
+            </p>
+          )}
+        </div>
+      )}
 
       {showCustom && (
         <div className={`space-y-2 ${isCompact ? '' : 'pl-0.5'}`}>

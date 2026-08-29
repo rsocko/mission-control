@@ -21,15 +21,19 @@ const queueMocks = vi.hoisted(() => {
   return {
     job,
     result,
-    enqueueSyncJob: vi.fn(() => job),
-    registerSyncSchedule: vi.fn(),
-    unregisterSyncSchedule: vi.fn(),
+    enqueueSyncJob: vi.fn(() => Promise.resolve(job)),
+    registerSyncSchedule: vi.fn(() => Promise.resolve()),
+    unregisterSyncSchedule: vi.fn(() => Promise.resolve()),
+    markSyncScheduleEnqueued: vi.fn(() => Promise.resolve()),
     isDurableSyncMode: vi.fn(() => true),
     waitForSyncJob: vi.fn(async () => result),
   };
 });
 
 vi.mock('@/db', () => ({
+  sqlite: {
+    prepare: vi.fn(() => ({ get: vi.fn(() => undefined) })),
+  },
   default: {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
@@ -92,7 +96,7 @@ vi.mock('@/lib/sync/task-dependency-manager', () => ({
   reconcileTaskDependencies: vi.fn(),
 }));
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/lib/sync/list-manager', () => ({
   upsertSourceLists: vi.fn(),
@@ -110,18 +114,19 @@ vi.mock('@/lib/notifications', () => ({
   wakeNotificationDeliveryDispatcher: vi.fn(),
 }));
 vi.mock('@/lib/sync/job-queue', () => ({
-  countRemainingSyncJobs: vi.fn(() => 0),
-  enqueueSyncJob: queueMocks.enqueueSyncJob,
-  getActiveSyncJobConnectorIds: vi.fn(() => []),
-  getLatestDurableSyncResult: vi.fn(),
-  getSyncSchedules: vi.fn(() => []),
-  getSyncDurationBudgetMs: vi.fn(() => 300_000),
-  getSyncQueueMetrics: vi.fn(() => ({ queued: 0, running: 0 })),
   isDurableSyncMode: queueMocks.isDurableSyncMode,
-  markSyncScheduleEnqueued: vi.fn(),
-  registerSyncSchedule: queueMocks.registerSyncSchedule,
-  unregisterSyncSchedule: queueMocks.unregisterSyncSchedule,
   waitForSyncJob: queueMocks.waitForSyncJob,
+  getSyncDurationBudgetMs: vi.fn(() => 300_000),
+  getSyncJobRepository: () => Promise.resolve({
+    enqueue: queueMocks.enqueueSyncJob,
+    registerSchedule: queueMocks.registerSyncSchedule,
+    unregisterSchedule: queueMocks.unregisterSyncSchedule,
+    markScheduleEnqueued: queueMocks.markSyncScheduleEnqueued,
+    getActiveConnectorIds: vi.fn(() => Promise.resolve([])),
+    getSchedules: vi.fn(() => Promise.resolve([])),
+    getMetrics: vi.fn(() => Promise.resolve({ queued: 0, running: 0 })),
+    getLatestResult: vi.fn(() => Promise.resolve(undefined)),
+  }),
 }));
 
 describe('web sync routing in durable mode', () => {
@@ -146,18 +151,27 @@ describe('web sync routing in durable mode', () => {
     const { SyncCronScheduler } = await import('@/lib/sync');
     const scheduler = new SyncCronScheduler(
       vi.fn(),
-      vi.fn(),
-      vi.fn(() => []),
+      vi.fn(() => Promise.resolve(undefined)),
+      vi.fn(() => Promise.resolve([])),
     );
 
-    scheduler.schedule({
+    await scheduler.schedule({
       id: 'github-1',
       type: 'github-issues',
       name: 'GitHub',
       enabled: true,
       syncMode: 'poll',
       pollIntervalMinutes: 10,
-      capabilities: { read: true, write: true },
+      capabilities: {
+        read: true,
+        write: true,
+        delete: false,
+        sync: true,
+        subtasks: false,
+        lists: false,
+        tags: false,
+        tagWriteBack: false,
+      },
       credentials: {},
       settings: {},
       syncedLists: [],
@@ -173,8 +187,8 @@ describe('web sync routing in durable mode', () => {
     const { SyncCronScheduler } = await import('@/lib/sync');
     const scheduler = new SyncCronScheduler(
       vi.fn(),
-      vi.fn(),
-      vi.fn(() => []),
+      vi.fn(() => Promise.resolve(undefined)),
+      vi.fn(() => Promise.resolve([])),
     );
     const config = {
       id: 'github-inline',
@@ -183,15 +197,24 @@ describe('web sync routing in durable mode', () => {
       enabled: true,
       syncMode: 'poll' as const,
       pollIntervalMinutes: 10,
-      capabilities: { read: true, write: true },
+      capabilities: {
+        read: true,
+        write: true,
+        delete: false,
+        sync: true,
+        subtasks: false,
+        lists: false,
+        tags: false,
+        tagWriteBack: false,
+      },
       credentials: {},
       settings: {},
       syncedLists: [],
     };
 
-    scheduler.schedule(config);
+    await scheduler.schedule(config);
     const task = vi.mocked(cron.schedule).mock.results.at(-1)?.value;
-    scheduler.schedule({ ...config, enabled: false });
+    await scheduler.schedule({ ...config, enabled: false });
 
     expect(task?.stop).toHaveBeenCalled();
     expect(queueMocks.unregisterSyncSchedule).toHaveBeenCalledWith('github-inline');

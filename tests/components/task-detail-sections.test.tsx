@@ -208,7 +208,7 @@ describe('TaskTagsSection', () => {
 describe('TaskDocumentPreviewSection', () => {
   it('renders nothing without a preview URL', () => {
     const { container } = render(
-      <TaskDocumentPreviewSection mode="panel" connectorType="local" metadata={{}} />,
+      <TaskDocumentPreviewSection taskId="task-1" mode="panel" connectorType="local" metadata={{}} />,
     );
 
     expect(container).toBeEmptyDOMElement();
@@ -217,28 +217,47 @@ describe('TaskDocumentPreviewSection', () => {
   it('renders the structured document layout for document intelligence', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task-1"
         mode="panel"
         connectorType="document-intelligence"
         metadata={{
           previewUrl: 'https://docs.example/1',
+          documentUrl: 'https://paperless.example/documents/1',
+          previewLabel: 'View in Paperless-ngx',
           documentTitle: 'Invoice 4711',
           correspondent: 'Acme',
           amount: 42.5,
           urgency: 'high',
-          docHubUrl: 'https://owl.example/1',
+          previewType: 'pdf',
+          docHubUrl: 'https://owl.example/admin/actions/action-1',
+          docHubDocumentUrl: 'https://owl.example/admin/documents/1',
         }}
+        dueDate="2026-08-30"
       />,
     );
 
     expect(screen.getByText('Invoice 4711')).toBeInTheDocument();
     expect(screen.getByText('$42.50')).toBeInTheDocument();
     expect(screen.getByText('high')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute('href', 'https://owl.example/1');
+    expect(screen.getByTitle('Preview of Invoice 4711')).toHaveAttribute('src', 'https://docs.example/1');
+    expect(screen.getByRole('link', { name: /View in Paperless-ngx/ })).toHaveAttribute(
+      'href',
+      'https://paperless.example/documents/1',
+    );
+    expect(screen.getByText('Aug 30, 2026')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open in OWL/ })).toHaveAttribute(
+      'href',
+      'https://owl.example/#/metadata/1',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand document preview' }));
+    expect(screen.getByTestId('expanded-document-preview')).toBeInTheDocument();
   });
 
   it('renders a generic preview link for other connectors', () => {
     render(
       <TaskDocumentPreviewSection
+        taskId="task-1"
         mode="panel"
         connectorType="local"
         metadata={{ previewUrl: 'https://files.example/a.pdf', correspondent: 'Acme', amount: 8 }}
@@ -248,7 +267,80 @@ describe('TaskDocumentPreviewSection', () => {
     const link = screen.getByRole('link', { name: 'Open Document' });
     expect(link).toHaveAttribute('href', 'https://files.example/a.pdf');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
-    expect(screen.getByText('$8.00')).toBeInTheDocument();
+    expect(link).toHaveTextContent('$8.00');
+  });
+
+  it('does not iframe document-intelligence links marked as external', () => {
+    render(
+      <TaskDocumentPreviewSection
+        taskId="task-2"
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://docs.example/2',
+          previewType: 'external',
+          documentTitle: 'External statement',
+        }}
+      />,
+    );
+
+    expect(screen.getByText('This source does not expose an embeddable preview. Open the original document to review it.')).toBeInTheDocument();
+    expect(screen.queryByTitle('Preview of External statement')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Expand document preview' })).not.toBeInTheDocument();
+  });
+
+  it('keeps arbitrary iframe previews sandboxed', () => {
+    render(
+      <TaskDocumentPreviewSection
+        taskId="task-3"
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://viewer.example/document/3',
+          previewType: 'iframe',
+          documentTitle: 'Hosted statement',
+        }}
+      />,
+    );
+
+    expect(screen.getByTitle('Preview of Hosted statement')).toHaveAttribute(
+      'sandbox',
+      'allow-forms allow-popups allow-same-origin allow-scripts',
+    );
+  });
+
+  it('upgrades legacy Paperless document links to PDF previews', () => {
+    render(
+      <TaskDocumentPreviewSection
+        taskId="task/42"
+        mode="panel"
+        connectorType="document-intelligence"
+        metadata={{
+          previewUrl: 'https://paperless.example/documents/42/details',
+          documentUrl: 'https://paperless.example/documents/42/details',
+          previewType: 'external',
+          documentId: 42,
+          documentTitle: 'Legacy statement',
+        }}
+      />,
+    );
+
+    const preview = screen.getByTitle('Preview of Legacy statement');
+    expect(preview).toHaveAttribute(
+      'src',
+      '/api/tasks/task%2F42/document-preview',
+    );
+    expect(preview).not.toHaveAttribute('sandbox');
+    expect(screen.getByRole('link', { name: /Open Doc/ })).toHaveAttribute(
+      'href',
+      'https://paperless.example/documents/42/details',
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand document preview' }));
+    expect(screen.getAllByTitle('Preview of Legacy statement')).toHaveLength(2);
+    for (const expandedPreview of screen.getAllByTitle('Preview of Legacy statement')) {
+      expect(expandedPreview).not.toHaveAttribute('sandbox');
+    }
   });
 });
 

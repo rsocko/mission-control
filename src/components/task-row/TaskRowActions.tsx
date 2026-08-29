@@ -9,19 +9,23 @@ import {
   CircleCheck,
   Clock3,
   FileText,
-  Flag,
+  Filter,
   Loader2,
+  MoreHorizontal,
   Sun,
   XCircle,
 } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { DayPicker } from 'react-day-picker';
+import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
+import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { calendarClassNames } from '@/components/ui/calendar-classes';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { cn } from '@/lib/utils/cn';
-import type { LocalDisposition } from '@/types';
+import type { LocalDisposition, PlanningHorizon } from '@/types';
+import type { ScoreBreakdown } from '@/lib/smart-score';
 import {
   canEditTaskField,
   canSetTaskLocalDisposition,
@@ -29,7 +33,15 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import type { TaskEditPolicy } from '@/types';
-import { TASK_PRIORITY_VISUALS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
+import {
+  DEFAULT_EFFORT_MEASURE,
+  EFFORT_BADGE_COLORS,
+  EFFORT_MEASURE_LABELS,
+  getTaskPriorityVisual,
+  getTaskStatusVisual,
+  TASK_PRIORITY_VISUALS,
+  TASK_STATUS_VISUALS,
+} from '@/lib/constants/task-formatting';
 
 const MENU_CONTENT_CLASS =
   'z-[100] min-w-48 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl';
@@ -37,19 +49,14 @@ const MENU_ITEM_CLASS =
   'flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 text-left text-sm text-[var(--text-secondary)] outline-none transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:bg-[var(--surface-2)] focus-visible:text-[var(--text-primary)]';
 const ACTION_BUTTON_CLASS =
   'relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-40';
-const CORE_HOVER_ACTION_SLOT_CLASS =
-  'hidden items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[480px]:flex';
-const SECONDARY_HOVER_ACTION_SLOT_CLASS =
-  'hidden items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[640px]:flex';
-const TERTIARY_HOVER_ACTION_SLOT_CLASS =
-  'hidden items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[768px]:flex';
-const WIDE_HOVER_ACTION_SLOT_CLASS =
-  'hidden items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[960px]:flex';
+const EMPTY_PROPERTY_ACTION_CLASS =
+  'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100';
 const MY_DAY_ACTION_CLASS = 'text-amber-400 hover:bg-amber-400/15 hover:text-amber-300';
 const DATE_ACTION_CLASS = 'text-sky-400 hover:bg-sky-400/15 hover:text-sky-300';
 const OVERDUE_DATE_ACTION_CLASS = 'font-medium text-red-400 hover:bg-red-400/15 hover:text-red-300';
 const NOTES_ACTION_CLASS = 'text-violet-400 hover:bg-violet-400/15 hover:text-violet-300';
 const SNOOZE_ACTION_CLASS = 'text-blue-400 hover:bg-blue-400/15 hover:text-blue-300';
+const EFFORT_LABELS = EFFORT_MEASURE_LABELS[DEFAULT_EFFORT_MEASURE];
 
 const PRIORITY_OPTIONS = [
   ...Object.entries(TASK_PRIORITY_VISUALS).map(([value, visual]) => ({
@@ -58,6 +65,7 @@ const PRIORITY_OPTIONS = [
     shortLabel: visual.shortLabel,
     color: visual.dotClass,
     actionClass: visual.actionClass,
+    badgeClass: visual.badgeClass,
   })),
 ] as const;
 
@@ -71,6 +79,41 @@ const STATUS_OPTIONS = [
 ] as const;
 
 type AsyncAction = () => void | Promise<void>;
+
+function StatusGlyph({ status }: { status: string }) {
+  const normalizedStatus = status === 'in-progress' ? 'in_progress' : status === 'completed' ? 'done' : status;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="8" />
+      {normalizedStatus === 'in_progress' && (
+        <path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor" stroke="none" />
+      )}
+      {normalizedStatus === 'blocked' && (
+        <>
+          <path d="M9.5 9v6" />
+          <path d="M14.5 9v6" />
+        </>
+      )}
+      {normalizedStatus === 'done' && <path d="m8.5 12 2.2 2.2 4.8-5" />}
+      {normalizedStatus === 'cancelled' && (
+        <>
+          <path d="m9 9 6 6" />
+          <path d="m15 9-6 6" />
+        </>
+      )}
+    </svg>
+  );
+}
 
 interface ActionPopoverProps {
   label: string;
@@ -305,48 +348,65 @@ function SnoozeMenu({
 function StatusMenu({
   status,
   onChange,
-  persistent = false,
+  onFilter,
   disabled = false,
   disabledReason,
 }: {
   status: string;
   onChange: (status: string) => void | Promise<void>;
-  persistent?: boolean;
+  onFilter?: (status: string) => void;
   disabled?: boolean;
   disabledReason?: string;
 }) {
-  const selected = STATUS_OPTIONS.find((option) => option.value === status);
+  const selected = getTaskStatusVisual(status);
+  const popoverDisabled = disabled && !onFilter;
   return (
     <ActionPopover
-      label={disabled && disabledReason
+      label={popoverDisabled && disabledReason
         ? disabledReason
-        : persistent && selected ? `Status: ${selected.label}` : 'Set status'}
-      icon={persistent && selected ? (
-        <>
-          <span className={cn('h-2 w-2 rounded-full', selected.color)} />
-          <span>{selected.label}</span>
-        </>
-      ) : <CircleDot size={14} />}
-      buttonClassName={cn(
-        selected?.actionClass,
-        persistent && 'h-6 w-auto gap-1.5 border border-current/25 px-1.5 text-xs',
-      )}
-      disabled={disabled}
+        : `Status: ${selected.label}`}
+      icon={<StatusGlyph status={status} />}
+      buttonClassName={selected.actionClass}
+      disabled={popoverDisabled}
     >
-      {(_close, run) => (
+      {(close, run) => (
         <>
           <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Set status</p>
           {STATUS_OPTIONS.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={cn(MENU_ITEM_CLASS, status === option.value && 'bg-[var(--surface-2)] text-[var(--text-primary)]')}
+              disabled={disabled}
+              title={disabled ? disabledReason : undefined}
+              className={cn(
+                MENU_ITEM_CLASS,
+                status === option.value && 'bg-[var(--surface-2)] text-[var(--text-primary)]',
+                disabled && 'cursor-not-allowed opacity-40',
+              )}
               onClick={() => void run(() => onChange(option.value))}
             >
-              <span className={cn('h-2 w-2 rounded-full', option.color)} />
+              <span className={option.actionClass}>
+                <StatusGlyph status={option.value} />
+              </span>
               {option.label}
             </button>
           ))}
+          {onFilter && (
+            <>
+              <div className="my-1 h-px bg-[var(--border-subtle)]" />
+              <button
+                type="button"
+                className={cn(MENU_ITEM_CLASS, selected.actionClass)}
+                onClick={() => {
+                  onFilter(status);
+                  close();
+                }}
+              >
+                <Filter size={14} />
+                Filter by {selected.label}
+              </button>
+            </>
+          )}
         </>
       )}
     </ActionPopover>
@@ -356,42 +416,44 @@ function StatusMenu({
 function PriorityMenu({
   priority,
   onChange,
-  persistent = false,
+  onFilter,
   disabled = false,
   disabledReason,
 }: {
   priority: string;
   onChange: (priority: string) => void | Promise<void>;
-  persistent?: boolean;
+  onFilter?: (priority: string) => void;
   disabled?: boolean;
   disabledReason?: string;
 }) {
-  const selected = PRIORITY_OPTIONS.find((option) => option.value === priority);
+  const selected = getTaskPriorityVisual(priority);
+  const popoverDisabled = disabled && !onFilter;
   return (
     <ActionPopover
-      label={disabled && disabledReason
+      label={popoverDisabled && disabledReason
         ? disabledReason
-        : persistent && selected ? `Priority: ${selected.label}` : 'Set priority'}
-      icon={persistent && selected ? (
-        <>
-          <span className={cn('h-2 w-2 rounded-full', selected.color)} />
-          <span>{selected.shortLabel}</span>
-        </>
-      ) : <Flag size={14} />}
+        : `Priority: ${selected.label}`}
+      icon={<span>{selected.shortLabel}</span>}
       buttonClassName={cn(
-        selected?.actionClass,
-        persistent && 'h-6 w-auto gap-1.5 border border-current/25 px-1.5 text-xs',
+        'h-6 w-[30px] border px-0 text-xs font-semibold',
+        selected.badgeClass,
       )}
-      disabled={disabled}
+      disabled={popoverDisabled}
     >
-      {(_close, run) => (
+      {(close, run) => (
         <>
           <p className="px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Set priority</p>
           {PRIORITY_OPTIONS.map((option) => (
             <button
               key={option.value}
               type="button"
-              className={cn(MENU_ITEM_CLASS, priority === option.value && 'bg-[var(--surface-2)] text-[var(--text-primary)]')}
+              disabled={disabled}
+              title={disabled ? disabledReason : undefined}
+              className={cn(
+                MENU_ITEM_CLASS,
+                priority === option.value && 'bg-[var(--surface-2)] text-[var(--text-primary)]',
+                disabled && 'cursor-not-allowed opacity-40',
+              )}
               onClick={() => void run(() => onChange(option.value))}
             >
               <span className={cn('h-2 w-2 rounded-full', option.color)} />
@@ -399,6 +461,22 @@ function PriorityMenu({
               <span className="ml-auto text-xs text-[var(--text-muted)]">{option.shortLabel}</span>
             </button>
           ))}
+          {onFilter && (
+            <>
+              <div className="my-1 h-px bg-[var(--border-subtle)]" />
+              <button
+                type="button"
+                className={cn(MENU_ITEM_CLASS, selected.actionClass)}
+                onClick={() => {
+                  onFilter(priority);
+                  close();
+                }}
+              >
+                <Filter size={14} />
+                Filter by {selected.shortLabel === '—' ? 'no priority' : `${selected.shortLabel} · ${selected.label}`}
+              </button>
+            </>
+          )}
         </>
       )}
     </ActionPopover>
@@ -467,6 +545,10 @@ function DispositionMenu({
 }
 
 export interface TaskRowActionsProps {
+  smartScore?: number | null;
+  scoreBreakdown?: ScoreBreakdown;
+  planningHorizon?: PlanningHorizon | null;
+  effort?: number | null;
   dueDate: string | null;
   hasDescription: boolean;
   isInMyDay: boolean;
@@ -477,9 +559,12 @@ export interface TaskRowActionsProps {
   surface: 'dashboard' | 'my-day';
   snoozedUntil?: string | null;
   surfaceActions?: ReactNode;
+  showMoreActions?: boolean;
   onSetDueDate: (date: string | null) => void | Promise<void>;
   onSetPriority: (priority: string) => void | Promise<void>;
   onSetStatus: (status: string) => void | Promise<void>;
+  onFilterPriority?: (priority: string) => void;
+  onFilterStatus?: (status: string) => void;
   onToggleMyDay: () => void | Promise<void>;
   onOpenNotes: (mode: 'read' | 'edit') => void;
   onSnoozeUntil?: (until: string | null) => void | Promise<void>;
@@ -487,6 +572,10 @@ export interface TaskRowActionsProps {
 }
 
 export function TaskRowActions({
+  smartScore,
+  scoreBreakdown,
+  planningHorizon,
+  effort,
   dueDate,
   hasDescription,
   isInMyDay,
@@ -497,9 +586,12 @@ export function TaskRowActions({
   surface,
   snoozedUntil,
   surfaceActions,
+  showMoreActions = false,
   onSetDueDate,
   onSetPriority,
   onSetStatus,
+  onFilterPriority,
+  onFilterStatus,
   onToggleMyDay,
   onOpenNotes,
   onSnoozeUntil,
@@ -510,29 +602,73 @@ export function TaskRowActions({
   const canEditPriority = canEditTaskField(editPolicy, 'priority');
   const canEditSnooze = canEditTaskField(editPolicy, 'snoozedUntil');
   const canEditStatus = canEditTaskField(editPolicy, 'status');
-  const persistentStatus = surface === 'my-day' && status !== 'todo';
-  const persistentPriority = surface === 'my-day' && priority !== 'none';
+  const validEffort = effort != null && effort >= 1 && effort <= 5 ? effort : null;
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-md px-0.5 transition-[background-color,box-shadow] group-hover:bg-[var(--surface-0)] group-hover:shadow-sm group-focus-within:bg-[var(--surface-0)] group-focus-within:shadow-sm">
-      {surfaceActions && (
-        <span className={TERTIARY_HOVER_ACTION_SLOT_CLASS}>
-          {surfaceActions}
-        </span>
-      )}
+    <div
+      data-testid="task-row-properties"
+      className="grid shrink-0 grid-cols-[36px_30px_32px_32px_32px_32px] items-center gap-1 @min-[480px]:grid-cols-[36px_30px_30px_32px_72px_32px_32px_96px] @min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]"
+    >
+      <span className="flex h-7 w-9 items-center justify-center">
+        {smartScore != null && (
+          <SmartScoreBadge score={smartScore} breakdown={scoreBreakdown} size="sm" />
+        )}
+      </span>
 
-      {surface === 'dashboard' && onSnoozeUntil && (
-        <span className={cn('items-center', snoozedUntil ? 'flex' : TERTIARY_HOVER_ACTION_SLOT_CLASS)}>
-          <SnoozeMenu
-            snoozedUntil={snoozedUntil}
-            onChange={onSnoozeUntil}
-            disabled={!canEditSnooze}
-            disabledReason={taskFieldBlockedReason(editPolicy, 'snoozedUntil')}
-          />
-        </span>
-      )}
+      <span className="hidden h-6 w-[52px] items-center justify-center @min-[960px]:flex">
+        <PlanningHorizonBadge planningHorizon={planningHorizon} />
+      </span>
 
-      <span className={cn('items-center', isInMyDay ? 'flex' : CORE_HOVER_ACTION_SLOT_CLASS)}>
+      <span className="flex h-7 w-[30px] items-center justify-center">
+        <PriorityMenu
+          priority={priority}
+          onChange={onSetPriority}
+          onFilter={onFilterPriority}
+          disabled={!canEditPriority}
+          disabledReason={taskFieldBlockedReason(editPolicy, 'priority')}
+        />
+      </span>
+
+      <span className="hidden h-6 w-[30px] items-center justify-center @min-[480px]:flex">
+        {validEffort && (
+          <span
+            className={cn(
+              'inline-flex h-6 min-w-[30px] items-center justify-center rounded border px-1 text-xs font-semibold',
+              EFFORT_BADGE_COLORS[validEffort],
+            )}
+            title={`Effort: ${EFFORT_LABELS[validEffort]}`}
+          >
+            {EFFORT_LABELS[validEffort]}
+          </span>
+        )}
+      </span>
+
+      <span className="flex h-8 w-8 items-center justify-center">
+        <StatusMenu
+          status={status}
+          onChange={onSetStatus}
+          onFilter={onFilterStatus}
+          disabled={!canEditStatus}
+          disabledReason={taskFieldBlockedReason(editPolicy, 'status')}
+        />
+      </span>
+
+      <span className={cn(
+        'hidden h-8 w-[72px] items-center justify-start @min-[480px]:flex',
+        !dueDate && EMPTY_PROPERTY_ACTION_CLASS,
+      )}>
+        <DateMenu
+          dueDate={dueDate}
+          disabled={!canEditDueDate}
+          disabledReason={taskFieldBlockedReason(editPolicy, 'dueDate')}
+          onChange={onSetDueDate}
+        />
+      </span>
+
+      <span className={cn(
+        'flex h-8 w-8 items-center justify-center',
+        !isInMyDay && EMPTY_PROPERTY_ACTION_CLASS,
+      )}>
         <Tooltip content={isInMyDay ? 'Remove from My Day' : 'Add to My Day'}>
           <button
             type="button"
@@ -548,16 +684,10 @@ export function TaskRowActions({
         </Tooltip>
       </span>
 
-      <span className={cn('items-center', dueDate ? 'flex' : CORE_HOVER_ACTION_SLOT_CLASS)}>
-        <DateMenu
-          dueDate={dueDate}
-          disabled={!canEditDueDate}
-          disabledReason={taskFieldBlockedReason(editPolicy, 'dueDate')}
-          onChange={onSetDueDate}
-        />
-      </span>
-
-      <span className={cn('items-center', hasDescription ? 'flex' : SECONDARY_HOVER_ACTION_SLOT_CLASS)}>
+      <span className={cn(
+        'flex h-8 w-8 items-center justify-center',
+        !hasDescription && EMPTY_PROPERTY_ACTION_CLASS,
+      )}>
         {hasDescription ? (
           <Tooltip content="Open notes">
             <button
@@ -594,43 +724,57 @@ export function TaskRowActions({
         )}
       </span>
 
-      <span className={cn(
-        'items-center',
-        persistentStatus ? 'flex' : WIDE_HOVER_ACTION_SLOT_CLASS,
-      )}>
-        <StatusMenu
-          status={status}
-          onChange={onSetStatus}
-          persistent={persistentStatus}
-          disabled={!canEditStatus}
-          disabledReason={taskFieldBlockedReason(editPolicy, 'status')}
-        />
+      <span className="flex h-8 w-8 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[480px]:w-24">
+        {surface === 'dashboard' && onSnoozeUntil && (
+          <span className="hidden @min-[480px]:contents">
+            <SnoozeMenu
+              snoozedUntil={snoozedUntil}
+              onChange={onSnoozeUntil}
+              disabled={!canEditSnooze}
+              disabledReason={taskFieldBlockedReason(editPolicy, 'snoozedUntil')}
+            />
+          </span>
+        )}
+        <span className="hidden items-center gap-0.5 @min-[480px]:flex">
+          {surfaceActions}
+        </span>
+        {onSetLocalDisposition
+          && TASK_DISPOSITION_OPTIONS.some((option) => (
+            option.value !== localDisposition
+            && canSetTaskLocalDisposition(editPolicy, localDisposition, option.value)
+          )) && (
+          <span className="hidden @min-[480px]:contents">
+            <DispositionMenu
+              disposition={localDisposition}
+              editPolicy={editPolicy}
+              onChange={onSetLocalDisposition}
+            />
+          </span>
+        )}
+        {showMoreActions && (
+          <span className="hidden md:contents">
+            <Tooltip content="More actions">
+              <button
+                type="button"
+                aria-label="More actions"
+                className={ACTION_BUTTON_CLASS}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX: rect.right,
+                    clientY: rect.bottom,
+                  }));
+                }}
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            </Tooltip>
+          </span>
+        )}
       </span>
-
-      <span className={cn(
-        'items-center',
-        persistentPriority ? 'flex' : WIDE_HOVER_ACTION_SLOT_CLASS,
-      )}>
-        <PriorityMenu
-          priority={priority}
-          onChange={onSetPriority}
-          persistent={persistentPriority}
-          disabled={!canEditPriority}
-          disabledReason={taskFieldBlockedReason(editPolicy, 'priority')}
-        />
-      </span>
-
-      {onSetLocalDisposition
-        && TASK_DISPOSITION_OPTIONS.some((option) => (
-          option.value !== localDisposition
-          && canSetTaskLocalDisposition(editPolicy, localDisposition, option.value)
-        )) && (
-        <DispositionMenu
-          disposition={localDisposition}
-          editPolicy={editPolicy}
-          onChange={onSetLocalDisposition}
-        />
-      )}
     </div>
   );
 }

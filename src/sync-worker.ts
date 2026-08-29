@@ -31,6 +31,7 @@ async function main(): Promise<void> {
     { DurableAiRunStore, DurableAiRunWorker },
     { WorkerHealthSnapshotScheduler },
     { taskReminderScheduler },
+    { financeConnectionRecoveryScheduler },
   ] = await Promise.all([
     import('@/lib/sync'),
     import('@/lib/sync/worker'),
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
     import('@/lib/ai/durable-runs'),
     import('@/lib/telemetry/health-snapshot'),
     import('@/lib/push/task-reminder-scheduler'),
+    import('@/lib/connectors/monarch-money/recovery-scheduler'),
   ]);
 
   assertSupportedWorkerReplicaCount();
@@ -48,9 +50,8 @@ async function main(): Promise<void> {
     'Sync worker starting',
   );
   const { initializeDatabaseWithRetry } = await import('@/db/startup');
-  const telemetry = await initializeDatabaseWithRetry({
-    initialize: () => startRuntimeTelemetry('worker'),
-  });
+  await initializeDatabaseWithRetry();
+  const telemetry = await startRuntimeTelemetry('worker');
   writeFileSync(instanceFile, telemetry.instanceId, { encoding: 'utf8', mode: 0o600 });
   const worker = new SyncWorker((connectorId, options) =>
     syncScheduler.runSyncLocally(connectorId, options)
@@ -81,6 +82,7 @@ async function main(): Promise<void> {
   syncScheduler.startDependencyReconciliationResume();
   syncScheduler.startDependencyRelationshipPolling();
   syncScheduler.startWatchdog();
+  await financeConnectionRecoveryScheduler.start();
 
   try {
     await triageSyncScheduler.initialize();
@@ -97,12 +99,15 @@ async function main(): Promise<void> {
       syncLogger.info({ signal }, 'Sync worker shutting down');
       healthSnapshotScheduler.stop();
       taskReminderScheduler.stop();
+      financeConnectionRecoveryScheduler.stop();
       await Promise.all([
         syncScheduler.stopAll(),
         worker.stop(),
         aiRunWorker.stop(),
       ]);
-      stopRuntimeTelemetry(signal);
+      await stopRuntimeTelemetry(signal);
+      const { shutdownRuntimeDatabase } = await import('@/db/runtime');
+      await shutdownRuntimeDatabase();
       rmSync(instanceFile, { force: true });
     })().then(
       () => process.exit(0),

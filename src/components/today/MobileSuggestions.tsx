@@ -6,6 +6,7 @@ import {
   AlertCircle, ArrowUpDown, Brain, Calendar, CalendarClock,
   ChevronDown, ChevronRight, ChevronUp,
   Flame, History, Plus, RotateCcw, Sparkles,
+  TimerReset,
 } from 'lucide-react';
 import { ConnectorIcon } from './SortableTaskRow';
 import { formatDueDate } from '@/lib/utils/date-format';
@@ -39,6 +40,7 @@ const GROUPS: GroupConfig[] = [
     description: REPLANNING_SUGGESTION.description,
     learnMoreHref: REPLANNING_SUGGESTION.insightsHref,
   },
+  { key: 'planningNext', title: 'Planned for Next', icon: <TimerReset size={16} />, color: 'emerald' },
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
   { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },
@@ -110,7 +112,7 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
           >
             <div className="px-4 pb-4 space-y-2">
               {GROUPS.map(({ key, title, icon, color, sortable, description, learnMoreHref }) => {
-                const tasks = suggestions[key];
+                const tasks = suggestions[key] ?? [];
                 if (tasks.length === 0) return null;
                 return (
                   <MobileSuggestionAccordion

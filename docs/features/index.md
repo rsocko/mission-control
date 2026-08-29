@@ -34,3 +34,4 @@ These capabilities are available across multiple views:
 - **Source Indicators** — Colored icons showing data provenance on every task
 - **Keyboard Shortcuts** — View-specific and global shortcuts for power users
 - **Sync Stream** — Real-time sync progress indicator with automatic data refresh
+- **[OWL Action Queue](../design/proposed/INTEGRATION-API-CONTRACT.md)** — Readiness-gated document actions, Needs Review deep links, and lightweight source execution

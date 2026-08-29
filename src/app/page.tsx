@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import Image from 'next/image';
 import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
-import { IconRenderer } from '@/components/ui/icon-picker';
+import { IconPickerButton, IconRenderer } from '@/components/ui/icon-picker';
 import { toast } from 'sonner';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import {
@@ -34,6 +34,7 @@ import {
   selectedTaskFieldBlockedReason,
   selectedTaskRemovalBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
+import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
@@ -49,7 +50,9 @@ import { DashboardSkeleton, TaskRowSkeleton } from '@/components/ui/Skeleton';
 import { useDashboardSections } from '@/lib/hooks/useDashboardSections';
 import { useTaskContextMenuActionFactory } from '@/lib/hooks/useTaskContextMenuActionFactory';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
+import { EmptyStateQueryFilters } from '@/components/filters/EmptyStateQueryFilters';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
+import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 
@@ -125,6 +128,8 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const { toggleSection, isCollapsed } = useDashboardSections();
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
+  const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
+  const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
@@ -274,24 +279,67 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           assignees={state.allAssignees}
           projects={state.projects}
           listGroups={state.listGroups}
-          onSaveView={() => actions.setSavingView(true)}
+          onSaveView={actions.startNewView}
         />
         {state.savingView && (
-          <div className="mb-4 p-2 bg-blue-900/30 border border-blue-800/30 rounded-md max-w-sm">
-            <input
-              type="text"
-              value={state.viewName}
-              onChange={(e) => actions.setViewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') actions.saveCurrentView(); if (e.key === 'Escape') actions.setSavingView(false); }}
-              placeholder="View name..."
-              className="w-full text-xs bg-[var(--surface-1)] border border-[var(--border)] rounded px-2 py-1 mb-1.5 outline-none focus:border-blue-400"
-              autoFocus
-            />
-            <div className="flex gap-1">
-              <button onClick={actions.saveCurrentView} className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded font-medium">Save</button>
-              <button onClick={() => actions.setSavingView(false)} className="text-xs text-[var(--text-tertiary)] px-2 py-0.5">Cancel</button>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              actions.saveCurrentView();
+            }}
+            onKeyDown={(event) => {
+              if (
+                event.key === 'Escape'
+                && event.currentTarget.contains(event.target as Node)
+              ) {
+                actions.cancelViewEditor();
+              }
+            }}
+            className="mb-4 flex max-w-md items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2"
+          >
+            <div className="shrink-0">
+              <label className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
+                Icon
+              </label>
+              <IconPickerButton
+                value={state.viewIcon}
+                onChange={actions.setViewIcon}
+                size="sm"
+                className="w-9 rounded-md"
+                color={state.viewIconColor || undefined}
+                onColorChange={actions.setViewIconColor}
+              />
             </div>
-          </div>
+            <label className="min-w-0 flex-1">
+              <span className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
+                View name
+              </span>
+              <input
+                type="text"
+                value={state.viewName}
+                onChange={(e) => actions.setViewName(e.target.value)}
+                placeholder="e.g. No project assigned"
+                className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)] focus:shadow-[var(--shadow-focus-glow)]"
+                autoFocus
+              />
+            </label>
+            <div className="flex h-8 items-center gap-1">
+              <button
+                type="submit"
+                disabled={!state.viewName.trim()}
+                className="h-8 rounded-md bg-[var(--accent-action)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {state.editingViewId ? 'Update' : 'Save'}
+              </button>
+              <button
+                type="button"
+                onClick={actions.cancelViewEditor}
+                className="h-8 rounded-md px-2 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
         )}
 
         <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] rounded-lg border border-[var(--border)] ${
@@ -363,7 +411,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
               <p className="mb-1 text-base font-medium text-[var(--text-secondary)]">No tasks found</p>
               {state.sourceFilter || state.listFilter || state.listGroupFilter || state.tagFilter.length > 0 || state.quickFilter || state.projectFilter || state.priorityFilter.length > 0 || state.statusFilter.length > 0 || textFilter ? (
                 <div className="flex flex-col items-center gap-3">
-                  <p className="text-sm">{textFilter ? `No tasks match "${textFilter}"` : 'No tasks match these filters'}</p>
+                  <p className="text-sm">
+                    {textFilter && !parsedTextFilter.hasStructuredTokens
+                      ? `No tasks match "${textFilter}"`
+                      : 'No tasks match these filters'}
+                  </p>
                   <div className="flex items-center gap-2 flex-wrap justify-center">
                     {state.sourceFilter && (
                       <span className="bg-blue-900/30 text-blue-300 px-2 py-0.5 rounded-full text-xs border border-blue-800/40 flex items-center gap-1">
@@ -423,9 +475,16 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                         <button onClick={() => actions.setProjectFilter(null)} className="ml-1 hover:text-white">×</button>
                       </span>
                     )}
+                    {textFilter && (
+                      <EmptyStateQueryFilters
+                        query={textFilter}
+                        projects={state.projects}
+                        onQueryChange={setTextFilter}
+                      />
+                    )}
                   </div>
                   <button
-                    onClick={() => { actions.setSourceFilter(null); actions.setListFilter(null); actions.setListGroupFilter(null); actions.setTagFilter([]); actions.setQuickFilter(null); actions.setProjectFilter(null); actions.setPriorityFilter([]); actions.setStatusFilter([]); }}
+                    onClick={() => { actions.setSourceFilter(null); actions.setListFilter(null); actions.setListGroupFilter(null); actions.setTagFilter([]); actions.setQuickFilter(null); actions.setProjectFilter(null); actions.setPriorityFilter([]); actions.setStatusFilter([]); setTextFilter(''); }}
                     className="text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
                   >
                     Clear all filters
@@ -574,66 +633,60 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                       className={`absolute left-0 top-0 w-full ${state.bulkMode ? 'select-none' : ''}`}
                       key={task.id}
                       style={{ transform: `translateY(${virtualItem.start}px)` }}
-                      onMouseDown={(e) => {
-                        if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault();
-                      }}
-                      onClick={(e) => {
-                        taskSelection.cancelPendingDeselect();
-                        if (e.shiftKey) {
-                          e.preventDefault();
-                          const enteringBulk = !state.bulkMode;
-                          if (enteringBulk) actions.setBulkMode(true);
-                          const currentIndex = virtualItem.index;
-                          const lastIndex = resolveSelectionAnchorIndex(
-                            virtualRows.map((row) => row.type === 'task' ? row.task.id : null),
-                            computed.lastClickedIndexRef.current,
-                            enteringBulk ? state.selectedTaskId : null,
-                          );
-                          if (lastIndex !== null && lastIndex !== currentIndex) {
-                            const start = Math.min(lastIndex, currentIndex);
-                            const end = Math.max(lastIndex, currentIndex);
-                            actions.setBulkSelected((prev) => {
-                              const next = new Set(prev);
-                              if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                              for (let i = start; i <= end; i++) {
-                                const r = virtualRows[i];
-                                if (r && r.type === 'task') next.add(r.task.id);
-                              }
-                              return next;
-                            });
+                      {...createTaskRowInteractionHandlers({
+                        taskId: task.id,
+                        bulkMode: state.bulkMode,
+                        onBeforeClick: taskSelection.cancelPendingDeselect,
+                        onSelect: taskSelection.handleTaskClick,
+                        onDoubleClick: taskSelection.handleTaskDoubleClick,
+                        onModifierClick: (_taskId, e) => {
+                          if (e.shiftKey) {
+                            const enteringBulk = !state.bulkMode;
+                            if (enteringBulk) actions.setBulkMode(true);
+                            const currentIndex = virtualItem.index;
+                            const lastIndex = resolveSelectionAnchorIndex(
+                              virtualRows.map((row) => row.type === 'task' ? row.task.id : null),
+                              computed.lastClickedIndexRef.current,
+                              enteringBulk ? state.selectedTaskId : null,
+                            );
+                            if (lastIndex !== null && lastIndex !== currentIndex) {
+                              const start = Math.min(lastIndex, currentIndex);
+                              const end = Math.max(lastIndex, currentIndex);
+                              actions.setBulkSelected((prev) => {
+                                const next = new Set(prev);
+                                if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
+                                for (let i = start; i <= end; i++) {
+                                  const r = virtualRows[i];
+                                  if (r && r.type === 'task') next.add(r.task.id);
+                                }
+                                return next;
+                              });
+                            } else {
+                              actions.setBulkSelected((prev) => {
+                                const next = new Set(prev);
+                                if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
+                                next.add(task.id);
+                                return next;
+                              });
+                            }
+                            computed.lastClickedIndexRef.current = currentIndex;
                           } else {
+                            const enteringBulk = !state.bulkMode;
+                            if (enteringBulk) actions.setBulkMode(true);
                             actions.setBulkSelected((prev) => {
                               const next = new Set(prev);
                               if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                              next.add(task.id);
+                              if (next.has(task.id)) next.delete(task.id);
+                              else next.add(task.id);
                               return next;
                             });
+                            computed.lastClickedIndexRef.current = virtualItem.index;
                           }
-                          computed.lastClickedIndexRef.current = currentIndex;
-                        } else if (e.ctrlKey || e.metaKey) {
-                          e.preventDefault();
-                          const enteringBulk = !state.bulkMode;
-                          if (enteringBulk) actions.setBulkMode(true);
-                          actions.setBulkSelected((prev) => {
-                            const next = new Set(prev);
-                            if (enteringBulk && state.selectedTaskId) next.add(state.selectedTaskId);
-                            if (next.has(task.id)) next.delete(task.id);
-                            else next.add(task.id);
-                            return next;
-                          });
+                        },
+                        onBulkClick: () => {
                           computed.lastClickedIndexRef.current = virtualItem.index;
-                        } else if (state.bulkMode) {
-                          computed.lastClickedIndexRef.current = virtualItem.index;
-                        } else {
-                          taskSelection.handleTaskClick(task.id);
-                        }
-                      }}
-                      onDoubleClick={(e) => {
-                        if (!state.bulkMode) {
-                          e.stopPropagation();
-                          taskSelection.handleTaskDoubleClick(task.id);
-                        }
-                      }}
+                        },
+                      })}
                     >
                       <TaskRow
                         task={task}

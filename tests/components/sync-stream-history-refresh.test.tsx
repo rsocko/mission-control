@@ -4,9 +4,12 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSyncStreamConnection } from '@/lib/hooks/useSyncStream';
 
-const toastError = vi.hoisted(() => vi.fn());
+const { toastMock, toastError } = vi.hoisted(() => ({
+  toastMock: vi.fn(),
+  toastError: vi.fn(),
+}));
 vi.mock('sonner', () => ({
-  toast: Object.assign(vi.fn(), { error: toastError }),
+  toast: Object.assign(toastMock, { error: toastError }),
 }));
 
 class MockEventSource {
@@ -33,6 +36,7 @@ class MockEventSource {
 
 afterEach(() => {
   MockEventSource.instances = [];
+  toastMock.mockClear();
   toastError.mockClear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -180,6 +184,69 @@ describe('useSyncStreamConnection history refresh', () => {
 
     render(toastError.mock.calls[0][0]);
     expect(screen.getByText(/invented failure \[runtime sha-fff0872\]/)).toBeInTheDocument();
+    unmount();
+  });
+
+  it('summarizes sync results received while the page was hidden in one toast', () => {
+    vi.stubGlobal('EventSource', MockEventSource);
+    let visibilityState: DocumentVisibilityState = 'hidden';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibilityState);
+    const { unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+    const eventSource = MockEventSource.instances[0];
+
+    act(() => {
+      eventSource.emit('sync:complete', {
+        type: 'sync:complete',
+        connectorId: 'todo-1',
+        queueRemaining: 1,
+        result: {
+          tasksAdded: 1,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          totalLists: 1,
+          durationMs: 100,
+        },
+      });
+      eventSource.emit('sync:complete', {
+        type: 'sync:complete',
+        connectorId: 'todo-1',
+        queueRemaining: 1,
+        result: {
+          tasksAdded: 0,
+          tasksUpdated: 1,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          totalLists: 1,
+          durationMs: 100,
+        },
+      });
+      eventSource.emit('sync:error', {
+        type: 'sync:error',
+        connectorId: 'doc-1',
+        queueRemaining: 0,
+        error: 'HTTP 502',
+      });
+    });
+
+    expect(toastMock).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+
+    act(() => {
+      visibilityState = 'visible';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(toastMock).toHaveBeenCalledTimes(1);
+    expect(toastMock).toHaveBeenCalledWith(
+      'While you were away: 2 syncs completed, 1 failed. See Sync History for details.',
+      { duration: 5000 },
+    );
+    expect(toastError).not.toHaveBeenCalled();
     unmount();
   });
 

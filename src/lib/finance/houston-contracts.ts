@@ -130,7 +130,7 @@ const transactionSchema = z.object({
     confidence: z.enum(['definite', 'likely', 'none']).nullable(),
     method: z.enum([
       'manual',
-      'card-rule',
+      'account-rule',
       'merchant-rule',
       'historical-pattern',
       'unassigned',

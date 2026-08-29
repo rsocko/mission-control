@@ -1,8 +1,9 @@
 import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
+import type { PlanningHorizon } from '@/types';
 
 export type MatrixAxisMode = 'priority-urgency' | 'priority-effort';
 export type MatrixSizeMode = 'smart-score' | 'effort' | 'urgency' | 'uniform';
-export type MatrixColorMode = 'project' | 'urgency' | 'status' | 'priority';
+export type MatrixColorMode = 'project' | 'urgency' | 'status' | 'priority' | 'planning-horizon';
 export type MatrixMobileView = 'table' | 'matrix';
 
 export interface MatrixPaginationCursor {
@@ -13,8 +14,17 @@ export interface MatrixPaginationCursor {
 export interface UrgencyResult {
   value: number | null;
   daysUntilDue: number | null;
-  state: 'invalid' | 'none' | 'overdue' | 'today' | 'future';
+  state: 'invalid' | 'none' | 'overdue' | 'today' | 'future' | 'horizon';
+  source: 'due-date' | 'planning-horizon' | 'none';
+  planningHorizon: PlanningHorizon | null;
 }
+
+const PLANNING_HORIZON_URGENCY: Record<PlanningHorizon, number> = {
+  next: 85,
+  soon: 55,
+  later: 25,
+  someday: 5,
+};
 
 const URGENCY_ANCHORS = [
   [0, 95],
@@ -58,18 +68,51 @@ export function priorityLabel(priority: string): string {
   return priority === 'none' ? 'Needs data' : priority[0].toUpperCase() + priority.slice(1);
 }
 
-export function urgencyScore(dueDate: string | null, today: string): UrgencyResult {
-  if (!dueDate) return { value: 0, daysUntilDue: null, state: 'none' };
+export function urgencyScore(
+  dueDate: string | null,
+  today: string,
+  planningHorizon: PlanningHorizon | null = null,
+): UrgencyResult {
+  if (!dueDate) {
+    if (planningHorizon) {
+      return {
+        value: PLANNING_HORIZON_URGENCY[planningHorizon],
+        daysUntilDue: null,
+        state: 'horizon',
+        source: 'planning-horizon',
+        planningHorizon,
+      };
+    }
+    return {
+      value: 0,
+      daysUntilDue: null,
+      state: 'none',
+      source: 'none',
+      planningHorizon: null,
+    };
+  }
   const due = dayNumber(dueDate);
   const current = dayNumber(today);
   if (due === null || current === null) {
-    return { value: null, daysUntilDue: null, state: 'invalid' };
+    return {
+      value: null,
+      daysUntilDue: null,
+      state: 'invalid',
+      source: 'due-date',
+      planningHorizon,
+    };
   }
 
   const daysUntilDue = due - current;
-  if (daysUntilDue < 0) return { value: 100, daysUntilDue, state: 'overdue' };
-  if (daysUntilDue === 0) return { value: 95, daysUntilDue, state: 'today' };
-  if (daysUntilDue >= 90) return { value: 5, daysUntilDue, state: 'future' };
+  if (daysUntilDue < 0) {
+    return { value: 100, daysUntilDue, state: 'overdue', source: 'due-date', planningHorizon };
+  }
+  if (daysUntilDue === 0) {
+    return { value: 95, daysUntilDue, state: 'today', source: 'due-date', planningHorizon };
+  }
+  if (daysUntilDue >= 90) {
+    return { value: 5, daysUntilDue, state: 'future', source: 'due-date', planningHorizon };
+  }
 
   for (let index = 1; index < URGENCY_ANCHORS.length; index += 1) {
     const [rightDay, rightValue] = URGENCY_ANCHORS[index];
@@ -80,11 +123,13 @@ export function urgencyScore(dueDate: string | null, today: string): UrgencyResu
         value: Math.round(leftValue + (rightValue - leftValue) * progress),
         daysUntilDue,
         state: 'future',
+        source: 'due-date',
+        planningHorizon,
       };
     }
   }
 
-  return { value: 5, daysUntilDue, state: 'future' };
+  return { value: 5, daysUntilDue, state: 'future', source: 'due-date', planningHorizon };
 }
 
 export function effortPosition(effort: number | null | undefined): number | null {

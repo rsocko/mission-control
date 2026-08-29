@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { PlanningHorizonFieldLabel, PlanningHorizonOption } from '@/components/PlanningHorizonVisuals';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { getTagPillStyle, CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { modalOverlay, modalContent } from '@/lib/motion';
@@ -22,6 +23,8 @@ import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import { EffortSelect } from '@/components/EffortBadge';
 import type { QuickAddDestination } from './quick-add-types';
+import type { PlanningHorizon } from '@/types';
+import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 
 interface Tag {
   id: string;
@@ -69,6 +72,7 @@ export interface TaskPrefill {
   sourceUrl?: string;
   priority?: ParsedTask['priority'];
   dueDate?: string;
+  planningHorizon?: PlanningHorizon;
   projectId?: string;
 }
 
@@ -135,6 +139,9 @@ export function AddTaskModal({
   const [dueDate, setDueDate] = useState(prefill?.dueDate || initialParsed?.dueDate || '');
   const [dueDateText, setDueDateText] = useState(initialParsed?.dueDateLabel || '');
   const [priority, setPriority] = useState(prefill?.priority || initialParsed?.priority || 'none');
+  const [planningHorizon, setPlanningHorizon] = useState<PlanningHorizon | null>(
+    prefill?.planningHorizon ?? initialParsed?.planningHorizon ?? null,
+  );
   const [destination, setDestination] = useState(initialDestination);
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
   const [prefillTagSlugs, setPrefillTagSlugs] = useState<string[]>(prefill?.tags || []);
@@ -152,6 +159,7 @@ export function AddTaskModal({
   const [effort, setEffort] = useState<number | null>(initialParsed?.effort || null);
   const [customDurationInput, setCustomDurationInput] = useState('');
   const [recurrence, setRecurrence] = useState<string>(initialParsed?.recurrence || 'none');
+  const [recurrenceMode, setRecurrenceMode] = useState<'schedule' | 'completion'>('schedule');
   const [availableLists, setAvailableLists] = useState<SourceList[]>([]);
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>(initialListId || initialDestination.listId || '');
@@ -176,7 +184,6 @@ export function AddTaskModal({
       setSelectedListId('');
       return;
     }
-
     // Find the connector id (use the base connector, not list-level destination)
     const connectorId = destination.id;
     fetch(`/api/connectors/${connectorId}/lists`)
@@ -298,6 +305,7 @@ export function AddTaskModal({
           description: description.trim() || undefined,
           dueDate: dueDate || undefined,
           priority,
+          planningHorizon,
           connectorType: destination.connectorType,
           connectorInstanceId: destination.connectorType === 'local'
             ? undefined
@@ -311,6 +319,7 @@ export function AddTaskModal({
           estimatedDuration: estimatedDuration || undefined,
           effort: effort || undefined,
           recurrence: recurrence !== 'none' ? recurrence : undefined,
+          recurrenceMode: recurrence !== 'none' ? recurrenceMode : undefined,
           triageItemId,
         }),
       });
@@ -338,6 +347,7 @@ export function AddTaskModal({
           setDueDate('');
           setDueDateText('');
           setPriority('none');
+          setPlanningHorizon(null);
           setSelectedTags([]);
           setPrefillTagSlugs([]);
           setSelectedProjectId('');
@@ -347,6 +357,7 @@ export function AddTaskModal({
           setEffort(null);
           setCustomDurationInput('');
           setRecurrence('none');
+          setRecurrenceMode('schedule');
           setAddToMyDay(false);
           setTagSearchQuery('');
           setShowTagDropdown(false);
@@ -541,7 +552,11 @@ export function AddTaskModal({
               {destinations.filter(d => !d.listId).map((dest) => (
                 <button
                   key={dest.id}
-                  onClick={() => { setDestination(dest); setSelectedListId(''); }}
+                  onClick={() => {
+                    setDestination(dest);
+                    setSelectedListId('');
+                    if (dest.connectorType !== 'local') setRecurrenceMode('schedule');
+                  }}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                     destination.id === dest.id && !destination.listId
                       ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent-400)]'
@@ -710,8 +725,9 @@ export function AddTaskModal({
               )}
             </div>
 
-            {/* Priority */}
-            <div>
+            {/* Priority and horizon */}
+            <div className="space-y-3">
+              <div>
               <label className="block text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-1">Priority</label>
               <Select value={priority} onValueChange={(v) => setPriority(v)}>
                 <SelectTrigger className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]">
@@ -725,6 +741,31 @@ export function AddTaskModal({
                   <SelectItem value="critical">🔥 Critical</SelectItem>
                 </SelectContent>
               </Select>
+              </div>
+              <div>
+                <PlanningHorizonFieldLabel className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
+                <Select
+                  value={planningHorizon ?? 'none'}
+                  onValueChange={(value) => setPlanningHorizon(
+                    value === 'none' ? null : value as PlanningHorizon,
+                  )}
+                >
+                  <SelectTrigger
+                    aria-label="Horizon"
+                    className="w-full bg-[var(--surface-0)] border border-[var(--border)] rounded-lg px-3 py-2 text-xs text-[var(--text-primary)]"
+                  >
+                    <PlanningHorizonOption value={planningHorizon} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none"><PlanningHorizonOption value={null} /></SelectItem>
+                    {PLANNING_HORIZONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        <PlanningHorizonOption value={value} />
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {/* Effort & Duration — stacked */}
@@ -821,7 +862,14 @@ export function AddTaskModal({
                 <Repeat size={10} />
                 Repeat
               </label>
-              <RecurrencePicker value={recurrence} onChange={setRecurrence} variant="full" />
+              <RecurrencePicker
+                value={recurrence}
+                onChange={setRecurrence}
+                mode={recurrenceMode}
+                onModeChange={setRecurrenceMode}
+                completionModeAvailable={destination.connectorType === 'local'}
+                variant="full"
+              />
               {recurrence !== 'none' && ['ms-todo', 'outlook-calendar'].includes(destination.connectorType) && (
                 <p className="text-xs text-[var(--text-muted)] mt-1">
                   Synced to {destination.connectorType === 'ms-todo' ? 'Microsoft To Do' : 'Outlook'}

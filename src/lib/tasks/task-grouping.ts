@@ -2,8 +2,25 @@ import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import { getTaskStatusGroupLabel } from './task-status-groups';
 
 export const NO_EFFORT_GROUP_LABEL = 'No Effort';
+export const NO_PLANNING_HORIZON_GROUP_LABEL = 'Not set';
 
-export function getTaskGroupLabels(task: Task, groupBy: string, today: string): string[] {
+const PLANNING_HORIZON_GROUP_LABELS = {
+  next: 'Next',
+  soon: 'Soon',
+  later: 'Later',
+  someday: 'Someday',
+} as const;
+
+interface TaskGroupingContext {
+  projectId?: string;
+}
+
+export function getTaskGroupLabels(
+  task: Task,
+  groupBy: string,
+  today: string,
+  context: TaskGroupingContext = {},
+): string[] {
   switch (groupBy) {
     case 'source':
       return [task.connectorType || 'local'];
@@ -13,6 +30,10 @@ export function getTaskGroupLabels(task: Task, groupBy: string, today: string): 
       return [getTaskStatusGroupLabel(task.status)];
     case 'priority':
       return [task.priority || 'none'];
+    case 'planningHorizon':
+      return [task.planningHorizon
+        ? PLANNING_HORIZON_GROUP_LABELS[task.planningHorizon]
+        : NO_PLANNING_HORIZON_GROUP_LABEL];
     case 'effort':
       return [task.effort == null ? NO_EFFORT_GROUP_LABEL : String(task.effort)];
     case 'dueDate':
@@ -32,6 +53,16 @@ export function getTaskGroupLabels(task: Task, groupBy: string, today: string): 
               : `${membership.projectName} › Unphased`
           )))]
         : ['No Project'];
+    case 'phase': {
+      const memberships = context.projectId
+        ? task.projectPhaseMemberships?.filter((membership) => (
+            membership.projectId === context.projectId
+          ))
+        : task.projectPhaseMemberships;
+      return memberships?.length
+        ? [...new Set(memberships.map((membership) => membership.phaseName || 'Unassigned'))]
+        : ['Unassigned'];
+    }
     default:
       return ['All'];
   }

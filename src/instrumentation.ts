@@ -38,14 +38,14 @@ export async function register() {
       terminateFailedStartup(error);
     }
     const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-    startRuntimeTelemetry('web');
+    await startRuntimeTelemetry('web');
     markRuntimeReady();
     syncLogger.info('Instrumentation: public demo database reset and seeded');
     return;
   }
 
   const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-  startRuntimeTelemetry('web');
+  await startRuntimeTelemetry('web');
   const {
     pushNotificationScheduler,
     scheduledSummariesEnabled,
@@ -72,7 +72,7 @@ export async function register() {
       try {
         await syncScheduler.scheduleAll();
         syncLogger.info(
-          { attempt, scheduledJobs: syncScheduler.getStatus().length },
+          { attempt, scheduledJobs: (await syncScheduler.getStatus()).length },
           'Instrumentation: sync scheduler initialized'
         );
         initialized = true;
@@ -98,6 +98,10 @@ export async function register() {
     }
 
     syncScheduler.startWatchdog();
+    const { financeConnectionRecoveryScheduler } = await import(
+      '@/lib/connectors/monarch-money/recovery-scheduler'
+    );
+    await financeConnectionRecoveryScheduler.start();
 
     try {
       await triageSyncScheduler.initialize();

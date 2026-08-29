@@ -8,7 +8,12 @@ import { ingestTriageImport } from '../capture';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 import { fetchWithRateLimit, IMPORT_USER_AGENT } from './base-importer';
-import type { DocAction } from '@/lib/connectors/document-intelligence/document-parser';
+import {
+  isActionReady,
+  resolveActionCta,
+  resolveReviewUrl,
+  type DocAction,
+} from '@/lib/connectors/document-intelligence/document-parser';
 
 export interface DocIntelligenceImportOptions {
   baseUrl?: string;
@@ -69,12 +74,17 @@ export async function importDocumentIntelligenceActions(
       summary.errors.push(`Skipped DI action missing id or document_title`);
       continue;
     }
+    if (!isActionReady(action)) {
+      summary.skipped += 1;
+      continue;
+    }
 
     const documentUrl =
       action.document_url ||
       (settings.paperlessBaseUrl
         ? `${settings.paperlessBaseUrl}/documents/${action.document_id}/details`
         : '');
+    const primaryAction = resolveActionCta(action);
 
     const result = await ingestTriageImport({
       sourcePlatform: 'document-intelligence',
@@ -92,6 +102,13 @@ export async function importDocumentIntelligenceActions(
         documentTitle: action.document_title,
         urgency: action.urgency,
         dueDate: action.due_date,
+        category: action.category,
+        actionReady: isActionReady(action),
+        reviewState: action.review_state,
+        reviewUrl: resolveReviewUrl(action, null),
+        primaryActionId: primaryAction?.id,
+        primaryActionLabel: primaryAction?.label,
+        primaryActionUrl: primaryAction?.url,
         connectorType: 'document-intelligence',
       },
     });
@@ -161,6 +178,8 @@ function buildTitle(action: DocAction): string {
       return `Schedule: ${action.document_title}`;
     case 'file':
       return `File: ${action.document_title}`;
+    case 'archive':
+      return `Archive: ${action.document_title}`;
     case 'review':
       return `Review: ${action.document_title}`;
     default:

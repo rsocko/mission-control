@@ -90,6 +90,7 @@ import {
   reorderMyDayItems,
   resolveMyDayGroupSelection,
   resolveMyDaySortSelection,
+  sortCompletedMyDayItems,
   sortMyDayItems,
 } from '@/lib/utils/my-day-view';
 import type {
@@ -341,8 +342,8 @@ export function TodayMainPanel({
     [filteredItemsByStatus.open, sortBy, sortDirection],
   );
   const completedItems = useMemo(
-    () => sortMyDayItems(filteredItemsByStatus.completed, sortBy, sortDirection),
-    [filteredItemsByStatus.completed, sortBy, sortDirection],
+    () => sortCompletedMyDayItems(filteredItemsByStatus.completed),
+    [filteredItemsByStatus.completed],
   );
   const cancelledItems = useMemo(
     () => sortMyDayItems(filteredItemsByStatus.cancelled, sortBy, sortDirection),
@@ -497,6 +498,25 @@ export function TodayMainPanel({
       return { ...current, query: tokens.map((token) => token.raw).join(' ') };
     });
   }, []);
+  const setSingleQueryFilter = useCallback((type: 'priority' | 'status', value: string) => {
+    setFilterContext((current) => {
+      const remainingTokens = parseFilterQuery(current.query).tokens
+        .filter((token) => token.type !== type)
+        .map((token) => token.raw);
+      return {
+        ...current,
+        priorities: type === 'priority' ? [] : current.priorities,
+        statuses: type === 'status' ? [] : current.statuses,
+        query: [...remainingTokens, `${type}:${value}`].join(' '),
+      };
+    });
+  }, []);
+  const filterByPriority = useCallback((priority: string) => {
+    setSingleQueryFilter('priority', priority);
+  }, [setSingleQueryFilter]);
+  const filterByStatus = useCallback((status: string) => {
+    setSingleQueryFilter('status', status);
+  }, [setSingleQueryFilter]);
 
   const handleModifierClick = useCallback((taskId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const items = activeItems;
@@ -959,6 +979,8 @@ export function TodayMainPanel({
                                       onSetDueDate={(date) => onSetTaskDueDate(item.taskId, date)}
                                       onSetPriority={(priority) => onSetTaskPriority(item.taskId, priority)}
                                       onSetStatus={(status) => onSetTaskStatus(item.taskId, status)}
+                                      onFilterPriority={filterByPriority}
+                                      onFilterStatus={filterByStatus}
                                       onOpenNotes={(mode) => onOpenTaskNotes(item.taskId, mode)}
                                       sourceLists={sourceLists}
                                       listGroups={listGroups}

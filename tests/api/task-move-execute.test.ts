@@ -374,7 +374,8 @@ describe('POST /api/tasks/move/preview', () => {
     selectResults.push([{
       id: 'task-1', title: 'Fix login', description: 'Broken auth', connectorType: 'microsoft-todo',
       connectorInstanceId: 'inst-1', sourceListId: 'list-a', status: 'todo', priority: 'high',
-      sourceId: 'list-a:task-1', dueDate: '2026-08-01', assignee: 'user@example.com', effort: 3,
+      sourceId: 'list-a:task-1', dueDate: '2026-08-01', assignee: 'user@example.com',
+      planningHorizon: 'soon', effort: 3,
     }]); // task
     selectResults.push([{ name: 'bug', slug: 'bug' }]); // task tags
     selectResults.push([{ count: 2 }]); // subtask count
@@ -403,6 +404,7 @@ describe('POST /api/tasks/move/preview', () => {
     expect(data.subtasks.count).toBe(2);
     expect(data.fieldMappings).toEqual(expect.arrayContaining([
       expect.objectContaining({ field: 'effort', targetValue: 'label: effort:3' }),
+      expect.objectContaining({ field: 'planningHorizon', targetValue: '(kept in Mission Control)' }),
       expect.objectContaining({ field: 'estimatedDuration', targetValue: '(kept in Mission Control)' }),
       expect.objectContaining({ field: 'projects', targetValue: '(preserved in Mission Control)' }),
       expect.objectContaining({ field: 'attachments', sourceValue: '1 attachment' }),
@@ -801,7 +803,9 @@ describe('POST /api/tasks/move/execute', () => {
       id: 'task-1', title: 'Test Task', description: 'desc', connectorType: 'microsoft-todo',
       connectorInstanceId: 'inst-1', sourceListId: 'list-a', sourceListName: 'My List',
       status: 'in_progress', priority: 'high', dueDate: '2026-08-01', assignee: 'user',
+      localDisposition: 'active', planningHorizon: 'soon', pushCount: 2,
       effort: 4, microStatus: 'blocked_external', reminderAt: '2026-08-01T12:00:00Z',
+      reminderRelative: 'P1D', reminderDueTime: '09:30', snoozedUntil: '2026-08-02T12:00:00Z',
       sourceId: 'ms-source-1', metadata: null,
     }]); // source task
     selectResults.push([{ id: 'inst-2', type: 'github-issues', name: 'GitHub', capabilities: { read: true, write: true } }]); // target connector
@@ -828,10 +832,24 @@ describe('POST /api/tasks/move/execute', () => {
     expect(data.sourceAction).toBe('move');
     expect(mockCreateTask).toHaveBeenCalled();
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({
+      planningHorizon: 'soon',
       effort: 4,
       status: 'in_progress',
       microStatus: 'blocked_external',
+      snoozedUntil: '2026-08-02T12:00:00Z',
     }));
+    const insertedTask = mockTxValues.mock.calls
+      .map(([value]) => value)
+      .find((value) => value && !Array.isArray(value) && value.sourceId === 'acme/repo:123');
+    expect(insertedTask).toMatchObject({
+      localDisposition: 'active',
+      planningHorizon: 'soon',
+      pushCount: 2,
+      reminderAt: '2026-08-01T12:00:00Z',
+      reminderRelative: 'P1D',
+      reminderDueTime: '09:30',
+      snoozedUntil: '2026-08-02T12:00:00Z',
+    });
     expect(mockRunTransaction).toHaveBeenCalled();
     expect(mockMoveLogInfo).toHaveBeenCalledWith(
       expect.objectContaining({

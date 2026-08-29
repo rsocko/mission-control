@@ -27,9 +27,9 @@ function matrixTask(overrides: Partial<Task>): Task {
     tags: [],
     metadata: '{}',
     sourceId: 'local:task-1',
+    planningHorizon: null,
     effort: 3,
     smartScore: 64,
-    hasDescription: false,
     editPolicy: editableTaskPolicy,
     ...overrides,
     localDisposition: overrides.localDisposition ?? 'active',
@@ -115,7 +115,7 @@ describe('MatrixScatter', () => {
     expect(screen.getByText('1 plotted')).toBeInTheDocument();
     expect(screen.getByText('1 missing priority')).toBeInTheDocument();
     expect(screen.getByText('1 missing effort')).toBeInTheDocument();
-    expect(screen.getByText('1 missing due date')).toBeInTheDocument();
+    expect(screen.getByText('1 missing date and horizon')).toBeInTheDocument();
     expect(screen.getByText('Expanded marks for this filter')).toBeInTheDocument();
     expect(screen.getByText('Needs data (1)')).toBeInTheDocument();
     expect(screen.getByText('1 task plotted. 1 task has one or more data gaps.')).toBeInTheDocument();
@@ -133,7 +133,28 @@ describe('MatrixScatter', () => {
     expect(screen.getByText('1 plotted')).toBeInTheDocument();
     expect(screen.queryByText('0 missing priority')).not.toBeInTheDocument();
     expect(screen.queryByText('0 missing effort')).not.toBeInTheDocument();
-    expect(screen.queryByText('0 missing due date')).not.toBeInTheDocument();
+    expect(screen.queryByText('0 missing date and horizon')).not.toBeInTheDocument();
+  });
+
+  it('plots undated tasks from their planning horizon and explains the signal', () => {
+    render(
+      <MatrixScatter
+        tasks={[matrixTask({
+          id: 'planned-next',
+          title: 'Plan next',
+          dueDate: null,
+          planningHorizon: 'next',
+        })]}
+        projects={[]}
+        onSelectTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('1 using horizon')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: /Plan next, High priority, Next horizon/,
+    })).toBeInTheDocument();
+    expect(screen.queryByText(/missing date and horizon/)).not.toBeInTheDocument();
   });
 
   it('switches to the effort preset and persists its recommended color default', () => {
@@ -146,7 +167,7 @@ describe('MatrixScatter', () => {
     );
 
     fireEvent.click(screen.getByLabelText('Axes'));
-    fireEvent.click(screen.getByRole('option', { name: 'Priority x Effort' }));
+    fireEvent.click(screen.getByRole('option', { name: 'Importance x Effort' }));
     expect(screen.getByText('Quick wins')).toBeInTheDocument();
     expect(screen.getByText('Strategic')).toBeInTheDocument();
     expect(useDashboardViewStore.getState()).toMatchObject({

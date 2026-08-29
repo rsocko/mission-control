@@ -57,6 +57,15 @@ export async function GET(request: Request) {
       case 'priority':
         groupExpr = sql`COALESCE(NULLIF(${tasks.priority}, ''), 'none')`;
         break;
+      case 'planningHorizon':
+        groupExpr = sql`CASE ${tasks.planningHorizon}
+          WHEN 'next' THEN 'Next'
+          WHEN 'soon' THEN 'Soon'
+          WHEN 'later' THEN 'Later'
+          WHEN 'someday' THEN 'Someday'
+          ELSE 'Not set'
+        END`;
+        break;
       case 'source':
         groupExpr = sql`COALESCE(NULLIF(${tasks.connectorType}, ''), 'local')`;
         break;

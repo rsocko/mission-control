@@ -44,6 +44,7 @@ function notification(overrides: Partial<InboundNotification> = {}): InboundNoti
 afterEach(() => {
   delete process.env.MONARCH_WEB_URL;
   delete process.env.FINANCE_EXTERNAL_ALLOWED_HOSTS;
+  delete process.env.TYRION_OPERATIONS_URL;
   clearNotificationProvidersForTests();
   registerDefaultNotificationProviders();
 });
@@ -141,6 +142,100 @@ describe('notification provider registry', () => {
     });
   });
 
+  it('constructs and authorizes the Tyrion reconnect destination server-side', async () => {
+    process.env.TYRION_OPERATIONS_URL = 'https://tyrion.socko.us';
+    process.env.FINANCE_EXTERNAL_ALLOWED_HOSTS = 'tyrion.socko.us';
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'finance-manager',
+      metadata: {
+        notificationType: 'connectorAuthenticationExpired',
+        returnUrl: 'https://attacker.example',
+        session_id: 'must-not-propagate',
+      },
+    }));
+    const action = resolved?.presentation.actions?.[0];
+
+    expect(action).toMatchObject({
+      actionType: 'reconnect_monarch',
+      label: 'Reconnect Monarch',
+      payload: {},
+    });
+    expect(JSON.stringify(action)).not.toMatch(/returnUrl|session_id|csrftoken|token/i);
+
+    const result = await executeNotificationProviderAction({
+      notification: {
+        id: 'finance-recovery',
+        sourceId: 'finance-source',
+        connectorType: 'finance-manager',
+        connectorInstanceId: 'finance-invented',
+        title: 'Reconnect Monarch',
+        body: null,
+        category: 'finance',
+        navigationTarget: null,
+        metadata: { notificationType: 'connectorAuthenticationExpired' },
+        presentation: {},
+      },
+      action: {
+        id: 'finance-recovery-action',
+        notificationId: 'finance-recovery',
+        actionType: 'reconnect_monarch',
+        payload: {},
+      },
+      payload: {
+        url: 'https://attacker.example',
+        returnUrl: 'https://attacker.example',
+        session_id: 'must-not-propagate',
+      },
+      input: {},
+    });
+
+    expect(result).toEqual({
+      state: 'read',
+      result: {
+        type: 'open_url',
+        url: 'https://tyrion.socko.us/?source=mission-control',
+      },
+    });
+  });
+
+  it('rejects reconnect actions outside outage notifications or an approved origin', async () => {
+    process.env.TYRION_OPERATIONS_URL = 'https://attacker.example';
+    process.env.FINANCE_EXTERNAL_ALLOWED_HOSTS = 'tyrion.socko.us';
+    const base = {
+      id: 'finance-recovery',
+      sourceId: 'finance-source',
+      connectorType: 'finance-manager',
+      connectorInstanceId: 'finance-invented',
+      title: 'Reconnect Monarch',
+      body: null,
+      category: 'finance',
+      navigationTarget: null,
+      presentation: {},
+    };
+    const action = {
+      id: 'finance-recovery-action',
+      notificationId: 'finance-recovery',
+      actionType: 'reconnect_monarch',
+      payload: {},
+    };
+
+    await expect(executeNotificationProviderAction({
+      notification: { ...base, metadata: { notificationType: 'largeTransaction' } },
+      action,
+      payload: {},
+      input: {},
+    })).resolves.toMatchObject({ error: { status: 400 } });
+    await expect(executeNotificationProviderAction({
+      notification: {
+        ...base,
+        metadata: { notificationType: 'connectorDegraded' },
+      },
+      action,
+      payload: {},
+      input: {},
+    })).resolves.toMatchObject({ error: { status: 503 } });
+  });
+
   it('registers built-in providers with source-specific CTA labels', () => {
     registerDefaultNotificationProviders();
     const resolved = resolveNotificationProvider(notification({
@@ -161,6 +256,41 @@ describe('notification provider registry', () => {
     expect(resolved?.presentation.actions?.[0].payload).toEqual({
       url: 'https://github.com/acme/repo/pull/42',
     });
+  });
+
+  it('presents bounded Homelab incident context and approved actions', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'homelab',
+      category: 'infrastructure',
+      metadata: {
+        schemaVersion: 1,
+        fingerprint: 'abcdef',
+        status: 'firing',
+        type: 'homelab_service_unavailable',
+        node: 'node-1',
+        environment: 'production',
+        metrics: [{ label: 'Unavailable', value: '5m', tone: 'danger' }],
+        links: [
+          { kind: 'dashboard', url: 'https://grafana.example/d/node' },
+          { kind: 'logs', url: 'javascript:alert(1)' },
+        ],
+      },
+    }));
+
+    expect(getNotificationProvider('homelab')?.displayName).toBe('Homelab');
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'Homelab',
+      subtitle: 'node-1 - firing',
+      richContent: {
+        stats: [
+          { label: 'Environment', value: 'production' },
+          { label: 'Unavailable', value: '5m', tone: 'danger' },
+        ],
+        links: [{ label: 'Open dashboard', url: 'https://grafana.example/d/node' }],
+      },
+    });
+    expect(resolved?.presentation.actions).toHaveLength(1);
   });
 
   it('keeps finance digests navigable without marking them actionable', () => {

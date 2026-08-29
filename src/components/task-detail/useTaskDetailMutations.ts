@@ -19,7 +19,7 @@ import {
   ProjectHierarchyClientError,
 } from '@/lib/projects/hierarchy-client';
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
-import type { LocalDisposition, TaskField } from '@/types';
+import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
@@ -149,6 +149,7 @@ export function useTaskDetailMutations({
   const saveField = useCallback(async (
     field: TaskField,
     value: string | number | null | undefined,
+    reportError = true,
   ) => {
     if (!ensureFieldsEditable(field)) return false;
     try {
@@ -158,7 +159,9 @@ export function useTaskDetailMutations({
       notifyNavigationCountsChanged();
       return true;
     } catch {
-      toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+      if (reportError) {
+        toast.error(`Failed to save ${field === 'description' ? 'notes' : field}`);
+      }
       return false;
     }
   }, [ensureFieldsEditable, taskId, onUpdate]);
@@ -405,6 +408,13 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? { ...prev, priority } : prev);
   }, [saveField, setTask]);
 
+  const handlePlanningHorizonChange = useCallback(async (
+    planningHorizon: PlanningHorizon | null,
+  ) => {
+    if (!(await saveField('planningHorizon', planningHorizon))) return;
+    setTask((prev) => prev ? { ...prev, planningHorizon } : prev);
+  }, [saveField, setTask]);
+
   const handleLocalDispositionChange = useCallback(async (localDisposition: LocalDisposition) => {
     if (!task || !canSetTaskLocalDisposition(
       task.editPolicy,
@@ -567,8 +577,23 @@ export function useTaskDetailMutations({
   const handleRecurrenceChange = useCallback(async (recurrence: string) => {
     const value = recurrence === 'none' ? null : recurrence;
     if (!(await saveField('recurrence', value))) return;
-    setTask((prev) => prev ? { ...prev, recurrence: value } : prev);
+    setTask((prev) => prev ? {
+      ...prev,
+      recurrence: value,
+      ...(value === null ? { recurrenceMode: 'schedule' as const } : {}),
+    } : prev);
   }, [saveField, setTask]);
+
+  const handleRecurrenceModeChange = useCallback(async (recurrenceMode: 'schedule' | 'completion') => {
+    if (!ensureFieldsEditable('recurrence')) return;
+    const result = await patchTask(taskId, { recurrenceMode });
+    if (!result.ok) {
+      toast.error('Failed to save recurrence timing');
+      return;
+    }
+    setTask((prev) => prev ? { ...prev, recurrenceMode } : prev);
+    onUpdate?.({ recurrenceMode });
+  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
 
   const handleMicroStatusChange = useCallback(async (microStatus: string | null) => {
     if (!ensureFieldsEditable('microStatus')) return;
@@ -690,6 +715,7 @@ export function useTaskDetailMutations({
     handleToggleMyDay,
     handleDelete,
     handlePriorityChange,
+    handlePlanningHorizonChange,
     handleLocalDispositionChange,
     handleEffortChange,
     handleDurationChange,
@@ -698,6 +724,7 @@ export function useTaskDetailMutations({
     handleReminderChange,
     reminderSaving,
     handleRecurrenceChange,
+    handleRecurrenceModeChange,
     handleMicroStatusChange,
     requestMicroStatusSuggestion,
     dismissMicroStatusSuggestion,

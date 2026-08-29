@@ -11,8 +11,58 @@ import { getMissingFields } from '@/lib/hooks/useQuickSortData';
 
 const SWIPE_THRESHOLD_X = 100;
 const SWIPE_THRESHOLD_Y = 100;
+const SWIPE_MIN_TRAVEL = 56;
+const SWIPE_VELOCITY_THRESHOLD = 500;
+const SWIPE_AXIS_DOMINANCE = 1.25;
+const SWIPE_AXIS_LOCK_DISTANCE = 12;
 
 type QuickSortSwipeAction = 'acceptSuggestions' | 'acceptFocused' | 'skip' | 'undo' | 'snapBack';
+
+export function getQuickSortGestureAxis(offsetX: number, offsetY: number): 'x' | 'y' | null {
+  const absoluteX = Math.abs(offsetX);
+  const absoluteY = Math.abs(offsetY);
+  if (Math.max(absoluteX, absoluteY) < SWIPE_AXIS_LOCK_DISTANCE) return null;
+  if (absoluteX >= absoluteY * SWIPE_AXIS_DOMINANCE) return 'x';
+  if (absoluteY >= absoluteX * SWIPE_AXIS_DOMINANCE) return 'y';
+  return null;
+}
+
+// A fast flick can end before Motion flushes a pan frame, so the axis is never locked
+// mid-gesture. Fall back to the final offsets so flicks stay as predictable as slow drags;
+// the same travel and dominance rules still apply.
+export function resolveQuickSortGestureAxis(
+  lockedAxis: 'x' | 'y' | null,
+  offsetX: number,
+  offsetY: number,
+): 'x' | 'y' | null {
+  return lockedAxis ?? getQuickSortGestureAxis(offsetX, offsetY);
+}
+
+function isCommittedSwipe({
+  primaryOffset,
+  secondaryOffset,
+  primaryVelocity,
+  direction,
+  threshold,
+}: {
+  primaryOffset: number;
+  secondaryOffset: number;
+  primaryVelocity: number;
+  direction: 'negative' | 'positive';
+  threshold: number;
+}) {
+  const directionMatches = direction === 'negative' ? primaryOffset < 0 : primaryOffset > 0;
+  const velocityMatches = direction === 'negative'
+    ? primaryVelocity <= -SWIPE_VELOCITY_THRESHOLD
+    : primaryVelocity >= SWIPE_VELOCITY_THRESHOLD;
+  const travel = Math.abs(primaryOffset);
+  return (
+    directionMatches
+    && travel >= SWIPE_MIN_TRAVEL
+    && travel >= Math.abs(secondaryOffset) * SWIPE_AXIS_DOMINANCE
+    && (travel >= threshold || velocityMatches)
+  );
+}
 
 export function getQuickSortSwipeAction({
   axis,
@@ -23,6 +73,7 @@ export function getQuickSortSwipeAction({
   hasSuggestions,
   hasFocusedSuggestion,
   hasUndo = false,
+  busy = false,
 }: {
   axis: 'x' | 'y' | null;
   offsetX: number;
@@ -32,11 +83,20 @@ export function getQuickSortSwipeAction({
   hasSuggestions: boolean;
   hasFocusedSuggestion: boolean;
   hasUndo?: boolean;
+  busy?: boolean;
 }): QuickSortSwipeAction {
+  if (busy) return 'snapBack';
+
   if (
     axis === 'x' &&
     hasSuggestions &&
-    (offsetX < -SWIPE_THRESHOLD_X || velocityX < -500)
+    isCommittedSwipe({
+      primaryOffset: offsetX,
+      secondaryOffset: offsetY,
+      primaryVelocity: velocityX,
+      direction: 'negative',
+      threshold: SWIPE_THRESHOLD_X,
+    })
   ) {
     return 'acceptSuggestions';
   }
@@ -44,14 +104,26 @@ export function getQuickSortSwipeAction({
   if (
     axis === 'x' &&
     hasFocusedSuggestion &&
-    (offsetX > SWIPE_THRESHOLD_X || velocityX > 500)
+    isCommittedSwipe({
+      primaryOffset: offsetX,
+      secondaryOffset: offsetY,
+      primaryVelocity: velocityX,
+      direction: 'positive',
+      threshold: SWIPE_THRESHOLD_X,
+    })
   ) {
     return 'acceptFocused';
   }
 
   if (
     axis === 'y' &&
-    (offsetY < -SWIPE_THRESHOLD_Y || velocityY < -500)
+    isCommittedSwipe({
+      primaryOffset: offsetY,
+      secondaryOffset: offsetX,
+      primaryVelocity: velocityY,
+      direction: 'negative',
+      threshold: SWIPE_THRESHOLD_Y,
+    })
   ) {
     return 'skip';
   }
@@ -59,7 +131,13 @@ export function getQuickSortSwipeAction({
   if (
     axis === 'y'
     && hasUndo
-    && (offsetY > SWIPE_THRESHOLD_Y || velocityY > 500)
+    && isCommittedSwipe({
+      primaryOffset: offsetY,
+      secondaryOffset: offsetX,
+      primaryVelocity: velocityY,
+      direction: 'positive',
+      threshold: SWIPE_THRESHOLD_Y,
+    })
   ) {
     return 'undo';
   }
@@ -111,6 +189,7 @@ interface QuickSortCardProps {
   /** Swipe down: undo the previous Quick Sort operation */
   onUndo?: () => void | Promise<void>;
   undoLabel?: string;
+  busy?: boolean;
 }
 
 export default function QuickSortCard({
@@ -123,6 +202,7 @@ export default function QuickSortCard({
   onSkip,
   onUndo,
   undoLabel,
+  busy = false,
 }: QuickSortCardProps) {
   const x = useMotionValue(0);
   const y = useMotionValue(0);
@@ -135,7 +215,6 @@ export default function QuickSortCard({
       (mode === 'no_effort' && suggestion.effort) ||
       (mode === 'no_tags' && suggestion.tags.length > 0))
   );
-
   // Swipe-left reveal: card slides left, showing action boxes on right
   const revealWidth = useTransform(x, [-200, 0], [200, 0]);
   const revealOpacity = useTransform(x, [-SWIPE_THRESHOLD_X, -40, 0], [1, 0.6, 0]);
@@ -152,11 +231,9 @@ export default function QuickSortCard({
 
   const handleDrag = useCallback(
     (_: unknown, info: PanInfo) => {
+      if (busy) return;
       if (!dragAxis.current) {
-        // Lock to the axis with more movement
-        if (Math.abs(info.offset.x) > 10 || Math.abs(info.offset.y) > 10) {
-          dragAxis.current = Math.abs(info.offset.x) > Math.abs(info.offset.y) ? 'x' : 'y';
-        }
+        dragAxis.current = getQuickSortGestureAxis(info.offset.x, info.offset.y);
       }
 
       if (dragAxis.current === 'x') {
@@ -172,12 +249,12 @@ export default function QuickSortCard({
           : onUndo ? info.offset.y : Math.min(30, info.offset.y));
       }
     },
-    [x, y, hasSuggestions, hasFocusedSuggestion, onUndo]
+    [busy, x, y, hasSuggestions, hasFocusedSuggestion, onUndo]
   );
 
   const handleDragEnd = useCallback(
     (_: unknown, info: PanInfo) => {
-      const axis = dragAxis.current;
+      const axis = resolveQuickSortGestureAxis(dragAxis.current, info.offset.x, info.offset.y);
       dragAxis.current = null;
 
       const action = getQuickSortSwipeAction({
@@ -189,6 +266,7 @@ export default function QuickSortCard({
         hasSuggestions,
         hasFocusedSuggestion,
         hasUndo: !!onUndo,
+        busy,
       });
 
       if (action === 'acceptSuggestions') {
@@ -222,7 +300,18 @@ export default function QuickSortCard({
         animate(y, 0, { type: 'spring', stiffness: 400, damping: 30 });
       }
     },
-    [onAcceptSuggestions, onAcceptFocused, onSkip, onUndo, task.id, x, y, hasSuggestions, hasFocusedSuggestion]
+    [
+      busy,
+      hasFocusedSuggestion,
+      hasSuggestions,
+      onAcceptFocused,
+      onAcceptSuggestions,
+      onSkip,
+      onUndo,
+      task.id,
+      x,
+      y,
+    ]
   );
 
   // Build the list of suggestions to show in the reveal area (swipe left)
@@ -280,6 +369,8 @@ export default function QuickSortCard({
   const modePrompt =
     mode === 'no_priority'
       ? "What's the priority?"
+      : mode === 'quadrant'
+        ? 'Which quadrant?'
       : mode === 'no_effort'
         ? 'How much effort?'
         : mode === 'no_tags'
@@ -332,8 +423,9 @@ export default function QuickSortCard({
       )}
 
       <motion.div
-        className="absolute inset-x-0 top-0 flex items-center justify-center gap-2 pt-4"
+        className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 pb-4"
         style={{ opacity: skipRevealOpacity }}
+        aria-hidden="true"
       >
         <div className="flex items-center gap-2 rounded-full border border-amber-400/40 bg-amber-950/70 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-amber-300">
           <SkipForward size={14} />
@@ -379,15 +471,12 @@ export default function QuickSortCard({
         data-quick-sort-card-task-id={task.id}
         tabIndex={-1}
         aria-label={`Task: ${task.title}`}
-        className="relative flex h-full min-h-0 touch-none cursor-grab select-none flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl active:cursor-grabbing"
+        className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[32px] bg-white/[0.04] shadow-2xl ring-1 ring-inset ring-white/[0.08] backdrop-blur-xl"
         style={{ x, y }}
-        onPanStart={handleDragStart}
-        onPan={handleDrag}
-        onPanEnd={handleDragEnd}
       >
         <div
           aria-label="Task details"
-          className="flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overscroll-contain p-5"
+          className="quick-sort-card-details flex min-h-0 flex-1 touch-pan-y flex-col gap-4 overflow-y-auto overscroll-contain p-5"
           role="region"
           tabIndex={0}
         >
@@ -540,6 +629,32 @@ export default function QuickSortCard({
             <p className="text-[13px] text-slate-300 font-medium">{modePrompt}</p>
           </div>
         </div>
+        <motion.div
+          className={cn(
+            'flex h-11 flex-shrink-0 touch-none select-none items-center justify-center gap-2 border-t border-white/[0.06] px-3 text-xs text-slate-400',
+            busy ? 'cursor-not-allowed opacity-50' : 'cursor-grab active:cursor-grabbing',
+          )}
+          data-testid="quick-sort-swipe-handle"
+          role="group"
+          aria-disabled={busy}
+          aria-label={[
+            'Swipe handle.',
+            hasSuggestions ? 'Swipe left to apply all AI suggestions.' : '',
+            hasFocusedSuggestion ? 'Swipe right to apply the focused AI suggestion.' : '',
+            'Swipe up to skip.',
+            onUndo ? `Swipe down to undo ${undoLabel ?? 'the previous action'}.` : '',
+          ].filter(Boolean).join(' ')}
+          onPanStart={handleDragStart}
+          onPan={handleDrag}
+          onPanEnd={handleDragEnd}
+        >
+          <span className="h-1 w-8 flex-shrink-0 rounded-full bg-slate-600" aria-hidden="true" />
+          <span className="truncate" aria-hidden="true">
+            {hasSuggestions || hasFocusedSuggestion ? 'Left/right: AI · ' : ''}
+            Up: skip
+            {onUndo ? ' · Down: undo' : ''}
+          </span>
+        </motion.div>
       </motion.div>
     </div>
   );

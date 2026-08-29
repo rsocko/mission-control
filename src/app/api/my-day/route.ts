@@ -206,6 +206,7 @@ export async function GET(request: Request) {
       status: tasks.status,
       statusReason: tasks.statusReason,
       priority: tasks.priority,
+      planningHorizon: tasks.planningHorizon,
       dueDate: tasks.dueDate,
       pushCount: tasks.pushCount,
       connectorType: tasks.connectorType,
@@ -215,6 +216,7 @@ export async function GET(request: Request) {
       sourceListName: tasks.sourceListName,
       assignee: tasks.assignee,
       createdAt: tasks.createdAt,
+      completedAt: tasks.completedAt,
       metadata: tasks.metadata,
       effort: tasks.effort,
       microStatus: tasks.microStatus,
@@ -381,6 +383,7 @@ export async function GET(request: Request) {
         status: task.status,
         microStatus: task.microStatus,
         priority: task.priority,
+        planningHorizon: task.planningHorizon,
         dueDate: task.dueDate,
         pushCount: task.pushCount,
         connectorType: task.connectorType,
@@ -400,6 +403,7 @@ export async function GET(request: Request) {
       overdueRows,
       dueTodayRows,
       dueThisWeekRows,
+      planningNextRows,
       highPriorityRows,
       aiRows,
       recentlyAddedRows,
@@ -411,6 +415,7 @@ export async function GET(request: Request) {
         title: tasks.title,
         sourceId: tasks.sourceId,
         priority: tasks.priority,
+        planningHorizon: tasks.planningHorizon,
         dueDate: tasks.dueDate,
         pushCount: tasks.pushCount,
         connectorType: tasks.connectorType,
@@ -465,6 +470,19 @@ export async function GET(request: Request) {
           and(
             gt(tasks.dueDate, date),
             lte(tasks.dueDate, weekEnd),
+            ne(tasks.status, 'done'),
+            ne(tasks.status, 'cancelled'),
+            isTopLevelTask,
+            ...taskVisibilityConditions,
+          )
+        )
+        .limit(SUGGESTION_LIMIT),
+      // Tasks explicitly queued to be done next
+      db.select()
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.planningHorizon, 'next'),
             ne(tasks.status, 'done'),
             ne(tasks.status, 'cancelled'),
             isTopLevelTask,
@@ -534,6 +552,7 @@ export async function GET(request: Request) {
         status: t.status,
         microStatus: t.microStatus,
         priority: t.priority,
+        planningHorizon: t.planningHorizon,
         dueDate: t.dueDate,
         pushCount: t.pushCount,
         connectorType: t.connectorType,
@@ -552,6 +571,10 @@ export async function GET(request: Request) {
       .map(pickSuggestionFields);
 
     const dueThisWeekSuggestions = dueThisWeekRows
+      .filter(t => !myDayTaskIds.includes(t.id))
+      .map(pickSuggestionFields);
+
+    const planningNextSuggestions = planningNextRows
       .filter(t => !myDayTaskIds.includes(t.id))
       .map(pickSuggestionFields);
 
@@ -651,6 +674,7 @@ export async function GET(request: Request) {
 
     const suggestionGroups = {
       planningSignals: planningSignalSuggestions,
+      planningNext: planningNextSuggestions,
       yesterday: yesterdaySuggestions,
       overdue: overdueSuggestions,
       dueToday: dueTodaySuggestions,

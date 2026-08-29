@@ -114,7 +114,7 @@ connectors are excluded from task field-policy and mutation surfaces.
 | Microsoft Todo | Tasks | `remote-managed` | Title, description, lifecycle, priority, due date, recurrence, micro-status | Effort, estimate, reminders, snooze, organization, Kanban | Direct |
 | GitHub Issues | Tasks | `remote-managed` | Title, description, lifecycle, priority, micro-status, dependencies | Due date, recurrence, effort, estimate, reminders, snooze, organization, Kanban | Direct |
 | Custom REST | Tasks | Per instance: `remote-managed` when `updateEndpoint` is configured; otherwise `remote-mirror` | Title, description, lifecycle, priority, due date | Remaining planning and organization fields | Direct only with `updateEndpoint` |
-| OWL (Paperless-ngx) | Tasks | `remote-managed` hybrid | Title, description, status reason, priority, and due date are source-read-only; status is writable | Effort, estimate, recurrence, reminders, snooze, micro-status, organization, dependencies, Kanban | Direct for status only |
+| OWL (Paperless-ngx) | Tasks | `remote-managed` hybrid | Title, description, lifecycle, priority, due date, and source snooze are source-controlled; lifecycle is writable through supported outcomes | Status reason, micro-status, effort, estimate, recurrence, reminders, organization, dependencies, Kanban | Direct for To Do, Done, Won't do, and task-scoped outcome actions |
 | Scout | Tasks | `ingested` | Title, description, priority, and due date use override-aware inbound merge | Lifecycle and all other ordinary task fields | Pull-based lifecycle feed; no direct connector call |
 | Outlook Calendar | Notifications only | — | — | — | — |
 | Outlook Email | Notifications only | — | — | — | — |
@@ -152,12 +152,27 @@ recorded in `finance_mutation_audit`; local confirmation occurs only after the
 bridge acknowledges success.
 
 Each normalized snapshot page is separately submitted to Tyrion's protected
-batch attribution v1 service. Mission Control sends only opaque keyed source
-references, date, normalized merchant, an irreversible instrument fingerprint,
-observation time, and a structured existing manual decision. Mission Control
-authenticates with the finance-manager bearer token over private service DNS;
-Tyrion fixes the service actor and household scope server-side. Tyrion remains
-the sole policy and engine runtime.
+batch attribution v2 service. Mission Control sends only deterministic opaque
+connector-scoped source and required account references, date, normalized
+merchant, observation time, and a structured existing manual decision. Raw
+Monarch account IDs and card masks never cross the boundary. Mission Control
+authenticates
+with the finance-manager bearer token over private service DNS; Tyrion fixes the
+service actor and household scope server-side. Tyrion remains the sole policy
+and engine runtime.
+
+The connector stores a random identity namespace beside its token in protected,
+browser-redacted connector credentials. Ordinary SHA-256 derivation produces
+stable connector-scoped transaction, recurring, category, category-group,
+account, and tag references for both attribution and Finance Insight
+publication. The namespace is identity state, not authentication key material;
+the bearer token remains authentication only.
+
+Finance connector creation requires an exact uppercase ISO-4217
+`settings.householdCurrency`. It is non-secret application state shared by
+connector setup and Finance Insight publication validation. Existing connectors
+without it remain editable, preserve unrelated settings, and report
+`needs-configuration` until an operator selects a supported currency.
 
 Attribution metadata is persisted beside the transaction mirror. Current review
 exceptions are unique by connector and transaction, with idempotent manual
@@ -176,7 +191,8 @@ follows [`octo-org/tyrion#175`](https://github.com/octo-org/tyrion/pull/175):
 |---|---|
 | Large transaction or material recurring increase insight | Notification only |
 | Category or merchant variance | High-confidence members in one bounded monthly digest; medium confidence remains status only |
-| Open attribution exception | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
+| Open human-reviewable attribution exception (`no-match`, confidence ambiguity, rule conflict, historical tie, or manual-decision conflict) | Actionable notification while unresolved for less than 24 hours; one `mc-owned` task and My Day item at 24 hours when the latest authoritative observation is no more than 24 hours old |
+| Attribution configuration, authentication, service, policy, timeout, contract, or system failure | Connector/Finance status only; settle any prior actionable projection |
 | Failed `finance_mutation_audit` write-back | Status only while retries remain; one `mc-owned` task and My Day item after at least three failed attempts while the authoritative failure is no more than 60 minutes old |
 | Resolved or superseded exception | Complete or cancel the projected task and settle the notification |
 | Stale source state | Preserve existing work with stale metadata; never create, escalate, or reopen attention |
@@ -193,12 +209,43 @@ historical, stale, status-only, settled, or already-routed rows.
 Routing metadata contains opaque local references and stable codes only, never
 mutation error text or upstream identifiers.
 
-Duplicate and connector-health signal detection, identity, and lifecycle remain
-owned by Tyrion ([`octo-org/tyrion#174`](https://github.com/octo-org/tyrion/pull/174)).
-Mission Control does not invoke those handlers because no approved authenticated
-cross-process transport exists. Due/overdue reconciliation is also deferred:
-Tyrion has no authoritative reconciliation event DTO/API and Mission Control has
-no `/finance/reconciliation` producer route. Neither signal is inferred locally.
+Historical `attribution_not_configured` projections can be repaired only through
+the trusted, audited, dry-run-gated operator endpoint documented in
+[`Finance Attention Projection Repair`](../operations/finance-attention-repair.md).
+The repair leaves authoritative attribution exceptions intact so a later
+configured sync can replace them with genuine review work. The repair is fenced
+to the August 11-12, 2026 MC producer window and does not infer Tyrion policy
+state, outbox state, or fingerprint-key parity.
+
+Scheduler quarantine, one-shot canary sync, and exact-generation Finance Insight
+cutover procedures are documented in
+[`Tyrion Recovery and Finance Insight Readiness`](../operations/tyrion-recovery-readiness.md).
+
+Duplicate signal detection remains owned by Tyrion
+([`octo-org/tyrion#174`](https://github.com/octo-org/tyrion/pull/174)).
+Tyrion also owns connector-health normalization; Mission Control owns the local
+outage attention lifecycle described below. Due/overdue reconciliation remains
+deferred because Tyrion has no authoritative reconciliation event DTO/API and
+Mission Control has no `/finance/reconciliation` producer route. Neither signal
+is inferred locally.
+
+Tyrion owns reusable Monarch session material and exposes only normalized
+connector health to Mission Control. Mission Control persists one outage episode
+per connector and polls the authenticated health contract every five minutes.
+Transient degraded or unavailable health is suppressed before 15 minutes. At
+15 minutes it produces one high actionable notification; verified expired or
+unauthenticated health produces one critical actionable notification
+immediately. Either episode promotes to one local task and My Day item at four
+hours. Episode timing, notification identity, and task identity survive restart.
+
+The primary notification action is always **Reconnect Monarch**. Mission Control
+constructs its destination from the allowlisted server-side Tyrion operations
+root and adds only `source=mission-control`; producer-provided URLs and reusable
+authentication material are rejected. Returning from Tyrion does not prove
+recovery. Mission Control independently requires connected live health, a
+successful bounded `POST /sync?days=30`, and a second connected live health
+check before resolving the notification and task. Until then, Finance settings
+and the Finance overview show one persistent stale-data warning.
 
 Web and worker processes resolve the same canonical Bridge API base URL from the
 connector's persisted settings. Production defaults to the protected,
@@ -207,7 +254,7 @@ select another validated HTTPS base path or a safe private/local HTTP bridge.
 The gateway exposes only the bounded connector contract and does not expose
 browser-proxy, raw bridge, authentication, session, or internal routes.
 The same services reach attribution at
-`http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch`.
+`http://tyrion-operations-ui:3000/api/internal/v2/attribution/batch`.
 `https://tyrion.example` is the bounded operational UI and is intentionally not
 the bridge API origin.
 
@@ -263,10 +310,48 @@ task-shaped notification payloads. Task creation requests identify the selected
 `connectorInstanceId`; type-only fallback is accepted only when exactly one
 enabled instance of that connector type exists.
 
-OWL's general connector `write` capability must not be
-interpreted as full-field write access. Its field profile permits only status
-write-back to its Paperless-ngx-backed workflow; Paperless-ngx remains the
-system of record for documents. Scout does not accept direct task writes; Mission
+OWL's general connector `write` capability must not be interpreted as full-field
+write access. Its field profile permits lifecycle write-back to its
+Paperless-ngx-backed workflow; Paperless-ngx remains the system of record for
+documents. OWL exposes only `todo`, `done`, and `cancelled` through the generic
+task lifecycle UI, labelled **To Do**, **Done**, and **Won't do**. These map to
+OWL `pending`, `completed`, and `dismissed`. `in_progress` and `blocked` are not
+valid OWL source states; working or blocked context remains MC-local in
+`microStatus` and `statusReason`.
+
+OWL is also the authority for whether an Action Queue item is trusted.
+`action_ready=true` is required for modern records to become MC tasks or triage
+items; explicit false records become Needs Review notifications linked to the
+exact OWL item. Missing readiness fields are treated as legacy responses and
+retain pre-readiness behavior. MC keeps its cross-source Do Next model and uses
+the dedicated OWL workspace only as a deadline-first projection for lightweight
+execution. It does not duplicate OWL's document correction or pipeline
+administration. See the
+[OWL/MC integration contract](../design/proposed/INTEGRATION-API-CONTRACT.md).
+
+OWL pulls request every lifecycle state and every page. Inbound states normalize
+as follows:
+
+| OWL state | MC lifecycle | Additional state |
+|---|---|---|
+| `pending` | `todo` | Clears source snooze |
+| `completed` or legacy `done` | `done` | Completion time comes from `updated_at` |
+| `dismissed` | `cancelled` | `metadata.owlDisposition = dismissed` |
+| `not_an_action` | `cancelled` | `metadata.owlDisposition = not_an_action` |
+| `snoozed` | `todo` | `snoozedUntil` and `metadata.owlSnoozedUntil` preserve the source deadline |
+
+`updated_at` is the source freshness timestamp and is also retained as
+`metadata.owlUpdatedAt`; `metadata.owlStatus` preserves the unnormalized source
+state. A complete OWL pull does not treat absence as deletion, because terminal
+outcomes are represented explicitly by the all-status feed.
+
+Source snooze and classifier/extraction feedback use the task-scoped
+`POST /api/tasks/{taskId}/owl` route. The server resolves both task and connector
+instance, validates the allowlisted payload, writes OWL first, and updates local
+status, snooze, priority, and metadata only after OWL succeeds. Upstream errors
+are returned to the UI and are not recorded as local success.
+
+Scout does not accept direct task writes; Mission
 Control persists Scout lifecycle locally and Scout observes it through the
 status-change feed.
 

@@ -21,6 +21,8 @@ export {
   runtimeTelemetrySamples,
   workerHealthSnapshot,
   syncSchedules,
+  connectorSyncControls,
+  connectorSyncOperatorRuns,
   syncDeletionCandidates,
   syncDeletionSnapshots,
   dependencyReconciliationSnapshots,
@@ -121,6 +123,9 @@ export type {
   AiRunSensitivity,
   AiRunStatus,
 } from './ai-runs';
+
+// Homelab alert lifecycle receipts
+export { homelabAlertReceipts } from './homelab';
 
 // Durable checkpoints and leases for bounded bulk maintenance agents
 export { maintenanceAgentRuns } from './maintenance-agents';
@@ -247,6 +252,7 @@ export {
 export {
   financeTransactions,
   financeSyncState,
+  financeConnectionOutages,
   financeInsightPublicationState,
   financeInsightPublicationDelivery,
   financeInsightPublications,
@@ -254,6 +260,7 @@ export {
   financeInsightOccurrenceCacheState,
   financeInsightOccurrences,
   financeInsightCutovers,
+  financeInsightCutoverAudit,
   financeInsightTransactionBackfillPlans,
   financeInsightTransactionProjectionFacts,
   financeInsightTransactionProjectionState,
@@ -271,6 +278,7 @@ export {
   financeAttributionSubjects,
   financeAttributionExceptions,
   financeAttributionAudit,
+  financeAttentionRepairAudit,
   kidProfiles,
   kidCardRules,
   kidMerchantRules,

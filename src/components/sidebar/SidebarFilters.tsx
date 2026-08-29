@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2 } from 'lucide-react';
+import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Pencil, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import {
@@ -96,6 +96,7 @@ interface SidebarFiltersProps {
     setTagSearch: (v: string) => void;
     setTagsExpanded: (v: boolean) => void;
     applyView: (view: SavedView) => void;
+    editView?: (view: SavedView) => void;
     deleteView?: (id: string) => void;
     setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
   };
@@ -125,7 +126,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
     setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter, setProjectFilter,
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
-    setListSearch, setTagSearch, setTagsExpanded, applyView, deleteView,
+    setListSearch, setTagSearch, setTagsExpanded, applyView, editView, deleteView,
     setQuickFilterVisibility,
   } = actions;
   const {
@@ -469,7 +470,14 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
               <div key={view.id} className="flex items-center group">
                 <div className="flex-1">
                   <SidebarNavItem
-                    icon={view.icon}
+                    icon={(
+                      <IconRenderer
+                        value={view.icon}
+                        size={14}
+                        color={view.iconColor}
+                        fallback={<Bookmark size={14} />}
+                      />
+                    )}
                     label={view.name}
                     count={0}
                     onClick={() => applyView(view)}
@@ -487,12 +495,26 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
                     ) : undefined}
                   />
                 </div>
+                {editView ? (
+                  <button
+                    type="button"
+                    onClick={() => editView(view)}
+                    className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover:opacity-100 group-focus-within:opacity-100"
+                    aria-label={`Edit ${view.name}`}
+                    title={`Edit ${view.name}`}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                ) : null}
                 {deleteView ? (
                   <button
+                    type="button"
                     onClick={() => deleteView(view.id)}
-                    className="text-[var(--text-muted)] hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity px-1"
+                    className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 group-focus-within:opacity-100"
+                    aria-label={`Delete ${view.name}`}
+                    title={`Delete ${view.name}`}
                   >
-                    ×
+                    <Trash2 size={12} />
                   </button>
                 ) : null}
               </div>

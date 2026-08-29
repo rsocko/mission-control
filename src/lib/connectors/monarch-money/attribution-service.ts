@@ -11,8 +11,8 @@ import type { MonarchTransaction } from './client';
 import type { ConnectorConfig } from '@/types';
 import {
   createAttributionRequests,
+  createAttributionAccountRef,
   createAttributionSourceRef,
-  createInstrumentFingerprint,
   normalizeAttributionMerchant,
   resolveTyrionAttributionConfig,
   TyrionAttributionClient,
@@ -21,11 +21,13 @@ import {
 } from './attribution-client';
 import {
   TYRION_ATTRIBUTION_CONTRACT_VERSION,
+  TYRION_ATTRIBUTION_ENGINE_VERSION,
   TYRION_ATTRIBUTION_PROVENANCE,
   type AttributionBatchItem,
   type AttributionBatchResult,
   type ManualDecision,
 } from './attribution-contract';
+import { ensureFinanceIdentityNamespace } from './identity';
 
 type ActorType = 'parent-admin' | 'service';
 type ExceptionStatus = 'open' | 'retry_requested' | 'resolved' | 'dismissed';
@@ -66,7 +68,7 @@ interface AttributionFailure {
 interface CoordinatorDependencies {
   config?: TyrionAttributionConfig;
   client?: TyrionAttributionClient;
-  financeConfig?: Pick<ConnectorConfig, 'credentials'>;
+  financeConfig?: Pick<ConnectorConfig, 'credentials' | 'settings'>;
 }
 
 function localTransactionId(connectorId: string, upstreamTransactionId: string): string {
@@ -188,12 +190,7 @@ function prepareItems(
         sourceRef: createAttributionSourceRef(config, connectorId, transaction.id),
         occurredOn: transaction.date,
         merchantName: normalizeAttributionMerchant(transaction.merchant.name),
-        instrumentFingerprint: createInstrumentFingerprint(
-          config,
-          connectorId,
-          transaction.account.id,
-          transaction.account.mask,
-        ),
+        accountRef: createAttributionAccountRef(config, transaction.account.id),
         observedAt,
         existingManualDecision: manualDecision,
       },
@@ -594,13 +591,13 @@ export class FinanceAttributionCoordinator {
   private terminalFailure: AttributionFailure | null = null;
   private attempted = false;
   private succeeded = false;
-  private readonly financeConfig: Pick<ConnectorConfig, 'credentials'>;
+  private readonly financeConfig: Pick<ConnectorConfig, 'credentials' | 'settings'>;
 
   constructor(
     private readonly connectorId: string,
     dependencies: CoordinatorDependencies = {},
   ) {
-    this.financeConfig = dependencies.financeConfig ?? { credentials: {} };
+    this.financeConfig = dependencies.financeConfig ?? { credentials: {}, settings: {} };
     if (dependencies.config) {
       this.config = dependencies.config;
       this.policyFence = dependencies.config.expectedPolicyVersion;
@@ -640,7 +637,15 @@ export class FinanceAttributionCoordinator {
     }
     let prepared: PreparedAttributionItem[];
     try {
-      if (!this.config) this.config = resolveTyrionAttributionConfig(this.financeConfig);
+      if (!this.config) {
+        const identityNamespace = ensureFinanceIdentityNamespace(this.connectorId);
+        this.config = resolveTyrionAttributionConfig({
+          credentials: {
+            ...(this.financeConfig.credentials ?? {}),
+            identityNamespace,
+          },
+        });
+      }
       if (!this.client) this.client = new TyrionAttributionClient(this.config);
       if (this.policyFence === null) {
         this.policyFence = this.config.expectedPolicyVersion;
@@ -685,7 +690,6 @@ export class FinanceAttributionCoordinator {
       this.attempted = true;
       try {
         const response = await this.client.attribute(request, signal);
-        if (this.policyFence === null) this.policyFence = response.policyVersion;
         applyResults(
           this.connectorId,
           batch,
@@ -736,7 +740,7 @@ export class FinanceAttributionCoordinator {
           attribution_last_successful_at = CASE WHEN ? THEN ? ELSE attribution_last_successful_at END,
           attribution_last_error_code = ?,
           attribution_policy_version = COALESCE(?, attribution_policy_version),
-          attribution_engine_version = CASE WHEN ? THEN '1.0.0' ELSE attribution_engine_version END,
+          attribution_engine_version = CASE WHEN ? THEN ? ELSE attribution_engine_version END,
           updated_at = ?
       WHERE connector_id = ?
     `).run(
@@ -747,6 +751,7 @@ export class FinanceAttributionCoordinator {
       this.terminalFailure?.code ?? null,
       this.policyFence,
       this.succeeded ? 1 : 0,
+      TYRION_ATTRIBUTION_ENGINE_VERSION,
       now,
       this.connectorId,
     );

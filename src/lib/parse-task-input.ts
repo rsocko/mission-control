@@ -6,6 +6,7 @@
  *   "jun 25", "end of month", "aug 15 2025", "3pm tomorrow", etc.
  * - Priority: "!critical", "!high", "!medium", "!low", "!0" (critical), "!1" (high), "!2" (medium), "!3" (low)
  * - Effort: "^1" (XS), "^2" (S), "^3" (M), "^4" (L), "^5" (XL)
+ * - Planning horizon: "~next", "~soon", "~later", "~someday"
  * - Tags: "#tagname"
  * - Destination: "@work", "@personal", "@github"
  * - Project: "/project-name"
@@ -14,6 +15,7 @@
  */
 
 import { findAllNLPDates, parseNLPDate } from './date-parser';
+import type { PlanningHorizon } from '@/types';
 
 export interface QuickAddProject {
   id: string;
@@ -43,6 +45,7 @@ export interface ParsedTask {
   } | null;
   estimatedDuration: number | null; // minutes, parsed from ~30m, ~1h, ~2h etc.
   effort: number | null;   // 1–5, parsed from ^1, ^2, ^3, ^4, ^5
+  planningHorizon: PlanningHorizon | null;
   recurrence: string | null; // Recurrence pattern value (e.g. 'daily', 'weekly', 'every 3 days', 'weekly (monday, wednesday)')
   recurrenceLabel: string | null; // Human-readable label for the parsed recurrence
 }
@@ -269,6 +272,7 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   let dateSuggestion: ParsedTask['dateSuggestion'] = null;
   let estimatedDuration: number | null = null;
   let effort: number | null = null;
+  let planningHorizon: PlanningHorizon | null = null;
   let recurrence: string | null = null;
   let recurrenceLabel: string | null = null;
 
@@ -279,6 +283,16 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     recurrenceLabel = recurrenceResult.result.label;
     remaining = removeMatchedText(remaining, recurrenceResult.matchedText);
     if (!preserveText) title = removeMatchedText(title, recurrenceResult.matchedText);
+  }
+
+  // Extract planning horizon. All recognized tokens are consumed; the last one wins.
+  const horizonMatches = [...remaining.matchAll(/(?<!\\)~(next|soon|later|someday)\b/gi)];
+  if (horizonMatches.length > 0) {
+    planningHorizon = horizonMatches[horizonMatches.length - 1][1].toLowerCase() as PlanningHorizon;
+    remaining = remaining.replace(/(?<!\\)~(?:next|soon|later|someday)\b/gi, '').trim();
+    if (!preserveText) {
+      title = title.replace(/(?<!\\)~(?:next|soon|later|someday)\b/gi, '').trim();
+    }
   }
 
   // Extract estimated duration: ~30m, ~1h, ~1.5h, ~90m, ~2h (not escaped with \)
@@ -404,6 +418,7 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     dateSuggestion,
     estimatedDuration,
     effort,
+    planningHorizon,
     recurrence,
     recurrenceLabel,
   };

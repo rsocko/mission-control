@@ -43,6 +43,11 @@ import {
 } from '@/lib/connectors/scout/settings';
 import { WorkTodoBridgePanel } from './WorkTodoBridgePanel';
 import { defaultTyrionBridgeUrlForEnvironment } from '@/lib/connectors/monarch-money/constants';
+import { FinanceConnectionWarning } from '@/components/finance/FinanceConnectionWarning';
+import {
+  currencySchema,
+  supportedCurrencyCodes,
+} from '@/lib/finance/currency';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -745,6 +750,12 @@ function DefaultConnectorEditPanel({
       ? connectorSettings.bridgeUrl
       : defaultTyrionBridgeUrlForEnvironment(process.env.NODE_ENV)
   );
+  const persistedHouseholdCurrency = typeof connectorSettings.householdCurrency === 'string'
+    ? connectorSettings.householdCurrency
+    : '';
+  const [editHouseholdCurrency, setEditHouseholdCurrency] = useState(
+    persistedHouseholdCurrency,
+  );
   const isGitHubConnector = resolvedVariant === 'github';
   const [editFetchNotifications, setEditFetchNotifications] = useState(
     typeof connectorSettings.fetchNotifications === 'boolean'
@@ -802,6 +813,15 @@ function DefaultConnectorEditPanel({
   async function handleSave() {
     setSaving(true);
     setSaveError('');
+    if (
+      isFinanceConnector
+      && editHouseholdCurrency !== persistedHouseholdCurrency
+      && !currencySchema.safeParse(editHouseholdCurrency).success
+    ) {
+      setSaveError('Select a supported household currency');
+      setSaving(false);
+      return;
+    }
     const updates: Partial<ConnectorConfig> = {
       name: getConnectorNameUpdate(connector, editName, editNameChanged),
       syncMode: editSyncMode,
@@ -820,6 +840,9 @@ function DefaultConnectorEditPanel({
       updates.settings = {
         ...connectorSettings,
         bridgeUrl: editBridgeUrl.trim(),
+        ...(editHouseholdCurrency
+          ? { householdCurrency: editHouseholdCurrency }
+          : {}),
       };
     }
 
@@ -920,8 +943,14 @@ function DefaultConnectorEditPanel({
         <div className="space-y-4">
           {/* Display Name */}
           <div>
-            <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Display Name</label>
+            <label
+              htmlFor={`connector-display-name-${connector.id}`}
+              className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block"
+            >
+              Display Name
+            </label>
             <input
+              id={`connector-display-name-${connector.id}`}
               type="text"
               value={editName}
               onChange={e => { setEditName(e.target.value); setEditNameChanged(true); markDirty(); }}
@@ -930,6 +959,12 @@ function DefaultConnectorEditPanel({
           </div>
 
           {isFinanceConnector && (
+            <>
+            {connector.configurationState?.status === 'needs-configuration' && (
+              <div role="status" className="rounded-lg border border-amber-700/40 bg-amber-900/20 p-3 text-xs text-amber-300">
+                Needs configuration: select the household currency before Finance Insights can publish.
+              </div>
+            )}
             <div>
               <label htmlFor={`tyrion-bridge-url-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Tyrion Bridge API URL
@@ -947,6 +982,35 @@ function DefaultConnectorEditPanel({
                 Include the approved versioned gateway path; the bare operations UI and browser proxy are not connector APIs.
               </p>
             </div>
+            <div>
+              <label htmlFor={`tyrion-household-currency-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
+                Household currency
+              </label>
+              <Select
+                value={editHouseholdCurrency}
+                onValueChange={(value) => {
+                setEditHouseholdCurrency(value);
+                markDirty();
+                }}
+              >
+                <SelectTrigger
+                id={`tyrion-household-currency-${connector.id}`}
+                aria-required="true"
+                className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
+                >
+                <SelectValue placeholder="Select an ISO 4217 currency" />
+                </SelectTrigger>
+                <SelectContent>
+                {supportedCurrencyCodes.map((currency) => (
+                  <SelectItem key={currency} value={currency}>{currency}</SelectItem>
+                ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Used for bounded Tyrion insight presentation and notification amounts.
+              </p>
+            </div>
+            </>
           )}
 
           {/* Connector Feature Summary */}
@@ -1230,13 +1294,22 @@ function DefaultConnectorEditPanel({
               <Shield size={10} /> Authentication
             </h4>
             {isFinanceConnector ? (
-              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
-                </p>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
-                </p>
+              <div className="space-y-3">
+                {healthState?.data?.recovery && (
+                  <FinanceConnectionWarning
+                    connectorId={connector.id}
+                    recovery={healthState.data.recovery}
+                    onVerified={() => onHealthRefresh(connector.id)}
+                  />
+                )}
+                <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
+                  </p>
+                </div>
               </div>
             ) : connector.hasCredentials ? (
               <div className="flex items-center gap-2">

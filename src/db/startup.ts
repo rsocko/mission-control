@@ -1,5 +1,6 @@
-import { initializeDatabase } from '@/db';
 import { isDatabaseContentionError } from '@/db/contention';
+import { isRetryablePostgresError } from '@/db/postgres/errors';
+import { initializeRuntimeDatabase } from '@/db/runtime';
 import { dbLogger } from '@/lib/logger';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
@@ -7,7 +8,7 @@ const DEFAULT_RETRY_BASE_MS = 1_000;
 const MAX_RETRY_DELAY_MS = 8_000;
 
 export interface DatabaseStartupOptions<T> {
-  initialize?: () => T;
+  initialize?: () => T | Promise<T>;
   maxAttempts?: number;
   retryBaseMs?: number;
   sleep?: (delayMs: number) => Promise<void>;
@@ -19,13 +20,13 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 }
 
 export function isRetryableDatabaseStartupError(error: unknown): boolean {
-  return isDatabaseContentionError(error);
+  return isDatabaseContentionError(error) || isRetryablePostgresError(error);
 }
 
 export async function initializeDatabaseWithRetry<T = void>(
   options: DatabaseStartupOptions<T> = {},
 ): Promise<T> {
-  const initialize = options.initialize ?? (initializeDatabase as () => T);
+  const initialize = options.initialize ?? (initializeRuntimeDatabase as () => Promise<T>);
   const maxAttempts = options.maxAttempts ?? positiveInteger(
     process.env.MC_DB_STARTUP_MAX_ATTEMPTS,
     DEFAULT_MAX_ATTEMPTS,
@@ -39,7 +40,7 @@ export async function initializeDatabaseWithRetry<T = void>(
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const result = initialize();
+      const result = await initialize();
       if (attempt > 1) {
         dbLogger.info({ attempt }, 'Database startup initialization recovered');
       }

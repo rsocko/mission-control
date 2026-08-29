@@ -511,6 +511,18 @@ export class MonarchBridgeClient {
     return parsed.data;
   }
 
+  async runBoundedSync(days = 30, signal?: AbortSignal): Promise<void> {
+    if (!Number.isSafeInteger(days) || days < 1 || days > 365) {
+      throw new MonarchBridgeError(
+        'invalid_request',
+        'Monarch Bridge sync days must be between 1 and 365',
+        false,
+        400,
+      );
+    }
+    await this.request(`/sync?days=${days}`, { method: 'POST' }, signal);
+  }
+
   async getTransactionsPage(
     input: { startDate: string; endDate: string; limit: number; cursor?: string },
     signal?: AbortSignal,

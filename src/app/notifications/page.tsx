@@ -320,8 +320,12 @@ function DesktopNotificationsPage() {
     ? hook.notifications.find(n => n.id === hook.selectedId)
       || (selectedSnapshot?.id === hook.selectedId ? selectedSnapshot : undefined)
     : undefined;
-  const handleExecuteAction = useCallback(async (notificationId: string, actionId: string) => {
-    const result = await executeAction(notificationId, actionId);
+  const handleExecuteAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
+    const result = await executeAction(notificationId, actionId, params);
     if (result.success && selectedIdRef.current === notificationId) {
       setSelectedId(null);
       setSelectedSnapshot(null);
@@ -765,7 +769,7 @@ function DesktopNotificationsPage() {
                             : hook.mute([notification.id]));
                           announceBulkResult(result);
                         }}
-                        onExecuteAction={(actionId) => handleExecuteAction(notification.id, actionId)}
+                        onExecuteAction={(actionId, params) => handleExecuteAction(notification.id, actionId, params)}
                       />
                     </div>
                   ))}
@@ -795,7 +799,7 @@ function DesktopNotificationsPage() {
               <NotificationDetail
                 key={selectedNotification.id}
                 notification={selectedNotification}
-                onExecuteAction={(actionId) => handleExecuteAction(selectedNotification.id, actionId)}
+                onExecuteAction={(actionId, params) => handleExecuteAction(selectedNotification.id, actionId, params)}
                 onMarkRead={() => {
                  const nextState = isNotificationUnread(selectedNotification) ? 'read' : 'unread';
                  setSelectedSnapshot({ ...selectedNotification, state: nextState, readState: nextState });

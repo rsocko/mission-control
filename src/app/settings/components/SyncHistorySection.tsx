@@ -38,6 +38,7 @@ const triggerLabels: Record<NonNullable<SyncLogEntry['trigger']>, string> = {
   nightly: 'Nightly',
   watchdog: 'Automatic recovery',
   recovery: 'Retried after interruption',
+  'operator-canary': 'Operator canary',
 };
 
 function formatElapsed(ms: number): string {

@@ -94,6 +94,21 @@ vi.mock('@/lib/sync/job-queue', () => ({
   getSyncScheduleHealth: vi.fn(() => []),
   isDurableSyncMode: vi.fn(() => true),
   requestSyncJobCancellation: vi.fn(),
+  getSyncJobRepository: vi.fn(() => Promise.resolve({
+    getMetrics: () => Promise.resolve({
+      queued: 0,
+      running: 0,
+      retrying: 0,
+      cancelled: 0,
+      oldestQueuedAgeMs: 0,
+      missedSchedules: 0,
+      oldestScheduleOverdueMs: 0,
+      overBudget: 0,
+      expiredLeases: 0,
+    }),
+    getScheduleHealth: () => Promise.resolve([]),
+    requestCancellation: vi.fn(() => Promise.resolve({ cancelled: 0, cancellationRequested: 0 })),
+  })),
 }));
 
 vi.mock('@/lib/sync/connector-lock', () => ({
@@ -420,12 +435,63 @@ describe('POST /api/ai', () => {
   it.each([
     ['missing', ''],
     ['short', 'too-short'],
-  ])('should fail closed when the approval secret is %s', async (_case, secret) => {
+  ])('should still serve non-finance chat when the approval secret is %s', async (_case, secret) => {
     vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
       method: 'POST',
-      body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
+      body: JSON.stringify({
+        messages: [{
+          id: 'invented-user-message',
+          role: 'user',
+          parts: [{ type: 'text', text: 'Hello' }],
+        }],
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+  });
+
+  it.each([
+    ['missing', ''],
+    ['short', 'too-short'],
+  ])('should fail closed for finance approval decisions when the approval secret is %s', async (_case, secret) => {
+    vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
+    const { POST } = await import('@/app/api/ai/route');
+    const request = new Request('http://localhost:3099/api/ai', {
+      method: 'POST',
+      body: JSON.stringify({
+        messages: [{
+          id: 'invented-assistant-message',
+          role: 'assistant',
+          parts: [{
+            type: 'tool-assignFinanceTransactionKid',
+            toolCallId: 'invented-call-id',
+            state: 'approval-responded',
+            input: {
+              transactionRef: `txn_${'a'.repeat(43)}`,
+              expected: {
+                date: '2026-08-13',
+                amount: -12.34,
+                merchant: 'Invented Market',
+                category: 'Groceries',
+                kidName: null,
+                stateToken: `state_${'b'.repeat(43)}`,
+              },
+              kidName: 'Avery',
+            },
+            approval: {
+              id: 'invented-approval-id',
+              signature: 'invented-signature',
+              approved: true,
+              reason: 'User approved.',
+            },
+          }],
+        }],
+      }),
       headers: { 'Content-Type': 'application/json' },
     });
 

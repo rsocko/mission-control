@@ -78,7 +78,7 @@ const mockUnmatchedEob: UnmatchedEob = {
 
 describe('isTaskAction', () => {
   it('returns true for all valid action types', () => {
-    const actionTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'review'];
+    const actionTypes: DocAction['action_type'][] = ['pay', 'respond', 'sign', 'schedule', 'file', 'archive', 'review'];
     for (const type of actionTypes) {
       expect(isTaskAction({ ...mockPayAction, action_type: type })).toBe(true);
     }
@@ -140,6 +140,29 @@ describe('mapActionToTask', () => {
     expect(meta.actionType).toBe('pay');
   });
 
+  it('prefers an OWL-provided rich preview', () => {
+    const task = mapActionToTask({
+      ...mockPayAction,
+      preview_url: 'https://owl.example/previews/42.pdf',
+      preview_type: 'pdf',
+      thumbnail_url: 'https://owl.example/thumbnails/42.webp',
+    }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
+
+    expect(task.metadata.previewUrl).toBe('https://owl.example/previews/42.pdf');
+    expect(task.metadata.previewType).toBe('pdf');
+    expect(task.metadata.documentUrl).toBe(mockPayAction.document_url);
+  });
+
+  it('uses an OWL-provided thumbnail when no rich preview is available', () => {
+    const task = mapActionToTask({
+      ...mockPayAction,
+      thumbnail_url: 'https://owl.example/thumbnails/42.webp',
+    }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
+
+    expect(task.metadata.previewUrl).toBe('https://owl.example/thumbnails/42.webp');
+    expect(task.metadata.previewType).toBe('image');
+  });
+
   it('maps a file action without amount', () => {
     const task = mapActionToTask(mockFileAction, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);
     expect(task.title).toBe('File: Tax Form W-2');
@@ -150,9 +173,11 @@ describe('mapActionToTask', () => {
   it('maps statuses correctly', () => {
     const statuses: [DocAction['status'], string][] = [
       ['pending', 'todo'],
-      ['in_progress', 'in_progress'],
+      ['completed', 'done'],
       ['done', 'done'],
       ['dismissed', 'cancelled'],
+      ['not_an_action', 'cancelled'],
+      ['snoozed', 'todo'],
     ];
     for (const [diStatus, mcStatus] of statuses) {
       const task = mapActionToTask({ ...mockPayAction, status: diStatus }, CONNECTOR_TYPE, CONNECTOR_INSTANCE_ID);

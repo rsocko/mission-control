@@ -60,10 +60,6 @@ vi.mock('@/lib/triage/sync-state', () => ({
   upsertSyncState: mockUpsertSyncState,
 }));
 
-vi.mock('@/lib/connectors/document-intelligence/document-parser', () => ({
-  DocAction: {},
-}));
-
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('Document Intelligence Importer', () => {
@@ -88,6 +84,7 @@ describe('Document Intelligence Importer', () => {
           status: 'pending',
           created_at: '2026-07-25T01:16:08',
           document_url: 'https://paperless.example/documents/9647/details',
+          needs_review_url: 'javascript:alert(1)',
         },
       ];
 
@@ -118,6 +115,9 @@ describe('Document Intelligence Importer', () => {
           sourceId: 'docintel-action-9',
           sourceUrl: 'https://paperless.example/documents/9647/details',
           title: expect.stringContaining('CVS Pharmacy'),
+          rawMetadata: expect.objectContaining({
+            reviewUrl: null,
+          }),
         }),
       );
     });
@@ -145,6 +145,40 @@ describe('Document Intelligence Importer', () => {
       expect(summary.skipped).toBe(1);
       expect(summary.imported).toBe(0);
       expect(mockIngest).not.toHaveBeenCalled();
+    });
+
+    it('skips actions OWL explicitly marks as not ready while retaining legacy fallback', async () => {
+      const baseAction = {
+        document_id: 1,
+        document_title: 'Uncertain document',
+        action_type: 'review',
+        urgency: 'medium',
+        summary: 'Needs confirmation',
+        status: 'pending',
+        created_at: '2026-07-20T10:00:00',
+      };
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve([
+          { ...baseAction, id: 'not-ready', action_ready: false, review_state: 'needs_review' },
+          { ...baseAction, id: 'legacy' },
+        ]),
+        headers: new Headers(),
+      });
+      const { importDocumentIntelligenceActions } = await import(
+        '@/lib/triage/importers/document-intelligence-importer'
+      );
+
+      const summary = await importDocumentIntelligenceActions({
+        baseUrl: 'https://doc-intel.example',
+      });
+
+      expect(summary).toMatchObject({ imported: 1, skipped: 1 });
+      expect(mockIngest).toHaveBeenCalledTimes(1);
+      expect(mockIngest).toHaveBeenCalledWith(expect.objectContaining({
+        sourceId: 'docintel-action-legacy',
+      }));
     });
 
     it('deduplicates already-imported actions', async () => {

@@ -1,4 +1,4 @@
-import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import { parseFilterQuery, replacePositiveFilterValues } from '@/lib/utils/parseFilterQuery';
 
 describe('parseFilterQuery', () => {
   it('returns empty result for empty string', () => {
@@ -37,6 +37,27 @@ describe('parseFilterQuery', () => {
   it('parses priority: token', () => {
     const result = parseFilterQuery('priority:high');
     expect(result.priorityTokens).toEqual(['high']);
+  });
+
+  it('parses positive and negated planning horizon tokens', () => {
+    const result = parseFilterQuery('horizon:next -horizon:none');
+
+    expect(result.horizonTokens).toEqual(['next']);
+    expect(result.negatedTokens).toEqual([
+      expect.objectContaining({ type: 'horizon', value: 'none' }),
+    ]);
+  });
+
+  it('replaces positive horizon filters while preserving other and negated tokens', () => {
+    const query = replacePositiveFilterValues(
+      'release horizon:next -horizon:none priority:high horizon:later',
+      'horizon',
+      ['next', 'someday'],
+    );
+
+    expect(query).toBe('release -horizon:none priority:high horizon:next horizon:someday');
+    expect(replacePositiveFilterValues(query, 'horizon', []))
+      .toBe('release -horizon:none priority:high');
   });
 
   it('parses status: token', () => {

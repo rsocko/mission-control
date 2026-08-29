@@ -241,6 +241,16 @@ describe('MobileBottomNav', () => {
     });
   });
 
+  it('stays in shell flow and owns the bottom safe area once', () => {
+    render(<MobileBottomNav />);
+    const nav = screen.getByRole('navigation', { name: 'Mobile navigation' });
+
+    expect(nav.className).toContain('shrink-0');
+    expect(nav.className).toContain('safe-area-pb');
+    expect(nav.className).not.toContain('fixed');
+    expect(nav.className).not.toContain('bottom-0');
+  });
+
   it('does not show badges when counts are zero', () => {
     render(<MobileBottomNav />);
     // With default mock returning 0 counts, no badge aria-labels should exist

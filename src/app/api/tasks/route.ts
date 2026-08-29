@@ -20,6 +20,7 @@ import { buildSourceListNameMap } from '@/lib/utils/resolve-task-list-names';
 import { getLocalToday } from '@/lib/utils/date';
 import { isDemoMode } from '@/lib/mode';
 import type { TaskPriority } from '@/types';
+import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import type { ConnectorCapabilities } from '@/types';
 import { resolveConnectorCapabilities } from '@/lib/connectors/task-source-profiles';
 import { resolveTaskSourceModel } from '@/lib/tasks/field-policy';
@@ -180,6 +181,20 @@ export async function GET(request: Request) {
             ? sql`(${tasks.priority} IS NULL OR ${tasks.priority} = '' OR ${tasks.priority} = 'none')`
             : eq(tasks.priority, groupValue));
           break;
+        case 'planningHorizon': {
+          const horizonByLabel: Record<string, 'next' | 'soon' | 'later' | 'someday'> = {
+            Next: 'next',
+            Soon: 'soon',
+            Later: 'later',
+            Someday: 'someday',
+          };
+          conditions.push(groupValue === 'Not set'
+            ? isNull(tasks.planningHorizon)
+            : horizonByLabel[groupValue]
+              ? eq(tasks.planningHorizon, horizonByLabel[groupValue])
+              : sql`1 = 0`);
+          break;
+        }
         case 'source':
           conditions.push(groupValue === 'local'
             ? sql`(${tasks.connectorType} IS NULL OR ${tasks.connectorType} = '' OR ${tasks.connectorType} = 'local')`
@@ -281,9 +296,14 @@ export async function GET(request: Request) {
     const dir = sortDirection === 'desc' ? desc : asc;
     const priorityOrder = sql`CASE ${tasks.priority} WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END`;
     const effortOrder = sql`COALESCE(${tasks.effort}, 0)`;
+    const planningHorizonOrder = sql`CASE ${tasks.planningHorizon}
+      WHEN 'now' THEN 0 WHEN 'next' THEN 1 WHEN 'later' THEN 2
+      WHEN 'someday' THEN 3 ELSE 4 END`;
 
     const orderBy = sortBy === 'smartScore'
       ? asc(tasks.id)
+      : sortBy === 'planningHorizon'
+        ? dir(planningHorizonOrder)
       : sortBy === 'dueDate'
         ? dir(tasks.dueDate)
         : sortBy === 'createdAt'
@@ -335,6 +355,7 @@ export async function GET(request: Request) {
         title: tasks.title,
         description: tasks.description,
         priority: tasks.priority,
+        planningHorizon: tasks.planningHorizon,
         effort: tasks.effort,
         dueDate: tasks.dueDate,
         createdAt: tasks.createdAt,
@@ -378,8 +399,20 @@ export async function GET(request: Request) {
           .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
           .where(inArray(taskProjects.taskId, candidateIds))
           .all();
+      const candidateScheduleRows = candidateIds.length === 0
+        ? []
+        : db.select({
+            taskId: taskSchedules.taskId,
+            estimatedDuration: taskSchedules.estimatedDuration,
+          })
+          .from(taskSchedules)
+          .where(inArray(taskSchedules.taskId, candidateIds))
+          .all();
       const linkedTagsByTask = new Map<string, Array<{ id: string; name: string }>>();
       const linkedProjectsByTask = new Map<string, Array<{ id: string; name: string }>>();
+      const durationByCandidate = new Map(
+        candidateScheduleRows.map((row) => [row.taskId, row.estimatedDuration]),
+      );
       for (const row of linkedTagRows) {
         if (!linkedTagsByTask.has(row.taskId)) linkedTagsByTask.set(row.taskId, []);
         linkedTagsByTask.get(row.taskId)!.push({ id: row.unifiedInto || row.id, name: row.name });
@@ -389,7 +422,11 @@ export async function GET(request: Request) {
         linkedProjectsByTask.get(row.taskId)!.push({ id: row.id, name: row.name });
       }
       const scoreInputs = candidateTasks.map((task) => createScoreInput(
-        { ...task, priority: task.priority as ScoreInputTask['priority'] },
+        {
+          ...task,
+          priority: task.priority as ScoreInputTask['priority'],
+          estimatedDuration: durationByCandidate.get(task.id),
+        },
         linkedTagsByTask.get(task.id),
         linkedProjectsByTask.get(task.id),
       ));
@@ -629,7 +666,11 @@ export async function GET(request: Request) {
       const entities = getResolvedPriorityEntities();
       const rankings = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all() as unknown as SourceRanking[];
       const scoreInputs = result.map((task) => createScoreInput(
-        { ...task, priority: task.priority as ScoreInputTask['priority'] },
+        {
+          ...task,
+          priority: task.priority as ScoreInputTask['priority'],
+          estimatedDuration: durationByTask.get(task.id),
+        },
         (tagsByTask.get(task.id) || []).map((taskTag) => ({
           id: taskTag.tagUnifiedInto || taskTag.tagId,
           name: taskTag.tagName,
@@ -729,7 +770,8 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { title, description, priority, dueDate, connectorType, sourceListId, sourceListName, tags: tagIdsList, tagSlugs, projectIds, recurrence, estimatedDuration, effort } = body;
+    const { title, description, priority, planningHorizon, dueDate, connectorType, sourceListId, sourceListName, tags: tagIdsList, tagSlugs, projectIds, recurrence, estimatedDuration, effort } = body;
+    const recurrenceMode = body.recurrenceMode === 'completion' ? 'completion' : 'schedule';
     const requestedConnectorInstanceId = typeof body.connectorInstanceId === 'string'
       && body.connectorInstanceId.trim()
       ? body.connectorInstanceId.trim()
@@ -741,6 +783,9 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('title is required');
     }
     const resolvedPriority: TaskPriority = isTaskPriority(priority) ? priority : 'none';
+    if (planningHorizon !== undefined && planningHorizon !== null && !isPlanningHorizon(planningHorizon)) {
+      return ApiErrors.badRequest('planningHorizon must be now, next, later, someday, or null');
+    }
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -755,6 +800,14 @@ export async function POST(request: Request) {
     metadata.missionControlTaskId = id;
 
     const isRemote = typeof connectorType === 'string' && connectorType !== 'local';
+    if (recurrenceMode === 'completion' && !recurrence) {
+      return ApiErrors.badRequest(
+        'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
+    if (recurrenceMode === 'completion' && isRemote) {
+      return ApiErrors.badRequest('Completion-anchored recurrence is available only for local tasks');
+    }
     let connectorInstanceId = isRemote
       ? requestedConnectorInstanceId ?? 'local'
       : 'local';
@@ -931,6 +984,7 @@ export async function POST(request: Request) {
           description,
           status: 'todo',
           priority: resolvedPriority,
+          planningHorizon: planningHorizon ?? null,
           dueDate,
           createdAt: now,
           updatedAt: now,
@@ -956,17 +1010,21 @@ export async function POST(request: Request) {
           ).onConflictDoNothing().run();
         }
 
-        if (estimatedDuration || dueDate) {
+        if (estimatedDuration || dueDate || recurrence) {
           tx.insert(taskSchedules).values({
             taskId: id,
             scheduledDate: dueDate || getLocalToday(),
             estimatedDuration: estimatedDuration || null,
+            recurrence: recurrence || null,
+            recurrenceMode,
             isTimeBlocked: false,
           }).onConflictDoUpdate({
             target: taskSchedules.taskId,
             set: {
               estimatedDuration: estimatedDuration || null,
               scheduledDate: dueDate || getLocalToday(),
+              recurrence: recurrence || null,
+              recurrenceMode,
             },
           }).run();
         }

@@ -2,29 +2,100 @@
 title: "Task Row Inline Actions"
 status: proposed
 created: 2026-08-01
-last_reviewed: 2026-08-01
+last_reviewed: 2026-08-25
 category: design
 related:
-  - "[TaskRow Consolidation](../taskrow-consolidation.md)"
   - "[Todoist vs Mission Control](../../research/todoist-vs-mc-analysis.md)"
   - "[Interactive mockup](../../mockups/mockup-task-row-inline-actions.html)"
-  - "GitHub issue #1257"
+  - "GitHub issue #1262"
 ---
 
 # Task Row Inline Actions
 
 ## Summary
 
-Add width-aware task-row shortcuts for due date, notes, status, priority, and
-snooze without replacing the task detail surfaces or context menu. Actions
-appear on pointer hover or keyboard focus. Existing task state remains visible
-when applicable, so users can scan a row without first interacting with it.
+Add width-aware task-row editors for due date, notes, status, and priority plus
+on-demand actions such as snooze, without replacing the task detail surfaces or
+context menu. Actions appear on pointer hover or keyboard focus. Existing task
+state remains visible when applicable, so users can scan a row without first
+interacting with it.
 
 The interactive design is available at
 [`docs/mockups/mockup-task-row-inline-actions.html`](../../mockups/mockup-task-row-inline-actions.html).
 It demonstrates Dashboard and My Day rows at full, medium, and narrow container
 widths, with dated/undated, existing/empty notes, keyboard-focus, menu, and
-read-only states.
+read-only states. It also includes a mixed-state alignment study with adjacent
+tasks that deliberately vary due date, status, priority, and notes presence.
+
+## Alignment follow-up
+
+The original interaction mockup separates hover actions from a trailing state
+strip. Because the task copy is flexible, this can make the action group appear
+in the middle of the row while persistent state occupies the far-right edge.
+That placement is intentional in the original concept, but it does not solve
+cross-row comparison when neighboring tasks expose different sets of state.
+
+The mixed-state study records the newer direction from GitHub issue #1262:
+
+- Use shared property columns for values users compare vertically, including
+  Score, Horizon, Priority, Effort, Status, and due date. These are individual
+  fixed tracks, not a variable-width flex cluster.
+- Keep those columns reserved when a value is absent. Hover or keyboard focus
+  may reveal an add affordance inside the empty property cell.
+- Show the default To Do status quietly rather than removing the status cell.
+- Keep notes in a stable indicator cell.
+- Keep scheduling controls ordered as Due, My Day, Notes, then Snooze. Pack
+  remaining commands into a consistently ordered toolbar anchored at the
+  far-right edge; unavailable commands do not leave holes inside the toolbar.
+- Collapse whole property columns and toolbar actions at container breakpoints.
+
+The preferred study is intentionally headerless. Stable position, distinctive
+shape, semantic color, accessible names, and tooltips identify compact values
+without adding a permanent header row or implying spreadsheet behavior.
+
+### Current field inventory and placement
+
+The shipped Dashboard and My Day rows expose more than due date, status,
+priority, and notes. The aligned layout should account for every current field
+without turning each signal into a permanent column.
+
+| Current field or control | Recommended placement | Alignment decision |
+|---|---|---|
+| Completion, drag handle, and bulk checkbox | Fixed leading controls | Keep one stable leading region; each mode shows only its applicable control |
+| Connector and linked-source state | Leading provenance area | Keep beside the title; do not create data columns |
+| Title and external display ID | Primary content | Keep together; title receives remaining width |
+| Micro-status / blocked state | Title-adjacent critical state | Keep visible; blocked must not collapse before lower-priority fields |
+| Subtask progress | Title-adjacent progress | Keep beside the title rather than reserving a list-wide column |
+| Source list, tags, and projects | Secondary metadata line | Keep flexible and wrapping; not comparison columns |
+| Smart Score | First aligned property after task content | Include as the prominent 36×28 score badge; blank cell when unavailable |
+| Planning horizon | Fixed column after Score | Include at wide widths using compact text and the production semantic color; omit the telescope icon |
+| Priority | Fixed column after Horizon | Include textual P0-P3 with the production priority palette; clicking opens the picker |
+| Effort | Fixed column after Priority | Include with the production XS-XL green-to-red palette |
+| Status | Aligned editable state position | Use the compact semantic status icon at every width; clicking opens the picker |
+| Due date | Aligned property column | Include; empty writable cells reveal Add due date on hover/focus |
+| Notes presence | Stable indicator column | Include persistent Open notes or hover/focus Add notes |
+| Recurrence | Secondary signal strip or overflow | Do not dedicate a column; retain icon and tooltip |
+| Reschedule / push count | Secondary signal strip or overflow | Do not dedicate a column; show only when meaningful |
+| Snoozed state | Secondary signal strip, then toolbar editor | Keep persistent while active; edit from the toolbar |
+| Reminder | Secondary signal strip | Keep persistent while active; no dedicated column |
+| Estimated duration | Secondary signal strip | Keep visible at wide widths; scheduled time supersedes it in My Day |
+| Scheduled time | My Day secondary metadata | Keep beside source/tags because it is surface-specific |
+| My Day membership | Aligned scheduling action after Due | Keep persistent when active; reveal the empty action on hover/focus before Notes and Snooze |
+| Focus and time-block | My Day packed action toolbar | Keep as high-frequency My Day commands |
+| Snooze and local disposition | Packed toolbar or overflow | Keep direct only where frequent/applicable; otherwise move to overflow |
+| Mobile swipe and action sheet | Mobile-only interaction | Preserve; the desktop grid does not replace touch behavior |
+
+At wide widths the preferred scan order is:
+
+```text
+Task | Score | Horizon | Priority | Effort | Status | Due | My Day | Notes | [Snooze · More]
+```
+
+Collapse Horizon first, then Effort. Keep the compact semantic Status icon at
+every width. Score and Priority remain visible longer because they are compact,
+high-value scanning signals. Critical state, title, completion, My Day, Notes,
+and overflow access remain available longest. Secondary signals collapse into
+overflow before core property positions disappear.
 
 ## Decisions
 
@@ -42,9 +113,13 @@ read-only states.
    the persistent notes indicator opens the dialog in Read mode. For an empty
    writable task, the hover action opens it in Edit mode. No new notes preview or
    detail-panel destination is introduced.
-5. **Priority and Status use popover pickers.** Dashboard badges keep their
-   existing filter behavior. Separate hover actions perform edits so state
-   display and filtering do not silently change semantics.
+5. **Priority and Status property controls open their popover pickers.** A
+   separated footer command offers `Filter by <current value>` and routes through
+   the existing list-filter state; clicking the property itself never filters.
+   Do not duplicate Priority or Status buttons in the hover toolbar. At
+   every width, Status uses a compact semantic state icon while the leading
+   completion control retains its existing completion behavior and related
+   status coloring.
 6. **Snooze becomes a popover.** Replace the opaque one-click "tomorrow" action
    with Later Today, Tomorrow, Next Monday, Pick Date, and Unsnooze.
 7. **Use CSS container queries.** Dashboard rows already establish an
@@ -69,7 +144,8 @@ read-only states.
 - Adding task comments, comment counts, or inline comment threads.
 - Adding inline title editing.
 - Replacing the detail panel, detail dialog, context menu, or mobile action sheet.
-- Changing Dashboard priority/status badge filtering.
+- Making the property click itself a filter gesture; filtering remains an
+  explicit picker command or list-filter control.
 - General inline editing of tags, projects, recurrence, effort, or micro-status.
 - Fully merging the Dashboard and My Day row components.
 
@@ -79,22 +155,24 @@ There are two categories of trailing controls:
 
 | Category | Visibility | Examples |
 |---|---|---|
-| State indicator | Persistent when applicable | My Day active, notes present, due date, priority, non-default status |
-| Mutation shortcut | Hover or keyboard focus, width permitting | Add to My Day, add notes, add date, snooze, status picker, priority picker |
+| Property control or state indicator | Persistent when applicable | Score, Horizon, Priority, Effort, Status, due date, active My Day, notes present |
+| Mutation shortcut | Hover or keyboard focus, width permitting | Add to My Day, add notes, add date, snooze, overflow |
 
 An applicable state indicator may also be interactive. The notes indicator opens
-Notes; the due-date pill opens the date picker. Priority and Status badges are
-the exception on Dashboard because they already filter the task list.
+Notes; the due-date pill opens the date picker. Priority and Status values open
+their property pickers. This intentionally replaces the current Dashboard
+badge-click filtering behavior; equivalent filtering stays in the list filter
+controls.
 
 ## Responsive contract
 
 Widths refer to the row container, not the viewport.
 
-| Container width | Persistent state | Hover/focus shortcuts |
+| Container width | Persistent state and properties | Hover/focus shortcuts |
 |---|---|---|
-| `>= 768px` | My Day, notes, due date, priority, non-default status | Surface actions plus add date, add notes, Status, Priority |
-| `480-767px` | My Day, notes, due date, compact priority/status | Surface actions plus add date; omit secondary pickers |
-| `< 480px` | Compact applicable state that fits without title overlap | No new desktop shortcuts; use mobile action sheet |
+| `>= 960px` | Score, Horizon, Priority, Effort, Status icon, Due, active My Day, Notes | Empty Due/My Day/Notes affordances, Snooze, and overflow |
+| `480-959px` | Score, Priority, Effort, Status icon, Due, active My Day, Notes; collapse Horizon | Empty Due/My Day/Notes affordances, Snooze, and overflow |
+| `< 480px` | Score, Priority, Status icon, active My Day, Notes; collapse Horizon, Effort, and Due | Empty My Day/Notes affordances and overflow; mobile action sheet retains the complete editing surface |
 
 The trailing area never wraps or covers task metadata. Lower-priority state
 collapses before the title loses its useful reading width. Opening a popover pins
@@ -113,10 +191,10 @@ Use container variants supported by the repository's Tailwind version, such as
 | Click calendar on undated task | Open due-date popover |
 | Click notes indicator | Open existing expanded Notes dialog in Read mode |
 | Click notes action on empty task | Open existing expanded Notes dialog in Edit mode |
-| Click Status action | Open anchored status picker |
-| Click Priority action | Open anchored priority picker |
+| Click Status icon | Open anchored status picker |
+| Click Priority value | Open anchored priority picker |
+| Click `Filter by <current value>` in either picker | Apply that value through the existing list filter and close the picker |
 | Click Snooze action | Open anchored snooze picker |
-| Click Dashboard priority/status badge | Preserve existing list-filter behavior |
 | Press Tab into a row | Reveal the action set available at that width |
 | Press Enter or Space on an action | Activate without selecting the row |
 | Right-click row | Preserve the complete context menu |
@@ -188,6 +266,7 @@ Use the same canonical status values and labels as `TaskContextMenu`:
 
 - To Do
 - In Progress
+- Blocked
 - Done
 - Cancelled
 
@@ -195,18 +274,29 @@ Completion remains available through the completion circle. Status still belongs
 in the picker because moving between To Do, In Progress, and Cancelled cannot be
 expressed through that control.
 
-On Dashboard, the visible status badge remains a filter trigger. The separate
-CircleDot action opens the picker at full width. On My Day, use the same explicit
-action for consistency in the first release.
+The compact semantic Status icon is the picker trigger at every width on both
+Dashboard and My Day: outline circle for To Do, half-filled circle for In
+Progress, pause circle for Blocked, check circle for Done, and X circle for
+Cancelled. Color reinforces but does not solely convey the state. The leading
+completion circle retains its existing completion behavior and status-aware
+coloring, visually relating the two controls without giving them the same
+action.
+
+After the status choices, a divider separates `Filter by <current status>`.
+This command changes the existing list filter but does not mutate the task.
 
 ## Priority picker
 
 Use the same canonical options and colors as `TaskContextMenu`:
 Critical, High, Medium, Low, and None.
 
-The visible Dashboard priority badge remains a filter trigger. A separate Flag
-action opens the picker at full width. Extract option definitions to a shared
-module or component; do not create another local copy.
+The visible P0-P3 value is the picker trigger on both Dashboard and My Day. An
+empty writable cell reveals the same trigger on hover/focus. Extract option
+definitions to a shared module or component; do not create another local copy.
+
+After the priority choices, a divider separates `Filter by <current priority>`.
+`No priority` is a valid filter value. This command changes the existing list
+filter but does not mutate the task.
 
 ## Snooze picker
 
@@ -227,14 +317,14 @@ planning action. The mobile action sheet remains the touch fallback.
 | Concern | Dashboard | My Day |
 |---|---|---|
 | Existing surface actions | Snooze, My Day | Focus, time-block, remove from My Day |
-| Priority badge | Filter control | Display only |
-| Status badge | Filter control | Usually absent for default To Do |
+| Priority property | Direct picker; filtering stays in list filters | Direct picker |
+| Status property | Direct picker, including quiet To Do | Direct picker, including quiet To Do |
 | Drag behavior | None | Actions must not start drag |
-| New full-width actions | Add/change date, Notes, Status, Priority | Add/change date, Notes, Status, Priority |
+| New full-width actions | Add/change date, Notes, Snooze, overflow | Add/change date, Notes, surface actions, overflow |
 
 My Day is denser because it already has Focus and time-block. Preserve its
-surface-specific actions first, then show Status and Priority only when the
-container has enough room. Never allow actions to overlap trailing metadata.
+surface-specific actions first. Status and Priority remain property controls,
+not toolbar actions. Never allow actions to overlap trailing metadata.
 
 ## Component direction
 
@@ -250,13 +340,13 @@ TaskPriorityPopover
 TaskSnoozePopover
 ```
 
-`TaskRowActions` owns responsive visibility and presentation, not data fetching.
-Consumers pass supported callbacks and capability flags. Missing callbacks omit
-the action.
+`TaskRowActions` owns responsive command visibility and presentation, not data
+fetching or property layout. Consumers pass supported callbacks and capability
+flags. Missing callbacks omit the action.
 
-This work can precede the broader shared-layout phase in
-`docs/design/taskrow-consolidation.md`, while remaining compatible with its
-eventual `TaskRowLayout` action slot.
+The shared row primitives should preserve separate property and action regions
+so the aligned layout proposed in GitHub issue #1262 can be adopted without
+changing the popover behavior.
 
 ## Accessibility
 
@@ -288,7 +378,9 @@ eventual `TaskRowLayout` action slot.
 1. Add `hasDescription` to Dashboard and My Day list contracts.
 2. Extract or expose the existing expanded Notes dialog and wire its controller.
 3. Extract shared due-date, Status, Priority, and Snooze popovers.
-4. Add the shared responsive action composition to Dashboard and My Day.
+4. Add the shared aligned property layout and responsive action composition to
+   Dashboard and My Day; route picker filter commands through the existing list
+   filter state.
 5. Validate keyboard, read-only, compact, bulk-selection, drag, and mobile paths.
 
 ## Acceptance criteria
@@ -299,8 +391,10 @@ eventual `TaskRowLayout` action slot.
   calendar shortcut.
 - Notes open the existing expanded Notes dialog in Read or Edit mode as defined.
 - No inline title-edit action is added.
-- Status, Priority, and Snooze open the documented pickers.
-- Dashboard priority/status badges continue filtering.
+- Status and Priority property controls, plus Snooze, open the documented
+  pickers without duplicate toolbar actions.
+- Status and Priority pickers expose a separated `Filter by <current value>`
+  command that updates the existing list filter without mutating the task.
 - Dashboard and My Day share action/popover primitives.
 - No `ResizeObserver` is introduced for visual breakpoints.
 - List APIs expose notes presence without returning full descriptions.

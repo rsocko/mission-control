@@ -19,13 +19,14 @@ export interface ProjectedMatrixTask {
 export interface MatrixNeedsData {
   missingPriority: Task[];
   missingEffort: Task[];
-  missingDueDate: Task[];
+  missingPlanningSignal: Task[];
   invalidDueDate: Task[];
 }
 
 export interface MatrixProjection {
   tasks: ProjectedMatrixTask[];
   needsData: MatrixNeedsData;
+  horizonFallback: Task[];
 }
 
 export interface MatrixTaskMark {
@@ -61,23 +62,28 @@ export function projectTasks(
 ): MatrixProjection {
   const result: MatrixProjection = {
     tasks: [],
+    horizonFallback: [],
     needsData: {
       missingPriority: [],
       missingEffort: [],
-      missingDueDate: [],
+      missingPlanningSignal: [],
       invalidDueDate: [],
     },
   };
 
   for (const task of tasks) {
     const y = priorityPosition(task.priority);
-    const urgency = urgencyScore(task.dueDate, today);
+    const urgency = urgencyScore(task.dueDate, today, task.planningHorizon ?? null);
     const effort = effortPosition(task.effort);
 
     if (y === null) result.needsData.missingPriority.push(task);
     if (effort === null) result.needsData.missingEffort.push(task);
     if (!task.dueDate) {
-      result.needsData.missingDueDate.push(task);
+      if (task.planningHorizon) {
+        result.horizonFallback.push(task);
+      } else {
+        result.needsData.missingPlanningSignal.push(task);
+      }
     } else if (urgency.value === null) {
       result.needsData.invalidDueDate.push(task);
     }

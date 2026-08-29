@@ -2,7 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ModeSelector from '@/components/quick-sort/ModeSelector';
 import QuickSortActions from '@/components/quick-sort/QuickSortActions';
-import QuickSortCard, { getQuickSortSwipeAction } from '@/components/quick-sort/QuickSortCard';
+import QuickSortCard, {
+  getQuickSortGestureAxis,
+  getQuickSortSwipeAction,
+  resolveQuickSortGestureAxis,
+} from '@/components/quick-sort/QuickSortCard';
 import type { QuickSortQueueTask } from '@/lib/hooks/useQuickSortData';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
@@ -42,6 +46,7 @@ const task: QuickSortQueueTask = {
   sourceListId: null,
   sourceListName: null,
   dueDate: null,
+  planningHorizon: null,
   createdAt: '2026-07-30T12:00:00.000Z',
   projects: [],
   phases: [],
@@ -51,51 +56,51 @@ const task: QuickSortQueueTask = {
   editPolicy: editableTaskPolicy,
 };
 
-describe('Quick Sort plan/schedule queue', () => {
-  it('shows a launch point with the high-priority/no-date count', () => {
+describe('Quick Sort planning horizon queue', () => {
+  it('shows a launch point for tasks without a planning horizon', () => {
     const onSelect = vi.fn();
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
         onSelect={onSelect}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /Plan \/ Schedule/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Set Horizon/i }));
 
-    expect(screen.getByText('P0 and P1 tasks without a due date')).toBeDefined();
+    expect(screen.getByText('Tasks not yet placed in Next, Soon, Later, or Someday')).toBeDefined();
     expect(screen.getAllByTestId('animated-counter').map((counter) => counter.textContent))
-      .toEqual(['1', '2', '3', '4']);
-    expect(onSelect).toHaveBeenCalledWith('no_due_date');
+      .toEqual(['1', '1', '2', '3', '4']);
+    expect(onSelect).toHaveBeenCalledWith('no_planning_horizon');
   });
 
   it('marks the active desktop queue as selected', () => {
     render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
         onSelect={vi.fn()}
         selectedMode="no_effort"
       />,
     );
 
     expect(screen.getByRole('button', { name: /Estimate Effort/i })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: /Set Priority/i })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Pick Quadrant/i })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('disables empty queues and all queues during an in-flight update', () => {
     const { rerender } = render(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 0, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 0, no_tags: 3, no_planning_horizon: 4 }}
         onSelect={vi.fn()}
       />,
     );
 
     expect(screen.getByRole('button', { name: /Estimate Effort/i })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /Set Priority/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /Pick Quadrant/i })).toBeEnabled();
 
     rerender(
       <ModeSelector
-        counts={{ no_priority: 1, no_effort: 2, no_tags: 3, no_due_date: 4 }}
+        counts={{ no_priority: 1, quadrant: 1, no_effort: 2, no_tags: 3, no_planning_horizon: 4 }}
         onSelect={vi.fn()}
         disabled
       />,
@@ -104,20 +109,21 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(screen.getAllByRole('button').every((button) => button.hasAttribute('disabled'))).toBe(true);
   });
 
-  it('offers today, tomorrow, and custom due-date actions', () => {
-    const onApplyDueDate = vi.fn();
+  it('offers all planning horizon actions', () => {
+    const onApplyPlanningHorizon = vi.fn();
     render(
       <QuickSortActions
         task={task}
-        mode="no_due_date"
+        mode="no_planning_horizon"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
-        onApplyDueDate={onApplyDueDate}
+        onApplyPlanningHorizon={onApplyPlanningHorizon}
         allTags={[]}
         tagsLoading={false}
         recentTagIds={[]}
@@ -125,15 +131,87 @@ describe('Quick Sort plan/schedule queue', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Today' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Tomorrow' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Pick date' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Soon' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Someday' }));
 
-    expect(onApplyDueDate.mock.calls).toEqual([
-      ['2026-07-30'],
-      ['2026-07-31'],
-      ['2026-08-15'],
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveClass('text-emerald-400');
+    expect(screen.getByRole('button', { name: 'Soon' })).toHaveClass('text-blue-400');
+    expect(screen.getByRole('button', { name: 'Later' })).toHaveClass('text-violet-400');
+    expect(screen.getByRole('button', { name: 'Someday' })).toHaveClass('text-slate-400');
+    expect(onApplyPlanningHorizon.mock.calls).toEqual([
+      ['next'],
+      ['soon'],
+      ['later'],
+      ['someday'],
     ]);
+  });
+
+  it('applies safe quadrant actions and confirms elimination', () => {
+    const onApplyQuadrant = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="quadrant"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        allTags={[]}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pick date' }));
+    fireEvent.click(screen.getByRole('button', { name: /Delegate/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Eliminate/i }));
+
+    expect(screen.getByRole('alertdialog', { name: 'Confirm eliminate task' })).toBeInTheDocument();
+    expect(onApplyQuadrant.mock.calls).toEqual([
+      ['do_first'],
+      ['schedule', '2026-08-15'],
+      ['delegate'],
+    ]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminate' }));
+    expect(onApplyQuadrant).toHaveBeenLastCalledWith('eliminate');
+  });
+
+  it('keeps direct priority assignment as a separate action', () => {
+    const onApplyPriority = vi.fn();
+    render(
+      <QuickSortActions
+        task={task}
+        mode="no_priority"
+        onViewTask={vi.fn()}
+        onSkip={vi.fn()}
+        onMarkDone={vi.fn()}
+        onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
+        onApplyPriority={onApplyPriority}
+        onApplyEffort={vi.fn()}
+        onApplyTag={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
+        allTags={[]}
+        tagsLoading={false}
+        recentTagIds={[]}
+        busy={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /P1 High/i }));
+
+    expect(onApplyPriority).toHaveBeenCalledWith('high');
+    expect(screen.queryByRole('button', { name: /Do first/i })).not.toBeInTheDocument();
   });
 
   it('keeps View task left of the primary completion actions', () => {
@@ -141,15 +219,16 @@ describe('Quick Sort plan/schedule queue', () => {
     render(
       <QuickSortActions
         task={task}
-        mode="no_due_date"
+        mode="no_planning_horizon"
         onViewTask={onViewTask}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
-        onApplyDueDate={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
         allTags={[]}
         tagsLoading={false}
         recentTagIds={[]}
@@ -163,48 +242,53 @@ describe('Quick Sort plan/schedule queue', () => {
     expect(onViewTask).toHaveBeenCalledOnce();
   });
 
-  it('maps priority and completion actions to semantic haptics', () => {
+  it('maps quadrant and completion actions to semantic haptics', () => {
+    triggerHapticFeedback.mockClear();
+    const onApplyQuadrant = vi.fn();
     const props = {
       task,
       onViewTask: vi.fn(),
       onSkip: vi.fn(),
       onMarkDone: vi.fn(),
       onSetLocalDisposition: vi.fn(),
+      onApplyQuadrant,
       onApplyPriority: vi.fn(),
       onApplyEffort: vi.fn(),
       onApplyTag: vi.fn(),
-      onApplyDueDate: vi.fn(),
+      onApplyPlanningHorizon: vi.fn(),
       allTags: [],
       tagsLoading: false,
       recentTagIds: [],
       busy: false,
     };
-    const { rerender } = render(<QuickSortActions {...props} mode="no_priority" />);
+    const { rerender } = render(<QuickSortActions {...props} mode="quadrant" />);
 
-    fireEvent.click(screen.getByText('Critical').closest('button')!);
-    rerender(<QuickSortActions {...props} mode="no_due_date" />);
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
+    rerender(<QuickSortActions {...props} mode="no_planning_horizon" />);
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
 
     expect(triggerHapticFeedback.mock.calls).toEqual([
       ['priority'],
       ['taskComplete'],
     ]);
+    expect(onApplyQuadrant).toHaveBeenCalledWith('do_first');
   });
 
   it('keeps Scout actions editable in Quick Sort', () => {
-    const onApplyPriority = vi.fn();
+    const onApplyQuadrant = vi.fn();
     render(
       <QuickSortActions
         task={{ ...task, connectorType: 'scout', editPolicy: makeTaskEditPolicy({ sourceModel: 'ingested' }) }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={vi.fn()}
-        onApplyPriority={onApplyPriority}
+        onApplyQuadrant={onApplyQuadrant}
+        onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
-        onApplyDueDate={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
         allTags={[]}
         tagsLoading={false}
         recentTagIds={[]}
@@ -212,8 +296,8 @@ describe('Quick Sort plan/schedule queue', () => {
       />,
     );
 
-    fireEvent.click(screen.getByText('High').closest('button')!);
-    expect(onApplyPriority).toHaveBeenCalledWith('high');
+    fireEvent.click(screen.getByRole('button', { name: /Do first/i }));
+    expect(onApplyQuadrant).toHaveBeenCalledWith('do_first');
     expect(screen.getByRole('button', { name: 'Done' })).toBeEnabled();
   });
 
@@ -230,15 +314,16 @@ describe('Quick Sort plan/schedule queue', () => {
             reasons: { priority: blockedReason, status: 'Status is controlled by the upstream task source' },
           }),
         }}
-        mode="no_priority"
+        mode="quadrant"
         onViewTask={vi.fn()}
         onSkip={vi.fn()}
         onMarkDone={vi.fn()}
         onSetLocalDisposition={onSetLocalDisposition}
+        onApplyQuadrant={vi.fn()}
         onApplyPriority={vi.fn()}
         onApplyEffort={vi.fn()}
         onApplyTag={vi.fn()}
-        onApplyDueDate={vi.fn()}
+        onApplyPlanningHorizon={vi.fn()}
         allTags={[]}
         tagsLoading={false}
         recentTagIds={[]}
@@ -246,8 +331,8 @@ describe('Quick Sort plan/schedule queue', () => {
       />,
     );
 
-    expect(screen.getByText('High').closest('button')).toBeDisabled();
-    expect(screen.getByText('High').closest('button')).toHaveAttribute('title', blockedReason);
+    expect(screen.getByRole('button', { name: /Do first/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Do first/i })).toHaveAttribute('title', blockedReason);
     expect(screen.getByRole('button', { name: 'Done' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'View task' })).toBeEnabled();
     expect(screen.getByText('Mission Control only. The upstream task is unchanged.')).toBeInTheDocument();
@@ -292,12 +377,41 @@ describe('Quick Sort plan/schedule queue', () => {
 
     const content = screen.getByRole('heading', { level: 2 }).parentElement;
     expect(content).toHaveClass('min-h-0', 'overflow-y-auto', 'overscroll-contain', 'touch-pan-y');
-    expect(content?.parentElement).toHaveClass('touch-none');
     expect(content).toHaveAttribute('tabindex', '0');
     expect(content).toHaveAttribute('aria-label', 'Task details');
+    expect(screen.getByTestId('quick-sort-swipe-handle')).toHaveClass('h-11', 'touch-none');
   });
 
-  it('treats swipe up as a skip gesture without changing horizontal swipe actions', () => {
+  it('resolves a flick axis at gesture end when no pan frame locked one', () => {
+    // A fast flick can end before Motion flushes a pan frame, leaving the axis unlocked.
+    expect(resolveQuickSortGestureAxis(null, 4, -140)).toBe('y');
+    expect(resolveQuickSortGestureAxis(null, -140, 6)).toBe('x');
+
+    // The fallback must not relax the travel or dominance rules.
+    expect(resolveQuickSortGestureAxis(null, 0, -8)).toBeNull();
+    expect(resolveQuickSortGestureAxis(null, 40, -38)).toBeNull();
+
+    // An axis locked during the drag still wins over the final offsets.
+    expect(resolveQuickSortGestureAxis('x', 20, -200)).toBe('x');
+    expect(resolveQuickSortGestureAxis('y', -200, 20)).toBe('y');
+
+    expect(getQuickSortSwipeAction({
+      axis: resolveQuickSortGestureAxis(null, 4, -140),
+      offsetX: 4,
+      offsetY: -140,
+      velocityX: 0,
+      velocityY: -900,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('skip');
+  });
+
+  it('requires meaningful, directionally dominant travel before committing gestures', () => {
+    expect(getQuickSortGestureAxis(8, -9)).toBeNull();
+    expect(getQuickSortGestureAxis(40, -38)).toBeNull();
+    expect(getQuickSortGestureAxis(-60, 20)).toBe('x');
+    expect(getQuickSortGestureAxis(20, -60)).toBe('y');
+
     expect(getQuickSortSwipeAction({
       axis: 'y',
       offsetX: 0,
@@ -316,12 +430,22 @@ describe('Quick Sort plan/schedule queue', () => {
       velocityY: -600,
       hasSuggestions: false,
       hasFocusedSuggestion: false,
+    })).toBe('snapBack');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 8,
+      offsetY: -60,
+      velocityX: 0,
+      velocityY: -600,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
     })).toBe('skip');
 
     expect(getQuickSortSwipeAction({
       axis: 'x',
       offsetX: -120,
-      offsetY: -160,
+      offsetY: -40,
       velocityX: 0,
       velocityY: 0,
       hasSuggestions: true,
@@ -334,6 +458,16 @@ describe('Quick Sort plan/schedule queue', () => {
       offsetY: -40,
       velocityX: 0,
       velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    })).toBe('snapBack');
+
+    expect(getQuickSortSwipeAction({
+      axis: 'y',
+      offsetX: 90,
+      offsetY: -110,
+      velocityX: 0,
+      velocityY: -700,
       hasSuggestions: false,
       hasFocusedSuggestion: false,
     })).toBe('snapBack');
@@ -352,5 +486,57 @@ describe('Quick Sort plan/schedule queue', () => {
 
     expect(getQuickSortSwipeAction({ ...gesture, hasUndo: true })).toBe('undo');
     expect(getQuickSortSwipeAction({ ...gesture, hasUndo: false })).toBe('snapBack');
+  });
+
+  it('blocks skip gestures only during updates', () => {
+    const gesture = {
+      axis: 'y' as const,
+      offsetX: 0,
+      offsetY: -120,
+      velocityX: 0,
+      velocityY: 0,
+      hasSuggestions: false,
+      hasFocusedSuggestion: false,
+    };
+
+    expect(getQuickSortSwipeAction({ ...gesture, busy: true })).toBe('snapBack');
+    expect(getQuickSortSwipeAction(gesture)).toBe('skip');
+  });
+
+  it('keeps skip available for source-owned tasks and disables the handle while busy', () => {
+    const { rerender } = render(
+      <QuickSortCard
+        task={{
+          ...task,
+          editPolicy: makeTaskEditPolicy({
+            sourceModel: 'remote-mirror',
+            mutations: { snoozedUntil: 'blocked' },
+            reasons: { snoozedUntil: 'Snooze is controlled by the upstream task source' },
+          }),
+        }}
+        mode="no_priority"
+        stackIndex={0}
+        onAcceptSuggestions={vi.fn()}
+        onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
+      />,
+    );
+
+    const handle = screen.getByTestId('quick-sort-swipe-handle');
+    expect(handle).toHaveAccessibleName(expect.stringContaining('Swipe up to skip.'));
+    expect(handle).not.toHaveAttribute('title');
+
+    rerender(
+      <QuickSortCard
+        task={task}
+        mode="no_priority"
+        stackIndex={0}
+        onAcceptSuggestions={vi.fn()}
+        onAcceptFocused={vi.fn()}
+        onSkip={vi.fn()}
+        busy
+      />,
+    );
+    expect(handle).toHaveAttribute('aria-disabled', 'true');
   });
 });

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
-import { readdir, readFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { parse } from 'yaml';
 
+const execFileAsync = promisify(execFile);
 const workflowsDirectory = path.resolve('.github', 'workflows');
 const workflowFiles = (await readdir(workflowsDirectory))
   .filter((file) => /\.ya?ml$/u.test(file))
@@ -43,6 +47,86 @@ function collectUses(value, results = []) {
     }
   }
   return results;
+}
+
+function isDocumentationPath(file) {
+  return file.startsWith('docs/') ||
+    new Set([
+      'README.md',
+      'CODE_OF_CONDUCT.md',
+      'CONTRIBUTING.md',
+      'DESIGN.md',
+      'PRODUCT.md',
+      'SECURITY.md',
+      'SUPPORT.md',
+    ]).has(file);
+}
+
+async function validateRenameClassification() {
+  const repository = await mkdtemp(path.join(os.tmpdir(), 'mission-control-workflow-'));
+  try {
+    await mkdir(path.join(repository, '.github', 'workflows'), { recursive: true });
+    await mkdir(path.join(repository, 'docs'), { recursive: true });
+    await mkdir(path.join(repository, 'src'), { recursive: true });
+    await writeFile(path.join(repository, 'src', 'feature.ts'), 'export const feature = true;\n');
+    await writeFile(path.join(repository, '.github', 'workflows', 'example.yml'), 'name: Example\n');
+    await writeFile(path.join(repository, 'docs', 'old.md'), '# Old\n');
+
+    const git = (...args) => execFileAsync('git', args, { cwd: repository });
+    await git('init', '--quiet');
+    await git('config', 'user.email', 'workflow-validator@example.invalid');
+    await git('config', 'user.name', 'Workflow validator');
+    await git('add', '.');
+    await git('commit', '--quiet', '-m', 'Base fixtures');
+    const { stdout: baseOutput } = await git('rev-parse', 'HEAD');
+    const base = baseOutput.trim();
+
+    await git('mv', 'src/feature.ts', 'docs/feature.ts');
+    await git('mv', '.github/workflows/example.yml', 'docs/example.yml');
+    await git('mv', 'docs/old.md', 'docs/new.md');
+    await git('commit', '--quiet', '-m', 'Rename fixtures');
+    const { stdout: headOutput } = await git('rev-parse', 'HEAD');
+    const head = headOutput.trim();
+    const { stdout } = await git(
+      'diff',
+      '--no-renames',
+      '--name-only',
+      '--diff-filter=ACDMRTUXB',
+      base,
+      head,
+    );
+    const changedPaths = stdout.trim().split(/\r?\n/u).sort();
+
+    assert.deepEqual(
+      changedPaths,
+      [
+        '.github/workflows/example.yml',
+        'docs/example.yml',
+        'docs/feature.ts',
+        'docs/new.md',
+        'docs/old.md',
+        'src/feature.ts',
+      ],
+      'rename-safe classification must inspect both source and destination paths',
+    );
+    assert.equal(
+      ['src/feature.ts', 'docs/feature.ts'].every(isDocumentationPath),
+      false,
+      'moving code into docs must not be documentation-only',
+    );
+    assert.equal(
+      ['.github/workflows/example.yml', 'docs/example.yml'].every(isDocumentationPath),
+      false,
+      'moving a workflow into docs must not be documentation-only',
+    );
+    assert.equal(
+      ['docs/old.md', 'docs/new.md'].every(isDocumentationPath),
+      true,
+      'moving documentation within docs must remain documentation-only',
+    );
+  } finally {
+    await rm(repository, { recursive: true, force: true });
+  }
 }
 
 for (const file of workflowFiles) {
@@ -92,15 +176,31 @@ for (const file of workflowFiles) {
 
   if (file === 'ci.yml') {
     const changes = workflow.jobs?.changes;
+    const impeccableWorker = workflow.jobs?.['impeccable-worker'];
+    const impeccableResult = workflow.jobs?.impeccable;
+    const lintWorker = workflow.jobs?.['lint-worker'];
+    const productionBuildWorker = workflow.jobs?.['production-build-worker'];
+    const lintResult = workflow.jobs?.lint;
+    const productionBuildResult = workflow.jobs?.['production-build'];
+    const workflowPolicyResult = workflow.jobs?.['workflow-policy'];
+    const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
-    const aggregate = workflow.jobs?.['unit-tests'];
-    const validate = workflow.jobs?.validate;
+    const unitTestsResult = workflow.jobs?.['unit-tests'];
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
-    assert.ok(changes && validate && shards && aggregate, 'ci.yml must classify changes and expose every check');
+    assert.ok(
+      changes && impeccableWorker && impeccableResult && lintWorker &&
+        productionBuildWorker && lintResult && productionBuildResult &&
+        workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult,
+      'ci.yml must classify changes, isolate expensive workers, and expose every required check',
+    );
     assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
     assert.deepEqual(
       changes.outputs,
-      { docs_only: '${{ steps.classify.outputs.docs_only }}' },
+      {
+        docs_only: '${{ steps.classify.outputs.docs_only }}',
+        impeccable_changed: '${{ steps.classify.outputs.impeccable_changed }}',
+        workflow_policy_changed: '${{ steps.classify.outputs.workflow_policy_changed }}',
+      },
       'change classification must expose its fail-closed result',
     );
     const classifier = changes.steps?.find((step) => step.id === 'classify');
@@ -110,28 +210,81 @@ for (const file of workflowFiles) {
       'github.event.pull_request.head.sha || github.sha',
       '0000000000000000000000000000000000000000',
       'git cat-file -e "${BASE_SHA}^{commit}"',
-      'git diff --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
+      'git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
+      '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
+      '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
+      'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
+      'echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"',
       'if [[ "${found_change}" != "true" ]]',
     ]) {
       assert.ok(source.includes(invariant), `documentation-only classification must enforce ${invariant}`);
     }
-    assert.deepEqual(validate.needs, ['changes'], 'validation jobs must depend on change classification');
+    const impeccableLiveConfig = JSON.parse(
+      await readFile(path.resolve('.impeccable', 'live', 'config.json'), 'utf8'),
+    );
+    for (const target of impeccableLiveConfig.files ?? []) {
+      assert.ok(
+        source.includes(target),
+        `Impeccable change classification must include configured live target ${target}`,
+      );
+    }
+    assert.deepEqual(
+      impeccableWorker.needs,
+      ['changes'],
+      'Impeccable worker must depend on change classification',
+    );
+    for (const invariant of [
+      'always()',
+      "needs.changes.result != 'success'",
+      "needs.changes.outputs.impeccable_changed != 'false'",
+    ]) {
+      assert.ok(
+        impeccableWorker.if.includes(invariant),
+        `Impeccable worker must enforce ${invariant}`,
+      );
+    }
+    assert.equal(
+      impeccableWorker.name,
+      'Impeccable integration worker',
+      'Impeccable worker must not claim the required check name',
+    );
+    assert.ok(
+      impeccableWorker.steps?.some((step) => step.run === 'node scripts/validate-impeccable.mjs'),
+      'Impeccable validation must run directly without installing dependencies',
+    );
+    assert.equal(
+      impeccableWorker.steps?.some((step) =>
+        step.run === 'npm ci --no-audit --no-fund' ||
+        step.uses?.startsWith('actions/cache/')
+      ),
+      false,
+      'Impeccable validation must not restore dependencies or npm caches',
+    );
+    assert.deepEqual(lintWorker.needs, ['changes'], 'lint worker must depend on change classification');
+    assert.deepEqual(
+      productionBuildWorker.needs,
+      ['changes'],
+      'production build worker must depend on change classification',
+    );
     assert.deepEqual(shards.needs, ['changes'], 'unit-test shards must depend on change classification');
-    assert.equal(validate.if, 'always()', 'validation jobs must fail closed if change classification fails');
-    assert.equal(shards.if, 'always()', 'unit-test shards must fail closed if change classification fails');
-    for (const [jobName, job] of Object.entries({ validate, 'unit-test-shards': shards })) {
-      const expensiveSteps = job.steps?.filter((step) =>
-        step.uses || step.run === 'npm ci --no-audit --no-fund' ||
-        step.run?.startsWith('npm test -- --shard=') ||
-        step.name?.startsWith('Run ')
-      ) ?? [];
-      for (const step of expensiveSteps) {
-        assert.ok(
-          step.if?.includes(expensiveStepCondition),
-          `${jobName} step "${step.name}" must be gated for documentation-only changes`,
-        );
+    for (const [jobName, job] of Object.entries({
+      'lint-worker': lintWorker,
+      'production-build-worker': productionBuildWorker,
+      'unit-test-shards': shards,
+    })) {
+      for (const invariant of [
+        'always()',
+        "needs.changes.result != 'success'",
+        expensiveStepCondition,
+      ]) {
+        assert.ok(job.if.includes(invariant), `${jobName} must enforce ${invariant}`);
       }
+      assert.equal(
+        job.steps?.some((step) => step.name?.startsWith('Skip ')),
+        false,
+        `${jobName} must skip documentation-only work before allocating a runner`,
+      );
     }
     assert.deepEqual(
       shards.strategy?.matrix?.shard,
@@ -139,21 +292,141 @@ for (const file of workflowFiles) {
       'ci.yml must run four unit-test shards',
     );
     assert.equal(shards.strategy?.['fail-fast'], false, 'unit-test shards must all report their result');
+    const workflowPolicy = lintWorker.steps?.find((step) => step.name === 'Validate workflow policy');
+    assert.ok(workflowPolicy, 'lint validation must include the workflow policy check');
+    for (const invariant of [
+      "needs.changes.result != 'success'",
+      "needs.changes.outputs.workflow_policy_changed != 'false'",
+    ]) {
+      assert.ok(workflowPolicy.if.includes(invariant), `workflow policy validation must enforce ${invariant}`);
+    }
+    assert.equal(workflowPolicy.run, 'npm run ci:workflows', 'workflow policy validation must use its npm script');
+    assert.ok(
+      lintWorker.steps?.some((step) => step.run === 'npm run lint'),
+      'lint worker must run the repository linter',
+    );
+    assert.ok(
+      productionBuildWorker.steps?.some((step) => step.run === 'npm run build'),
+      'production build worker must run the production build',
+    );
+    const workerSmoke = productionBuildWorker.steps?.find(
+      (step) => step.name === 'Smoke-test production worker runtime',
+    );
+    assert.ok(workerSmoke, 'production validation must smoke-test the packaged worker runtime');
+    assert.equal(
+      workerSmoke.run,
+      'MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs',
+      'worker runtime smoke test must reuse the production standalone artifact',
+    );
     assert.ok(
       shards.steps?.some((step) =>
         step.run === 'npm test -- --shard=${{ matrix.shard }}/4'
       ),
       'unit-test shards must partition the Vitest suite',
     );
-    assert.equal(aggregate.name, 'Unit tests', 'aggregate check must retain its stable name');
+
+    const requiredGates = {
+      impeccable: {
+        job: impeccableResult,
+        name: 'Impeccable integration',
+        needs: ['changes', 'impeccable-worker'],
+        workerResult: '${{ needs.impeccable-worker.result }}',
+        decisionEnv: 'CHANGE_REQUIRED',
+        decisionValue: '${{ needs.changes.outputs.impeccable_changed }}',
+      },
+      lint: {
+        job: lintResult,
+        name: 'Lint',
+        needs: ['changes', 'lint-worker'],
+        workerResult: '${{ needs.lint-worker.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
+      'production-build': {
+        job: productionBuildResult,
+        name: 'Production build',
+        needs: ['changes', 'production-build-worker'],
+        workerResult: '${{ needs.production-build-worker.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
+      'workflow-policy': {
+        job: workflowPolicyResult,
+        name: 'Workflow policy',
+        needs: ['changes', 'lint-worker'],
+        workerResult: '${{ needs.lint-worker.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
+      'worker-runtime': {
+        job: workerRuntimeResult,
+        name: 'Worker runtime',
+        needs: ['changes', 'production-build-worker'],
+        workerResult: '${{ needs.production-build-worker.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
+      'unit-tests': {
+        job: unitTestsResult,
+        name: 'Unit tests',
+        needs: ['changes', 'unit-test-shards'],
+        workerResult: '${{ needs.unit-test-shards.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
+    };
     assert.deepEqual(
-      aggregate.needs,
-      ['unit-test-shards'],
-      'aggregate unit-test check must depend on every shard',
+      Object.values(requiredGates).map(({ name }) => name).sort(),
+      [
+        'Impeccable integration',
+        'Lint',
+        'Production build',
+        'Unit tests',
+        'Worker runtime',
+        'Workflow policy',
+      ],
+      'ci.yml must preserve every active ruleset context',
     );
-    assert.equal(aggregate.if, 'always()', 'aggregate unit-test check must report shard failures');
+    for (const [jobName, gate] of Object.entries(requiredGates)) {
+      assert.equal(gate.job.name, gate.name, `${jobName} must retain its required check name`);
+      assert.equal(gate.job.if, 'always()', `${jobName} must materialize after skipped or failed needs`);
+      assert.deepEqual(gate.job.needs, gate.needs, `${jobName} must depend on classification and its worker`);
+      assert.equal(gate.job.steps?.length, 1, `${jobName} must remain a cheap summary gate`);
+      const [step] = gate.job.steps;
+      assert.equal(
+        step.env?.CLASSIFICATION_RESULT,
+        '${{ needs.changes.result }}',
+        `${jobName} must fail closed when classification fails`,
+      );
+      assert.equal(step.env?.WORKER_RESULT, gate.workerResult, `${jobName} must inspect its worker result`);
+      assert.equal(
+        step.env?.[gate.decisionEnv],
+        gate.decisionValue,
+        `${jobName} must use the classifier to decide whether a worker was required`,
+      );
+      for (const invariant of [
+        'if [[ "${CLASSIFICATION_RESULT}" != "success" ]]',
+        'exit 1',
+        `case "\${${gate.decisionEnv}}" in`,
+        'test "${WORKER_RESULT}" = "success"',
+        'test "${WORKER_RESULT}" = "skipped"',
+        '*) echo "Invalid ',
+      ]) {
+        assert.ok(step.run.includes(invariant), `${jobName} gate must enforce ${invariant}`);
+      }
+    }
+
     for (const [jobName, job] of Object.entries(workflow.jobs ?? {})) {
-      if (jobName === 'changes' || jobName === 'unit-tests') continue;
+      if (
+        jobName === 'changes' ||
+        jobName === 'impeccable-worker' ||
+        jobName === 'impeccable' ||
+        jobName === 'lint' ||
+        jobName === 'production-build' ||
+        jobName === 'workflow-policy' ||
+        jobName === 'worker-runtime' ||
+        jobName === 'unit-tests'
+      ) continue;
       const cacheRestores =
         job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
       assert.equal(cacheRestores.length, 1, `${jobName} must restore the shared npm cache`);
@@ -164,13 +437,12 @@ for (const file of workflowFiles) {
       );
     }
     const cacheSaves =
-      workflow.jobs?.validate?.steps?.filter((step) =>
+      lintWorker.steps?.filter((step) =>
         step.uses?.startsWith('actions/cache/save@')
       ) ?? [];
     assert.equal(cacheSaves.length, 1, 'ci.yml must use one designated npm cache writer');
     for (const invariant of [
       "github.ref == 'refs/heads/main'",
-      "matrix.name == 'Workflow policy'",
       "steps.npm-cache.outputs.cache-hit != 'true'",
       expensiveStepCondition,
     ]) {
@@ -361,5 +633,6 @@ for (const file of workflowFiles) {
   }
 }
 
+await validateRenameClassification();
 assert.ok(hasPullRequestWorkflow, 'At least one workflow must validate pull requests');
 console.log(`Validated ${workflowFiles.length} workflow files`);

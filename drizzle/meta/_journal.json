@@ -778,6 +778,69 @@
       "when": 1787248200000,
       "tag": "0110_my_day_planning_signals",
       "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "6",
+      "when": 1787331600000,
+      "tag": "0111_completion_anchored_recurrence",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "6",
+      "when": 1787422177425,
+      "tag": "0112_finance_connection_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "6",
+      "when": 1787424779698,
+      "tag": "0113_finance_attention_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1787426400000,
+      "tag": "0114_tyrion_readiness",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1787450400000,
+      "tag": "0115_homelab_alert_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1787497200000,
+      "tag": "0116_track_task_disposition_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1787505600000,
+      "tag": "0117_simplify_tyrion_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1787616000000,
+      "tag": "0118_add_planning_horizon",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1787624700000,
+      "tag": "0119_replace_now_horizon_with_soon",
+      "breakpoints": true
     }
   ]
 }

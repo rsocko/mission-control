@@ -22,8 +22,12 @@ import {
 import { createNewGitHubConnectorIdentityState } from '@/lib/external-identities';
 import { normalizeGitHubOrigin } from '@/lib/connectors/github-issues/identity';
 import {
+  FinanceConnectorConfigurationError,
   isFinanceConnectorType,
+  preserveFinanceConnectorIdentityCredentials,
+  protectNewFinanceConnectorCredentials,
   sanitizeFinanceConnectorWrite,
+  validateFinanceConnectorSettings,
 } from '@/lib/connectors/monarch-money/config';
 import { TyrionBridgeUrlValidationError } from '@/lib/connectors/monarch-money/bridge-url';
 import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
@@ -158,6 +162,11 @@ export async function POST(request: Request) {
           : {}
       ),
     };
+    if (isFinanceConnectorType(type)) {
+      connectorSettings = validateFinanceConnectorSettings(connectorSettings, {
+        requireHouseholdCurrency: true,
+      });
+    }
     let workTodoSettings = null;
     if (type === 'scout') {
       const validation = validateScoutSettings(connectorSettings);
@@ -208,7 +217,9 @@ export async function POST(request: Request) {
         capabilities: workTodoSettings
           ? capabilitiesForWorkTodo(workTodoSettings)
           : capabilities || { read: true, write: false, delete: false, sync: true, subtasks: false, lists: false },
-        credentials: credentials || {},
+        credentials: isFinanceConnectorType(type)
+          ? protectNewFinanceConnectorCredentials(credentials)
+          : credentials || {},
         settings: connectorSettings,
         syncedLists: syncedLists || [],
         createdAt: now,
@@ -251,6 +262,12 @@ export async function POST(request: Request) {
     await syncScheduler.reconcileScheduleFromDb(id);
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
+    if (error instanceof FinanceConnectorConfigurationError) {
+      return NextResponse.json(
+        { error: error.code, code: error.code },
+        { status: 400 },
+      );
+    }
     if (error instanceof TyrionBridgeUrlValidationError) {
       return ApiErrors.badRequest(error.message);
     }
@@ -269,26 +286,46 @@ export async function PATCH(request: Request) {
     }
 
     const [existing] = await db
-      .select({ type: connectorConfigs.type })
+      .select({
+        type: connectorConfigs.type,
+        credentials: connectorConfigs.credentials,
+        settings: connectorConfigs.settings,
+        updatedAt: connectorConfigs.updatedAt,
+      })
       .from(connectorConfigs)
       .where(eq(connectorConfigs.id, id));
     if (updates.type !== undefined && updates.type !== existing?.type) {
       return ApiErrors.badRequest('Connector type cannot be changed');
     }
     if (existing && isFinanceConnectorType(existing.type)) {
+      const existingSettings = typeof existing.settings === 'string'
+        ? JSON.parse(existing.settings) as Record<string, unknown>
+        : (existing.settings as Record<string, unknown> | null) ?? {};
+      const requestedSettings = updates.settings === undefined
+        ? undefined
+        : (updates.settings as Record<string, unknown> | null) ?? {};
       const sanitized = sanitizeFinanceConnectorWrite({
         type: existing.type,
         credentials: updates.credentials,
-        settings: updates.settings,
+        settings: requestedSettings === undefined
+          ? undefined
+          : { ...existingSettings, ...requestedSettings },
       });
       if (updates.credentials !== undefined) {
         if ('serviceToken' in sanitized.credentials) {
-          updates.credentials = sanitized.credentials;
+          updates.credentials = preserveFinanceConnectorIdentityCredentials(
+            sanitized.credentials,
+            existing.credentials,
+          );
         } else {
           delete updates.credentials;
         }
       }
-      if (updates.settings !== undefined) updates.settings = sanitized.settings;
+      if (updates.settings !== undefined) {
+        updates.settings = validateFinanceConnectorSettings(sanitized.settings, {
+          requireHouseholdCurrency: false,
+        });
+      }
     }
 
     if (updates.settings !== undefined) {
@@ -356,9 +393,24 @@ export async function PATCH(request: Request) {
       }
     } else {
       const applyUpdate = async () => {
-        await db.update(connectorConfigs)
+        const result = await db.update(connectorConfigs)
           .set({ ...updates, updatedAt: now })
-          .where(eq(connectorConfigs.id, id));
+          .where(
+            existing && isFinanceConnectorType(existing.type)
+              ? and(
+                  eq(connectorConfigs.id, id),
+                  eq(connectorConfigs.updatedAt, existing.updatedAt),
+                  eq(connectorConfigs.settings, existing.settings),
+                )
+              : eq(connectorConfigs.id, id),
+          );
+        if (
+          existing
+          && isFinanceConnectorType(existing.type)
+          && result.changes !== 1
+        ) {
+          throw new ConnectorOperationBusyError('Connector configuration changed; retry');
+        }
       };
       if (
         existing?.type === 'github-issues'
@@ -378,6 +430,12 @@ export async function PATCH(request: Request) {
     }
     if (error instanceof TyrionBridgeUrlValidationError) {
       return ApiErrors.badRequest(error.message);
+    }
+    if (error instanceof FinanceConnectorConfigurationError) {
+      return NextResponse.json(
+        { error: error.code, code: error.code },
+        { status: 400 },
+      );
     }
     return ApiErrors.internal('Failed to update connector', error);
   }

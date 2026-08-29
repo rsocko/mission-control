@@ -60,7 +60,7 @@ beforeAll(async () => {
     ) VALUES (
       ?, ?, 'transaction-one', '2026-08-08', -10,
       'Invented merchant', 'account-one', '1234', 'kid-one',
-      'card-rule', 'pending', 0, 0, '[]',
+      'account-rule', 'pending', 0, 0, '[]',
       'active', 'source-hash', ?, ?, ?,
       'attributed', '[]', 'pending', 0
     )

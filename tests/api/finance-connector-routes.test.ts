@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
   runBackfill: vi.fn(),
   getHealth: vi.fn(),
   getDatasetHealth: vi.fn(),
+  verifyRecovery: vi.fn(),
+  reconcileRecovery: vi.fn(),
+  getRecoveryView: vi.fn(),
   select: vi.fn(),
 }));
 
@@ -30,6 +33,15 @@ vi.mock('@/db', () => ({
 vi.mock('@/lib/connectors/monarch-money/config', () => ({
   getPersistedFinanceConnectorConfig: mocks.getPersistedConfig,
   financeConnectorConfigFromRow: mocks.configFromRow,
+  isFinanceConnectorType: (type: string) => (
+    type === 'finance' || type === 'finance-manager' || type === 'monarch-money'
+  ),
+}));
+
+vi.mock('@/lib/connectors/monarch-money/connection-recovery', () => ({
+  verifyFinanceConnectionRecovery: mocks.verifyRecovery,
+  reconcileFinanceConnectionObservation: mocks.reconcileRecovery,
+  getFinanceConnectionRecoveryView: mocks.getRecoveryView,
 }));
 
 vi.mock('@/lib/sync', () => ({
@@ -75,6 +87,67 @@ describe('finance connector routes', () => {
       aggregate: 'fresh',
       datasets: [],
     });
+    mocks.getRecoveryView.mockReturnValue(null);
+  });
+
+  it('authorizes recovery verification and accepts only an empty request contract', async () => {
+    const connector = {
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: true,
+      deletedAt: null,
+    };
+    mocks.select.mockReturnValue(chainable([connector]));
+    mocks.configFromRow.mockReturnValue({ id: connector.id, settings: {}, credentials: {} });
+    mocks.verifyRecovery.mockResolvedValue({ recovered: true, reason: 'recovered' });
+    const { POST } = await import('@/app/api/connectors/[id]/finance/recovery/route');
+
+    const response = await POST(new Request(
+      'https://mc.example/api/connectors/persisted-finance/finance/recovery',
+      {
+        method: 'POST',
+        headers: {
+          host: 'mc.example',
+          origin: 'https://mc.example',
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      },
+    ), { params: Promise.resolve({ id: connector.id }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyRecovery).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ id: connector.id }),
+      signal: expect.any(AbortSignal),
+    }));
+  });
+
+  it.each([
+    ['cross-site request', { origin: 'https://attacker.example', 'sec-fetch-site': 'cross-site' }, '{}', 403],
+    ['malformed JSON', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{', 400],
+    ['return URL', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"returnUrl":"https://attacker.example"}', 400],
+    ['session cookie', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"session_id":"secret"}', 400],
+    ['CSRF token', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"csrftoken":"secret"}', 400],
+    ['connector token', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"connectorToken":"secret"}', 400],
+    ['recovery assertion', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"assertion":"secret"}', 400],
+  ])('rejects a recovery %s', async (_label, requestHeaders, body, status) => {
+    const { POST } = await import('@/app/api/connectors/[id]/finance/recovery/route');
+    const response = await POST(new Request(
+      'https://mc.example/api/connectors/persisted-finance/finance/recovery',
+      {
+        method: 'POST',
+        headers: {
+          host: 'mc.example',
+          'content-type': 'application/json',
+          ...requestHeaders,
+        },
+        body,
+      },
+    ), { params: Promise.resolve({ id: 'persisted-finance' }) });
+
+    expect(response.status).toBe(status);
+    expect(mocks.verifyRecovery).not.toHaveBeenCalled();
   });
 
   it('runs finance sync through persisted config and the canonical scheduler', async () => {

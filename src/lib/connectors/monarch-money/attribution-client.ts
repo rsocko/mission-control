@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { createHmac } from 'node:crypto';
 import type { ConnectorConfig } from '@/types';
 import { getPersistedFinanceManagerServiceToken } from './client';
 import {
@@ -17,6 +16,11 @@ import {
   type AttributionBatchRequest,
   type AttributionBatchResponse,
 } from './attribution-contract';
+import {
+  financeConnectorScopedReference,
+  financeIdentityNamespaceFromCredentials,
+} from './identity';
+export { normalizeAttributionMerchant } from '@/lib/finance/attribution-merchant';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MAX_TIMEOUT_MS = 30_000;
@@ -41,9 +45,8 @@ const stableServiceErrorCodes = new Set([
 
 export interface TyrionAttributionConfig {
   serviceToken: string;
-  fingerprintKey: string;
-  keyVersion: number;
-  expectedPolicyVersion: number | null;
+  identityNamespace: string;
+  expectedPolicyVersion: number;
   timeoutMs: number;
 }
 
@@ -66,10 +69,9 @@ function positiveInteger(value: string | undefined, fallback: number, maximum: n
     : fallback;
 }
 
-function optionalPositiveInteger(value: string | undefined): number | null {
-  if (!value?.trim()) return null;
+function requiredPositiveInteger(value: string | undefined): number {
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+  if (!value?.trim() || !Number.isSafeInteger(parsed) || parsed < 1) {
     throw new TyrionAttributionError(
       'attribution_not_configured',
       'Tyrion attribution policy configuration is invalid',
@@ -86,15 +88,10 @@ export function resolveTyrionAttributionConfig(
   const serviceToken = getPersistedFinanceManagerServiceToken(financeConfig)
     || environment.FINANCE_MANAGER_API_TOKEN?.trim()
     || '';
-  const fingerprintKey = environment.TYRION_ATTRIBUTION_FINGERPRINT_KEY;
-  const keyVersion = Number(environment.TYRION_ATTRIBUTION_KEY_VERSION);
-  if (
-    !serviceToken
-    || !fingerprintKey
-    || fingerprintKey.length < 32
-    || !Number.isSafeInteger(keyVersion)
-    || keyVersion < 1
-  ) {
+  const identityNamespace = financeIdentityNamespaceFromCredentials(
+    financeConfig.credentials,
+  );
+  if (!serviceToken || !identityNamespace) {
     throw new TyrionAttributionError(
       'attribution_not_configured',
       'Tyrion attribution service configuration is unavailable',
@@ -103,9 +100,8 @@ export function resolveTyrionAttributionConfig(
   }
   return {
     serviceToken,
-    fingerprintKey,
-    keyVersion,
-    expectedPolicyVersion: optionalPositiveInteger(
+    identityNamespace,
+    expectedPolicyVersion: requiredPositiveInteger(
       environment.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION,
     ),
     timeoutMs: positiveInteger(
@@ -116,52 +112,27 @@ export function resolveTyrionAttributionConfig(
   };
 }
 
-function keyedRef(
-  config: Pick<TyrionAttributionConfig, 'fingerprintKey' | 'keyVersion'>,
-  purpose: 'source-ref' | 'instrument',
-  connectorId: string,
-  values: string[],
-): string {
-  return createHmac('sha256', config.fingerprintKey)
-    .update([purpose, `key-v${config.keyVersion}`, connectorId, ...values].join('\n'))
-    .digest('base64url');
-}
-
 export function createAttributionSourceRef(
-  config: Pick<TyrionAttributionConfig, 'fingerprintKey' | 'keyVersion'>,
-  connectorId: string,
+  config: Pick<TyrionAttributionConfig, 'identityNamespace'>,
+  _connectorId: string,
   upstreamTransactionId: string,
 ): string {
-  return `source-v1:${keyedRef(
-    config,
-    'source-ref',
-    connectorId,
-    [upstreamTransactionId],
-  )}`;
+  return financeConnectorScopedReference(
+    config.identityNamespace,
+    'source',
+    upstreamTransactionId,
+  );
 }
 
-export function createInstrumentFingerprint(
-  config: Pick<TyrionAttributionConfig, 'fingerprintKey' | 'keyVersion'>,
-  connectorId: string,
-  accountId: string | null,
-  accountMask: string | null,
-): string | null {
-  if (!accountId && !accountMask) return null;
-  return `instrument-v1:${keyedRef(
-    config,
-    'instrument',
-    connectorId,
-    [accountId ?? '', accountMask ?? ''],
-  )}`;
-}
-
-export function normalizeAttributionMerchant(value: string | null): string {
-  const normalized = (value ?? '')
-    .normalize('NFKC')
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return (normalized || 'Unknown merchant').slice(0, 160);
+export function createAttributionAccountRef(
+  config: Pick<TyrionAttributionConfig, 'identityNamespace'>,
+  accountId: string,
+): string {
+  return financeConnectorScopedReference(
+    config.identityNamespace,
+    'account',
+    accountId,
+  );
 }
 
 export function createAttributionHeaders(
@@ -351,7 +322,7 @@ export class TyrionAttributionClient {
 
 export function createAttributionRequests(
   items: AttributionBatchItem[],
-  expectedPolicyVersion: number | null,
+  expectedPolicyVersion: number,
 ): AttributionBatchRequest[] {
   if (items.length === 0) return [];
   const requests: AttributionBatchRequest[] = [];

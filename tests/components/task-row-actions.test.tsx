@@ -94,9 +94,28 @@ describe('TaskRowActions', () => {
   it('opens anchored mutation menus and applies a status selection', async () => {
     const onSetStatus = vi.fn();
     renderActions({ onSetStatus });
-    fireEvent.click(screen.getByRole('button', { name: 'Set status' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Status: To do' }));
     fireEvent.click(await screen.findByRole('button', { name: 'In progress' }));
     await waitFor(() => expect(onSetStatus).toHaveBeenCalledWith('in_progress'));
+  });
+
+  it('offers explicit filter commands without overloading property clicks', () => {
+    const onFilterStatus = vi.fn();
+    const onFilterPriority = vi.fn();
+    renderActions({
+      status: 'in_progress',
+      priority: 'high',
+      onFilterStatus,
+      onFilterPriority,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Status: In progress' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by In progress' }));
+    expect(onFilterStatus).toHaveBeenCalledWith('in_progress');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Priority: High' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by P1 · High' }));
+    expect(onFilterPriority).toHaveBeenCalledWith('high');
   });
 
   it('uses semantic colors for actions and keeps their identity on hover', () => {
@@ -122,13 +141,13 @@ describe('TaskRowActions', () => {
       'hover:bg-blue-400/15',
       'hover:text-blue-300',
     );
-    expect(screen.getByRole('button', { name: 'Set status' })).toHaveClass(
+    expect(screen.getByRole('button', { name: 'Status: In progress' })).toHaveClass(
       'text-[var(--accent-400)]',
       'hover:text-[var(--accent-300)]',
     );
-    expect(screen.getByRole('button', { name: 'Set priority' })).toHaveClass(
+    expect(screen.getByRole('button', { name: 'Priority: High' })).toHaveClass(
       'text-orange-400',
-      'hover:text-orange-300',
+      'bg-orange-900/30',
     );
   });
 
@@ -142,15 +161,19 @@ describe('TaskRowActions', () => {
     );
   });
 
-  it('progressively reveals inactive hover actions while keeping active actions visible', () => {
+  it('reserves property tracks while revealing only empty writable affordances', () => {
     const { rerender } = renderActions();
 
-    expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('@min-[480px]:flex');
-    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('@min-[480px]:flex');
-    expect(screen.getByRole('button', { name: 'Add notes' }).parentElement).toHaveClass('@min-[640px]:flex');
-    expect(screen.getByRole('button', { name: 'Snooze task' }).parentElement).toHaveClass('@min-[768px]:flex');
-    expect(screen.getByRole('button', { name: 'Set status' }).parentElement).toHaveClass('@min-[960px]:flex');
-    expect(screen.getByRole('button', { name: 'Set priority' }).parentElement).toHaveClass('@min-[960px]:flex');
+    expect(screen.getByTestId('task-row-properties')).toHaveClass(
+      'grid-cols-[36px_30px_32px_32px_32px_32px]',
+      '@min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]',
+    );
+    expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('opacity-0');
+    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('@min-[480px]:flex', 'opacity-0');
+    expect(screen.getByRole('button', { name: 'Add notes' }).parentElement).toHaveClass('opacity-0');
+    expect(screen.getByRole('button', { name: 'Snooze task' }).closest('.hidden')).toHaveClass('@min-[480px]:contents');
+    expect(screen.getByRole('button', { name: 'Status: To do' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Priority: None' })).toBeVisible();
 
     rerender(
       <TaskRowActions
@@ -171,10 +194,9 @@ describe('TaskRowActions', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).toHaveClass('flex');
-    expect(screen.getByRole('button', { name: /^Change due date/ }).parentElement).toHaveClass('flex');
-    expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).toHaveClass('flex');
-    expect(screen.getByRole('button', { name: 'Snooze task' }).parentElement).toHaveClass('flex');
+    expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).not.toHaveClass('opacity-0');
+    expect(screen.getByRole('button', { name: /^Change due date/ }).parentElement).not.toHaveClass('opacity-0');
+    expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).not.toHaveClass('opacity-0');
   });
 
   it('keeps active My Day status and priority controls visible at narrow widths', () => {
@@ -196,12 +218,12 @@ describe('TaskRowActions', () => {
       .filter(Boolean);
 
     expect(actionNames()).toEqual([
-      'Snooze task',
-      'Add to My Day',
+      'Priority: None',
+      'Status: To do',
       'Add due date',
+      'Add to My Day',
       'Add notes',
-      'Set status',
-      'Set priority',
+      'Snooze task',
     ]);
 
     rerender(
@@ -223,13 +245,23 @@ describe('TaskRowActions', () => {
     );
 
     expect(actionNames()).toEqual([
-      'Snooze task',
-      'Remove from My Day',
+      'Priority: None',
+      'Status: To do',
       expect.stringMatching(/^Change due date, currently/),
+      'Remove from My Day',
       'Open notes',
-      'Set status',
-      'Set priority',
+      'Snooze task',
     ]);
+  });
+
+  it('opens the existing row context menu from the More action', () => {
+    const { container } = renderActions({ showMoreActions: true });
+    const onContextMenu = vi.fn((event: Event) => event.preventDefault());
+    container.addEventListener('contextmenu', onContextMenu);
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+
+    expect(onContextMenu).toHaveBeenCalledOnce();
   });
 
   it('caps Later today at 11:59 PM when selected after 8 PM', () => {

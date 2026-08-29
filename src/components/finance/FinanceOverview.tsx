@@ -20,6 +20,7 @@ import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { cn } from '@/lib/utils';
 import { SpendingInsightsSection } from './SpendingInsightsSection';
 import type { FinanceHealth, FinanceOverviewData } from './types';
+import { FinanceConnectionWarning } from './FinanceConnectionWarning';
 
 type ProjectionState = FinanceHealth['projection']['aggregate'];
 type ProjectionDataset = FinanceHealth['projection']['datasets'][number];
@@ -257,6 +258,13 @@ export function FinanceOverview() {
         </div>
       ) : overview ? (
         <main className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
+          {health?.recovery && (
+            <FinanceConnectionWarning
+              connectorId={overview.connector.id}
+              recovery={health.recovery}
+              onVerified={() => load(true)}
+            />
+          )}
           <section aria-labelledby="finance-attention-heading">
             <div className="mb-3 flex items-center justify-between gap-3">
               <h2 id="finance-attention-heading" className="text-sm font-semibold text-[var(--text-primary)]">

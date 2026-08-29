@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { SortableTaskRow } from '@/components/today/SortableTaskRow';
 import type { MyDayItem } from '@/components/today/types';
@@ -52,7 +52,28 @@ vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
 }));
 
 vi.mock('@/components/task-row/TaskRowActions', () => ({
-  TaskRowActions: () => <span data-testid="task-row-actions" />,
+  TaskRowActions: (props: {
+    smartScore?: number | null;
+    planningHorizon?: string | null;
+    effort?: number | null;
+    priority: string;
+    status: string;
+    onFilterPriority?: (priority: string) => void;
+    onFilterStatus?: (status: string) => void;
+  }) => (
+    <>
+      <span
+        data-testid="task-row-actions"
+        data-score={props.smartScore}
+        data-horizon={props.planningHorizon}
+        data-effort={props.effort}
+        data-priority={props.priority}
+        data-status={props.status}
+      />
+      <button type="button" onClick={() => props.onFilterPriority?.(props.priority)}>Filter priority</button>
+      <button type="button" onClick={() => props.onFilterStatus?.(props.status)}>Filter status</button>
+    </>
+  ),
 }));
 
 vi.mock('@/types/dashboard', () => ({
@@ -69,6 +90,7 @@ const item: MyDayItem = {
   order: 0,
   isAutoIncluded: false,
   addedAt: '2026-08-06T12:00:00.000Z',
+  completedAt: null,
   title: 'Narrow row',
   status: 'in_progress',
   priority: 'high',
@@ -80,6 +102,7 @@ const item: MyDayItem = {
   tags: [],
   metadata: JSON.stringify({ recurrence: 'weekly' }),
   effort: 3,
+  planningHorizon: 'soon',
   estimatedDuration: 30,
   smartScore: 80,
   hasDescription: false,
@@ -88,8 +111,10 @@ const item: MyDayItem = {
   editPolicy: editableTaskPolicy,
 };
 
-describe('SortableTaskRow responsive trailing controls', () => {
-  it('hides lower-priority badges before they can displace the rightmost action rail', () => {
+describe('SortableTaskRow aligned properties', () => {
+  it('passes comparable properties to the shared grid and keeps secondary signals with task metadata', () => {
+    const onFilterPriority = vi.fn();
+    const onFilterStatus = vi.fn();
     const { container } = render(
       <SortableTaskRow
         item={item}
@@ -102,6 +127,8 @@ describe('SortableTaskRow responsive trailing controls', () => {
         onSetDueDate={vi.fn()}
         onSetPriority={vi.fn()}
         onSetStatus={vi.fn()}
+        onFilterPriority={onFilterPriority}
+        onFilterStatus={onFilterStatus}
         onOpenNotes={vi.fn()}
         draggable={false}
       />,
@@ -110,19 +137,24 @@ describe('SortableTaskRow responsive trailing controls', () => {
     const row = container.firstElementChild;
     const children = Array.from(row?.children ?? []);
     const actions = screen.getByTestId('task-row-actions');
-    const effort = screen.getByTitle('Effort: M');
     const duration = screen.getByTitle('Estimated: 30min');
-    const recurrence = screen.getByText('Narrow row').closest('.group')
-      ?.querySelector('[data-tooltip="Repeats: weekly"]')?.parentElement;
-    const smartScore = screen.getByTestId('smart-score').parentElement;
+    const recurrence = screen.getByText('Narrow row').closest('.flex-1')
+      ?.querySelector<HTMLElement>('[data-tooltip="Repeats: weekly"]') ?? null;
+    const taskCopy = screen.getByText('Narrow row').closest('.flex-1');
 
-    expect(effort).toHaveClass('hidden', '@min-[640px]:inline');
+    expect(actions).toHaveAttribute('data-score', '80');
+    expect(actions).toHaveAttribute('data-horizon', 'soon');
+    expect(actions).toHaveAttribute('data-effort', '3');
+    expect(actions).toHaveAttribute('data-priority', 'high');
+    expect(actions).toHaveAttribute('data-status', 'in_progress');
     expect(duration).toHaveClass('hidden', '@min-[640px]:flex');
-    expect(recurrence).toHaveClass('hidden', '@min-[640px]:flex');
-    expect(smartScore).toHaveClass('hidden', '@min-[640px]:block');
-    expect(children.indexOf(effort)).toBeLessThan(children.indexOf(actions));
-    expect(children.indexOf(duration)).toBeLessThan(children.indexOf(actions));
-    expect(children.indexOf(recurrence!)).toBeLessThan(children.indexOf(actions));
-    expect(children.indexOf(smartScore!)).toBeLessThan(children.indexOf(actions));
+    expect(taskCopy).toContainElement(duration);
+    expect(taskCopy).toContainElement(recurrence);
+    expect(children.indexOf(actions)).toBeGreaterThan(children.indexOf(taskCopy!));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter priority' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Filter status' }));
+    expect(onFilterPriority).toHaveBeenCalledWith('high');
+    expect(onFilterStatus).toHaveBeenCalledWith('in_progress');
   });
 });

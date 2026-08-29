@@ -23,6 +23,9 @@ export function applyTaskSafetyNets(_sqlite: Database.Database): void {
   if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'effort')) {
     _sqlite.exec('ALTER TABLE tasks ADD COLUMN effort INTEGER');
   }
+  if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'planning_horizon')) {
+    _sqlite.exec('ALTER TABLE tasks ADD COLUMN planning_horizon TEXT');
+  }
   if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'status_reason')) {
     _sqlite.exec('ALTER TABLE tasks ADD COLUMN status_reason TEXT');
   }
@@ -40,7 +43,20 @@ export function applyTaskSafetyNets(_sqlite: Database.Database): void {
       "ALTER TABLE tasks ADD COLUMN local_disposition TEXT NOT NULL DEFAULT 'active' CHECK (local_disposition IN ('active', 'handled', 'dismissed'))",
     );
   }
+  if (taskColumns.length > 0 && !taskColumns.some((column) => column.name === 'recurrence_generated_from_task_id')) {
+    _sqlite.exec('ALTER TABLE tasks ADD COLUMN recurrence_generated_from_task_id TEXT');
+  }
+  const scheduleColumns = _sqlite.prepare("PRAGMA table_info('task_schedules')").all() as Array<{ name: string }>;
+  if (scheduleColumns.length > 0 && !scheduleColumns.some((column) => column.name === 'recurrence_mode')) {
+    _sqlite.exec("ALTER TABLE task_schedules ADD COLUMN recurrence_mode TEXT NOT NULL DEFAULT 'schedule'");
+  }
+  _execSafe(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_recurrence_generated_from ON tasks(recurrence_generated_from_task_id) WHERE recurrence_generated_from_task_id IS NOT NULL',
+  );
   _execSafe(
     'CREATE INDEX IF NOT EXISTS idx_tasks_local_disposition ON tasks(local_disposition)',
+  );
+  _execSafe(
+    'CREATE INDEX IF NOT EXISTS idx_tasks_planning_horizon ON tasks(planning_horizon)',
   );
 }

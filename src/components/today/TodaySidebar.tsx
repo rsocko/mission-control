@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target } from 'lucide-react';
+import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
 import { SuggestionGroup } from './SuggestionGroup';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
@@ -67,6 +67,7 @@ export function TodaySidebar({
             learnMoreHref={REPLANNING_SUGGESTION.insightsHref}
             {...interactionProps}
           />
+          <SuggestionGroup title="Planned for Next" icon={<TimerReset size={12} />} tasks={suggestions.planningNext} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />

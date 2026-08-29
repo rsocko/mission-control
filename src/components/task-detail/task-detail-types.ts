@@ -1,6 +1,8 @@
 import type {
   LocalDisposition,
+  PlanningHorizon,
   TaskEditPolicy,
+  TaskStatus,
   TaskSourceModel,
 } from '@/types';
 import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
@@ -36,6 +38,7 @@ export interface TaskDetail {
   microStatus: string | null;
   statusReason: string | null;
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
@@ -52,15 +55,18 @@ export interface TaskDetail {
   metadata: string | null;
   estimatedDuration?: number | null;
   recurrence?: string | null;
+  recurrenceMode?: 'schedule' | 'completion';
   effort?: number | null;
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
   reminderTimezone?: string;
+  snoozedUntil?: string | null;
   isInMyDay?: boolean;
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
   editPolicy: TaskEditPolicy;
+  supportedStatusValues?: TaskStatus[];
 }
 
 /** A list within the task's own source, used for same-source moves. */
@@ -132,13 +138,36 @@ export interface MicroStatusSuggestion {
 /** Metadata fields the panel reads out of a task's JSON metadata blob. */
 export interface TaskDetailMetadata {
   previewUrl?: string;
+  previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;
+  documentUrl?: string;
   documentTitle?: string;
+  documentType?: string;
+  documentId?: string | number;
   docHubUrl?: string;
+  docHubDocumentUrl?: string;
   correspondent?: string;
   amount?: number;
   actionType?: string;
+  category?: string;
   urgency?: string;
+  confidence?: number;
+  actionReady?: boolean;
+  reviewState?: string;
+  reviewUrl?: string;
+  primaryActionId?: string;
+  primaryActionLabel?: string;
+  primaryActionUrl?: string;
+  sourceActions?: Array<{
+    id: string;
+    label: string;
+    method: 'POST';
+    url: string;
+  }>;
+  owlStatus?: string;
+  owlDisposition?: string;
+  owlSnoozedUntil?: string;
+  owlUpdatedAt?: string;
   recurrence?: string;
   linkedResources?: Array<{
     id?: string;
@@ -173,6 +202,10 @@ export interface TaskDetailPanelProps {
   portalDialog?: boolean;
   /** Override the minimum resizable width when a host surface requires more coverage. */
   minPanelWidth?: number;
+  /** Fill a host-owned pane instead of using the user's global side-panel width. */
+  fillContainer?: boolean;
+  /** Additional responsive visibility classes for the embedded document preview. */
+  documentPreviewClassName?: string;
   /** Move keyboard focus into the panel when it opens. */
   focusPanelOnMount?: boolean;
   /** Open the existing expanded Notes dialog after the requested task loads. */
@@ -182,8 +215,14 @@ export interface TaskDetailPanelProps {
 }
 
 /** Parse a task's metadata blob, tolerating absent or malformed JSON. */
-export function parseTaskMetadata(metadata: string | null | undefined): TaskDetailMetadata {
+export function parseTaskMetadata(
+  metadata: string | Record<string, unknown> | null | undefined,
+): TaskDetailMetadata {
   if (!metadata) return {};
+  if (typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as TaskDetailMetadata;
+  }
+  if (typeof metadata !== 'string') return {};
   try {
     const parsed: unknown = JSON.parse(metadata);
     return parsed && typeof parsed === 'object' ? parsed as TaskDetailMetadata : {};

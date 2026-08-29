@@ -35,6 +35,7 @@ function renderFilters(overrides: Partial<React.ComponentProps<typeof MobileTask
     activeFilter: 'all',
     sourceFilter: null,
     listFilter: null,
+    planningHorizonFilters: [],
     sources,
     sourceLists,
     syncStatus,
@@ -60,6 +61,8 @@ function renderFilters(overrides: Partial<React.ComponentProps<typeof MobileTask
     onQuickFilterVisibilityChange: vi.fn(),
     onSourceFilterChange: vi.fn(),
     onListFilterChange: vi.fn(),
+    onPlanningHorizonToggle: vi.fn(),
+    onPlanningHorizonClear: vi.fn(),
     onClear: vi.fn(),
     ...overrides,
   };
@@ -105,5 +108,18 @@ describe('MobileTaskFilters', () => {
     expect(screen.getByRole('button', { name: /Next 7 Days/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Assigned to Me/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /No Date/ })).not.toBeInTheDocument();
+  });
+
+  it('shows and toggles canonical planning horizon filters', () => {
+    const props = renderFilters({ planningHorizonFilters: ['next'] });
+
+    expect(screen.getByRole('button', { name: /Next Planned for next/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Not set Needs planning/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Later Planned for later/ }));
+    expect(props.onPlanningHorizonToggle).toHaveBeenCalledWith('later');
+
+    fireEvent.click(screen.getByRole('button', { name: /Any horizon/ }));
+    expect(props.onPlanningHorizonClear).toHaveBeenCalledTimes(1);
   });
 });

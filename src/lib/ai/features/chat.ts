@@ -2,7 +2,7 @@ import { generateText, streamText, stepCountIs, type ModelMessage } from 'ai';
 import { getAIModel, getAIRouteOutcome } from '../provider-factory';
 import type { SensitivityClass } from '../types';
 import { createHoustonTools } from '../tools';
-import { getHoustonToolApprovalSecret } from '../tool-approval-config';
+import { getOptionalHoustonToolApprovalSecret } from '../tool-approval-config';
 import { excludeFinanceMutations, restrictToolsAfterTriage } from '../tool-safety';
 import type { AIAdmission } from '../admission-controller';
 
@@ -46,7 +46,7 @@ Rules:
 
 export async function chat(messages: Array<{ role: 'user' | 'assistant'; content: string }>) {
   const route = getAIModel('houston-chat');
-  const approvalSecret = getHoustonToolApprovalSecret();
+  const approvalSecret = getOptionalHoustonToolApprovalSecret();
   const tools = createHoustonTools(approvalSecret);
 
   const result = await generateText({
@@ -54,7 +54,7 @@ export async function chat(messages: Array<{ role: 'user' | 'assistant'; content
     system: SYSTEM_PROMPT,
     messages,
     tools,
-    experimental_toolApprovalSecret: approvalSecret,
+    ...(approvalSecret ? { experimental_toolApprovalSecret: approvalSecret } : {}),
     stopWhen: stepCountIs(5),
     prepareStep: restrictToolsAfterTriage,
   });
@@ -82,7 +82,7 @@ export async function streamChat(
   },
 ) {
   const route = getAIModel('houston-chat', options);
-  const approvalSecret = getHoustonToolApprovalSecret();
+  const approvalSecret = getOptionalHoustonToolApprovalSecret();
   const tools = createHoustonTools(approvalSecret);
   const systemPrompt = options?.contextPrefix
     ? `${SYSTEM_PROMPT}\n\n${options.contextPrefix}`
@@ -97,7 +97,7 @@ export async function streamChat(
     messages,
     tools,
     activeTools,
-    experimental_toolApprovalSecret: approvalSecret,
+    ...(approvalSecret ? { experimental_toolApprovalSecret: approvalSecret } : {}),
     experimental_context: { correlationId: route.context.correlationId },
     stopWhen: stepCountIs(5),
     prepareStep: restrictToolsAfterTriage,

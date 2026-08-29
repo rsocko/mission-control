@@ -14,6 +14,14 @@ const sources = {
     connectorId: 'todo',
     lists: [{ name: 'Work', count: 8 }],
   },
+  'custom-rest': {
+    connectorId: 'custom',
+    lists: [],
+  },
+  browser_extension: {
+    connectorId: 'browser',
+    lists: [],
+  },
 };
 
 describe('Quick Sort source filter', () => {
@@ -43,6 +51,15 @@ describe('Quick Sort source filter', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Microsoft To Do' }));
 
     expect(onChange).toHaveBeenCalledWith({ source: 'microsoft-todo' });
+  });
+
+  it('formats known and custom source identifiers as display labels', async () => {
+    renderFilter();
+    fireEvent.click(screen.getByRole('button', { name: 'All sources' }));
+
+    expect(await screen.findByRole('button', { name: 'Custom REST' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Browser Extension' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'browser_extension' })).not.toBeInTheDocument();
   });
 
   it('collapses lists until requested and selects one list as the scope', async () => {

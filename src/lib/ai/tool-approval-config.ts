@@ -64,6 +64,24 @@ export function verifyHoustonToolApprovalSignature(input: {
     .update(canonicalJson(input.toolInput))
     .digest('base64url');
   const expected = createHmac('sha256', input.secret)
+    .update(JSON.stringify([
+      'ai-sdk-tool-approval-v1',
+      input.approvalId,
+      input.toolCallId,
+      input.toolName,
+      inputDigest,
+    ]))
+    .digest();
+  const actual = Buffer.from(input.signature, 'base64url');
+  if (actual.length === expected.length && timingSafeEqual(actual, expected)) return true;
+  if (
+    input.approvalId.includes('\n')
+    || input.toolCallId.includes('\n')
+    || input.toolName.includes('\n')
+  ) {
+    return false;
+  }
+  const legacyExpected = createHmac('sha256', input.secret)
     .update([
       input.approvalId,
       input.toolCallId,
@@ -71,6 +89,6 @@ export function verifyHoustonToolApprovalSignature(input: {
       inputDigest,
     ].join('\n'))
     .digest();
-  const actual = Buffer.from(input.signature, 'base64url');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
+  return actual.length === legacyExpected.length
+    && timingSafeEqual(actual, legacyExpected);
 }

@@ -118,7 +118,7 @@ connectors are excluded from task field-policy and mutation surfaces.
 | Scout | Tasks | `ingested` | Title, description, priority, and due date use override-aware inbound merge | Lifecycle and all other ordinary task fields | Pull-based lifecycle feed; no direct connector call |
 | Outlook Calendar | Notifications only | — | — | — | — |
 | Outlook Email | Notifications only | — | — | — | — |
-| RyMessage | Notifications now; task candidates/materializations proposed | Provider-owned bridge | RyMessage owns extraction; the selected provider owns task fields and lifecycle | Provenance-aware planning overlays only after correlation | Through selected provider; relationship lifecycle through Companion |
+| RyMessage | Experimental notification webhook now; task candidates/materializations proposed | Provider-owned bridge | RyMessage owns extraction; the selected provider owns task fields and lifecycle | Provenance-aware planning overlays only after correlation | Through selected provider; future relationship lifecycle through a dedicated Companion integration boundary |
 | Home Assistant | Notifications only | — | — | — | — |
 | Tyrion | Notifications only | — | — | — | — |
 | Monarch Money | Notifications only | — | — | — | — |

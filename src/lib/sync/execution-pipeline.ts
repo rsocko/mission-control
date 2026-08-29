@@ -574,6 +574,16 @@ export class SyncExecutionPipeline {
       tasksRemoved += upsertResult.removed;
       const localOnlyProtected = upsertResult.localOnlyProtected;
       const remoteSourceIds = upsertResult.remoteSourceIds ?? new Set<string>();
+      if (upsertResult.identityBlocked > 0) {
+        const outcomes = Object.entries(upsertResult.identityBlockedOutcomes)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([outcome, count]) => `${outcome}=${count}`)
+          .join(', ');
+        errors.push(
+          `${upsertResult.identityBlocked} GitHub task identity decision(s) blocked`
+          + (outcomes ? ` (${outcomes})` : ''),
+        );
+      }
 
       // ─── PHASE 4a: DEPENDENCIES — Reconcile native blocking edges ───
       try {
@@ -833,12 +843,12 @@ export class SyncExecutionPipeline {
 
       // ─── Log to sync_log table ──────────────────────────────────────
       // The core sync (fetch + upsert) completed. Non-fatal errors from
-      // ancillary phases (source list discovery, GitHub Projects, push)
-      // are logged in the errors array but don't mark the sync as failed.
-      // Only the catch block below (truly failed syncs) sets success=false.
+      // Ancillary phase errors remain informational, while a blocked task
+      // identity fails the run so it cannot advance the incremental baseline.
+      const syncSucceeded = upsertResult.identityBlocked === 0;
       const result: SyncResult = {
         connectorId,
-        success: true,
+        success: syncSucceeded,
         tasksAdded,
         tasksUpdated,
         tasksRemoved,
@@ -850,10 +860,10 @@ export class SyncExecutionPipeline {
           ? { datasetErrors: domainDataResult.datasetErrors }
           : {}),
       };
-      const successLog = {
+      const syncLogEntry = {
         id: randomUUID(),
         connectorId,
-        success: true,
+        success: syncSucceeded,
         tasksAdded,
         tasksUpdated,
         tasksRemoved,
@@ -868,11 +878,16 @@ export class SyncExecutionPipeline {
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
       runTransaction((tx) => {
-        tx.insert(syncLog).values(successLog).run();
+        tx.insert(syncLog).values(syncLogEntry).run();
       });
-      identityRuntime?.complete('succeeded');
+      identityRuntime?.complete(
+        syncSucceeded ? 'succeeded' : 'failed',
+        syncSucceeded ? undefined : 'task_identity_blocked',
+      );
 
-      this.lastSyncResults.set(connectorId, result);
+      if (syncSucceeded) {
+        this.lastSyncResults.set(connectorId, result);
+      }
       syncEventBus.emitSyncEvent({
         type: 'sync:complete',
         connectorId,
@@ -909,7 +924,7 @@ export class SyncExecutionPipeline {
 
       syncLogger.info({
         connectorId,
-        success: true,
+        success: syncSucceeded,
         tasksAdded,
         tasksUpdated,
         tasksRemoved,

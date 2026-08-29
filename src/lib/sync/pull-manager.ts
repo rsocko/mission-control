@@ -42,6 +42,7 @@ import {
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import type {
   GitHubStableIdentityRuntime,
+  GitHubIdentityOutcome,
   GitHubIdentityResolutionDecision,
 } from '@/lib/external-identities';
 import {
@@ -56,6 +57,7 @@ import { needsMicrosoftTodoLinkedResourceHydration } from './task-metadata-hydra
  *  Balances throughput (fewer yields = fewer context switches) against
  *  responsiveness (shorter blocking windows for HTTP/cron/SSE). */
 const BATCH_SIZE = 25;
+const MAX_BLOCKED_IDENTITY_AUDIT_ENTRIES = 20;
 
 /** Minimum milliseconds to yield between batches. Must be long enough for
  *  queued macrotasks (healthcheck HTTP, cron, SSE) to run.  2 ms was too
@@ -75,6 +77,29 @@ interface RemoteTaskVersion {
   updatedAt?: string;
   status: TaskItem['status'];
   isChecklistItem: boolean;
+}
+
+export interface GitHubTaskIdentityBlockSummary {
+  count: number;
+  outcomes: Partial<Record<GitHubIdentityOutcome, number>>;
+}
+
+export function recordBlockedTaskIdentityDecision(
+  decision: GitHubIdentityResolutionDecision,
+  audit: SyncAuditEntry[],
+  summary: GitHubTaskIdentityBlockSummary,
+): void {
+  if (decision.appliedSource !== 'blocked') return;
+  summary.count++;
+  summary.outcomes[decision.outcome] = (summary.outcomes[decision.outcome] ?? 0) + 1;
+  if (summary.count <= MAX_BLOCKED_IDENTITY_AUDIT_ENTRIES) {
+    audit.push({
+      action: 'protected',
+      taskTitle: 'GitHub task identity blocked',
+      taskSourceId: decision.candidateKey,
+      reason: `Stable identity decision blocked: ${decision.outcome}`,
+    });
+  }
 }
 
 function toRemoteTaskVersion(task: TaskItem): RemoteTaskVersion {
@@ -123,6 +148,8 @@ export async function upsertTasks(
   parentTasksAdded: number;
   subtasksAdded: number;
   remoteSourceIds: Set<string>;
+  identityBlocked: number;
+  identityBlockedOutcomes: Partial<Record<GitHubIdentityOutcome, number>>;
 }> {
   let added = 0;
   let updated = 0;
@@ -131,6 +158,7 @@ export async function upsertTasks(
   let parentTasksAdded = 0;
   let subtasksAdded = 0;
   let skippedPendingPush = 0;
+  const identityBlocks: GitHubTaskIdentityBlockSummary = { count: 0, outcomes: {} };
   const audit = auditLog || [];
   const now = new Date().toISOString();
   const caps = await getConnectorCapabilities(connectorId);
@@ -359,6 +387,10 @@ export async function upsertTasks(
         );
         for (const decision of decisions) {
           identityDecisionBySourceId.set(decision.candidateKey, decision);
+          if (decision.appliedSource === 'blocked') {
+            identityRuntime.markBlocked('task_identity_blocked');
+          }
+          recordBlockedTaskIdentityDecision(decision, audit, identityBlocks);
         }
       }
       const linkedCandidates = comparisonTasks.flatMap((remoteTask) => (
@@ -1001,7 +1033,17 @@ export async function upsertTasks(
     audit.push({ action: 'skipped', taskTitle: `${skippedPendingPush} task(s)`, taskSourceId: connectorId, reason: 'Preserved pending local edits — deferring to write-through' });
   }
 
-  return { added, updated, removed, localOnlyProtected, parentTasksAdded, subtasksAdded, remoteSourceIds };
+  return {
+    added,
+    updated,
+    removed,
+    localOnlyProtected,
+    parentTasksAdded,
+    subtasksAdded,
+    remoteSourceIds,
+    identityBlocked: identityBlocks.count,
+    identityBlockedOutcomes: identityBlocks.outcomes,
+  };
 }
 
 function githubRepositoryFromLegacySourceId(sourceId: string): string | null {

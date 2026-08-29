@@ -30,10 +30,14 @@ export const LOCAL_CONNECTOR_ICON_PATH = '/icons/connectors/local.svg';
 /** Icon paths for connector logos */
 export const CONNECTOR_ICON_PATHS: Record<string, string> = {
   'local': LOCAL_CONNECTOR_ICON_PATH,
+  'mission-control': '/icons/connectors/mission-control.svg',
   'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
+  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
+  'ms-todo': '/icons/connectors/microsoft-todo.svg',
   'github-issues': '/icons/connectors/github.svg',
   'outlook-email': '/icons/connectors/outlook.svg',
   'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
+  'scout': '/icons/connectors/scout.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'document-intelligence': '/icons/agents/owl.svg',
   finance: '/icons/connectors/tyrion.svg',

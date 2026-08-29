@@ -60,6 +60,9 @@ describe('Quick Sort source filter', () => {
     expect(await screen.findByRole('button', { name: 'Custom REST' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Browser Extension' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'browser_extension' })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Custom REST' }).querySelector('img[src="/icons/connectors/custom-rest.svg"]'),
+    ).toBeInTheDocument();
   });
 
   it('collapses lists until requested and selects one list as the scope', async () => {
@@ -69,7 +72,9 @@ describe('Quick Sort source filter', () => {
 
     expect(screen.queryByRole('button', { name: /rsocko\/mission-control/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Expand GitHub Issues lists' }));
-    fireEvent.click(screen.getByRole('button', { name: /rsocko\/mission-control/ }));
+    const listOption = screen.getByRole('button', { name: /rsocko\/mission-control/ });
+    expect(listOption.querySelector('svg')).toBeInTheDocument();
+    fireEvent.click(listOption);
 
     expect(onChange).toHaveBeenCalledWith({
       source: 'github-issues',

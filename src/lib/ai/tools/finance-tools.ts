@@ -32,15 +32,21 @@ import {
 } from '@/lib/finance/houston-contracts';
 
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
-// Intentionally NOT wrapped in `.optional()`: the AI SDK's `InferToolContext`
-// requires a context type that does not include `undefined` for a finance
-// mutation tool's context to become a *required* key of the combined
-// `toolsContext` type (see `RequiredToolSetContext`/`ToolsContextParameter`
-// in the `ai` package). `correlationId` itself is optional, which is enough
-// to make providing it non-mandatory for callers.
+// Uses `.default({})` rather than `.optional()` on the outer object: the AI
+// SDK's `InferToolContext`/`ToolsContextParameter` require a context type
+// that does not include `undefined` in its union for a finance mutation
+// tool's context to compose correctly into the combined `toolsContext` type
+// (see `IsEmptyObject`/`ToolsContextParameter` in the `ai` package) — wrapping
+// the whole schema in `.optional()` collapsed the inferred type and broke
+// the production build. `.default({})` keeps the *output* type free of
+// `undefined` (satisfying the SDK's typing) while still letting the schema
+// accept a missing/`undefined` context at runtime (substituting `{}`), which
+// is required for callers — including tests and any non-`chat.ts` call site
+// — that invoke these tools without supplying `toolsContext` explicitly.
+// `correlationId` itself remains optional, so providing it is never mandatory.
 const financeMutationToolContextSchema = z.object({
   correlationId: z.string().optional(),
-});
+}).default({});
 
 async function executeFinanceTool<T>(
   operation: (signal: AbortSignal) => Promise<T>,

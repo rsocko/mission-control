@@ -162,15 +162,18 @@ export function MobileHeader({
           aria-expanded={isDrawerOpen}
           aria-controls="mobile-navigation-drawer"
         >
-          <Menu size={20} />
+          <span className="relative" data-mobile-menu-icon>
+            <Menu size={20} />
+            {showNavigationNotificationBadge && navigationCounts && (
+              <NavigationBadge
+                count={navigationCounts.notifications}
+                tone={navigationCounts.notificationTone}
+                overlay
+              />
+            )}
+          </span>
           {/* Notification dot indicator (F-9) — colored by most severe level */}
-          {showNavigationNotificationBadge && navigationCounts ? (
-            <NavigationBadge
-              count={navigationCounts.notifications}
-              tone={navigationCounts.notificationTone}
-              overlay
-            />
-          ) : dotColor && !navigationCounts ? (
+          {!showNavigationNotificationBadge && dotColor && !navigationCounts ? (
             <span
               className={cn('absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ring-2 ring-[var(--surface-0)]', dotColorClass)}
               aria-hidden="true"

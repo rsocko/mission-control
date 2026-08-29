@@ -260,10 +260,13 @@ async function buildContextPrefix(): Promise<{ contextPrefix?: string; sources: 
 
 /**
  * Defensively scans raw, not-yet-validated request messages for any finance
- * mutation tool part. Schema validation below only recognizes tools that
- * exist in the active tool set, so a missing approval secret (which drops
- * the finance mutation tools entirely) would otherwise surface as a generic
- * "invalid messages" error instead of the actionable configuration error.
+ * mutation tool part. `createHoustonTools` always includes the finance
+ * mutation tool schemas (with or without an approval secret) so
+ * `toolsContext` typing stays stable, and their `execute` fails closed on its
+ * own — but without this early check, a request referencing one of these
+ * tools while no secret is configured would otherwise fall through to
+ * `validateFinanceApprovalParts` (or model execution) before surfacing the
+ * actionable configuration error.
  */
 function referencesFinanceMutationTool(messages: unknown): boolean {
   if (!Array.isArray(messages)) return false;

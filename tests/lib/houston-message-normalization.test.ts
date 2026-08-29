@@ -133,12 +133,16 @@ describe('Houston message normalization', () => {
     });
     expect(normalized.modelMessages[0]).toMatchObject({
       role: 'assistant',
-      content: expect.arrayContaining([{
+      // `ai@7.0.77` always includes an `isAutomatic` key on tool-approval-request
+      // parts (even when undefined), which `arrayContaining`'s exact per-element
+      // equality doesn't ignore the way plain `toEqual` does. `objectContaining`
+      // makes this a partial match so the extra key doesn't fail the assertion.
+      content: expect.arrayContaining([expect.objectContaining({
         type: 'tool-approval-request',
         approvalId: signed.approvalId,
         toolCallId: 'invented-call-id',
         signature: signed.signature,
-      }]),
+      })]),
     });
   });
 

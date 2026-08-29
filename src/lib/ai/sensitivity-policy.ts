@@ -273,6 +273,11 @@ function parseProviderUrl(provider: string, baseUrl?: string) {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new AIProviderEndpointValidationError(`${provider} endpoint must use HTTP or HTTPS`);
     }
+    if (url.username || url.password) {
+      throw new AIProviderEndpointValidationError(
+        `${provider} endpoint must not contain embedded credentials`,
+      );
+    }
     return url;
   } catch (error) {
     if (error instanceof AIProviderEndpointValidationError) throw error;

@@ -178,6 +178,7 @@ describe('findSimilarTaskEmbeddings', () => {
       FROM search_embeddings e
       WHERE e.provider = ?
         AND e.model = ?
+        AND e.dimensions = ?
         AND e.source_sort_at IS NOT NULL
         AND e.entity_type = 'task'
       ORDER BY e.source_sort_at DESC, e.entity_type, e.entity_id
@@ -185,6 +186,7 @@ describe('findSimilarTaskEmbeddings', () => {
     `).all(
       'ollama',
       'nomic-embed-text',
+      2,
       2_000,
     ) as Array<{ detail: string }>;
 
@@ -272,17 +274,9 @@ describe('findSimilarTaskEmbeddings', () => {
   });
 
   it('keeps the last-good rows when a rebuild batch fails', async () => {
-    let request = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      request++;
-      if (request === 1) {
-        return new Response('provider unavailable', { status: 503 });
-      }
-      return new Response(JSON.stringify({ data: [{ embedding: [1, 0] }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('provider unavailable', { status: 503 }),
+    );
 
     await expect(rebuildEmbeddingIndex()).rejects.toThrow(
       'Embedding index rebuild batch failed',

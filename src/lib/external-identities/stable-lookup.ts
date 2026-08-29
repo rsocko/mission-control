@@ -148,6 +148,7 @@ export function resolveGitHubStableIdentityBatch(
       AND path_locator.host_key = ?
       AND path_locator.owner_key = incoming.owner_key
       AND path_locator.repository_key = incoming.repository_key
+      AND path_locator.valid_to IS NULL
       AND (
         path_locator.issue_number = incoming.issue_number
         OR (path_locator.issue_number IS NULL AND incoming.issue_number IS NULL)

@@ -17,6 +17,7 @@ const mockSyncLogRows: unknown[] = [];
 const mockInProgressTasks: Array<{ id: string; sourceId: string; status: string; completedAt: string | null }> = [];
 const mockUpdateSets: Array<{ data: unknown; id: string }> = [];
 let mockConnectorInstance: Partial<IConnector> | null = null;
+let mockIdentityBlocked = 0;
 
 vi.mock('@/db', () => {
   const updateWhereFn = vi.fn();
@@ -180,7 +181,17 @@ vi.mock('@/lib/sync/pull-manager', () => ({
     for await (const page of pages) {
       for (const task of page) remoteSourceIds.add(task.sourceId);
     }
-    return { added: 0, updated: 0, removed: 0, localOnlyProtected: 0, parentTasksAdded: 0, subtasksAdded: 0, remoteSourceIds };
+    return {
+      added: 0,
+      updated: 0,
+      removed: 0,
+      localOnlyProtected: 0,
+      parentTasksAdded: 0,
+      subtasksAdded: 0,
+      remoteSourceIds,
+      identityBlocked: mockIdentityBlocked,
+      identityBlockedOutcomes: mockIdentityBlocked > 0 ? { path_reuse: mockIdentityBlocked } : {},
+    };
   }),
 }));
 
@@ -231,6 +242,7 @@ describe('stale in_progress verification', () => {
     mockInProgressTasks.length = 0;
     mockUpdateSets.length = 0;
     mockConnectorInstance = null;
+    mockIdentityBlocked = 0;
     vi.clearAllMocks();
   });
 
@@ -398,5 +410,31 @@ describe('stale in_progress verification', () => {
 
     // updateTask should NOT be called for verification — task was already in pull results
     expect(mockConnectorInstance.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('reports blocked GitHub task identities as an unsuccessful sync', async () => {
+    mockIdentityBlocked = 2;
+    mockConnectorInstance = {
+      id: 'github-1',
+      type: 'github-issues',
+      displayName: 'GitHub Issues',
+      capabilities: { read: true, write: true, sync: true } as ConnectorCapabilities,
+      fetchTasks: vi.fn(async function* () { yield []; }),
+      fetchNotifications: vi.fn().mockResolvedValue([]),
+      fetchSourceLists: vi.fn().mockResolvedValue([]),
+    };
+
+    const scheduler = new SyncExecutionPipeline();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const result = await scheduler.runSyncLocally('github-1');
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain(
+      '2 GitHub task identity decision(s) blocked (path_reuse=2)',
+    );
+    expect(syncLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ connectorId: 'github-1', success: false }),
+      'Sync completed',
+    );
   });
 });

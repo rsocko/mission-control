@@ -147,8 +147,10 @@ export interface DashboardState {
 
   // View saving
   savingView: boolean;
+  editingViewId: string | null;
   viewName: string;
   viewIcon: string;
+  viewIconColor: string;
 }
 
 export interface DashboardActions {
@@ -213,9 +215,12 @@ export interface DashboardActions {
   setTagsExpanded: (v: boolean) => void;
 
   // View save actions
-  setSavingView: (v: boolean) => void;
+  startNewView: () => void;
+  cancelViewEditor: () => void;
+  editView: (view: SavedView) => void;
   setViewName: (v: string) => void;
   setViewIcon: (v: string) => void;
+  setViewIconColor: (v: string) => void;
   saveCurrentView: () => void;
   applyView: (view: SavedView) => void;
   deleteView: (id: string) => void;
@@ -523,9 +528,13 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     pathname,
     replaceUrl: replaceDashboardUrl,
   });
-  const { savedViews, savingView, viewName, viewIcon } = savedViewsState.state;
   const {
-    setSavingView, setViewName, setViewIcon, saveCurrentView, applyView, deleteView,
+    savedViews, savingView, editingViewId, viewName, viewIcon, viewIconColor,
+  } = savedViewsState.state;
+  const {
+    startNewView, cancelViewEditor, editView,
+    setViewName, setViewIcon, setViewIconColor,
+    saveCurrentView, applyView, deleteView,
   } = savedViewsState.actions;
   const completionScopeKey = JSON.stringify({
     taskFilterContext,
@@ -1001,7 +1010,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
       collapsedSections, expandedSourceLists, collapsedListGroups, listSearch,
       tagSearch, tagsExpanded, allSourceCounts,
-      savingView, viewName, viewIcon,
+      savingView, editingViewId, viewName, viewIcon, viewIconColor,
     },
     actions: {
       fetchData, loadMoreForGroup, setRefreshTrigger, patchTaskInList, updateSubtaskCount,
@@ -1017,7 +1026,9 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setShowAddTaskModal, setAddTaskInitialDest, setAddTaskInitialListId,
       toggleSection, setExpandedSourceLists, setCollapsedListGroups, setListSearch,
       setTagSearch, setTagsExpanded,
-      setSavingView, setViewName, setViewIcon, saveCurrentView, applyView, deleteView,
+      startNewView, cancelViewEditor, editView,
+      setViewName, setViewIcon, setViewIconColor,
+      saveCurrentView, applyView, deleteView,
       animateTaskExit,
     },
     computed: {

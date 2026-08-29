@@ -81,6 +81,7 @@ export function DashboardSidebar({
         setTagSearch: actions.setTagSearch,
         setTagsExpanded: actions.setTagsExpanded,
         applyView: actions.applyView,
+        editView: actions.editView,
         deleteView: actions.deleteView,
         setQuickFilterVisibility: actions.setQuickFilterVisibility,
       }}

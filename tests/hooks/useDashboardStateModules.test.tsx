@@ -68,6 +68,7 @@ describe('dashboard state modules', () => {
     act(() => {
       result.current.actions.setViewName('Planning');
       result.current.actions.setViewIcon('lucide:clipboard-check');
+      result.current.actions.setViewIconColor('#3b82f6');
     });
     act(() => {
       result.current.actions.saveCurrentView();
@@ -77,9 +78,33 @@ describe('dashboard state modules', () => {
     expect(result.current.state.savedViews[0]).toMatchObject({
       name: 'Planning',
       icon: 'lucide:clipboard-check',
+      iconColor: '#3b82f6',
     });
     expect(result.current.state.viewIcon).toBe('bookmark');
+    expect(result.current.state.viewIconColor).toBe('');
     expect(JSON.parse(localStorage.getItem('mission-control:saved-views') ?? '[]')).toHaveLength(1);
+
+    const savedFilters = result.current.state.savedViews[0].filters;
+    act(() => result.current.actions.editView(result.current.state.savedViews[0]));
+    expect(result.current.state).toMatchObject({
+      editingViewId: result.current.state.savedViews[0].id,
+      viewName: 'Planning',
+      viewIcon: 'lucide:clipboard-check',
+      viewIconColor: '#3b82f6',
+    });
+    act(() => {
+      result.current.actions.setViewName('Weekly planning');
+      result.current.actions.setViewIcon('lucide:calendar');
+      result.current.actions.setViewIconColor('');
+    });
+    act(() => result.current.actions.saveCurrentView());
+    expect(result.current.state.savedViews).toHaveLength(1);
+    expect(result.current.state.savedViews[0]).toMatchObject({
+      name: 'Weekly planning',
+      icon: 'lucide:calendar',
+      filters: savedFilters,
+    });
+    expect(result.current.state.savedViews[0].iconColor).toBeUndefined();
 
     act(() => result.current.actions.applyView(result.current.state.savedViews[0]));
     expect(filterActions.setTagFilter).toHaveBeenCalledWith(['planning']);

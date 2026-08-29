@@ -279,7 +279,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           assignees={state.allAssignees}
           projects={state.projects}
           listGroups={state.listGroups}
-          onSaveView={() => actions.setSavingView(true)}
+          onSaveView={actions.startNewView}
         />
         {state.savingView && (
           <form
@@ -288,7 +288,12 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
               actions.saveCurrentView();
             }}
             onKeyDown={(event) => {
-              if (event.key === 'Escape') actions.setSavingView(false);
+              if (
+                event.key === 'Escape'
+                && event.currentTarget.contains(event.target as Node)
+              ) {
+                actions.cancelViewEditor();
+              }
             }}
             className="mb-4 flex max-w-md items-end gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2"
           >
@@ -301,6 +306,8 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 onChange={actions.setViewIcon}
                 size="sm"
                 className="w-9 rounded-md"
+                color={state.viewIconColor || undefined}
+                onColorChange={actions.setViewIconColor}
               />
             </div>
             <label className="min-w-0 flex-1">
@@ -322,11 +329,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 disabled={!state.viewName.trim()}
                 className="h-8 rounded-md bg-[var(--accent-action)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Save
+                {state.editingViewId ? 'Update' : 'Save'}
               </button>
               <button
                 type="button"
-                onClick={() => actions.setSavingView(false)}
+                onClick={actions.cancelViewEditor}
                 className="h-8 rounded-md px-2 text-xs text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
               >
                 Cancel

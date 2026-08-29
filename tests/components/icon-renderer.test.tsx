@@ -17,6 +17,22 @@ describe('IconRenderer', () => {
     expect(icon.style.maskImage).toContain('/lucide/pin.svg');
   });
 
+  it('falls back when a masked (uncolored) remote icon fails to load', () => {
+    render(<IconRenderer value="pin" size={16} fallback={<span data-testid="fallback">?</span>} />);
+
+    // The masked icon renders optimistically alongside a hidden probe <img>
+    // used solely to detect load failures (mask-image has no error event).
+    expect(screen.getByRole('img', { name: 'lucide:pin' })).toBeInTheDocument();
+    expect(screen.queryByTestId('fallback')).not.toBeInTheDocument();
+
+    const probe = document.querySelector('img[aria-hidden="true"]');
+    expect(probe).not.toBeNull();
+    fireEvent.error(probe as HTMLImageElement);
+
+    expect(screen.queryByRole('img', { name: 'lucide:pin' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('fallback')).toBeInTheDocument();
+  });
+
   it('requests the selected color when one is set', () => {
     render(<IconRenderer value="lucide:pin" size={16} color="#3b82f6" />);
 

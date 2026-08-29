@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Filter, Search, X } from 'lucide-react';
-import { CONNECTOR_LABELS } from '@/lib/constants/colors';
+import Image from 'next/image';
+import { ChevronDown, Filter, List, Search, Waypoints, X } from 'lucide-react';
+import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import type { QuickSortScopeFilter } from '@/lib/hooks/useQuickSortData';
 
@@ -25,6 +26,23 @@ function sourceLabel(connectorType: string): string {
       .split(/[-_]+/)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ');
+}
+
+function SourceIcon({ connectorType }: { connectorType: string }) {
+  const iconPath = CONNECTOR_ICON_PATHS[connectorType];
+
+  return (
+    <span
+      aria-hidden="true"
+      className="hidden size-4 shrink-0 items-center justify-center sm:flex"
+    >
+      {iconPath ? (
+        <Image src={iconPath} alt="" width={16} height={16} className="size-4 object-contain" />
+      ) : (
+        <Waypoints size={14} className="text-[var(--text-tertiary)]" />
+      )}
+    </span>
+  );
 }
 
 interface SourceData {
@@ -232,13 +250,14 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                           type="button"
                           onClick={() => selectSource(connectorType)}
                           className={cn(
-                            'min-h-11 min-w-0 flex-1 px-4 text-left text-sm font-medium transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)]',
+                            'flex min-h-11 min-w-0 flex-1 items-center gap-2 px-4 text-left text-sm font-medium transition-colors hover:bg-[var(--surface-2)] active:bg-[var(--surface-3)]',
                             filter.source === connectorType && !filter.sourceList
                               ? 'text-[var(--accent-400)]'
                               : 'text-[var(--text-primary)]'
                           )}
                         >
-                          {displayLabel}
+                          <SourceIcon connectorType={connectorType} />
+                          <span className="truncate">{displayLabel}</span>
                         </button>
                         {data.lists.length > 0 && (
                           <button
@@ -260,14 +279,19 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                               key={list.name}
                               onClick={() => selectList(connectorType, list.name)}
                               className={cn(
-                                'min-h-11 w-full rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--surface-3)]',
+                                'flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--surface-3)]',
                                 filter.source === connectorType && filter.sourceList === list.name
                                   ? 'text-[var(--accent-400)] font-medium'
                                   : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
                               )}
                             >
-                              {list.name}
-                              <span className="ml-1.5 opacity-50">({list.count})</span>
+                              <List
+                                aria-hidden="true"
+                                size={14}
+                                className="hidden shrink-0 opacity-70 sm:block"
+                              />
+                              <span className="min-w-0 flex-1 truncate">{list.name}</span>
+                              <span className="shrink-0 opacity-50">({list.count})</span>
                             </button>
                           ))}
                         </div>

@@ -36,6 +36,7 @@ import {
   BulkDispositionButtons,
   BulkDueDateDropdown,
   BulkMoveDropdown,
+  BulkMoveToProjectDropdown,
   BulkMoveToSourceButton,
   BulkPriorityDropdown,
   BulkStatusDropdown,
@@ -863,6 +864,27 @@ export function TodayMainPanel({
                       const { failed } = await executeBulkOperation(ids, (id) => onMoveTaskToList(id, targetListId) as Promise<void>, `Moved ${ids.length} task${ids.length > 1 ? 's' : ''}`);
                       if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
                       else bulk.clearSelection();
+                    }}
+                  />
+                  <BulkMoveToProjectDropdown
+                    projects={projects}
+                    onMove={async (projectId, phaseId) => {
+                      const ids = Array.from(bulk.bulkSelected);
+                      const project = projects.find((candidate) => candidate.id === projectId);
+                      const phase = project?.phases?.find((candidate) => candidate.id === phaseId);
+                      const destination = phase ? `${project?.name} / ${phase.name}` : project?.name || 'project';
+                      const { failed } = await executeBulkOperation(
+                        ids,
+                        (id) => fetch(`/api/hub-projects/${projectId}/tasks`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ taskId: id, phaseId }),
+                        }),
+                        `Moved ${ids.length} task${ids.length > 1 ? 's' : ''} to ${destination}`,
+                      );
+                      if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
+                      else bulk.clearSelection();
+                      void fetchData();
                     }}
                   />
                   <BulkMoveToSourceButton

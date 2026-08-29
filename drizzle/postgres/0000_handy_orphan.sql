@@ -1213,6 +1213,16 @@ CREATE TABLE "houston_finance_action_audit" (
 	"created_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "houston_finance_pending_approvals" (
+	"approval_id" text PRIMARY KEY NOT NULL,
+	"tool_call_id" text NOT NULL,
+	"tool" text NOT NULL,
+	"tool_input" text NOT NULL,
+	"correlation_id" text NOT NULL,
+	"expires_at" text NOT NULL,
+	"created_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "hub_projects" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
@@ -2581,6 +2591,7 @@ CREATE INDEX "idx_homelab_alert_receipts_incident" ON "homelab_alert_receipts" U
 CREATE INDEX "idx_homelab_alert_receipts_received" ON "homelab_alert_receipts" USING btree ("last_received_at");--> statement-breakpoint
 CREATE INDEX "idx_houston_finance_action_call" ON "houston_finance_action_audit" USING btree ("call_hash","created_at");--> statement-breakpoint
 CREATE INDEX "idx_houston_finance_action_correlation" ON "houston_finance_action_audit" USING btree ("correlation_id","created_at");--> statement-breakpoint
+CREATE INDEX "idx_houston_finance_pending_expiry" ON "houston_finance_pending_approvals" USING btree ("expires_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_inbound_webhook_replays_delivery" ON "inbound_webhook_replays" USING btree ("webhook_id","delivery_key");--> statement-breakpoint
 CREATE INDEX "idx_inbound_webhook_replays_expiry" ON "inbound_webhook_replays" USING btree ("expires_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_maintenance_agent_runs_active" ON "maintenance_agent_runs" USING btree ("agent_type") WHERE "maintenance_agent_runs"."status" = 'running';--> statement-breakpoint

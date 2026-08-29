@@ -55,6 +55,11 @@ export async function chat(messages: Array<{ role: 'user' | 'assistant'; content
   const route = getAIModel('houston-chat');
   const approvalSecret = getOptionalHoustonToolApprovalSecret();
   const tools = createHoustonTools(approvalSecret);
+  // Finance mutation tools are always present in `tools` (for stable typing),
+  // so the model must be kept from ever seeing/calling them without a secret.
+  const activeTools = approvalSecret
+    ? undefined
+    : excludeFinanceMutations(Object.keys(tools) as Array<keyof typeof tools>);
 
   const result = await generateText({
     model: route.model,
@@ -62,6 +67,7 @@ export async function chat(messages: Array<{ role: 'user' | 'assistant'; content
     messages,
     tools,
     toolsContext: createHoustonToolsContext(route.context.correlationId),
+    activeTools,
     ...(approvalSecret ? { experimental_toolApprovalSecret: approvalSecret } : {}),
     stopWhen: stepCountIs(5),
     prepareStep: restrictToolsAfterTriage,
@@ -95,7 +101,7 @@ export async function streamChat(
   const systemPrompt = options?.contextPrefix
     ? `${SYSTEM_PROMPT}\n\n${options.contextPrefix}`
     : SYSTEM_PROMPT;
-  const activeTools = options?.financeMutationsAllowed === false
+  const activeTools = (!approvalSecret || options?.financeMutationsAllowed === false)
     ? excludeFinanceMutations(Object.keys(tools) as Array<keyof typeof tools>)
     : undefined;
 

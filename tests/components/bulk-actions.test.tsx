@@ -11,6 +11,10 @@ vi.mock('lucide-react', () => ({
   Clock: () => <span data-testid="icon-clock">🕐</span>,
   Search: () => <span data-testid="icon-search">S</span>,
   Calendar: () => <span data-testid="icon-calendar">📅</span>,
+  ChevronRight: () => <span data-testid="icon-chevron-right">&gt;</span>,
+  FolderKanban: () => <span data-testid="icon-folder-kanban">P</span>,
+  Layers3: () => <span data-testid="icon-layers">L</span>,
+  Loader2: () => <span data-testid="icon-loader">...</span>,
   Tag: () => <span data-testid="icon-tag">T</span>,
   X: () => <span data-testid="icon-x">×</span>,
 }));
@@ -304,6 +308,82 @@ describe('BulkMoveDropdown', () => {
     localStorage.clear();
     const mod = await import('@/components/bulk-actions/BulkMoveDropdown');
     BulkMoveDropdown = mod.BulkMoveDropdown;
+  });
+
+  // ─── BulkMoveToProjectDropdown ───────────────────────────────────────────
+
+  describe('BulkMoveToProjectDropdown', () => {
+    let BulkMoveToProjectDropdown: React.ComponentType<{
+      projects: Array<{
+        id: string;
+        name: string;
+        color: string;
+        icon: string | null;
+        category?: string | null;
+        phases?: Array<{ id: string; name: string }>;
+      }>;
+      onMove: (projectId: string, phaseId: string | null) => Promise<void>;
+    }>;
+
+    const projects = [
+      {
+        id: 'p1',
+        name: 'Mission Control',
+        color: '#3b82f6',
+        icon: null,
+        phases: [
+          { id: 'phase-1', name: 'Now' },
+          { id: 'phase-2', name: 'Next' },
+        ],
+      },
+      {
+        id: 'p2',
+        name: 'Home',
+        color: '#3b82f6',
+        icon: null,
+        phases: [],
+      },
+    ];
+
+    beforeEach(async () => {
+      localStorage.clear();
+      const mod = await import('@/components/bulk-actions/BulkMoveToProjectDropdown');
+      BulkMoveToProjectDropdown = mod.BulkMoveToProjectDropdown;
+    });
+
+    it('shows projects and their phase destinations', async () => {
+      render(<BulkMoveToProjectDropdown projects={projects} onMove={vi.fn()} />);
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Project / phase' }));
+      expect(await screen.findByText('Mission Control')).toBeInTheDocument();
+      fireEvent.keyDown(screen.getByText('Mission Control').closest('[role="menuitem"]')!, {
+        key: 'ArrowRight',
+      });
+      expect(await screen.findByText('Now')).toBeInTheDocument();
+      expect(screen.getByText('No phase')).toBeInTheDocument();
+    });
+
+    it('moves selected tasks to a project phase', async () => {
+      const onMove = vi.fn().mockResolvedValue(undefined);
+      render(<BulkMoveToProjectDropdown projects={projects} onMove={onMove} />);
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Project / phase' }));
+      fireEvent.keyDown((await screen.findByText('Mission Control')).closest('[role="menuitem"]')!, {
+        key: 'ArrowRight',
+      });
+      await act(async () => {
+        fireEvent.click(await screen.findByText('Next'));
+      });
+      expect(onMove).toHaveBeenCalledWith('p1', 'phase-2');
+    });
+
+    it('moves directly to projects without phases', async () => {
+      const onMove = vi.fn().mockResolvedValue(undefined);
+      render(<BulkMoveToProjectDropdown projects={projects} onMove={onMove} />);
+      fireEvent.pointerDown(screen.getByRole('button', { name: 'Project / phase' }));
+      await act(async () => {
+        fireEvent.click(await screen.findByText('Home'));
+      });
+      expect(onMove).toHaveBeenCalledWith('p2', null);
+    });
   });
 
   it('renders button with label', () => {

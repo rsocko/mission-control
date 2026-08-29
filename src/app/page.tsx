@@ -26,7 +26,7 @@ import { TriageQueueWidget } from '@/components/triage/TriageQueueWidget';
 import { KpiBar } from '@/components/kpi/KpiBar';
 import { InsightsBackLink } from '@/components/insights/InsightsBackLink';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
-import { BulkDispositionButtons, BulkMoveDropdown, BulkMoveToSourceButton, BulkDueDateDropdown, BulkTagDropdown, BulkPriorityDropdown, BulkStatusDropdown, executeBulkOperation, resolveSelectionAnchorIndex } from '@/components/bulk-actions';
+import { BulkDispositionButtons, BulkMoveDropdown, BulkMoveToProjectDropdown, BulkMoveToSourceButton, BulkDueDateDropdown, BulkTagDropdown, BulkPriorityDropdown, BulkStatusDropdown, executeBulkOperation, resolveSelectionAnchorIndex } from '@/components/bulk-actions';
 import { AddTaskModal, SaveTemplateModal } from '@/components/add-task';
 import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import { getTagPillStyle } from '@/lib/constants/colors';
@@ -978,6 +978,28 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
             toast.success(moveLabel);
           }
           actions.setBulkSelected(new Set()); actions.setBulkMode(false); actions.setRefreshTrigger((n) => n + 1);
+        }}
+      />
+      <BulkMoveToProjectDropdown
+        projects={state.projects}
+        onMove={async (projectId, phaseId) => {
+          const ids = Array.from(state.bulkSelected);
+          const project = state.projects.find((candidate) => candidate.id === projectId);
+          const phase = project?.phases?.find((candidate) => candidate.id === phaseId);
+          const destination = phase ? `${project?.name} / ${phase.name}` : project?.name || 'project';
+          await executeBulkOperation(
+            ids,
+            (id) => fetch(`/api/hub-projects/${projectId}/tasks`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ taskId: id, phaseId }),
+            }),
+            `Moved ${ids.length} task${ids.length > 1 ? 's' : ''} to ${destination}`,
+            {
+              onSelectionChange: updateBulkSelection,
+              onRefresh: refreshBulkTasks,
+            },
+          );
         }}
       />
       <BulkMoveToSourceButton

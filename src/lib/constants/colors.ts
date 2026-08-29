@@ -48,10 +48,14 @@ export const CONNECTOR_ICON_PATHS: Record<string, string> = {
 
 /** Human-friendly connector names for accessibility (alt text, aria-labels) */
 export const CONNECTOR_LABELS: Record<string, string> = {
+  'mission-control': 'Local',
   'microsoft-todo': 'Microsoft To Do',
+  'microsoft-todo-work': 'Microsoft To Do',
+  'ms-todo': 'Microsoft To Do',
   'github-issues': 'GitHub Issues',
   'outlook-email': 'Outlook Email',
   'outlook-calendar': 'Outlook Calendar',
+  'scout': 'Microsoft Scout',
   'rymessage': 'RyMessage',
   'document-intelligence': 'OWL',
   finance: 'Tyrion',
@@ -60,6 +64,14 @@ export const CONNECTOR_LABELS: Record<string, string> = {
   'custom-rest': 'Custom REST',
   'local': 'Local',
 };
+
+export function getConnectorLabel(connectorType: string): string {
+  return CONNECTOR_LABELS[connectorType]
+    ?? connectorType
+      .split(/[-_]+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+}
 
 /**
  * Generate accessible tag pill styles.

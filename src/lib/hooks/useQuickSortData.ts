@@ -57,6 +57,7 @@ export function getMissingFields(task: QuickSortQueueTask): QuickSortQueueMode[]
 export interface QuickSortScopeFilter {
   source?: string;
   sourceList?: string;
+  sourceListId?: string;
   connectorId?: string;
 }
 
@@ -76,6 +77,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
     const params = new URLSearchParams();
     if (filter?.source) params.set('source', filter.source);
     if (filter?.sourceList) params.set('sourceList', filter.sourceList);
+    if (filter?.sourceListId) params.set('sourceListId', filter.sourceListId);
     if (filter?.connectorId) params.set('connectorId', filter.connectorId);
     const str = params.toString();
     return str ? `&${str}` : '';

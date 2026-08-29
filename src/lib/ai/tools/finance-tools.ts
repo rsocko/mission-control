@@ -1,6 +1,5 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import { HoustonToolApprovalConfigurationError } from '@/lib/ai/tool-approval-config';
 import {
   getFinanceConnectorHealth,
   getFinanceObligations,
@@ -46,6 +45,7 @@ const FINANCE_TOOL_TIMEOUT_MS = 3_000;
 // `correlationId` itself remains optional, so providing it is never mandatory.
 const financeMutationToolContextSchema = z.object({
   correlationId: z.string().optional(),
+  financeApprovalIds: z.record(z.string(), z.string()).optional(),
 }).default({});
 
 async function executeFinanceTool<T>(
@@ -135,6 +135,7 @@ export const financeTools = {
 
 type HoustonToolContext = {
   correlationId?: unknown;
+  financeApprovalIds?: unknown;
 };
 
 type HoustonToolExecutionOptions = {
@@ -152,20 +153,19 @@ function resolveToolContext(options: unknown): unknown {
   return value?.context ?? value?.experimental_context;
 }
 
-/**
- * Builds the two approval-gated finance mutation tools.
- *
- * `approvalSecret` is accepted as optional so this always returns the same
- * fixed set of tool keys with a stable TypeScript shape — required for
- * {@link InferToolSetContext} (used to type `toolsContext` in `chat.ts`) to
- * resolve correctly, since keying off a conditionally-shaped union type would
- * collapse to an empty context. When no secret is configured, `execute` fails
- * closed immediately; callers must additionally keep these tools out of
- * `activeTools` so the model is never offered them in the first place (see
- * `chat.ts`), and `src/app/api/ai/route.ts` independently rejects any
- * request that references these tools without a configured secret.
- */
-export function createFinanceMutationTools(approvalSecret: string | undefined) {
+function approvalId(context: unknown, toolCallId: string): string {
+  const approvals = (context as HoustonToolContext | undefined)?.financeApprovalIds;
+  if (!approvals || typeof approvals !== 'object') {
+    throw new Error('The finance approval context is unavailable.');
+  }
+  const value = (approvals as Record<string, unknown>)[toolCallId];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error('The finance approval context is unavailable.');
+  }
+  return value;
+}
+
+export function createFinanceMutationTools() {
   return {
     assignFinanceTransactionKid: tool({
       description: 'Propose assigning one current finance transaction to a current household member. This always requires explicit user approval.',
@@ -173,15 +173,11 @@ export function createFinanceMutationTools(approvalSecret: string | undefined) {
       outputSchema: zodSchema(assignFinanceTransactionKidOutputSchema),
       contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
-      execute: (input, options) => {
-        if (!approvalSecret) throw new HoustonToolApprovalConfigurationError();
-        return assignFinanceTransactionKid(input, {
-          approvalSecret,
-          toolCallId: options.toolCallId,
-          correlationId: correlationId(resolveToolContext(options)),
-          signal: options.abortSignal,
-        });
-      },
+      execute: (input, options) => assignFinanceTransactionKid(input, {
+        approvalId: approvalId(resolveToolContext(options), options.toolCallId),
+        correlationId: correlationId(resolveToolContext(options)),
+        signal: options.abortSignal,
+      }),
     }),
     updateFinanceTransactionCategory: tool({
       description: 'Propose changing one current finance transaction to a current finance category. This always requires explicit user approval.',
@@ -189,15 +185,11 @@ export function createFinanceMutationTools(approvalSecret: string | undefined) {
       outputSchema: zodSchema(updateFinanceTransactionCategoryOutputSchema),
       contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
-      execute: (input, options) => {
-        if (!approvalSecret) throw new HoustonToolApprovalConfigurationError();
-        return updateFinanceTransactionCategory(input, {
-          approvalSecret,
-          toolCallId: options.toolCallId,
-          correlationId: correlationId(resolveToolContext(options)),
-          signal: options.abortSignal,
-        });
-      },
+      execute: (input, options) => updateFinanceTransactionCategory(input, {
+        approvalId: approvalId(resolveToolContext(options), options.toolCallId),
+        correlationId: correlationId(resolveToolContext(options)),
+        signal: options.abortSignal,
+      }),
     }),
   };
 }

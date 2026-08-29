@@ -21,7 +21,6 @@ vi.mock('@/lib/finance/houston-tools', () => ({
 
 import { createHoustonTools } from '@/lib/ai/tools';
 import { createFinanceMutationTools } from '@/lib/ai/tools/finance-tools';
-import { HoustonToolApprovalConfigurationError } from '@/lib/ai/tool-approval-config';
 import { excludeFinanceMutations } from '@/lib/ai/tool-safety';
 
 type ToolExecute = (
@@ -43,50 +42,48 @@ const mutationInput = {
 };
 
 describe('createHoustonTools finance mutation shape', () => {
-  it('always includes both finance mutation tool keys, with or without a secret', () => {
-    const withoutSecret = createHoustonTools(undefined);
-    const withSecret = createHoustonTools('invented-approval-secret-at-least-32-bytes');
+  it('always includes both finance mutation tool keys', () => {
+    const tools = createHoustonTools();
 
-    // Fixed, non-union key set is required so TypeScript can infer a
-    // consistent `toolsContext` shape for `generateText`/`streamText` in
-    // chat.ts (see the comment on createFinanceMutationTools).
-    expect(Object.keys(withoutSecret).sort()).toEqual(Object.keys(withSecret).sort());
-    expect(withoutSecret).toHaveProperty('assignFinanceTransactionKid');
-    expect(withoutSecret).toHaveProperty('updateFinanceTransactionCategory');
+    expect(tools).toHaveProperty('assignFinanceTransactionKid');
+    expect(tools).toHaveProperty('updateFinanceTransactionCategory');
   });
 
-  it('fails closed when a finance mutation tool executes without a configured secret', () => {
-    const tools = createFinanceMutationTools(undefined);
+  it('fails closed when a finance mutation executes without server approval context', () => {
+    const tools = createFinanceMutationTools();
     const execute = tools.assignFinanceTransactionKid.execute as unknown as ToolExecute;
 
-    // `execute` throws synchronously (not a rejected promise) when no secret
-    // is configured, so it must be invoked inside the assertion callback.
     expect(() => execute(mutationInput, { toolCallId: 'call-1' }))
-      .toThrow(HoustonToolApprovalConfigurationError);
+      .toThrow('The finance approval context is unavailable.');
     expect(mutationSpies.assign).not.toHaveBeenCalled();
 
     const executeCategory = tools.updateFinanceTransactionCategory.execute as unknown as ToolExecute;
     expect(() => executeCategory(mutationInput, { toolCallId: 'call-2' }))
-      .toThrow(HoustonToolApprovalConfigurationError);
+      .toThrow('The finance approval context is unavailable.');
     expect(mutationSpies.category).not.toHaveBeenCalled();
   });
 
-  it('still calls through to the finance mutation implementation once a secret is configured', async () => {
+  it('calls through with the consumed server approval ID', async () => {
     mutationSpies.assign.mockResolvedValue({ status: 'proposed' });
-    const approvalSecret = 'invented-approval-secret-at-least-32-bytes';
-    const tools = createFinanceMutationTools(approvalSecret);
+    const tools = createFinanceMutationTools();
     const execute = tools.assignFinanceTransactionKid.execute as unknown as ToolExecute;
 
-    await execute(mutationInput, { toolCallId: 'call-3' });
+    await execute(mutationInput, {
+      toolCallId: 'call-3',
+      context: {
+        correlationId: 'invented-correlation',
+        financeApprovalIds: { 'call-3': 'invented-approval-id' },
+      },
+    });
 
     expect(mutationSpies.assign).toHaveBeenCalledWith(mutationInput, expect.objectContaining({
-      approvalSecret,
-      toolCallId: 'call-3',
+      approvalId: 'invented-approval-id',
+      correlationId: 'invented-correlation',
     }));
   });
 
-  it('callers must exclude finance mutations from activeTools when no secret is configured', () => {
-    const tools = createHoustonTools(undefined);
+  it('callers without approval persistence can exclude finance mutations', () => {
+    const tools = createHoustonTools();
     const activeTools = excludeFinanceMutations(Object.keys(tools) as Array<keyof typeof tools>);
 
     expect(activeTools).not.toContain('assignFinanceTransactionKid');

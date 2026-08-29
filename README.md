@@ -18,7 +18,8 @@ Personal task & alert aggregation hub. A local-first, self-hosted system that pr
 ## Tech Stack
 
 - **Framework**: Next.js 14 (App Router) + TypeScript
-- **Database**: SQLite via Drizzle ORM (local-first)
+- **Database**: PostgreSQL approved for production; SQLite remains the default
+  compatibility and local-development backend ([strategy](docs/design/active/database-scaling-strategy.md))
 - **UI**: Tailwind CSS + shadcn/ui components
 - **State**: TanStack Query + Zustand
 - **AI**: Vercel AI SDK (configurable: OpenAI, Azure, Ollama)

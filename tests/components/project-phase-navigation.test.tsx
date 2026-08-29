@@ -252,7 +252,7 @@ describe('project phase navigation', () => {
     expect(projectAttempts).toBe(2);
   });
 
-  it('keeps only the graph toolbar non-sticky and omits its unused search field', async () => {
+  it('keeps only the graph toolbar non-sticky and limits task filters to list view', async () => {
     render(
       <TooltipProvider>
         <ProjectDetailPage />
@@ -261,27 +261,28 @@ describe('project phase navigation', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Plan (1)' }));
 
-    const getPlanToolbar = () => screen.getByRole('heading', { name: 'Plan' }).parentElement?.parentElement;
+    const getPlanToolbar = () => screen.getByRole('heading', { name: 'Plan' })
+      .parentElement?.parentElement?.parentElement;
     expect(getPlanToolbar()).toHaveClass('sticky');
     expect(getPlanToolbar()).toHaveStyle({ top: '72px' });
-    expect(screen.getByPlaceholderText('Filter tasks…').parentElement).toHaveClass('input-glow');
+    expect(screen.getByRole('textbox', { name: 'Filter tasks by keyword' })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^graph$/i }));
     expect(getPlanToolbar()).toHaveClass('relative');
     expect(getPlanToolbar()).not.toHaveClass('sticky');
     expect(getPlanToolbar()).not.toHaveStyle({ top: '72px' });
-    expect(screen.queryByPlaceholderText('Filter tasks…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Filter tasks by keyword' })).not.toBeInTheDocument();
     expect(await screen.findByTestId('project-structure-graph')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^gantt$/i }));
     expect(getPlanToolbar()).toHaveClass('sticky');
     expect(getPlanToolbar()).toHaveStyle({ top: '72px' });
-    expect(screen.getByPlaceholderText('Filter tasks…').parentElement).toHaveClass('input-glow');
+    expect(screen.queryByRole('textbox', { name: 'Filter tasks by keyword' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
     expect(getPlanToolbar()).toHaveClass('sticky');
     expect(getPlanToolbar()).toHaveStyle({ top: '72px' });
-    expect(screen.queryByPlaceholderText('Filter tasks…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Filter tasks by keyword' })).not.toBeInTheDocument();
   });
 
   it('keeps the Plan visible while a sync refreshes project data', async () => {

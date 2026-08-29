@@ -14,12 +14,29 @@ export class HoustonToolApprovalConfigurationError extends Error {
 export function getHoustonToolApprovalSecret(
   value = process.env.MC_HOUSTON_TOOL_APPROVAL_SECRET,
 ): string {
+  const secret = getOptionalHoustonToolApprovalSecret(value);
+  if (secret === undefined) {
+    throw new HoustonToolApprovalConfigurationError();
+  }
+  return secret;
+}
+
+/**
+ * Same validation as {@link getHoustonToolApprovalSecret}, but returns
+ * `undefined` instead of throwing when the secret is missing or too short.
+ * Use this anywhere Houston chat must keep working for non-finance requests
+ * even when finance approvals are not configured; only the finance mutation
+ * tools themselves should require the secret.
+ */
+export function getOptionalHoustonToolApprovalSecret(
+  value = process.env.MC_HOUSTON_TOOL_APPROVAL_SECRET,
+): string | undefined {
   if (
     typeof value !== 'string'
     || value.length === 0
     || Buffer.byteLength(value, 'utf8') < MIN_APPROVAL_SECRET_BYTES
   ) {
-    throw new HoustonToolApprovalConfigurationError();
+    return undefined;
   }
   return value;
 }

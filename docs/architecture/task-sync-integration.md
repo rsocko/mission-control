@@ -176,7 +176,7 @@ sequenceDiagram
 | `outlook-email` | Microsoft Graph API | Read (flagged → tasks), Notifications | OAuth2 (MSAL) |
 | `outlook-calendar` | Microsoft Graph API | Read (events → timeline) | OAuth2 (MSAL) |
 | `home-assistant` | HA REST API | Notifications (device states) | Long-lived token |
-| `rymessage` | Webhook/REST | Notifications today; task materialization bridge proposed | API key today; dedicated Companion integration principal proposed |
+| `rymessage` | Experimental webhook today; transport-independent durable ingress proposed | Notifications today; provider-owned task materialization bridge proposed | LAN trust today; dedicated scoped integration principal required before production |
 | `document-intelligence` | Azure AI | Read (extracted action items) | API key |
 | `monarch-money` | Monarch API | Notifications (finance) | Session token |
 | `custom-rest` | Any REST API | Configurable | Configurable |

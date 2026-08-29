@@ -416,9 +416,20 @@ export function quickAddContextModule() {
 
 export function taskDetailPanelModule() {
   return {
-    TaskDetailPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void }) => (
+    TaskDetailPanel: ({
+      taskId,
+      onClose,
+      notesOpenRequest,
+    }: {
+      taskId: string;
+      onClose: () => void;
+      notesOpenRequest?: { taskId: string; mode: 'read' | 'edit' } | null;
+    }) => (
       <aside aria-label="Task detail" data-testid={`task-detail-${taskId}`}>
         <p>Detail for {taskId}</p>
+        {notesOpenRequest?.taskId === taskId ? (
+          <div role="dialog" aria-label="Notes" data-mode={notesOpenRequest.mode} />
+        ) : null}
         <button type="button" onClick={onClose}>Close task detail</button>
       </aside>
     ),

@@ -22,7 +22,7 @@ function collectTsxFiles(directory: string): string[] {
 const compositeControlSources = [
   ['src/app/icons/page.tsx', 1],
   ['src/app/projects/[id]/PhaseAssignView.tsx', 1],
-  ['src/app/projects/[id]/tabs/ProjectPhasesTab.tsx', 2],
+  ['src/app/projects/[id]/tabs/ProjectPhasesTab.tsx', 1],
   ['src/app/settings/components/GeneralSettingsSection.tsx', 1],
   ['src/components/add-task/DestinationPicker.tsx', 1],
   ['src/components/add-task/SaveTemplateModal.tsx', 1],

@@ -73,7 +73,7 @@ function planScenario() {
       'phase-build': [makePhaseItem('phase-build', 'task-beta', 0)],
     },
     tasks: [
-      makeTask('task-alpha', { title: 'Alpha migration' }),
+      makeTask('task-alpha', { title: 'Alpha migration', hasDescription: true }),
       makeTask('task-beta', { title: 'Beta cleanup', status: 'done' }),
       makeTask('task-gamma', { title: 'Gamma rollout' }),
     ],
@@ -124,6 +124,32 @@ describe('project phases (Plan) tab', () => {
     const unassigned = screen.getByRole('heading', { name: 'Unassigned Tasks' }).parentElement!;
     expect(within(unassigned).getByText('1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Drag task to a phase' })).toBeInTheDocument();
+  });
+
+  it('keeps task detail open when a Plan list row is double-clicked', async () => {
+    await renderProjectTab('Plan');
+
+    const taskRow = (await screen.findByText('Alpha migration'))
+      .closest<HTMLElement>('[data-task-row-surface="plan"]');
+    expect(taskRow).not.toBeNull();
+
+    fireEvent.click(taskRow!);
+    fireEvent.click(taskRow!);
+    fireEvent.doubleClick(taskRow!);
+
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
+  });
+
+  it('opens the expanded Notes dialog from a Plan list row', async () => {
+    await renderProjectTab('Plan');
+
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    fireEvent.click(within(discovery).getByRole('button', { name: 'Open notes' }));
+
+    const notesDialog = await screen.findByRole('dialog', { name: 'Notes' });
+    expect(notesDialog).toHaveAttribute('data-mode', 'read');
+    expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
   });
 
   it('switches plan views and drops bulk selection when the list is left', async () => {
@@ -454,7 +480,7 @@ describe('project phases (Plan) tab', () => {
     await renderProjectTab('Plan');
     await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.change(screen.getByPlaceholderText('Filter tasks…'), {
+    fireEvent.change(screen.getByPlaceholderText(/Filter Plan tasks/), {
       target: { value: 'beta' },
     });
 
@@ -463,6 +489,12 @@ describe('project phases (Plan) tab', () => {
     });
     expect(within(phaseRegion('Discovery')).queryByText('Alpha migration')).not.toBeInTheDocument();
     expect(within(phaseRegion('Build')).getByText('Beta cleanup')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add Filter' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand all phases' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse all phases' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to compact view' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Group by:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Sort by:/ })).not.toBeInTheDocument();
   });
 
   it('bulk selects a range of plan tasks and moves them to another phase', async () => {
@@ -556,7 +588,7 @@ describe('project phases (Plan) tab', () => {
     await renderProjectTab('Plan');
     const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
 
-    fireEvent.click(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
     fireEvent.click(within(screen.getByRole('menu', { name: 'Add task' }))
       .getByRole('menuitem', { name: 'Create new task' }));
     fireEvent.click(within(await screen.findByRole('dialog', { name: 'Create task' }))
@@ -571,7 +603,7 @@ describe('project phases (Plan) tab', () => {
       });
     });
 
-    fireEvent.click(within(phaseRegion('Discovery')).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(phaseRegion('Discovery')).getByRole('button', { name: 'Add task' }));
     fireEvent.click(screen.getByRole('menuitem', { name: 'Link existing task' }));
     const picker = await screen.findByRole('dialog', { name: 'Add tasks to Discovery' });
     fireEvent.click(within(picker).getByRole('button', { name: 'Confirm linked tasks' }));
@@ -598,8 +630,8 @@ describe('project phases (Plan) tab', () => {
     const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
     expect(within(discovery).getByText('No tasks in this phase yet.')).toBeInTheDocument();
 
-    fireEvent.click(within(discovery).getByRole('button', { name: 'Add task' }));
+    fireEvent.pointerDown(within(discovery).getByRole('button', { name: 'Add task' }));
     expect(screen.getByRole('menu', { name: 'Add task' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Create new task' })).toHaveFocus();
+    expect(screen.getByRole('menuitem', { name: 'Create new task' })).toBeInTheDocument();
   });
 });

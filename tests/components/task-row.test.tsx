@@ -270,6 +270,26 @@ describe('TaskRow', () => {
     });
   });
 
+  it('preserves wrapper interactions when row callbacks are not supplied', () => {
+    const onDoubleClick = vi.fn();
+
+    render(
+      <div onDoubleClick={onDoubleClick}>
+        <TaskRow
+          task={baseTask}
+          onComplete={noop}
+          {...actionProps}
+          onAddToMyDay={noop}
+          onRemoveFromMyDay={noop}
+        />
+      </div>,
+    );
+
+    fireEvent.doubleClick(screen.getByText('Test task'));
+
+    expect(onDoubleClick).toHaveBeenCalledOnce();
+  });
+
   it('renders contextual metadata and routes row filters through a supplied controller', () => {
     const onToggleTag = vi.fn();
     const onFilterPriority = vi.fn();

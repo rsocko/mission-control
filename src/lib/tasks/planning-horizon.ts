@@ -10,6 +10,13 @@ export const PLANNING_HORIZON_LABELS: Record<PlanningHorizon, string> = {
   someday: 'Someday',
 };
 
+export const PLANNING_HORIZON_CODES: Record<PlanningHorizon, string> = {
+  next: 'H1',
+  soon: 'H2',
+  later: 'H3',
+  someday: '∞',
+};
+
 export const PLANNING_HORIZON_VISUALS: Record<PlanningHorizon, {
   color: string;
   dotClass: string;

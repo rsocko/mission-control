@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { motion } from 'motion/react';
 import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
@@ -27,12 +27,6 @@ import {
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
 import { cn } from '@/lib/utils';
-import type {
-  DashboardProjectViewModel as FilterHubProject,
-  DashboardTaskTagViewModel as TaskTag,
-  EnabledSource,
-  SourceList,
-} from '@/types/dashboard';
 import { EMPTY_TASK_RESPONSE } from '@/types/dashboard';
 import { fadeSlideUp } from '@/lib/motion';
 import { PhaseAddTaskMenu } from '../components';
@@ -45,6 +39,7 @@ import {
   sortTasks,
 } from '../utils';
 import type { ProjectTaskOverlayActions } from './contracts';
+import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
 type TaskSortField = 'priority' | 'dueDate' | 'updated' | 'title';
 
@@ -87,9 +82,8 @@ export function ProjectTasksTab({
     completingIds,
     getTaskContextActions,
     myDayTaskIds,
+    openTaskNotes,
     selectedTaskId,
-    setDetailMode,
-    setSelectedTaskId,
     toggleTask,
   } = useProjectPageTaskInteractions();
 
@@ -111,57 +105,18 @@ export function ProjectTasksTab({
     setCollapsedGroups(new Set());
   }, [projectId]);
 
-  const projectTaskSources = useMemo<EnabledSource[]>(() => {
-    const connectorTypes = [...new Set(tasks.map((task) => task.connectorType))];
-    return connectorTypes.map((connectorType) => ({
-      type: connectorType,
-      name: connectorLabels[connectorType] || connectorType,
-      icon: '',
-    }));
-  }, [connectorLabels, tasks]);
-  const projectTaskSourceLists = useMemo<SourceList[]>(() => {
-    const lists = new Map<string, SourceList>();
-    for (const task of tasks) {
-      if (!task.sourceListName) continue;
-      const sourceId = task.sourceListId || task.sourceListName.toLowerCase();
-      const key = `${task.connectorInstanceId}:${sourceId}`;
-      const existing = lists.get(key);
-      lists.set(key, {
-        id: key,
-        sourceId,
-        connectorInstanceId: task.connectorInstanceId,
-        name: task.sourceListName,
-        taskCount: (existing?.taskCount ?? 0) + 1,
-        groupId: null,
-      });
-    }
-    return [...lists.values()].sort((left, right) => left.name.localeCompare(right.name));
-  }, [tasks]);
-  const projectTaskTags = useMemo<TaskTag[]>(() => {
-    const tags = new Map<string, TaskTag>();
-    for (const task of tasks) {
-      for (const tag of task.tags ?? []) {
-        const existing = tags.get(tag.slug);
-        tags.set(tag.slug, { ...tag, count: (existing?.count ?? 0) + 1 });
-      }
-    }
-    return [...tags.values()].sort((left, right) => left.name.localeCompare(right.name));
-  }, [tasks]);
-  const projectTaskAssignees = useMemo(
-    () => [...new Set(tasks.map((task) => task.assignee?.trim()).filter((value): value is string => Boolean(value)))].sort(),
-    [tasks],
-  );
-  const projectTaskFilterProjects = useMemo<FilterHubProject[]>(() => (
-    project
-      ? [{
-          id: project.id,
-          name: project.name,
-          color: project.color,
-          icon: project.icon,
-          phases: phases.map((phase) => ({ id: phase.id, name: phase.name })),
-        }]
-      : []
-  ), [phases, project]);
+  const {
+    assignees: projectTaskAssignees,
+    projects: projectTaskFilterProjects,
+    sourceLists: projectTaskSourceLists,
+    sources: projectTaskSources,
+    tags: projectTaskTags,
+  } = useProjectTaskFilterOptions({
+    connectorLabels,
+    phases,
+    project,
+    tasks,
+  });
   const filteredTasks = useMemo(() => (
     sortTasks(
       filterProjectTasks(tasks, taskFilterContext, projectId),
@@ -213,32 +168,23 @@ export function ProjectTasksTab({
                 : `Showing ${filteredTasks.length} of ${tasks.length} project tasks.`}
             </CardDescription>
           </div>
-          <div className="relative" data-phase-add-menu>
-            <Button
-              onClick={() => setAddTaskMenuOpen((current) => !current)}
-              aria-expanded={addTaskMenuOpen}
-              aria-haspopup="menu"
-            >
-              <Plus size={14} />
-              Add task
-              <ChevronDown size={14} />
-            </Button>
-            <AnimatePresence>
-              {addTaskMenuOpen && (
-                <PhaseAddTaskMenu
-                  onCreateNew={() => {
-                    setAddTaskMenuOpen(false);
-                    taskOverlayActions.requestCreateTask({ phaseId: null });
-                  }}
-                  onLinkExisting={() => {
-                    setAddTaskMenuOpen(false);
-                    taskOverlayActions.requestLinkTasks({ phaseId: null });
-                  }}
-                  onClose={() => setAddTaskMenuOpen(false)}
-                />
-              )}
-            </AnimatePresence>
-          </div>
+          <PhaseAddTaskMenu
+            open={addTaskMenuOpen}
+            onOpenChange={setAddTaskMenuOpen}
+            trigger={(
+              <Button>
+                <Plus size={14} />
+                Add task
+                <ChevronDown size={14} />
+              </Button>
+            )}
+            onCreateNew={() => {
+              taskOverlayActions.requestCreateTask({ phaseId: null });
+            }}
+            onLinkExisting={() => {
+              taskOverlayActions.requestLinkTasks({ phaseId: null });
+            }}
+          />
         </CardHeader>
         <CardContent>
           <TaskKeywordFilter
@@ -386,10 +332,7 @@ export function ProjectTasksTab({
                         onSetLocalDisposition={(disposition) => (
                           contextActions.onSetLocalDisposition?.(disposition)
                         )}
-                        onOpenNotes={() => {
-                          setDetailMode('panel');
-                          setSelectedTaskId(task.id);
-                        }}
+                        onOpenNotes={(mode) => openTaskNotes(task.id, mode)}
                         onAddToMyDay={() => contextActions.onAddToMyDay?.()}
                         onRemoveFromMyDay={() => contextActions.onRemoveFromMyDay?.()}
                         isInMyDay={myDayTaskIds.has(task.id)}

@@ -150,6 +150,27 @@ export function useSyncStreamConnection() {
   // Grace period: suppress toasts for first 2s after connection to avoid
   // flooding the user with stale events on hard reload (Ctrl+Shift+R).
   const toastSuppressedUntilRef = useRef<number>(0);
+  const hiddenSyncResultsRef = useRef({ completed: 0, failed: 0 });
+
+  useEffect(() => {
+    const showHiddenSyncSummary = () => {
+      if (document.visibilityState !== 'visible') return;
+      const { completed, failed } = hiddenSyncResultsRef.current;
+      if (completed === 0 && failed === 0) return;
+
+      hiddenSyncResultsRef.current = { completed: 0, failed: 0 };
+      const parts = [
+        completed > 0 ? `${completed} sync${completed === 1 ? '' : 's'} completed` : null,
+        failed > 0 ? `${failed} failed` : null,
+      ].filter((part): part is string => part !== null);
+      toast(`While you were away: ${parts.join(', ')}. See Sync History for details.`, {
+        duration: 5000,
+      });
+    };
+
+    document.addEventListener('visibilitychange', showHiddenSyncSummary);
+    return () => document.removeEventListener('visibilitychange', showHiddenSyncSummary);
+  }, []);
 
   const refreshActiveQueries = useCallback(async () => {
     // An initial query fetch cannot be invalidated into a second request while
@@ -341,6 +362,11 @@ export function useSyncStreamConnection() {
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
       }
 
+      if (document.visibilityState !== 'visible') {
+        hiddenSyncResultsRef.current.completed += 1;
+        return;
+      }
+
       // Suppress toasts during the post-reload grace period
       if (Date.now() < toastSuppressedUntilRef.current) return;
 
@@ -411,6 +437,11 @@ export function useSyncStreamConnection() {
         knownSyncingRef.current = false;
         setProgress((prev) => ({ ...initialProgress, refetchKey: prev.refetchKey }));
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
+      }
+
+      if (document.visibilityState !== 'visible') {
+        hiddenSyncResultsRef.current.failed += 1;
+        return;
       }
 
       // Suppress toasts during the post-reload grace period

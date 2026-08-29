@@ -13,6 +13,10 @@ describe('connector icon mappings', () => {
     expect(CONNECTOR_ICONS.local).toBe(LOCAL_CONNECTOR_ICON_PATH);
   });
 
+  it('uses the local Copilot icon for Scout', () => {
+    expect(CONNECTOR_ICONS.scout).toBe('/icons/connectors/scout.svg');
+  });
+
   it.each(['finance-manager', 'monarch-money'])(
     'uses the Tyrion connector icon for %s surfaces',
     (connectorType) => {

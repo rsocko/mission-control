@@ -8,10 +8,13 @@ import {
   tasks,
   taskTags,
   tags,
+  sourceLists,
 } from '@/db/schema';
 import { eq, and, isNull, notInArray, asc, desc, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 import { QUICK_SORT_SKIP_MS } from '@/lib/quick-sort/constants';
+import { buildQuickSortSourceData } from '@/lib/quick-sort/source-options';
+import { taskSourceTypesForFilter } from '@/lib/tasks/source-hierarchy';
 
 export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
@@ -45,6 +48,7 @@ export async function GET(request: Request) {
   // Optional scope filters
   const sourceFilter = searchParams.get('source');
   const sourceListFilter = searchParams.get('sourceList');
+  const sourceListIdFilter = searchParams.get('sourceListId');
   const connectorIdFilter = searchParams.get('connectorId');
 
   // Exclude tasks from soft-deleted connectors
@@ -71,7 +75,7 @@ export async function GET(request: Request) {
       .select({
         connectorType: tasks.connectorType,
         connectorInstanceId: tasks.connectorInstanceId,
-        sourceId: tasks.sourceId,
+        sourceListId: tasks.sourceListId,
         sourceListName: tasks.sourceListName,
         count: sql<number>`COUNT(*)`.as('count'),
       })
@@ -83,20 +87,23 @@ export async function GET(request: Request) {
         availableCondition,
         notRecentlySkippedCondition,
       ))
-      .groupBy(tasks.connectorType, tasks.connectorInstanceId, tasks.sourceListName)
+      .groupBy(tasks.connectorType, tasks.connectorInstanceId, tasks.sourceListId, tasks.sourceListName)
       .orderBy(sql`COUNT(*) DESC`);
 
-    const grouped: Record<string, { connectorId: string; lists: Array<{ name: string; count: number }> }> = {};
-    for (const row of sourceRows) {
-      if (!grouped[row.connectorType]) {
-        grouped[row.connectorType] = { connectorId: row.connectorInstanceId, lists: [] };
-      }
-      if (row.sourceListName) {
-        grouped[row.connectorType].lists.push({ name: row.sourceListName, count: row.count });
-      }
-    }
+    const sourceListDefinitions = await db.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      type: sourceLists.type,
+      icon: sourceLists.icon,
+      iconColor: sourceLists.iconColor,
+      hidden: sourceLists.hidden,
+    }).from(sourceLists);
 
-    return NextResponse.json({ sources: grouped });
+    return NextResponse.json({
+      sources: buildQuickSortSourceData(sourceRows, sourceListDefinitions),
+    });
   }
 
   // Build scope conditions
@@ -108,9 +115,14 @@ export async function GET(request: Request) {
     notRecentlySkippedCondition,
   ];
   if (sourceFilter) {
-    scopeConditions.push(eq(tasks.connectorType, sourceFilter));
+    const sourceTypes = taskSourceTypesForFilter(sourceFilter);
+    scopeConditions.push(sourceTypes.length === 1
+      ? eq(tasks.connectorType, sourceTypes[0])
+      : inArray(tasks.connectorType, sourceTypes));
   }
-  if (sourceListFilter) {
+  if (sourceListIdFilter) {
+    scopeConditions.push(eq(tasks.sourceListId, sourceListIdFilter));
+  } else if (sourceListFilter) {
     scopeConditions.push(eq(tasks.sourceListName, sourceListFilter));
   }
   if (connectorIdFilter) {

@@ -1,55 +1,15 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import Image from 'next/image';
-import { ChevronDown, Filter, List, Search, Waypoints, X } from 'lucide-react';
-import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
+import { ChevronDown, Filter, Search, X } from 'lucide-react';
+import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
+import { getConnectorLabel } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import type { QuickSortScopeFilter } from '@/lib/hooks/useQuickSortData';
-
-const SOURCE_LABELS: Record<string, string> = {
-  'microsoft-todo': 'Microsoft To Do',
-  'ms-todo': 'Microsoft To Do',
-  'github-issues': 'GitHub Issues',
-  local: 'Local',
-  'google-tasks': 'Google Tasks',
-  jira: 'Jira',
-  linear: 'Linear',
-  asana: 'Asana',
-  notion: 'Notion',
-};
+import type { QuickSortSourceData } from '@/lib/quick-sort/source-options';
 
 function sourceLabel(connectorType: string): string {
-  return SOURCE_LABELS[connectorType]
-    ?? CONNECTOR_LABELS[connectorType]
-    ?? connectorType
-      .split(/[-_]+/)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(' ');
-}
-
-function SourceIcon({ connectorType }: { connectorType: string }) {
-  const iconPath = CONNECTOR_ICON_PATHS[connectorType];
-
-  return (
-    <span
-      aria-hidden="true"
-      className="hidden size-4 shrink-0 items-center justify-center sm:flex"
-    >
-      {iconPath ? (
-        <Image src={iconPath} alt="" width={16} height={16} className="size-4 object-contain" />
-      ) : (
-        <Waypoints size={14} className="text-[var(--text-tertiary)]" />
-      )}
-    </span>
-  );
-}
-
-interface SourceData {
-  [connectorType: string]: {
-    connectorId: string;
-    lists: Array<{ name: string; count: number }>;
-  };
+  return getConnectorLabel(connectorType);
 }
 
 interface ScopeFilterProps {
@@ -59,7 +19,7 @@ interface ScopeFilterProps {
 
 export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
   const [expanded, setExpanded] = useState(false);
-  const [sources, setSources] = useState<SourceData | null>(null);
+  const [sources, setSources] = useState<QuickSortSourceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -118,8 +78,16 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
     setExpanded(false);
   };
 
-  const selectList = (connectorType: string, listName: string) => {
-    onChange({ source: connectorType, sourceList: listName });
+  const selectList = (
+    connectorType: string,
+    list: QuickSortSourceData[string]['lists'][number],
+  ) => {
+    onChange({
+      source: connectorType,
+      sourceList: list.name,
+      sourceListId: list.sourceListId ?? undefined,
+      connectorId: list.connectorId,
+    });
     setExpanded(false);
   };
 
@@ -256,7 +224,7 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                               : 'text-[var(--text-primary)]'
                           )}
                         >
-                          <SourceIcon connectorType={connectorType} />
+                          <ConnectorIcon connectorType={connectorType} size={16} />
                           <span className="truncate">{displayLabel}</span>
                         </button>
                         {data.lists.length > 0 && (
@@ -276,22 +244,18 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                           {filteredLists.map((list) => (
                             <button
                               type="button"
-                              key={list.name}
-                              onClick={() => selectList(connectorType, list.name)}
+                              key={`${list.connectorId}:${list.sourceListId ?? list.name}`}
+                              onClick={() => selectList(connectorType, list)}
                               className={cn(
                                 'flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors hover:bg-[var(--surface-3)]',
                                 filter.source === connectorType && filter.sourceList === list.name
-                                  ? 'text-[var(--accent-400)] font-medium'
-                                  : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'
+                                  ? 'bg-[var(--accent)]/15 text-[var(--accent)] font-medium'
+                                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
                               )}
                             >
-                              <List
-                                aria-hidden="true"
-                                size={14}
-                                className="hidden shrink-0 opacity-70 sm:block"
-                              />
+                              <SourceListIcon connectorType={connectorType} list={list} size={14} />
                               <span className="min-w-0 flex-1 truncate">{list.name}</span>
-                              <span className="shrink-0 opacity-50">({list.count})</span>
+                              <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{list.count}</span>
                             </button>
                           ))}
                         </div>

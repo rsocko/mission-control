@@ -6,7 +6,7 @@ import type {
   TaskListStatsDto,
   TaskTagDto,
 } from '@/types/api';
-import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { PRIORITY_BADGE_COLORS, PRIORITY_LABELS as TASK_PRIORITY_LABELS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 
 export type DashboardTaskTagViewModel = TaskTagDto;
@@ -30,6 +30,7 @@ export interface SourceList {
   connectorInstanceId: string;
   name: string;
   taskCount: number;
+  type?: string | null;
   groupId: string | null;
   hidden?: boolean;
   sortOrder?: number;
@@ -94,21 +95,7 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   availableTags: [],
 };
 
-export const CONNECTOR_ICONS: Record<string, string> = {
-  'local': LOCAL_CONNECTOR_ICON_PATH,
-  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
-  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
-  'github-issues': '/icons/connectors/github.svg',
-  'outlook-email': '/icons/connectors/outlook.svg',
-  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
-  'rymessage': '/icons/connectors/rymessage.svg',
-  'document-intelligence': '/icons/agents/owl.svg',
-  finance: '/icons/connectors/tyrion.svg',
-  'finance-manager': '/icons/connectors/tyrion.svg',
-  'monarch-money': '/icons/connectors/tyrion.svg',
-  'custom-rest': '/icons/connectors/custom-rest.svg',
-  'scout': 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
-};
+export const CONNECTOR_ICONS: Record<string, string> = CONNECTOR_ICON_PATHS;
 
 export const PRIORITY_COLORS = PRIORITY_BADGE_COLORS;
 

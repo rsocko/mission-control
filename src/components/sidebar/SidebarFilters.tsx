@@ -5,6 +5,7 @@ import Image from 'next/image';
 import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Pencil, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
+import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
 import {
   Select,
   SelectContent,
@@ -22,7 +23,7 @@ import type {
   SavedView,
   SourceList,
 } from '@/types/dashboard';
-import { CONNECTOR_ICONS, PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
+import { PRIORITY_COLORS, PRIORITY_LABELS, STATUS_COLORS, STATUS_LABELS } from '@/types/dashboard';
 import type { SidebarMode } from '@/lib/hooks/useSidebarExpanded';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
 import type { GraphOrigin } from '@/lib/graph/graph-navigation';
@@ -191,11 +192,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
             title={src.type}
             aria-label={`Filter by ${src.type}`}
           >
-            {CONNECTOR_ICONS[src.type] ? (
-              <Image src={CONNECTOR_ICONS[src.type]} alt="" width={16} height={16} />
-            ) : (
-              <Globe size={16} />
-            )}
+            <ConnectorIcon connectorType={src.type} size={16} />
           </button>
         ))}
 
@@ -312,10 +309,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
             return (
             <div key={source.type}>
               <SidebarNavItem
-                icon={CONNECTOR_ICONS[source.type]
-                  ? <Image src={CONNECTOR_ICONS[source.type]} alt={source.name} width={14} height={14} />
-                  : <Globe size={14} />
-                }
+                icon={<ConnectorIcon connectorType={source.type} size={14} />}
                 label={source.name}
                 count={allSourceCounts[source.type] || 0}
                 active={sourceFilter === source.type}
@@ -892,7 +886,7 @@ function SourceListSection({
                     }`}
                   >
                     <span className="inline-flex items-center gap-1.5 truncate">
-                      {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
+                      <SourceListIcon connectorType={source.type} list={sl} />
                       <span className="truncate">{sl.name}</span>
                       {sl.selectedForSync === false && (
                         <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">
@@ -945,7 +939,7 @@ function SourceListSection({
                     }`}
                   >
                     <span className="inline-flex items-center gap-1.5 truncate">
-                      {sl.icon ? <IconRenderer value={sl.icon} size={11} color={sl.iconColor || undefined} className="flex-shrink-0" /> : <List size={11} className="flex-shrink-0" />}
+                      <SourceListIcon connectorType={source.type} list={sl} />
                       <span className="truncate">{sl.name}</span>
                       {sl.selectedForSync === false && (
                         <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-xs uppercase tracking-wide text-amber-400">

@@ -60,6 +60,16 @@ vi.mock('@/db/schema', () => ({
   hubProjects: { id: 'projectId', name: 'projectName', color: 'projectColor' },
   projectPhaseItems: { taskId: 'taskId', phaseId: 'phaseId', isProposed: 'isProposed' },
   projectPhases: { id: 'phaseId', name: 'phaseName', projectId: 'phaseProjectId' },
+  sourceLists: {
+    connectorInstanceId: 'sourceListConnectorInstanceId',
+    sourceId: 'sourceListSourceId',
+    name: 'sourceListDefinitionName',
+    userDisplayName: 'sourceListUserDisplayName',
+    type: 'sourceListType',
+    icon: 'sourceListIcon',
+    iconColor: 'sourceListIconColor',
+    hidden: 'sourceListHidden',
+  },
 }));
 
 describe('GET /api/tasks/quick-sort', () => {
@@ -143,5 +153,87 @@ describe('GET /api/tasks/quick-sort', () => {
       no_tags: 3,
       no_planning_horizon: 4,
     });
+  });
+
+  it('groups legacy Mission Control tasks under Local and includes list icon metadata', async () => {
+    mocks.terminals.push(
+      [
+        {
+          connectorType: 'mission-control',
+          connectorInstanceId: 'mc-local',
+          sourceListId: 'local',
+          sourceListName: 'Local',
+          count: 3,
+        },
+        {
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          sourceListId: 'local',
+          sourceListName: 'Local',
+          count: 2,
+        },
+        {
+          connectorType: 'github-issues',
+          connectorInstanceId: 'github',
+          sourceListId: 'rsocko/mission-control',
+          sourceListName: 'rsocko/mission-control',
+          count: 4,
+        },
+        {
+          connectorType: 'microsoft-todo',
+          connectorInstanceId: 'todo',
+          sourceListId: null,
+          sourceListName: 'Work',
+          count: 6,
+        },
+      ],
+      [
+        {
+          connectorInstanceId: 'github',
+          sourceId: 'rsocko/mission-control',
+          name: 'rsocko/mission-control',
+          userDisplayName: null,
+          type: 'repo',
+          icon: 'dash:github',
+          iconColor: null,
+          hidden: false,
+        },
+        {
+          connectorInstanceId: 'todo',
+          sourceId: 'work-list',
+          name: 'Work',
+          userDisplayName: null,
+          type: 'list',
+          icon: 'mdi:briefcase',
+          iconColor: '#60a5fa',
+          hidden: false,
+        },
+      ],
+    );
+
+    const { GET } = await import('@/app/api/tasks/quick-sort/route');
+    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?sources=true'));
+    const body = await response.json();
+
+    expect(body.sources).not.toHaveProperty('mission-control');
+    expect(body.sources.local).toMatchObject({ count: 5, lists: [] });
+    expect(body.sources['github-issues'].lists).toEqual([{
+      connectorId: 'github',
+      sourceListId: 'rsocko/mission-control',
+      name: 'rsocko/mission-control',
+      count: 4,
+      type: 'repo',
+      icon: 'dash:github',
+      iconColor: null,
+    }]);
+    expect(body.sources['microsoft-todo'].lists).toEqual([{
+      connectorId: 'todo',
+      sourceListId: 'work-list',
+      name: 'Work',
+      count: 6,
+      type: 'list',
+      icon: 'mdi:briefcase',
+      iconColor: '#60a5fa',
+    }]);
   });
 });

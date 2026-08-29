@@ -10,12 +10,14 @@ import {
 type DbModule = typeof import('@/db');
 type SchemaModule = typeof import('@/db/schema');
 type IdentityModule = typeof import('@/lib/external-identities');
+type PullManagerModule = typeof import('@/lib/sync/pull-manager');
 
 const dbPath = join(tmpdir(), `mc-nodeid-permanent-${process.pid}.db`);
 const now = '2026-08-16T00:00:00.000Z';
 let database: DbModule;
 let schema: SchemaModule;
 let identity: IdentityModule;
+let pullManager: PullManagerModule;
 
 beforeAll(async () => {
   if (existsSync(dbPath)) rmSync(dbPath);
@@ -24,10 +26,11 @@ beforeAll(async () => {
   vi.doUnmock('drizzle-orm');
   vi.doUnmock('crypto');
   vi.resetModules();
-  [database, schema, identity] = await Promise.all([
+  [database, schema, identity, pullManager] = await Promise.all([
     import('@/db'),
     import('@/db/schema'),
     import('@/lib/external-identities'),
+    import('@/lib/sync/pull-manager'),
   ]);
   database.default.insert(schema.connectorConfigs).values({
     id: 'github-permanent',
@@ -251,6 +254,113 @@ describe('permanent GitHub NodeID identity', () => {
         selectedLocalId: null,
       }),
     ]));
+  });
+
+  it('ignores retired path locators but blocks active path reuse', () => {
+    const insertEntity = database.sqlite.prepare(`
+      INSERT INTO external_entities (
+        id, provider, host_key, entity_type, stable_id, identity_version,
+        next_locator_revision, first_seen_at, last_seen_at
+      ) VALUES (?, 'github', 'github.com', 'issue', ?, 1, 2, ?, ?)
+    `);
+    const insertLocator = database.sqlite.prepare(`
+      INSERT INTO external_entity_locators (
+        id, external_entity_id, repository_entity_id, provider, host_key, owner, repository,
+        owner_key, repository_key, issue_number, valid_from, valid_to, last_seen_at,
+        observation_source, locator_revision
+      ) VALUES (?, ?, 'entity-R_app', 'github', 'github.com', 'acme', 'app',
+        'acme', 'app', ?, ?, ?, ?, 'graphql', 1)
+    `);
+    insertEntity.run('entity-I_retired_owner', 'I_retired_owner', now, now);
+    insertLocator.run(
+      'locator-I_retired_owner',
+      'entity-I_retired_owner',
+      90,
+      now,
+      '2026-08-16T01:00:00.000Z',
+      '2026-08-16T01:00:00.000Z',
+    );
+    insertEntity.run('entity-I_active_owner', 'I_active_owner', now, now);
+    insertLocator.run('locator-I_active_owner', 'entity-I_active_owner', 91, now, null, now);
+
+    const scope = runtime();
+    const decisions = scope.resolveBatch('task', 'task', [
+      {
+        candidateKey: 'acme/app:90',
+        unboundAction: 'create',
+        evidence: githubIssueEvidence({
+          issueStableId: 'I_replacement_after_retired',
+          repositoryStableId: 'R_app',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 90,
+        }),
+      },
+      {
+        candidateKey: 'acme/app:91',
+        unboundAction: 'create',
+        evidence: githubIssueEvidence({
+          issueStableId: 'I_replacement_while_active',
+          repositoryStableId: 'R_app',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 91,
+        }),
+      },
+    ]);
+    scope.complete('failed', 'test_probe');
+
+    expect(decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        candidateKey: 'acme/app:90',
+        appliedSource: 'stable',
+        outcome: 'resolved',
+        selectedAction: 'create',
+      }),
+      expect.objectContaining({
+        candidateKey: 'acme/app:91',
+        appliedSource: 'blocked',
+        outcome: 'path_reuse',
+        selectedAction: 'none',
+      }),
+    ]));
+  });
+
+  it('reports blocked task identity decisions with bounded non-sensitive audit entries', () => {
+    const scope = runtime();
+    const [decision] = scope.resolveBatch('task', 'task', [{
+      candidateKey: 'acme/app:1',
+      locatorMatchedLocalIds: ['task-parent'],
+      localTaskId: 'task-parent',
+    }]);
+    scope.complete('failed', 'test_probe');
+    const audit: import('@/lib/sync').SyncAuditEntry[] = [];
+    const summary: import('@/lib/sync/pull-manager').GitHubTaskIdentityBlockSummary = {
+      count: 0,
+      outcomes: {},
+    };
+
+    for (let index = 0; index < 25; index++) {
+      pullManager.recordBlockedTaskIdentityDecision(
+        { ...decision, candidateKey: `acme/app:${index + 100}` },
+        audit,
+        summary,
+      );
+    }
+
+    expect(summary).toEqual({
+      count: 25,
+      outcomes: { missing_stable_id: 25 },
+    });
+    expect(audit).toHaveLength(20);
+    expect(audit[0]).toEqual({
+      action: 'protected',
+      taskTitle: 'GitHub task identity blocked',
+      taskSourceId: 'acme/app:100',
+      reason: 'Stable identity decision blocked: missing_stable_id',
+    });
+    expect(JSON.stringify(audit)).not.toContain('stableIdDigest');
+    expect(JSON.stringify(audit)).not.toContain('externalEntityId');
   });
 
   it('blocks a write when the task has no NodeID binding', () => {

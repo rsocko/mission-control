@@ -318,8 +318,7 @@ describe.sequential('Houston finance facade', () => {
       kidName: 'Blair',
     };
     const execution = {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-kid-call',
+      approvalId: 'invented-kid-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     };
@@ -392,8 +391,7 @@ describe.sequential('Houston finance facade', () => {
       },
       kidName: 'Avery',
     }, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-stale-call',
+      approvalId: 'invented-stale-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     });
@@ -430,8 +428,7 @@ describe.sequential('Houston finance facade', () => {
       expected,
       kidName: 'Avery',
     }, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-stale-projection-kid',
+      approvalId: 'invented-stale-projection-kid-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     })).resolves.toMatchObject({
@@ -443,8 +440,7 @@ describe.sequential('Houston finance facade', () => {
       expected,
       categoryName: 'Entertainment',
     }, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-stale-projection-category',
+      approvalId: 'invented-stale-projection-category-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     })).resolves.toMatchObject({
@@ -486,8 +482,7 @@ describe.sequential('Houston finance facade', () => {
       },
     })));
     const failed = await facade.updateFinanceTransactionCategory(input, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-category-failure',
+      approvalId: 'invented-category-failure-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     });
@@ -518,8 +513,7 @@ describe.sequential('Houston finance facade', () => {
       },
     })));
     const updated = await facade.updateFinanceTransactionCategory(input, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-category-success',
+      approvalId: 'invented-category-success-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     });
@@ -537,8 +531,7 @@ describe.sequential('Houston finance facade', () => {
       WHERE connector_id = ? AND upstream_category_id = 'invented-upstream-category'
     `).run(connectorId);
     await expect(facade.updateFinanceTransactionCategory(input, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-category-success',
+      approvalId: 'invented-category-success-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     })).resolves.toMatchObject({
@@ -590,8 +583,7 @@ describe.sequential('Houston finance facade', () => {
       },
       categoryName: 'Entertainment',
     }, {
-      approvalSecret: 'invented-approval-secret-at-least-32-bytes',
-      toolCallId: 'invented-stale-category-call',
+      approvalId: 'invented-stale-category-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     });

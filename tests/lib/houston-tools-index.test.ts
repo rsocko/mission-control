@@ -55,17 +55,19 @@ describe('createHoustonTools finance mutation shape', () => {
     expect(withoutSecret).toHaveProperty('updateFinanceTransactionCategory');
   });
 
-  it('fails closed when a finance mutation tool executes without a configured secret', async () => {
+  it('fails closed when a finance mutation tool executes without a configured secret', () => {
     const tools = createFinanceMutationTools(undefined);
     const execute = tools.assignFinanceTransactionKid.execute as unknown as ToolExecute;
 
-    await expect(execute(mutationInput, { toolCallId: 'call-1' }))
-      .rejects.toBeInstanceOf(HoustonToolApprovalConfigurationError);
+    // `execute` throws synchronously (not a rejected promise) when no secret
+    // is configured, so it must be invoked inside the assertion callback.
+    expect(() => execute(mutationInput, { toolCallId: 'call-1' }))
+      .toThrow(HoustonToolApprovalConfigurationError);
     expect(mutationSpies.assign).not.toHaveBeenCalled();
 
     const executeCategory = tools.updateFinanceTransactionCategory.execute as unknown as ToolExecute;
-    await expect(executeCategory(mutationInput, { toolCallId: 'call-2' }))
-      .rejects.toBeInstanceOf(HoustonToolApprovalConfigurationError);
+    expect(() => executeCategory(mutationInput, { toolCallId: 'call-2' }))
+      .toThrow(HoustonToolApprovalConfigurationError);
     expect(mutationSpies.category).not.toHaveBeenCalled();
   });
 

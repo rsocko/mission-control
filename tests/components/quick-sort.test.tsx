@@ -140,6 +140,10 @@ describe('Quick Sort planning horizon queue', () => {
     expect(screen.getByRole('button', { name: 'Soon' })).toHaveClass('text-blue-400');
     expect(screen.getByRole('button', { name: 'Later' })).toHaveClass('text-violet-400');
     expect(screen.getByRole('button', { name: 'Someday' })).toHaveClass('text-slate-400');
+    expect(screen.getByRole('button', { name: 'Next' })).toHaveTextContent('H1Next');
+    expect(screen.getByRole('button', { name: 'Soon' })).toHaveTextContent('H2Soon');
+    expect(screen.getByRole('button', { name: 'Later' })).toHaveTextContent('H3Later');
+    expect(screen.getByRole('button', { name: 'Someday' })).toHaveTextContent('∞Someday');
     expect(onApplyPlanningHorizon.mock.calls).toEqual([
       ['next'],
       ['soon'],

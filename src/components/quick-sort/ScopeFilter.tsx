@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { ChevronDown, Filter, Search, X } from 'lucide-react';
+import { CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import type { QuickSortScopeFilter } from '@/lib/hooks/useQuickSortData';
 
@@ -16,6 +17,15 @@ const SOURCE_LABELS: Record<string, string> = {
   asana: 'Asana',
   notion: 'Notion',
 };
+
+function sourceLabel(connectorType: string): string {
+  return SOURCE_LABELS[connectorType]
+    ?? CONNECTOR_LABELS[connectorType]
+    ?? connectorType
+      .split(/[-_]+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+}
 
 interface SourceData {
   [connectorType: string]: {
@@ -108,7 +118,7 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
     ? Object.entries(sources).filter(([connectorType, data]) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.toLowerCase();
-        const label = (SOURCE_LABELS[connectorType] ?? connectorType).toLowerCase();
+        const label = sourceLabel(connectorType).toLowerCase();
         if (label.includes(q)) return true;
         return data.lists.some((list) => list.name.toLowerCase().includes(q));
       })
@@ -134,7 +144,7 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
         >
           <span className="flex-1 truncate">
             {hasFilter
-              ? `${SOURCE_LABELS[filter.source!] ?? filter.source}${filter.sourceList ? ` / ${filter.sourceList}` : ''}`
+              ? `${filter.source ? sourceLabel(filter.source) : 'All sources'}${filter.sourceList ? ` / ${filter.sourceList}` : ''}`
               : 'All sources'}
           </span>
           <ChevronDown size={14} className={cn('flex-shrink-0 transition-transform', expanded && 'rotate-180')} />
@@ -209,9 +219,9 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
 
                 {filteredSources.map(([connectorType, data]) => {
                   const q = searchQuery.toLowerCase();
-                  const sourceLabel = SOURCE_LABELS[connectorType] ?? connectorType;
+                  const displayLabel = sourceLabel(connectorType);
                   const filteredLists = searchQuery.trim()
-                    ? data.lists.filter((list) => list.name.toLowerCase().includes(q) || sourceLabel.toLowerCase().includes(q))
+                    ? data.lists.filter((list) => list.name.toLowerCase().includes(q) || displayLabel.toLowerCase().includes(q))
                     : data.lists;
                   const listsExpanded = searchQuery.trim() !== '' || expandedSources.has(connectorType);
 
@@ -228,14 +238,14 @@ export default function ScopeFilter({ filter, onChange }: ScopeFilterProps) {
                               : 'text-[var(--text-primary)]'
                           )}
                         >
-                          {sourceLabel}
+                          {displayLabel}
                         </button>
                         {data.lists.length > 0 && (
                           <button
                             type="button"
                             onClick={() => toggleSource(connectorType)}
                             className="flex min-h-11 min-w-11 items-center justify-center text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]"
-                            aria-label={`${listsExpanded ? 'Collapse' : 'Expand'} ${sourceLabel} lists`}
+                            aria-label={`${listsExpanded ? 'Collapse' : 'Expand'} ${displayLabel} lists`}
                             aria-expanded={listsExpanded}
                           >
                             <ChevronDown size={14} className={cn('transition-transform', listsExpanded && 'rotate-180')} />

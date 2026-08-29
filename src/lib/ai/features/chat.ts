@@ -2,8 +2,8 @@ import {
   generateText,
   streamText,
   stepCountIs,
+  type GenerateTextOnStepFinishCallback,
   type ModelMessage,
-  type StreamTextOnStepFinishCallback,
 } from 'ai';
 import { getAIModel, getAIRouteOutcome } from '../provider-factory';
 import type { SensitivityClass } from '../types';
@@ -96,7 +96,7 @@ export async function streamChat(
     financeMutationsAllowed?: boolean;
     correlationId?: string;
     financeApprovalIds?: Record<string, string>;
-    onStepFinish?: StreamTextOnStepFinishCallback<ReturnType<typeof createHoustonTools>>;
+    onStepFinish?: GenerateTextOnStepFinishCallback<ReturnType<typeof createHoustonTools>>;
   },
 ) {
   const route = getAIModel('houston-chat', options);

@@ -28,6 +28,7 @@ import { DatePicker } from '@/components/ui/date-picker';
 import type { QuickSortQueueMode, QuickSortQueueTask, QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import { TASK_PRIORITY_VISUALS } from '@/lib/constants/task-formatting';
 import {
+  PLANNING_HORIZON_CODES,
   PLANNING_HORIZON_LABELS,
   PLANNING_HORIZONS,
   PLANNING_HORIZON_VISUALS,
@@ -405,11 +406,17 @@ export default function QuickSortActions({
               disabled={busy || !canApplyMode}
               title={!canApplyMode ? modeBlockedReason : undefined}
               className={cn(
-                'flex min-h-[48px] items-center justify-center rounded-xl border px-2 py-3 text-sm font-medium transition-all active:scale-95 disabled:opacity-50',
+                'quick-sort-primary-button flex min-h-[64px] flex-col items-center justify-center gap-1 rounded-xl border px-2 py-2 text-sm font-medium transition-all active:scale-95 disabled:opacity-50',
                 PLANNING_HORIZON_VISUALS[planningHorizon].badgeClass,
               )}
             >
-              {PLANNING_HORIZON_LABELS[planningHorizon]}
+              <span
+                aria-hidden="true"
+                className="inline-flex min-w-6 items-center justify-center rounded border border-current/30 bg-black/10 px-1 py-0.5 font-mono text-xs font-semibold leading-none"
+              >
+                {PLANNING_HORIZON_CODES[planningHorizon]}
+              </span>
+              <span>{PLANNING_HORIZON_LABELS[planningHorizon]}</span>
             </button>
           ))}
           </div>

@@ -5,6 +5,7 @@ created: 2026-08-29
 category: roadmap
 related:
   - "./architecture.md"
+  - "./retrieval-benchmark.md"
   - "../../active/search-ux-redesign.md"
   - "../../graph-visualization-system.md"
   - "https://github.com/rsocko/mission-control/issues/1668"

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SearchResult } from '@/lib/search/fts';
+import { fuseHybridResults } from '@/lib/search/hybrid-ranking';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
 
@@ -23,33 +24,16 @@ interface UseProgressiveSearchOptions {
   excludeDone?: boolean;
 }
 
-function resultKey(result: Pick<SearchResult, 'type' | 'id'>) {
-  return `${result.type}:${result.id}`;
-}
-
 export function mergeProgressiveSearchResults(
   keywordResults: SearchResult[],
   semanticResults: SearchResult[],
+  query = '',
+  limit = Math.max(keywordResults.length, semanticResults.length, 20),
 ): SearchResult[] {
-  const semanticByKey = new Map(
-    semanticResults.map((result) => [resultKey(result), result]),
-  );
-  const merged = keywordResults.map((keywordResult) => {
-    const semanticResult = semanticByKey.get(resultKey(keywordResult));
-    if (!semanticResult) return keywordResult;
-    semanticByKey.delete(resultKey(keywordResult));
-    return {
-      ...keywordResult,
-      source: 'hybrid' as const,
-      metadata: {
-        ...semanticResult.metadata,
-        ...keywordResult.metadata,
-        semanticScore: semanticResult.score,
-      },
-    };
+  return fuseHybridResults(query, keywordResults, semanticResults, {
+    limit,
+    perKindLimit: Math.max(1, Math.ceil(limit * 0.75)),
   });
-
-  return [...merged, ...semanticByKey.values()];
 }
 
 async function readSearchResponse(response: Response): Promise<SearchResponse> {
@@ -219,8 +203,13 @@ export function useProgressiveSearch({
   ]);
 
   const results = useMemo(
-    () => mergeProgressiveSearchResults(keywordResults, semanticResults),
-    [keywordResults, semanticResults],
+    () => mergeProgressiveSearchResults(
+      keywordResults,
+      semanticResults,
+      normalizedQuery,
+      limit,
+    ),
+    [keywordResults, limit, normalizedQuery, semanticResults],
   );
 
   return {

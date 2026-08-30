@@ -131,4 +131,35 @@ describe('staged search execution', () => {
     expect(execution.results.map((result) => result.id)).toEqual(['keyword-only']);
     expect(execution.branches.semantic).toMatchObject({ resultCount: 0 });
   });
+
+  it('applies the same eligibility filters to both hybrid channels', async () => {
+    mocks.searchFTS.mockResolvedValue([]);
+    mocks.semanticSearch.mockResolvedValue([]);
+
+    const { searchWithBranches } = await import('@/lib/search');
+    await searchWithBranches('deploy', {
+      mode: 'hybrid',
+      source: 'Project Alpha',
+      status: 'todo',
+      excludeDone: true,
+    });
+
+    const expectedFilters = {
+      source: 'Project Alpha',
+      status: 'todo',
+      excludeDone: true,
+    };
+    expect(mocks.searchFTS).toHaveBeenCalledTimes(2);
+    expect(mocks.semanticSearch).toHaveBeenCalledTimes(2);
+    for (const scope of ['tasks', 'notifications']) {
+      expect(mocks.searchFTS).toHaveBeenCalledWith(
+        'deploy',
+        expect.objectContaining({ ...expectedFilters, type: scope }),
+      );
+      expect(mocks.semanticSearch).toHaveBeenCalledWith(
+        'deploy',
+        expect.objectContaining({ ...expectedFilters, type: scope }),
+      );
+    }
+  });
 });

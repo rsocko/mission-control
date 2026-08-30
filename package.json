@@ -22,6 +22,7 @@
     "test:worker-runtime": "npm run build:worker && npm run build:identity-operator && node scripts/smoke-sync-worker-runtime.mjs",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "benchmark:hybrid-search": "tsx scripts/benchmark-hybrid-search.ts",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "db:generate": "drizzle-kit generate",

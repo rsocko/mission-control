@@ -1,13 +1,6 @@
-import { sqlite } from '@/db';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
-import {
-  sqliteCorePersistenceRepositories,
-} from '@/db/persistence/sqlite-core-repositories';
-import { SqliteTransactionRunner } from '@/db/persistence/sqlite-transaction-runner';
-import { SqliteIdeationWorkspaceRepository } from '@/lib/graph-workspace/sqlite-repository';
 
-const sqliteTransactions = new SqliteTransactionRunner(sqlite);
-let selectedCorePersistenceRepositories = sqliteCorePersistenceRepositories;
+let selectedCorePersistenceRepositories: CorePersistenceRepositories | null = null;
 let corePersistenceRegistered = false;
 let corePersistenceAccessed = false;
 
@@ -26,12 +19,8 @@ export function registerCorePersistenceRepositories(
 
 export function getCorePersistenceRepositories(): CorePersistenceRepositories {
   corePersistenceAccessed = true;
+  if (!selectedCorePersistenceRepositories) {
+    throw new Error('Core persistence repositories have not been registered');
+  }
   return selectedCorePersistenceRepositories;
 }
-
-export const persistence = {
-  ideationWorkspaces: new SqliteIdeationWorkspaceRepository(
-    sqlite,
-    sqliteTransactions,
-  ),
-} as const;

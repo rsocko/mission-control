@@ -408,5 +408,31 @@ describe('task dependency reconciliation', () => {
     expect(await db.select().from(taskDependencies).where(
       eq(taskDependencies.id, 'create-delete-race'),
     )).toHaveLength(0);
+
+    await db.insert(taskDependencies).values({
+      id: 'missing-connector-retry',
+      taskId: 'task-1',
+      dependsOnTaskId: 'task-6',
+      type: 'blocks',
+      connectorInstanceId: 'github-1',
+      syncStatus: 'failed',
+      syncAction: 'create',
+      createdAt: '2026-07-30T00:00:00.000Z',
+    });
+    await db.delete(connectorConfigs).where(eq(connectorConfigs.id, 'github-1'));
+    const writesBeforeMissingConnector = addCalls;
+
+    expect(await manager.reconcileTaskDependencies('github-1', connector)).toEqual({
+      imported: 0,
+      removed: 0,
+      pushed: 0,
+      failed: 0,
+    });
+    expect(addCalls).toBe(writesBeforeMissingConnector);
+    expect(await db.select().from(taskDependencies).where(
+      eq(taskDependencies.id, 'missing-connector-retry'),
+    )).toEqual([
+      expect.objectContaining({ syncStatus: 'failed', syncAction: 'create' }),
+    ]);
   });
 });

@@ -31,10 +31,14 @@ import {
   finishGitHubWriteCycle,
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
-  persistExternalIdentityBatch,
-  type GitHubStableIdentityRuntime,
   type GitHubWriteAuthorization,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/github-write-fence';
+import type {
+  GitHubStableIdentityRuntime,
+} from '@/lib/external-identities/stable-identity-runtime';
+import {
+  persistGitHubPrimaryIdentityBatch,
+} from '@/lib/external-identities/primary-identity';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** Maximum number of push retries before marking a task as permanently failed */
@@ -897,10 +901,13 @@ async function persistCreatedGitHubIdentity(
   created: TaskItem,
   runtime?: GitHubStableIdentityRuntime,
 ): Promise<void> {
-  if (!runtime || !created.externalIdentity) return;
+  if (!runtime) return;
   try {
+    if (!created.externalIdentity) {
+      throw new GitHubWriteFenceError('created_identity_evidence_missing');
+    }
     await runtime.assertCurrentMode();
-    persistExternalIdentityBatch([{
+    const [result] = await persistGitHubPrimaryIdentityBatch([{
       target: {
         connectorInstanceId,
         bindingType: 'task',
@@ -909,11 +916,14 @@ async function persistCreatedGitHubIdentity(
       },
       evidence: created.externalIdentity,
     }], runtime.modeSnapshot);
+    if (result?.state !== 'bound') {
+      throw new GitHubWriteFenceError(
+        result?.collisionCategory ?? 'created_identity_binding_failed',
+      );
+    }
   } catch (error) {
-    syncLogger.error(
-      { err: error, connectorId: connectorInstanceId, taskId },
-      'Created GitHub task returned without a usable stable binding; future mutations are fenced',
-    );
+    runtime.markBlocked('created_identity_persistence_failed');
+    throw error;
   }
 }
 

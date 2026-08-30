@@ -15,9 +15,8 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
     },
   })),
 }));
-vi.mock('@/lib/external-identities', () => ({
-  getGitHubIdentityPhase: vi.fn(() => false),
-  persistExternalIdentityBatch: vi.fn(),
+vi.mock('@/lib/external-identities/primary-identity', () => ({
+  persistGitHubPrimaryIdentityBatch: vi.fn(),
 }));
 vi.mock('@/lib/logger', () => ({
   syncLogger: { info: vi.fn(), warn: vi.fn() },

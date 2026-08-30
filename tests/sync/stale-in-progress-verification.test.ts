@@ -118,7 +118,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
     },
     execution: {
       support: {
-        allowsLegacyWorkflow: vi.fn(() => true),
+        allowsLegacyWorkflow: vi.fn(() => false),
         assertConfigSupported: vi.fn(),
         assertConnectorSupported: vi.fn(),
         listConnectorTaskIdentities: vi.fn(async () => []),
@@ -215,6 +215,7 @@ vi.mock('@/lib/connectors', () => ({
 vi.mock('@/lib/external-identities', () => ({
   GITHUB_IDENTITY_MODE: 'stable',
   GitHubStableIdentityRuntime: class {
+    blockedReasonCodes: readonly string[] = [];
     modeSnapshot = {
       connectorInstanceId: 'stale-verify',
       effectiveMode: 'stable',

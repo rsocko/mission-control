@@ -443,5 +443,71 @@ export function describeGitHubDependencyRepositoriesContract(
         'dependency_identity_context_changed',
       );
     });
+
+    it('clears stale identity evidence when a state transition supplies explicit null', async () => {
+      const record = dependencySnapshotRecord({
+        id: 'gen-clear-evidence',
+        cursor: 0,
+        total: 1,
+      });
+      const evidence = {
+        entity: {
+          identity: {
+            provider: 'github',
+            hostKey: 'github.com',
+            entityType: 'issue' as const,
+            stableId: 'I_stale_evidence',
+          },
+          locator: {
+            owner: 'synthetic-owner',
+            repository: 'synthetic-repo',
+            issueNumber: 17,
+          },
+          observationSource: 'graphql' as const,
+          observedAt: NOW,
+        },
+      };
+      expect(await repositories.createGeneration({
+        connectorInstanceId: DEP_CONNECTOR,
+        frozenModeRevision: 1,
+        matchInsert: record,
+        mismatchInsert: {
+          ...record,
+          status: 'partial',
+          phase: 'completed',
+          identityEvidenceFailureReason: 'dependency_identity_context_changed',
+        },
+        items: [{
+          position: 0,
+          sourceId: 'source-with-stale-evidence',
+          verified: false,
+          identityEvidence: evidence,
+          identityEvidenceState: evidenceState('verified'),
+        }],
+        deletionCandidateIds: [],
+      })).toBe(true);
+
+      expect(await repositories.applyReconciliationBatch({
+        fence: fenceOf(record),
+        batchStart: 0,
+        batchEnd: 1,
+        lastSyncedAt: NOW,
+        stagedEdges: [],
+        verifiedUpdates: [{
+          sourceId: 'source-with-stale-evidence',
+          identityEvidence: null,
+          identityEvidenceState: evidenceState('missing'),
+        }],
+      })).toBe(true);
+
+      await expect(repositories.listSnapshotItemsForSourceIds({
+        snapshotId: record.id,
+        sourceIds: ['source-with-stale-evidence'],
+      })).resolves.toEqual([{
+        sourceId: 'source-with-stale-evidence',
+        identityEvidence: null,
+        identityEvidenceState: 'missing',
+      }]);
+    });
   });
 }

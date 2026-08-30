@@ -41,6 +41,7 @@ export async function GET(request: Request) {
       semanticAvailable: status.available,
       semanticState: status.state,
       semanticMetrics: status.semanticMetrics,
+      semanticIndex: status.semanticMetrics?.index ?? null,
       branches: {},
       results: [],
     });
@@ -86,6 +87,7 @@ export async function GET(request: Request) {
     semanticAvailable: statusResult.status.available,
     semanticState: statusResult.status.state,
     semanticMetrics: statusResult.status.semanticMetrics,
+    semanticIndex: statusResult.status.semanticMetrics?.index ?? null,
     branches: execution.branches,
     statusDurationMs: statusResult.durationMs,
     results: execution.results,

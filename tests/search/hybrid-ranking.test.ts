@@ -4,7 +4,7 @@ import type { SearchResult } from '@/lib/search/repository';
 import {
   applyEvaluationFilter,
   SYNTHETIC_HYBRID_EVALUATION,
-} from './fixtures/hybrid-evaluation';
+} from '../../scripts/fixtures/hybrid-evaluation';
 
 function result(type: SearchResult['type'], id: string, title = id): SearchResult {
   return {

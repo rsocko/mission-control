@@ -14,6 +14,7 @@ import type {
 } from '@/lib/semantic-index/embedding-provider';
 import type {
   SemanticAlertSource,
+  SemanticHoustonSummarySource,
   SemanticProjectSource,
   SemanticSourceEntityType,
   SemanticSourceIdPage,
@@ -24,6 +25,7 @@ import type {
   SemanticTagSource,
   SemanticTriageItemSource,
 } from '@/lib/semantic-index/source/contracts';
+import { SEMANTIC_SOURCE_ENTITY_TYPES } from '@/lib/semantic-index/source/contracts';
 import { SemanticIndexService } from '@/lib/semantic-index/service';
 import { getSemanticWorkerConfig, type SemanticWorkerConfig } from '@/lib/semantic-index/config';
 
@@ -54,6 +56,7 @@ export class FakeSemanticSourcePort implements SemanticSourcePort {
   readonly tags = new Map<string, SemanticTagSource>();
   readonly triageItems = new Map<string, SemanticTriageItemSource>();
   readonly alerts = new Map<string, SemanticAlertSource>();
+  readonly houstonSummaries = new Map<string, SemanticHoustonSummarySource>();
   listIdsCalls = 0;
   /** Simulated per-page latency, used to make slice deadlines deterministic. */
   pageDelayMs = 0;
@@ -64,6 +67,10 @@ export class FakeSemanticSourcePort implements SemanticSourcePort {
 
   putAlert(alert: SemanticAlertSource): void {
     this.alerts.set(alert.id, alert);
+  }
+
+  putHoustonSummary(summary: SemanticHoustonSummarySource): void {
+    this.houstonSummaries.set(summary.id, summary);
   }
 
   putProject(project: SemanticProjectSource): void {
@@ -85,6 +92,7 @@ export class FakeSemanticSourcePort implements SemanticSourcePort {
       case 'tag': return this.tags as Map<string, SemanticSourceRecord>;
       case 'triage-item': return this.triageItems as Map<string, SemanticSourceRecord>;
       case 'alert': return this.alerts as Map<string, SemanticSourceRecord>;
+      case 'houston-summary': return this.houstonSummaries as Map<string, SemanticSourceRecord>;
     }
   }
 
@@ -246,7 +254,11 @@ export function createSemanticHarness(options: SemanticHarnessOptions = {}): Sem
     source,
     embeddings,
     service,
-    config: { ...getSemanticWorkerConfig(), ...options.config },
+    config: {
+      ...getSemanticWorkerConfig(),
+      entityTypes: SEMANTIC_SOURCE_ENTITY_TYPES,
+      ...options.config,
+    },
     ids: newId,
     close: () => db.close(),
   };

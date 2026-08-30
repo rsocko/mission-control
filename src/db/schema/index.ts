@@ -268,6 +268,8 @@ export type {
   SemanticRunStatus,
 } from './semantic-index';
 
+export { houstonConversationMemories } from './houston-memory';
+
 // Finance (re-exported from separate file)
 export {
   financeTransactions,

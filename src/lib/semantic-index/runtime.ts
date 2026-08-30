@@ -19,6 +19,7 @@ import { randomUUID } from 'node:crypto';
 import { semanticIndexLogger } from '@/lib/logger';
 import {
   getSemanticWorkerConfig,
+  isSemanticEntityTypeEnabled,
   isSemanticIndexEnabled,
   type SemanticWorkerConfig,
 } from './config';
@@ -295,7 +296,7 @@ async function publishSafely(
   entityType: SemanticSourceEntityType,
   entityId: string,
 ): Promise<SemanticPublishResult> {
-  if (!isSemanticIndexEnabled()) {
+  if (!isSemanticIndexEnabled() || !isSemanticEntityTypeEnabled(entityType)) {
     return { status: 'skipped', reason: 'semantic-search-disabled' };
   }
   try {
@@ -364,6 +365,7 @@ export async function startSemanticIndexWorker(
       embeddings: resolved.embeddings,
       service: resolved.service,
       config: resolved.config,
+      enabledEntityTypes: () => getSemanticWorkerConfig().entityTypes,
     });
     worker.start();
     return worker;

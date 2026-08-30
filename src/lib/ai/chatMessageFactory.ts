@@ -3,6 +3,7 @@ import type { ChatMessage, ChatPart, ToolPart } from '@/lib/ai/chatTypes';
 export type { AITab, ChatMessage, ChatPart, HubProject, ProviderInfo, SidebarResult, ToolPart } from '@/lib/ai/chatTypes';
 
 let chatMessageCache: ChatMessage[] = [];
+let chatConversationId = crypto.randomUUID();
 let chatTaskCounter = 0;
 
 export function getCachedChatMessages() {
@@ -11,6 +12,14 @@ export function getCachedChatMessages() {
 
 export function setCachedChatMessages(messages: ChatMessage[]) {
   chatMessageCache = messages;
+}
+
+export function getCachedChatConversationId(): string {
+  return chatConversationId;
+}
+
+export function setCachedChatConversationId(id: string): void {
+  chatConversationId = id;
 }
 
 export function getChatTaskId(): string {

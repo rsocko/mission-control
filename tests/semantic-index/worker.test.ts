@@ -51,7 +51,7 @@ describe('SemanticIndexWorker', () => {
       source: harness.source,
       embeddings: harness.embeddings,
       service: harness.service,
-      config: { ...getSemanticWorkerConfig(), ...overrides.config },
+      config: { ...harness.config, ...overrides.config },
       isEnabled: overrides.isEnabled ?? (() => true),
       owner: overrides.owner ?? 'worker-under-test',
     });
@@ -94,7 +94,7 @@ describe('SemanticIndexWorker', () => {
           source: unconfigured.source,
           embeddings: unconfigured.embeddings,
           service: unconfigured.service,
-          config: getSemanticWorkerConfig(),
+          config: unconfigured.config,
           isEnabled: () => true,
           owner: 'worker-unconfigured',
         });

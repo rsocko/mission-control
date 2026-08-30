@@ -267,6 +267,8 @@ export {
   semanticIntents,
   semanticRuns,
 } from './semantic-index';
+
+export { houstonConversationMemories } from './houston-memory';
 export type {
   SemanticIndexStatus,
   SemanticSensitivity,

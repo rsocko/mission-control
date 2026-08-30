@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     model: 'gpt-4o-mini',
     embeddingModel: 'text-embedding-3-small',
     semanticSearchEnabled: false,
+    houstonMemoryEnabled: false,
     baseUrl: undefined as string | undefined,
     apiKey: '',
     configured: false,
@@ -61,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.resetModules();
   mocks.resolved.semanticSearchEnabled = false;
+  mocks.resolved.houstonMemoryEnabled = false;
   delete process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED;
   mocks.getSemanticIndexRepository.mockResolvedValue({});
   mocks.getSemanticSourcePort.mockResolvedValue({});
@@ -81,6 +83,13 @@ describe('semantic index feature gate', () => {
     mocks.resolved.semanticSearchEnabled = true;
     const { isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
     expect(isSemanticIndexEnabled()).toBe(true);
+  });
+
+  it('is on when only Houston memory is on and restricts maintenance to Houston summaries', async () => {
+    mocks.resolved.houstonMemoryEnabled = true;
+    const { getSemanticWorkerConfig, isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
+    expect(isSemanticIndexEnabled()).toBe(true);
+    expect(getSemanticWorkerConfig().entityTypes).toEqual(['houston-summary']);
   });
 
   it('honours an explicit worker kill switch even when the feature is on', async () => {
@@ -137,6 +146,15 @@ describe('publish helpers', () => {
       status: 'skipped', reason: 'semantic-search-disabled',
     });
     expect(await runtime.publishSemanticDelete('alert', 'alert-1')).toEqual({
+      status: 'skipped', reason: 'semantic-search-disabled',
+    });
+    expect(mocks.getSemanticIndexRepository).not.toHaveBeenCalled();
+  });
+
+  it('does not publish non-Houston entities when only Houston memory is enabled', async () => {
+    mocks.resolved.houstonMemoryEnabled = true;
+    const runtime = await import('@/lib/semantic-index/runtime');
+    expect(await runtime.publishSemanticUpsert('task', 'task-1')).toEqual({
       status: 'skipped', reason: 'semantic-search-disabled',
     });
     expect(mocks.getSemanticIndexRepository).not.toHaveBeenCalled();

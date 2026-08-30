@@ -26,6 +26,7 @@ import type {
 import { semanticSensitivityRank } from '../contracts';
 import type {
   SemanticAlertSource,
+  SemanticHoustonSummarySource,
   SemanticProjectSource,
   SemanticSourceEntityType,
   SemanticSourceRecord,
@@ -53,12 +54,13 @@ export const TRIAGE_ITEM_PROJECTION_VERSION = 1;
 
 /** Bump when the alert projection's shape or normalization changes. */
 export const ALERT_PROJECTION_VERSION = 2;
+export const HOUSTON_SUMMARY_PROJECTION_VERSION = 1;
 
 /**
  * The index-wide projection version. Must be >= every per-kind constant; the
  * assertion below fails the build the moment a kind is bumped in isolation.
  */
-export const SEMANTIC_PROJECTION_VERSION = 2;
+export const SEMANTIC_PROJECTION_VERSION = 3;
 
 const PER_KIND_PROJECTION_VERSIONS: Readonly<Record<SemanticSourceEntityType, number>> = {
   task: TASK_PROJECTION_VERSION,
@@ -66,6 +68,7 @@ const PER_KIND_PROJECTION_VERSIONS: Readonly<Record<SemanticSourceEntityType, nu
   tag: TAG_PROJECTION_VERSION,
   'triage-item': TRIAGE_ITEM_PROJECTION_VERSION,
   alert: ALERT_PROJECTION_VERSION,
+  'houston-summary': HOUSTON_SUMMARY_PROJECTION_VERSION,
 };
 
 /**
@@ -500,6 +503,71 @@ export function projectAlert(
   };
 }
 
+export function projectHoustonSummary(
+  source: SemanticHoustonSummarySource,
+  options: SemanticProjectionOptions,
+): SemanticIndexDocument {
+  const projectionVersion = options.projectionVersion ?? SEMANTIC_PROJECTION_VERSION;
+  const policySensitivity = options.resolveSensitivity({
+    entityType: 'houston-summary',
+    connectorType: 'houston',
+  });
+  const sensitivity = semanticSensitivityRank(source.sensitivity)
+    < semanticSensitivityRank(policySensitivity)
+    ? source.sensitivity
+    : policySensitivity;
+  const title = normalizeTitleField(source.title);
+  const body = normalizeBoundedBodyField([
+    source.summary,
+    source.decisions.length ? `Decisions: ${source.decisions.join('; ')}` : null,
+    source.commitments.length ? `Commitments: ${source.commitments.join('; ')}` : null,
+  ].filter(Boolean).join('\n'), 1_600);
+  const keywords = normalizeKeywords([
+    ...source.topics,
+    ...source.linkedEntities.map((entity) => entity.label),
+    ...source.linkedEntities.map((entity) => `${entity.type}:${entity.id}`),
+  ]);
+  const metadata = normalizeMetadata({
+    connectorType: 'houston',
+    connectorTypes: 'houston,mission-control',
+    authorizationScope: source.authorizationScope,
+    navigationTarget: `/ai?memory=${encodeURIComponent(source.id)}`,
+    linkedTaskIds: source.linkedEntities
+      .filter((entity) => entity.type === 'task').map((entity) => entity.id).join(','),
+    linkedProjectIds: source.linkedEntities
+      .filter((entity) => entity.type === 'project').map((entity) => entity.id).join(','),
+    linkedTagIds: source.linkedEntities
+      .filter((entity) => entity.type === 'tag').map((entity) => entity.id).join(','),
+  });
+  return finalizeProjection({
+    entityType: 'houston-summary',
+    entityId: source.id,
+    title,
+    body,
+    keywords,
+    metadata,
+    sourceSnapshot: {
+      kind: 'houston-summary',
+      id: source.id,
+      authorizationScope: source.authorizationScope,
+      title: source.title,
+      summary: source.summary,
+      decisions: source.decisions,
+      commitments: source.commitments,
+      topics: source.topics,
+      linkedEntities: source.linkedEntities,
+      sensitivity: source.sensitivity,
+      retainUntil: source.retainUntil,
+      excludedAt: source.excludedAt,
+      updatedAt: source.updatedAt,
+    },
+    sourceUpdatedAt: source.updatedAt,
+    projectionVersion,
+    sensitivity,
+    retainUntil: source.retainUntil,
+  });
+}
+
 // ─── Registry ───────────────────────────────────────────────────────────────
 
 /**
@@ -522,6 +590,8 @@ export function projectSource(
       return projectTriageItem(source, options);
     case 'alert':
       return projectAlert(source, options);
+    case 'houston-summary':
+      return projectHoustonSummary(source, options);
   }
 }
 
@@ -551,5 +621,5 @@ export function buildEmbeddingText(document: SemanticIndexDocument): string {
 }
 
 export function projectionVersionFor(entityType: SemanticEntityType): number | null {
-  return entityType === 'houston-summary' ? null : PER_KIND_PROJECTION_VERSIONS[entityType];
+  return PER_KIND_PROJECTION_VERSIONS[entityType];
 }

@@ -35,6 +35,7 @@ async function main(): Promise<void> {
     { taskReminderScheduler },
     { financeConnectionRecoveryScheduler },
     { startSemanticIndexWorker, stopSemanticIndexWorker },
+    { houstonMemoryRetentionScheduler },
   ] = await Promise.all([
     import('@/lib/sync'),
     import('@/lib/sync/worker'),
@@ -46,6 +47,7 @@ async function main(): Promise<void> {
     import('@/lib/push/task-reminder-scheduler'),
     import('@/lib/connectors/monarch-money/recovery-scheduler'),
     import('@/lib/semantic-index/runtime'),
+    import('@/lib/houston-memory/retention'),
   ]);
 
   assertSupportedWorkerReplicaCount();
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
   // no embedding provider is configured, and `startSemanticIndexWorker` never
   // throws, so it can never keep the sync worker from coming up.
   const semanticIndexWorker = await startSemanticIndexWorker();
+  houstonMemoryRetentionScheduler.start();
   syncLogger.info(
     { started: semanticIndexWorker !== null },
     'Sync worker: semantic index worker initialization completed',
@@ -134,6 +137,7 @@ async function main(): Promise<void> {
       healthSnapshotScheduler.stop();
       taskReminderScheduler.stop();
       financeConnectionRecoveryScheduler.stop();
+      houstonMemoryRetentionScheduler.stop();
       await Promise.all([
         syncScheduler.stopAll(),
         worker.stop(),

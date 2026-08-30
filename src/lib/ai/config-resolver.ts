@@ -125,6 +125,17 @@ function resolveSemanticSearchEnabled(saved: SavedAIProviderConfig) {
   return /^(1|true|yes|on)$/i.test(process.env.AI_SEMANTIC_SEARCH_ENABLED?.trim() ?? '');
 }
 
+function resolveHoustonMemoryEnabled(saved: SavedAIProviderConfig) {
+  if (typeof saved.houstonMemoryEnabled === 'boolean') return saved.houstonMemoryEnabled;
+  return /^(1|true|yes|on)$/i.test(process.env.AI_HOUSTON_MEMORY_ENABLED?.trim() ?? '');
+}
+
+function resolveHoustonMemoryRetentionDays(saved: SavedAIProviderConfig) {
+  const value = saved.houstonMemoryRetentionDays
+    ?? Number(process.env.AI_HOUSTON_MEMORY_RETENTION_DAYS);
+  return Number.isSafeInteger(value) ? Math.min(Math.max(value, 1), 365) : 90;
+}
+
 export function invalidateAIConfigCache() {
   cachedConfig = null;
   cachedRoutingPolicy = null;
@@ -191,6 +202,8 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
     embeddingApiKey,
     embeddingConfigured,
     semanticSearchEnabled: resolveSemanticSearchEnabled(saved),
+    houstonMemoryEnabled: resolveHoustonMemoryEnabled(saved),
+    houstonMemoryRetentionDays: resolveHoustonMemoryRetentionDays(saved),
     baseUrl,
     apiKey,
     configured,

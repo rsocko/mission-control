@@ -135,6 +135,8 @@ describe('Semantic search — unit tests (mocked)', () => {
       embeddingApiKey: undefined,
       embeddingConfigured: true,
       semanticSearchEnabled: false,
+      houstonMemoryEnabled: false,
+      houstonMemoryRetentionDays: 90,
     });
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(7) }] }), {

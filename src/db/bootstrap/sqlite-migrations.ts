@@ -4,11 +4,11 @@ import path from 'path';
 import { dbLogger } from '@/lib/logger';
 
 /**
- * Apply Drizzle migrations one at a time, outside of Drizzle's single-transaction
- * wrapper. Drizzle's migrate() wraps every pending migration in one transaction,
- * so one compatibility error can roll back earlier migrations that created tables
- * required by later safety nets. Expected schema-level idempotency errors are
- * skipped; an unexpected statement failure is logged, left unmarked, and stops
+ * Apply Drizzle migrations one at a time, each in its own transaction. Drizzle's
+ * migrate() wraps every pending migration in one transaction, so one compatibility
+ * error can roll back earlier migrations that created tables required by later
+ * safety nets. Expected schema-level idempotency errors are skipped; an unexpected
+ * statement failure rolls back that migration, leaves it unmarked, and stops
  * subsequent migrations.
  */
 export function _runMigrationsIndividually(
@@ -56,40 +56,46 @@ export function _runMigrationsIndividually(
     let skipped = false;
     let failed = false;
     try {
-      for (const statement of statements) {
-        try {
-          sqlite.exec(statement);
-        } catch (statementError: unknown) {
-          const message = statementError instanceof Error
-            ? statementError.message
-            : String(statementError);
-          if (
-            message.includes('duplicate column name')
-            || message.includes('already exists')
-            || (entry.idx < 33 && message.includes('no such column'))
-            || (entry.idx < 33 && message.includes('no such table'))
-            || (
-              entry.tag === '0038_enforce_task_source_identity'
-              && message.includes('no such table: task_triage_log')
-            )
-            || (
-              // `task_triage_log` is owned by the task-activity safety net, which
-              // runs after migrations, so a fresh database has no table to alter.
-              entry.tag === '0104_quick_sort_undo'
-              && message.includes('no such table: task_triage_log')
-            )
-            || (
-              entry.tag === '0060_optimize_list_queries'
-              && message.includes('no such table')
-            )
-            || message.includes('DROP COLUMN')
-          ) {
-            skipped = true;
-            continue;
+      sqlite.transaction(() => {
+        for (const statement of statements) {
+          try {
+            sqlite.exec(statement);
+          } catch (statementError: unknown) {
+            const message = statementError instanceof Error
+              ? statementError.message
+              : String(statementError);
+            if (
+              message.includes('duplicate column name')
+              || message.includes('already exists')
+              || (entry.idx < 33 && message.includes('no such column'))
+              || (entry.idx < 33 && message.includes('no such table'))
+              || (
+                entry.tag === '0038_enforce_task_source_identity'
+                && message.includes('no such table: task_triage_log')
+              )
+              || (
+                // `task_triage_log` is owned by the task-activity safety net, which
+                // runs after migrations, so a fresh database has no table to alter.
+                entry.tag === '0104_quick_sort_undo'
+                && message.includes('no such table: task_triage_log')
+              )
+              || (
+                entry.tag === '0060_optimize_list_queries'
+                && message.includes('no such table')
+              )
+              || message.includes('DROP COLUMN')
+            ) {
+              skipped = true;
+              continue;
+            }
+            throw statementError;
           }
-          throw statementError;
         }
-      }
+
+        sqlite.prepare(
+          'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+        ).run(hash, entry.when ?? Date.now());
+      })();
     } catch (error) {
       dbLogger.error(
         { err: error, tag },
@@ -99,10 +105,6 @@ export function _runMigrationsIndividually(
     }
 
     if (failed) break;
-
-    sqlite.prepare(
-      'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
-    ).run(hash, entry.when ?? Date.now());
 
     if (skipped) {
       dbLogger.info(

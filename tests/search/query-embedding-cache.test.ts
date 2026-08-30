@@ -5,6 +5,9 @@ const vector = {
   embedding: [1, 2, 3],
   provider: 'ollama',
   model: 'nomic-embed-text',
+  dimensions: 3,
+  fallbackOccurred: false,
+  correlationId: 'test-correlation',
 };
 
 describe('QueryEmbeddingCache', () => {

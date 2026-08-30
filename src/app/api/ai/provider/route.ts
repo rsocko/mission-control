@@ -12,6 +12,10 @@ import {
   invalidateAIConfigCache,
 } from '@/lib/ai/config-resolver';
 import {
+  getEmbeddingOperationalStatus,
+  testEmbeddingConnection,
+} from '@/lib/search/semantic';
+import {
   AIProviderEndpointValidationError,
   AIRoutingPolicyValidationError,
   extractBifrostRoutingMetadata,
@@ -30,7 +34,10 @@ const REDACTED_API_KEY = '********';
 const providerConfigSchema = z.object({
   provider: z.enum(['openai', 'azure', 'ollama', 'bifrost']).default('openai'),
   model: z.string().trim().min(1, 'Model is required').max(200),
+  embeddingProvider: z.enum(['openai', 'azure', 'ollama', 'bifrost']).optional(),
   embeddingModel: z.string().trim().max(200).default(''),
+  embeddingBaseUrl: z.union([z.literal(''), z.url()]).optional(),
+  embeddingApiKey: z.string().max(10_000).optional(),
   semanticSearchEnabled: z.boolean().default(false),
   baseUrl: z.union([z.literal(''), z.url()]).default(''),
   apiKey: z.string().max(10_000).optional(),
@@ -44,14 +51,14 @@ const providerConfigSchema = z.object({
     });
   }
   if (
-    config.provider === 'bifrost'
+    (config.embeddingProvider ?? config.provider) === 'bifrost'
     && config.embeddingModel
     && !parseBifrostModelId(config.embeddingModel)
   ) {
     context.addIssue({
       code: 'custom',
       path: ['embeddingModel'],
-      message: 'Bifrost embedding model must include a supported provider prefix, such as ollama/nomic-embed-text:latest',
+      message: 'Bifrost embedding model must include a supported provider prefix, such as azure/text-embedding-3-small',
     });
   }
 });
@@ -66,7 +73,10 @@ async function loadSavedProviderConfig() {
     ? row.value as {
         provider?: string;
         model?: string;
+        embeddingProvider?: string;
         embeddingModel?: string;
+        embeddingBaseUrl?: string;
+        embeddingApiKey?: string;
         semanticSearchEnabled?: boolean;
         baseUrl?: string;
         apiKey?: string;
@@ -79,6 +89,15 @@ function getOperationalStatus() {
   const bifrostRoute = resolved.provider === 'bifrost'
     ? parseBifrostModelId(resolved.model)?.route
     : undefined;
+  const embeddingRoute = resolved.embeddingProvider === 'bifrost'
+    ? parseBifrostModelId(resolved.embeddingModel)?.route
+    : resolved.embeddingProvider === 'azure'
+      ? 'azure-private'
+      : resolved.embeddingProvider === 'ollama'
+        ? 'ollama'
+        : resolved.embeddingProvider === 'openai'
+          ? 'openai'
+          : undefined;
   const routeNames = new Set(
     Object.values(getAIRoutingPolicy().policies)
       .flatMap((policy) => policy.allowedRoutes),
@@ -87,10 +106,19 @@ function getOperationalStatus() {
   return {
     providerHealth: [...routeNames].map((route) => ({
       route,
-      status: route === resolved.provider
-        || (resolved.provider === 'azure' && route === 'azure-private')
-        || route === bifrostRoute
-        ? (resolved.configured ? 'configured' : 'unavailable')
+      status: (
+        (
+          route === resolved.provider
+          || (resolved.provider === 'azure' && route === 'azure-private')
+          || route === bifrostRoute
+        ) && resolved.configured
+      ) || (route === embeddingRoute && resolved.embeddingConfigured)
+        ? 'configured'
+        : route === resolved.provider
+          || (resolved.provider === 'azure' && route === 'azure-private')
+          || route === bifrostRoute
+          || route === embeddingRoute
+          ? 'unavailable'
         : 'unknown',
     })),
     entitlement: {
@@ -113,6 +141,7 @@ export async function GET() {
     const info = getProviderInfo();
     const resolved = getResolvedAIConfig();
     const savedConfig = await loadSavedProviderConfig();
+    const embeddingStatus = await getEmbeddingOperationalStatus();
 
     return Response.json({
       ...info,
@@ -120,11 +149,17 @@ export async function GET() {
       savedConfig: {
         provider: savedConfig.provider,
         model: savedConfig.model,
+        embeddingProvider: savedConfig.embeddingProvider || resolved.embeddingProvider,
         embeddingModel: savedConfig.embeddingModel || resolved.embeddingModel,
+        embeddingBaseUrl: savedConfig.embeddingBaseUrl || resolved.embeddingBaseUrl,
         semanticSearchEnabled: savedConfig.semanticSearchEnabled ?? resolved.semanticSearchEnabled,
         baseUrl: savedConfig.baseUrl,
         hasApiKey: Boolean(savedConfig.apiKey || resolved.apiKey),
+        embeddingHasApiKey: Boolean(
+          savedConfig.embeddingApiKey || resolved.embeddingApiKey,
+        ),
       },
+      embeddingStatus,
       routingPolicy: getAIRoutingPolicy(),
       ...getOperationalStatus(),
     });
@@ -150,18 +185,61 @@ export async function POST(request: Request) {
     const apiKey = submittedApiKey === REDACTED_API_KEY || parsed.data.apiKey === undefined
       ? (sameCredentialTarget ? current.apiKey || '' : '')
       : submittedApiKey || '';
+    const embeddingProvider = parsed.data.embeddingProvider
+      ?? current.embeddingProvider
+      ?? parsed.data.provider;
+    const legacySharedEmbeddingTarget = parsed.data.embeddingProvider === undefined
+      && current.embeddingProvider === undefined
+      && embeddingProvider === parsed.data.provider;
+    const embeddingBaseUrl = parsed.data.embeddingBaseUrl
+      ?? current.embeddingBaseUrl
+      ?? (legacySharedEmbeddingTarget ? parsed.data.baseUrl : '');
+    const submittedEmbeddingApiKey = parsed.data.embeddingApiKey?.trim();
+    const embeddingTargetFieldsOmitted = parsed.data.embeddingProvider === undefined
+      && parsed.data.embeddingBaseUrl === undefined;
+    const resolvedCurrent = getResolvedAIConfig();
+    const sameEmbeddingCredentialTarget = resolvedCurrent.embeddingProvider === embeddingProvider
+      && (resolvedCurrent.embeddingBaseUrl || '') === embeddingBaseUrl;
+    const legacyCurrentSharedTarget = current.embeddingProvider === undefined
+      && current.provider === embeddingProvider
+      && (current.baseUrl || '') === embeddingBaseUrl;
+    const embeddingApiKey = submittedEmbeddingApiKey === REDACTED_API_KEY
+      || parsed.data.embeddingApiKey === undefined
+      ? (
+          embeddingTargetFieldsOmitted
+            ? current.embeddingApiKey
+              || (legacyCurrentSharedTarget ? current.apiKey || '' : '')
+            : sameEmbeddingCredentialTarget
+            ? current.embeddingApiKey || (legacyCurrentSharedTarget ? current.apiKey || '' : '')
+            : legacyCurrentSharedTarget
+              ? current.apiKey || ''
+            : legacySharedEmbeddingTarget
+              ? apiKey
+              : ''
+        )
+      : submittedEmbeddingApiKey || '';
     const routingPolicy = parsed.data.routingPolicy
       ? validateAIRoutingPolicy(parsed.data.routingPolicy)
       : getAIRoutingPolicy();
     const config = {
       provider: parsed.data.provider,
       model: parsed.data.model,
+      embeddingProvider,
       embeddingModel: parsed.data.embeddingModel,
+      embeddingBaseUrl,
+      embeddingApiKey,
       semanticSearchEnabled: parsed.data.semanticSearchEnabled,
       baseUrl: parsed.data.baseUrl,
       apiKey,
     };
     validateProviderEndpoint(config.provider, config.baseUrl || undefined, Boolean(config.apiKey));
+    if (config.embeddingBaseUrl || config.semanticSearchEnabled) {
+      validateProviderEndpoint(
+        config.embeddingProvider,
+        config.embeddingBaseUrl || undefined,
+        Boolean(config.embeddingApiKey),
+      );
+    }
     const now = new Date().toISOString();
 
     db.transaction((tx) => {
@@ -186,7 +264,11 @@ export async function POST(request: Request) {
     invalidateAIConfigCache();
     return Response.json({
       success: true,
-      config: { ...config, apiKey: apiKey ? REDACTED_API_KEY : '' },
+      config: {
+        ...config,
+        apiKey: apiKey ? REDACTED_API_KEY : '',
+        embeddingApiKey: embeddingApiKey ? REDACTED_API_KEY : '',
+      },
       routingPolicy,
     });
   } catch (error) {
@@ -200,8 +282,14 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT() {
+export async function PUT(request?: Request) {
   try {
+    if (
+      request
+      && new URL(request.url).searchParams.get('target') === 'embedding'
+    ) {
+      return Response.json(await testEmbeddingConnection());
+    }
     const info = getProviderInfo();
     const resolved = getResolvedAIConfig();
     const { provider, model, baseUrl, apiKey } = resolved;

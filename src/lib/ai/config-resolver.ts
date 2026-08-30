@@ -12,6 +12,8 @@ const ROUTING_POLICY_SETTINGS_KEY = 'ai_routing_policy';
 const CONFIG_CACHE_TTL = 60_000;
 const DEFAULT_PROVIDER = 'openai';
 const DEFAULT_MODEL = 'gpt-4o-mini';
+export const DEFAULT_EMBEDDING_PROVIDER = 'bifrost';
+export const DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL = 'azure/text-embedding-3-small';
 const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434/v1';
 
 let cachedConfig: ResolvedAIConfig | null = null;
@@ -52,25 +54,41 @@ function loadSavedAIProviderConfigSync(): SavedAIProviderConfig {
   }
 }
 
-function resolveProviderBaseUrl(provider: string, saved: SavedAIProviderConfig) {
+function resolveProviderBaseUrl(
+  provider: string,
+  saved: Pick<SavedAIProviderConfig, 'baseUrl'>,
+  allowGenericEnvironment = true,
+) {
   if (provider === 'bifrost') {
-    return saved.baseUrl || process.env.BIFROST_BASE_URL || process.env.AI_BASE_URL;
+    return saved.baseUrl
+      || process.env.BIFROST_BASE_URL
+      || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
   }
 
   if (provider === 'azure') {
-    return saved.baseUrl || process.env.AZURE_OPENAI_ENDPOINT || process.env.AI_BASE_URL;
+    return saved.baseUrl
+      || process.env.AZURE_OPENAI_ENDPOINT
+      || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
   }
 
   if (provider === 'ollama') {
     return saved.baseUrl || process.env.AI_BASE_URL || DEFAULT_OLLAMA_BASE_URL;
   }
 
-  return saved.baseUrl || process.env.AI_BASE_URL;
+  return saved.baseUrl || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
 }
 
-function resolveProviderApiKey(provider: string, saved: SavedAIProviderConfig) {
+function resolveProviderApiKey(
+  provider: string,
+  saved: Pick<SavedAIProviderConfig, 'baseUrl' | 'apiKey'>,
+  allowGenericEnvironment = true,
+) {
   const savedBaseUrl = saved.baseUrl?.replace(/\/+$/, '');
-  const environmentBaseUrl = resolveProviderBaseUrl(provider, {})?.replace(/\/+$/, '');
+  const environmentBaseUrl = resolveProviderBaseUrl(
+    provider,
+    {},
+    allowGenericEnvironment,
+  )?.replace(/\/+$/, '');
   const mayUseEnvironmentCredential = !savedBaseUrl
     || savedBaseUrl === environmentBaseUrl
     || (provider === 'openai' && savedBaseUrl === 'https://api.openai.com/v1');
@@ -96,7 +114,7 @@ function resolveProviderApiKey(provider: string, saved: SavedAIProviderConfig) {
 
 function getDefaultEmbeddingModel(provider: string) {
   if (provider === 'ollama') return 'nomic-embed-text';
-  if (provider === 'bifrost') return 'ollama/nomic-embed-text:latest';
+  if (provider === 'bifrost') return DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL;
   return 'text-embedding-3-small';
 }
 
@@ -122,19 +140,56 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   const saved = loadSavedAIProviderConfigSync();
   const provider = saved.provider || process.env.AI_PROVIDER || DEFAULT_PROVIDER;
   const model = saved.model || process.env.AI_MODEL || DEFAULT_MODEL;
+  const legacyEmbeddingProvider = saved.provider || process.env.AI_PROVIDER;
+  const embeddingProvider = saved.embeddingProvider
+    || process.env.AI_EMBEDDING_PROVIDER
+    || legacyEmbeddingProvider
+    || DEFAULT_EMBEDDING_PROVIDER;
   const embeddingModel = saved.embeddingModel
     || process.env.AI_EMBEDDING_MODEL
-    || getDefaultEmbeddingModel(provider);
+    || getDefaultEmbeddingModel(embeddingProvider);
   const baseUrl = resolveProviderBaseUrl(provider, saved);
   const apiKey = resolveProviderApiKey(provider, saved);
+  const sharesCompletionTarget = !saved.embeddingProvider
+    && !process.env.AI_EMBEDDING_PROVIDER
+    && embeddingProvider === provider;
+  const embeddingTarget = {
+    baseUrl: saved.embeddingBaseUrl
+      || process.env.AI_EMBEDDING_BASE_URL
+      || (sharesCompletionTarget ? saved.baseUrl : undefined),
+    apiKey: saved.embeddingApiKey
+      || process.env.AI_EMBEDDING_API_KEY
+      || (sharesCompletionTarget ? saved.apiKey : undefined),
+  };
+  const embeddingBaseUrl = resolveProviderBaseUrl(
+    embeddingProvider,
+    embeddingTarget,
+    sharesCompletionTarget,
+  );
+  const embeddingApiKey = resolveProviderApiKey(
+    embeddingProvider,
+    embeddingTarget,
+    sharesCompletionTarget,
+  );
   const configured = provider === 'ollama'
     ? Boolean(baseUrl)
     : Boolean(apiKey || baseUrl);
+  const embeddingConfigured = embeddingProvider === 'ollama'
+    ? Boolean(embeddingBaseUrl)
+    : embeddingProvider === 'azure'
+      ? Boolean(embeddingBaseUrl && embeddingApiKey)
+      : embeddingProvider === 'bifrost'
+        ? Boolean(embeddingBaseUrl)
+        : Boolean(embeddingApiKey || embeddingBaseUrl);
 
   cachedConfig = {
     provider,
     model,
+    embeddingProvider,
     embeddingModel,
+    embeddingBaseUrl,
+    embeddingApiKey,
+    embeddingConfigured,
     semanticSearchEnabled: resolveSemanticSearchEnabled(saved),
     baseUrl,
     apiKey,

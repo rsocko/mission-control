@@ -157,4 +157,47 @@ describe('embedding index rebuild routing', () => {
     expect(callsAfterRouteFailure).toBe(2);
     expect(fetchSpy).toHaveBeenCalledTimes(callsAfterRouteFailure);
   });
+
+  it('builds an active index when entities arrive after an empty warmup', async () => {
+    const { warmUpEmbeddings } = await import('@/lib/search/semantic');
+    await warmUpEmbeddings();
+    const sqlite = await seedTask('arrived-later');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ data: [{ embedding: embedding(1) }] }), { status: 200 }),
+    );
+
+    await warmUpEmbeddings();
+
+    expect(sqlite.prepare(`
+      SELECT provider, model, dimensions
+      FROM search_embedding_index_state
+      WHERE id = 'active'
+    `).get()).toEqual({
+      provider: 'ollama',
+      model: 'nomic-embed-text:latest',
+      dimensions: 3,
+    });
+  });
+
+  it('does not reuse a cached query vector after resolved-route cutover', async () => {
+    await seedTask('cache-cutover');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(
+      new Response(JSON.stringify({ data: [{ embedding: embedding(1) }] }), { status: 200 }),
+    ));
+    const { rebuildEmbeddingIndex, semanticSearch } = await import('@/lib/search/semantic');
+
+    await rebuildEmbeddingIndex();
+    await semanticSearch('Task cache-cutover');
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    routeOutcomes = [
+      { provider: 'ollama', model: 'fallback-embed-model', fallbackOccurred: true },
+    ];
+    await rebuildEmbeddingIndex();
+    routeOutcomes = [
+      { provider: 'ollama', model: 'fallback-embed-model', fallbackOccurred: true },
+    ];
+
+    await semanticSearch('Task cache-cutover');
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
 });

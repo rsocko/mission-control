@@ -7,6 +7,10 @@ import {
 } from '@/lib/ai/provider-factory';
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import type { AIRequestContext } from '@/lib/ai/types';
+import {
+  extractBifrostRoutingMetadata,
+  parseBifrostModelId,
+} from '@/lib/ai/sensitivity-policy';
 import { aiLogger } from '@/lib/logger';
 import type {
   SearchResult,
@@ -99,6 +103,18 @@ const ROUTE_RETRY_MAX_MS = positiveInteger(
   process.env.MC_SEMANTIC_ROUTE_RETRY_MAX_MS,
   5 * 60_000,
 );
+const EMBEDDING_REQUEST_TIMEOUT_MS = positiveInteger(
+  process.env.MC_EMBEDDING_REQUEST_TIMEOUT_MS,
+  20_000,
+);
+const EMBEDDING_REQUEST_MAX_RETRIES = Math.min(
+  positiveInteger(process.env.MC_EMBEDDING_REQUEST_MAX_RETRIES, 2),
+  5,
+);
+const EMBEDDING_REQUEST_RETRY_BASE_MS = positiveInteger(
+  process.env.MC_EMBEDDING_REQUEST_RETRY_BASE_MS,
+  100,
+);
 
 const searchMetrics = {
   searches: 0,
@@ -147,101 +163,149 @@ function getAzureEmbeddingEndpoint(baseUrl: string, deployment: string) {
 
 async function getEmbeddingConfig(sources: string[] = []): Promise<EmbeddingConfig | null> {
   const resolved = getResolvedAIConfig();
-  const provider = resolved.provider;
+  const provider = resolved.embeddingProvider ?? resolved.provider;
   const model = resolved.embeddingModel;
+  const baseUrl = resolved.embeddingBaseUrl ?? resolved.baseUrl;
+  const apiKey = resolved.embeddingApiKey ?? resolved.apiKey;
+  if (!(resolved.embeddingConfigured ?? resolved.configured)) {
+    return null;
+  }
   const context = getAIRequestContext('semantic-embedding', { sources });
   const routingHeaders = getAIRoutingHeaders(
     context,
     provider,
-    resolved.baseUrl,
-    Boolean(resolved.apiKey),
+    baseUrl,
+    Boolean(apiKey),
     model,
   );
 
   if (provider === 'azure') {
-    if (!resolved.baseUrl || !resolved.apiKey) {
+    if (!baseUrl || !apiKey) {
       return null;
     }
 
     return {
       provider,
-      baseUrl: resolved.baseUrl,
-      apiKey: resolved.apiKey,
+      baseUrl,
+      apiKey,
       model,
-      endpoint: getAzureEmbeddingEndpoint(resolved.baseUrl, model),
+      endpoint: getAzureEmbeddingEndpoint(baseUrl, model),
       headers: {
         'Content-Type': 'application/json',
-        'api-key': resolved.apiKey,
+        'api-key': apiKey,
         ...routingHeaders,
       },
       context,
     };
   }
 
-  if (!resolved.configured) {
-    return null;
-  }
-
   return {
     provider,
-    baseUrl: resolved.baseUrl,
-    apiKey: resolved.apiKey,
+    baseUrl,
+    apiKey,
     model,
-    endpoint: resolved.baseUrl
-      ? `${resolved.baseUrl.replace(/\/$/, '')}/embeddings`
+    endpoint: baseUrl
+      ? `${baseUrl.replace(/\/$/, '')}/embeddings`
       : 'https://api.openai.com/v1/embeddings',
     headers: {
       'Content-Type': 'application/json',
       ...routingHeaders,
-      ...(resolved.apiKey ? { Authorization: `Bearer ${resolved.apiKey}` } : {}),
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     context,
   };
 }
 
-export async function getSemanticSearchStatus() {
+export async function getEmbeddingOperationalStatus() {
   const resolved = getResolvedAIConfig();
-  if (!resolved.semanticSearchEnabled) {
-    return {
-      available: false as const,
-      state: 'disabled' as const,
-      note: 'Semantic search enrichment is turned off in AI settings.',
-    };
+  let config: EmbeddingConfig | null;
+  try {
+    config = await getEmbeddingConfig();
+  } catch (error) {
+    if (error instanceof AIRoutingDeniedError) {
+      return {
+        available: false as const,
+        state: 'denied' as const,
+        note: 'The routing policy does not permit this embedding route.',
+        configured: {
+          provider: resolved.embeddingProvider,
+          model: resolved.embeddingModel,
+        },
+      };
+    }
+    throw error;
   }
-  const config = await getEmbeddingConfig();
   if (!config) {
     return {
       available: false as const,
       state: 'unconfigured' as const,
-      note: 'Semantic search is unavailable until an AI embedding provider is configured.',
+      note: 'An embedding route endpoint or credential is required.',
+      configured: {
+        provider: resolved.embeddingProvider,
+        model: resolved.embeddingModel,
+      },
     };
   }
 
   await ensureEmbeddingsTable();
-  const route = getConfiguredEmbeddingRoute(config);
+  const active = getActiveEmbeddingIdentity(config);
   const compatible = sqlite.prepare(`
     SELECT COUNT(*) AS count
     FROM search_embeddings
-    WHERE provider = ? AND model = ? AND source_sort_at IS NOT NULL
-  `).get(route.provider, route.model) as { count: number };
+    WHERE provider = ?
+      AND model = ?
+      AND dimensions = ?
+      AND source_sort_at IS NOT NULL
+  `).get(
+    active?.provider ?? '',
+    active?.model ?? '',
+    active?.dimensions ?? 0,
+  ) as { count: number };
   const entities = sqlite.prepare(`
     SELECT
       (SELECT COUNT(*) FROM tasks)
       + (SELECT COUNT(*) FROM notifications) AS count
   `).get() as { count: number };
-  if (entities.count > 0 && compatible.count === 0) {
+  if (!active || (entities.count > 0 && compatible.count === 0)) {
     return {
       available: false as const,
       state: 'not-ready' as const,
-      note: 'Semantic search is enabled, but compatible entity embeddings are not ready yet.',
+      note: 'A compatible embedding index is not active yet. Save the route and run a rebuild.',
       indexedCount: 0,
+      configured: { provider: config.provider, model: config.model },
+      resolved: active
+        ? {
+            provider: active.provider,
+            model: active.model,
+            dimensions: active.dimensions,
+          }
+        : null,
     };
   }
   return {
     available: true as const,
     state: 'ready' as const,
     indexedCount: compatible.count,
+    configured: { provider: config.provider, model: config.model },
+    resolved: {
+      provider: active.provider,
+      model: active.model,
+      dimensions: active.dimensions,
+    },
   };
+}
+
+export async function getSemanticSearchStatus() {
+  const status = await getEmbeddingOperationalStatus();
+  if (!getResolvedAIConfig().semanticSearchEnabled) {
+    return {
+      ...status,
+      available: false as const,
+      state: 'disabled' as const,
+      note: 'Semantic search enrichment is turned off in AI settings.',
+    };
+  }
+  return status;
 }
 
 async function ensureEmbeddingsTable() {
@@ -258,7 +322,21 @@ async function ensureEmbeddingsTable() {
       updated_at TEXT NOT NULL,
       provider TEXT,
       model TEXT,
+      configured_provider TEXT,
+      configured_model TEXT,
+      dimensions INTEGER,
+      fallback_occurred INTEGER NOT NULL DEFAULT 0,
+      correlation_id TEXT,
       source_sort_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS search_embedding_index_state (
+      id TEXT PRIMARY KEY CHECK (id = 'active'),
+      configured_provider TEXT NOT NULL,
+      configured_model TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL CHECK (dimensions > 0),
+      updated_at TEXT NOT NULL
     );
   `);
   const columns = sqlite.prepare('PRAGMA table_info(search_embeddings)').all() as Array<{
@@ -271,6 +349,21 @@ async function ensureEmbeddingsTable() {
   if (!columnNames.has('model')) {
     sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN model TEXT');
   }
+  if (!columnNames.has('configured_provider')) {
+    sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN configured_provider TEXT');
+  }
+  if (!columnNames.has('configured_model')) {
+    sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN configured_model TEXT');
+  }
+  if (!columnNames.has('dimensions')) {
+    sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN dimensions INTEGER');
+  }
+  if (!columnNames.has('fallback_occurred')) {
+    sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN fallback_occurred INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!columnNames.has('correlation_id')) {
+    sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN correlation_id TEXT');
+  }
   const sourceSortAdded = !columnNames.has('source_sort_at');
   if (sourceSortAdded) {
     sqlite.exec('ALTER TABLE search_embeddings ADD COLUMN source_sort_at TEXT');
@@ -281,20 +374,21 @@ async function ensureEmbeddingsTable() {
     DROP INDEX IF EXISTS search_embeddings_tasks_idx;
     DROP INDEX IF EXISTS search_embeddings_alerts_idx;
     CREATE INDEX search_embeddings_entity_idx
-      ON search_embeddings(entity_type, entity_id, provider, model);
+      ON search_embeddings(entity_type, entity_id, provider, model, dimensions);
     CREATE INDEX search_embeddings_search_idx
       ON search_embeddings(
         provider,
         model,
+        dimensions,
         source_sort_at DESC,
         entity_type,
         entity_id
       );
     CREATE INDEX search_embeddings_tasks_idx
-      ON search_embeddings(provider, model, source_sort_at DESC, entity_id)
+      ON search_embeddings(provider, model, dimensions, source_sort_at DESC, entity_id)
       WHERE entity_type = 'task';
     CREATE INDEX search_embeddings_alerts_idx
-      ON search_embeddings(provider, model, source_sort_at DESC, entity_id)
+      ON search_embeddings(provider, model, dimensions, source_sort_at DESC, entity_id)
       WHERE entity_type = 'alert';
     DROP TRIGGER IF EXISTS search_embeddings_update_task;
     DROP TRIGGER IF EXISTS search_embeddings_touch_task;
@@ -351,6 +445,9 @@ async function ensureEmbeddingsTable() {
       SELECT 1 FROM notifications WHERE notifications.id = search_embeddings.entity_id
     ));
     UPDATE search_embeddings
+    SET dimensions = json_array_length(embedding)
+    WHERE dimensions IS NULL;
+    UPDATE search_embeddings
     SET source_sort_at = NULL
     WHERE entity_type = 'task' AND EXISTS (
       SELECT 1 FROM tasks
@@ -381,6 +478,45 @@ async function ensureEmbeddingsTable() {
     // Existing notification rows cannot prove that their text still matches.
     sqlite.prepare("DELETE FROM search_embeddings WHERE entity_type = 'alert'").run();
   }
+  const hasActiveIdentity = sqlite.prepare(`
+    SELECT 1 FROM search_embedding_index_state WHERE id = 'active'
+  `).get();
+  if (!hasActiveIdentity) {
+    const resolved = getResolvedAIConfig();
+    const configuredProvider = resolved.embeddingProvider ?? resolved.provider;
+    const configuredModel = resolved.embeddingModel;
+    const configuredRoute = configuredProvider === 'bifrost'
+      ? parseBifrostModelId(configuredModel)
+      : { provider: configuredProvider, model: configuredModel };
+    const identity = configuredRoute
+      ? sqlite.prepare(`
+      SELECT provider, model, dimensions
+      FROM search_embeddings
+      WHERE provider = ? AND model = ? AND dimensions > 0
+      GROUP BY provider, model, dimensions
+      ORDER BY COUNT(*) DESC, dimensions
+      LIMIT 1
+    `).get(
+        configuredRoute.provider,
+        configuredRoute.model,
+      ) as { provider: string; model: string; dimensions: number } | undefined
+      : undefined;
+    if (identity) {
+      sqlite.prepare(`
+        INSERT INTO search_embedding_index_state (
+          id, configured_provider, configured_model, provider, model, dimensions,
+          updated_at
+        ) VALUES ('active', ?, ?, ?, ?, ?, ?)
+      `).run(
+        configuredProvider,
+        configuredModel,
+        identity.provider,
+        identity.model,
+        identity.dimensions,
+        new Date().toISOString(),
+      );
+    }
+  }
 
   embeddingsTableReady = true;
 }
@@ -390,8 +526,9 @@ function getEntityEmbeddingId(
   id: string,
   provider: string,
   model: string,
+  dimensions: number,
 ) {
-  return JSON.stringify([type, id, provider, model]);
+  return JSON.stringify([type, id, provider, model, dimensions]);
 }
 
 export function buildTaskEmbeddingText(task: Pick<SearchableTaskRecord, 'title' | 'description'>) {
@@ -448,17 +585,54 @@ export async function generateEmbedding(
   return (await requestEmbedding(text, config))?.embedding ?? [];
 }
 
+export async function testEmbeddingConnection() {
+  const config = await getEmbeddingConfig();
+  if (!config) {
+    return {
+      success: false as const,
+      error: 'Embedding route is not configured',
+    };
+  }
+  const startedAt = Date.now();
+  const generated = await requestEmbedding('Mission Control embedding connection test', config);
+  if (!generated) {
+    return {
+      success: false as const,
+      error: 'Embedding provider did not return a valid vector',
+      latencyMs: Date.now() - startedAt,
+    };
+  }
+  return {
+    success: true as const,
+    latencyMs: Date.now() - startedAt,
+    configured: { provider: config.provider, model: config.model },
+    resolved: {
+      provider: generated.provider,
+      model: generated.model,
+      dimensions: generated.dimensions,
+      fallbackOccurred: generated.fallbackOccurred,
+    },
+  };
+}
+
 interface GeneratedEmbedding {
   embedding: number[];
   provider: string;
   model: string;
+  dimensions: number;
+  fallbackOccurred: boolean;
+  correlationId: string;
 }
 
 function normalizeQueryForCache(query: string) {
   return query.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-function getQueryEmbeddingCacheKey(query: string, config: EmbeddingConfig) {
+function getQueryEmbeddingCacheKey(
+  query: string,
+  config: EmbeddingConfig,
+  active: ActiveEmbeddingIdentity,
+) {
   const route = getConfiguredEmbeddingRoute(config);
   return JSON.stringify([
     normalizeQueryForCache(query),
@@ -469,15 +643,19 @@ function getQueryEmbeddingCacheKey(query: string, config: EmbeddingConfig) {
     route.provider,
     route.model,
     config.endpoint,
+    active.provider,
+    active.model,
+    active.dimensions,
   ]);
 }
 
 async function getQueryEmbedding(
   query: string,
   config: EmbeddingConfig,
+  active: ActiveEmbeddingIdentity,
 ): Promise<QueryEmbedding | null> {
   return queryEmbeddingCache.getOrCreate(
-    getQueryEmbeddingCacheKey(query, config),
+    getQueryEmbeddingCacheKey(query, config, active),
     () => requestEmbedding(query, config),
   );
 }
@@ -487,9 +665,43 @@ interface EmbeddingRoute {
   model: string;
 }
 
+interface ActiveEmbeddingIdentity extends EmbeddingRoute {
+  dimensions: number;
+  configuredProvider: string;
+  configuredModel: string;
+}
+
+function getActiveEmbeddingIdentity(
+  config?: Pick<EmbeddingConfig, 'provider' | 'model'>,
+): ActiveEmbeddingIdentity | null {
+  const identity = sqlite.prepare(`
+    SELECT
+      provider,
+      model,
+      dimensions,
+      configured_provider AS configuredProvider,
+      configured_model AS configuredModel
+    FROM search_embedding_index_state
+    WHERE id = 'active'
+  `).get() as ActiveEmbeddingIdentity | undefined;
+  if (
+    !identity
+    || (config && (
+      identity.configuredProvider !== config.provider
+      || identity.configuredModel !== config.model
+    ))
+  ) {
+    return null;
+  }
+  return identity;
+}
+
 function getConfiguredEmbeddingRoute(config: EmbeddingConfig): EmbeddingRoute {
   const outcome = getAIRouteOutcome(config.context, {
     modelId: config.model,
+  }, undefined, {
+    provider: config.provider,
+    model: config.model,
   });
   return {
     provider: outcome.provider,
@@ -530,64 +742,86 @@ async function requestEmbedding(
   text: string,
   config: EmbeddingConfig,
 ): Promise<GeneratedEmbedding | null> {
-  try {
-    const response = await fetch(config.endpoint, {
-      method: 'POST',
-      headers: config.headers,
-      body: JSON.stringify(
-        config.provider === 'azure'
-          ? { input: text }
-          : { model: config.model, input: text },
-      ),
-      signal: AbortSignal.timeout(20000),
-    });
+  for (let attempt = 0; attempt <= EMBEDDING_REQUEST_MAX_RETRIES; attempt++) {
+    try {
+      const response = await fetch(config.endpoint, {
+        method: 'POST',
+        headers: config.headers,
+        body: JSON.stringify(
+          config.provider === 'azure'
+            ? { input: text }
+            : { model: config.model, input: text },
+        ),
+        signal: AbortSignal.timeout(EMBEDDING_REQUEST_TIMEOUT_MS),
+      });
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!response.ok) {
+        aiLogger.warn({
+          featureId: config.context.featureId,
+          sensitivity: config.context.sensitivity,
+          correlationId: config.context.correlationId,
+          status: response.status,
+          attempt,
+        }, 'AI embedding request failed');
+        if (!retryable || attempt === EMBEDDING_REQUEST_MAX_RETRIES) return null;
+      } else {
+        const payload = await response.json() as {
+          data?: Array<{ embedding?: number[] }>;
+          extra_fields?: unknown;
+        };
+        const embedding = payload.data?.[0]?.embedding;
+        if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+          return null;
+        }
+        const outcome = getAIRouteOutcome(
+          config.context,
+          {
+            modelId: config.model,
+            headers: Object.fromEntries(response.headers.entries()),
+          },
+          config.provider === 'bifrost'
+            ? extractBifrostRoutingMetadata(payload)
+            : undefined,
+          { provider: config.provider, model: config.model },
+        );
+        aiLogger.info({
+          featureId: config.context.featureId,
+          sensitivity: config.context.sensitivity,
+          allowedRoutes: config.context.allowedRoutes,
+          correlationId: config.context.correlationId,
+          provider: outcome.provider,
+          model: outcome.model,
+          dimensions: embedding.length,
+          fallbackOccurred: outcome.fallbackOccurred,
+          status: response.status,
+        }, 'AI embedding request completed');
 
-    if (!response.ok) {
+        return {
+          embedding,
+          provider: outcome.provider,
+          model: outcome.model,
+          dimensions: embedding.length,
+          fallbackOccurred: outcome.fallbackOccurred,
+          correlationId: config.context.correlationId,
+        };
+      }
+    } catch (error) {
+      if (error instanceof AIRoutingDeniedError) {
+        throw error;
+      }
       aiLogger.warn({
+        err: error,
         featureId: config.context.featureId,
-        sensitivity: config.context.sensitivity,
         correlationId: config.context.correlationId,
-        status: response.status,
+        attempt,
       }, 'AI embedding request failed');
-      return null;
+      if (attempt === EMBEDDING_REQUEST_MAX_RETRIES) return null;
     }
-
-    const outcome = getAIRouteOutcome(config.context, {
-      modelId: config.model,
-      headers: Object.fromEntries(response.headers.entries()),
+    await new Promise((resolve) => {
+      setTimeout(resolve, EMBEDDING_REQUEST_RETRY_BASE_MS * (2 ** attempt));
     });
-    aiLogger.info({
-      featureId: config.context.featureId,
-      sensitivity: config.context.sensitivity,
-      allowedRoutes: config.context.allowedRoutes,
-      correlationId: config.context.correlationId,
-      provider: outcome.provider,
-      model: outcome.model,
-      fallbackOccurred: outcome.fallbackOccurred,
-      status: response.status,
-    }, 'AI embedding request completed');
-
-    const payload = await response.json() as {
-      data?: Array<{ embedding?: number[] }>;
-    };
-    const embedding = payload.data?.[0]?.embedding;
-
-    if (!embedding || !Array.isArray(embedding)) {
-      return null;
-    }
-
-    return {
-      embedding,
-      provider: outcome.provider,
-      model: outcome.model,
-    };
-  } catch (error) {
-    if (error instanceof AIRoutingDeniedError) {
-      throw error;
-    }
-    aiLogger.warn({ err: error }, 'AI embedding request failed');
-    return null;
   }
+  return null;
 }
 
 export async function indexEntityEmbedding(
@@ -624,19 +858,26 @@ export async function indexEntityEmbedding(
     id,
     generated.provider,
     generated.model,
+    generated.dimensions,
   );
   sqlite
     .prepare(`
       INSERT INTO search_embeddings (
         id, entity_type, entity_id, embedding, updated_at, provider, model,
-        source_sort_at
+        configured_provider, configured_model, dimensions, fallback_occurred,
+        correlation_id, source_sort_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         embedding = excluded.embedding,
         updated_at = excluded.updated_at,
         provider = excluded.provider,
         model = excluded.model,
+        configured_provider = excluded.configured_provider,
+        configured_model = excluded.configured_model,
+        dimensions = excluded.dimensions,
+        fallback_occurred = excluded.fallback_occurred,
+        correlation_id = excluded.correlation_id,
         source_sort_at = excluded.source_sort_at
     `)
     .run(
@@ -647,6 +888,11 @@ export async function indexEntityEmbedding(
       new Date().toISOString(),
       generated.provider,
       generated.model,
+      config.provider,
+      config.model,
+      generated.dimensions,
+      generated.fallbackOccurred ? 1 : 0,
+      generated.correlationId,
       sourceSnapshot.sortAt,
     );
   sqlite.prepare(`
@@ -655,8 +901,16 @@ export async function indexEntityEmbedding(
       AND entity_id = ?
       AND provider = ?
       AND model = ?
+      AND dimensions = ?
       AND id <> ?
-  `).run(type, id, generated.provider, generated.model, embeddingId);
+  `).run(
+    type,
+    id,
+    generated.provider,
+    generated.model,
+    generated.dimensions,
+    embeddingId,
+  );
   embeddingCache.delete(embeddingId);
   return true;
 }
@@ -672,16 +926,21 @@ async function maybeSeedEmbeddings() {
     return;
   }
   const route = getConfiguredEmbeddingRoute(config);
-  const signature = getEmbeddingSeedSignature(config, route);
+  const active = getActiveEmbeddingIdentity(config);
+  const signature = getEmbeddingSeedSignature(config, active ?? route);
   if (embeddingsSeedSignature === signature) return;
 
   const [{ count: compatibleIndexedCount }] = sqlite
     .prepare(`
       SELECT COUNT(*) AS count
       FROM search_embeddings
-      WHERE provider = ? AND model = ?
+      WHERE provider = ? AND model = ? AND dimensions = ?
     `)
-    .all(route.provider, route.model) as Array<{ count: number }>;
+    .all(
+      active?.provider ?? '',
+      active?.model ?? '',
+      active?.dimensions ?? 0,
+    ) as Array<{ count: number }>;
   const [{ count: taskCount }] = sqlite
     .prepare('SELECT COUNT(*) AS count FROM tasks')
     .all() as Array<{ count: number }>;
@@ -705,7 +964,9 @@ async function maybeSeedEmbeddings() {
     }
   }
 
-  embeddingsSeedSignature = signature;
+  if (taskCount + notificationCount > 0) {
+    embeddingsSeedSignature = signature;
+  }
 }
 
 export async function rebuildEmbeddingIndex() {
@@ -732,7 +993,7 @@ async function stageEntityEmbedding(
   sourceBody: string | null,
   sourceSortAt: string,
   rebuildConfig: Pick<EmbeddingConfig, 'provider' | 'model'>,
-  rebuildRoute: { current: EmbeddingRoute | null },
+  rebuildRoute: { current: (EmbeddingRoute & { dimensions: number }) | null },
 ): Promise<boolean> {
   const config = await getEmbeddingConfig(sources);
   if (
@@ -748,10 +1009,12 @@ async function stageEntityEmbedding(
     rebuildRoute.current = {
       provider: generated.provider,
       model: generated.model,
+      dimensions: generated.dimensions,
     };
   } else if (
     generated.provider !== rebuildRoute.current.provider
     || generated.model !== rebuildRoute.current.model
+    || generated.dimensions !== rebuildRoute.current.dimensions
   ) {
     throw new Error('Embedding route changed during rebuild');
   }
@@ -759,16 +1022,28 @@ async function stageEntityEmbedding(
   sqlite.prepare(`
     INSERT INTO search_embeddings_rebuild (
       id, entity_type, entity_id, embedding, updated_at, provider, model,
-      source_title, source_body, source_sort_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      configured_provider, configured_model, dimensions, fallback_occurred,
+      correlation_id, source_title, source_body, source_sort_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    getEntityEmbeddingId(type, id, generated.provider, generated.model),
+    getEntityEmbeddingId(
+      type,
+      id,
+      generated.provider,
+      generated.model,
+      generated.dimensions,
+    ),
     type,
     id,
     JSON.stringify(generated.embedding),
     new Date().toISOString(),
     generated.provider,
     generated.model,
+    config.provider,
+    config.model,
+    generated.dimensions,
+    generated.fallbackOccurred ? 1 : 0,
+    generated.correlationId,
     sourceTitle,
     sourceBody ?? '',
     sourceSortAt,
@@ -781,8 +1056,10 @@ async function performEmbeddingIndexRebuild() {
 
   const config = await getEmbeddingConfig();
   if (!config) return;
-  const configuredRoute = getConfiguredEmbeddingRoute(config);
-  const rebuildRoute: { current: EmbeddingRoute | null } = { current: null };
+  getConfiguredEmbeddingRoute(config);
+  const rebuildRoute: {
+    current: (EmbeddingRoute & { dimensions: number }) | null;
+  } = { current: null };
 
   const BATCH_CONCURRENCY = 5;
   const PAGE_SIZE = 100;
@@ -807,6 +1084,11 @@ async function performEmbeddingIndexRebuild() {
       updated_at TEXT NOT NULL,
       provider TEXT NOT NULL,
       model TEXT NOT NULL,
+      configured_provider TEXT NOT NULL,
+      configured_model TEXT NOT NULL,
+      dimensions INTEGER NOT NULL,
+      fallback_occurred INTEGER NOT NULL,
+      correlation_id TEXT NOT NULL,
       source_title TEXT NOT NULL,
       source_body TEXT NOT NULL,
       source_sort_at TEXT NOT NULL
@@ -904,16 +1186,31 @@ async function performEmbeddingIndexRebuild() {
       lastNotificationId = notificationRows[notificationRows.length - 1].id;
     }
 
+    if (!rebuildRoute.current) {
+      const { count } = sqlite.prepare(`
+        SELECT
+          (SELECT COUNT(*) FROM tasks)
+          + (SELECT COUNT(*) FROM notifications) AS count
+      `).get() as { count: number };
+      if (count === 0) {
+        return;
+      }
+    }
+    const committedRoute = rebuildRoute.current;
+    if (!committedRoute) {
+      throw new Error('Embedding index rebuild produced no vectors');
+    }
     sqlite.exec('BEGIN IMMEDIATE');
     try {
-      const committedRoute = rebuildRoute.current ?? configuredRoute;
       sqlite.prepare(`
-        DELETE FROM search_embeddings WHERE provider = ? AND model = ?
-      `).run(committedRoute.provider, committedRoute.model);
+        DELETE FROM search_embeddings
+        WHERE provider = ? AND model = ? AND dimensions = ?
+      `).run(committedRoute.provider, committedRoute.model, committedRoute.dimensions);
       sqlite.prepare(`
         INSERT INTO search_embeddings (
           id, entity_type, entity_id, embedding, updated_at, provider, model,
-          source_sort_at
+          configured_provider, configured_model, dimensions, fallback_occurred,
+          correlation_id, source_sort_at
         )
         SELECT
           id,
@@ -923,6 +1220,11 @@ async function performEmbeddingIndexRebuild() {
           updated_at,
           provider,
           model,
+          configured_provider,
+          configured_model,
+          dimensions,
+          fallback_occurred,
+          correlation_id,
           source_sort_at
         FROM search_embeddings_rebuild
         WHERE (
@@ -945,6 +1247,26 @@ async function performEmbeddingIndexRebuild() {
           )
         )
       `).run();
+      sqlite.prepare(`
+        INSERT INTO search_embedding_index_state (
+          id, configured_provider, configured_model, provider, model, dimensions,
+          updated_at
+        ) VALUES ('active', ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          configured_provider = excluded.configured_provider,
+          configured_model = excluded.configured_model,
+          provider = excluded.provider,
+          model = excluded.model,
+          dimensions = excluded.dimensions,
+          updated_at = excluded.updated_at
+      `).run(
+        config.provider,
+        config.model,
+        committedRoute.provider,
+        committedRoute.model,
+        committedRoute.dimensions,
+        new Date().toISOString(),
+      );
       sqlite.exec('COMMIT');
     } catch (error) {
       sqlite.exec('ROLLBACK');
@@ -952,7 +1274,7 @@ async function performEmbeddingIndexRebuild() {
     }
     embeddingsSeedSignature = getEmbeddingSeedSignature(
       config,
-      rebuildRoute.current ?? configuredRoute,
+      committedRoute,
     );
   } finally {
     sqlite.exec('DROP TABLE IF EXISTS search_embeddings_rebuild');
@@ -971,6 +1293,7 @@ interface IndexedEmbeddingMetadata {
   updatedAt: string;
   provider: string;
   model: string;
+  dimensions: number;
 }
 
 interface IndexedEmbeddingRow extends IndexedEmbeddingMetadata {
@@ -1017,7 +1340,7 @@ function getCachedEmbedding(row: IndexedEmbeddingRow): EmbeddingCacheEntry | nul
 }
 
 function getCandidateMetadata(
-  config: Pick<EmbeddingConfig, 'provider' | 'model'>,
+  config: Pick<GeneratedEmbedding, 'provider' | 'model' | 'dimensions'>,
   type: SearchScope,
   filters: SearchFilters = {},
 ): IndexedEmbeddingMetadata[] {
@@ -1028,7 +1351,8 @@ function getCandidateMetadata(
       e.entity_id AS entityId,
       e.updated_at AS updatedAt,
       e.provider,
-      e.model
+      e.model,
+      e.dimensions
     FROM search_embeddings e
     LEFT JOIN tasks t
       ON e.entity_type = 'task' AND t.id = e.entity_id
@@ -1036,6 +1360,7 @@ function getCandidateMetadata(
       ON e.entity_type = 'alert' AND n.id = e.entity_id
     WHERE e.provider = ?
       AND e.model = ?
+      AND e.dimensions = ?
       AND e.source_sort_at IS NOT NULL
   `;
   const filterClauses: string[] = [];
@@ -1065,6 +1390,7 @@ function getCandidateMetadata(
     `).all(
       config.provider,
       config.model,
+      config.dimensions,
       ...filterParams,
       SEARCH_MAX_CANDIDATES,
     ) as IndexedEmbeddingMetadata[];
@@ -1080,13 +1406,14 @@ function getCandidateMetadata(
   `).all(
     config.provider,
     config.model,
+    config.dimensions,
     ...filterParams,
     SEARCH_MAX_CANDIDATES,
   ) as IndexedEmbeddingMetadata[];
 }
 
 function scanCandidateEmbeddings(
-  config: Pick<EmbeddingConfig, 'provider' | 'model'>,
+  config: Pick<GeneratedEmbedding, 'provider' | 'model' | 'dimensions'>,
   type: SearchScope,
   visit: (entry: EmbeddingCacheEntry) => void,
   filters: SearchFilters = {},
@@ -1122,7 +1449,8 @@ function scanCandidateEmbeddings(
           embedding,
           updated_at AS updatedAt,
           provider,
-          model
+          model,
+          dimensions
         FROM search_embeddings
         WHERE id IN (${placeholders})
       `).all(...missingIds) as IndexedEmbeddingRow[];
@@ -1215,6 +1543,14 @@ export async function findSimilarTaskEmbeddings(
       neighbors: [],
     };
   }
+  const active = getActiveEmbeddingIdentity(config);
+  if (!active) {
+    return {
+      status: 'incompatible',
+      note: 'The configured embedding route does not have an active compatible index.',
+      neighbors: [],
+    };
+  }
   const sourceRow = sqlite.prepare(`
     SELECT
       id,
@@ -1223,15 +1559,22 @@ export async function findSimilarTaskEmbeddings(
       embedding,
       updated_at AS updatedAt,
       provider,
-      model
+      model,
+      dimensions
     FROM search_embeddings
     WHERE entity_type = 'task'
       AND entity_id = ?
       AND provider = ?
       AND model = ?
+      AND dimensions = ?
     ORDER BY updated_at DESC
     LIMIT 1
-  `).get(taskId, config.provider, config.model) as IndexedEmbeddingRow | undefined;
+  `).get(
+    taskId,
+    active.provider,
+    active.model,
+    active.dimensions,
+  ) as IndexedEmbeddingRow | undefined;
   if (!sourceRow) {
     const incompatible = sqlite.prepare(`
       SELECT 1
@@ -1276,7 +1619,7 @@ export async function findSimilarTaskEmbeddings(
   const limit = Math.min(Math.max(Math.trunc(options.limit ?? 10), 1), 25);
   const minScore = Math.min(Math.max(options.minScore ?? SIMILARITY_THRESHOLD, 0), 1);
   const ranked: Array<{ candidate: EmbeddingCacheEntry; score: number }> = [];
-  const candidates = scanCandidateEmbeddings(config, 'tasks', (candidate) => {
+  const candidates = scanCandidateEmbeddings(active, 'tasks', (candidate) => {
     if (
       candidate.entityId === taskId
       || candidate.embedding.length !== source.embedding.length
@@ -1301,8 +1644,8 @@ export async function findSimilarTaskEmbeddings(
   if (!ranked.length) {
     return {
       status: 'available',
-      provider: config.provider,
-      model: config.model,
+      provider: active.provider,
+      model: active.model,
       sourceUpdatedAt: source.updatedAt,
       neighbors: [],
     };
@@ -1314,8 +1657,8 @@ export async function findSimilarTaskEmbeddings(
   }));
   return {
     status: 'available',
-    provider: config.provider,
-    model: config.model,
+    provider: active.provider,
+    model: active.model,
     sourceUpdatedAt: source.updatedAt,
     neighbors,
   };
@@ -1342,8 +1685,19 @@ export async function semanticSearch(
     return [];
   }
 
-  const generatedQuery = await getQueryEmbedding(normalizedQuery, config);
+  const active = getActiveEmbeddingIdentity(config);
+  if (!active) {
+    return [];
+  }
+  const generatedQuery = await getQueryEmbedding(normalizedQuery, config, active);
   if (!generatedQuery) {
+    return [];
+  }
+  if (
+    active.provider !== generatedQuery.provider
+    || active.model !== generatedQuery.model
+    || active.dimensions !== generatedQuery.dimensions
+  ) {
     return [];
   }
   const queryEmbedding = generatedQuery.embedding;

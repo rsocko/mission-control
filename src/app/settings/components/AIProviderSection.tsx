@@ -75,7 +75,7 @@ const DEFAULT_EMBEDDING_MODELS: Record<AIProviderValue, string> = {
   openai: 'text-embedding-3-small',
   azure: 'text-embedding-3-small',
   ollama: 'nomic-embed-text',
-  bifrost: 'ollama/nomic-embed-text:latest',
+  bifrost: 'azure/text-embedding-3-small',
 };
 
 const DEFAULT_ROUTING_POLICY: RoutingPolicy = {
@@ -133,14 +133,29 @@ function AIProviderSection() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; latencyMs?: number; error?: string; model?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    target: 'completion' | 'embedding';
+    success: boolean;
+    latencyMs?: number;
+    error?: string;
+    model?: string;
+    resolved?: {
+      provider: string;
+      model: string;
+      dimensions: number;
+      fallbackOccurred: boolean;
+    };
+  } | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const [provider, setProvider] = useState<AIProviderValue>('openai');
   const [model, setModel] = useState('gpt-4o-mini');
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
-  const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODELS.openai);
+  const [embeddingProvider, setEmbeddingProvider] = useState<AIProviderValue>('bifrost');
+  const [embeddingModel, setEmbeddingModel] = useState(DEFAULT_EMBEDDING_MODELS.bifrost);
+  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('');
+  const [embeddingApiKey, setEmbeddingApiKey] = useState('');
   const [semanticSearchEnabled, setSemanticSearchEnabled] = useState(false);
   const [configured, setConfigured] = useState(false);
   const [activeProvider, setActiveProvider] = useState('openai');
@@ -153,6 +168,13 @@ function AIProviderSection() {
   const [providerHealth, setProviderHealth] = useState<Array<{ route: string; status: string }>>([]);
   const [entitlement, setEntitlement] = useState<{ status: string; detail: string } | null>(null);
   const [quota, setQuota] = useState<{ status: string; detail: string } | null>(null);
+  const [embeddingStatus, setEmbeddingStatus] = useState<{
+    state: string;
+    indexedCount?: number;
+    configured?: { provider: string; model: string };
+    resolved?: { provider: string; model: string; dimensions: number } | null;
+    note?: string;
+  } | null>(null);
 
   const refreshModels = useCallback(async (nextProvider: AIProviderValue, nextBaseUrl: string, silent = false) => {
     if (!silent) {
@@ -209,12 +231,19 @@ function AIProviderSection() {
     setModel(nextModel);
     setBaseUrl(nextBaseUrl);
     setApiKey(nextApiKey);
-    setEmbeddingModel(savedConfig.embeddingModel || DEFAULT_EMBEDDING_MODELS[nextProvider]);
+    const nextEmbeddingProvider = (savedConfig.embeddingProvider || 'bifrost') as AIProviderValue;
+    setEmbeddingProvider(nextEmbeddingProvider);
+    setEmbeddingModel(
+      savedConfig.embeddingModel || DEFAULT_EMBEDDING_MODELS[nextEmbeddingProvider],
+    );
+    setEmbeddingBaseUrl(savedConfig.embeddingBaseUrl || '');
+    setEmbeddingApiKey(savedConfig.embeddingHasApiKey ? '********' : '');
     setSemanticSearchEnabled(Boolean(savedConfig.semanticSearchEnabled));
     setRoutingPolicy(data.routingPolicy || DEFAULT_ROUTING_POLICY);
     setProviderHealth(Array.isArray(data.providerHealth) ? data.providerHealth : []);
     setEntitlement(data.entitlement || null);
     setQuota(data.quota || null);
+    setEmbeddingStatus(data.embeddingStatus || null);
     await refreshModels(nextProvider, nextBaseUrl, true);
   }, [refreshModels]);
 
@@ -236,7 +265,10 @@ function AIProviderSection() {
         body: JSON.stringify({
           provider,
           model,
+          embeddingProvider,
           embeddingModel,
+          embeddingBaseUrl,
+          embeddingApiKey,
           semanticSearchEnabled,
           baseUrl,
           apiKey,
@@ -259,15 +291,20 @@ function AIProviderSection() {
     }
   }
 
-  async function handleTest() {
+  async function handleTest(target: 'completion' | 'embedding') {
     setTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch('/api/ai/provider', { method: 'PUT' });
+      const suffix = target === 'embedding' ? '?target=embedding' : '';
+      const res = await fetch(`/api/ai/provider${suffix}`, { method: 'PUT' });
       const data = await res.json();
-      setTestResult(data);
+      setTestResult({ ...data, target });
     } catch {
-      setTestResult({ success: false, error: 'Request failed' });
+      setTestResult({
+        target,
+        success: false,
+        error: 'The connection test could not reach Mission Control. Try again.',
+      });
     }
     setTesting(false);
     setTimeout(() => setTestResult(null), 10000);
@@ -389,6 +426,12 @@ function AIProviderSection() {
 
       {/* Config Form */}
       <motion.div variants={fadeSlideUp} className="bg-[var(--surface-1)] border border-[var(--border)] rounded-xl p-5 space-y-5">
+        <div>
+          <h3 className="text-sm font-semibold text-[var(--text-primary)]">Completion route</h3>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Used for chat, planning, classification, and generated suggestions.
+          </p>
+        </div>
         {/* Provider Selection */}
         <div>
           <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 block">Provider</label>
@@ -402,7 +445,6 @@ function AIProviderSection() {
                   if (p.value !== provider) {
                     setApiKey('');
                     setModel(STATIC_AI_MODELS[p.value][0].value);
-                    setEmbeddingModel(DEFAULT_EMBEDDING_MODELS[p.value]);
                     nextBaseUrl = '';
                     setBaseUrl(nextBaseUrl);
                   }
@@ -507,25 +549,46 @@ function AIProviderSection() {
           </div>
         )}
 
-        <div className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-4">
-          <label className="flex cursor-pointer items-start justify-between gap-4">
-            <span className="min-w-0">
-              <span className="block text-sm font-medium text-[var(--text-secondary)]">
-                Semantic search enrichment
-              </span>
-              <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
-                Add meaning-based matches after keyword results. Off by default; queries are not stored.
-              </span>
-            </span>
-            <input
-              type="checkbox"
-              checked={semanticSearchEnabled}
-              onChange={(event) => setSemanticSearchEnabled(event.target.checked)}
-              className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--border-strong)]"
-            />
-          </label>
-
-          {semanticSearchEnabled && (
+        <div className="space-y-4 border-t border-[var(--border)] pt-5">
+          <div>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Embedding route</h3>
+            <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
+              Independent from completions. Bifrost to Azure OpenAI is the recommended default.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label
+                htmlFor="ai-embedding-provider"
+                className="mb-1.5 block text-xs font-semibold uppercase text-[var(--text-tertiary)]"
+              >
+                Provider
+              </label>
+              <Select
+                value={embeddingProvider}
+                onValueChange={(value) => {
+                  const nextProvider = value as AIProviderValue;
+                  setEmbeddingProvider(nextProvider);
+                  setEmbeddingModel(DEFAULT_EMBEDDING_MODELS[nextProvider]);
+                  setEmbeddingBaseUrl('');
+                  setEmbeddingApiKey('');
+                }}
+              >
+                <SelectTrigger
+                  id="ai-embedding-provider"
+                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {AI_PROVIDERS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <label
                 htmlFor="ai-embedding-model"
@@ -540,16 +603,93 @@ function AIProviderSection() {
                 onChange={(event) => setEmbeddingModel(event.target.value)}
                 required
                 maxLength={200}
-                placeholder={DEFAULT_EMBEDDING_MODELS[provider]}
-                className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none font-mono"
+                placeholder={DEFAULT_EMBEDDING_MODELS[embeddingProvider]}
+                className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none font-mono"
               />
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                {provider === 'bifrost'
-                  ? 'Use a provider-qualified Bifrost ID, such as ollama/nomic-embed-text:latest.'
-                  : 'Separate from the completion model. Existing entity embeddings remain stored when this is off.'}
+                {embeddingProvider === 'bifrost'
+                  ? 'Use a provider-qualified ID, such as azure/text-embedding-3-small.'
+                  : 'Use the embedding deployment or model ID exposed by this provider.'}
               </p>
             </div>
-          )}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label htmlFor="ai-embedding-base-url" className="mb-1.5 block text-xs font-semibold uppercase text-[var(--text-tertiary)]">
+                Base URL
+              </label>
+              <input
+                id="ai-embedding-base-url"
+                type="url"
+                value={embeddingBaseUrl}
+                onChange={(event) => setEmbeddingBaseUrl(event.target.value)}
+                placeholder={embeddingProvider === 'ollama'
+                  ? 'http://localhost:11434/v1'
+                  : embeddingProvider === 'bifrost'
+                    ? 'https://bifrost.example.com/v1'
+                    : 'Provider endpoint'}
+                className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none font-mono"
+              />
+            </div>
+            {embeddingProvider !== 'ollama' && (
+              <div>
+                <label htmlFor="ai-embedding-api-key" className="mb-1.5 block text-xs font-semibold uppercase text-[var(--text-tertiary)]">
+                  API key
+                </label>
+                <input
+                  id="ai-embedding-api-key"
+                  type="password"
+                  value={embeddingApiKey}
+                  onChange={(event) => setEmbeddingApiKey(event.target.value)}
+                  placeholder={embeddingProvider === 'bifrost'
+                    ? 'Bifrost virtual key (optional)'
+                    : 'Provider API key'}
+                  className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none font-mono"
+                />
+              </div>
+            )}
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium text-[var(--text-secondary)]">Index status</span>
+              <span className="capitalize text-[var(--text-muted)]">{embeddingStatus?.state || 'unknown'}</span>
+            </div>
+            <p className="mt-1 break-words text-[var(--text-muted)]">
+              Configured: <span className="font-mono">{embeddingStatus?.configured
+                ? `${embeddingStatus.configured.provider}/${embeddingStatus.configured.model}`
+                : `${embeddingProvider}/${embeddingModel}`}</span>
+            </p>
+            {embeddingStatus?.resolved && (
+              <p className="mt-1 break-words text-[var(--text-muted)]">
+                Active: <span className="font-mono">
+                  {embeddingStatus.resolved.provider}/{embeddingStatus.resolved.model}
+                  {' · '}{embeddingStatus.resolved.dimensions} dimensions
+                </span>
+                {typeof embeddingStatus.indexedCount === 'number'
+                  ? ` · ${embeddingStatus.indexedCount} indexed`
+                  : ''}
+              </p>
+            )}
+            {embeddingStatus?.note && (
+              <p className="mt-1 text-[var(--text-muted)]">{embeddingStatus.note}</p>
+            )}
+          </div>
+          <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-4">
+            <span className="min-w-0">
+              <span className="block text-sm font-medium text-[var(--text-secondary)]">
+                Semantic search enrichment
+              </span>
+              <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
+                Add meaning-based matches after keyword results. Existing vectors remain stored when disabled.
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={semanticSearchEnabled}
+              onChange={(event) => setSemanticSearchEnabled(event.target.checked)}
+              className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--border-strong)]"
+            />
+          </label>
         </div>
       </motion.div>
 
@@ -630,7 +770,7 @@ function AIProviderSection() {
       </motion.div>
 
       {/* Actions */}
-      <motion.div variants={fadeSlideUp} className="flex items-center gap-3">
+      <motion.div variants={fadeSlideUp} className="flex flex-wrap items-center gap-3">
         <motion.button
           onClick={handleSave}
           disabled={saving}
@@ -642,13 +782,23 @@ function AIProviderSection() {
         </motion.button>
 
         <motion.button
-          onClick={handleTest}
+          onClick={() => handleTest('completion')}
           disabled={testing}
           whileTap={{ scale: 0.97 }}
           className="px-4 py-2 text-sm font-medium rounded-lg bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-secondary)] border border-[var(--border)] flex items-center gap-2 disabled:opacity-50"
         >
           {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
-          {testing ? 'Testing...' : 'Test Connection'}
+          {testing ? 'Testing...' : 'Test Completion'}
+        </motion.button>
+
+        <motion.button
+          onClick={() => handleTest('embedding')}
+          disabled={testing}
+          whileTap={{ scale: 0.97 }}
+          className="px-4 py-2 text-sm font-medium rounded-lg bg-[var(--surface-2)] hover:bg-[var(--surface-3)] text-[var(--text-secondary)] border border-[var(--border)] flex items-center gap-2 disabled:opacity-50"
+        >
+          {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
+          {testing ? 'Testing...' : 'Test Embedding'}
         </motion.button>
 
         {saved && (
@@ -684,12 +834,16 @@ function AIProviderSection() {
                 <XCircle size={16} className="text-red-400" />
               )}
               <span className={`text-sm font-medium ${testResult.success ? 'text-emerald-300' : 'text-red-300'}`}>
-                {testResult.success ? 'Connection Successful' : 'Connection Failed'}
+                {testResult.success
+                  ? `${testResult.target === 'embedding' ? 'Embedding' : 'Completion'} connection successful`
+                  : `${testResult.target === 'embedding' ? 'Embedding' : 'Completion'} connection failed`}
               </span>
             </div>
             <p className="text-xs text-[var(--text-muted)] mt-1 ml-6">
               {testResult.success
-                ? `Model "${testResult.model}" responded in ${testResult.latencyMs}ms`
+                ? testResult.target === 'embedding' && testResult.resolved
+                  ? `${testResult.resolved.provider}/${testResult.resolved.model} returned ${testResult.resolved.dimensions} dimensions in ${testResult.latencyMs}ms${testResult.resolved.fallbackOccurred ? ' via fallback' : ''}`
+                  : `Model "${testResult.model}" responded in ${testResult.latencyMs}ms`
                 : testResult.error}
             </p>
           </motion.div>

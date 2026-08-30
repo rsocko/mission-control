@@ -66,7 +66,11 @@ vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: () => ({
     provider: 'bifrost',
     model: 'azure/gpt-4o-mini',
-    embeddingModel: 'ollama/nomic-embed-text:latest',
+    embeddingProvider: 'bifrost',
+    embeddingModel: 'azure/text-embedding-3-small',
+    embeddingBaseUrl: 'https://bifrost.test/v1',
+    embeddingApiKey: 'embedding-secret',
+    embeddingConfigured: true,
     semanticSearchEnabled: false,
     baseUrl: 'https://bifrost.test/v1',
     apiKey: 'server-secret',
@@ -87,6 +91,25 @@ vi.mock('@/lib/ai/provider-factory', () => ({
   getAIRequestContext: vi.fn(),
   getAIRouteOutcome: vi.fn(),
   getAIRoutingHeaders: vi.fn(),
+}));
+
+vi.mock('@/lib/search/semantic', () => ({
+  getEmbeddingOperationalStatus: () => ({
+    available: true,
+    state: 'ready',
+    indexedCount: 12,
+    configured: { provider: 'bifrost', model: 'azure/text-embedding-3-small' },
+    resolved: { provider: 'azure', model: 'text-embedding-3-small', dimensions: 1536 },
+  }),
+  testEmbeddingConnection: () => ({
+    success: true,
+    resolved: {
+      provider: 'azure',
+      model: 'text-embedding-3-small',
+      dimensions: 1536,
+      fallbackOccurred: false,
+    },
+  }),
 }));
 
 describe('AI provider routing settings', () => {
@@ -110,9 +133,12 @@ describe('AI provider routing settings', () => {
       provider: 'bifrost',
       model: 'azure/gpt-4o-mini',
       baseUrl: 'https://bifrost.test/v1',
-      embeddingModel: 'ollama/nomic-embed-text:latest',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+      embeddingBaseUrl: 'https://bifrost.test/v1',
       semanticSearchEnabled: false,
       hasApiKey: true,
+      embeddingHasApiKey: true,
     });
     expect(body.providerHealth).toContainEqual({
       route: 'azure-private',
@@ -143,6 +169,118 @@ describe('AI provider routing settings', () => {
     expect(body.config.apiKey).toBe('********');
   });
 
+  it('preserves a legacy shared credential when saving explicit embedding settings', async () => {
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...state.saved,
+        apiKey: '********',
+        embeddingProvider: 'bifrost',
+        embeddingModel: 'azure/text-embedding-3-small',
+        embeddingBaseUrl: 'https://bifrost.test/v1',
+        embeddingApiKey: '********',
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.writes[0]?.value).toMatchObject({
+      apiKey: 'server-secret',
+      embeddingApiKey: 'server-secret',
+    });
+  });
+
+  it('preserves a saved embedding key when its endpoint is supplied by the environment', async () => {
+    state.saved = {
+      provider: 'ollama',
+      model: 'llama3.1:8b',
+      baseUrl: 'http://localhost:11434/v1',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+      embeddingApiKey: 'saved-embedding-secret',
+    };
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'ollama',
+        model: 'llama3.1:8b',
+        baseUrl: 'http://localhost:11434/v1',
+        embeddingProvider: 'bifrost',
+        embeddingModel: 'azure/text-embedding-3-small',
+        embeddingBaseUrl: 'https://bifrost.test/v1',
+        embeddingApiKey: '********',
+        semanticSearchEnabled: false,
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.writes[0]?.value).toMatchObject({
+      embeddingBaseUrl: 'https://bifrost.test/v1',
+      embeddingApiKey: 'saved-embedding-secret',
+    });
+  });
+
+  it('preserves independent embedding settings omitted by a legacy client', async () => {
+    state.saved = {
+      provider: 'ollama',
+      model: 'llama3.1:8b',
+      baseUrl: 'http://localhost:11434/v1',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+      embeddingApiKey: 'saved-embedding-secret',
+    };
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'ollama',
+        model: 'llama3.1:8b',
+        baseUrl: 'http://localhost:11434/v1',
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.writes[0]?.value).toMatchObject({
+      embeddingProvider: 'bifrost',
+      embeddingApiKey: 'saved-embedding-secret',
+    });
+  });
+
+  it('allows completion settings to save while the disabled embedding route is unconfigured', async () => {
+    state.saved = {};
+    const { POST } = await import('@/app/api/ai/provider/route');
+    const response = await POST(new Request('http://localhost/api/ai/provider', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: 'openai',
+        model: 'gpt-4.1',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'completion-secret',
+        embeddingProvider: 'bifrost',
+        embeddingModel: 'azure/text-embedding-3-small',
+        embeddingBaseUrl: '',
+        embeddingApiKey: '',
+        semanticSearchEnabled: false,
+        routingPolicy,
+      }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(state.writes[0]?.value).toMatchObject({
+      embeddingProvider: 'bifrost',
+      embeddingBaseUrl: '',
+      semanticSearchEnabled: false,
+    });
+  });
+
   it('persists semantic opt-in and a separate Bifrost embedding model', async () => {
     const { POST } = await import('@/app/api/ai/provider/route');
     const response = await POST(new Request('http://localhost/api/ai/provider', {
@@ -162,6 +300,61 @@ describe('AI provider routing settings', () => {
       semanticSearchEnabled: true,
       embeddingModel: 'ollama/nomic-embed-text:latest',
     });
+  });
+
+  it('persists an embedding route independently from completions', async () => {
+      const { POST } = await import('@/app/api/ai/provider/route');
+      const response = await POST(new Request('http://localhost/api/ai/provider', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'ollama',
+          model: 'llama3.1:8b',
+          baseUrl: 'http://localhost:11434/v1',
+          apiKey: '',
+          embeddingProvider: 'bifrost',
+          embeddingModel: 'azure/text-embedding-3-small',
+          embeddingBaseUrl: 'https://bifrost.test/v1',
+          embeddingApiKey: 'embedding-secret',
+          semanticSearchEnabled: true,
+          routingPolicy,
+        }),
+      }));
+
+      expect(response.status).toBe(200);
+      expect(state.writes[0]?.value).toMatchObject({
+        provider: 'ollama',
+        model: 'llama3.1:8b',
+        embeddingProvider: 'bifrost',
+        embeddingModel: 'azure/text-embedding-3-small',
+        embeddingBaseUrl: 'https://bifrost.test/v1',
+        embeddingApiKey: 'embedding-secret',
+      });
+      expect(await response.json()).toMatchObject({
+        config: {
+          apiKey: '',
+          embeddingApiKey: '********',
+        },
+      });
+  });
+
+  it('runs the embedding-specific connection test without exposing credentials', async () => {
+      const { PUT } = await import('@/app/api/ai/provider/route');
+      const response = await PUT(new Request(
+        'http://localhost/api/ai/provider?target=embedding',
+        { method: 'PUT' },
+      ));
+      const body = await response.json();
+
+      expect(body).toMatchObject({
+        success: true,
+        resolved: {
+          provider: 'azure',
+          model: 'text-embedding-3-small',
+          dimensions: 1536,
+        },
+      });
+      expect(JSON.stringify(body)).not.toContain('secret');
   });
 
   it('rejects an invalid Bifrost embedding model even when search enrichment is off', async () => {

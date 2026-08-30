@@ -7,6 +7,7 @@ import * as schema from '@/db/schema';
 import {
   homelabAlertReceipts,
   notificationActions,
+  notificationDeliveryEvents,
   notifications,
 } from '@/db/schema';
 import {
@@ -31,6 +32,7 @@ export interface IngestHomelabAlertOptions {
   integration: string;
   receivedAt?: Date;
   wakeDispatcher?: boolean;
+  suppressDeliveries?: boolean;
 }
 
 export interface IngestHomelabAlertResult {
@@ -269,6 +271,11 @@ export function ingestHomelabAlertEvents(
         wakeDispatcher: false,
       });
       replaceExternalActions(transaction, creation.notification.id, event);
+      if (options.suppressDeliveries) {
+        transaction.delete(notificationDeliveryEvents)
+          .where(eq(notificationDeliveryEvents.notificationId, creation.notification.id))
+          .run();
+      }
       transaction.update(homelabAlertReceipts).set({
         notificationId: creation.notification.id,
       }).where(and(
@@ -279,7 +286,8 @@ export function ingestHomelabAlertEvents(
       totals.applied++;
       if (creation.created) totals.created++;
       else totals.updated++;
-      shouldWakeDispatcher ||= creation.deliveryEvents.some(delivery => delivery.status === 'pending');
+      shouldWakeDispatcher ||= !options.suppressDeliveries
+        && creation.deliveryEvents.some(delivery => delivery.status === 'pending');
     }
     return totals;
   });

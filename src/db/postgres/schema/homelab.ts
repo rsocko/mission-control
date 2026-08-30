@@ -22,3 +22,27 @@ export const homelabAlertReceipts = pgTable('homelab_alert_receipts', {
   index('idx_homelab_alert_receipts_received')
     .on(table.lastReceivedAt),
 ]);
+
+export const alertmanagerIntegrationEvents = pgTable('alertmanager_integration_events', {
+  id: text('id').primaryKey(),
+  integration: text('integration').notNull(),
+  kind: text('kind')
+    .$type<'webhook_request' | 'operator_action' | 'synthetic_test'>()
+    .notNull(),
+  outcome: text('outcome').notNull(),
+  authenticated: boolean('authenticated').notNull().default(false),
+  httpStatus: integer('http_status').notNull(),
+  accepted: integer('accepted').notNull().default(0),
+  applied: integer('applied').notNull().default(0),
+  created: integer('created').notNull().default(0),
+  updated: integer('updated').notNull().default(0),
+  stale: integer('stale').notNull().default(0),
+  duplicateReceipts: integer('duplicate_receipts').notNull().default(0),
+  detail: text('detail'),
+  occurredAt: text('occurred_at').notNull(),
+}, (table) => [
+  index('idx_alertmanager_integration_events_history')
+    .on(table.integration, table.occurredAt),
+  index('idx_alertmanager_integration_events_outcome')
+    .on(table.integration, table.kind, table.outcome, table.occurredAt),
+]);

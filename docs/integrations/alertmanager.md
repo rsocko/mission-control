@@ -49,6 +49,33 @@ Content-Type: application/json
 Keep ntfy in a separate Alertmanager receiver so paging does not depend on
 Mission Control availability.
 
+## Operate the integration
+
+Settings → Integrations registers Alertmanager as a system-managed inbound
+integration. The page reports configured and connected as separate states:
+configured means a valid deployment-managed token is present; connected means
+at least one authenticated batch has been projected successfully.
+
+The page exposes the fixed endpoint and integration ID, last request, last
+authenticated receipt, last successful projection, bounded result totals, and
+up to five recent categorized failures. It never returns the bearer token, raw
+request bodies, labels, or annotations. The operational ledger retains a
+bounded recent history while preserving the latest successful projection and
+synthetic-test landmarks. Unauthenticated probes do not degrade authenticated
+delivery health.
+
+Pause and resume require a trusted same-origin or Mission Control API-key
+request. While paused, the webhook still authenticates and validates bounded
+batches, returns `202`, records an intentional drop, and does not project an
+incident. This prevents retry storms without presenting paused delivery as
+successful ingestion.
+
+The lifecycle test sends fixed synthetic firing, duplicate firing, and resolved
+events through the local normalization and persistence path. It verifies one
+deduplicated resolved fingerprint, suppresses push delivery, invokes no upstream
+service or runbook, and removes its synthetic projection and receipts after the
+check.
+
 ## Payload contract
 
 The endpoint accepts the standard Alertmanager v4 grouped webhook object,
@@ -141,6 +168,7 @@ retained.
 | Condition | Status | Response |
 |---|---:|---|
 | Batch committed | `200` | `{ "success": true, "accepted": n, "applied": n, "stale": n, "created": n, "updated": n, "duplicateReceipts": n }` |
+| Intake paused after a valid authenticated batch | `202` | `{ "success": true, "paused": true, "accepted": n, "applied": 0 }` |
 | Missing or invalid bearer token | `401` | `{ "error": "Unauthorized" }` |
 | Invalid JSON | `400` | `{ "error": "Invalid JSON payload" }` |
 | Malformed batch or member | `422` | `{ "error": "Invalid Alertmanager webhook batch", "maxAlerts": 100, "issues": [...] }` |
@@ -155,3 +183,7 @@ incident projections, and push outbox records commit in one immediate database
 transaction. Alertmanager may safely retry 5xx responses: delivery receipts are
 idempotent and projections are unique by integration, source, and fingerprint.
 Resolved source state cannot be regressed by an older firing delivery.
+
+Operational request outcomes are stored separately from incident receipts.
+Successful projection acknowledgements require that operational receipt to be
+durable; if it cannot be recorded, Mission Control returns a retryable `503`.

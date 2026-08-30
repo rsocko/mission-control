@@ -124,8 +124,11 @@ export type {
   AiRunStatus,
 } from './ai-runs';
 
-// Homelab alert lifecycle receipts
-export { homelabAlertReceipts } from './homelab';
+// Homelab alert lifecycle receipts and integration telemetry
+export {
+  alertmanagerIntegrationEvents,
+  homelabAlertReceipts,
+} from './homelab';
 
 // Durable checkpoints and leases for bounded bulk maintenance agents
 export { maintenanceAgentRuns } from './maintenance-agents';

@@ -848,6 +848,13 @@
       "when": 1788012000000,
       "tag": "0120_houston_pending_approvals",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1788049800000,
+      "tag": "0121_alertmanager_integration_operations",
+      "breakpoints": true
     }
   ]
 }

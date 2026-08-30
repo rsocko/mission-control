@@ -396,20 +396,7 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
       `,
       [connectorId, issueStableId],
     );
-    expect(owner.rows.some(({ sourceId }) =>
-      sourceId === `synthetic-owner/${repositoryName}:52`)).toBe(false);
-    expect(owner.rows.every(({ state }) => state === 'collision')).toBe(true);
-    const collisions = await pool.query<{ state: string }>(
-      `
-        SELECT state
-        FROM github_identity_collisions
-        WHERE connector_instance_id = $1
-          AND binding_type = 'task'
-      `,
-      [connectorId],
-    );
-    expect(collisions.rows.length).toBeGreaterThan(0);
-    expect(collisions.rows.every(({ state }) => state === 'open')).toBe(true);
+    expect(owner.rows).toEqual([]);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 

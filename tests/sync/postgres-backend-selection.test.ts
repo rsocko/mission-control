@@ -110,8 +110,8 @@ vi.mock('@/db/postgres/sync/job-repository', () => ({
   assertConnectorSyncEnqueueAllowedInPostgres: postgresMocks.assertConnectorSyncEnqueueAllowedInPostgres,
 }));
 
-vi.mock('@/lib/persistence/runtime', () => ({
-  getWorkerPersistenceRepositories: () => postgresMocks.workerRepositories,
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => postgresMocks.workerRepositories,
 }));
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;

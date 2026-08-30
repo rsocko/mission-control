@@ -124,8 +124,8 @@ vi.mock('@/db/schema', () => ({
   },
 }));
 
-vi.mock('@/lib/persistence/runtime', () => ({
-  getWorkerPersistenceRepositories: () => ({
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
     connectors: {
       get: vi.fn(async () => repositoryConfig),
     },

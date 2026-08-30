@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getWorkerPersistenceRepositories } from '@/lib/persistence/runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorSettingsStatePatchResult,
 } from '@/db/persistence/core-repositories';
@@ -29,7 +29,8 @@ export async function mergeConnectorSettings(
   currentSettings: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  return getWorkerPersistenceRepositories().connectors.mergeSettings(
+  const repositories = await getWorkerPersistenceRepositories();
+  return repositories.connectors.mergeSettings(
     connectorId,
     currentSettings,
     patch,
@@ -53,7 +54,8 @@ export async function patchConnectorSettingsState<TState extends object>(
   stateKey: string,
   patch: Partial<TState>,
 ): Promise<ConnectorSettingsStatePatchResult<TState>> {
-  return getWorkerPersistenceRepositories().connectors.patchSettingsState(
+  const repositories = await getWorkerPersistenceRepositories();
+  return repositories.connectors.patchSettingsState(
     connectorId,
     stateKey,
     patch,

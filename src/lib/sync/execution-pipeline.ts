@@ -76,7 +76,7 @@ import {
   withDatabaseOperation,
   type DatabaseOperationName,
 } from '@/lib/telemetry/database-operation-context';
-import { getWorkerPersistenceRepositories } from '@/lib/persistence/runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type { SyncRunRecord } from '@/db/persistence/worker-repositories';
 
 type DependencyResumeTrigger = 'startup' | 'recurring' | 'retry' | 'manual';
@@ -255,9 +255,8 @@ export class SyncExecutionPipeline {
     // Only hydrate from successful syncs — failed syncs should not advance the
     // `since` baseline, otherwise tasks updated during a failed sync window are
     // permanently missed until the next nightly full sync.
-    const rows = await getWorkerPersistenceRepositories()
-      .syncRuns
-      .listLatestSuccessfulPulls();
+    const repositories = await getWorkerPersistenceRepositories();
+    const rows = await repositories.syncRuns.listLatestSuccessfulPulls();
 
     // Keep only the first (most recent) successful PULL sync row per connector.
     // Write-through entries (durationMs === 0) must be excluded — they only push
@@ -890,7 +889,8 @@ export class SyncExecutionPipeline {
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
-      await getWorkerPersistenceRepositories().syncRuns.append(syncLogEntry);
+      const workerPersistence = await getWorkerPersistenceRepositories();
+      await workerPersistence.syncRuns.append(syncLogEntry);
       identityRuntime?.complete(
         syncSucceeded ? 'succeeded' : 'failed',
         syncSucceeded ? undefined : 'task_identity_blocked',
@@ -1006,7 +1006,8 @@ export class SyncExecutionPipeline {
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
       try {
-        await getWorkerPersistenceRepositories().syncRuns.append(failureLog);
+        const workerPersistence = await getWorkerPersistenceRepositories();
+        await workerPersistence.syncRuns.append(failureLog);
       } catch (finalizationError) {
         syncLogger.error(
           { err: finalizationError, connectorId },
@@ -1055,7 +1056,8 @@ export class SyncExecutionPipeline {
    * Refresh a connector from persisted config before each sync.
    */
   async initializeConnectorFromDb(connectorId: string): Promise<IConnector | null> {
-    const config = await getWorkerPersistenceRepositories().connectors.get(connectorId);
+    const workerPersistence = await getWorkerPersistenceRepositories();
+    const config = await workerPersistence.connectors.get(connectorId);
     if (!config) {
       syncLogger.error({ connectorId }, 'No config row found in DB');
       return null;

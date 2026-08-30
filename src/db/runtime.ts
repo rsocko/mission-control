@@ -5,8 +5,10 @@ import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
 import {
   registerCorePersistenceRepositories,
-  registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/runtime';
+import {
+  registerWorkerPersistenceRepositories,
+} from '@/lib/persistence/worker-runtime';
 import { initializeDatabase } from './index';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';

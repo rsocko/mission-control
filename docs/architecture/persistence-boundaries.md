@@ -121,9 +121,11 @@ Worker connector refresh, connector-settings updates, and sync-run journal
 hydration/finalization are composed together through
 `registerWorkerPersistenceRepositories(repositories)`. Both backends implement
 the same atomic nested-settings patch and successful-pull baseline contract.
-The PostgreSQL runtime registers this complete worker composition before loading
-worker schedulers; remaining connector task/list/notification execution stays
-explicitly unsupported until its workflow-specific ports are migrated.
+SQLite loads its worker adapters lazily on first access so importing a connector
+does not initialize the database. PostgreSQL has no compatibility fallback: its
+runtime must register the complete worker composition before access and before
+loading worker schedulers. Remaining connector task/list/notification execution
+stays explicitly unsupported until its workflow-specific ports are migrated.
 
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health

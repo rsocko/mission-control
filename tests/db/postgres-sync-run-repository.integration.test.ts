@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { describe } from 'vitest';
+import { describe, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import {
@@ -9,6 +9,8 @@ import {
 import { syncLog } from '@/db/postgres/schema';
 import { describeSyncRunRepositoryContract } from '../contracts/sync-run-repository.contract';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+
+vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const describePostgres = describe.skipIf(!connectionString);

@@ -55,8 +55,8 @@ vi.mock('@/db/schema', () => ({
   tasks: {},
 }));
 
-vi.mock('@/lib/persistence/runtime', () => ({
-  getWorkerPersistenceRepositories: () => ({
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
     connectors: {},
     syncRuns: {
       listLatestSuccessfulPulls: vi.fn(async () => [...mockSyncLogRows]),

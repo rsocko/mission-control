@@ -95,8 +95,8 @@ vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', sourceId: 'source_id', connectorInstanceId: 'connector_instance_id', status: 'status', completedAt: 'completed_at', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', sourceListId: 'source_list_id' },
 }));
 
-vi.mock('@/lib/persistence/runtime', () => ({
-  getWorkerPersistenceRepositories: () => ({
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
     connectors: {
       get: vi.fn(async () => mockConnectorInstance
         ? {

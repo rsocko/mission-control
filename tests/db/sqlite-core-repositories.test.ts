@@ -403,7 +403,7 @@ describe('core persistence runtime selection', () => {
     const {
       getWorkerPersistenceRepositories,
       registerWorkerPersistenceRepositories,
-    } = await import('@/lib/persistence/runtime');
+    } = await import('@/lib/persistence/worker-runtime');
     const selected = createHarness();
     const replacement = createHarness();
     const selectedWorker = {
@@ -419,7 +419,7 @@ describe('core persistence runtime selection', () => {
     };
     try {
       registerWorkerPersistenceRepositories(selectedWorker);
-      expect(getWorkerPersistenceRepositories()).toBe(selectedWorker);
+      await expect(getWorkerPersistenceRepositories()).resolves.toBe(selectedWorker);
       expect(() => registerWorkerPersistenceRepositories(selectedWorker))
         .not.toThrow();
       expect(() => registerWorkerPersistenceRepositories(replacementWorker))

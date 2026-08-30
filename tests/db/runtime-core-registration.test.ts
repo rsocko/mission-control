@@ -84,6 +84,8 @@ vi.mock('@/db/runtime-backend', () => ({
 }));
 vi.mock('@/lib/persistence/runtime', () => ({
   registerCorePersistenceRepositories: mocks.registerCore,
+}));
+vi.mock('@/lib/persistence/worker-runtime', () => ({
   registerWorkerPersistenceRepositories: mocks.registerWorker,
 }));
 vi.mock('@/db/postgres/runtime', () => ({

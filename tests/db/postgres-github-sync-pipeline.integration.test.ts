@@ -2,6 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import type { IConnector } from '@/lib/connectors';
+import type {
+  FencedGitHubConnector,
+  GitHubWriteAuthorization,
+} from '@/lib/external-identities/github-write-fence';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { SourceList, TaskItem } from '@/types';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
@@ -133,7 +137,10 @@ function connector(input: {
   sourceLists: SourceList[];
   tasks: TaskItem[];
   beforeSourceLists?: () => Promise<void>;
+  createTask?: IConnector['createTask'];
 }): IConnector {
+  const repositoryStableId =
+    input.sourceLists[0]?.externalIdentity?.entity.identity.stableId;
   return {
     id: input.connectorId,
     type: 'github-issues',
@@ -169,7 +176,25 @@ function connector(input: {
     async getLastSyncToken() {
       return null;
     },
-  };
+    createTask: input.createTask,
+    async preflightWriteRoute(route: GitHubWriteAuthorization) {
+      if (!repositoryStableId) {
+        throw new Error('Synthetic connector requires repository identity evidence');
+      }
+      return {
+        targets: Object.fromEntries(route.targets.map((target) => [
+          target.role,
+          { repositoryStableId },
+        ])),
+      };
+    },
+    async runAuthorizedWrite<T>(
+      _route: GitHubWriteAuthorization,
+      write: () => Promise<T>,
+    ) {
+      return write();
+    },
+  } as IConnector & FencedGitHubConnector;
 }
 
 async function seedConnector(connectorId: string): Promise<void> {
@@ -226,6 +251,23 @@ async function runPipeline(
 }
 
 async function cleanupConnector(connectorId: string): Promise<void> {
+  await pool.query(
+    `DELETE FROM github_write_outcome_events WHERE connector_instance_id = $1`,
+    [connectorId],
+  );
+  await pool.query(
+    `DELETE FROM task_source_write_lease_targets WHERE lease_id IN (
+       SELECT id FROM task_source_write_leases WHERE connector_instance_id = $1)`,
+    [connectorId],
+  );
+  await pool.query(
+    'DELETE FROM task_source_write_leases WHERE connector_instance_id = $1',
+    [connectorId],
+  );
+  await pool.query(
+    'DELETE FROM github_identity_write_cycles WHERE connector_instance_id = $1',
+    [connectorId],
+  );
   await pool.query(
     'DELETE FROM github_identity_collisions WHERE connector_instance_id = $1',
     [connectorId],
@@ -356,6 +398,152 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
         state: 'active',
       },
     ]);
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  it('persists a pushed task NodeID binding before finalizing its remote identity', async () => {
+    const connectorId = `gh-pipeline-${randomUUID()}`;
+    const repositoryStableId = `R_kgSYNTHETIC_${randomUUID()}`;
+    const issueStableId = `I_kwSYNTHETIC_${randomUUID()}`;
+    stableIds.add(repositoryStableId);
+    stableIds.add(issueStableId);
+    await seedConnector(connectorId);
+    const repositoryName = `repo-${connectorId}`;
+    const repositoryEvidence = evidence('repository', repositoryStableId, repositoryName);
+    const issueEvidence = evidence('issue', issueStableId, repositoryName, 61);
+    const remoteSourceId = `synthetic-owner/${repositoryName}:61`;
+    const repositoryList = sourceList(connectorId, repositoryEvidence);
+    await pool.query(
+      `
+        INSERT INTO source_lists (id, connector_instance_id, source_id, name, type)
+        VALUES ($1, $2, $3, $3, 'repo')
+      `,
+      [repositoryList.id, connectorId, repositoryList.sourceId],
+    );
+    const { persistGitHubPrimaryIdentityBatch } = await import(
+      '@/lib/external-identities/primary-identity'
+    );
+    await persistGitHubPrimaryIdentityBatch([{
+      target: {
+        connectorInstanceId: connectorId,
+        bindingType: 'source_list',
+        localId: repositoryList.id,
+        legacyIdentity: repositoryList.sourceId,
+      },
+      evidence: { entity: repositoryEvidence },
+    }], {
+      connectorInstanceId: connectorId,
+      effectiveMode: 'stable',
+      modeRevision: 1,
+      capturedAt: NOW,
+    });
+    const localTaskId = `${connectorId}:local-create`;
+    await pool.query(
+      `
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title, status,
+          priority, source_list_id, source_list_name, metadata, sync_status,
+          created_at, updated_at, last_synced_at
+        ) VALUES (
+          $1, $2, 'github-issues', $3, 'Create synthetic issue', 'todo',
+          'none', $4, $4, '{}'::jsonb, 'pending_push', $5, $5, $5
+        )
+      `,
+      [localTaskId, `local:${localTaskId}`, connectorId, repositoryList.sourceId, NOW],
+    );
+    const createdTask = task(
+      connectorId,
+      61,
+      issueEvidence,
+      repositoryEvidence,
+    );
+    const createTask = vi.fn(async () => createdTask);
+    const inertConnector = connector({
+      connectorId,
+      sourceLists: [repositoryList],
+      tasks: [createdTask],
+      createTask,
+    });
+
+    const result = await runPipeline(connectorId, inertConnector);
+
+    expect(result.success).toBe(true);
+    expect(createTask).toHaveBeenCalledTimes(1);
+    const persistedTask = await pool.query<{ sourceId: string; syncStatus: string }>(
+      `
+        SELECT source_id AS "sourceId", sync_status AS "syncStatus"
+        FROM tasks
+        WHERE id = $1
+      `,
+      [localTaskId],
+    );
+    expect(persistedTask.rows).toEqual([{
+      sourceId: remoteSourceId,
+      syncStatus: 'synced',
+    }]);
+    const binding = await pool.query<{ stableId: string; state: string }>(
+      `
+        SELECT entity.stable_id AS "stableId", binding.state
+        FROM external_entity_bindings AS binding
+        JOIN external_entities AS entity ON entity.id = binding.external_entity_id
+        WHERE binding.connector_instance_id = $1
+          AND binding.binding_type = 'task'
+          AND binding.local_id = $2
+      `,
+      [connectorId, localTaskId],
+    );
+    expect(binding.rows).toEqual([{ stableId: issueStableId, state: 'active' }]);
+
+    const competingTaskId = `${connectorId}:competing-create`;
+    await pool.query(
+      `
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title, status,
+          priority, source_list_id, source_list_name, metadata, sync_status,
+          created_at, updated_at, last_synced_at
+        ) VALUES (
+          $1, $2, 'github-issues', $3, 'Competing synthetic issue', 'todo',
+          'none', $4, $4, '{}'::jsonb, 'pending_push', $5, $5, $5
+        )
+      `,
+      [
+        competingTaskId,
+        `local:${competingTaskId}`,
+        connectorId,
+        repositoryList.sourceId,
+        NOW,
+      ],
+    );
+
+    const retry = await runPipeline(connectorId, inertConnector);
+
+    expect(retry.success).toBe(false);
+    expect(retry.errors.join(' ')).toMatch(/identity|bound|collision/i);
+    expect(createTask).toHaveBeenCalledTimes(2);
+    const competingTask = await pool.query<{ sourceId: string; syncStatus: string }>(
+      `
+        SELECT source_id AS "sourceId", sync_status AS "syncStatus"
+        FROM tasks
+        WHERE id = $1
+      `,
+      [competingTaskId],
+    );
+    expect(competingTask.rows).toEqual([{
+      sourceId: `local:${competingTaskId}`,
+      syncStatus: 'push_error',
+    }]);
+    const owner = await pool.query<{ localId: string }>(
+      `
+        SELECT binding.local_id AS "localId"
+        FROM external_entity_bindings AS binding
+        JOIN external_entities AS entity ON entity.id = binding.external_entity_id
+        WHERE binding.connector_instance_id = $1
+          AND binding.binding_type = 'task'
+          AND entity.stable_id = $2
+      `,
+      [connectorId, issueStableId],
+    );
+    expect(owner.rows).toEqual([{ localId: localTaskId }]);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 

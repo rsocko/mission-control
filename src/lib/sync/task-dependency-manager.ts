@@ -1870,13 +1870,18 @@ async function reconcileTaskDependenciesUnlocked(
   const persistedConnector = await (
     await getWorkerPersistenceRepositories()
   ).connectors.get(connectorInstanceId);
-  const capabilities = persistedConnector
-    ? resolvePersistedConnectorCapabilities({
-        type: persistedConnector.type,
-        capabilities: persistedConnector.capabilities,
-        settings: persistedConnector.settings,
-      })
-    : connector.capabilities;
+  if (!persistedConnector) {
+    syncLogger.warn(
+      { connectorId: connectorInstanceId },
+      'Skipping dependency reconciliation because the persisted connector is unavailable',
+    );
+    return { imported: 0, removed: 0, pushed: 0, failed: 0 };
+  }
+  const capabilities = resolvePersistedConnectorCapabilities({
+    type: persistedConnector.type,
+    capabilities: persistedConnector.capabilities,
+    settings: persistedConnector.settings,
+  });
   const deps = await getGitHubDependencyRepository();
   const resumeSnapshot = options.resumeGenerationId
     ? await loadActiveSnapshot(connectorInstanceId)

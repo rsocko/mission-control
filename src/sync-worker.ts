@@ -21,6 +21,8 @@ async function main(): Promise<void> {
       );
     },
   });
+  const { initializeDatabaseWithRetry } = await import('@/db/startup');
+  await initializeDatabaseWithRetry();
 
   const [
     { syncScheduler },
@@ -49,8 +51,6 @@ async function main(): Promise<void> {
     { runtimeRelease: publicRuntimeRelease(), role: 'worker' },
     'Sync worker starting',
   );
-  const { initializeDatabaseWithRetry } = await import('@/db/startup');
-  await initializeDatabaseWithRetry();
   const telemetry = await startRuntimeTelemetry('worker');
   writeFileSync(instanceFile, telemetry.instanceId, { encoding: 'utf8', mode: 0o600 });
   const worker = new SyncWorker((connectorId, options) =>

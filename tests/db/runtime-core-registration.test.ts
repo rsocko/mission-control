@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
+import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
 
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
+  const registerWorker = vi.fn();
   const backend = {
     generation: 0,
     initialize: vi.fn(async () => {
@@ -17,6 +19,7 @@ const mocks = vi.hoisted(() => {
     },
   };
   const repositories: CorePersistenceRepositories[] = [];
+  const workerRepositories: WorkerPersistenceRepositories[] = [];
   return {
     backend,
     registerCore,
@@ -37,6 +40,11 @@ const mocks = vi.hoisted(() => {
           get: vi.fn(async () => null),
           upsert: vi.fn(async (connector) => connector),
           delete: vi.fn(async () => false),
+          mergeSettings: vi.fn(async (_id, settings, patch) => ({ ...settings, ...patch })),
+          patchSettingsState: vi.fn(async (_id, key, patch) => ({
+            settings: { [key]: patch },
+            state: patch,
+          })),
         },
         notifications: {
           get: vi.fn(async () => null),
@@ -52,6 +60,19 @@ const mocks = vi.hoisted(() => {
       repositories.push(repository);
       return repository;
     }),
+    registerWorker,
+    workerRepositories,
+    createWorker: vi.fn((_db, core: CorePersistenceRepositories) => {
+      const repository: WorkerPersistenceRepositories = {
+        connectors: core.connectors,
+        syncRuns: {
+          listLatestSuccessfulPulls: vi.fn(async () => []),
+          append: vi.fn(async () => undefined),
+        },
+      };
+      workerRepositories.push(repository);
+      return repository;
+    }),
   };
 });
 
@@ -64,6 +85,9 @@ vi.mock('@/db/runtime-backend', () => ({
 vi.mock('@/lib/persistence/runtime', () => ({
   registerCorePersistenceRepositories: mocks.registerCore,
 }));
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  registerWorkerPersistenceRepositories: mocks.registerWorker,
+}));
 vi.mock('@/db/postgres/runtime', () => ({
   PostgresPersistenceBackend: class {
     initialize = mocks.backend.initialize;
@@ -75,6 +99,7 @@ vi.mock('@/db/postgres/runtime', () => ({
 }));
 vi.mock('@/db/postgres/repositories', () => ({
   createPostgresCoreRepositories: mocks.createCore,
+  createPostgresWorkerPersistenceRepositories: mocks.createWorker,
 }));
 vi.mock('@/db/postgres/sync/job-repository', () => ({
   createPostgresSyncJobRepository: vi.fn(() => ({})),
@@ -91,6 +116,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     vi.clearAllMocks();
     mocks.backend.generation = 0;
     mocks.repositories.length = 0;
+    mocks.workerRepositories.length = 0;
   });
 
   it('keeps the neutral registration identity stable while replacing the live delegate', async () => {
@@ -102,15 +128,23 @@ describe('PostgreSQL runtime core repository registration', () => {
 
     await initializeRuntimeDatabase();
     const registeredComposition = mocks.registerCore.mock.calls[0][0];
+    const registeredWorkerComposition = mocks.registerWorker.mock.calls[0][0];
     await getPostgresCoreRepositories().tasks.get('task-1');
+    await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     expect(mocks.repositories[0].tasks.get).toHaveBeenCalledWith('task-1');
+    expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
+      .toHaveBeenCalledOnce();
 
     await shutdownRuntimeDatabase();
     await initializeRuntimeDatabase();
 
     expect(mocks.registerCore).toHaveBeenCalledTimes(2);
     expect(mocks.registerCore.mock.calls[1][0]).toBe(registeredComposition);
+    expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
     await getPostgresCoreRepositories().tasks.get('task-1');
+    await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     expect(mocks.repositories[1].tasks.get).toHaveBeenCalledWith('task-1');
+    expect(mocks.workerRepositories[1].syncRuns.listLatestSuccessfulPulls)
+      .toHaveBeenCalledOnce();
   });
 });

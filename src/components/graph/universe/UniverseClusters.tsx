@@ -11,6 +11,13 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type {
   UniverseCluster,
   UniverseClusterDestination,
@@ -55,24 +62,25 @@ export function UniverseClusterControls({
         {enabled ? 'Transient groups on' : 'Group by meaning'}
       </button>
       {enabled && projection ? (
-        <label className="flex min-w-0 items-center gap-1 text-xs text-[var(--text-tertiary)]">
-          <span className="sr-only">Filter transient clusters</span>
-          <select
-            value={filter}
-            onChange={(event) => onFilterChange(event.target.value)}
-            className="h-7 max-w-44 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-500)]"
+        <Select value={filter} onValueChange={onFilterChange}>
+          <SelectTrigger
+            aria-label="Filter transient clusters"
+            className="h-7 min-h-0 max-w-44 bg-[var(--surface-2)] px-2 text-xs"
           >
-            <option value="all">All {projection.clusters.length} groups</option>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All {projection.clusters.length} groups</SelectItem>
             {projection.clusters.map((cluster) => (
-              <option key={cluster.id} value={cluster.id}>
+              <SelectItem key={cluster.id} value={cluster.id}>
                 {cluster.label} ({cluster.taskIds.length})
-              </option>
+              </SelectItem>
             ))}
-            <option value="outliers">
+            <SelectItem value="outliers">
               Ungrouped ({projection.outlierNodeIds.length})
-            </option>
-          </select>
-        </label>
+            </SelectItem>
+          </SelectContent>
+        </Select>
       ) : null}
     </div>
   );

@@ -47,7 +47,7 @@ describe('Universe transient cluster UI', () => {
     vi.restoreAllMocks();
   });
 
-  it('exposes feature gating and filters through accessible controls', () => {
+  it('exposes feature gating and filters through accessible controls', async () => {
     const onToggle = vi.fn();
     const onFilterChange = vi.fn();
     render(
@@ -63,9 +63,8 @@ describe('Universe transient cluster UI', () => {
 
     expect(screen.getByRole('button', { name: 'Transient groups on' }))
       .toHaveAttribute('aria-pressed', 'true');
-    fireEvent.change(screen.getByRole('combobox', { name: 'Filter transient clusters' }), {
-      target: { value: cluster.id },
-    });
+    fireEvent.click(screen.getByRole('combobox', { name: 'Filter transient clusters' }));
+    fireEvent.click(await screen.findByRole('option', { name: /Release.*\(2\)/ }));
     expect(onFilterChange).toHaveBeenCalledWith(cluster.id);
   });
 

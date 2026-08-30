@@ -6,6 +6,8 @@ SET `planning_horizon` = CASE `planning_horizon`
 END
 WHERE `planning_horizon` IN ('now', 'next');
 --> statement-breakpoint
+DROP TRIGGER IF EXISTS `task_history_immutable_update`;
+--> statement-breakpoint
 UPDATE `task_history_events`
 SET `previous_value` = CASE `previous_value`
   WHEN 'now' THEN 'next'
@@ -21,6 +23,12 @@ SET `new_value` = CASE `new_value`
 END
 WHERE `field_name` = 'planningHorizon'
   AND `new_value` IN ('now', 'next');
+--> statement-breakpoint
+CREATE TRIGGER `task_history_immutable_update`
+BEFORE UPDATE ON `task_history_events`
+BEGIN
+  SELECT RAISE(ABORT, 'task_history_events is append-only');
+END;
 --> statement-breakpoint
 UPDATE `quick_sort_operations`
 SET `before_snapshot` = json_set(

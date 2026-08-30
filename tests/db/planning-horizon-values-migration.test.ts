@@ -17,6 +17,11 @@ describe('planning horizon values migration', () => {
         previous_value TEXT,
         new_value TEXT
       );
+      CREATE TRIGGER task_history_immutable_update
+      BEFORE UPDATE ON task_history_events
+      BEGIN
+        SELECT RAISE(ABORT, 'task_history_events is append-only');
+      END;
       CREATE TABLE quick_sort_operations (
         id TEXT PRIMARY KEY,
         before_snapshot TEXT NOT NULL,
@@ -70,6 +75,9 @@ describe('planning horizon values migration', () => {
     expect(JSON.parse(operation.after_snapshot)).toEqual({
       planningHorizon: 'soon',
     });
+    expect(() => sqlite.prepare(
+      "UPDATE task_history_events SET new_value = 'later' WHERE id = 1",
+    ).run()).toThrow('task_history_events is append-only');
     sqlite.close();
   });
 });

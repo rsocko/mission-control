@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -528,6 +529,7 @@ jobs:
         run: npm test -- --run --no-file-parallelism tests/db/postgres-*.integration.test.ts
 
       - name: Run pgvector 100k benchmark gate
+        if: github.event_name == 'workflow_dispatch'
         env:
           MC_BENCHMARK_DIMENSIONS: 1536
           MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable

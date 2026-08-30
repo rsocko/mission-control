@@ -1520,6 +1520,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
 
     const rows = await withTransaction(this.pool, async (client) => {
       await client.query(`SET LOCAL enable_seqscan = off`);
+      await client.query(`SET LOCAL enable_sort = off`);
       await client.query(`SET LOCAL hnsw.ef_search = ${candidateCeiling}`);
       await client.query(`SET LOCAL hnsw.iterative_scan = strict_order`);
       await client.query(`SET LOCAL hnsw.max_scan_tuples = 20000`);

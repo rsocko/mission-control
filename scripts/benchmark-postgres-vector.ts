@@ -669,6 +669,7 @@ async function explainProductionAnn(
     await client.query('BEGIN');
     await client.query('SET LOCAL jit = off');
     await client.query('SET LOCAL enable_seqscan = off');
+    await client.query('SET LOCAL enable_sort = off');
     await client.query('SET LOCAL hnsw.ef_search = 100');
     await client.query("SET LOCAL hnsw.iterative_scan = 'strict_order'");
     await client.query('SET LOCAL hnsw.max_scan_tuples = 20000');

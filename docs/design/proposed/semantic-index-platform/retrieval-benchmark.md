@@ -85,8 +85,8 @@ metadata and vectors. For both corpus sizes it:
    the production `halfvec` expression followed by full-precision repository rerank;
 3. runs unfiltered and selective scope/category/expiry ANN queries through
    `PostgresSemanticIndexRepository.queryVectors`, whose indexed transaction disables
-   sequential scans locally so PostgreSQL cannot silently replace the required ANN
-   path with a full table scan;
+   sequential scans and explicit sorts locally so PostgreSQL cannot silently replace
+   the required order-producing ANN path with a full or B-tree-filtered scan;
 4. parses `EXPLAIN (ANALYZE, FORMAT JSON)` and rejects any ANN plan that does not
   contain the named HNSW index or that contains a sequential scan;
 5. seeds explicit `restricted` and non-task (`project`) negative cohorts, queries

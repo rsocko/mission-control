@@ -24,7 +24,9 @@ available only through the explicit `--all-issues` option.
    byte size, modified and verified timestamps, `integrityCheck: "ok"`,
    `source: "external-preverified"`); this repository ships no PostgreSQL dump,
    restore, or deployment tooling, and the persistence layer never opens a
-   backup file.
+   backup file. Both the snapshot modification time and its verification time
+   must be within the inclusive 24-hour window. Timestamps more than five
+   minutes in the future are rejected as clock drift.
 4. Verify that source and target repositories are under the same GitHub owner
    and both have stable source-list bindings in the connector.
 5. Freeze connector configuration and task metadata until reconciliation
@@ -59,7 +61,9 @@ For PostgreSQL, replace `--backup /backups/mission-control.db` with
 attestation contains only the opaque backup locator, lowercase SHA-256 digest,
 positive size, modification and verification timestamps, `integrityCheck:
 "ok"`, and `source: "external-preverified"`. Extra fields are rejected so
-credentials or backup contents cannot be persisted accidentally.
+credentials or backup contents cannot be persisted accidentally. Re-verifying
+an older dump does not make it eligible: both timestamps are checked
+independently.
 
 Archive the complete JSON output. Confirm that `go` is true, open plus closed
 counts equal the selected issue count, every selected issue has one stable task

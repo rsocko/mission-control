@@ -225,7 +225,10 @@ through the backend-neutral service contract. The SQLite file verifier lives in
 helper — it is the only module that opens a database file, nothing in the ports
 imports it, and this repository still ships no PostgreSQL dump, restore, or
 deployment tooling. PostgreSQL operators supply an equivalent externally
-verified attestation (`source: 'external-preverified'`).
+verified attestation (`source: 'external-preverified'`). The shared validator
+requires both the snapshot modification and verification timestamps to fall
+within the same inclusive 24-hour window, with at most five minutes of future
+clock skew; re-verifying an old snapshot cannot refresh it.
 
 No PostgreSQL schema migration was required: `drizzle/postgres/0000_handy_orphan.sql`
 already creates `github_repository_repoints`, `github_repository_repoint_events`,

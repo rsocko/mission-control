@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  BACKUP_ATTESTATION_MAX_AGE_MS,
+  BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
+} from '../../src/db/persistence/github-recovery-values';
+import {
   buildSuccessorAuthorization,
   buildTransferScope,
   parseReviewedAllowlist,
@@ -117,6 +121,7 @@ describe('GitHub bulk issue transfer CLI', () => {
   it('loads only bounded external backup attestations', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'mc-backup-attestation-'));
     const attestationPath = join(directory, 'attestation.json');
+    const now = new Date('2026-08-30T20:00:00.000Z');
     const attestation = {
       path: 'approved-backup://mission-control/2026-08-30',
       sha256: 'b'.repeat(64),
@@ -129,12 +134,59 @@ describe('GitHub bulk issue transfer CLI', () => {
 
     try {
       writeFileSync(attestationPath, JSON.stringify(attestation));
-      await expect(resolveBackupAttestation(undefined, attestationPath))
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
         .resolves.toEqual(attestation);
 
       writeFileSync(attestationPath, JSON.stringify({ ...attestation, credentials: 'secret' }));
-      await expect(resolveBackupAttestation(undefined, attestationPath))
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
         .rejects.toThrow('unsupported fields');
+
+      const exactBoundary = {
+        ...attestation,
+        modifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS,
+        ).toISOString(),
+        verifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS,
+        ).toISOString(),
+      };
+      writeFileSync(attestationPath, JSON.stringify(exactBoundary));
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
+        .resolves.toEqual(exactBoundary);
+
+      writeFileSync(attestationPath, JSON.stringify({
+        ...exactBoundary,
+        modifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1,
+        ).toISOString(),
+      }));
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
+        .rejects.toThrow('recent snapshot');
+
+      writeFileSync(attestationPath, JSON.stringify({
+        ...attestation,
+        modifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS,
+        ).toISOString(),
+        verifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1,
+        ).toISOString(),
+      }));
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
+        .rejects.toThrow('recent snapshot');
+
+      writeFileSync(attestationPath, JSON.stringify({
+        ...attestation,
+        verifiedAt: new Date(
+          now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS + 1,
+        ).toISOString(),
+      }));
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
+        .rejects.toThrow('recent snapshot');
+
+      writeFileSync(attestationPath, JSON.stringify({ ...attestation, modifiedAt: 'invalid' }));
+      await expect(resolveBackupAttestation(undefined, attestationPath, now))
+        .rejects.toThrow('invalid');
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

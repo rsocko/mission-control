@@ -3,6 +3,7 @@ import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresGitHubRecoveryRepositories } from '@/db/postgres/repositories/github-recovery-repositories';
 import {
+  describeGitHubRecoveryBackupAttestationContract,
   describeGitHubRecoveryRepositoriesContract,
   type GitHubRecoveryHarness,
   type RecoveryFixture,
@@ -10,6 +11,7 @@ import {
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
 vi.unmock('drizzle-orm');
+describeGitHubRecoveryBackupAttestationContract('PostgreSQL');
 
 /**
  * Fail-closed guard: the PostgreSQL recovery adapter must never reach a SQLite

@@ -3,10 +3,13 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterAll, vi } from 'vitest';
 import {
+  describeGitHubRecoveryBackupAttestationContract,
   describeGitHubRecoveryRepositoriesContract,
   type GitHubRecoveryHarness,
   type RecoveryFixture,
 } from '../contracts/github-recovery-repositories.contract';
+
+describeGitHubRecoveryBackupAttestationContract('SQLite');
 
 vi.unmock('drizzle-orm');
 

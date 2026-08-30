@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
 import type { GitHubRecoveryBackupAttestation } from '../src/db/persistence/github-recovery';
+import { isBackupAttestationReady } from '../src/db/persistence/github-recovery-values';
 import { initializeDatabaseWithRetry } from '../src/db/startup';
 import { shutdownRuntimeDatabase } from '../src/db/runtime';
 import {
@@ -145,6 +146,7 @@ export function required(value: string | undefined, option: string): string {
 export async function resolveBackupAttestation(
   backupPath: string | undefined,
   attestationPath: string | undefined,
+  now = new Date(),
 ): Promise<GitHubRecoveryBackupAttestation> {
   if (Boolean(backupPath) === Boolean(attestationPath)) {
     throw new Error('Use exactly one of --backup or --backup-attestation');
@@ -197,7 +199,7 @@ export async function resolveBackupAttestation(
   ) {
     throw new Error('Backup attestation is invalid or contains unsupported fields');
   }
-  return {
+  const attestation: GitHubRecoveryBackupAttestation = {
     path: attestationLocator,
     sha256,
     sizeBytes,
@@ -206,6 +208,12 @@ export async function resolveBackupAttestation(
     verifiedAt,
     source,
   };
+  if (!isBackupAttestationReady(attestation, now)) {
+    throw new Error(
+      'Backup attestation must describe a recent snapshot and verification',
+    );
+  }
+  return attestation;
 }
 
 export function buildSuccessorAuthorization(input: {

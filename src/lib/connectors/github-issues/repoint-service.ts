@@ -210,7 +210,6 @@ export async function executeGitHubRepositoryRepoint(
     !isBackupAttestationReady(
       input.backupProof,
       dependencies.now?.() ?? new Date(),
-      { allowFutureVerification: true },
     )
   ) {
     throw new Error('A verified recent backup proof is required');
@@ -884,9 +883,7 @@ async function buildRepointPlan(
   if (activity.maintenanceLocks > 0) reasons.push('conflicting_maintenance_operation');
   const backupReady = ownedOperationId
     ? true
-    : isBackupAttestationReady(input.backupProof, new Date(observedAt), {
-      allowFutureVerification: true,
-    });
+    : isBackupAttestationReady(input.backupProof, new Date(observedAt));
   if (!backupReady) reasons.push('verified_recent_backup_required');
 
   const report: GitHubRepositoryRepointPreflight = {

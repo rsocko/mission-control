@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import type { GitHubRecoveryBackupAttestation } from '@/db/persistence/github-recovery';
+import { isBackupAttestationReady } from '@/db/persistence/github-recovery-values';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 import {
   abortGitHubBulkTransfer,
@@ -115,6 +116,12 @@ export async function POST(request: Request) {
     }
     let backupProof: GitHubRecoveryBackupAttestation;
     if (input.backupAttestation) {
+      if (!isBackupAttestationReady(input.backupAttestation, new Date())) {
+        return NextResponse.json(
+          { error: 'Backup attestation must describe a recent snapshot and verification' },
+          { status: 400 },
+        );
+      }
       backupProof = input.backupAttestation;
     } else {
       if (!input.backupPath) {

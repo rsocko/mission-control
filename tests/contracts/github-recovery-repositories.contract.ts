@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { GitHubRecoveryPersistence } from '@/db/persistence/github-recovery';
+import {
+  BACKUP_ATTESTATION_MAX_AGE_MS,
+  BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
+  isBackupAttestationReady,
+} from '@/db/persistence/github-recovery-values';
 
 /**
  * Shared Layer 3B contract suite.
@@ -54,6 +59,74 @@ export interface GitHubRecoveryHarness {
 
 const OBSERVED_AT = '2026-08-20T12:00:00.000Z';
 const NOW = '2026-08-20T12:05:00.000Z';
+
+export function describeGitHubRecoveryBackupAttestationContract(backend: string): void {
+  describe(`GitHub recovery backup attestation (${backend})`, () => {
+    const now = new Date('2026-08-30T20:00:00.000Z');
+    const current = {
+      sha256: 'a'.repeat(64),
+      sizeBytes: 1024,
+      modifiedAt: '2026-08-30T19:00:00.000Z',
+      integrityCheck: 'ok',
+      verifiedAt: '2026-08-30T19:05:00.000Z',
+    };
+
+    it('accepts current snapshots and the inclusive 24-hour boundary', () => {
+      expect(isBackupAttestationReady(current, now)).toBe(true);
+      expect(isBackupAttestationReady({
+        ...current,
+        modifiedAt: new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+        verifiedAt: new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+      }, now)).toBe(true);
+      expect(isBackupAttestationReady({
+        ...current,
+        modifiedAt: new Date(
+          now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
+        ).toISOString(),
+        verifiedAt: new Date(
+          now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
+        ).toISOString(),
+      }, now)).toBe(true);
+    });
+
+    it('rejects an old snapshot even when verification is fresh', () => {
+      expect(isBackupAttestationReady({
+        ...current,
+        modifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1,
+        ).toISOString(),
+        verifiedAt: now.toISOString(),
+      }, now)).toBe(false);
+    });
+
+    it('rejects an old verification even when the snapshot is current', () => {
+      expect(isBackupAttestationReady({
+        ...current,
+        modifiedAt: new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+        verifiedAt: new Date(
+          now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1,
+        ).toISOString(),
+      }, now)).toBe(false);
+    });
+
+    it('rejects malformed and excessively future timestamps', () => {
+      expect(isBackupAttestationReady({ ...current, modifiedAt: 'invalid' }, now)).toBe(false);
+      expect(isBackupAttestationReady({ ...current, verifiedAt: 'invalid' }, now)).toBe(false);
+      expect(isBackupAttestationReady({
+        ...current,
+        modifiedAt: new Date(
+          now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS + 1,
+        ).toISOString(),
+      }, now)).toBe(false);
+      expect(isBackupAttestationReady({
+        ...current,
+        verifiedAt: new Date(
+          now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS + 1,
+        ).toISOString(),
+      }, now)).toBe(false);
+    });
+  });
+}
 
 export function baseFixture(connectorInstanceId: string): RecoveryFixture {
   return {

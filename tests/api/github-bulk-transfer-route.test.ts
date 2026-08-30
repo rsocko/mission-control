@@ -1,4 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  BACKUP_ATTESTATION_MAX_AGE_MS,
+  BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
+} from '@/db/persistence/github-recovery-values';
 
 const mocks = vi.hoisted(() => ({
   execute: vi.fn(),
@@ -32,6 +36,18 @@ function request(body: unknown): Request {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
+}
+
+function externalAttestation(modifiedAt: string, verifiedAt: string) {
+  return {
+    path: 'approved-backup://mission-control/2026-08-30',
+    sha256: 'b'.repeat(64),
+    sizeBytes: 4096,
+    modifiedAt,
+    integrityCheck: 'ok',
+    verifiedAt,
+    source: 'external-preverified',
+  };
 }
 
 describe('GitHub bulk transfer API', () => {
@@ -103,15 +119,10 @@ describe('GitHub bulk transfer API', () => {
   });
 
   it('passes externally verified PostgreSQL backup evidence without opening SQLite', async () => {
-    const backupAttestation = {
-      path: 'approved-backup://mission-control/2026-08-30',
-      sha256: 'b'.repeat(64),
-      sizeBytes: 4096,
-      modifiedAt: '2026-08-30T19:00:00.000Z',
-      integrityCheck: 'ok',
-      verifiedAt: '2026-08-30T19:05:00.000Z',
-      source: 'external-preverified',
-    };
+    const backupAttestation = externalAttestation(
+      new Date(Date.now() - 60_000).toISOString(),
+      new Date().toISOString(),
+    );
     mocks.preview.mockResolvedValue({ go: true, items: [] });
 
     const response = await POST(request({
@@ -129,6 +140,68 @@ describe('GitHub bulk transfer API', () => {
     expect(mocks.preview).toHaveBeenCalledWith(
       expect.objectContaining({ backupProof: backupAttestation }),
     );
+  });
+
+  it('enforces snapshot and verification freshness at the API boundary', async () => {
+    const now = new Date('2026-08-30T20:00:00.000Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    mocks.preview.mockResolvedValue({ go: true, items: [] });
+    const body = {
+      action: 'preview',
+      connectorInstanceId: 'github',
+      sourceRepository: 'owner/source',
+      targetRepository: 'owner/target',
+      actor: 'operator',
+      scope: { mode: 'all-issues' },
+    };
+
+    try {
+      const boundary = await POST(request({
+        ...body,
+        backupAttestation: externalAttestation(
+          new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+          new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+        ),
+      }));
+      expect(boundary.status).toBe(200);
+
+      const oldSnapshot = await POST(request({
+        ...body,
+        backupAttestation: externalAttestation(
+          new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1).toISOString(),
+          now.toISOString(),
+        ),
+      }));
+      expect(oldSnapshot.status).toBe(400);
+
+      const oldVerification = await POST(request({
+        ...body,
+        backupAttestation: externalAttestation(
+          new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS).toISOString(),
+          new Date(now.getTime() - BACKUP_ATTESTATION_MAX_AGE_MS - 1).toISOString(),
+        ),
+      }));
+      expect(oldVerification.status).toBe(400);
+
+      const futureSnapshot = await POST(request({
+        ...body,
+        backupAttestation: externalAttestation(
+          new Date(now.getTime() + BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS + 1).toISOString(),
+          now.toISOString(),
+        ),
+      }));
+      expect(futureSnapshot.status).toBe(400);
+
+      const malformed = await POST(request({
+        ...body,
+        backupAttestation: externalAttestation('not-a-timestamp', now.toISOString()),
+      }));
+      expect(malformed.status).toBe(400);
+      expect(mocks.preview).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('passes reviewed successor authorization to ambiguous-write reconciliation', async () => {

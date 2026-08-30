@@ -78,6 +78,7 @@ export function readApiOrigin(settings: unknown): string | null {
 }
 
 const MAX_BACKUP_AGE_MS = 24 * 60 * 60_000;
+const MAX_BACKUP_CLOCK_SKEW_MS = 5 * 60_000;
 
 /**
  * Validates a pre-verified backup attestation without touching the filesystem.
@@ -85,21 +86,37 @@ const MAX_BACKUP_AGE_MS = 24 * 60 * 60_000;
  * same freshness and integrity rules to externally produced evidence.
  */
 export function isBackupAttestationReady(
-  proof: { sha256?: unknown; sizeBytes?: unknown; integrityCheck?: unknown; verifiedAt?: unknown } | undefined,
+  proof: {
+    sha256?: unknown;
+    sizeBytes?: unknown;
+    modifiedAt?: unknown;
+    integrityCheck?: unknown;
+    verifiedAt?: unknown;
+  } | undefined,
   now: Date,
-  options: { allowFutureVerification?: boolean } = {},
 ): boolean {
   if (!proof) return false;
+  const nowMs = now.getTime();
+  const modifiedAt = Date.parse(String(proof.modifiedAt));
   const verifiedAt = Date.parse(String(proof.verifiedAt));
-  if (!Number.isFinite(verifiedAt)) return false;
+  if (!Number.isFinite(nowMs) || !Number.isFinite(modifiedAt) || !Number.isFinite(verifiedAt)) {
+    return false;
+  }
   if (proof.integrityCheck !== 'ok') return false;
   if (typeof proof.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(proof.sha256)) return false;
-  if (typeof proof.sizeBytes !== 'number' || proof.sizeBytes <= 0) return false;
-  const ageMs = now.getTime() - verifiedAt;
-  if (options.allowFutureVerification) {
-    return Math.abs(ageMs) <= MAX_BACKUP_AGE_MS;
-  }
-  return ageMs >= 0 && ageMs <= MAX_BACKUP_AGE_MS;
+  if (
+    typeof proof.sizeBytes !== 'number'
+    || !Number.isSafeInteger(proof.sizeBytes)
+    || proof.sizeBytes <= 0
+  ) return false;
+  const snapshotAgeMs = nowMs - modifiedAt;
+  const verificationAgeMs = nowMs - verifiedAt;
+  return snapshotAgeMs >= -MAX_BACKUP_CLOCK_SKEW_MS
+    && snapshotAgeMs <= MAX_BACKUP_AGE_MS
+    && verificationAgeMs >= -MAX_BACKUP_CLOCK_SKEW_MS
+    && verificationAgeMs <= MAX_BACKUP_AGE_MS
+    && modifiedAt <= verifiedAt + MAX_BACKUP_CLOCK_SKEW_MS;
 }
 
 export const BACKUP_ATTESTATION_MAX_AGE_MS = MAX_BACKUP_AGE_MS;
+export const BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS = MAX_BACKUP_CLOCK_SKEW_MS;

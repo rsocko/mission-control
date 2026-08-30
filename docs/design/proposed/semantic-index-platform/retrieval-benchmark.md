@@ -44,7 +44,7 @@ No separate vector service is introduced.
 
 ## Synthetic relevance set
 
-`tests/search/fixtures/hybrid-evaluation.ts` contains synthetic cases for exact ID,
+`scripts/fixtures/hybrid-evaluation.ts` contains synthetic cases for exact ID,
 exact title, lexical, conceptual, cross-source, filtered, duplicate, and no-result
 queries. The set contains no user content. `tests/search/hybrid-ranking.test.ts`
 enforces the relevance and deterministic-ordering gates.

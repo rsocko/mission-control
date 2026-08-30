@@ -130,6 +130,8 @@ const queryEmbeddingCache = new QueryEmbeddingCache<QueryVector>(
 
 const searchMetrics = {
   searches: 0,
+  lastStrategy: 'bounded-in-process' as SemanticQueryScan['kind'],
+  postgresVectorVersion: null as string | null,
   totalCandidates: 0,
   lastCandidates: 0,
   candidateLimit: 0,
@@ -567,6 +569,13 @@ async function readSemanticSearchStatus(): Promise<SemanticSearchStatus> {
       snapshot,
     );
   }
+  if (!readiness.available) {
+    return statusResult(
+      'not-ready',
+      'Semantic search is unavailable because the configured retrieval index is not ready.',
+      snapshot,
+    );
+  }
   if (snapshot.totals.vectors === 0) {
     return statusResult(
       'not-ready',
@@ -593,6 +602,8 @@ export function getSemanticSearchMetrics() {
     queryCache: queryEmbeddingCache.getMetrics(),
     search: {
       searches: searchMetrics.searches,
+      lastStrategy: searchMetrics.lastStrategy,
+      postgresVectorVersion: searchMetrics.postgresVectorVersion,
       totalCandidates: searchMetrics.totalCandidates,
       lastCandidates: searchMetrics.lastCandidates,
       candidateLimit: searchMetrics.candidateLimit,
@@ -608,6 +619,9 @@ export function getSemanticSearchMetrics() {
 
 function recordSearchMetrics(scan: SemanticQueryScan, durationMs: number) {
   searchMetrics.searches++;
+  searchMetrics.lastStrategy = scan.kind;
+  searchMetrics.postgresVectorVersion =
+    scan.kind === 'postgres-hnsw' ? scan.extensionVersion : null;
   searchMetrics.totalCandidates += scan.candidatesScanned;
   searchMetrics.lastCandidates = scan.candidatesScanned;
   searchMetrics.candidateLimit = scan.candidateCeiling;
@@ -626,6 +640,8 @@ export function resetSemanticSearchStateForTests(): void {
   queryEmbeddingCache.clear();
   lastIndexSnapshot = null;
   searchMetrics.searches = 0;
+  searchMetrics.lastStrategy = 'bounded-in-process';
+  searchMetrics.postgresVectorVersion = null;
   searchMetrics.totalCandidates = 0;
   searchMetrics.lastCandidates = 0;
   searchMetrics.candidateLimit = 0;

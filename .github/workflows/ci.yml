@@ -460,12 +460,12 @@ jobs:
     needs:
       - changes
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 120
     permissions:
       contents: read
     services:
       postgres:
-        image: postgres:17-alpine
+        image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
         env:
           POSTGRES_DB: mission_control_test
           POSTGRES_PASSWORD: postgres
@@ -499,7 +499,36 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Bootstrap and verify pgvector
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGDATABASE: mission_control_test
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql --set ON_ERROR_STOP=1 --command 'CREATE EXTENSION IF NOT EXISTS vector;'
+          test "$(psql --tuples-only --no-align --command \
+            "SELECT extversion FROM pg_extension WHERE extname = 'vector'")" = "0.8.6"
+
+      - name: Locate pgvector service container
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker ps --filter publish=5432 --format '{{.ID}}' | head -n 1)"
+          test -n "${container_id}"
+          echo "MC_BENCHMARK_POSTGRES_CONTAINER=${container_id}" >> "$GITHUB_ENV"
+
       - name: Run PostgreSQL integration tests
         env:
           MC_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
         run: npm test -- --run --no-file-parallelism tests/db/postgres-*.integration.test.ts
+
+      - name: Run pgvector 100k benchmark gate
+        env:
+          MC_BENCHMARK_DIMENSIONS: 1536
+          MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
+          MC_BENCHMARK_QUERY_RUNS: 8
+        run: npm run --silent benchmark:postgres-vector

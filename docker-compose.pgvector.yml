@@ -1,0 +1,38 @@
+# Opt-in pgvector integration environment. The default docker-compose.yml remains SQLite-backed.
+
+services:
+  postgres-vector:
+    profiles:
+      - postgres-vector
+    image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${MC_PGVECTOR_DATABASE:-mission_control_vector_dev}
+      POSTGRES_PASSWORD: ${MC_PGVECTOR_ADMIN_PASSWORD:-postgres}
+      POSTGRES_USER: ${MC_PGVECTOR_ADMIN_USER:-postgres}
+    entrypoint:
+      - /bin/bash
+      - -ceu
+      - |
+        printf '%s\n' 'CREATE EXTENSION IF NOT EXISTS vector;' \
+          > /docker-entrypoint-initdb.d/001-enable-vector.sql
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    ports:
+      - "${MC_PGVECTOR_PORT:-5433}:5432"
+    volumes:
+      - mc_pgvector_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" &&
+          test "$$(psql -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -Atqc
+          "SELECT extversion FROM pg_extension WHERE extname = 'vector'")" = "0.8.6"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+volumes:
+  mc_pgvector_data:
+    driver: local

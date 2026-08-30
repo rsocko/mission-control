@@ -3,6 +3,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import {
   PostgresDatabaseBootstrapAdapter,
   runPostgresMigrations,
+  runPostgresVectorMigrations,
 } from '@/db/postgres/migrations';
 
 vi.mock('drizzle-orm/node-postgres/migrator', () => ({
@@ -69,5 +70,20 @@ describe('PostgreSQL migrations', () => {
       'RESET idle_in_transaction_session_timeout',
     );
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('uses a separate migration history for extension-dependent schema', async () => {
+    await runPostgresVectorMigrations(pool, {
+      migrationsFolder: 'drizzle/postgres-vector',
+    });
+
+    expect(migrate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        migrationsFolder: 'drizzle/postgres-vector',
+        migrationsSchema: 'drizzle',
+        migrationsTable: '__drizzle_vector_migrations',
+      }),
+    );
   });
 });

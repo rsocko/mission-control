@@ -15,6 +15,14 @@ import {
 } from './config';
 import { createPostgresPool } from './connection';
 import { runPostgresMigrations } from './migrations';
+import {
+  disabledPostgresVectorCapability,
+  initializePostgresVectorSupport,
+  PostgresVectorUnavailableError,
+  resolvePostgresVectorMode,
+  type PostgresVectorCapability,
+  type PostgresVectorMode,
+} from './vector-support';
 
 export type PostgresDatabase = NodePgDatabase<typeof schema>;
 export type PostgresTransaction = Parameters<
@@ -25,12 +33,15 @@ export interface PostgresRuntimeOptions {
   config?: PostgresConfig;
   initializeSchema?: boolean;
   migrationsFolder?: string;
+  vectorMigrationsFolder?: string;
+  vectorMode?: PostgresVectorMode;
   createPool?: (config: PostgresConfig) => Pool;
 }
 
 export interface PostgresContext {
   db: PostgresDatabase;
   pool: Pool;
+  vector: PostgresVectorCapability;
 }
 
 export class PostgresPersistenceBackend
@@ -91,9 +102,22 @@ implements PersistenceBackend<PostgresTransaction> {
           migrationsFolder: this.options.migrationsFolder,
         });
       }
+      const vectorMode = this.options.vectorMode ?? resolvePostgresVectorMode();
+      if (this.options.initializeSchema === false && vectorMode === 'required') {
+        throw new PostgresVectorUnavailableError(
+          'PostgreSQL indexed vector retrieval is required, but schema initialization is disabled.',
+        );
+      }
+      const vector = this.options.initializeSchema === false
+        ? disabledPostgresVectorCapability(vectorMode)
+        : await initializePostgresVectorSupport(pool, {
+            mode: vectorMode,
+            migrationsFolder: this.options.vectorMigrationsFolder,
+          });
       this.contextValue = {
         pool,
         db: drizzle(pool, { schema }),
+        vector,
       };
     } catch (error) {
       await pool.end();

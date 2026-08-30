@@ -186,11 +186,13 @@ for (const file of workflowFiles) {
     const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
     const unitTestsResult = workflow.jobs?.['unit-tests'];
+    const postgresIntegration = workflow.jobs?.['postgres-integration'];
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
     assert.ok(
       changes && impeccableWorker && impeccableResult && lintWorker &&
         productionBuildWorker && lintResult && productionBuildResult &&
-        workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult,
+        workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult &&
+        postgresIntegration,
       'ci.yml must classify changes, isolate expensive workers, and expose every required check',
     );
     assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
@@ -292,6 +294,59 @@ for (const file of workflowFiles) {
       'ci.yml must run four unit-test shards',
     );
     assert.equal(shards.strategy?.['fail-fast'], false, 'unit-test shards must all report their result');
+    assert.equal(
+      postgresIntegration.services?.postgres?.image,
+      'pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f',
+      'PostgreSQL integration must use the approved pgvector image digest',
+    );
+    assert.equal(
+      postgresIntegration['timeout-minutes'],
+      120,
+      'PostgreSQL integration must budget for the required 1536-dimension 100k gate',
+    );
+    const pgvectorBootstrap = postgresIntegration.steps?.find(
+      (step) => step.name === 'Bootstrap and verify pgvector',
+    );
+    assert.ok(
+      pgvectorBootstrap?.run?.includes('CREATE EXTENSION IF NOT EXISTS vector'),
+      'PostgreSQL integration must bootstrap pgvector through its administrator',
+    );
+    assert.ok(
+      pgvectorBootstrap?.run?.includes(
+        "SELECT extversion FROM pg_extension WHERE extname = 'vector'",
+      ) && pgvectorBootstrap.run.includes('"0.8.6"'),
+      'PostgreSQL integration must assert pgvector 0.8.6',
+    );
+    for (const name of ['PGHOST', 'PGPORT', 'PGDATABASE', 'PGUSER', 'PGPASSWORD']) {
+      assert.ok(
+        pgvectorBootstrap?.env?.[name],
+        `PostgreSQL extension bootstrap must provide ${name}`,
+      );
+    }
+    const pgvectorBenchmark = postgresIntegration.steps?.find(
+      (step) => step.name === 'Run pgvector 100k benchmark gate',
+    );
+    const pgvectorContainer = postgresIntegration.steps?.find(
+      (step) => step.name === 'Locate pgvector service container',
+    );
+    assert.ok(
+      pgvectorContainer?.run?.includes('MC_BENCHMARK_POSTGRES_CONTAINER='),
+      'PostgreSQL integration must expose its service container for pg_dump and pg_restore',
+    );
+    assert.equal(
+      pgvectorBenchmark?.run,
+      'npm run --silent benchmark:postgres-vector',
+      'PostgreSQL integration must run the repository pgvector benchmark',
+    );
+    assert.equal(
+      pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,
+      1536,
+      'CI must run the production-representative pgvector dimension',
+    );
+    assert.ok(
+      pgvectorBenchmark?.env?.MC_BENCHMARK_POSTGRES_URL,
+      'pgvector benchmark must receive a dedicated database URL',
+    );
     const workflowPolicy = lintWorker.steps?.find((step) => step.name === 'Validate workflow policy');
     assert.ok(workflowPolicy, 'lint validation must include the workflow policy check');
     for (const invariant of [

@@ -132,7 +132,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
     return;
   }
   await postgresBackend.initialize();
-  const { db, pool } = postgresBackend.context;
+  const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
   postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
@@ -144,7 +144,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
-  postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool);
+  postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
 }
 

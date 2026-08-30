@@ -164,6 +164,51 @@ describe('PostgresSemanticIndexRepository', () => {
     mock = createMockPool();
   });
 
+  describe('indexed identity lifecycle', () => {
+    it('creates a dimension-specific HNSW index before marking an identity ready', async () => {
+      mock = createMockPool([
+        {
+          match: /FROM semantic_index_identities\s+WHERE id = \$1/,
+          rows: [{ ...IDENTITY, id: "idx-'quoted", dimensions: 1536 }],
+        },
+        { match: /UPDATE semantic_index_identities/, rowCount: 1 },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5_000, {
+        available: true,
+        mode: 'required',
+        extensionVersion: '0.8.6',
+        maxDimensions: 4_000,
+      });
+
+      await expect(repo.markIdentityReady("idx-'quoted", T0)).resolves.toBe(true);
+
+      const ddl = mock.find(/USING hnsw/);
+      expect(ddl).toContain('embedding::halfvec(1536)');
+      expect(ddl).toContain("index_id = 'idx-''quoted'");
+      expect(ddl).toContain('dimensions = 1536');
+      const statements = mock.sql();
+      expect(statements.findIndex((sql) => /pg_advisory_lock/.test(sql)))
+        .toBeLessThan(statements.findIndex((sql) => /CREATE INDEX CONCURRENTLY/.test(sql)));
+      expect(statements.findIndex((sql) => /CREATE INDEX CONCURRENTLY/.test(sql)))
+        .toBeLessThan(statements.findIndex((sql) => /UPDATE semantic_index_identities/.test(sql)));
+      expect(mock.find(/pg_advisory_unlock/)).toBeDefined();
+    });
+
+    it('rejects dimensions above the indexed limit in required mode', async () => {
+      mock = createMockPool([identityHandler({ dimensions: 4_001 })]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5_000, {
+        available: true,
+        mode: 'required',
+        extensionVersion: '0.8.6',
+        maxDimensions: 4_000,
+      });
+
+      await expect(repo.markIdentityReady('idx-1', T0))
+        .rejects.toMatchObject({ code: 'invalid-argument' });
+      expect(mock.find(/UPDATE semantic_index_identities/)).toBeUndefined();
+    });
+  });
+
   describe('intent queue claims', () => {
     it('claims atomically inside a transaction using FOR UPDATE SKIP LOCKED', async () => {
       mock = createMockPool([
@@ -834,6 +879,53 @@ describe('PostgresSemanticIndexRepository', () => {
       expect(scan).toContain('d.deleted_at IS NULL');
       expect(scan).toContain('v.expires_at IS NULL OR v.expires_at > $2');
       expect(scan).toContain('d.retain_until IS NULL OR d.retain_until > $2');
+    });
+
+    it('uses HNSW candidates with filters and exact reranking when available', async () => {
+      mock = createMockPool([
+        { match: /WHERE status = 'active' LIMIT 1/, rows: [{ ...IDENTITY, status: 'active' }] },
+        { match: /SELECT to_regclass/, rows: [{ present: true }] },
+        {
+          match: /WITH nearest AS MATERIALIZED/,
+          rows: [
+            vectorRow({ id: 'v-near', entityId: 'near', embedding: '[1,0,0]' }),
+            vectorRow({ id: 'v-far', entityId: 'far', embedding: '[0,0,1]' }),
+          ],
+        },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5, {
+        available: true,
+        mode: 'required',
+        extensionVersion: '0.8.6',
+        maxDimensions: 4_000,
+      });
+
+      const response = await repo.queryVectors({
+        queryEmbedding: new Float32Array([1, 0, 0]),
+        limit: 5,
+        entityTypes: ['task'],
+        metadataFilters: [{
+          keys: ['status'],
+          match: 'any',
+          values: ['todo'],
+          caseInsensitive: true,
+        }],
+        now: T1,
+      });
+
+      expect(response.results.map((result) => result.entityId)).toEqual(['near', 'far']);
+      expect(response.scan).toMatchObject({
+        kind: 'postgres-hnsw',
+        candidateCeiling: 100,
+        extensionVersion: '0.8.6',
+        guaranteedScale: 100_000,
+      });
+      const ann = mock.find(/WITH nearest AS MATERIALIZED/);
+      expect(ann).toContain('a.embedding::halfvec(3)');
+      expect(ann).toContain("a.index_id = 'idx-1'");
+      expect(ann).toContain('LOWER(a.metadata ->>');
+      expect(ann).toContain('v.document_version = d.version');
+      expect(mock.find(/SET LOCAL hnsw.iterative_scan/)).toContain('strict_order');
     });
 
     it('binds entity-kind and sensitivity filters as arrays', async () => {

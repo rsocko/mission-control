@@ -11,6 +11,10 @@ export interface PostgresMigrationOptions {
   migrationsFolder?: string;
 }
 
+export interface PostgresVectorMigrationOptions {
+  migrationsFolder?: string;
+}
+
 export class PostgresDatabaseBootstrapAdapter implements DatabaseBootstrapAdapter {
   constructor(
     private readonly pool: Pool,
@@ -26,6 +30,29 @@ export async function runPostgresMigrations(
   pool: Pool,
   options: PostgresMigrationOptions = {},
 ): Promise<void> {
+  return runMigrationStream(
+    pool,
+    options.migrationsFolder ?? path.join(process.cwd(), 'drizzle', 'postgres'),
+    '__drizzle_migrations',
+  );
+}
+
+export async function runPostgresVectorMigrations(
+  pool: Pool,
+  options: PostgresVectorMigrationOptions = {},
+): Promise<void> {
+  return runMigrationStream(
+    pool,
+    options.migrationsFolder ?? path.join(process.cwd(), 'drizzle', 'postgres-vector'),
+    '__drizzle_vector_migrations',
+  );
+}
+
+async function runMigrationStream(
+  pool: Pool,
+  migrationsFolder: string,
+  migrationsTable: string,
+): Promise<void> {
   const client = await pool.connect();
   let operationError: unknown;
   let cleanupError: unknown;
@@ -38,11 +65,9 @@ export async function runPostgresMigrations(
     );
     try {
       await migrate(drizzle(client), {
-        migrationsFolder:
-          options.migrationsFolder
-          ?? path.join(process.cwd(), 'drizzle', 'postgres'),
+        migrationsFolder,
         migrationsSchema: 'drizzle',
-        migrationsTable: '__drizzle_migrations',
+        migrationsTable,
       });
     } finally {
       await client.query(

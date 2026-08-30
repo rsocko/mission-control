@@ -39,8 +39,16 @@ function parseJson(value: unknown): unknown {
   return typeof value === 'string' ? JSON.parse(value) as unknown : value;
 }
 
+function parseJsonContainer(value: unknown): unknown {
+  let parsed = value;
+  for (let depth = 0; depth < 5 && typeof parsed === 'string'; depth += 1) {
+    parsed = JSON.parse(parsed) as unknown;
+  }
+  return parsed;
+}
+
 function parseJsonObject(value: unknown, field: string): Record<string, unknown> {
-  const parsed = parseJson(value);
+  const parsed = parseJsonContainer(value);
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Expected ${field} to contain a JSON object`);
   }
@@ -48,7 +56,7 @@ function parseJsonObject(value: unknown, field: string): Record<string, unknown>
 }
 
 function parseJsonArray(value: unknown, field: string): unknown[] {
-  const parsed = parseJson(value);
+  const parsed = parseJsonContainer(value);
   if (!Array.isArray(parsed)) {
     throw new Error(`Expected ${field} to contain a JSON array`);
   }

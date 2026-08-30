@@ -10,13 +10,16 @@ import {
 import { mergeUniverseSubgraph } from '@/lib/graph/universe-subgraph';
 import type {
   UniverseDimension,
+  UniverseNeighborLayer,
   UniverseNode,
+  UniverseSemanticState,
   UniverseSubgraph,
 } from '@/lib/graph/universe-types';
 import type { GraphSubgraph } from '@/lib/graph/types';
 
 const MAX_UNIVERSE_NODES = 500;
 const MAX_EXPANSION_NODES = 10;
+export const MAX_UNIVERSE_EXPANSION_HOPS = 2;
 const universePositionCache = new Map<string, UniversePosition>();
 
 type UseUniverseGraphDataOptions = {
@@ -24,6 +27,7 @@ type UseUniverseGraphDataOptions = {
   canonicalQuery: string;
   reloadKey: number;
   dimensions: UniverseDimension[];
+  neighborLayers: UniverseNeighborLayer[];
   onCanonicalLoad: () => void;
   debounceMs?: number;
 };
@@ -33,6 +37,7 @@ export function useUniverseGraphData({
   canonicalQuery,
   reloadKey,
   dimensions,
+  neighborLayers = ['explicit', 'derived'],
   onCanonicalLoad,
   debounceMs = 250,
 }: UseUniverseGraphDataOptions) {
@@ -42,11 +47,20 @@ export function useUniverseGraphData({
   const [expanding, setExpanding] = useState(false);
   const [explorationMessage, setExplorationMessage] = useState<string | null>(null);
   const [explorationError, setExplorationError] = useState<string | null>(null);
+  const [semanticOutcomes, setSemanticOutcomes] = useState<Array<{
+    nodeId: string;
+    status: UniverseSemanticState;
+    note?: string;
+  }>>([]);
+  const [nodeHops, setNodeHops] = useState<Record<string, number>>({});
   const canonicalGenerationRef = useRef(0);
   const expansionControllerRef = useRef<AbortController | null>(null);
   const expansionPinnedNodesRef = useRef<UniverseNode[]>([]);
   const onCanonicalLoadRef = useRef(onCanonicalLoad);
-  onCanonicalLoadRef.current = onCanonicalLoad;
+
+  useEffect(() => {
+    onCanonicalLoadRef.current = onCanonicalLoad;
+  }, [onCanonicalLoad]);
 
   useEffect(() => {
     canonicalGenerationRef.current += 1;
@@ -70,6 +84,8 @@ export function useUniverseGraphData({
         onCanonicalLoadRef.current();
         setExplorationMessage(null);
         setExplorationError(null);
+        setSemanticOutcomes([]);
+        setNodeHops(Object.fromEntries(result.graph.nodes.map((node) => [node.id, 0])));
         setGraph(positionUniverseGraph(result.graph, universePositionCache));
       } catch (fetchError) {
         if (fetchError instanceof DOMException && fetchError.name === 'AbortError') return;
@@ -93,9 +109,19 @@ export function useUniverseGraphData({
 
   const expandSelection = useCallback(async (selectedNodes: UniverseNode[]) => {
     if (!graph || expanding) return;
-    const allNodeIds = selectedNodes.map((node) => node.id);
+    if (!neighborLayers.length) {
+      setExplorationMessage('Choose at least one neighbor layer before expanding.');
+      return;
+    }
+    const expandableNodes = selectedNodes.filter(
+      (node) => (nodeHops[node.id] ?? 0) < MAX_UNIVERSE_EXPANSION_HOPS,
+    );
+    const allNodeIds = expandableNodes.map((node) => node.id);
     const nodeIds = allNodeIds.slice(0, MAX_EXPANSION_NODES);
-    if (!nodeIds.length) return;
+    if (!nodeIds.length) {
+      setExplorationMessage(`The selected nodes reached the ${MAX_UNIVERSE_EXPANSION_HOPS}-hop limit.`);
+      return;
+    }
     const generation = canonicalGenerationRef.current;
     const controller = new AbortController();
     expansionControllerRef.current?.abort();
@@ -106,19 +132,30 @@ export function useUniverseGraphData({
     try {
       const results = await Promise.allSettled(nodeIds.map(async (nodeId) => {
         const params = new URLSearchParams({
-          include: 'explicit,derived',
+          include: neighborLayers.join(','),
           maxNodes: '80',
           maxEdges: '240',
+          semanticTopK: '10',
         });
         const response = await fetch(
           `/api/graph/nodes/${encodeURIComponent(nodeId)}/neighbors?${params}`,
           { signal: controller.signal },
         );
-        const result: { graph?: GraphSubgraph; error?: string } = await response.json();
+        const result: {
+          graph?: GraphSubgraph & {
+            centerNodeId?: string;
+            semantic?: {
+              requested: boolean;
+              status: UniverseSemanticState;
+              note?: string;
+            };
+          };
+          error?: string;
+        } = await response.json();
         if (!response.ok || !result.graph) {
           throw new Error(result.error ?? `Failed to expand ${nodeId}`);
         }
-        return result.graph;
+        return { nodeId, graph: result.graph };
       }));
       if (
         controller.signal.aborted
@@ -138,8 +175,18 @@ export function useUniverseGraphData({
       let merged = { ...graph, nodes: pinPositionedUniverseNodes(graph.nodes) };
       let droppedNodes = 0;
       let droppedEdges = 0;
-      for (const responseGraph of responses) {
-        const result = mergeUniverseSubgraph(merged, responseGraph, {
+      const nextHops = { ...nodeHops };
+      for (const response of responses) {
+        const sourceHop = nodeHops[response.nodeId] ?? 0;
+        for (const node of response.graph.nodes) {
+          if (node.id !== response.nodeId) {
+            nextHops[node.id] = Math.min(
+              nextHops[node.id] ?? Number.POSITIVE_INFINITY,
+              sourceHop + 1,
+            );
+          }
+        }
+        const result = mergeUniverseSubgraph(merged, response.graph, {
           dimensions,
           maxNodes: MAX_UNIVERSE_NODES,
           maxEdges: MAX_UNIVERSE_NODES * 4,
@@ -157,7 +204,16 @@ export function useUniverseGraphData({
           existingNodeIds.has(node.id));
         setGraph(positioned);
       }
-      const truncated = responses.some((responseGraph) => responseGraph.truncated);
+      setNodeHops(nextHops);
+      setSemanticOutcomes(responses.flatMap(({ nodeId, graph: responseGraph }) =>
+        responseGraph.semantic?.requested
+          ? [{
+              nodeId,
+              status: responseGraph.semantic.status,
+              ...(responseGraph.semantic.note ? { note: responseGraph.semantic.note } : {}),
+            }]
+          : []));
+      const truncated = responses.some(({ graph: responseGraph }) => responseGraph.truncated);
       const selectionLimited = allNodeIds.length > nodeIds.length;
       const suffix = [
         truncated ? 'the neighborhood was bounded' : null,
@@ -181,7 +237,7 @@ export function useUniverseGraphData({
         setExpanding(false);
       }
     }
-  }, [dimensions, expanding, graph, rememberPositions]);
+  }, [dimensions, expanding, graph, neighborLayers, nodeHops, rememberPositions]);
 
   return {
     graph,
@@ -190,6 +246,8 @@ export function useUniverseGraphData({
     expanding,
     explorationMessage,
     explorationError,
+    semanticOutcomes,
+    nodeHops,
     expansionPinnedNodesRef,
     expandSelection,
     rememberPositions,

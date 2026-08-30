@@ -1494,6 +1494,23 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       params.push(request.sensitivities);
       where += ` AND a.sensitivity = ANY($${params.length}::text[])`;
     }
+    if (request.includeEntityIds) {
+      params.push(request.includeEntityIds);
+      where += ` AND a.entity_id = ANY($${params.length}::text[])`;
+    }
+    if (request.excludeConnectorInstanceIds?.length) {
+      params.push(request.excludeConnectorInstanceIds);
+      where += ` AND (
+        a.metadata ->> 'connectorInstanceId' IS NULL
+        OR NOT (a.metadata ->> 'connectorInstanceId' = ANY($${params.length}::text[]))
+      )`;
+    }
+    if (request.rootTaskOnly) {
+      where += ` AND (
+        a.metadata -> 'parentId' IS NULL
+        OR a.metadata -> 'parentId' = 'null'::jsonb
+      )`;
+    }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       params.push(request.excludeEntityIds);
       where += ` AND NOT (a.entity_id = ANY($${params.length}::text[]))`;
@@ -1656,6 +1673,20 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     const limit = Math.max(1, Math.min(Math.trunc(request.limit) || 1, 100));
     const minScore = request.minScore ?? 0;
     const metadataFilters = normalizeMetadataFilters(request.metadataFilters);
+    if (request.includeEntityIds?.length === 0) {
+      return {
+        identityId: identity.id,
+        results: [],
+        scan: {
+          kind: 'bounded-in-process',
+          candidatesScanned: 0,
+          candidateCeiling: ceiling,
+          guaranteesFullRecall: false,
+          guaranteedScale: ceiling,
+          truncated: false,
+        },
+      };
+    }
     if (await this.annIndexExists(identity)) {
       return this.queryVectorsIndexed(
         request,
@@ -1698,6 +1729,23 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     if (request.sensitivities && request.sensitivities.length > 0) {
       params.push(request.sensitivities);
       sql += ` AND v.sensitivity = ANY($${params.length}::text[])`;
+    }
+    if (request.includeEntityIds) {
+      params.push(request.includeEntityIds);
+      sql += ` AND v.entity_id = ANY($${params.length}::text[])`;
+    }
+    if (request.excludeConnectorInstanceIds?.length) {
+      params.push(request.excludeConnectorInstanceIds);
+      sql += ` AND (
+        d.metadata ->> 'connectorInstanceId' IS NULL
+        OR NOT (d.metadata ->> 'connectorInstanceId' = ANY($${params.length}::text[]))
+      )`;
+    }
+    if (request.rootTaskOnly) {
+      sql += ` AND (
+        d.metadata -> 'parentId' IS NULL
+        OR d.metadata -> 'parentId' = 'null'::jsonb
+      )`;
     }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       params.push(request.excludeEntityIds);

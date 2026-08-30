@@ -4,6 +4,8 @@ export interface SearchFilters {
   source?: string;
   status?: string;
   excludeDone?: boolean;
+  universeEligible?: boolean;
+  excludeConnectorInstanceIds?: string[];
 }
 
 export interface SearchOptions extends SearchFilters {

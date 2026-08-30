@@ -35,6 +35,7 @@ interface TaskRow {
   effort: number | null;
   dueDate: string | null;
   connectorType: string;
+  connectorInstanceId: string;
   sourceListName: string | null;
   parentId: string | null;
   isChecklistItem: number;
@@ -121,6 +122,7 @@ const TASK_COLUMNS = `
   effort,
   due_date AS dueDate,
   connector_type AS connectorType,
+  connector_instance_id AS connectorInstanceId,
   source_list_name AS sourceListName,
   parent_id AS parentId,
   is_checklist_item AS isChecklistItem,
@@ -196,6 +198,7 @@ function toTask(row: TaskRow, tags: string[]): SemanticTaskSource {
     effort: row.effort,
     dueDate: row.dueDate,
     connectorType: row.connectorType,
+    connectorInstanceId: row.connectorInstanceId,
     sourceListName: row.sourceListName,
     parentId: row.parentId,
     isChecklistItem: row.isChecklistItem === 1,

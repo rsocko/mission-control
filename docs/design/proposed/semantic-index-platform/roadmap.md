@@ -115,6 +115,9 @@ Roll out entity kinds in risk order:
 - Missing, stale, incompatible, denied, and unavailable states are distinguishable.
 - Expansion is bounded and remains responsive at the target corpus size.
 - Keyboard/list alternatives expose the same entities and explanations.
+- PostgreSQL HNSW keeps the 100,000-entity guarantee while eligibility allow-lists are
+  applied in the ANN candidate query; SQLite reports partial when its bounded scan
+  ceiling is reached.
 
 ## Phase 4: Semantic Cluster Grouping and Save
 
@@ -255,6 +258,10 @@ Use independent feature gates for:
 Roll out to synthetic/demo data first, then an opt-in local installation, then make
 the Bifrost-to-Azure route the recommended configured default. Do not silently send
 existing sensitive records to a newly configured provider.
+
+The Universe gate is `MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED`. It is independent of
+global semantic-search enablement: disabling it leaves keyword seeding plus explicit
+and derived expansion intact.
 
 ## Definition of Done
 

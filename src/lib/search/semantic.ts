@@ -43,6 +43,7 @@ import { AIRoutingDeniedError } from '@/lib/ai/provider-factory';
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
 import { aiLogger, semanticIndexLogger } from '@/lib/logger';
 import { isSemanticIndexEnabled } from '@/lib/semantic-index/config';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import type {
   SemanticDocumentMetadataValue,
   SemanticEntityKindReadiness,
@@ -83,6 +84,8 @@ interface SearchFilters {
   source?: string;
   status?: string;
   excludeDone?: boolean;
+  universeEligible?: boolean;
+  excludeConnectorInstanceIds?: string[];
 }
 
 function positiveInteger(value: string | undefined, fallback: number) {
@@ -826,6 +829,18 @@ function buildMetadataFilters(filters: SearchFilters): SemanticMetadataFilter[] 
       caseInsensitive: true,
     });
   }
+  if (filters.universeEligible) {
+    metadataFilters.push({
+      keys: ['localDisposition'],
+      match: 'any',
+      values: ['active'],
+    });
+    metadataFilters.push({
+      keys: ['connectorType'],
+      match: 'none',
+      values: [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+    });
+  }
   return metadataFilters;
 }
 
@@ -914,6 +929,8 @@ export async function semanticSearch(
       limit,
       entityTypes: entityTypesForScope(options.type ?? 'all'),
       metadataFilters: buildMetadataFilters(options),
+      excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
+      rootTaskOnly: options.universeEligible,
       minScore: SIMILARITY_THRESHOLD,
       now: new Date().toISOString(),
     });
@@ -938,25 +955,32 @@ export async function semanticSearch(
 export interface TaskEmbeddingNeighbor {
   taskId: string;
   score: number;
-  embeddingUpdatedAt: string;
+  sourceUpdatedAt: string;
+  embeddedAt: string;
 }
 
 export type TaskEmbeddingNeighborResult =
   | {
-      status: 'available';
+      status: 'available' | 'partial';
+      indexId: string;
       provider: string;
       model: string;
+      projectionVersion: number;
       sourceUpdatedAt: string;
+      sourceEmbeddedAt: string;
+      candidateCount: number;
+      truncated: boolean;
+      note?: string;
       neighbors: TaskEmbeddingNeighbor[];
     }
   | {
-      status: 'unavailable' | 'missing' | 'stale' | 'incompatible';
+      status: 'denied' | 'unavailable' | 'missing' | 'stale' | 'incompatible';
       note: string;
       neighbors: [];
     };
 
 function neighborFailure(
-  status: 'unavailable' | 'missing' | 'stale' | 'incompatible',
+  status: 'denied' | 'unavailable' | 'missing' | 'stale' | 'incompatible',
   note: string,
 ): TaskEmbeddingNeighborResult {
   return { status, note, neighbors: [] };
@@ -989,7 +1013,13 @@ function vectorMatchesIdentity(
  */
 export async function findSimilarTaskEmbeddings(
   taskId: string,
-  options: { limit?: number; minScore?: number } = {},
+  options: {
+    limit?: number;
+    minScore?: number;
+    eligibleTaskIds?: string[];
+    eligibilityFilters?: SemanticMetadataFilter[];
+    excludedConnectorInstanceIds?: string[];
+  } = {},
 ): Promise<TaskEmbeddingNeighborResult> {
   const startedAt = performance.now();
   const context = await resolveRetrievalContext();
@@ -1032,6 +1062,9 @@ export async function findSimilarTaskEmbeddings(
       queryEmbedding: vector.embedding,
       limit,
       entityTypes: ['task'],
+      includeEntityIds: options.eligibleTaskIds,
+      excludeConnectorInstanceIds: options.excludedConnectorInstanceIds,
+      metadataFilters: options.eligibilityFilters,
       excludeEntityIds: [taskId],
       minScore,
       now: new Date().toISOString(),
@@ -1039,14 +1072,23 @@ export async function findSimilarTaskEmbeddings(
     recordSearchMetrics(response.scan, performance.now() - startedAt);
 
     return {
-      status: 'available',
+      status: response.scan.truncated ? 'partial' : 'available',
+      indexId: identity.id,
       provider: identity.provider,
       model: identity.model,
-      sourceUpdatedAt: vector.embeddedAt,
+      projectionVersion: identity.projectionVersion,
+      sourceUpdatedAt: vector.sourceUpdatedAt,
+      sourceEmbeddedAt: vector.embeddedAt,
+      candidateCount: response.scan.candidatesScanned,
+      truncated: response.scan.truncated,
+      ...(response.scan.truncated
+        ? { note: 'Semantic candidates reached the repository scan ceiling; results are partial.' }
+        : {}),
       neighbors: response.results.map((result) => ({
         taskId: result.entityId,
         score: Math.min(result.score, 1),
-        embeddingUpdatedAt: result.embeddedAt,
+        sourceUpdatedAt: result.sourceUpdatedAt,
+        embeddedAt: result.embeddedAt,
       })),
     };
   } catch (error) {

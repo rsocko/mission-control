@@ -100,6 +100,7 @@ export function createSemanticSimilarityEdge(input: {
   source: string;
   target: string;
   score: number;
+  explanation?: string;
   embedding?: SemanticSimilarityGraphEdge['embedding'];
 }): SemanticSimilarityGraphEdge {
   if (
@@ -122,11 +123,14 @@ export function createSemanticSimilarityEdge(input: {
     type: 'semantic-similarity',
     provenance: 'embedding',
     score: input.score,
+    explanation: input.explanation ?? 'Related by semantic similarity in the active embedding index.',
     embedding: endpointsSwapped
       ? {
           ...embedding,
           sourceUpdatedAt: embedding.targetUpdatedAt,
           targetUpdatedAt: embedding.sourceUpdatedAt,
+          sourceEmbeddedAt: embedding.targetEmbeddedAt,
+          targetEmbeddedAt: embedding.sourceEmbeddedAt,
         }
       : embedding,
   };

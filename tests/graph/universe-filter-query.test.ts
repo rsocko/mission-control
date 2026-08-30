@@ -21,11 +21,13 @@ describe('buildUniverseGraphSearchParams', () => {
       context,
       ['priority', 'tags', 'project'],
       500,
+      Array.from({ length: 12 }, (_, index) => `task-${index}`),
     );
 
     expect(params.get('dimensions')).toBe('priority,tags,project');
     expect(params.get('maxNodes')).toBe('500');
     expect(params.get('parentOnly')).toBe('true');
+    expect(params.get('seedTaskIds')?.split(',')).toHaveLength(10);
     expect(params.get('sources')).toBe('github-issues,todoist');
     expect(params.get('listIds')).toBe('github-work:repo-a,todoist-home:inbox');
     expect(params.get('tagSlugs')).toBe('graph,urgent');

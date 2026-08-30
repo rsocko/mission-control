@@ -359,7 +359,7 @@ function toNumber(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function annIndexName(indexId: string): string {
+export function postgresSemanticAnnIndexName(indexId: string): string {
   const digest = createHash('sha256').update(indexId).digest('hex').slice(0, 20);
   return `idx_semantic_ann_${digest}`;
 }
@@ -591,7 +591,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       return false;
     }
 
-    const name = annIndexName(identity.id);
+    const name = postgresSemanticAnnIndexName(identity.id);
     if (this.knownAnnIndexes.has(name)) return true;
     const indexId = quoteSqlLiteral(identity.id);
     const dimensions = identity.dimensions;
@@ -672,7 +672,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     identity: Pick<SemanticIndexIdentity, 'id' | 'dimensions'>,
   ): Promise<boolean> {
     if (!this.supportsAnnDimensions(identity.dimensions)) return false;
-    const name = annIndexName(identity.id);
+    const name = postgresSemanticAnnIndexName(identity.id);
     if (this.knownAnnIndexes.has(name)) return true;
     const [row] = await query<{ present: boolean }>(
       this.pool,
@@ -1038,7 +1038,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           `DELETE FROM semantic_index_identities WHERE id = $1 AND status IN ('retired', 'failed')`,
           [candidate.id],
         );
-        const indexName = annIndexName(candidate.id);
+        const indexName = postgresSemanticAnnIndexName(candidate.id);
         await client.query(`DROP INDEX IF EXISTS "${indexName}"`);
         this.knownAnnIndexes.delete(indexName);
       }

@@ -81,9 +81,11 @@ bulk-loading and exact-reference work that is not part of the application query 
 `scripts/benchmark-postgres-vector.ts` creates only deterministic synthetic
 metadata and vectors. For both corpus sizes it:
 
-1. initializes the production migrations, creates a production semantic index
-   identity, bulk-backfills `semantic_documents`, `semantic_vectors`, and
-   `semantic_vector_ann`, and rebuilds that identity's production HNSW cosine index;
+1. initializes the production migrations, deterministically drops any valid or
+   invalid identity-specific HNSW index left by an interrupted run, creates a
+   production semantic index identity, bulk-backfills `semantic_documents`,
+   `semantic_vectors`, and `semantic_vector_ann`, and rebuilds that identity's
+   production HNSW cosine index;
 2. obtains full-precision `vector` cosine reference results with ANN, ordinary
    index, index-only, and bitmap scans disabled; HNSW candidate generation remains
    the production `halfvec` expression followed by full-precision repository rerank;

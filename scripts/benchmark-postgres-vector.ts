@@ -9,7 +9,10 @@ import { Pool } from 'pg';
 import { createPostgresPool } from '../src/db/postgres/connection';
 import { resolvePostgresConfig } from '../src/db/postgres/config';
 import { runPostgresMigrations } from '../src/db/postgres/migrations';
-import { PostgresSemanticIndexRepository } from '../src/db/postgres/semantic-index/repository';
+import {
+  postgresSemanticAnnIndexName,
+  PostgresSemanticIndexRepository,
+} from '../src/db/postgres/semantic-index/repository';
 import {
   initializePostgresVectorSupport,
   POSTGRES_HNSW_MIN_CANDIDATES,
@@ -470,16 +473,17 @@ async function identityIndexDefinition(
   pool: Pool,
   identityId: string,
 ): Promise<{ name: string; definition: string }> {
+  const expectedName = postgresSemanticAnnIndexName(identityId);
   const result = await pool.query<{ indexname: string; indexdef: string }>(
     `
       SELECT indexname, indexdef
       FROM pg_indexes
       WHERE schemaname = 'public'
         AND tablename = 'semantic_vector_ann'
+        AND indexname = $1
         AND indexdef LIKE '%USING hnsw%'
-        AND indexdef LIKE '%' || $1 || '%'
     `,
-    [identityId],
+    [expectedName],
   );
   const name = result.rows[0]?.indexname;
   const definition = result.rows[0]?.indexdef;
@@ -488,12 +492,12 @@ async function identityIndexDefinition(
   return { name, definition };
 }
 
-async function cleanupIdentity(
+export async function cleanupBenchmarkIdentity(
   pool: Pool,
   identityId: string,
-  indexName?: string,
 ): Promise<void> {
-  if (indexName) await pool.query(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`);
+  const indexName = postgresSemanticAnnIndexName(identityId);
+  await pool.query(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`);
   await pool.query('DELETE FROM semantic_index_identities WHERE id = $1', [identityId]);
   await pool.query(`DROP TABLE IF EXISTS ${STAGING_TABLE}`);
 }
@@ -1193,7 +1197,7 @@ async function benchmarkCorpus(
   size: number,
 ): Promise<BenchmarkResult> {
   const identityId = `mc-benchmark-${size}-${config.dimensions}`;
-  await cleanupIdentity(rawPool, identityId);
+  await cleanupBenchmarkIdentity(rawPool, identityId);
   const memoryBefore = await memorySample(rawPool, config.postgresContainer);
   await repository.createIdentity({
     id: identityId,
@@ -1455,7 +1459,7 @@ async function benchmarkCorpus(
       gatesPassed,
     };
   } finally {
-    await cleanupIdentity(rawPool, identityId, indexName);
+    await cleanupBenchmarkIdentity(rawPool, identityId);
   }
 }
 

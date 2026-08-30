@@ -531,7 +531,7 @@ export function createSqliteGitHubDependencyRepositories(
               position: item.position,
               sourceId: item.sourceId,
               verified: item.verified,
-              identityEvidence: item.identityEvidence ?? undefined,
+              identityEvidence: item.identityEvidence,
               identityEvidenceState: item.identityEvidenceState,
             })),
           ).run();
@@ -597,7 +597,7 @@ export function createSqliteGitHubDependencyRepositories(
               position: item.position,
               sourceId: item.sourceId,
               verified: item.verified,
-              identityEvidence: item.identityEvidence ?? undefined,
+              identityEvidence: item.identityEvidence,
               identityEvidenceState: item.identityEvidenceState,
             })),
           ).run();
@@ -608,7 +608,7 @@ export function createSqliteGitHubDependencyRepositories(
               snapshotId: fence.id,
               blockerSourceId: edge.blockerSourceId,
               blockedSourceId: edge.blockedSourceId,
-              blockerIdentityEvidence: edge.blockerIdentityEvidence ?? undefined,
+              blockerIdentityEvidence: edge.blockerIdentityEvidence,
               blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState,
             })),
           ).onConflictDoNothing().run();
@@ -782,7 +782,7 @@ export function createSqliteGitHubDependencyRepositories(
               snapshotId: fence.id,
               blockerSourceId: edge.blockerSourceId,
               blockedSourceId: edge.blockedSourceId,
-              blockerIdentityEvidence: edge.blockerIdentityEvidence ?? undefined,
+              blockerIdentityEvidence: edge.blockerIdentityEvidence,
               blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState,
             })),
           ).onConflictDoNothing().run();
@@ -792,7 +792,7 @@ export function createSqliteGitHubDependencyRepositories(
             verified: true,
             ...(update.identityEvidenceState !== undefined
               ? {
-                  identityEvidence: update.identityEvidence ?? undefined,
+                  identityEvidence: update.identityEvidence,
                   identityEvidenceState: update.identityEvidenceState,
                 }
               : {}),

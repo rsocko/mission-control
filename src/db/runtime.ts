@@ -11,7 +11,6 @@ import {
 import {
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
-import { initializeDatabase } from './index';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
@@ -137,7 +136,15 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  */
 export async function initializeRuntimeDatabase(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
+    const [
+      { initializeDatabase },
+      { sqliteCorePersistenceRepositories },
+    ] = await Promise.all([
+      import('./index'),
+      import('./persistence/sqlite-core-repositories'),
+    ]);
     initializeDatabase();
+    registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
     return;
   }
   await postgresBackend.initialize();

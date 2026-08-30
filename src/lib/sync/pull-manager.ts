@@ -26,8 +26,10 @@ import {
 import { getLocalToday } from '@/lib/utils/date';
 import {
   persistGitHubLinkedSourceIdentityBatch,
-  persistExternalIdentityBatch,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/linked-source-identity';
+import {
+  persistGitHubPrimaryIdentityBatch,
+} from '@/lib/external-identities/primary-identity';
 import { getTimezone } from '@/lib/mode';
 import {
   isReminderRelativeRule,
@@ -36,9 +38,11 @@ import {
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import type {
   GitHubStableIdentityRuntime,
+} from '@/lib/external-identities/stable-identity-runtime';
+import type {
   GitHubIdentityOutcome,
   GitHubIdentityResolutionDecision,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/stable-identity-types';
 import {
   mergeGitHubHierarchyObservation,
   readGitHubHierarchyObservation,
@@ -746,10 +750,18 @@ export async function upsertTasks(
             evidence: remoteTask.externalIdentity,
           });
         }
-        persistExternalIdentityBatch(
+        const identityResults = await persistGitHubPrimaryIdentityBatch(
           identityWrites,
           identityRuntime.modeSnapshot,
         );
+        const failedIdentity = identityResults.find((result) => result.state !== 'bound');
+        if (failedIdentity) {
+          throw new Error(
+            `GitHub task identity persistence failed: ${
+              failedIdentity.collisionCategory ?? failedIdentity.state
+            }`,
+          );
+        }
         const linkedIdentityWrites = new Map<string, {
           linkedSourceId: string;
           sourceId: string;

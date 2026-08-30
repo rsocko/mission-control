@@ -1,5 +1,9 @@
 import type { ExternalBindingType, GitHubTaskWriteOperation } from '@/db/schema';
 import type { GitHubIdentityModeSnapshot } from '@/lib/external-identities/stable-identity-types';
+import type {
+  ExternalIdentityWrite,
+  ExternalIdentityWriteResult,
+} from '@/lib/external-identities/types';
 
 /**
  * Backend-neutral persistence port for the GitHub durable identity epoch, stable
@@ -139,6 +143,17 @@ export interface GitHubIdentityPersistence {
     connectorInstanceId: string;
     now: string;
   }): Promise<void>;
+
+  /**
+   * Atomically persists the primary task/source-list NodeID bindings observed by
+   * normal GitHub sync execution. The frozen identity epoch is rechecked inside
+   * the same transaction as every entity, locator, binding, and collision write.
+   */
+  persistExternalIdentityBatch(input: {
+    connectorInstanceId: string;
+    modeSnapshot?: GitHubIdentityModeSnapshot;
+    writes: readonly ExternalIdentityWrite[];
+  }): Promise<readonly ExternalIdentityWriteResult[]>;
 
   /** Single NodeID batch lookup used by the stable-identity resolver. */
   lookupStableIdentityBatch(input: {

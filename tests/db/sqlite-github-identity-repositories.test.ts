@@ -239,6 +239,21 @@ describeGitHubIdentityRepositoriesContract('SQLite', async (): Promise<GitHubIde
       `).get(cycleId) as { state: string } | undefined;
       return row ? row.state : null;
     },
+    primaryBinding: async ({ connectorInstanceId, bindingType, localId }) => {
+      const row = sqlite.prepare(`
+        SELECT entity.stable_id AS stableId, binding.state,
+          binding.verified_at AS verifiedAt
+        FROM external_entity_bindings AS binding
+        JOIN external_entities AS entity ON entity.id = binding.external_entity_id
+        WHERE binding.connector_instance_id = ?
+          AND binding.binding_type = ?
+          AND binding.local_id = ?
+        LIMIT 1
+      `).get(connectorInstanceId, bindingType, localId) as
+        | { stableId: string; state: string; verifiedAt: string | null }
+        | undefined;
+      return row ?? null;
+    },
     close: () => undefined,
   };
 });

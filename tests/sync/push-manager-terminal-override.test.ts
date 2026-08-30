@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
+import { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -140,7 +141,7 @@ vi.mock('@/lib/sync/push-lease', () => ({
   releaseTaskPush: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@/lib/external-identities', () => {
+vi.mock('@/lib/external-identities/github-write-fence', () => {
   class GitHubWriteFenceError extends Error {
     constructor(readonly code: string) {
       super(code);
@@ -162,11 +163,13 @@ vi.mock('@/lib/external-identities', () => {
     GitHubUnknownWriteOutcomeError,
     GitHubWriteFenceError,
     hasSucceededGitHubWrite: vi.fn(() => false),
-    persistExternalIdentityBatch: vi.fn(),
     quarantineUnknownGitHubWrite: vi.fn(),
     verifyGitHubWritePreflight: vi.fn(),
   };
 });
+vi.mock('@/lib/external-identities/primary-identity', () => ({
+  persistGitHubPrimaryIdentityBatch: vi.fn(async () => []),
+}));
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
@@ -257,6 +260,75 @@ describe('push-manager terminal status override', () => {
     expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Create remotely',
     }));
+  });
+
+  it('does not finalize a GitHub create that returns no stable identity evidence', async () => {
+    mockPendingTasks.push({
+      id: 'task-github-create',
+      sourceId: 'local:task-github-create',
+      title: 'Create GitHub issue',
+      description: '',
+      status: 'todo',
+      priority: 'none',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      sourceListId: 'synthetic-owner/synthetic-repo',
+      sourceListName: 'synthetic-owner/synthetic-repo',
+      connectorInstanceId: 'github-create',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    const createTask = vi.fn().mockResolvedValue({
+      sourceId: 'synthetic-owner/synthetic-repo:42',
+      metadata: {},
+    });
+    const identityRuntime = new GitHubStableIdentityRuntime({
+      connectorInstanceId: 'github-create',
+      modeSnapshot: {
+        connectorInstanceId: 'github-create',
+        effectiveMode: 'stable',
+        modeRevision: 1,
+        capturedAt: '2026-08-10T12:00:00.000Z',
+      },
+      syncKind: 'full',
+    });
+
+    const result = await pushPendingChanges(
+      'github-create',
+      {
+        type: 'github-issues',
+        createTask,
+        preflightWriteRoute: vi.fn(async () => ({ state: 'verified' })),
+        runAuthorizedWrite: vi.fn(async (
+          _authorization: unknown,
+          write: () => Promise<TaskItem>,
+        ) => write()),
+      } as Partial<IConnector> as IConnector,
+      [],
+      undefined,
+      {
+        identityRuntime,
+        identityMode: { modeRevision: 1 },
+        connectorOperationLeaseHeld: true,
+      },
+    );
+
+    expect(result.pushed).toBe(0);
+    expect(result.errors.join(' ')).toContain('created_identity_evidence_missing');
+    expect(identityRuntime.blockedReasonCodes).toContain(
+      'created_identity_persistence_failed',
+    );
+    expect(mockCompleteTaskPush).not.toHaveBeenCalled();
+    expect(mockFailTaskPush).toHaveBeenCalledWith(
+      'task-github-create',
+      'renewed-lease-token',
+      'push_error',
+      1,
+      undefined,
+    );
   });
 
   it('does not auto-delete a retained task when a user-triggered retry returns 404', async () => {

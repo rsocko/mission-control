@@ -67,6 +67,7 @@ describe('PostgreSQL vector benchmark helpers', () => {
     );
     expect(source).toContain("THEN 'project' ELSE 'task'");
     expect(source).toContain("THEN 'restricted' ELSE 'standard'");
+    expect(source).toContain('dimension::bigint * 32452843');
     expect(source).toContain('unauthorizedResults');
     expect(source).toContain('repository.upsertVector(repositoryUpdate)');
     expect(source).toContain('/sys/fs/cgroup/memory.current');

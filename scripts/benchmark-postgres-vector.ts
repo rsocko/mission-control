@@ -25,6 +25,7 @@ const FUTURE = '2031-01-01T00:00:00.000Z';
 const EXPIRED = '2029-01-01T00:00:00.000Z';
 const SYNTHETIC_VECTOR_FUNCTION = 'mc_benchmark_synthetic_vector';
 const STAGING_TABLE = 'mc_benchmark_vector_seed';
+let currentStage = 'configuration';
 const execFileAsync = promisify(execFile);
 
 const GATES = {
@@ -381,7 +382,7 @@ async function createSyntheticVectorFunction(pool: Pool): Promise<void> {
             (
               (
                 seed * 15485863
-                + dimension * 32452843
+                + dimension::bigint * 32452843
                 + seed * dimension * 49979687
               ) % 2000003
             )::double precision / 1000001.5 - 1
@@ -1355,7 +1356,9 @@ async function main() {
   const annQueryTimings: number[] = [];
 
   try {
+    currentStage = 'core-migrations';
     await runPostgresMigrations(rawPool);
+    currentStage = 'vector-capability';
     const vectorCapability = await initializePostgresVectorSupport(rawPool, {
       mode: 'required',
     });
@@ -1372,6 +1375,7 @@ async function main() {
     if (postgresVersion < 170_000 || postgresVersion >= 180_000) {
       throw new Error('unsupported_postgres_version');
     }
+    currentStage = 'synthetic-vector-function';
     await createSyntheticVectorFunction(rawPool);
     const repository = new PostgresSemanticIndexRepository(
       instrumentAnnQueries(rawPool, annQueryTimings),
@@ -1380,6 +1384,7 @@ async function main() {
     );
     const results: BenchmarkResult[] = [];
     for (const size of CORPUS_SIZES) {
+      currentStage = `corpus-${size}`;
       results.push(
         await benchmarkCorpus(rawPool, repository, annQueryTimings, config, size),
       );
@@ -1415,6 +1420,15 @@ if (import.meta.url === invokedPath) {
       benchmark: 'postgres-semantic-repository-pgvector-hnsw',
       gatesPassed: false,
       error: code,
+      stage: currentStage,
+      postgresCode:
+        typeof error === 'object'
+          && error !== null
+          && 'code' in error
+          && typeof error.code === 'string'
+          && /^[A-Z0-9]{5}$/u.test(error.code)
+          ? error.code
+          : null,
     }));
     process.exitCode = 1;
   });

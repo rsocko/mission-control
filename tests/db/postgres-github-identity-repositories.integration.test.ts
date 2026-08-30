@@ -1,7 +1,10 @@
-import { afterAll, describe, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import type { Pool } from 'pg';
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresGitHubIdentityRepositories } from '@/db/postgres/repositories/github-identity-repositories';
+import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import {
   describeGitHubIdentityRepositoriesContract,
   GITHUB_IDENTITY_CONTRACT,
@@ -77,6 +80,46 @@ async function cleanupContractRows(): Promise<void> {
   await pool.query(`DELETE FROM github_identity_controls WHERE connector_instance_id = $1 OR connector_instance_id LIKE $2`, [connectorInstanceId, `${FRESH_CONNECTOR_PREFIX}%`]);
   await pool.query(`DELETE FROM github_identity_migrations WHERE connector_instance_id = $1 OR connector_instance_id LIKE $2`, [connectorInstanceId, `${FRESH_CONNECTOR_PREFIX}%`]);
   await pool.query(`DELETE FROM connector_configs WHERE id = $1 OR id LIKE $2`, [connectorInstanceId, `${FRESH_CONNECTOR_PREFIX}%`]);
+}
+
+function instrumentPostgresPool(pool: Pool, statements: string[]): Pool {
+  return new Proxy(pool, {
+    get(target, property, receiver) {
+      if (property === 'connect') {
+        return async () => {
+          const client = await target.connect();
+          return new Proxy(client, {
+            get(clientTarget, clientProperty, clientReceiver) {
+              if (clientProperty === 'query') {
+                return (textOrConfig: unknown, ...args: unknown[]) => {
+                  const text = typeof textOrConfig === 'string'
+                    ? textOrConfig
+                    : (
+                        textOrConfig
+                        && typeof textOrConfig === 'object'
+                        && 'text' in textOrConfig
+                        && typeof textOrConfig.text === 'string'
+                          ? textOrConfig.text
+                          : ''
+                      );
+                  statements.push(text.replace(/\s+/g, ' ').trim());
+                  return Reflect.apply(
+                    clientTarget.query,
+                    clientTarget,
+                    [textOrConfig, ...args],
+                  );
+                };
+              }
+              const value = Reflect.get(clientTarget, clientProperty, clientReceiver);
+              return typeof value === 'function' ? value.bind(clientTarget) : value;
+            },
+          });
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
 }
 
 if (connectionString) {
@@ -234,6 +277,366 @@ if (connectionString) {
       };
     },
   );
+
+  describe('GitHubIdentityPersistence bulk writes (PostgreSQL)', () => {
+    beforeEach(async () => {
+      await initialize();
+      await cleanupContractRows();
+    });
+
+    it('persists a production-sized batch with bounded query count and isolated collisions', async () => {
+      const pool = backend.context.pool;
+      const repositories = createPostgresGitHubIdentityRepositories(pool);
+      const connectorInstanceId = `fresh-primary-bulk-${randomUUID()}`;
+      const observedAt = '2026-08-20T10:00:00.000Z';
+      await pool.query(
+        `
+          INSERT INTO connector_configs (
+            id, type, name, enabled, capabilities, credentials, settings,
+            synced_lists, created_at, updated_at
+          ) VALUES (
+            $1, 'github-issues', 'GitHub bulk', true, '{}'::jsonb,
+            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, $2, $2
+          )
+        `,
+        [connectorInstanceId, observedAt],
+      );
+      await repositories.identity.ensureControls({ connectorInstanceId, now: observedAt });
+      const modeSnapshot = await repositories.identity.getModeSnapshot(
+        connectorInstanceId,
+        observedAt,
+      );
+      const evidence = (suffix: string) => ({
+        entity: {
+          identity: {
+            provider: 'github' as const,
+            hostKey: 'github.com',
+            entityType: 'repository' as const,
+            stableId: `R_fresh-primary-bulk-${suffix}`,
+          },
+          locator: {
+            owner: 'bulk-owner',
+            repository: `repository-${suffix}`,
+          },
+          observationSource: 'graphql' as const,
+          observedAt,
+        },
+      });
+      const existingStableTarget = {
+        connectorInstanceId,
+        bindingType: 'source_list' as const,
+        localId: `${connectorInstanceId}:existing-stable`,
+        legacyIdentity: 'bulk-owner/repository-existing-stable',
+      };
+      const existingLocalTarget = {
+        connectorInstanceId,
+        bindingType: 'source_list' as const,
+        localId: `${connectorInstanceId}:existing-local`,
+        legacyIdentity: 'bulk-owner/repository-existing-local',
+      };
+      await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [
+          { target: existingStableTarget, evidence: evidence('existing-stable') },
+          { target: existingLocalTarget, evidence: evidence('existing-local') },
+        ],
+      });
+
+      const writes: ExternalIdentityWrite[] = [
+        {
+          target: {
+            ...existingStableTarget,
+            localId: `${connectorInstanceId}:competing-local`,
+          },
+          evidence: evidence('existing-stable'),
+        },
+        {
+          target: existingLocalTarget,
+          evidence: evidence('competing-stable'),
+        },
+        ...Array.from({ length: 498 }, (_, index): ExternalIdentityWrite => ({
+          target: {
+            connectorInstanceId,
+            bindingType: 'source_list',
+            localId: `${connectorInstanceId}:list-${index}`,
+            legacyIdentity: `bulk-owner/repository-${index}`,
+          },
+          evidence: evidence(String(index)),
+        })),
+      ];
+      const statements: string[] = [];
+      const instrumentedRepositories = createPostgresGitHubIdentityRepositories(
+        instrumentPostgresPool(pool, statements),
+      );
+      const results = await instrumentedRepositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes,
+      });
+
+      expect(results).toHaveLength(500);
+      expect(results.filter(({ state }) => state === 'bound')).toHaveLength(498);
+      expect(results.slice(0, 2)).toEqual([
+        expect.objectContaining({
+          state: 'collision',
+          collisionCategory: 'multiple_local_one_stable',
+        }),
+        expect.objectContaining({
+          state: 'collision',
+          collisionCategory: 'one_local_multiple_stable',
+        }),
+      ]);
+      expect(statements).toHaveLength(14);
+      expect(statements.filter((text) => text.includes('INSERT INTO external_entities')))
+        .toHaveLength(1);
+      expect(statements.filter((text) => text.includes('INSERT INTO external_entity_locators')))
+        .toHaveLength(1);
+      expect(statements.filter((text) => text.includes('INSERT INTO external_entity_bindings')))
+        .toHaveLength(1);
+      expect(statements.filter((text) => text.includes('FROM unnest'))).toHaveLength(6);
+
+      const persisted = await pool.query<{ count: string }>(
+        `
+          SELECT count(*)::text AS count
+          FROM external_entity_bindings
+          WHERE connector_instance_id = $1
+        `,
+        [connectorInstanceId],
+      );
+      expect(persisted.rows[0]?.count).toBe('500');
+      const competingBindings = await pool.query<{ localId: string }>(
+        `
+          SELECT local_id AS "localId"
+          FROM external_entity_bindings
+          WHERE connector_instance_id = $1
+            AND local_id = ANY($2::text[])
+        `,
+        [
+          connectorInstanceId,
+          [
+            `${connectorInstanceId}:competing-local`,
+            existingLocalTarget.localId,
+          ],
+        ],
+      );
+      expect(competingBindings.rows.map(({ localId }) => localId)).toEqual([
+        existingLocalTarget.localId,
+      ]);
+
+      const [retry] = await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [{
+          target: existingStableTarget,
+          evidence: evidence('existing-stable'),
+        }],
+      });
+      expect(retry.state).toBe('bound');
+      const collisionState = await pool.query<{ state: string }>(
+        `
+          SELECT state
+          FROM external_entity_bindings
+          WHERE connector_instance_id = $1
+            AND binding_type = 'source_list'
+            AND local_id = $2
+        `,
+        [connectorInstanceId, existingStableTarget.localId],
+      );
+      expect(collisionState.rows[0]?.state).toBe('collision');
+    });
+
+    it('preserves ordered locator handoffs through the sequential fallback', async () => {
+      const pool = backend.context.pool;
+      const repositories = createPostgresGitHubIdentityRepositories(pool);
+      const connectorInstanceId = `fresh-primary-handoff-${randomUUID()}`;
+      const initialAt = '2026-08-20T10:00:00.000Z';
+      const movedAt = '2026-08-20T10:01:00.000Z';
+      await pool.query(
+        `
+          INSERT INTO connector_configs (
+            id, type, name, enabled, capabilities, credentials, settings,
+            synced_lists, created_at, updated_at
+          ) VALUES (
+            $1, 'github-issues', 'GitHub handoff', true, '{}'::jsonb,
+            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, $2, $2
+          )
+        `,
+        [connectorInstanceId, initialAt],
+      );
+      await repositories.identity.ensureControls({ connectorInstanceId, now: initialAt });
+      const modeSnapshot = await repositories.identity.getModeSnapshot(
+        connectorInstanceId,
+        initialAt,
+      );
+      const target = (suffix: string) => ({
+        connectorInstanceId,
+        bindingType: 'source_list' as const,
+        localId: `${connectorInstanceId}:${suffix}`,
+        legacyIdentity: `bulk-owner/${suffix}`,
+      });
+      const evidence = (
+        stableId: string,
+        repository: string,
+        observedAt: string,
+      ) => ({
+        entity: {
+          identity: {
+            provider: 'github' as const,
+            hostKey: 'github.com',
+            entityType: 'repository' as const,
+            stableId,
+          },
+          locator: { owner: 'bulk-owner', repository },
+          observationSource: 'graphql' as const,
+          observedAt,
+        },
+      });
+      await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [{
+          target: target('first'),
+          evidence: evidence('R_fresh-primary-handoff-first', 'old-path', initialAt),
+        }],
+      });
+
+      const results = await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [
+          {
+            target: target('first'),
+            evidence: evidence('R_fresh-primary-handoff-first', 'new-path', movedAt),
+          },
+          {
+            target: target('second'),
+            evidence: evidence('R_fresh-primary-handoff-second', 'old-path', movedAt),
+          },
+        ],
+      });
+      expect(results.map(({ state }) => state)).toEqual(['bound', 'bound']);
+      const locators = await pool.query<{ stableId: string; repository: string }>(
+        `
+          SELECT
+            entity.stable_id AS "stableId",
+            locator.repository
+          FROM external_entities entity
+          INNER JOIN external_entity_locators locator
+            ON locator.external_entity_id = entity.id
+           AND locator.valid_to IS NULL
+          WHERE entity.stable_id = ANY($1::text[])
+          ORDER BY entity.stable_id
+        `,
+        [[
+          'R_fresh-primary-handoff-first',
+          'R_fresh-primary-handoff-second',
+        ]],
+      );
+      expect(locators.rows).toEqual([
+        { stableId: 'R_fresh-primary-handoff-first', repository: 'new-path' },
+        { stableId: 'R_fresh-primary-handoff-second', repository: 'old-path' },
+      ]);
+    });
+
+    it('does not persist an issue whose repository locator is rejected', async () => {
+      const pool = backend.context.pool;
+      const repositories = createPostgresGitHubIdentityRepositories(pool);
+      const connectorInstanceId = `fresh-primary-rejected-issue-${randomUUID()}`;
+      const observedAt = '2026-08-20T10:00:00.000Z';
+      await pool.query(
+        `
+          INSERT INTO connector_configs (
+            id, type, name, enabled, capabilities, credentials, settings,
+            synced_lists, created_at, updated_at
+          ) VALUES (
+            $1, 'github-issues', 'GitHub rejected issue', true, '{}'::jsonb,
+            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, $2, $2
+          )
+        `,
+        [connectorInstanceId, observedAt],
+      );
+      await repositories.identity.ensureControls({ connectorInstanceId, now: observedAt });
+      const modeSnapshot = await repositories.identity.getModeSnapshot(
+        connectorInstanceId,
+        observedAt,
+      );
+      const repositoryObservation = (stableId: string) => ({
+        identity: {
+          provider: 'github' as const,
+          hostKey: 'github.com',
+          entityType: 'repository' as const,
+          stableId,
+        },
+        locator: { owner: 'bulk-owner', repository: 'claimed-path' },
+        observationSource: 'graphql' as const,
+        observedAt,
+      });
+      await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [{
+          target: {
+            connectorInstanceId,
+            bindingType: 'source_list',
+            localId: `${connectorInstanceId}:owner`,
+            legacyIdentity: 'bulk-owner/claimed-path',
+          },
+          evidence: {
+            entity: repositoryObservation('R_fresh-primary-rejected-owner'),
+          },
+        }],
+      });
+
+      const rejectedIssueStableId = 'I_fresh-primary-rejected-issue';
+      const [result] = await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: [{
+          target: {
+            connectorInstanceId,
+            bindingType: 'task',
+            localId: `${connectorInstanceId}:issue`,
+            legacyIdentity: 'bulk-owner/claimed-path:17',
+          },
+          evidence: {
+            repository: repositoryObservation('R_fresh-primary-rejected-competitor'),
+            entity: {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'issue',
+                stableId: rejectedIssueStableId,
+              },
+              locator: {
+                owner: 'bulk-owner',
+                repository: 'claimed-path',
+                issueNumber: 17,
+              },
+              observationSource: 'graphql',
+              observedAt,
+            },
+          },
+        }],
+      });
+      expect(result).toMatchObject({
+        state: 'collision',
+        collisionCategory: 'repository_path_replacement',
+      });
+      const rejectedIssue = await pool.query<{ id: string }>(
+        `
+          SELECT id
+          FROM external_entities
+          WHERE provider = 'github'
+            AND host_key = 'github.com'
+            AND entity_type = 'issue'
+            AND stable_id = $1
+        `,
+        [rejectedIssueStableId],
+      );
+      expect(rejectedIssue.rows).toEqual([]);
+    });
+  });
 }
 
 describe.skipIf(Boolean(connectionString))('GitHubIdentityPersistence (PostgreSQL)', () => {

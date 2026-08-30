@@ -1,10 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import type { Pool } from 'pg';
+import { describe, expect, it, vi } from 'vitest';
 import {
+  cleanupBenchmarkIdentity,
+  evaluateResourceGates,
   inspectExplainPlan,
   percentile,
+  POSTGRES_VECTOR_100K_RESOURCE_CEILINGS,
 } from '../../scripts/benchmark-postgres-vector';
+import { postgresSemanticAnnIndexName } from '../../src/db/postgres/semantic-index/repository';
 
 describe('PostgreSQL vector benchmark helpers', () => {
   it('computes nearest-rank percentiles deterministically', () => {
@@ -48,6 +53,93 @@ describe('PostgreSQL vector benchmark helpers', () => {
     expect(plan.usesSequentialScan).toBe(true);
   });
 
+  it('passes 100k resource measurements at their explicit ceilings', () => {
+    expect(evaluateResourceGates(
+      100_000,
+      {
+        memoryDeltaBytes: POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.memoryDeltaBytes,
+        productionTableBytes:
+          POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.productionTableBytes,
+        identityIndexBytes:
+          POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.identityIndexBytes,
+      },
+      true,
+    )).toEqual({
+      memoryDeltaPassed: true,
+      productionTablePassed: true,
+      identityIndexPassed: true,
+      passed: true,
+    });
+  });
+
+  it.each([
+    ['memory', {
+      memoryDeltaBytes: POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.memoryDeltaBytes + 1,
+      productionTableBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.productionTableBytes,
+      identityIndexBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.identityIndexBytes,
+    }],
+    ['table', {
+      memoryDeltaBytes: POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.memoryDeltaBytes,
+      productionTableBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.productionTableBytes + 1,
+      identityIndexBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.identityIndexBytes,
+    }],
+    ['index', {
+      memoryDeltaBytes: POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.memoryDeltaBytes,
+      productionTableBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.productionTableBytes,
+      identityIndexBytes:
+        POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.identityIndexBytes + 1,
+    }],
+  ])('fails the 100k %s resource ceiling above its boundary', (_name, measurements) => {
+    expect(evaluateResourceGates(100_000, measurements, true).passed).toBe(false);
+  });
+
+  it('requires the 100k memory measurement in the pinned container gate', () => {
+    const measurements = {
+      memoryDeltaBytes: null,
+      productionTableBytes: 1,
+      identityIndexBytes: 1,
+    };
+    expect(evaluateResourceGates(100_000, measurements, true).passed).toBe(false);
+    expect(evaluateResourceGates(100_000, measurements, false).passed).toBe(true);
+  });
+
+  it('drops an interrupted run index before every measured retry build', async () => {
+    const identityId = 'mc-benchmark-100000-1536';
+    const indexName = postgresSemanticAnnIndexName(identityId);
+    let indexPresent = true;
+    let builds = 0;
+    const statements: string[] = [];
+    const pool = {
+      query: vi.fn(async (text: string) => {
+        statements.push(text);
+        if (text === `DROP INDEX IF EXISTS "${indexName}"`) indexPresent = false;
+        return { rows: [], rowCount: 0 };
+      }),
+    } as unknown as Pool;
+    const measuredAttempt = async () => {
+      await cleanupBenchmarkIdentity(pool, identityId);
+      expect(indexPresent).toBe(false);
+      indexPresent = true;
+      builds += 1;
+      return 125_000;
+    };
+
+    await expect(measuredAttempt()).resolves.toBe(125_000);
+    await expect(measuredAttempt()).resolves.toBe(125_000);
+
+    expect(builds).toBe(2);
+    expect(statements.filter((sql) =>
+      sql === `DROP INDEX IF EXISTS "${indexName}"`
+    )).toHaveLength(2);
+    expect(statements[0]).toBe(`DROP INDEX IF EXISTS "${indexName}"`);
+    expect(statements[1]).toBe('DELETE FROM semantic_index_identities WHERE id = $1');
+  });
+
   it('uses the production repository and performs a real custom-format restore', () => {
     const source = readFileSync(
       join(process.cwd(), 'scripts', 'benchmark-postgres-vector.ts'),
@@ -56,6 +148,13 @@ describe('PostgreSQL vector benchmark helpers', () => {
 
     expect(source).toContain('PostgresSemanticIndexRepository');
     expect(source).toContain('repository.queryVectors(request)');
+    expect(source).toContain('repository.markIdentityReady(identityId');
+    expect(source).toContain('await cleanupBenchmarkIdentity(rawPool, identityId)');
+    expect(source).toContain('resolvePostgresConfig');
+    expect(source).toContain('instrumentAnnQueries(productionPool');
+    expect(source).toContain("throw new Error('non_production_statement_timeout')");
+    expect(source).toContain('poolStatementTimeoutMs: postgresConfig.pool.statement_timeout');
+    expect(source).not.toContain("SET maintenance_work_mem = '512MB'");
     expect(source).toContain("'--format=custom'");
     expect(source).not.toContain("'--table'");
     expect(source).toContain("executable: 'pg_dump'");

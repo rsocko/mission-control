@@ -125,6 +125,23 @@ CREATE TABLE "ai_runs" (
 	"expires_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "alertmanager_integration_events" (
+	"id" text PRIMARY KEY NOT NULL,
+	"integration" text NOT NULL,
+	"kind" text NOT NULL,
+	"outcome" text NOT NULL,
+	"authenticated" boolean DEFAULT false NOT NULL,
+	"http_status" integer NOT NULL,
+	"accepted" integer DEFAULT 0 NOT NULL,
+	"applied" integer DEFAULT 0 NOT NULL,
+	"created" integer DEFAULT 0 NOT NULL,
+	"updated" integer DEFAULT 0 NOT NULL,
+	"stale" integer DEFAULT 0 NOT NULL,
+	"duplicate_receipts" integer DEFAULT 0 NOT NULL,
+	"detail" text,
+	"occurred_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "apns_registrations" (
 	"id" text PRIMARY KEY NOT NULL,
 	"installation_id" text NOT NULL,
@@ -2580,6 +2597,8 @@ CREATE INDEX "idx_ai_runs_correlation" ON "ai_runs" USING btree ("correlation_id
 CREATE INDEX "idx_ai_runs_history" ON "ai_runs" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "idx_ai_runs_expiry" ON "ai_runs" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "idx_ai_runs_cleanup" ON "ai_runs" USING btree ("cleanup_status","updated_at");--> statement-breakpoint
+CREATE INDEX "idx_alertmanager_integration_events_history" ON "alertmanager_integration_events" USING btree ("integration","occurred_at");--> statement-breakpoint
+CREATE INDEX "idx_alertmanager_integration_events_outcome" ON "alertmanager_integration_events" USING btree ("integration","kind","outcome","occurred_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "apns_registrations_installation_target_idx" ON "apns_registrations" USING btree ("installation_id","environment","topic");--> statement-breakpoint
 CREATE INDEX "apns_registrations_token_target_idx" ON "apns_registrations" USING btree ("token_hash","environment","topic");--> statement-breakpoint
 CREATE INDEX "apns_registrations_active_idx" ON "apns_registrations" USING btree ("environment","topic","invalidated_at");--> statement-breakpoint

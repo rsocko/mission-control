@@ -51,4 +51,40 @@ describe('homelab alert receipt migration', () => {
       sqlite.close();
     }
   });
+
+  it('creates the bounded Alertmanager integration event ledger and indexes', () => {
+    const sqlite = new Database(':memory:');
+    try {
+      _runMigrationsIndividually(sqlite, resolve(process.cwd(), 'drizzle'));
+      const columns = sqlite.prepare(
+        'PRAGMA table_info(alertmanager_integration_events)',
+      ).all() as Array<{ name: string }>;
+      expect(columns.map(column => column.name)).toEqual([
+        'id',
+        'integration',
+        'kind',
+        'outcome',
+        'authenticated',
+        'http_status',
+        'accepted',
+        'applied',
+        'created',
+        'updated',
+        'stale',
+        'duplicate_receipts',
+        'detail',
+        'occurred_at',
+      ]);
+
+      const indexes = sqlite.prepare(
+        'PRAGMA index_list(alertmanager_integration_events)',
+      ).all() as Array<{ name: string }>;
+      expect(indexes.map(index => index.name)).toEqual(expect.arrayContaining([
+        'idx_alertmanager_integration_events_history',
+        'idx_alertmanager_integration_events_outcome',
+      ]));
+    } finally {
+      sqlite.close();
+    }
+  });
 });

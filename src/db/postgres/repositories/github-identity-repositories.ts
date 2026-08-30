@@ -1,6 +1,17 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import type {
+  ExternalIdentityObservation,
+  ExternalIdentityWrite,
+  ExternalIdentityWriteResult,
+  NormalizedExternalEntityLocator,
+} from '@/lib/external-identities/types';
+import type {
+  ExternalBindingState,
+  ExternalEntityType,
+  GitHubCollisionCategory,
+} from '@/db/postgres/schema';
 import type {
   GitHubAuthorizeSourceWriteResult,
   GitHubAuthorizeTaskWriteResult,
@@ -130,6 +141,584 @@ interface DbWriteCycleRow {
   completedAt: string | null;
 }
 
+interface PrimaryIdentityEntityRow {
+  id: string;
+  provider: string;
+  hostKey: string;
+  entityType: ExternalEntityType;
+  stableId: string;
+  nextLocatorRevision: number;
+}
+
+interface PrimaryIdentityLocatorRow extends NormalizedExternalEntityLocator {
+  id: string;
+  externalEntityId: string;
+  repositoryEntityId: string | null;
+  validFrom: string;
+  validTo: string | null;
+  lastSeenAt: string;
+  observationSource: string;
+  locatorRevision: number;
+}
+
+interface PrimaryIdentityBindingRow {
+  id: string;
+  externalEntityId: string;
+  bindingType: 'task' | 'source_list';
+  localId: string;
+  state: ExternalBindingState;
+}
+
+const MAX_PRIMARY_IDENTITY_BATCH_SIZE = 500;
+const MAX_PRIMARY_IDENTITY_COLLISION_IDS = 50;
+
+function digestExternalIdentifier(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function validatePrimaryIdentityWrite(write: ExternalIdentityWrite): void {
+  const { target, evidence } = write;
+  if (!target.connectorInstanceId || !target.localId || !target.legacyIdentity) {
+    throw new Error('External identity binding target is incomplete');
+  }
+  validatePrimaryIdentityObservation(evidence.entity);
+  if (target.bindingType === 'task' && evidence.entity.identity.entityType !== 'issue') {
+    throw new Error('Task bindings require issue identity evidence');
+  }
+  if (
+    target.bindingType === 'source_list'
+    && evidence.entity.identity.entityType !== 'repository'
+  ) {
+    throw new Error('Source-list bindings require repository identity evidence');
+  }
+  if (!evidence.repository) return;
+  validatePrimaryIdentityObservation(evidence.repository);
+  if (evidence.repository.identity.entityType !== 'repository') {
+    throw new Error('Repository evidence must identify a repository entity');
+  }
+  if (
+    evidence.repository.identity.provider !== evidence.entity.identity.provider
+    || evidence.repository.identity.hostKey !== evidence.entity.identity.hostKey
+  ) {
+    throw new Error('Issue and repository evidence must share a provider and host');
+  }
+}
+
+function validatePrimaryIdentityObservation(observation: ExternalIdentityObservation): void {
+  const { identity, locator } = observation;
+  if (!identity.provider || !identity.hostKey || !identity.stableId) {
+    throw new Error('External entity key is incomplete');
+  }
+  if (identity.entityType !== 'repository' && identity.entityType !== 'issue') {
+    throw new Error('External entity type is invalid');
+  }
+  if (!locator.owner || !locator.repository) {
+    throw new Error('External identity observation is incomplete');
+  }
+  if (!observation.observedAt) {
+    throw new Error('External entity observation time is required');
+  }
+  if (identity.entityType === 'issue') {
+    if (!Number.isSafeInteger(locator.issueNumber) || (locator.issueNumber ?? 0) <= 0) {
+      throw new Error('Issue identity observation requires a positive issue number');
+    }
+  } else if (locator.issueNumber !== undefined) {
+    throw new Error('Repository locator must not include an issue number');
+  }
+}
+
+function normalizePrimaryIdentityLocator(
+  observation: ExternalIdentityObservation,
+): NormalizedExternalEntityLocator {
+  return {
+    owner: observation.locator.owner,
+    repository: observation.locator.repository,
+    ownerKey: observation.locator.owner.toLowerCase(),
+    repositoryKey: observation.locator.repository.toLowerCase(),
+    issueNumber: observation.locator.issueNumber ?? null,
+    apiUrl: observation.locator.apiUrl ?? null,
+    webUrl: observation.locator.webUrl ?? null,
+  };
+}
+
+function primaryIdentityLockKeys(
+  connectorInstanceId: string,
+  writes: readonly ExternalIdentityWrite[],
+): string[] {
+  const keys = new Set<string>([`connector:${connectorInstanceId}`]);
+  for (const write of writes) {
+    for (const observation of [
+      ...(write.evidence.repository ? [write.evidence.repository] : []),
+      write.evidence.entity,
+    ]) {
+      const identity = observation.identity;
+      const locator = normalizePrimaryIdentityLocator(observation);
+      keys.add(JSON.stringify([
+        'identity',
+        identity.provider,
+        identity.hostKey,
+        identity.entityType,
+        identity.stableId,
+      ]));
+      keys.add(JSON.stringify([
+        'locator',
+        identity.provider,
+        identity.hostKey,
+        locator.ownerKey,
+        locator.repositoryKey,
+        locator.issueNumber,
+      ]));
+    }
+  }
+  return [...keys].sort();
+}
+
+function samePrimaryIdentityLocator(
+  current: PrimaryIdentityLocatorRow,
+  locator: NormalizedExternalEntityLocator,
+): boolean {
+  return current.owner === locator.owner
+    && current.repository === locator.repository
+    && current.ownerKey === locator.ownerKey
+    && current.repositoryKey === locator.repositoryKey
+    && current.issueNumber === locator.issueNumber
+    && current.apiUrl === locator.apiUrl
+    && current.webUrl === locator.webUrl;
+}
+
+async function upsertPrimaryIdentityEntity(
+  client: PoolClient,
+  observation: ExternalIdentityObservation,
+): Promise<PrimaryIdentityEntityRow> {
+  const result = await query<PrimaryIdentityEntityRow>(
+    client,
+    `
+      INSERT INTO external_entities (
+        id, provider, host_key, entity_type, stable_id, identity_version,
+        next_locator_revision, first_seen_at, last_seen_at
+      ) VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $6)
+      ON CONFLICT (provider, host_key, entity_type, stable_id)
+      DO UPDATE SET last_seen_at = GREATEST(
+        external_entities.last_seen_at,
+        EXCLUDED.last_seen_at
+      )
+      RETURNING
+        id,
+        provider,
+        host_key AS "hostKey",
+        entity_type AS "entityType",
+        stable_id AS "stableId",
+        next_locator_revision AS "nextLocatorRevision"
+    `,
+    [
+      randomUUID(),
+      observation.identity.provider,
+      observation.identity.hostKey,
+      observation.identity.entityType,
+      observation.identity.stableId,
+      observation.observedAt,
+    ],
+  );
+  const entity = result.rows[0];
+  if (!entity) throw new Error('Failed to persist external entity');
+  return entity;
+}
+
+async function observePrimaryIdentityLocator(
+  client: PoolClient,
+  entity: PrimaryIdentityEntityRow,
+  observation: ExternalIdentityObservation,
+  repositoryEntityId: string | null,
+): Promise<
+  | { state: 'observed' }
+  | {
+      state: 'collision';
+      category: GitHubCollisionCategory;
+      conflictingEntityId: string;
+    }
+> {
+  let locator = normalizePrimaryIdentityLocator(observation);
+  const currentResult = await query<PrimaryIdentityLocatorRow>(
+    client,
+    `
+      SELECT
+        id,
+        external_entity_id AS "externalEntityId",
+        repository_entity_id AS "repositoryEntityId",
+        owner,
+        repository,
+        owner_key AS "ownerKey",
+        repository_key AS "repositoryKey",
+        issue_number AS "issueNumber",
+        api_url AS "apiUrl",
+        web_url AS "webUrl",
+        valid_from AS "validFrom",
+        valid_to AS "validTo",
+        last_seen_at AS "lastSeenAt",
+        observation_source AS "observationSource",
+        locator_revision AS "locatorRevision"
+      FROM external_entity_locators
+      WHERE external_entity_id = $1 AND valid_to IS NULL
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [entity.id],
+  );
+  const current = currentResult.rows[0];
+  if (
+    current
+    && current.owner === locator.owner
+    && current.repository === locator.repository
+    && current.issueNumber === locator.issueNumber
+  ) {
+    locator = {
+      ...locator,
+      apiUrl: locator.apiUrl ?? current.apiUrl,
+      webUrl: locator.webUrl ?? current.webUrl,
+    };
+  }
+  if (
+    current
+    && observation.observedAt < current.validFrom
+    && !samePrimaryIdentityLocator(current, locator)
+  ) {
+    return {
+      state: 'collision',
+      category: 'locator_overlap_or_regression',
+      conflictingEntityId: entity.id,
+    };
+  }
+  if (current && samePrimaryIdentityLocator(current, locator)) {
+    if (observation.observedAt > current.lastSeenAt) {
+      await query(
+        client,
+        'UPDATE external_entity_locators SET last_seen_at = $2 WHERE id = $1',
+        [current.id, observation.observedAt],
+      );
+    }
+    return { state: 'observed' };
+  }
+
+  const pathConflict = await query<{ externalEntityId: string }>(
+    client,
+    `
+      SELECT external_entity_id AS "externalEntityId"
+      FROM external_entity_locators
+      WHERE provider = $1
+        AND host_key = $2
+        AND owner_key = $3
+        AND repository_key = $4
+        AND issue_number IS NOT DISTINCT FROM $5
+        AND valid_to IS NULL
+      LIMIT 1
+    `,
+    [
+      entity.provider,
+      entity.hostKey,
+      locator.ownerKey,
+      locator.repositoryKey,
+      locator.issueNumber,
+    ],
+  );
+  const conflictingEntityId = pathConflict.rows[0]?.externalEntityId;
+  if (conflictingEntityId && conflictingEntityId !== entity.id) {
+    return {
+      state: 'collision',
+      category: entity.entityType === 'repository'
+        ? 'repository_path_replacement'
+        : 'stable_legacy_disagree',
+      conflictingEntityId,
+    };
+  }
+
+  if (current) {
+    await query(
+      client,
+      'UPDATE external_entity_locators SET valid_to = $2 WHERE id = $1',
+      [current.id, observation.observedAt],
+    );
+  }
+  const revision = await query<{ locatorRevision: number }>(
+    client,
+    `
+      UPDATE external_entities
+      SET
+        next_locator_revision = next_locator_revision + 1,
+        last_seen_at = GREATEST(last_seen_at, $2)
+      WHERE id = $1
+      RETURNING next_locator_revision - 1 AS "locatorRevision"
+    `,
+    [entity.id, observation.observedAt],
+  );
+  const locatorRevision = revision.rows[0]?.locatorRevision;
+  if (!locatorRevision) {
+    throw new Error('External entity disappeared during locator update');
+  }
+  await query(
+    client,
+    `
+      INSERT INTO external_entity_locators (
+        id, external_entity_id, repository_entity_id, provider, host_key,
+        owner, repository, owner_key, repository_key, issue_number, api_url,
+        web_url, valid_from, valid_to, last_seen_at, observation_source,
+        locator_revision
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+        NULL, $13, $14, $15
+      )
+    `,
+    [
+      randomUUID(),
+      entity.id,
+      repositoryEntityId,
+      entity.provider,
+      entity.hostKey,
+      locator.owner,
+      locator.repository,
+      locator.ownerKey,
+      locator.repositoryKey,
+      locator.issueNumber,
+      locator.apiUrl,
+      locator.webUrl,
+      observation.observedAt,
+      observation.observationSource,
+      locatorRevision,
+    ],
+  );
+  return { state: 'observed' };
+}
+
+function boundedPrimaryIdentityCollisionIds(values: readonly string[]): string[] {
+  return [...new Set(values)].sort().slice(0, MAX_PRIMARY_IDENTITY_COLLISION_IDS);
+}
+
+async function recordPrimaryIdentityCollision(
+  client: PoolClient,
+  write: ExternalIdentityWrite,
+  category: GitHubCollisionCategory,
+  externalEntityIds: readonly string[],
+  observedAt: string,
+  localIds: readonly string[] = [write.target.localId],
+): Promise<ExternalIdentityWriteResult> {
+  const boundedLocalIds = boundedPrimaryIdentityCollisionIds(localIds);
+  const boundedEntityIds = boundedPrimaryIdentityCollisionIds(externalEntityIds);
+  const fingerprint = digestExternalIdentifier(JSON.stringify({
+    category,
+    bindingType: write.target.bindingType,
+    localIds: boundedLocalIds,
+    externalEntityIds: boundedEntityIds,
+  }));
+  await query(
+    client,
+    `
+      INSERT INTO github_identity_collisions (
+        id, connector_instance_id, category, fingerprint, binding_type,
+        local_ids, external_entity_ids, legacy_identity_digest, state,
+        resolution, first_seen_at, last_seen_at, resolved_at, resolved_by
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, 'open',
+        NULL, $9, $9, NULL, NULL
+      )
+      ON CONFLICT (connector_instance_id, category, fingerprint)
+      DO UPDATE SET
+        local_ids = EXCLUDED.local_ids,
+        external_entity_ids = EXCLUDED.external_entity_ids,
+        legacy_identity_digest = EXCLUDED.legacy_identity_digest,
+        state = 'open',
+        resolution = NULL,
+        last_seen_at = EXCLUDED.last_seen_at,
+        resolved_at = NULL,
+        resolved_by = NULL
+    `,
+    [
+      randomUUID(),
+      write.target.connectorInstanceId,
+      category,
+      fingerprint,
+      write.target.bindingType,
+      JSON.stringify(boundedLocalIds),
+      JSON.stringify(boundedEntityIds),
+      digestExternalIdentifier(write.target.legacyIdentity),
+      observedAt,
+    ],
+  );
+  await query(
+    client,
+    `
+      UPDATE external_entity_bindings
+      SET state = 'collision', updated_at = $5
+      WHERE connector_instance_id = $1
+        AND state != 'retired'
+        AND (
+          (binding_type = $2 AND local_id = ANY($3::text[]))
+          OR external_entity_id = ANY($4::text[])
+        )
+    `,
+    [
+      write.target.connectorInstanceId,
+      write.target.bindingType,
+      boundedLocalIds,
+      boundedEntityIds,
+      observedAt,
+    ],
+  );
+  return {
+    target: write.target,
+    state: 'collision',
+    collisionCategory: category,
+  };
+}
+
+async function persistPrimaryIdentityWrite(
+  client: PoolClient,
+  write: ExternalIdentityWrite,
+): Promise<ExternalIdentityWriteResult> {
+  const { evidence, target } = write;
+  let repositoryEntity: PrimaryIdentityEntityRow | null = null;
+  if (evidence.entity.identity.entityType === 'issue') {
+    if (!evidence.repository) {
+      throw new Error('Issue identity evidence requires a repository observation');
+    }
+    repositoryEntity = await upsertPrimaryIdentityEntity(client, evidence.repository);
+    const repositoryLocator = await observePrimaryIdentityLocator(
+      client,
+      repositoryEntity,
+      evidence.repository,
+      null,
+    );
+    if (repositoryLocator.state === 'collision') {
+      return recordPrimaryIdentityCollision(
+        client,
+        write,
+        repositoryLocator.category,
+        [repositoryEntity.id, repositoryLocator.conflictingEntityId],
+        evidence.repository.observedAt,
+      );
+    }
+  }
+
+  const entity = await upsertPrimaryIdentityEntity(client, evidence.entity);
+  const localBindingResult = await query<PrimaryIdentityBindingRow>(
+    client,
+    `
+      SELECT
+        id,
+        external_entity_id AS "externalEntityId",
+        binding_type AS "bindingType",
+        local_id AS "localId",
+        state
+      FROM external_entity_bindings
+      WHERE connector_instance_id = $1
+        AND binding_type = $2
+        AND local_id = $3
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [target.connectorInstanceId, target.bindingType, target.localId],
+  );
+  const entityBindingResult = await query<PrimaryIdentityBindingRow>(
+    client,
+    `
+      SELECT
+        id,
+        external_entity_id AS "externalEntityId",
+        binding_type AS "bindingType",
+        local_id AS "localId",
+        state
+      FROM external_entity_bindings
+      WHERE connector_instance_id = $1
+        AND external_entity_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [target.connectorInstanceId, entity.id],
+  );
+  const localBinding = localBindingResult.rows[0];
+  const entityBinding = entityBindingResult.rows[0];
+  if (localBinding && localBinding.externalEntityId !== entity.id) {
+    return recordPrimaryIdentityCollision(
+      client,
+      write,
+      'one_local_multiple_stable',
+      [localBinding.externalEntityId, entity.id],
+      evidence.entity.observedAt,
+    );
+  }
+  if (
+    entityBinding
+    && (
+      entityBinding.bindingType !== target.bindingType
+      || entityBinding.localId !== target.localId
+    )
+  ) {
+    return recordPrimaryIdentityCollision(
+      client,
+      write,
+      'multiple_local_one_stable',
+      [entity.id],
+      evidence.entity.observedAt,
+      [entityBinding.localId, target.localId],
+    );
+  }
+  if (localBinding?.state === 'retired' || entityBinding?.state === 'retired') {
+    return recordPrimaryIdentityCollision(
+      client,
+      write,
+      'stable_legacy_disagree',
+      [entity.id],
+      evidence.entity.observedAt,
+    );
+  }
+
+  const locator = await observePrimaryIdentityLocator(
+    client,
+    entity,
+    evidence.entity,
+    repositoryEntity?.id ?? null,
+  );
+  if (locator.state === 'collision') {
+    return recordPrimaryIdentityCollision(
+      client,
+      write,
+      locator.category,
+      [entity.id, locator.conflictingEntityId],
+      evidence.entity.observedAt,
+    );
+  }
+
+  const existingBinding = localBinding ?? entityBinding;
+  if (existingBinding) {
+    await query(
+      client,
+      `
+        UPDATE external_entity_bindings
+        SET verified_at = $2, updated_at = $2
+        WHERE id = $1
+      `,
+      [existingBinding.id, evidence.entity.observedAt],
+    );
+  } else {
+    await query(
+      client,
+      `
+        INSERT INTO external_entity_bindings (
+          id, external_entity_id, connector_instance_id, binding_type, local_id,
+          state, verified_at, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, 'active', $6, $6, $6)
+      `,
+      [
+        randomUUID(),
+        entity.id,
+        target.connectorInstanceId,
+        target.bindingType,
+        target.localId,
+        evidence.entity.observedAt,
+      ],
+    );
+  }
+  return { target, state: 'bound', externalEntityId: entity.id };
+}
+
 const TASK_COLUMNS = `
   id,
   connector_instance_id AS "connectorInstanceId",
@@ -205,6 +794,23 @@ export function createPostgresGitHubIdentityRepositories(
       [connectorInstanceId],
     );
     return rows[0]?.modeRevision ?? 0;
+  }
+
+  async function readModeRevisionForShare(
+    client: PoolClient,
+    connectorInstanceId: string,
+  ): Promise<number | null> {
+    const { rows } = await query<{ modeRevision: number }>(
+      client,
+      `
+        SELECT mode_revision AS "modeRevision"
+        FROM github_identity_controls
+        WHERE connector_instance_id = $1
+        FOR SHARE
+      `,
+      [connectorInstanceId],
+    );
+    return rows[0]?.modeRevision ?? null;
   }
 
   async function identityForBinding(
@@ -530,6 +1136,57 @@ export function createPostgresGitHubIdentityRepositories(
         `,
         [connectorInstanceId, now],
       );
+    },
+
+    async persistExternalIdentityBatch({ connectorInstanceId, modeSnapshot, writes }) {
+      if (writes.length === 0) return [];
+      if (writes.length > MAX_PRIMARY_IDENTITY_BATCH_SIZE) {
+        throw new Error(
+          `External identity batch exceeds the maximum of ${MAX_PRIMARY_IDENTITY_BATCH_SIZE}`,
+        );
+      }
+      if (writes.some((write) => (
+        write.target.connectorInstanceId !== connectorInstanceId
+      ))) {
+        throw new Error('External identity batches must contain one connector instance');
+      }
+      for (const write of writes) validatePrimaryIdentityWrite(write);
+
+      return transaction(pool, async (client) => {
+        await query(
+          client,
+          `
+            SELECT pg_advisory_xact_lock(hashtextextended(lock_key, 0))
+            FROM unnest($1::text[]) AS lock_keys(lock_key)
+            ORDER BY lock_key
+          `,
+          [primaryIdentityLockKeys(connectorInstanceId, writes)],
+        );
+        if (modeSnapshot) {
+          const current = await readModeRevisionForShare(
+            client,
+            modeSnapshot.connectorInstanceId,
+          );
+          if (current === null) {
+            throw new Error(
+              `GitHub identity controls are missing for ${modeSnapshot.connectorInstanceId}`,
+            );
+          }
+          if (
+            modeSnapshot.connectorInstanceId !== connectorInstanceId
+            || current !== modeSnapshot.modeRevision
+          ) {
+            throw new Error(
+              `GitHub identity revision changed from ${modeSnapshot.modeRevision} to ${current}`,
+            );
+          }
+        }
+        const results: ExternalIdentityWriteResult[] = [];
+        for (const write of writes) {
+          results.push(await persistPrimaryIdentityWrite(client, write));
+        }
+        return results;
+      });
     },
 
     async lookupStableIdentityBatch({ connectorInstanceId, namespace, rows }) {

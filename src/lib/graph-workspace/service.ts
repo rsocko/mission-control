@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { persistence } from '@/lib/persistence/runtime';
+import { sqlitePersistence } from '@/lib/persistence/sqlite-runtime';
 import {
   ideationWorkspaceDocumentSchema,
   type IdeationWorkspaceDocument,
@@ -112,7 +112,7 @@ export class IdeationWorkspaceService {
 }
 
 export const ideationWorkspaceService = new IdeationWorkspaceService(
-  persistence.ideationWorkspaces,
+  sqlitePersistence.ideationWorkspaces,
 );
 
 export function isWorkspaceConflict(

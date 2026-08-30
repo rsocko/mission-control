@@ -40,6 +40,15 @@ export interface GitHubIdentityHarness {
     leaseId: string,
   ): Promise<{ state: string; modeRevision: number; dispatchedAt: string | null } | null>;
   writeCycleState(cycleId: string): Promise<string | null>;
+  primaryBinding(input: {
+    connectorInstanceId: string;
+    bindingType: 'task' | 'source_list';
+    localId: string;
+  }): Promise<{
+    stableId: string;
+    state: string;
+    verifiedAt: string | null;
+  } | null>;
   close(): void | Promise<void>;
 }
 
@@ -118,6 +127,7 @@ export function describeGitHubIdentityRepositoriesContract(
             },
           ],
         });
+
         expect(rows).toHaveLength(1);
         expect(rows[0]).toMatchObject({
           candidateKey: 'candidate-1',
@@ -142,6 +152,202 @@ export function describeGitHubIdentityRepositoriesContract(
         expect(rows).toEqual([]);
       });
     });
+
+    describe('primary identity persistence', () => {
+          it('fails closed when the connector identity controls are missing', async () => {
+            const connectorInstanceId = `fresh-primary-${randomUUID()}`;
+            const localId = `${connectorInstanceId}:list`;
+            await harness.seedConnector(connectorInstanceId, NOW);
+            const { identity } = harness.repositories;
+            const modeSnapshot = await identity.getModeSnapshot(connectorInstanceId, NOW);
+            expect(modeSnapshot.modeRevision).toBe(0);
+
+            await expect(identity.persistExternalIdentityBatch({
+              connectorInstanceId,
+              modeSnapshot,
+              writes: [{
+                target: {
+                  connectorInstanceId,
+                  bindingType: 'source_list',
+                  localId,
+                  legacyIdentity: 'synthetic-owner/synthetic-repo',
+                },
+                evidence: {
+                  entity: {
+                    identity: {
+                      provider: 'github',
+                      hostKey: 'github.com',
+                      entityType: 'repository',
+                      stableId: `R_${connectorInstanceId}`,
+                    },
+                    locator: {
+                      owner: 'synthetic-owner',
+                      repository: 'synthetic-repo',
+                    },
+                    observationSource: 'graphql',
+                    observedAt: NOW,
+                  },
+                },
+              }],
+            })).rejects.toThrow(/identity controls are missing/i);
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'source_list',
+              localId,
+            })).resolves.toBeNull();
+          });
+
+          it('atomically binds normal-execution repository and issue evidence', async () => {
+            const connectorInstanceId = `fresh-primary-${randomUUID()}`;
+            const sourceListId = `${connectorInstanceId}:list`;
+            const taskId = `${connectorInstanceId}:task`;
+            await harness.seedConnector(connectorInstanceId, NOW);
+            const { identity } = harness.repositories;
+            await identity.ensureControls({ connectorInstanceId, now: NOW });
+            const modeSnapshot = await identity.getModeSnapshot(connectorInstanceId, NOW);
+            const repository = {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'repository' as const,
+                stableId: `R_${connectorInstanceId}`,
+              },
+              locator: { owner: 'synthetic-owner', repository: 'synthetic-repo' },
+              observationSource: 'graphql' as const,
+              observedAt: NOW,
+            };
+            const issue = {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'issue' as const,
+                stableId: `I_${connectorInstanceId}`,
+              },
+              locator: {
+                owner: 'synthetic-owner',
+                repository: 'synthetic-repo',
+                issueNumber: 42,
+              },
+              observationSource: 'graphql' as const,
+              observedAt: NOW,
+            };
+            const writes = [
+              {
+                target: {
+                  connectorInstanceId,
+                  bindingType: 'source_list' as const,
+                  localId: sourceListId,
+                  legacyIdentity: 'synthetic-owner/synthetic-repo',
+                },
+                evidence: { entity: repository },
+              },
+              {
+                target: {
+                  connectorInstanceId,
+                  bindingType: 'task' as const,
+                  localId: taskId,
+                  legacyIdentity: 'synthetic-owner/synthetic-repo:42',
+                },
+                evidence: { entity: issue, repository },
+              },
+            ];
+
+            const result = await identity.persistExternalIdentityBatch({
+              connectorInstanceId,
+              modeSnapshot,
+              writes,
+            });
+            expect(result.map(({ state }) => state)).toEqual(['bound', 'bound']);
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'source_list',
+              localId: sourceListId,
+            })).resolves.toMatchObject({
+              stableId: repository.identity.stableId,
+              state: 'active',
+              verifiedAt: NOW,
+            });
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'task',
+              localId: taskId,
+            })).resolves.toMatchObject({
+              stableId: issue.identity.stableId,
+              state: 'active',
+              verifiedAt: NOW,
+            });
+
+            await expect(identity.persistExternalIdentityBatch({
+              connectorInstanceId,
+              modeSnapshot: { ...modeSnapshot, modeRevision: modeSnapshot.modeRevision - 1 },
+              writes: [{
+                ...writes[1],
+                target: { ...writes[1].target, localId: `${taskId}:stale` },
+              }],
+            })).rejects.toThrow(/identity revision changed/i);
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'task',
+              localId: `${taskId}:stale`,
+            })).resolves.toBeNull();
+          });
+
+          it('records a collision instead of stealing an existing stable binding', async () => {
+            const connectorInstanceId = `fresh-primary-${randomUUID()}`;
+            await harness.seedConnector(connectorInstanceId, NOW);
+            const { identity } = harness.repositories;
+            await identity.ensureControls({ connectorInstanceId, now: NOW });
+            const modeSnapshot = await identity.getModeSnapshot(connectorInstanceId, NOW);
+            const evidence = {
+              entity: {
+                identity: {
+                  provider: 'github',
+                  hostKey: 'github.com',
+                  entityType: 'repository' as const,
+                  stableId: `R_${connectorInstanceId}`,
+                },
+                locator: { owner: 'synthetic-owner', repository: 'synthetic-repo' },
+                observationSource: 'graphql' as const,
+                observedAt: NOW,
+              },
+            };
+            const firstLocalId = `${connectorInstanceId}:first`;
+            const secondLocalId = `${connectorInstanceId}:second`;
+            const target = {
+              connectorInstanceId,
+              bindingType: 'source_list' as const,
+              localId: firstLocalId,
+              legacyIdentity: 'synthetic-owner/synthetic-repo',
+            };
+            await identity.persistExternalIdentityBatch({
+              connectorInstanceId,
+              modeSnapshot,
+              writes: [{ target, evidence }],
+            });
+            const [collision] = await identity.persistExternalIdentityBatch({
+              connectorInstanceId,
+              modeSnapshot,
+              writes: [{
+                target: { ...target, localId: secondLocalId },
+                evidence,
+              }],
+            });
+            expect(collision).toMatchObject({
+              state: 'collision',
+              collisionCategory: 'multiple_local_one_stable',
+            });
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'source_list',
+              localId: firstLocalId,
+            })).resolves.toMatchObject({ state: 'collision' });
+            await expect(harness.primaryBinding({
+              connectorInstanceId,
+              bindingType: 'source_list',
+              localId: secondLocalId,
+            })).resolves.toBeNull();
+          });
+        });
 
     describe('linked-source identity', () => {
       it('associates a linked source with a matching NodeID and re-reads it', async () => {

@@ -19,6 +19,9 @@ import {
 } from '@/db/schema';
 import type { ExternalEntityType } from '@/db/schema/external-identities';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import {
+  persistExternalIdentityBatchInTransaction,
+} from '@/lib/external-identities/service';
 import type {
   GitHubAuthorizeSourceWriteResult,
   GitHubAuthorizeTaskWriteResult,
@@ -364,6 +367,42 @@ export function createSqliteGitHubIdentityRepositories(
         .values({ connectorInstanceId, modeRevision: 1, updatedAt: now })
         .onConflictDoNothing()
         .run();
+    },
+
+    async persistExternalIdentityBatch({ connectorInstanceId, modeSnapshot, writes }) {
+      if (writes.length === 0) return [];
+      if (writes.length > 500) {
+        throw new Error('External identity batch exceeds the maximum of 500');
+      }
+      if (writes.some((write) => (
+        write.target.connectorInstanceId !== connectorInstanceId
+      ))) {
+        throw new Error('External identity batches must contain one connector instance');
+      }
+      return runTx((tx) => {
+        if (modeSnapshot) {
+          const current = readModeRevision(tx, modeSnapshot.connectorInstanceId);
+          if (current < 1) {
+            throw new Error(
+              `GitHub identity controls are missing for ${modeSnapshot.connectorInstanceId}`,
+            );
+          }
+          if (
+            modeSnapshot.connectorInstanceId !== connectorInstanceId
+            || current !== modeSnapshot.modeRevision
+          ) {
+            throw new Error(
+              `GitHub identity revision changed from ${modeSnapshot.modeRevision} to ${current}`,
+            );
+          }
+        }
+        return persistExternalIdentityBatchInTransaction(
+          tx,
+          [...writes],
+          false,
+          'active',
+        );
+      });
     },
 
     async lookupStableIdentityBatch({ connectorInstanceId, namespace, rows }) {

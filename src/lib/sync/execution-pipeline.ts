@@ -845,7 +845,10 @@ export class SyncExecutionPipeline {
       // The core sync (fetch + upsert) completed. Non-fatal errors from
       // Ancillary phase errors remain informational, while a blocked task
       // identity fails the run so it cannot advance the incremental baseline.
-      const syncSucceeded = upsertResult.identityBlocked === 0;
+      const syncSucceeded = (
+        upsertResult.identityBlocked === 0
+        && (identityRuntime?.blockedReasonCodes.length ?? 0) === 0
+      );
       const syncRunId = randomUUID();
       const result: SyncResult = {
         connectorId,

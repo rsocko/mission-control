@@ -238,6 +238,7 @@ vi.mock('@/lib/logger', () => ({
 vi.mock('@/lib/public-demo', () => ({ isPublicDemoMode: vi.fn(() => false) }));
 const identityRuntimeStub = vi.hoisted(() => ({
   GitHubStableIdentityRuntime: class {
+    blockedReasonCodes: readonly string[] = [];
     modeSnapshot = {
       connectorInstanceId: 'github-1',
       effectiveMode: 'stable',

@@ -163,7 +163,8 @@ worker-registered composition, `GitHubWorkerRepositories`
 `ConnectorExecutionRepositories`, so a backend either has all five members or
 none:
 
-- `identity` — the durable GitHub identity epoch, NodeID batch lookup,
+- `identity` — the durable GitHub identity epoch, transactional primary
+  task/source-list NodeID binding persistence, NodeID batch lookup,
   binding/locator revision currency checks, linked-source identity
   resolve/persist, and accepted terminal-inaccessible exception reads;
 - `writeFence` — write-cycle begin/observe/finish, task and source write-lease

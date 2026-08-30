@@ -1,9 +1,9 @@
 import type { IConnector } from '@/lib/connectors';
 import type { SourceList } from '@/types';
 import { syncLogger } from '@/lib/logger';
-import { persistExternalIdentityBatch } from '@/lib/external-identities';
+import { persistGitHubPrimaryIdentityBatch } from '@/lib/external-identities/primary-identity';
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
-import type { GitHubStableIdentityRuntime } from '@/lib/external-identities';
+import type { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /**
@@ -157,10 +157,18 @@ export async function upsertSourceLists(
       }];
     });
     for (let index = 0; index < identityWrites.length; index += 500) {
-      persistExternalIdentityBatch(
+      const results = await persistGitHubPrimaryIdentityBatch(
         identityWrites.slice(index, index + 500),
         identityRuntime.modeSnapshot,
       );
+      const failed = results.find((result) => result.state !== 'bound');
+      if (failed) {
+        throw new Error(
+          `GitHub source-list identity persistence failed: ${
+            failed.collisionCategory ?? failed.state
+          }`,
+        );
+      }
     }
   }
 

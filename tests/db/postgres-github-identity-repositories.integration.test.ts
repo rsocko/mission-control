@@ -51,9 +51,26 @@ async function cleanupContractRows(): Promise<void> {
   await pool.query(`DELETE FROM task_source_write_lease_targets WHERE lease_id IN (SELECT id FROM task_source_write_leases WHERE connector_instance_id = $1)`, [connectorInstanceId]);
   await pool.query(`DELETE FROM task_source_write_leases WHERE connector_instance_id = $1`, [connectorInstanceId]);
   await pool.query(`DELETE FROM github_identity_write_cycles WHERE connector_instance_id = $1`, [connectorInstanceId]);
-  await pool.query(`DELETE FROM external_entity_bindings WHERE connector_instance_id = $1`, [connectorInstanceId]);
+  await pool.query(
+    `DELETE FROM external_entity_locators
+     WHERE external_entity_id IN (
+       SELECT id FROM external_entities
+       WHERE stable_id LIKE 'R_fresh-primary-%'
+          OR stable_id LIKE 'I_fresh-primary-%'
+     )`,
+  );
+  await pool.query(
+    `DELETE FROM external_entity_bindings
+     WHERE connector_instance_id = $1 OR connector_instance_id LIKE $2`,
+    [connectorInstanceId, `${FRESH_CONNECTOR_PREFIX}%`],
+  );
   await pool.query(`DELETE FROM external_entity_locators WHERE external_entity_id IN ('repo-entity', 'issue-entity')`);
   await pool.query(`DELETE FROM external_entities WHERE id IN ('repo-entity', 'issue-entity')`);
+  await pool.query(
+    `DELETE FROM external_entities
+     WHERE stable_id LIKE 'R_fresh-primary-%'
+        OR stable_id LIKE 'I_fresh-primary-%'`,
+  );
   await pool.query(`DELETE FROM task_linked_sources WHERE connector_instance_id = $1`, [connectorInstanceId]);
   await pool.query(`DELETE FROM tasks WHERE connector_instance_id = $1`, [connectorInstanceId]);
   await pool.query(`DELETE FROM source_lists WHERE connector_instance_id = $1`, [connectorInstanceId]);
@@ -192,6 +209,26 @@ if (connectionString) {
             [cycleId],
           );
           return result.rows[0]?.state ?? null;
+        },
+        primaryBinding: async ({ connectorInstanceId, bindingType, localId }) => {
+          const result = await pool.query<{
+            stableId: string;
+            state: string;
+            verifiedAt: string | null;
+          }>(
+            `
+              SELECT entity.stable_id AS "stableId", binding.state,
+                binding.verified_at AS "verifiedAt"
+              FROM external_entity_bindings AS binding
+              JOIN external_entities AS entity ON entity.id = binding.external_entity_id
+              WHERE binding.connector_instance_id = $1
+                AND binding.binding_type = $2
+                AND binding.local_id = $3
+              LIMIT 1
+            `,
+            [connectorInstanceId, bindingType, localId],
+          );
+          return result.rows[0] ?? null;
         },
         close: () => undefined,
       };

@@ -72,6 +72,7 @@ const MIGRATED_CONNECTOR_EXECUTION_MODULES = [
 const MIGRATED_GITHUB_WORKER_MODULES = [
   'src/lib/external-identities/github-write-fence.ts',
   'src/lib/external-identities/linked-source-identity.ts',
+  'src/lib/external-identities/primary-identity.ts',
   'src/lib/external-identities/stable-identity-runtime.ts',
   'src/lib/external-identities/stable-lookup.ts',
   'src/lib/external-identities/worker-persistence.ts',

@@ -68,12 +68,14 @@ describe('findSimilarTaskEmbeddings', () => {
       title: 'Near task',
       embedding: [0.9, 0.1, 0],
       embeddedAt: T2,
+      metadata: { connectorInstanceId: 'deleted-connector' },
     });
     await harness.seedEntity({
       entityType: 'task',
       entityId: 'far',
       title: 'Far task',
       embedding: [0, 0, 1],
+      metadata: { connectorInstanceId: 'active-connector' },
     });
     await harness.seedEntity({
       entityType: 'alert',
@@ -86,7 +88,7 @@ describe('findSimilarTaskEmbeddings', () => {
   }
 
   it('ranks neighbours from the stored vector without embedding anything', async () => {
-    await seedNeighbourCorpus();
+    const indexId = await seedNeighbourCorpus();
 
     const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 5, minScore: 0 });
 
@@ -94,12 +96,18 @@ describe('findSimilarTaskEmbeddings', () => {
       status: 'available',
       provider: PROVIDER,
       model: MODEL,
+      indexId,
+      projectionVersion: 1,
       sourceUpdatedAt: T1,
+      sourceEmbeddedAt: T1,
     });
     if (result.status !== 'available') throw new Error('expected available neighbours');
     // Self is excluded, alerts are out of scope, and the closer task ranks first.
     expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['near', 'far']);
-    expect(result.neighbors[0]).toMatchObject({ embeddingUpdatedAt: T2 });
+    expect(result.neighbors[0]).toMatchObject({
+      sourceUpdatedAt: T1,
+      embeddedAt: T2,
+    });
     expect(result.neighbors[0].score).toBeGreaterThan(result.neighbors[1].score);
     expect(harness.embeddings.calls).toHaveLength(0);
   });
@@ -157,12 +165,96 @@ describe('findSimilarTaskEmbeddings', () => {
     expect(result.neighbors[0].taskId).toBe('near');
   });
 
+  it('applies eligibility before scoring and candidate counts', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', {
+      limit: 5,
+      minScore: 0,
+      eligibleTaskIds: ['far'],
+    });
+
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['far']);
+    expect(result.candidateCount).toBe(1);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('accepts large eligibility scopes without expanding SQL parameters', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', {
+      limit: 5,
+      minScore: 0,
+      eligibleTaskIds: [
+        ...Array.from({ length: 40_000 }, (_, index) => `eligible-${index}`),
+        'far',
+      ],
+    });
+
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['far']);
+    expect(result.candidateCount).toBe(1);
+  });
+
+  it('returns no candidates for an explicitly empty eligibility scope', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', {
+      limit: 5,
+      minScore: 0,
+      eligibleTaskIds: [],
+    });
+
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors).toEqual([]);
+    expect(result.candidateCount).toBe(0);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('excludes deleted connector instances before scoring', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', {
+      limit: 5,
+      minScore: 0,
+      excludedConnectorInstanceIds: ['deleted-connector'],
+    });
+
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['far']);
+    expect(result.candidateCount).toBe(1);
+  });
+
   it('honours the minimum score', async () => {
     await seedNeighbourCorpus();
 
     const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 5 });
     if (result.status !== 'available') throw new Error('expected available neighbours');
     expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['near']);
+  });
+
+  it('reports partial when the bounded repository scan reaches its ceiling', async () => {
+    harness.close();
+    harness = createSearchIndexHarness(1);
+    mocks.runtime = {
+      repository: harness.repository,
+      embeddings: harness.embeddings,
+      config: {},
+    };
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', {
+      limit: 5,
+      minScore: 0,
+    });
+
+    expect(result).toMatchObject({
+      status: 'partial',
+      candidateCount: 1,
+      truncated: true,
+      note: expect.stringContaining('partial'),
+    });
   });
 
   it('reports missing when the task has no vector in the active identity', async () => {

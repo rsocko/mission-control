@@ -22,6 +22,7 @@ interface UseProgressiveSearchOptions {
   source?: string | null;
   status?: string | null;
   excludeDone?: boolean;
+  universeEligible?: boolean;
 }
 
 export function mergeProgressiveSearchResults(
@@ -51,6 +52,7 @@ export function useProgressiveSearch({
   source = null,
   status = null,
   excludeDone = false,
+  universeEligible = false,
 }: UseProgressiveSearchOptions) {
   const normalizedQuery = query.trim();
   const requestRevisionRef = useRef(0);
@@ -114,6 +116,7 @@ export function useProgressiveSearch({
     if (source) params.set('source', source);
     if (status) params.set('status', status);
     if (excludeDone) params.set('excludeDone', 'true');
+    if (universeEligible) params.set('universeEligible', 'true');
 
     setKeywordLoading(true);
     setSemanticLoading(false);
@@ -143,7 +146,7 @@ export function useProgressiveSearch({
       });
 
     return () => controller.abort();
-  }, [enabled, excludeDone, limit, normalizedQuery, source, status, type]);
+  }, [enabled, excludeDone, limit, normalizedQuery, source, status, type, universeEligible]);
 
   useEffect(() => {
     if (
@@ -168,6 +171,7 @@ export function useProgressiveSearch({
     if (source) params.set('source', source);
     if (status) params.set('status', status);
     if (excludeDone) params.set('excludeDone', 'true');
+    if (universeEligible) params.set('universeEligible', 'true');
 
     setSemanticLoading(true);
     fetch(`/api/ai/search?${params.toString()}`, { signal: controller.signal })
@@ -200,6 +204,7 @@ export function useProgressiveSearch({
     source,
     status,
     type,
+    universeEligible,
   ]);
 
   const results = useMemo(

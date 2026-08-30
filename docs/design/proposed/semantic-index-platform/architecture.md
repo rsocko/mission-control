@@ -316,15 +316,28 @@ admin extension bootstrap, health/version assertion, and operator backup/restore
 Search-first Universe exploration follows this sequence:
 
 1. hybrid search selects one or more seed entities;
-2. the graph service loads explicit and derived neighbors;
-3. semantic retrieval adds bounded top-k neighbors;
-4. results become transient `semantic-similarity` edges;
-5. authorization and graph budgets are applied before rendering; and
-6. expansion repeats only on an explicit user action.
+2. Universe requests a canonical projection for at most 10 authorized task seeds;
+3. the user independently enables explicit, derived, and semantic neighbor layers;
+4. semantic retrieval adds at most 10 neighbors per seed (hard maximum 25);
+5. results become transient `semantic-similarity` edges;
+6. authorization and eligibility are repository predicates applied before candidate
+   selection, scoring, counts, and truncation metadata; and
+7. expansion repeats only on an explicit user action, up to 10 selected nodes and two
+   hops, with 80-node/240-edge request and 500-node/2,000-edge scene ceilings.
 
-Semantic edges include score, provider/model, freshness, and explanation. They remain
-visually distinct from explicit and derived edges. They are never written to task
-dependency or canonical graph tables.
+Semantic edges include score, an honest explanation, resolved provider/model, index
+identity, projection version, source revision timestamps, and embedding timestamps.
+The UI distinguishes available, partial, missing, stale, incompatible, denied, and
+unavailable outcomes while preserving keyword-first results. Semantic edges remain
+visually distinct from explicit and derived edges and are never written to task
+dependency, workspace, or canonical graph tables.
+
+Task projection version 4 includes `connectorInstanceId` alongside `connectorType`.
+Universe derives its server-side task visibility scope from deleted connector instances
+and notification-only connector types, expresses that scope as portable semantic
+metadata predicates, and applies the equivalent relational predicates to explicit and
+derived queries. This avoids constructing a 100,000-ID allow-list while preserving
+pre-ANN authorization.
 
 ## Cluster Grouping
 
@@ -433,6 +446,9 @@ second-host validation issues rather than preceding working Mission Control beha
 - Prevent mixed-provider indexes from being treated as one comparable vector space.
 - Require user confirmation before inferred relationships or clusters become
   canonical domain state.
+- Treat an explicit empty eligibility allow-list as an empty result, never as
+  unrestricted access. Universe callers pass eligibility into repository SQL before
+  ANN/scan limits; post-filtering ranked results is not an authorization mechanism.
 
 ## Observability
 

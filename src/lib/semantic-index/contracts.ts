@@ -838,6 +838,19 @@ export interface SemanticQueryRequest {
   limit: number;
   entityTypes?: SemanticEntityType[];
   sensitivities?: SemanticSensitivity[];
+  /**
+   * Authorization/eligibility allow-list, applied before candidate selection
+   * and scoring. An empty list means no entity is eligible.
+   */
+  includeEntityIds?: string[];
+  /**
+   * Server-derived connector visibility exclusions. Backends apply this
+   * projection predicate before candidate selection without one SQL parameter
+   * per connector.
+   */
+  excludeConnectorInstanceIds?: string[];
+  /** Restricts task projections to records without a parent before scoring. */
+  rootTaskOnly?: boolean;
   /** Excluded before scoring; never returned even at a lower rank. */
   excludeEntityIds?: string[];
   /** AND-ed portable metadata predicates, applied before the candidate cap. */

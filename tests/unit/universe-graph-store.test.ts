@@ -17,6 +17,7 @@ describe('Universe graph persistence migration', () => {
     }, 0);
 
     expect(migratedState.dimensions).toEqual(['tags', 'project']);
+    expect(migratedState.neighborLayers).toEqual(['explicit', 'derived']);
     expect(migrateLegacyUniverseFilters(migratedState.legacyFilters ?? {}).context).toMatchObject({
       query: 'release',
       priorities: ['high'],
@@ -34,6 +35,14 @@ describe('Universe graph persistence migration', () => {
       useUniverseGraphStore.setState({
         selectedNodeIds: [],
       });
+    });
+
+    it('toggles neighbor layers independently', () => {
+      useUniverseGraphStore.setState({ neighborLayers: ['explicit', 'derived'] });
+      useUniverseGraphStore.getState().toggleNeighborLayer('semantic');
+      useUniverseGraphStore.getState().toggleNeighborLayer('explicit');
+
+      expect(useUniverseGraphStore.getState().neighborLayers).toEqual(['derived', 'semantic']);
     });
 
     it('resets selection for a new canonical graph', () => {

@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   getSearchStatus: vi.fn(),
   searchWithBranches: vi.fn(),
+  select: vi.fn(),
 }));
 
 vi.mock('@/lib/search', () => mocks);
+vi.mock('@/db', () => ({ default: { select: mocks.select } }));
 vi.mock('@/lib/telemetry/operations', () => ({
   withRuntimeOperation: vi.fn((_operation, run: () => unknown) => run()),
 }));
@@ -14,6 +16,12 @@ describe('AI search route', () => {
   beforeEach(() => {
     mocks.getSearchStatus.mockReset();
     mocks.searchWithBranches.mockReset();
+    mocks.select.mockReset();
+    mocks.select.mockReturnValue({
+      from: () => ({
+        where: () => Promise.resolve([{ id: 'deleted-connector' }]),
+      }),
+    });
     mocks.getSearchStatus.mockResolvedValue({
       available: true,
       enabled: true,
@@ -101,5 +109,19 @@ describe('AI search route', () => {
         excludeDone: true,
       },
     );
+  });
+
+  it('derives the Universe visibility scope before searching', async () => {
+    mocks.searchWithBranches.mockResolvedValue({ results: [], branches: {} });
+    const { GET } = await import('@/app/api/ai/search/route');
+    await GET(new Request(
+      'http://localhost/api/ai/search?q=planning&type=tasks&mode=hybrid&universeEligible=true',
+    ));
+
+    expect(mocks.searchWithBranches).toHaveBeenCalledWith('planning', expect.objectContaining({
+      type: 'tasks',
+      universeEligible: true,
+      excludeConnectorInstanceIds: ['deleted-connector'],
+    }));
   });
 });

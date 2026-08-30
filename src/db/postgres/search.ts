@@ -7,6 +7,7 @@ import type {
   SearchableNotificationRecord,
   SearchableTaskRecord,
 } from '@/lib/search/repository';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 
 export function normalizeLimit(limit = 20): number {
   return Math.max(1, Math.min(limit, 50));
@@ -133,10 +134,25 @@ async function searchTasksByIssueNumber(
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
         AND ($4::boolean = false OR LOWER(t.status) <> 'done')
+        AND ($5::boolean = false OR (
+          t.parent_id IS NULL
+          AND t.local_disposition = 'active'
+          AND NOT (t.connector_type = ANY($6::text[]))
+          AND NOT (t.connector_instance_id = ANY($7::text[]))
+        ))
       ORDER BY t.updated_at DESC
-      LIMIT $5
+      LIMIT $8
     `,
-    [`%:${issueNumber}`, source, status, filters.excludeDone === true, limit],
+    [
+      `%:${issueNumber}`,
+      source,
+      status,
+      filters.excludeDone === true,
+      filters.universeEligible === true,
+      [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+      filters.excludeConnectorInstanceIds ?? [],
+      limit,
+    ],
   );
   return result.rows.map((row: {
     id: string;
@@ -202,10 +218,25 @@ async function searchTasks(
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
         AND ($4::boolean = false OR LOWER(t.status) <> 'done')
+        AND ($5::boolean = false OR (
+          t.parent_id IS NULL
+          AND t.local_disposition = 'active'
+          AND NOT (t.connector_type = ANY($6::text[]))
+          AND NOT (t.connector_instance_id = ANY($7::text[]))
+        ))
       ORDER BY rank DESC
-      LIMIT $5
+      LIMIT $8
     `,
-    [tsQuery, source, status, filters.excludeDone === true, limit],
+    [
+      tsQuery,
+      source,
+      status,
+      filters.excludeDone === true,
+      filters.universeEligible === true,
+      [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+      filters.excludeConnectorInstanceIds ?? [],
+      limit,
+    ],
   );
   return result.rows.map(toTaskSearchResult);
 }

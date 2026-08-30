@@ -44,6 +44,10 @@ describe('getNodeNeighbors', () => {
       task('blocker', 'Blocking task'),
       task('blocked', 'Blocked task'),
       task('semantic', 'Semantic task'),
+      {
+        ...task('notification-only', 'Notification-only task'),
+        connectorType: 'outlook-email',
+      },
     ]);
     await db.insert(schema.taskDependencies).values([
       {
@@ -68,6 +72,14 @@ describe('getNodeNeighbors', () => {
         id: 'dependency-related',
         taskId: 'center',
         dependsOnTaskId: 'blocked',
+        type: 'related',
+        syncStatus: 'local',
+        createdAt: now,
+      },
+      {
+        id: 'dependency-notification-only',
+        taskId: 'center',
+        dependsOnTaskId: 'notification-only',
         type: 'related',
         syncStatus: 'local',
         createdAt: now,
@@ -127,11 +139,15 @@ describe('getNodeNeighbors', () => {
       status: 'available',
       provider: 'ollama',
       model: 'nomic-embed-text',
+      indexId: 'idx-active',
+      projectionVersion: 3,
       sourceUpdatedAt: '2030-01-01T00:00:00.000Z',
+      sourceEmbeddedAt: '2030-01-01T00:00:01.000Z',
       neighbors: [{
         taskId: 'semantic',
         score: 0.75,
-        embeddingUpdatedAt: '2030-01-01T00:00:00.000Z',
+        sourceUpdatedAt: '2030-01-01T00:00:02.000Z',
+        embeddedAt: '2030-01-01T00:00:03.000Z',
       }],
     });
     const graph = await getNodeNeighbors({
@@ -180,7 +196,14 @@ describe('getNodeNeighbors', () => {
         type: 'semantic-similarity',
         provenance: 'embedding',
         score: 0.75,
-        embedding: expect.objectContaining({ model: 'nomic-embed-text' }),
+        explanation: expect.stringContaining('semantic similarity'),
+        embedding: expect.objectContaining({
+          model: 'nomic-embed-text',
+          indexId: 'idx-active',
+          projectionVersion: 3,
+          sourceEmbeddedAt: '2030-01-01T00:00:01.000Z',
+          targetEmbeddedAt: '2030-01-01T00:00:03.000Z',
+        }),
       }),
     ]));
     expect(graph.edges.filter((edge) => edge.provenance === 'explicit').map((edge) => edge.id))
@@ -193,6 +216,16 @@ describe('getNodeNeighbors', () => {
       id: 'property:effort:3',
       label: 'Effort 3',
     }));
+    expect(graph.nodes.map((node) => node.id)).not.toContain('task:notification-only');
+    expect(findSimilarTaskEmbeddings).toHaveBeenCalledWith('center', expect.objectContaining({
+      eligibilityFilters: expect.arrayContaining([
+        expect.objectContaining({
+          keys: ['connectorType'],
+          match: 'none',
+          values: expect.arrayContaining(['outlook-email']),
+        }),
+      ]),
+    }));
     expect(graph.semantic).toEqual({ requested: true, status: 'available' });
   });
 
@@ -202,6 +235,7 @@ describe('getNodeNeighbors', () => {
       note: 'The selected task embedding is older than the task.',
       neighbors: [],
     });
+
     const graph = await getNodeNeighbors({
       nodeId: 'task:center',
       include: ['semantic'],
@@ -213,6 +247,30 @@ describe('getNodeNeighbors', () => {
       status: 'stale',
       note: expect.stringContaining('older'),
     });
+  });
+
+  it('reports a distinct denied state when only Universe semantic expansion is gated off', async () => {
+    const previous = process.env.MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED;
+    process.env.MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED = 'false';
+    try {
+      const graph = await getNodeNeighbors({
+        nodeId: 'task:center',
+        include: ['semantic'],
+      });
+      expect(graph.semantic).toMatchObject({
+        requested: true,
+        status: 'denied',
+        note: expect.stringContaining('feature gate'),
+      });
+      expect(graph.edges).toEqual([]);
+      expect(findSimilarTaskEmbeddings).not.toHaveBeenCalled();
+    } finally {
+      if (previous === undefined) {
+        delete process.env.MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED;
+      } else {
+        process.env.MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED = previous;
+      }
+    }
   });
 
   it('enforces authorization and total budgets in the service', async () => {
@@ -233,6 +291,63 @@ describe('getNodeNeighbors', () => {
       expect.objectContaining({ id: 'dependency:dependency-in' }),
     ]);
     expect(graph.pageInfo.truncated).toBe(true);
+  });
+
+  it('applies eligibility before explicit and semantic neighborhood metadata', async () => {
+    findSimilarTaskEmbeddings.mockResolvedValue({
+      status: 'available',
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+      indexId: 'idx-active',
+      projectionVersion: 1,
+      sourceUpdatedAt: '2030-01-01T00:00:00.000Z',
+      sourceEmbeddedAt: '2030-01-01T00:00:00.000Z',
+      neighbors: [],
+      candidateCount: 0,
+      truncated: false,
+    });
+
+    const graph = await getNodeNeighbors({
+      nodeId: 'task:center',
+      include: ['explicit', 'semantic'],
+      eligibleTaskIds: ['center', 'semantic'],
+      maxNodes: 10,
+      maxEdges: 10,
+    });
+
+    expect(graph.nodes.map((node) => node.id)).toEqual(['task:center']);
+    expect(graph.edges).toEqual([]);
+    expect(findSimilarTaskEmbeddings).toHaveBeenCalledWith('center', expect.objectContaining({
+      eligibleTaskIds: ['center', 'semantic'],
+    }));
+    expect(graph.pageInfo.truncated).toBe(false);
+  });
+
+  it('filters an authorized eligibility scope before semantic scoring', async () => {
+    findSimilarTaskEmbeddings.mockResolvedValue({
+      status: 'available',
+      provider: 'ollama',
+      model: 'nomic-embed-text',
+      indexId: 'idx-active',
+      projectionVersion: 1,
+      sourceUpdatedAt: '2030-01-01T00:00:00.000Z',
+      sourceEmbeddedAt: '2030-01-01T00:00:00.000Z',
+      neighbors: [],
+      candidateCount: 0,
+      truncated: false,
+    });
+    const authorizeTask = vi.fn(async (id: string) => id !== 'blocked');
+
+    await getNodeNeighbors({
+      nodeId: 'task:center',
+      include: ['semantic'],
+      eligibleTaskIds: ['center', 'blocked', 'semantic'],
+      authorizeTask,
+    });
+
+    expect(findSimilarTaskEmbeddings).toHaveBeenCalledWith('center', expect.objectContaining({
+      eligibleTaskIds: ['center', 'semantic'],
+    }));
   });
 
   it('expands tag, project, and property nodes within total budgets', async () => {
@@ -271,5 +386,19 @@ describe('getNodeNeighbors', () => {
     expect(propertyGraph.nodes).toHaveLength(2);
     expect(propertyGraph.pageInfo.truncated).toBe(true);
     expect(propertyGraph.pageInfo.truncationReasons).toContain('source-limit');
+  });
+
+  it('does not expose aggregate metadata without an eligible related task', async () => {
+    await expect(getNodeNeighbors({
+      nodeId: 'tag:tag-1',
+      include: ['derived'],
+      eligibleTaskIds: ['semantic'],
+    })).rejects.toThrow('Graph node not found');
+
+    await expect(getNodeNeighbors({
+      nodeId: 'project:project-1',
+      include: ['derived'],
+      eligibleTaskIds: [],
+    })).rejects.toThrow('Graph node not found');
   });
 });

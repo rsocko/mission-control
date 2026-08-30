@@ -23,6 +23,7 @@ const SCHEMA = `
     effort INTEGER,
     due_date TEXT,
     connector_type TEXT NOT NULL,
+    connector_instance_id TEXT NOT NULL DEFAULT 'local',
     source_list_name TEXT,
     parent_id TEXT,
     is_checklist_item INTEGER NOT NULL DEFAULT 0,

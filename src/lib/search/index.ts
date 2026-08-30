@@ -28,6 +28,8 @@ export interface SearchFilters {
   source?: string;
   status?: string;
   excludeDone?: boolean;
+  universeEligible?: boolean;
+  excludeConnectorInstanceIds?: string[];
 }
 
 type SearchOptions = SearchFilters & {
@@ -75,6 +77,8 @@ export async function searchWithBranches(
     source: options.source,
     status: options.status,
     excludeDone: options.excludeDone,
+    universeEligible: options.universeEligible,
+    excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
   };
   if (mode === 'keyword') {
     const startedAt = performance.now();

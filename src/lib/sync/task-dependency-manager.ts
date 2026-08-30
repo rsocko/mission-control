@@ -3,6 +3,7 @@ import 'server-only';
 import { randomUUID } from 'crypto';
 import type { IConnector } from '@/lib/connectors';
 import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
+import { resolvePersistedConnectorCapabilities } from '@/lib/connectors/resolved-capabilities';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
@@ -34,6 +35,7 @@ import type {
   DependencySnapshotRecord,
   TaskDependencyInsert,
 } from '@/db/persistence/github-dependencies';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getGitHubDependencyRepository } from './github-worker-persistence';
 
 /**
@@ -1865,7 +1867,16 @@ async function reconcileTaskDependenciesUnlocked(
   connector: IConnector,
   options: ReconcileOptions,
 ): Promise<DependencyReconciliationResult> {
-  const capabilities = connector.capabilities;
+  const persistedConnector = await (
+    await getWorkerPersistenceRepositories()
+  ).connectors.get(connectorInstanceId);
+  const capabilities = persistedConnector
+    ? resolvePersistedConnectorCapabilities({
+        type: persistedConnector.type,
+        capabilities: persistedConnector.capabilities,
+        settings: persistedConnector.settings,
+      })
+    : connector.capabilities;
   const deps = await getGitHubDependencyRepository();
   const resumeSnapshot = options.resumeGenerationId
     ? await loadActiveSnapshot(connectorInstanceId)

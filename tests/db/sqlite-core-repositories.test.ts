@@ -397,4 +397,36 @@ describe('core persistence runtime selection', () => {
       replacement.close();
     }
   });
+
+  it('registers the complete worker composition and rejects split replacement', async () => {
+    vi.resetModules();
+    const {
+      getWorkerPersistenceRepositories,
+      registerWorkerPersistenceRepositories,
+    } = await import('@/lib/persistence/worker-runtime');
+    const selected = createHarness();
+    const replacement = createHarness();
+    const selectedWorker = {
+      connectors: selected.repositories.connectors,
+      syncRuns: {
+        listLatestSuccessfulPulls: async () => [],
+        append: async () => undefined,
+      },
+    };
+    const replacementWorker = {
+      connectors: replacement.repositories.connectors,
+      syncRuns: selectedWorker.syncRuns,
+    };
+    try {
+      registerWorkerPersistenceRepositories(selectedWorker);
+      await expect(getWorkerPersistenceRepositories()).resolves.toBe(selectedWorker);
+      expect(() => registerWorkerPersistenceRepositories(selectedWorker))
+        .not.toThrow();
+      expect(() => registerWorkerPersistenceRepositories(replacementWorker))
+        .toThrow('Worker persistence repositories are already selected');
+    } finally {
+      selected.close();
+      replacement.close();
+    }
+  });
 });

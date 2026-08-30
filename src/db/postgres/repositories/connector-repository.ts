@@ -1,6 +1,11 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { ConnectorConfig } from '@/types';
 import type { ConnectorRepository } from '@/db/persistence/core-repositories';
+import { RepositoryError } from '@/db/persistence/contracts';
+import {
+  mergeConnectorSettings,
+  patchConnectorSettingsState,
+} from '@/db/persistence/connector-settings';
 import type { PostgresDatabase } from '../runtime';
 import { connectorConfigs } from '../schema';
 
@@ -19,6 +24,13 @@ function toConnectorConfig(row: ConnectorRow): ConnectorConfig {
     settings: row.settings as ConnectorConfig['settings'],
     syncedLists: row.syncedLists as string[],
   };
+}
+
+function toSettings(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Expected connector settings to contain a JSON object');
+  }
+  return value as Record<string, unknown>;
 }
 
 /**
@@ -89,5 +101,50 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
       .returning({ id: connectorConfigs.id });
     return updated.length > 0;
+  }
+
+  async mergeSettings(
+    id: string,
+    currentSettings: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const settings = mergeConnectorSettings(currentSettings, patch);
+    const updated = await this.db
+      .update(connectorConfigs)
+      .set({ settings, updatedAt: new Date().toISOString() })
+      .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
+      .returning({ id: connectorConfigs.id });
+    if (updated.length !== 1) {
+      throw new RepositoryError('not-found', `Connector ${id} was not found`);
+    }
+    return settings;
+  }
+
+  async patchSettingsState<T extends object>(
+    id: string,
+    key: string,
+    patch: Partial<T>,
+  ): Promise<{ settings: Record<string, unknown>; state: T }> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ settings: connectorConfigs.settings })
+        .from(connectorConfigs)
+        .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
+        .limit(1)
+        .for('update');
+      if (!row) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      const result = patchConnectorSettingsState(
+        toSettings(row.settings),
+        key,
+        patch,
+      );
+      await tx
+        .update(connectorConfigs)
+        .set({ settings: result.settings, updatedAt: new Date().toISOString() })
+        .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)));
+      return result;
+    });
   }
 }

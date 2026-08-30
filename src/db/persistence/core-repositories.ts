@@ -6,6 +6,11 @@ import type {
 } from '@/types';
 import type { PersistenceJson } from './contracts';
 
+export interface ConnectorSettingsStatePatchResult<TState> {
+  settings: Record<string, unknown>;
+  state: TState;
+}
+
 export interface TaskRepository {
   get(id: string): Promise<TaskItem | null>;
   upsert(task: TaskItem): Promise<TaskItem>;
@@ -23,6 +28,16 @@ export interface ConnectorRepository {
   upsert(connector: ConnectorConfig): Promise<ConnectorConfig>;
   /** Removes the connector from the active configuration set. */
   delete(id: string): Promise<boolean>;
+  mergeSettings(
+    id: string,
+    currentSettings: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
+  patchSettingsState<T extends object>(
+    id: string,
+    key: string,
+    patch: Partial<T>,
+  ): Promise<ConnectorSettingsStatePatchResult<T>>;
 }
 
 export interface NotificationRepository {

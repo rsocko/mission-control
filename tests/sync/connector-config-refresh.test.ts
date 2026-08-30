@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
-import type { ConnectorConfig } from '@/types';
+import type { ConnectorConfig, FetchTaskOptions } from '@/types';
 
 const mocks = vi.hoisted(() => ({
   cronSchedule: vi.fn(),
@@ -47,6 +47,24 @@ const persistedConfig = {
   settings: JSON.stringify({ repos: ['octo/existing', 'octo/new'] }),
   syncedLists: JSON.stringify(['octo/existing', 'octo/new']),
   deletedAt: null,
+};
+
+const repositoryConfig: ConnectorConfig = {
+  ...persistedConfig,
+  syncMode: 'poll',
+  capabilities: {
+    read: true,
+    write: false,
+    delete: false,
+    sync: true,
+    subtasks: false,
+    lists: true,
+    tags: false,
+    tagWriteBack: false,
+  },
+  credentials: { token: 'test-token' },
+  settings: { repos: ['octo/existing', 'octo/new'] },
+  syncedLists: ['octo/existing', 'octo/new'],
 };
 
 vi.mock('@/db', () => ({
@@ -104,6 +122,18 @@ vi.mock('@/db/schema', () => ({
     connectorInstanceId: 'connectorInstanceId',
     sourceListId: 'sourceListId',
   },
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: {
+      get: vi.fn(async () => repositoryConfig),
+    },
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+    },
+  }),
 }));
 
 vi.mock('@/lib/connectors', () => ({
@@ -594,8 +624,8 @@ describe('dependency reconciliation resume scheduling', () => {
       icon: 'github',
       dependencySnapshotStrategy: 'task-stream',
       capabilities: { dependencyRead: true },
-      fetchTasks: async function* (_since, options) {
-        await options.dependencyGeneration.complete('graphql-bulk');
+      fetchTasks: async function* (_since?: Date, options?: FetchTaskOptions) {
+        await options!.dependencyGeneration!.complete('graphql-bulk');
         yield [];
       },
       getIdentityObservationState: () => [{

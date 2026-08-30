@@ -1,4 +1,5 @@
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
+import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
@@ -7,10 +8,16 @@ import type { SemanticSourcePort } from '@/lib/semantic-index/source/contracts';
 import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
+import {
+  registerWorkerPersistenceRepositories,
+} from '@/lib/persistence/worker-runtime';
 import { initializeDatabase } from './index';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
-import { createPostgresCoreRepositories } from './postgres/repositories';
+import {
+  createPostgresCoreRepositories,
+  createPostgresWorkerPersistenceRepositories,
+} from './postgres/repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
@@ -19,6 +26,7 @@ import { createPostgresSemanticSourcePort } from './postgres/semantic-index/sour
 
 const postgresBackend = new PostgresPersistenceBackend();
 let postgresRepositories: CorePersistenceRepositories | null = null;
+let postgresWorkerRepositories: WorkerPersistenceRepositories | null = null;
 let postgresSyncJobRepository: SyncJobRepository | null = null;
 let postgresConnectorOperationLeaseRepository: ConnectorOperationLeaseRepository | null = null;
 let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
@@ -30,6 +38,13 @@ function requirePostgresRepositories(): CorePersistenceRepositories {
     throw new Error('PostgreSQL core repositories have not been registered');
   }
   return postgresRepositories;
+}
+
+function requirePostgresWorkerRepositories(): WorkerPersistenceRepositories {
+  if (!postgresWorkerRepositories) {
+    throw new Error('PostgreSQL worker repositories have not been registered');
+  }
+  return postgresWorkerRepositories;
 }
 
 const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
@@ -47,6 +62,12 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
     get: (id) => requirePostgresRepositories().connectors.get(id),
     upsert: (connector) => requirePostgresRepositories().connectors.upsert(connector),
     delete: (id) => requirePostgresRepositories().connectors.delete(id),
+    mergeSettings: (id, currentSettings, patch) => (
+      requirePostgresRepositories().connectors.mergeSettings(id, currentSettings, patch)
+    ),
+    patchSettingsState: (id, key, patch) => (
+      requirePostgresRepositories().connectors.patchSettingsState(id, key, patch)
+    ),
   },
   notifications: {
     get: (id) => requirePostgresRepositories().notifications.get(id),
@@ -60,13 +81,24 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   },
 };
 
+const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
+  connectors: postgresCorePersistenceRepositories.connectors,
+  syncRuns: {
+    listLatestSuccessfulPulls: () => (
+      requirePostgresWorkerRepositories().syncRuns.listLatestSuccessfulPulls()
+    ),
+    append: (record) => requirePostgresWorkerRepositories().syncRuns.append(record),
+  },
+};
+
 /**
  * Initializes the selected persistence backend. For PostgreSQL, this also
  * instantiates and registers the portable-contract adapters
  * (`createPostgresCoreRepositories`, `createPostgresSyncJobRepository`,
- * `createPostgresConnectorOperationLeaseRepository`,
- * `createPostgresKeywordSearchRepository`,
- * `createPostgresSemanticIndexRepository`) from the freshly-initialized
+ * `createPostgresConnectorOperationLeaseRepository`, the worker persistence
+ * composition, `createPostgresKeywordSearchRepository`,
+ * `createPostgresSemanticIndexRepository`, and
+ * `createPostgresSemanticSourcePort`) from the freshly-initialized
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite initialization is untouched.
@@ -80,6 +112,11 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   const { db, pool } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
+  postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
+    db,
+    postgresRepositories,
+  );
+  registerWorkerPersistenceRepositories(postgresWorkerPersistenceRepositories);
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
@@ -91,6 +128,7 @@ export async function shutdownRuntimeDatabase(): Promise<void> {
   if (resolveDatabaseBackend() === 'postgres') {
     await postgresBackend.shutdown();
     postgresRepositories = null;
+    postgresWorkerRepositories = null;
     postgresSyncJobRepository = null;
     postgresConnectorOperationLeaseRepository = null;
     postgresKeywordSearchRepository = null;
@@ -120,6 +158,10 @@ export function registerPostgresCoreRepositories(
 
 export function getPostgresCoreRepositories(): CorePersistenceRepositories {
   return requirePostgresRepositories();
+}
+
+export function getPostgresWorkerPersistenceRepositories(): WorkerPersistenceRepositories {
+  return requirePostgresWorkerRepositories();
 }
 
 /**

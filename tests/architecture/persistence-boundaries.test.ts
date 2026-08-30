@@ -23,7 +23,6 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/connectors/monarch-money/identity.ts',
   'src/lib/connectors/monarch-money/snapshot-sync.ts',
   'src/lib/connectors/monarch-money/transaction-backfill.ts',
-  'src/lib/connectors/shared/connector-config-store.ts',
   'src/lib/external-agents/service.ts',
   'src/lib/external-identities/github-backfill.ts',
   'src/lib/external-identities/github-write-fence.ts',

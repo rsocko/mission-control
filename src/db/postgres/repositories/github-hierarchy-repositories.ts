@@ -1,5 +1,4 @@
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
-import { UnsupportedGitHubWorkerOperationError } from '@/db/persistence/github-worker-errors';
 import type {
   GitHubHierarchyApplyResult,
   GitHubHierarchyExceptionEventRow,
@@ -8,10 +7,14 @@ import type {
   GitHubHierarchyTaskIdentityRow,
   GitHubHierarchyTaskRow,
 } from '@/db/persistence/github-hierarchy';
+import {
+  historicalProofDigestMatches,
+  historicalProofMatchesBindings,
+  type HistoricalTransferBinding,
+} from '@/db/persistence/github-transfer-succession';
+import { inspectTaskTransferBinding } from './github-recovery-support';
 
 type Client = Pool | PoolClient;
-
-const HISTORICAL_SUCCESSION_REASON = 'GitHub historical task-transfer succession state';
 
 async function query<T extends QueryResultRow>(
   client: Client,
@@ -41,37 +44,64 @@ async function transaction<T>(
   }
 }
 
-/**
- * Fail closed if any historical task-transfer succession state exists for the
- * connector. That succession filtering (`provenSupersededGitHubTaskIds`) is a
- * legacy SQLite-only surface: rather than silently ignoring it and reconciling
- * the hierarchy from an incomplete population, PostgreSQL refuses the operation.
- */
-async function assertNoHistoricalSuccession(
+interface HistoricalSuccessionRow {
+  sourceTaskId: string;
+  successorTaskId: string;
+  sourceExternalEntityId: string;
+  successorExternalEntityId: string;
+  proof: unknown;
+  proofDigest: string;
+}
+
+async function readProvenSupersededTaskIds(
   client: Client,
   connectorInstanceId: string,
-): Promise<void> {
-  const rows = await query<{ exists: number }>(
+  observedEndpointTaskIds: readonly string[],
+): Promise<Set<string>> {
+  if (observedEndpointTaskIds.length === 0) return new Set();
+  const observed = new Set(observedEndpointTaskIds);
+  const rows = await query<HistoricalSuccessionRow & QueryResultRow>(
     client,
-    `SELECT 1 AS exists
+    `SELECT
+       source_task_id AS "sourceTaskId",
+       successor_task_id AS "successorTaskId",
+       source_external_entity_id AS "sourceExternalEntityId",
+       successor_external_entity_id AS "successorExternalEntityId",
+       proof,
+       proof_digest AS "proofDigest"
      FROM github_identity_task_transfer_reconciliations
      WHERE connector_instance_id = $1
-     LIMIT 1`,
-    [connectorInstanceId],
+       AND successor_task_id = ANY($2::text[])`,
+    [connectorInstanceId, observedEndpointTaskIds],
   );
-  if (rows.length > 0) {
-    throw new UnsupportedGitHubWorkerOperationError(HISTORICAL_SUCCESSION_REASON);
+  const superseded = new Set<string>();
+  for (const row of rows) {
+    if (observed.has(row.sourceTaskId) || !observed.has(row.successorTaskId)) continue;
+    if (!historicalProofDigestMatches(row.proof, row.proofDigest)) continue;
+    const [sourceResult, successorResult] = await Promise.all([
+      inspectTaskTransferBinding(client, connectorInstanceId, row.sourceTaskId),
+      inspectTaskTransferBinding(client, connectorInstanceId, row.successorTaskId),
+    ]);
+    if ('error' in sourceResult || 'error' in successorResult) continue;
+    const source: HistoricalTransferBinding = sourceResult.binding;
+    const successor: HistoricalTransferBinding = successorResult.binding;
+    if (
+      source.externalEntityId !== row.sourceExternalEntityId
+      || successor.externalEntityId !== row.successorExternalEntityId
+      || !historicalProofMatchesBindings(row.proof, source, successor)
+    ) {
+      continue;
+    }
+    superseded.add(source.taskId);
   }
+  return superseded;
 }
 
 /**
  * PostgreSQL adapter for the GitHub sub-issue hierarchy reconciliation port.
  *
- * The hierarchy fences behave identically to SQLite, with one deliberate
- * exception: historical task-transfer succession state is not migrated, so any
- * such state makes this adapter fail closed with
- * `UnsupportedGitHubWorkerOperationError` instead of reconciling from a
- * population that omits proven-superseded tasks.
+ * The hierarchy fences behave identically to SQLite, including revalidation of
+ * historical task-transfer succession proofs against current bindings.
  */
 export function createPostgresGitHubHierarchyRepositories(
   pool: Pool,
@@ -137,15 +167,16 @@ export function createPostgresGitHubHierarchyRepositories(
       );
     },
 
-    async provenSupersededTaskIds(connectorInstanceId) {
-      await assertNoHistoricalSuccession(pool, connectorInstanceId);
-      return [];
+    async provenSupersededTaskIds(connectorInstanceId, observedEndpointTaskIds) {
+      return [...await readProvenSupersededTaskIds(
+        pool,
+        connectorInstanceId,
+        observedEndpointTaskIds,
+      )];
     },
 
-    async applyReconciliation({ connectorInstanceId, reconcile }) {
+    async applyReconciliation({ connectorInstanceId, observedEndpointTaskIds, reconcile }) {
       return transaction(pool, async (client): Promise<GitHubHierarchyApplyResult> => {
-        await assertNoHistoricalSuccession(client, connectorInstanceId);
-
         const [control] = await query<{ modeRevision: number }>(
           client,
           `SELECT mode_revision AS "modeRevision"
@@ -185,12 +216,17 @@ export function createPostgresGitHubHierarchyRepositories(
            ORDER BY id DESC`,
           [connectorInstanceId],
         );
+        const supersededHistoricalTaskIds = await readProvenSupersededTaskIds(
+          client,
+          connectorInstanceId,
+          observedEndpointTaskIds,
+        );
 
         const verdict = reconcile({
           identitySnapshot,
           tasks: taskRows,
           exceptionEvents,
-          supersededHistoricalTaskIds: new Set<string>(),
+          supersededHistoricalTaskIds,
         });
         if (verdict.fenced) {
           return { applied: false, updated: 0, fenced: true };

@@ -4,7 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 const LEGACY_DRIVER_IMPORTS = new Set([
   'src/lib/ai/agents/maintenance.ts',
-  'src/lib/connectors/github-issues/repoint-service.ts',
+  // Documented edge helper: SQLite backup file verification, not persistence.
+  // It produces the bounded, backend-neutral backup attestation the Layer 3B
+  // recovery services consume, and nothing in the ports imports it.
+  'src/lib/connectors/github-issues/backup-verifier.ts',
   'src/lib/seed-api.ts',
 ]);
 
@@ -15,8 +18,6 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/ai/config-resolver.ts',
   'src/lib/ai/durable-runs/store.ts',
   'src/lib/ai/finance-approval-store.ts',
-  'src/lib/connectors/github-issues/bulk-transfer-service.ts',
-  'src/lib/connectors/github-issues/repoint-service.ts',
   'src/lib/connectors/monarch-money/attribution-service.ts',
   'src/lib/connectors/monarch-money/dataset-sync.ts',
   'src/lib/connectors/monarch-money/finance-insight-history-sync.ts',
@@ -81,6 +82,9 @@ const MIGRATED_GITHUB_WORKER_MODULES = [
   'src/lib/sync/github-project-association-identity.ts',
   'src/lib/sync/github-worker-persistence.ts',
   'src/lib/sync/task-dependency-manager.ts',
+  // Layer 3B: GitHub operator recovery orchestration.
+  'src/lib/connectors/github-issues/bulk-transfer-service.ts',
+  'src/lib/connectors/github-issues/repoint-service.ts',
 ] as const;
 
 /**
@@ -89,8 +93,6 @@ const MIGRATED_GITHUB_WORKER_MODULES = [
  * migrated modules above must not import them at runtime.
  */
 const LEGACY_GITHUB_OPERATOR_MODULES = [
-  'src/lib/connectors/github-issues/bulk-transfer-service.ts',
-  'src/lib/connectors/github-issues/repoint-service.ts',
   'src/lib/external-identities/github-backfill.ts',
   'src/lib/external-identities/identity-status.ts',
   'src/lib/external-identities/task-transfer-reconciliation.ts',
@@ -236,6 +238,9 @@ describe('portable persistence dependency ratchet', () => {
       'src/db/persistence/github-dependencies.ts',
       'src/db/persistence/github-hierarchy.ts',
       'src/db/persistence/github-projects.ts',
+      'src/db/persistence/github-recovery.ts',
+      'src/db/persistence/github-recovery-values.ts',
+      'src/db/persistence/github-transfer-succession.ts',
     ];
     const violations = ports.flatMap((path) => {
       const source = readFileSync(join(process.cwd(), path), 'utf8');

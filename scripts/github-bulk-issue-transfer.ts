@@ -5,6 +5,9 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import type { GitHubRecoveryBackupAttestation } from '../src/db/persistence/github-recovery';
+import { initializeDatabaseWithRetry } from '../src/db/startup';
+import { shutdownRuntimeDatabase } from '../src/db/runtime';
 import {
   abortGitHubBulkTransfer,
   executeGitHubBulkTransfer,
@@ -14,7 +17,7 @@ import {
   type GitHubBulkTransferSuccessorAuthorization,
   type GitHubBulkTransferScope,
 } from '../src/lib/connectors/github-issues/bulk-transfer-service';
-import { inspectGitHubRepointBackup } from '../src/lib/connectors/github-issues/repoint-service';
+import { inspectGitHubRepointBackup } from '../src/lib/connectors/github-issues/backup-verifier';
 
 export type GitHubBulkTransferCommand =
   | 'preview' | 'execute' | 'status' | 'resume' | 'abort' | 'reconcile';
@@ -29,6 +32,7 @@ async function main(): Promise<void> {
       source: { type: 'string' },
       target: { type: 'string' },
       backup: { type: 'string' },
+      'backup-attestation': { type: 'string' },
       actor: { type: 'string' },
       allowlist: { type: 'string' },
       'all-issues': { type: 'boolean' },
@@ -46,14 +50,15 @@ async function main(): Promise<void> {
     },
     strict: true,
   });
+  await initializeDatabaseWithRetry();
 
   if (command === 'status') {
-    print(getGitHubBulkTransferStatus(required(values.run, '--run')));
+    print(await getGitHubBulkTransferStatus(required(values.run, '--run')));
     return;
   }
   if (command === 'abort') {
     if (values.confirm !== 'abort') throw new Error('Abort requires --confirm abort');
-    print(abortGitHubBulkTransfer(
+    print(await abortGitHubBulkTransfer(
       required(values.run, '--run'),
       required(values.actor, '--actor'),
     ));
@@ -90,7 +95,10 @@ async function main(): Promise<void> {
     sourceRepository,
     targetRepository,
     actor: required(values.actor, '--actor'),
-    backupProof: await inspectGitHubRepointBackup(required(values.backup, '--backup')),
+    backupProof: await resolveBackupAttestation(
+      values.backup,
+      values['backup-attestation'],
+    ),
     scope,
   };
   if (command === 'preview') {
@@ -132,6 +140,72 @@ export function required(value: string | undefined, option: string): string {
   const normalized = value?.trim();
   if (!normalized) throw new Error(`${option} is required`);
   return normalized;
+}
+
+export async function resolveBackupAttestation(
+  backupPath: string | undefined,
+  attestationPath: string | undefined,
+): Promise<GitHubRecoveryBackupAttestation> {
+  if (Boolean(backupPath) === Boolean(attestationPath)) {
+    throw new Error('Use exactly one of --backup or --backup-attestation');
+  }
+  if (backupPath) return inspectGitHubRepointBackup(backupPath);
+
+  const raw = readFileSync(required(attestationPath, '--backup-attestation'), 'utf8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('Backup attestation must be valid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Backup attestation must be a JSON object');
+  }
+  const record = parsed as Record<string, unknown>;
+  const attestationLocator = record.path;
+  const sha256 = record.sha256;
+  const sizeBytes = record.sizeBytes;
+  const modifiedAt = record.modifiedAt;
+  const integrityCheck = record.integrityCheck;
+  const verifiedAt = record.verifiedAt;
+  const source = record.source;
+  const allowedKeys = new Set([
+    'path',
+    'sha256',
+    'sizeBytes',
+    'modifiedAt',
+    'integrityCheck',
+    'verifiedAt',
+    'source',
+  ]);
+  if (
+    Object.keys(record).some((key) => !allowedKeys.has(key))
+    || typeof attestationLocator !== 'string'
+    || attestationLocator.length < 1
+    || attestationLocator.length > 2_048
+    || typeof sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/.test(sha256)
+    || typeof sizeBytes !== 'number'
+    || !Number.isSafeInteger(sizeBytes)
+    || sizeBytes <= 0
+    || typeof modifiedAt !== 'string'
+    || !Number.isFinite(Date.parse(modifiedAt))
+    || integrityCheck !== 'ok'
+    || typeof verifiedAt !== 'string'
+    || !Number.isFinite(Date.parse(verifiedAt))
+    || source !== 'external-preverified'
+  ) {
+    throw new Error('Backup attestation is invalid or contains unsupported fields');
+  }
+  return {
+    path: attestationLocator,
+    sha256,
+    sizeBytes,
+    modifiedAt,
+    integrityCheck,
+    verifiedAt,
+    source,
+  };
 }
 
 export function buildSuccessorAuthorization(input: {
@@ -235,10 +309,12 @@ function print(value: unknown): void {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error: unknown) => {
-    console.error(JSON.stringify({
-      error: error instanceof Error ? error.message : String(error),
-    }));
-    process.exitCode = 1;
-  });
+  main()
+    .catch((error: unknown) => {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+      }));
+      process.exitCode = 1;
+    })
+    .finally(() => shutdownRuntimeDatabase());
 }

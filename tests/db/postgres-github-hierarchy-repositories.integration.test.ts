@@ -3,6 +3,7 @@ import { afterAll, describe, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresGitHubHierarchyRepositories } from '@/db/postgres/repositories/github-hierarchy-repositories';
+import { digestHistoricalProof } from '@/db/persistence/github-transfer-succession';
 import {
   describeGitHubHierarchyRepositoriesContract,
   type GitHubHierarchyHarness,
@@ -64,7 +65,6 @@ if (connectionString) {
     }
     return {
       repositories: createPostgresGitHubHierarchyRepositories(pool),
-      failsClosedOnSuccession: true,
       reset: async () => {
         await cleanup();
         for (const id of CONNECTORS) {
@@ -125,14 +125,61 @@ if (connectionString) {
       seedSuccessionState: async (connectorInstanceId) => {
         const sourceEntity = `gh-hier-src-${randomUUID()}`;
         const successorEntity = `gh-hier-suc-${randomUUID()}`;
-        for (const [id, stable] of [[sourceEntity, 'src'], [successorEntity, 'suc']]) {
+        const sourceRepositoryEntity = `gh-hier-src-repo-${randomUUID()}`;
+        const successorRepositoryEntity = `gh-hier-suc-repo-${randomUUID()}`;
+        const sourceStableId = `src-${randomUUID()}`;
+        const successorStableId = `suc-${randomUUID()}`;
+        const proof = {
+          requestedSourceId: 'acme/source:1',
+          successorSourceId: 'acme/target:2',
+          sourceStableId,
+          successorStableId,
+          observedStableId: successorStableId,
+        };
+        await pool.query(
+          `INSERT INTO tasks (
+             id, source_id, connector_type, connector_instance_id, title, status,
+             created_at, updated_at, last_synced_at, depth, is_checklist_item, metadata
+           ) VALUES
+             ('source', 'acme/source:1', 'github-issues', $1, 'source', 'todo', $2, $2, $2, 0, false, '{}'::jsonb),
+             ('successor', 'acme/target:2', 'github-issues', $1, 'successor', 'todo', $2, $2, $2, 0, false, '{}'::jsonb)`,
+          [connectorInstanceId, NOW],
+        );
+        for (const [id, entityType, stable] of [
+          [sourceRepositoryEntity, 'repository', `repo-${randomUUID()}`],
+          [successorRepositoryEntity, 'repository', `repo-${randomUUID()}`],
+          [sourceEntity, 'issue', sourceStableId],
+          [successorEntity, 'issue', successorStableId],
+        ]) {
           await pool.query(
             `INSERT INTO external_entities (
                id, provider, host_key, entity_type, stable_id, first_seen_at, last_seen_at
-             ) VALUES ($1, 'github', 'github.com', 'issue', $2, $3, $3)`,
-            [id, `${stable}-${randomUUID()}`, NOW],
+             ) VALUES ($1, 'github', 'github.com', $2, $3, $4, $4)`,
+            [id, entityType, stable, NOW],
           );
         }
+        await pool.query(
+          `INSERT INTO external_entity_locators (
+             id, external_entity_id, repository_entity_id, provider, host_key,
+             owner, repository, owner_key, repository_key, issue_number,
+             valid_from, last_seen_at, observation_source, locator_revision
+           ) VALUES
+             ($1, $2, $3, 'github', 'github.com', 'acme', 'source', 'acme', 'source', 1, $4, $4, 'rest', 1),
+             ($5, $6, $7, 'github', 'github.com', 'acme', 'target', 'acme', 'target', 2, $4, $4, 'rest', 1)`,
+          [
+            randomUUID(), sourceEntity, sourceRepositoryEntity, NOW,
+            randomUUID(), successorEntity, successorRepositoryEntity,
+          ],
+        );
+        await pool.query(
+          `INSERT INTO external_entity_bindings (
+             id, external_entity_id, connector_instance_id, binding_type,
+             local_id, state, verified_at, created_at, updated_at
+           ) VALUES
+             ($1, $2, $3, 'task', 'source', 'active', $4, $4, $4),
+             ($5, $6, $3, 'task', 'successor', 'active', $4, $4, $4)`,
+          [randomUUID(), sourceEntity, connectorInstanceId, NOW, randomUUID(), successorEntity],
+        );
         await pool.query(
           `INSERT INTO github_identity_task_transfer_reconciliations (
              id, connector_instance_id, source_task_id, successor_task_id,
@@ -140,14 +187,15 @@ if (connectionString) {
              expected_mode_revision, proof_kind, proof, proof_digest,
              observed_at, actor, reason, idempotency_key, created_at
            ) VALUES ($1, $2, 'source', 'successor', $3, $4, 1,
-             'rest_historical_redirect', '{}'::jsonb, $5, $6, 'test',
-             'contract-seed', $7, $6)`,
+             'rest_historical_redirect', $5::jsonb, $6, $7, 'test',
+             'contract-seed', $8, $7)`,
           [
             randomUUID(),
             connectorInstanceId,
             sourceEntity,
             successorEntity,
-            'a'.repeat(64),
+            JSON.stringify(proof),
+            digestHistoricalProof(proof),
             NOW,
             randomUUID(),
           ],

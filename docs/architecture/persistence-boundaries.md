@@ -160,7 +160,7 @@ PostgreSQL now supports the generic list/task push/task pull/notification path.
 Layer 3A additionally migrates *normal* GitHub queue execution behind a second
 worker-registered composition, `GitHubWorkerRepositories`
 (`src/db/persistence/github-worker.ts`). It is registered atomically alongside
-`ConnectorExecutionRepositories`, so a backend either has all five members or
+`ConnectorExecutionRepositories`, so a backend either has all six members or
 none:
 
 - `identity` — the durable GitHub identity epoch, transactional primary
@@ -178,7 +178,61 @@ none:
   resolution, accepted terminal-inaccessible read protection, and the fenced
   parent/depth/metadata apply; and
 - `projects` — sync-managed hub-project upsert and authoritative `task_projects`
-  association reconciliation.
+  association reconciliation; and
+- `recovery` — the Layer 3B operator recovery composition
+  (`src/db/persistence/github-recovery.ts`), split into `transfer`,
+  `bulkTransfer`, and `repoint` sub-ports.
+
+### Layer 3B: GitHub recovery persistence
+
+`recovery` covers native GitHub issue transfer, historical task-transfer
+succession reconciliation, bulk transfer runs, and repository repoint. Its
+adapters are `createSqliteGitHubRecoveryRepositories`
+(`src/db/persistence/sqlite-github-recovery-repositories.ts`) and
+`createPostgresGitHubRecoveryRepositories`
+(`src/db/postgres/repositories/github-recovery-repositories.ts`, with shared
+locator/collision/binding helpers in `github-recovery-support.ts`).
+
+Transaction and effect ordering:
+
+- Every GitHub HTTP call, verification retry, and rate-limit sleep runs in
+  `repoint-service.ts` / `bulk-transfer-service.ts` *outside* any adapter
+  transaction. Adapter methods only accept synchronous pure callbacks
+  (`refreshMetadata`), never a remote-I/O callback.
+- Each adapter method owns at most one short transaction. Inside it the adapter
+  re-reads and re-checks the operation phase, maintenance-lock ownership,
+  connector activity (queued/running sync jobs and operation leases), the
+  identity-mode revision, the bulk item state, the task route, the active
+  stable binding, and the current locator revision before writing. PostgreSQL
+  takes explicit `FOR UPDATE` locks on those rows.
+- `applyOperation` returns `not-applicable` when the operation already left
+  `locked`, so a resumed execute is idempotent rather than double-applying.
+- `rollbackOperation` implements both the first rollback and the idempotent
+  rolled-back source-list repair, and leaves the connector disabled.
+- Locator collisions map to bounded domain outcomes (`{ outcome: 'collision' }`,
+  `{ outcome: 'collision', scope }`) after recording a bounded
+  `github_identity_collisions` row and disabling the connector; they are never
+  surfaced as driver errors.
+- Results carry SHA-256 digests instead of raw node IDs wherever a digest is
+  sufficient, and the only credential-bearing method is
+  `transfer.getConnectorCredentials`, which callers use solely to construct a
+  GitHub client.
+
+Backup evidence is a *value*, not a capability. `GitHubRecoveryBackupAttestation`
+(digest, size, timestamps, integrity status, and evidence `source`) flows
+through the backend-neutral service contract. The SQLite file verifier lives in
+`src/lib/connectors/github-issues/backup-verifier.ts` as an allowlisted edge
+helper — it is the only module that opens a database file, nothing in the ports
+imports it, and this repository still ships no PostgreSQL dump, restore, or
+deployment tooling. PostgreSQL operators supply an equivalent externally
+verified attestation (`source: 'external-preverified'`).
+
+No PostgreSQL schema migration was required: `drizzle/postgres/0000_handy_orphan.sql`
+already creates `github_repository_repoints`, `github_repository_repoint_events`,
+`github_bulk_transfer_runs`, `github_bulk_transfer_items`,
+`github_bulk_transfer_successions`, `github_bulk_transfer_events`, and
+`github_identity_task_transfer_reconciliations` with matching phase/state checks,
+idempotency uniqueness, and succession/audit constraints.
 
 Every fence is frozen as a value and re-checked with SQL *inside* the final
 write transaction: the identity epoch, the write-cycle state, the lease token
@@ -194,20 +248,19 @@ reconciliation resume and relationship polling only when the whole GitHub
 composition is present and the execution support reports the
 `dependency-reconciliation` workflow as allowed.
 
-Surfaces Layer 3A deliberately does not migrate stay SQLite-only and fail closed
-under PostgreSQL *before* any remote effect: repository repoint, bulk transfer,
-historical task-transfer reconciliation and succession operator workflows,
-identity backfill and status, manual identity-exception mutation, unknown
+Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
+closed under PostgreSQL *before* any remote effect: identity backfill and
+status, manual identity-exception mutation, unknown
 write-outcome resolution, interrupted write-cycle recovery, connector-owned
 state, Microsoft To Do hidden-list state, Monarch, reminders, triage, and
-semantic/project automation. The PostgreSQL hierarchy adapter is explicitly
-strict here: if historical task-transfer succession state exists for a
-connector it throws `UnsupportedGitHubWorkerOperationError` rather than
-silently reconciling without the succession filter that SQLite applies. GitHub
-restore and operator recovery of deletion snapshots also remain unsupported on
-PostgreSQL; only identity-fenced deletion candidate quarantine, retention, and
-archival are enabled, and only when every frozen epoch/binding/locator/source
-and task fence still matches.
+semantic/project automation. Historical task-transfer succession filtering is
+portable: both hierarchy adapters recompute a JSON-order-independent proof
+digest and revalidate the immutable record against current task bindings and
+locators before excluding the superseded task. Legacy insertion-ordered SQLite
+proof digests remain readable. GitHub restore and operator recovery of deletion
+snapshots also remain unsupported on PostgreSQL; only identity-fenced deletion
+candidate quarantine, retention, and archival are enabled, and only when every
+frozen epoch/binding/locator/source and task fence still matches.
 
 The PostgreSQL execution guard continues to reject Microsoft To Do hidden-list
 state, connector-owned finance or Work To Do bridge state, and non-GitHub

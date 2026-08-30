@@ -7,8 +7,6 @@ import type {
 
 export interface GitHubHierarchyHarness {
   repositories: GitHubHierarchyPersistence;
-  /** True for PostgreSQL — enables the fail-closed succession-state assertions. */
-  failsClosedOnSuccession: boolean;
   reset(): Promise<void>;
   seedControl(connectorInstanceId: string, modeRevision: number): Promise<void>;
   seedTask(row: {
@@ -188,28 +186,32 @@ export function describeGitHubHierarchyRepositoriesContract(
     });
 
     it('reports no proven-superseded task ids when there is no succession state', async () => {
-      if (harness.failsClosedOnSuccession) return;
-      await expect(
-        harness.repositories.provenSupersededTaskIds(CONNECTOR, ['a', 'b']),
-      ).resolves.toEqual([]);
-    });
+        await expect(
+          harness.repositories.provenSupersededTaskIds(CONNECTOR, ['a', 'b']),
+        ).resolves.toEqual([]);
+      });
 
-    it('fails closed on historical task-transfer succession state (PostgreSQL only)', async () => {
-      if (!harness.failsClosedOnSuccession) return;
-      await harness.seedControl(CONNECTOR, 1);
-      await harness.seedSuccessionState(CONNECTOR);
+      it('revalidates historical succession before excluding the source task', async () => {
+        await harness.seedControl(CONNECTOR, 1);
+        await harness.seedSuccessionState(CONNECTOR);
 
-      await expect(
-        harness.repositories.provenSupersededTaskIds(CONNECTOR, ['source', 'successor']),
-      ).rejects.toThrow('GitHub historical task-transfer succession state');
+        await expect(
+          harness.repositories.provenSupersededTaskIds(CONNECTOR, ['successor']),
+        ).resolves.toEqual(['source']);
+        await expect(
+          harness.repositories.provenSupersededTaskIds(CONNECTOR, ['source', 'successor']),
+        ).resolves.toEqual([]);
 
-      await expect(
-        harness.repositories.applyReconciliation({
+        let seen: GitHubHierarchyReconcileContext | undefined;
+        await harness.repositories.applyReconciliation({
           connectorInstanceId: CONNECTOR,
-          observedEndpointTaskIds: ['source', 'successor'],
-          reconcile: () => ({ fenced: false, updates: [] }),
-        }),
-      ).rejects.toThrow('GitHub historical task-transfer succession state');
-    });
+          observedEndpointTaskIds: ['successor'],
+          reconcile: (context) => {
+            seen = context;
+            return { fenced: true };
+          },
+        });
+        expect([...seen!.supersededHistoricalTaskIds]).toEqual(['source']);
+      });
   });
 }

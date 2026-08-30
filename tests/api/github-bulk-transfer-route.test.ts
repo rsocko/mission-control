@@ -20,7 +20,7 @@ vi.mock('@/lib/connectors/github-issues/bulk-transfer-service', () => ({
   reconcileGitHubBulkTransferItem: mocks.reconcile,
 }));
 
-vi.mock('@/lib/connectors/github-issues/repoint-service', () => ({
+vi.mock('@/lib/connectors/github-issues/backup-verifier', () => ({
   inspectGitHubRepointBackup: mocks.inspectBackup,
 }));
 
@@ -100,6 +100,35 @@ describe('GitHub bulk transfer API', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.preview).toHaveBeenCalledWith(expect.objectContaining({ scope }));
+  });
+
+  it('passes externally verified PostgreSQL backup evidence without opening SQLite', async () => {
+    const backupAttestation = {
+      path: 'approved-backup://mission-control/2026-08-30',
+      sha256: 'b'.repeat(64),
+      sizeBytes: 4096,
+      modifiedAt: '2026-08-30T19:00:00.000Z',
+      integrityCheck: 'ok',
+      verifiedAt: '2026-08-30T19:05:00.000Z',
+      source: 'external-preverified',
+    };
+    mocks.preview.mockResolvedValue({ go: true, items: [] });
+
+    const response = await POST(request({
+      action: 'preview',
+      connectorInstanceId: 'github',
+      sourceRepository: 'owner/source',
+      targetRepository: 'owner/target',
+      actor: 'operator',
+      backupAttestation,
+      scope: { mode: 'all-issues' },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.inspectBackup).not.toHaveBeenCalled();
+    expect(mocks.preview).toHaveBeenCalledWith(
+      expect.objectContaining({ backupProof: backupAttestation }),
+    );
   });
 
   it('passes reviewed successor authorization to ambiguous-write reconciliation', async () => {

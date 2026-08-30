@@ -14,6 +14,7 @@ import { createPostgresGitHubIdentityRepositories } from './github-identity-repo
 import { createPostgresGitHubDependencyRepositories } from './github-dependency-repositories';
 import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
+import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -28,6 +29,7 @@ export { createPostgresGitHubIdentityRepositories } from './github-identity-repo
 export { createPostgresGitHubDependencyRepositories } from './github-dependency-repositories';
 export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
+export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -64,6 +66,7 @@ export function createPostgresGitHubWorkerRepositories(
     dependencies: createPostgresGitHubDependencyRepositories(pool),
     hierarchy: createPostgresGitHubHierarchyRepositories(pool),
     projects: createPostgresGitHubProjectRepositories(pool),
+    recovery: createPostgresGitHubRecoveryRepositories(pool),
   };
 }
 

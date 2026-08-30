@@ -17,8 +17,14 @@ available only through the explicit `--all-issues` option.
    zero-disagreement soak.
 2. Drain queued/running syncs, pending or failed writes, deletion candidates,
    unresolved write cycles, and identity collisions.
-3. Create and integrity-check a fresh SQLite backup outside the active database
-   path.
+3. Create and integrity-check a fresh backup outside the active database path.
+   On SQLite the CLI's `--backup` flag runs the built-in file verifier. On
+   PostgreSQL the operator verifies their own dump out of band and supplies the
+   same bounded attestation value through `--backup-attestation` (SHA-256 digest,
+   byte size, modified and verified timestamps, `integrityCheck: "ok"`,
+   `source: "external-preverified"`); this repository ships no PostgreSQL dump,
+   restore, or deployment tooling, and the persistence layer never opens a
+   backup file.
 4. Verify that source and target repositories are under the same GitHub owner
    and both have stable source-list bindings in the connector.
 5. Freeze connector configuration and task metadata until reconciliation
@@ -47,6 +53,13 @@ npm run github:bulk-transfer -- preview \
   --backup /backups/mission-control.db \
   --actor <operator>
 ```
+
+For PostgreSQL, replace `--backup /backups/mission-control.db` with
+`--backup-attestation /reviewed/mission-control-backup-attestation.json`. The
+attestation contains only the opaque backup locator, lowercase SHA-256 digest,
+positive size, modification and verification timestamps, `integrityCheck:
+"ok"`, and `source: "external-preverified"`. Extra fields are rejected so
+credentials or backup contents cannot be persisted accidentally.
 
 Archive the complete JSON output. Confirm that `go` is true, open plus closed
 counts equal the selected issue count, every selected issue has one stable task
@@ -103,6 +116,24 @@ npm run github:bulk-transfer -- status --run <run-id>
 
 Use `--concurrency 1` for production unless rehearsal evidence supports a
 higher value. The maximum is eight.
+
+## Backend support
+
+Bulk transfer, repository repoint, native issue transfer, and historical
+task-transfer reconciliation run through the backend-neutral Layer 3B
+`recovery` persistence composition, so they behave identically on SQLite and
+PostgreSQL. The composition is registered atomically: if it is absent or
+partial for the selected backend, every entry point fails closed *before* any
+GitHub HTTP call. Documenting support is not the same as activating a backend —
+see the database scaling and migration strategy for cutover.
+
+Every GitHub call, verification retry, and rate-limit backoff happens outside
+database transactions. Each durable step (lock, apply, verify, rollback,
+dispatch, complete, reconcile, succession) is a single short transaction that
+re-checks operation phase, maintenance-lock ownership, connector activity, the
+identity-mode revision, item state, task route, stable binding, and locator
+revision before committing. Resume and reconcile are therefore idempotent, and
+a repeated apply on an operation that already left `locked` is a no-op.
 
 ## Resume, abort, and incidents
 

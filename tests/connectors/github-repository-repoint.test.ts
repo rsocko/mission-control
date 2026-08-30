@@ -324,7 +324,7 @@ describe('GitHub repository repoint service', () => {
     )).rejects.toThrow('simulated verification interruption');
     const operation = database.default.select().from(schema.githubRepositoryRepoints)
       .where(eq(schema.githubRepositoryRepoints.connectorInstanceId, 'resume')).get()!;
-    expect(service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
+    expect(await service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
       phase: 'verifying',
       connectorLocked: true,
     });
@@ -439,7 +439,7 @@ describe('GitHub repository repoint service', () => {
         { oldStableId: 'R_reused' },
       )),
     )).rejects.toThrow('Rollback source repository identity verification failed');
-    expect(service.getGitHubRepositoryRepointStatus(failed.id))
+    expect(await service.getGitHubRepositoryRepointStatus(failed.id))
       .toMatchObject({ phase: 'verification_failed', connectorLocked: true });
 
     const rolledBack = await service.rollbackGitHubRepositoryRepoint(

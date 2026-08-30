@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import {
   externalEntities,
@@ -7,6 +7,14 @@ import {
   tasks,
 } from '@/db/schema';
 import { runTransaction } from '@/db';
+import {
+  buildHistoricalTransferProof,
+  canonicalIssueSourceId,
+  digestHistoricalProof,
+  historicalProofDigestMatches,
+  historicalProofMatchesBindings,
+  validateHistoricalAuditRequest,
+} from '@/db/persistence/github-transfer-succession';
 import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
 import { getCurrentExternalEntityLocatorInTransaction } from './service';
 import type { ExternalIdentityTransaction } from './service';
@@ -117,7 +125,7 @@ function inspectGitHubTaskTransferBinding(
       error: `GitHub task stable binding has no current issue locator: ${taskId}`,
     };
   }
-  const locatorSourceId = canonicalSourceId(
+  const locatorSourceId = canonicalIssueSourceId(
     locator.owner,
     locator.repository,
     locator.issueNumber,
@@ -145,7 +153,7 @@ function inspectGitHubTaskTransferBinding(
 export function recordGitHubTaskTransferReconciliation(
   request: GitHubTaskTransferReconciliationRequest,
 ): GitHubTaskTransferReconciliationResult {
-  validateAuditRequest(request);
+  validateHistoricalAuditRequest(request);
   return runTransaction((tx) => {
     const mode = getGitHubIdentityModeSnapshotInTransaction(
       tx,
@@ -167,7 +175,7 @@ export function recordGitHubTaskTransferReconciliation(
       request.connectorInstanceId,
       request.successorTaskId,
     );
-    const proof = buildTransferProof(request, source, successor);
+    const proof = buildHistoricalTransferProof(request, source, successor);
     const replay = tx.select().from(githubIdentityTaskTransferReconciliations)
       .where(and(
         eq(
@@ -188,7 +196,7 @@ export function recordGitHubTaskTransferReconciliation(
         || replay.expectedModeRevision !== request.expectedRevision
         || replay.actor !== request.actor
         || replay.reason !== request.reason
-        || !proofMatchesCurrentBindings(replay.proof, source, successor)
+        || !historicalProofMatchesBindings(replay.proof, source, successor)
       ) {
         throw new Error('Historical transfer idempotency key belongs to another request');
       }
@@ -224,7 +232,7 @@ export function recordGitHubTaskTransferReconciliation(
       expectedModeRevision: request.expectedRevision,
       proofKind: 'rest_historical_redirect',
       proof,
-      proofDigest: digestProof(proof),
+      proofDigest: digestHistoricalProof(proof),
       observedAt: request.observation.evidence.entity.observedAt,
       actor: request.actor,
       reason: request.reason,
@@ -255,7 +263,7 @@ export function provenSupersededGitHubTaskIds(
     ) {
       continue;
     }
-    if (digestProof(reconciliation.proof) !== reconciliation.proofDigest) continue;
+    if (!historicalProofDigestMatches(reconciliation.proof, reconciliation.proofDigest)) continue;
     const sourceResult = inspectGitHubTaskTransferBinding(
       database,
       connectorInstanceId,
@@ -272,113 +280,13 @@ export function provenSupersededGitHubTaskIds(
     if (
       source.externalEntityId !== reconciliation.sourceExternalEntityId
       || successor.externalEntityId !== reconciliation.successorExternalEntityId
-      || !proofMatchesCurrentBindings(reconciliation.proof, source, successor)
+      || !historicalProofMatchesBindings(reconciliation.proof, source, successor)
     ) {
       continue;
     }
     superseded.add(source.taskId);
   }
   return superseded;
-}
-
-function buildTransferProof(
-  request: GitHubTaskTransferReconciliationRequest,
-  source: GitHubTaskTransferBinding,
-  successor: GitHubTaskTransferBinding,
-): Record<string, unknown> {
-  const observation = request.observation;
-  const remote = observation.evidence.entity;
-  if (source.taskId === successor.taskId || source.externalEntityId === successor.externalEntityId) {
-    throw new Error('Historical transfer reconciliation requires distinct tasks and identities');
-  }
-  if (source.hostKey !== successor.hostKey || remote.identity.hostKey !== source.hostKey) {
-    throw new Error('Historical transfer reconciliation must stay in one GitHub host namespace');
-  }
-  if (
-    remote.identity.provider !== 'github'
-    || remote.identity.entityType !== 'issue'
-    || remote.observationSource !== 'rest'
-  ) {
-    throw new Error('Historical transfer reconciliation requires authoritative REST issue evidence');
-  }
-  if (remote.identity.stableId !== successor.stableId) {
-    throw new Error('Historical endpoint did not resolve to the successor stable identity');
-  }
-  if (remote.identity.stableId === source.stableId) {
-    throw new Error('Historical endpoint still resolves to the source stable identity');
-  }
-  const remoteSourceId = canonicalSourceId(
-    remote.locator.owner,
-    remote.locator.repository,
-    remote.locator.issueNumber,
-  );
-  if (request.requestedSourceId.toLowerCase() !== source.locatorSourceId) {
-    throw new Error('Historical transfer lookup did not target the source task locator');
-  }
-  if (remoteSourceId !== successor.locatorSourceId) {
-    throw new Error('Historical endpoint canonical locator does not match the successor task');
-  }
-  if (remoteSourceId === source.locatorSourceId) {
-    throw new Error('Historical endpoint did not move to a distinct locator');
-  }
-
-  return {
-    requestedSourceId: source.locatorSourceId,
-    successorSourceId: successor.locatorSourceId,
-    sourceStableId: source.stableId,
-    successorStableId: successor.stableId,
-    observedStableId: remote.identity.stableId,
-    observedAt: remote.observedAt,
-    title: observation.title,
-    state: observation.state,
-    stateReason: observation.stateReason,
-    apiUrl: remote.locator.apiUrl ?? null,
-    webUrl: remote.locator.webUrl ?? null,
-  };
-}
-
-function proofMatchesCurrentBindings(
-  value: unknown,
-  source: GitHubTaskTransferBinding,
-  successor: GitHubTaskTransferBinding,
-): boolean {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proof = value as Record<string, unknown>;
-  return proof.requestedSourceId === source.locatorSourceId
-    && proof.successorSourceId === successor.locatorSourceId
-    && proof.sourceStableId === source.stableId
-    && proof.successorStableId === successor.stableId
-    && proof.observedStableId === successor.stableId;
-}
-
-function digestProof(proof: unknown): string {
-  return createHash('sha256').update(JSON.stringify(proof)).digest('hex');
-}
-
-function canonicalSourceId(
-  owner: string,
-  repository: string,
-  issueNumber: number | undefined,
-): string {
-  if (!Number.isSafeInteger(issueNumber) || (issueNumber ?? 0) <= 0) {
-    throw new Error('GitHub issue locator requires a positive issue number');
-  }
-  return `${owner}/${repository}:${issueNumber}`.toLowerCase();
-}
-
-function validateAuditRequest(request: GitHubTaskTransferReconciliationRequest): void {
-  if (!Number.isSafeInteger(request.expectedRevision) || request.expectedRevision < 0) {
-    throw new Error('Historical transfer reconciliation requires a non-negative mode revision');
-  }
-  if (request.actor.length < 1 || request.actor.length > 80) {
-    throw new Error('Historical transfer reconciliation actor must be 1-80 characters');
-  }
-  if (request.reason.length < 3 || request.reason.length > 500) {
-    throw new Error('Historical transfer reconciliation reason must be 3-500 characters');
-  }
-  if (request.idempotencyKey.length < 8 || request.idempotencyKey.length > 192) {
-    throw new Error('Historical transfer idempotency key must be 8-192 characters');
-  }
 }
 
 function toResult(

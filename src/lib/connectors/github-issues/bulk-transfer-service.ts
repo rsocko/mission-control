@@ -1,24 +1,16 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
-import db, { runTransaction, sqlite } from '@/db';
+import { randomUUID } from 'node:crypto';
+import type {
+  GitHubBulkTransferItemRecord,
+  GitHubBulkTransferRunRecord,
+  GitHubBulkTransferSuccessionRecord,
+} from '@/db/persistence/github-recovery';
 import {
-  connectorConfigs,
-  externalEntityBindings,
-  externalEntityLocators,
-  githubBulkTransferEvents,
-  githubBulkTransferItems,
-  githubBulkTransferRuns,
-  githubBulkTransferSuccessions,
-  tasks,
-} from '@/db/schema';
-import {
-  getGitHubIdentityModeSnapshot,
-  getGitHubIdentityModeSnapshotInTransaction,
-  observeOperatorExternalEntityLocatorInTransaction,
-  readGitHubTaskTransferBinding,
-  type ExternalIdentityEvidence,
-  upsertExternalEntityInTransaction,
-} from '@/lib/external-identities';
+  canonicalDigest,
+  identifierDigest,
+  isBackupAttestationReady,
+} from '@/db/persistence/github-recovery-values';
+import { getGitHubRecoveryRepository } from '@/lib/sync/github-worker-persistence';
+import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
 import { GitHubHttpError } from './github-client';
 import { parseSourceId, refreshGitHubIssueMetadata } from './issue-transformer';
@@ -127,32 +119,40 @@ export interface GitHubBulkTransferSuccessorAuthorization {
   idempotencyKey: string;
 }
 
+async function recovery() {
+  return getGitHubRecoveryRepository();
+}
+
 export async function previewGitHubBulkTransfer(
   input: GitHubBulkTransferInput,
   dependencies: GitHubBulkTransferDependencies = {},
 ): Promise<GitHubBulkTransferPreview> {
   validateInput(input);
-  requireConnector(input.connectorInstanceId);
-  const remote = dependencies.remote ?? createGitHubRepositoryRemote(input.connectorInstanceId);
+  const ports = await recovery();
+  await requireConnector(input.connectorInstanceId);
+  const remote = dependencies.remote
+    ?? await createGitHubRepositoryRemote(input.connectorInstanceId);
   if (!remote.listIssues) throw new Error('GitHub remote does not support issue enumeration');
 
   const reasons: string[] = [];
-  getGitHubIdentityModeSnapshot(input.connectorInstanceId);
+  await ports.transfer.getIdentityModeSnapshot(input.connectorInstanceId);
   if (!backupReady(input.backupProof, dependencies.now?.() ?? new Date())) {
     reasons.push('verified_recent_backup_required');
   }
-  if (connectorActivity(
-    input.connectorInstanceId,
-    dependencies.operationLeaseOwned ?? false,
-  ) > 0) {
+  if (await ports.bulkTransfer.countConnectorActivity({
+    connectorInstanceId: input.connectorInstanceId,
+    ignoreOwnedOperationLease: dependencies.operationLeaseOwned ?? false,
+  }) > 0) {
     reasons.push('connector_activity_must_be_drained');
   }
-  if (blockingStateCount(input.connectorInstanceId) > 0) {
+  if (await ports.bulkTransfer.countBlockingState(input.connectorInstanceId) > 0) {
     reasons.push('pending_writes_deletions_or_identity_collisions');
   }
 
-  const sourceBinding = repositoryBinding(input.connectorInstanceId, input.sourceRepository);
-  const targetBinding = repositoryBinding(input.connectorInstanceId, input.targetRepository);
+  const [sourceBinding, targetBinding] = await Promise.all([
+    ports.bulkTransfer.getRepositoryBinding(input.connectorInstanceId, input.sourceRepository),
+    ports.bulkTransfer.getRepositoryBinding(input.connectorInstanceId, input.targetRepository),
+  ]);
   if (!sourceBinding) reasons.push('source_repository_binding_missing_or_ambiguous');
   if (!targetBinding) reasons.push('target_repository_binding_missing_or_ambiguous');
 
@@ -187,31 +187,28 @@ export async function previewGitHubBulkTransfer(
     }
   }
 
-  const authoritativeDeletedTaskIds = getDurablyAuthoritativeDeletedTaskIds(
-    input.connectorInstanceId,
+  const authoritativeDeletedTaskIds = new Set(
+    await ports.bulkTransfer.listAuthoritativeDeletedTaskIds(input.connectorInstanceId),
   );
   const selectedIssueNumbers = new Set(selectedRemoteIssues.map((issue) => issue.number));
-  const localRows = db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    status: tasks.status,
-  }).from(tasks).where(and(
-    eq(tasks.connectorInstanceId, input.connectorInstanceId),
-    eq(tasks.connectorType, 'github-issues'),
-  )).all().filter((row) => (
-    parseSourceId(row.sourceId).repo.toLowerCase() === input.sourceRepository.toLowerCase()
-    && (
-      !approvedIssueNodeIds
-      || selectedIssueNumbers.has(parseSourceId(row.sourceId).issueNumber)
-    )
-    && (row.status !== 'cancelled' || !authoritativeDeletedTaskIds.has(row.id))
-  ));
+  const localRows = (await ports.bulkTransfer.listConnectorTasks(input.connectorInstanceId))
+    .filter((row) => (
+      parseSourceId(row.sourceId).repo.toLowerCase() === input.sourceRepository.toLowerCase()
+      && (
+        !approvedIssueNodeIds
+        || selectedIssueNumbers.has(parseSourceId(row.sourceId).issueNumber)
+      )
+      && (row.status !== 'cancelled' || !authoritativeDeletedTaskIds.has(row.id))
+    ));
   const remoteByNumber = new Map(selectedRemoteIssues.map((issue) => [issue.number, issue]));
   const items: GitHubBulkTransferPlanItem[] = [];
   for (const row of localRows) {
     try {
       const locator = parseSourceId(row.sourceId);
-      const binding = readGitHubTaskTransferBinding(db, input.connectorInstanceId, row.id);
+      const binding = await ports.transfer.readTaskTransferBinding(
+        input.connectorInstanceId,
+        row.id,
+      );
       const remoteIssue = remoteByNumber.get(locator.issueNumber);
       if (!remoteIssue?.node_id || remoteIssue.node_id !== binding.stableId) {
         reasons.push(`issue_identity_mismatch:${row.id}`);
@@ -223,7 +220,7 @@ export async function previewGitHubBulkTransfer(
         issueStableId: binding.stableId,
         sourceNumber: locator.issueNumber,
         sourceState: remoteIssue.state,
-        beforeDigest: taskMetadataDigest(row.id),
+        beforeDigest: await ports.bulkTransfer.taskMetadataDigest(row.id),
       });
     } catch {
       reasons.push(`issue_binding_missing_or_ambiguous:${row.id}`);
@@ -250,7 +247,8 @@ export async function previewGitHubBulkTransfer(
     targetRepositoryStableId: targetBinding?.stableId ?? null,
     backupSha256: input.backupProof.sha256,
     scope: normalizedScope(input.scope),
-    globalBeforeDigest: globalMetadataDigest(input.connectorInstanceId),
+    globalBeforeDigest: await ports.bulkTransfer
+      .connectorMetadataDigest(input.connectorInstanceId),
     targetIssueStableIds: targetIssues
       .map((issue) => issue.node_id)
       .filter((value): value is string => typeof value === 'string')
@@ -292,15 +290,16 @@ export async function executeGitHubBulkTransfer(
   dependencies: GitHubBulkTransferDependencies = {},
 ): Promise<GitHubBulkTransferStatus> {
   validateExecutionInput(input);
-  const existing = findRun(input.connectorInstanceId, input.idempotencyKey);
+  const ports = await recovery();
+  const existing = await ports.bulkTransfer.findRun(
+    input.connectorInstanceId,
+    input.idempotencyKey,
+  );
   if (existing) {
     assertSameRun(existing, input);
     if (existing.phase === 'completed') return status(existing.id);
     if (existing.phase === 'aborted') throw new Error('Aborted bulk transfer cannot be resumed');
-    const ambiguous = db.select().from(githubBulkTransferItems).where(and(
-      eq(githubBulkTransferItems.runId, existing.id),
-      eq(githubBulkTransferItems.state, 'transferring'),
-    )).get();
+    const ambiguous = (await ports.bulkTransfer.listItems(existing.id, ['transferring']))[0];
     if (ambiguous) {
       throw new Error(
         `Bulk transfer has an unresolved post-dispatch item: ${ambiguous.taskId}`,
@@ -312,11 +311,7 @@ export async function executeGitHubBulkTransfer(
     let runId: string;
     if (existing) {
       runId = existing.id;
-      db.update(githubBulkTransferRuns).set({
-        phase: 'running',
-        lastError: null,
-        updatedAt: nowIso(dependencies),
-      }).where(eq(githubBulkTransferRuns.id, runId)).run();
+      await ports.bulkTransfer.markRunRunning(runId, nowIso(dependencies));
     } else {
       const preview = await previewGitHubBulkTransfer(input, {
         ...dependencies,
@@ -328,32 +323,51 @@ export async function executeGitHubBulkTransfer(
       if (preview.planHash !== input.planHash) {
         throw new Error('GitHub bulk transfer plan hash is stale');
       }
-      runId = createRun(input, preview, dependencies.now?.() ?? new Date());
+      runId = randomUUID();
+      await ports.bulkTransfer.createRun({
+        runId,
+        connectorInstanceId: input.connectorInstanceId,
+        idempotencyKey: input.idempotencyKey,
+        actor: input.actor,
+        sourceRepository: input.sourceRepository,
+        targetRepository: input.targetRepository,
+        planHash: input.planHash,
+        plan: preview,
+        items: preview.items.map((item) => ({
+          taskId: item.taskId,
+          issueEntityId: item.issueEntityId,
+          issueStableId: item.issueStableId,
+          sourceNumber: item.sourceNumber,
+          beforeDigest: item.beforeDigest,
+        })),
+        now: (dependencies.now?.() ?? new Date()).toISOString(),
+      });
     }
 
     try {
-      const remote = dependencies.remote ?? createGitHubRepositoryRemote(input.connectorInstanceId);
-      const pending = db.select().from(githubBulkTransferItems).where(and(
-        eq(githubBulkTransferItems.runId, runId),
-        inArray(githubBulkTransferItems.state, ['pending', 'failed']),
-      )).orderBy(githubBulkTransferItems.sourceNumber).all();
+      const remote = dependencies.remote
+        ?? await createGitHubRepositoryRemote(input.connectorInstanceId);
+      const pending = await ports.bulkTransfer.listItems(runId, ['pending', 'failed']);
       await runBounded(pending, input.concurrency ?? 1, async (item) => {
-        if (taskMetadataDigest(item.taskId) !== item.beforeDigest) {
+        if (await ports.bulkTransfer.taskMetadataDigest(item.taskId) !== item.beforeDigest) {
           throw new Error(`Local metadata drift detected for task ${item.taskId}`);
         }
         const attemptStartedAt = nowIso(dependencies);
-        db.update(githubBulkTransferItems).set({
+        await ports.bulkTransfer.setItemState({
+          runId,
+          taskId: item.taskId,
           state: 'pending',
           startedAt: attemptStartedAt,
-          updatedAt: attemptStartedAt,
           lastError: null,
-        }).where(and(
-          eq(githubBulkTransferItems.runId, runId),
-          eq(githubBulkTransferItems.taskId, item.taskId),
-        )).run();
-        appendEvent(runId, item.taskId, 'preflight_started', {
-          issueStableIdDigest: digest(item.issueStableId),
-        }, attemptStartedAt);
+          now: attemptStartedAt,
+        });
+        await ports.bulkTransfer.appendEvent({
+          runId,
+          taskId: item.taskId,
+          eventType: 'preflight_started',
+          payload: { issueStableIdDigest: digest(item.issueStableId) },
+          createdAt: attemptStartedAt,
+        });
 
         let result;
         let transferAccepted = false;
@@ -367,62 +381,68 @@ export async function executeGitHubBulkTransfer(
             remote,
             now: dependencies.now,
             sleep: dependencies.sleep,
-            onTransferDispatch: () => {
+            // Awaited before the mutation leaves the process, so a crash after
+            // dispatch always finds a durable `transferring` (ambiguous) item.
+            onTransferDispatch: async () => {
               const dispatchedAt = nowIso(dependencies);
-              db.update(githubBulkTransferItems).set({
+              await ports.bulkTransfer.setItemState({
+                runId,
+                taskId: item.taskId,
                 state: 'transferring',
-                updatedAt: dispatchedAt,
-              }).where(and(
-                eq(githubBulkTransferItems.runId, runId),
-                eq(githubBulkTransferItems.taskId, item.taskId),
-              )).run();
-              appendEvent(runId, item.taskId, 'dispatch_started', {
-                issueStableIdDigest: digest(item.issueStableId),
-              }, dispatchedAt);
+                now: dispatchedAt,
+              });
+              await ports.bulkTransfer.appendEvent({
+                runId,
+                taskId: item.taskId,
+                eventType: 'dispatch_started',
+                payload: { issueStableIdDigest: digest(item.issueStableId) },
+                createdAt: dispatchedAt,
+              });
             },
-            onTransferAccepted: (targetNumber) => {
+            onTransferAccepted: async (targetNumber) => {
               transferAccepted = true;
-              appendEvent(runId, item.taskId, 'dispatch_accepted', {
-                targetNumber,
-                issueStableIdDigest: digest(item.issueStableId),
-              }, nowIso(dependencies));
+              await ports.bulkTransfer.appendEvent({
+                runId,
+                taskId: item.taskId,
+                eventType: 'dispatch_accepted',
+                payload: {
+                  targetNumber,
+                  issueStableIdDigest: digest(item.issueStableId),
+                },
+                createdAt: nowIso(dependencies),
+              });
             },
-            onChangedIssueIdentity: (transfer) => {
-              reconcileAutomaticallyChangedIssueIdentity({
-                run: requireRun(runId),
+            onChangedIssueIdentity: async (transfer) => {
+              await reconcileAutomaticallyChangedIssueIdentity({
+                run: await requireRun(runId),
                 item,
                 transfer,
                 actor: input.actor,
                 now: nowIso(dependencies),
               });
             },
-          }), dependencies.sleep, ({ attempt, delayMs, status }) => {
+          }), dependencies.sleep, async ({ attempt, delayMs, status: httpStatus }) => {
             const rateLimitedAt = nowIso(dependencies);
             if (!transferAccepted) {
-              db.update(githubBulkTransferItems).set({
+              await ports.bulkTransfer.setItemState({
+                runId,
+                taskId: item.taskId,
                 state: 'pending',
-                updatedAt: rateLimitedAt,
                 lastError: null,
-              }).where(and(
-                eq(githubBulkTransferItems.runId, runId),
-                eq(githubBulkTransferItems.taskId, item.taskId),
-              )).run();
+                now: rateLimitedAt,
+              });
             }
-            appendEvent(runId, item.taskId, transferAccepted
-              ? 'verification_rate_limited'
-              : 'rate_limited', {
-              attempt,
-              delayMs,
-              status,
-            }, rateLimitedAt);
+            await ports.bulkTransfer.appendEvent({
+              runId,
+              taskId: item.taskId,
+              eventType: transferAccepted ? 'verification_rate_limited' : 'rate_limited',
+              payload: { attempt, delayMs, status: httpStatus },
+              createdAt: rateLimitedAt,
+            });
             return !transferAccepted;
           });
         } catch (error) {
-          const current = db.select({ state: githubBulkTransferItems.state })
-            .from(githubBulkTransferItems).where(and(
-              eq(githubBulkTransferItems.runId, runId),
-              eq(githubBulkTransferItems.taskId, item.taskId),
-            )).get();
+          const current = await ports.bulkTransfer.getItem(runId, item.taskId);
           const definitelyRejectedBeforeAcceptance = (
             !transferAccepted
             && error instanceof GitHubHttpError
@@ -431,63 +451,52 @@ export async function executeGitHubBulkTransfer(
           if (current?.state === 'pending' || definitelyRejectedBeforeAcceptance) {
             const failedAt = nowIso(dependencies);
             const message = error instanceof Error ? error.message : String(error);
-            db.update(githubBulkTransferItems).set({
+            await ports.bulkTransfer.setItemState({
+              runId,
+              taskId: item.taskId,
               state: 'failed',
               lastError: message.slice(0, 1_000),
-              updatedAt: failedAt,
-            }).where(and(
-              eq(githubBulkTransferItems.runId, runId),
-              eq(githubBulkTransferItems.taskId, item.taskId),
-            )).run();
-            appendEvent(runId, item.taskId, 'pre_dispatch_failed', {
-              error: message.slice(0, 1_000),
-            }, failedAt);
+              now: failedAt,
+            });
+            await ports.bulkTransfer.appendEvent({
+              runId,
+              taskId: item.taskId,
+              eventType: 'pre_dispatch_failed',
+              payload: { error: message.slice(0, 1_000) },
+              createdAt: failedAt,
+            });
           }
           throw error;
         }
-        if (taskMetadataDigest(item.taskId) !== item.beforeDigest) {
+        if (await ports.bulkTransfer.taskMetadataDigest(item.taskId) !== item.beforeDigest) {
           throw new Error(`Local metadata changed during transfer for task ${item.taskId}`);
         }
         const targetNumber = parseSourceId(result.newSourceId).issueNumber;
-        const completedAt = nowIso(dependencies);
-        runTransaction((tx) => {
-          tx.update(githubBulkTransferItems).set({
-            state: 'transferred',
-            targetNumber,
+        await ports.bulkTransfer.completeItem({
+          runId,
+          taskId: item.taskId,
+          targetNumber,
+          newSourceId: result.newSourceId,
+          eventPayload: {
             newSourceId: result.newSourceId,
-            completedAt,
-            updatedAt: completedAt,
-          }).where(and(
-            eq(githubBulkTransferItems.runId, runId),
-            eq(githubBulkTransferItems.taskId, item.taskId),
-          )).run();
-          tx.update(githubBulkTransferRuns).set({
-            transferredCount: sqlCountTransferred(runId),
-            updatedAt: completedAt,
-          }).where(eq(githubBulkTransferRuns.id, runId)).run();
-          tx.insert(githubBulkTransferEvents).values({
-            runId,
-            taskId: item.taskId,
-            eventType: 'verified',
-            payload: {
-              newSourceId: result.newSourceId,
-              issueStableIdDigest: digest(result.issueStableId),
-            },
-            createdAt: completedAt,
-          }).run();
+            issueStableIdDigest: digest(result.issueStableId),
+          },
+          now: nowIso(dependencies),
         });
       });
       await completeRun(runId, remote, dependencies);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      failRun(runId, message, dependencies);
+      await ports.bulkTransfer.failRun(runId, message, nowIso(dependencies));
       throw error;
     }
     return status(runId);
   });
 }
 
-export function getGitHubBulkTransferStatus(runId: string): GitHubBulkTransferStatus {
+export async function getGitHubBulkTransferStatus(
+  runId: string,
+): Promise<GitHubBulkTransferStatus> {
   return status(runId);
 }
 
@@ -505,15 +514,10 @@ export async function reconcileGitHubBulkTransferItem(
   if (!Number.isSafeInteger(input.targetNumber) || input.targetNumber <= 0) {
     throw new Error('Bulk transfer reconciliation requires a positive target issue number');
   }
-  const run = requireRun(input.runId);
-  const item = db.select().from(githubBulkTransferItems).where(and(
-    eq(githubBulkTransferItems.runId, input.runId),
-    eq(githubBulkTransferItems.taskId, input.taskId),
-  )).limit(1).get();
-  const replay = db.select().from(githubBulkTransferSuccessions).where(and(
-    eq(githubBulkTransferSuccessions.runId, input.runId),
-    eq(githubBulkTransferSuccessions.taskId, input.taskId),
-  )).limit(1).get();
+  const ports = await recovery();
+  const run = await requireRun(input.runId);
+  const item = await ports.bulkTransfer.getItem(input.runId, input.taskId);
+  const replay = await ports.bulkTransfer.getSuccession(input.runId, input.taskId);
   if (replay) {
     if (!item || !successionProofMatches(replay, run, item)) {
       throw new Error('Bulk transfer successor replay proof is invalid');
@@ -527,13 +531,17 @@ export async function reconcileGitHubBulkTransferItem(
   if (!item || item.state !== 'transferring') {
     throw new Error('Bulk transfer reconciliation requires an ambiguous item');
   }
-  if (taskMetadataDigest(item.taskId) !== item.beforeDigest) {
+  if (await ports.bulkTransfer.taskMetadataDigest(item.taskId) !== item.beforeDigest) {
     throw new Error('Bulk transfer reconciliation found local metadata drift');
   }
 
   await runWithConnectorOperationLease(run.connectorInstanceId, 'transfer', async () => {
-    const remote = dependencies.remote ?? createGitHubRepositoryRemote(run.connectorInstanceId);
-    const targetBinding = repositoryBinding(run.connectorInstanceId, run.targetRepository);
+    const remote = dependencies.remote
+      ?? await createGitHubRepositoryRemote(run.connectorInstanceId);
+    const targetBinding = await ports.bulkTransfer.getRepositoryBinding(
+      run.connectorInstanceId,
+      run.targetRepository,
+    );
     const targetRepository = await remote.resolveRepository(run.targetRepository);
     if (
       !targetBinding
@@ -552,7 +560,7 @@ export async function reconcileGitHubBulkTransferItem(
     }
     const now = nowIso(dependencies);
     if (evidence.entity.identity.stableId !== item.issueStableId) {
-      reconcileChangedIssueIdentity({
+      await reconcileChangedIssueIdentity({
         run,
         item,
         evidence,
@@ -564,75 +572,37 @@ export async function reconcileGitHubBulkTransferItem(
       });
       return;
     }
-    runTransaction((tx) => {
-      const observed = observeOperatorExternalEntityLocatorInTransaction(tx, {
-        entityId: item.issueEntityId,
-        identity: evidence.entity.identity,
-        locator: evidence.entity.locator,
-        repositoryEntityId: targetBinding.entityId,
-        observedAt: now,
-      });
-      if (observed.state === 'collision') {
-        throw new Error('Bulk transfer reconciliation target locator collision');
-      }
-      const newSourceId = `${run.targetRepository}:${input.targetNumber}`;
-      const currentTask = tx.select({ metadata: tasks.metadata }).from(tasks)
-        .where(eq(tasks.id, item.taskId)).limit(1).get();
-      if (!currentTask) {
-        throw new Error('Bulk transfer reconciliation task disappeared before routing update');
-      }
-      tx.update(tasks).set({
-        sourceId: newSourceId,
-        sourceListId: run.targetRepository,
-        sourceListName: run.targetRepository,
-        metadata: refreshGitHubIssueMetadata(currentTask.metadata, newSourceId, evidence),
-        syncStatus: 'synced',
-        updatedAt: now,
-      }).where(eq(tasks.id, item.taskId)).run();
-      tx.update(githubBulkTransferItems).set({
-        state: 'transferred',
-        targetNumber: input.targetNumber,
-        newSourceId,
-        lastError: null,
-        completedAt: now,
-        updatedAt: now,
-      }).where(and(
-        eq(githubBulkTransferItems.runId, input.runId),
-        eq(githubBulkTransferItems.taskId, input.taskId),
-      )).run();
-      tx.update(githubBulkTransferRuns).set({
-        actor: input.actor,
-        transferredCount: sqlCountTransferred(input.runId),
-        failedCount: 0,
-        lastError: null,
-        updatedAt: now,
-      }).where(eq(githubBulkTransferRuns.id, input.runId)).run();
-      tx.insert(githubBulkTransferEvents).values({
-        runId: input.runId,
-        taskId: input.taskId,
-        eventType: 'ambiguity_reconciled',
-        payload: {
-          targetNumber: input.targetNumber,
-          issueStableIdDigest: digest(item.issueStableId),
-          actor: input.actor,
-        },
-        createdAt: now,
-      }).run();
+    const newSourceId = `${run.targetRepository}:${input.targetNumber}`;
+    await ports.bulkTransfer.reconcileItemRouting({
+      runId: input.runId,
+      taskId: input.taskId,
+      connectorInstanceId: run.connectorInstanceId,
+      issueEntityId: item.issueEntityId,
+      targetRepository: run.targetRepository,
+      targetRepositoryEntityId: targetBinding.entityId,
+      targetNumber: input.targetNumber,
+      identity: evidence.entity.identity,
+      locator: evidence.entity.locator,
+      observedAt: now,
+      actor: input.actor,
+      now,
+      issueStableIdDigest: digest(item.issueStableId),
+      refreshMetadata: (metadata) => refreshGitHubIssueMetadata(metadata, newSourceId, evidence),
     });
   });
   return status(input.runId);
 }
 
-function reconcileChangedIssueIdentity(input: {
-  run: typeof githubBulkTransferRuns.$inferSelect;
-  item: typeof githubBulkTransferItems.$inferSelect;
+async function reconcileChangedIssueIdentity(input: {
+  run: GitHubBulkTransferRunRecord;
+  item: GitHubBulkTransferItemRecord;
   evidence: ExternalIdentityEvidence;
   targetBinding: { entityId: string; stableId: string };
   targetNumber: number;
   actor: string;
   authorization: GitHubBulkTransferSuccessorAuthorization | undefined;
   now: string;
-}): void {
+}): Promise<void> {
   const authorization = input.authorization;
   if (!authorization) {
     throw new Error(
@@ -640,15 +610,15 @@ function reconcileChangedIssueIdentity(input: {
     );
   }
   validateSuccessorAuthorization(authorization);
-  const sourceStableIdDigest = identityDigest(input.item.issueStableId);
-  const successorStableIdDigest = identityDigest(input.evidence.entity.identity.stableId);
+  const sourceStableIdDigest = identifierDigest(input.item.issueStableId);
+  const successorStableIdDigest = identifierDigest(input.evidence.entity.identity.stableId);
   if (authorization.expectedSourceStableIdDigest !== sourceStableIdDigest) {
     throw new Error('Bulk transfer successor authorization source identity mismatch');
   }
   if (authorization.expectedSuccessorStableIdDigest !== successorStableIdDigest) {
     throw new Error('Bulk transfer successor authorization target identity mismatch');
   }
-  recordChangedIssueIdentity({
+  await recordChangedIssueIdentity({
     ...input,
     audit: {
       reason: authorization.reason.trim(),
@@ -658,13 +628,13 @@ function reconcileChangedIssueIdentity(input: {
   });
 }
 
-function reconcileAutomaticallyChangedIssueIdentity(input: {
-  run: typeof githubBulkTransferRuns.$inferSelect;
-  item: typeof githubBulkTransferItems.$inferSelect;
+async function reconcileAutomaticallyChangedIssueIdentity(input: {
+  run: GitHubBulkTransferRunRecord;
+  item: GitHubBulkTransferItemRecord;
   transfer: GitHubChangedIssueIdentityTransfer;
   actor: string;
   now: string;
-}): void {
+}): Promise<void> {
   const { run, item, transfer } = input;
   if (
     transfer.sourceTaskId !== item.taskId
@@ -677,7 +647,11 @@ function reconcileAutomaticallyChangedIssueIdentity(input: {
   ) {
     throw new Error('Bulk transfer automatic successor dispatch proof mismatch');
   }
-  const targetBinding = repositoryBinding(run.connectorInstanceId, run.targetRepository);
+  const ports = await recovery();
+  const targetBinding = await ports.bulkTransfer.getRepositoryBinding(
+    run.connectorInstanceId,
+    run.targetRepository,
+  );
   if (
     !targetBinding
     || transfer.targetRepositoryEntityId !== targetBinding.entityId
@@ -687,7 +661,7 @@ function reconcileAutomaticallyChangedIssueIdentity(input: {
   ) {
     throw new Error('Bulk transfer automatic successor target repository mismatch');
   }
-  recordChangedIssueIdentity({
+  await recordChangedIssueIdentity({
     run,
     item,
     evidence: transfer.evidence,
@@ -703,9 +677,9 @@ function reconcileAutomaticallyChangedIssueIdentity(input: {
   });
 }
 
-function recordChangedIssueIdentity(input: {
-  run: typeof githubBulkTransferRuns.$inferSelect;
-  item: typeof githubBulkTransferItems.$inferSelect;
+async function recordChangedIssueIdentity(input: {
+  run: GitHubBulkTransferRunRecord;
+  item: GitHubBulkTransferItemRecord;
   evidence: ExternalIdentityEvidence;
   targetBinding: { entityId: string; stableId: string };
   targetNumber: number;
@@ -716,12 +690,12 @@ function recordChangedIssueIdentity(input: {
     idempotencyKey: string;
     requireAcceptedDispatch: boolean;
   };
-}): void {
-  const sourceStableIdDigest = identityDigest(input.item.issueStableId);
-  const successorStableIdDigest = identityDigest(input.evidence.entity.identity.stableId);
-  const mode = getGitHubIdentityModeSnapshot(input.run.connectorInstanceId);
-  const sourceBinding = readGitHubTaskTransferBinding(
-    db,
+}): Promise<void> {
+  const ports = await recovery();
+  const sourceStableIdDigest = identifierDigest(input.item.issueStableId);
+  const successorStableIdDigest = identifierDigest(input.evidence.entity.identity.stableId);
+  const mode = await ports.transfer.getIdentityModeSnapshot(input.run.connectorInstanceId);
+  const sourceBinding = await ports.transfer.readTaskTransferBinding(
     input.run.connectorInstanceId,
     input.item.taskId,
   );
@@ -733,13 +707,10 @@ function recordChangedIssueIdentity(input: {
   ) {
     throw new Error('Bulk transfer successor reconciliation source binding changed');
   }
-  const acceptedTargets = db.select({ payload: githubBulkTransferEvents.payload })
-    .from(githubBulkTransferEvents).where(and(
-      eq(githubBulkTransferEvents.runId, input.run.id),
-      eq(githubBulkTransferEvents.taskId, input.item.taskId),
-      eq(githubBulkTransferEvents.eventType, 'dispatch_accepted'),
-    )).all().map((event) => event.payload.targetNumber)
-    .filter((value): value is number => Number.isSafeInteger(value));
+  const acceptedTargets = await ports.bulkTransfer.listAcceptedDispatchTargets(
+    input.run.id,
+    input.item.taskId,
+  );
   if (acceptedTargets.length > 0 && !acceptedTargets.includes(input.targetNumber)) {
     throw new Error('Bulk transfer successor target number disagrees with dispatch evidence');
   }
@@ -759,145 +730,43 @@ function recordChangedIssueIdentity(input: {
     successorStableIdDigest,
     successorSourceId,
     targetRepositoryEntityId: input.targetBinding.entityId,
-    targetRepositoryStableIdDigest: identityDigest(input.targetBinding.stableId),
+    targetRepositoryStableIdDigest: identifierDigest(input.targetBinding.stableId),
     targetNumber: input.targetNumber,
     beforeDigest: input.item.beforeDigest,
     expectedModeRevision: mode.modeRevision,
     dispatchTargetVerified: acceptedTargets.length > 0,
   };
 
-  runTransaction((tx) => {
-    const currentItem = tx.select().from(githubBulkTransferItems).where(and(
-      eq(githubBulkTransferItems.runId, input.run.id),
-      eq(githubBulkTransferItems.taskId, input.item.taskId),
-    )).limit(1).get();
-    if (!currentItem || currentItem.state !== 'transferring') {
-      throw new Error('Bulk transfer successor reconciliation item state changed');
-    }
-    const currentMode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      input.run.connectorInstanceId,
-    );
-    if (currentMode.modeRevision !== mode.modeRevision) {
-      throw new Error('Bulk transfer successor reconciliation identity mode changed');
-    }
-    const currentTask = tx.select({
-      sourceId: tasks.sourceId,
-      metadata: tasks.metadata,
-    }).from(tasks).where(and(
-      eq(tasks.id, input.item.taskId),
-      eq(tasks.connectorInstanceId, input.run.connectorInstanceId),
-    )).limit(1).get();
-    if (currentTask?.sourceId.toLowerCase() !== sourceId.toLowerCase()) {
-      throw new Error('Bulk transfer successor reconciliation task route changed');
-    }
-    const binding = tx.select().from(externalEntityBindings).where(and(
-      eq(externalEntityBindings.connectorInstanceId, input.run.connectorInstanceId),
-      eq(externalEntityBindings.bindingType, 'task'),
-      eq(externalEntityBindings.localId, input.item.taskId),
-      inArray(externalEntityBindings.state, ['shadow', 'active']),
-    )).limit(1).get();
-    if (!binding || binding.externalEntityId !== input.item.issueEntityId) {
-      throw new Error('Bulk transfer successor reconciliation binding changed');
-    }
-    const successor = upsertExternalEntityInTransaction(tx, {
-      identity: input.evidence.entity.identity,
-      observedAt: input.now,
-    });
-    if (successor.id === input.item.issueEntityId) {
-      throw new Error('Bulk transfer successor reconciliation requires distinct identities');
-    }
-    const occupied = tx.select().from(externalEntityBindings).where(and(
-      eq(externalEntityBindings.connectorInstanceId, input.run.connectorInstanceId),
-      eq(externalEntityBindings.externalEntityId, successor.id),
-    )).limit(1).get();
-    if (occupied) {
-      throw new Error('Bulk transfer successor identity is already bound');
-    }
-    tx.update(externalEntityLocators).set({
-      validTo: input.now,
-    }).where(and(
-      eq(externalEntityLocators.externalEntityId, input.item.issueEntityId),
-      isNull(externalEntityLocators.validTo),
-    )).run();
-    const observed = observeOperatorExternalEntityLocatorInTransaction(tx, {
-      entityId: successor.id,
-      identity: input.evidence.entity.identity,
-      locator: input.evidence.entity.locator,
-      repositoryEntityId: input.targetBinding.entityId,
-      observedAt: input.now,
-    });
-    if (observed.state === 'collision') {
-      throw new Error('Bulk transfer successor target locator collision');
-    }
-    tx.update(externalEntityBindings).set({
-      externalEntityId: successor.id,
-      verifiedAt: input.now,
-      updatedAt: input.now,
-    }).where(eq(externalEntityBindings.id, binding.id)).run();
-    tx.update(tasks).set({
-      sourceId: successorSourceId,
-      sourceListId: input.run.targetRepository,
-      sourceListName: input.run.targetRepository,
-      metadata: refreshGitHubIssueMetadata(
-        currentTask.metadata,
-        successorSourceId,
-        input.evidence,
-      ),
-      syncStatus: 'synced',
-      updatedAt: input.now,
-    }).where(eq(tasks.id, input.item.taskId)).run();
-    tx.insert(githubBulkTransferSuccessions).values({
-      id: randomUUID(),
-      runId: input.run.id,
-      taskId: input.item.taskId,
-      sourceExternalEntityId: input.item.issueEntityId,
-      successorExternalEntityId: successor.id,
-      sourceStableIdDigest,
-      successorStableIdDigest,
-      sourceId,
+  await ports.bulkTransfer.recordSuccession({
+    runId: input.run.id,
+    taskId: input.item.taskId,
+    connectorInstanceId: input.run.connectorInstanceId,
+    sourceRepository: input.run.sourceRepository,
+    targetRepository: input.run.targetRepository,
+    sourceNumber: input.item.sourceNumber,
+    targetNumber: input.targetNumber,
+    issueEntityId: input.item.issueEntityId,
+    issueStableId: input.item.issueStableId,
+    beforeDigest: input.item.beforeDigest,
+    expectedModeRevision: mode.modeRevision,
+    successorSourceId,
+    sourceId,
+    sourceStableIdDigest,
+    successorStableIdDigest,
+    targetRepositoryEntityId: input.targetBinding.entityId,
+    targetRepositoryStableId: input.targetBinding.stableId,
+    evidence: input.evidence,
+    proof,
+    proofDigest: digest(proof),
+    actor: input.actor,
+    reason: input.audit.reason,
+    idempotencyKey: input.audit.idempotencyKey,
+    now: input.now,
+    refreshMetadata: (metadata) => refreshGitHubIssueMetadata(
+      metadata,
       successorSourceId,
-      targetRepositoryEntityId: input.targetBinding.entityId,
-      targetNumber: input.targetNumber,
-      proof,
-      proofDigest: digest(proof),
-      actor: input.actor,
-      reason: input.audit.reason,
-      idempotencyKey: input.audit.idempotencyKey,
-      observedAt: input.evidence.entity.observedAt,
-      createdAt: input.now,
-    }).run();
-    tx.update(githubBulkTransferItems).set({
-      state: 'transferred',
-      targetNumber: input.targetNumber,
-      newSourceId: successorSourceId,
-      lastError: null,
-      completedAt: input.now,
-      updatedAt: input.now,
-    }).where(and(
-      eq(githubBulkTransferItems.runId, input.run.id),
-      eq(githubBulkTransferItems.taskId, input.item.taskId),
-    )).run();
-    tx.update(githubBulkTransferRuns).set({
-      actor: input.actor,
-      transferredCount: sqlCountTransferred(input.run.id),
-      failedCount: 0,
-      lastError: null,
-      updatedAt: input.now,
-    }).where(eq(githubBulkTransferRuns.id, input.run.id)).run();
-    tx.insert(githubBulkTransferEvents).values({
-      runId: input.run.id,
-      taskId: input.item.taskId,
-      eventType: 'identity_successor_reconciled',
-      payload: {
-        targetNumber: input.targetNumber,
-        sourceStableIdDigest,
-        successorStableIdDigest,
-        proofDigest: digest(proof),
-        actor: input.actor,
-      },
-      createdAt: input.now,
-    }).run();
+      input.evidence,
+    ),
   });
 }
 
@@ -922,7 +791,7 @@ function validateSuccessorAuthorization(
 }
 
 function assertSuccessorReplay(
-  replay: typeof githubBulkTransferSuccessions.$inferSelect,
+  replay: GitHubBulkTransferSuccessionRecord,
   input: {
     targetNumber: number;
     actor: string;
@@ -946,82 +815,22 @@ function assertSuccessorReplay(
   }
 }
 
-export function abortGitHubBulkTransfer(
+export async function abortGitHubBulkTransfer(
   runId: string,
   actor: string,
-): GitHubBulkTransferStatus {
+): Promise<GitHubBulkTransferStatus> {
   validateActor(actor);
-  const run = requireRun(runId);
+  const ports = await recovery();
+  const run = await requireRun(runId);
   if (run.phase !== 'running' && run.phase !== 'failed') {
     throw new Error(`Bulk transfer cannot be aborted from phase ${run.phase}`);
   }
-  const ambiguous = db.select().from(githubBulkTransferItems).where(and(
-    eq(githubBulkTransferItems.runId, runId),
-    eq(githubBulkTransferItems.state, 'transferring'),
-  )).get();
+  const ambiguous = (await ports.bulkTransfer.listItems(runId, ['transferring']))[0];
   if (ambiguous) {
     throw new Error('Bulk transfer cannot be aborted with an unresolved post-dispatch item');
   }
-  const now = new Date().toISOString();
-  db.update(githubBulkTransferRuns).set({
-    phase: 'aborted',
-    actor,
-    completedAt: now,
-    updatedAt: now,
-  }).where(eq(githubBulkTransferRuns.id, runId)).run();
-  appendEvent(runId, null, 'aborted', { actor }, now);
+  await ports.bulkTransfer.abortRun(runId, actor, new Date().toISOString());
   return status(runId);
-}
-
-function createRun(
-  input: GitHubBulkTransferExecuteInput,
-  preview: GitHubBulkTransferPreview,
-  now: Date,
-): string {
-  const connector = requireConnector(input.connectorInstanceId);
-  const runId = randomUUID();
-  const timestamp = now.toISOString();
-  runTransaction((tx) => {
-    tx.insert(githubBulkTransferRuns).values({
-      id: runId,
-      connectorInstanceId: input.connectorInstanceId,
-      idempotencyKey: input.idempotencyKey,
-      phase: 'running',
-      actor: input.actor,
-      sourceRepository: input.sourceRepository,
-      targetRepository: input.targetRepository,
-      planHash: input.planHash,
-      plan: preview,
-      connectorWasEnabled: connector.enabled,
-      transferredCount: 0,
-      skippedCount: 0,
-      failedCount: 0,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }).run();
-    tx.insert(githubBulkTransferItems).values(preview.items.map((item) => ({
-      runId,
-      taskId: item.taskId,
-      issueEntityId: item.issueEntityId,
-      issueStableId: item.issueStableId,
-      sourceNumber: item.sourceNumber,
-      state: 'pending' as const,
-      beforeDigest: item.beforeDigest,
-      updatedAt: timestamp,
-    }))).run();
-    tx.update(connectorConfigs).set({
-      enabled: false,
-      updatedAt: timestamp,
-    }).where(eq(connectorConfigs.id, input.connectorInstanceId)).run();
-    tx.insert(githubBulkTransferEvents).values({
-      runId,
-      taskId: null,
-      eventType: 'started',
-      payload: { planHash: input.planHash, totalCount: preview.items.length },
-      createdAt: timestamp,
-    }).run();
-  });
-  return runId;
 }
 
 async function completeRun(
@@ -1029,20 +838,21 @@ async function completeRun(
   remote: GitHubRepositoryRepointRemote,
   dependencies: GitHubBulkTransferDependencies,
 ): Promise<void> {
-  const run = requireRun(runId);
-  const items = db.select().from(githubBulkTransferItems)
-    .where(eq(githubBulkTransferItems.runId, runId)).all();
+  const ports = await recovery();
+  const run = await requireRun(runId);
+  const items = await ports.bulkTransfer.listItems(runId);
   if (items.some((item) => item.state !== 'transferred')) {
     throw new Error('Bulk transfer reconciliation found incomplete items');
   }
   for (const item of items) {
-    if (taskMetadataDigest(item.taskId) !== item.beforeDigest) {
+    if (await ports.bulkTransfer.taskMetadataDigest(item.taskId) !== item.beforeDigest) {
       throw new Error(`Bulk transfer reconciliation found metadata drift for ${item.taskId}`);
     }
   }
   if (
     typeof run.plan.globalBeforeDigest !== 'string'
-    || globalMetadataDigest(run.connectorInstanceId) !== run.plan.globalBeforeDigest
+    || await ports.bulkTransfer.connectorMetadataDigest(run.connectorInstanceId)
+      !== run.plan.globalBeforeDigest
   ) {
     throw new Error('Bulk transfer reconciliation found connector metadata drift');
   }
@@ -1052,10 +862,9 @@ async function completeRun(
     destinationIssues.map((issue) => issue.node_id).filter((value): value is string => Boolean(value)),
   );
   const destinationStableIdDigests = new Set(
-    [...destinationStableIds].map((stableId) => identityDigest(stableId)),
+    [...destinationStableIds].map((stableId) => identifierDigest(stableId)),
   );
-  const successions = db.select().from(githubBulkTransferSuccessions)
-    .where(eq(githubBulkTransferSuccessions.runId, runId)).all();
+  const successions = await ports.bulkTransfer.listSuccessions(runId);
   const itemByTask = new Map(items.map((item) => [item.taskId, item]));
   if (successions.some((succession) => {
     const item = itemByTask.get(succession.taskId);
@@ -1067,7 +876,8 @@ async function completeRun(
     successions.map((succession) => [succession.taskId, succession.successorStableIdDigest]),
   );
   const targetBefore = Array.isArray(run.plan.targetIssueStableIds)
-    ? run.plan.targetIssueStableIds.filter((value): value is string => typeof value === 'string')
+    ? (run.plan.targetIssueStableIds as unknown[])
+      .filter((value): value is string => typeof value === 'string')
     : null;
   if (
     !targetBefore
@@ -1081,59 +891,19 @@ async function completeRun(
   ) {
     throw new Error('Bulk transfer destination counts or stable identities did not reconcile');
   }
-  const now = nowIso(dependencies);
-  runTransaction((tx) => {
-    tx.update(connectorConfigs).set({
-      enabled: run.connectorWasEnabled,
-      updatedAt: now,
-    }).where(eq(connectorConfigs.id, run.connectorInstanceId)).run();
-    tx.update(githubBulkTransferRuns).set({
-      phase: 'completed',
-      transferredCount: items.length,
-      failedCount: 0,
-      lastError: null,
-      completedAt: now,
-      updatedAt: now,
-    }).where(eq(githubBulkTransferRuns.id, runId)).run();
-    tx.insert(githubBulkTransferEvents).values({
-      runId,
-      taskId: null,
-      eventType: 'reconciled',
-      payload: {
-        sourceCount: items.length,
-        destinationBeforeCount: targetBefore.length,
-        destinationAfterCount: destinationIssues.length,
-        transferredCount: items.length,
-        skippedCount: 0,
-        failedCount: 0,
-        reconciledCount: items.length,
-        metadataDriftCount: 0,
-      },
-      createdAt: now,
-    }).run();
+  await ports.bulkTransfer.completeRun({
+    runId,
+    connectorInstanceId: run.connectorInstanceId,
+    connectorWasEnabled: run.connectorWasEnabled,
+    transferredCount: items.length,
+    destinationBeforeCount: targetBefore.length,
+    destinationAfterCount: destinationIssues.length,
+    now: nowIso(dependencies),
   });
 }
 
-function failRun(
-  runId: string,
-  message: string,
-  dependencies: GitHubBulkTransferDependencies,
-): void {
-  const now = nowIso(dependencies);
-  db.update(githubBulkTransferRuns).set({
-    phase: 'failed',
-    failedCount: scalar(`
-      SELECT COUNT(*) AS value FROM github_bulk_transfer_items
-      WHERE run_id = ? AND state IN ('failed', 'transferring')
-    `, runId),
-    lastError: message.slice(0, 1_000),
-    updatedAt: now,
-  }).where(eq(githubBulkTransferRuns.id, runId)).run();
-  appendEvent(runId, null, 'failed', { error: message.slice(0, 1_000) }, now);
-}
-
 async function runBounded<T>(
-  values: T[],
+  values: readonly T[],
   concurrency: number,
   operation: (value: T) => Promise<void>,
 ): Promise<void> {
@@ -1164,7 +934,7 @@ async function withRateLimitBackoff<T>(
     attempt: number;
     delayMs: number | null;
     status: number | null;
-  }) => boolean,
+  }) => boolean | Promise<boolean>,
 ): Promise<T> {
   let lastError: unknown;
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -1175,7 +945,7 @@ async function withRateLimitBackoff<T>(
       const retry = rateLimitRetry(error, attempt);
       if (!retry) throw error;
       const delayMs = attempt < 3 ? retry.delayMs : null;
-      const retryAllowed = onRateLimited?.({
+      const retryAllowed = await onRateLimited?.({
         attempt: attempt + 1,
         delayMs,
         status: retry.status,
@@ -1231,189 +1001,11 @@ function rateLimitResetDelayMilliseconds(error: GitHubHttpError): number | null 
   return Math.max(0, resetAtMs - Date.now());
 }
 
-function taskMetadataDigest(taskId: string): string {
-  const task = sqlite.prepare(`
-    SELECT id, title, description, status, priority, due_date, effort,
-           CASE
-             WHEN json_valid(metadata)
-               THEN json_remove(metadata, '$.issueNumber', '$.nodeId', '$.url')
-             ELSE metadata
-           END AS metadata,
-           local_disposition, completed_at, created_at
-    FROM tasks WHERE id = ?
-  `).get(taskId);
-  if (!task) throw new Error(`Task disappeared during bulk transfer: ${taskId}`);
-  const relations: Record<string, unknown[]> = {};
-  for (const [table, column] of [
-    ['task_projects', 'task_id'],
-    ['project_phase_items', 'task_id'],
-    ['task_tags', 'task_id'],
-    ['task_schedules', 'task_id'],
-    ['task_field_states', 'task_id'],
-    ['task_linked_sources', 'task_id'],
-    ['task_history_events', 'task_id'],
-    ['my_day_items', 'task_id'],
-    ['focus_items', 'task_id'],
-    ['task_attachments', 'task_id'],
-  ] as const) {
-    if (!tableHasColumn(table, column)) continue;
-    relations[table] = sqlite.prepare(
-      `SELECT * FROM ${table} WHERE ${column} = ?`,
-    ).all(taskId).sort(compareCanonical);
-  }
-
-  if (tableHasColumn('task_dependencies', 'task_id')) {
-    relations.task_dependencies = sqlite.prepare(`
-      SELECT * FROM task_dependencies
-      WHERE task_id = ? OR depends_on_task_id = ?
-    `).all(taskId, taskId).sort(compareCanonical);
-  }
-  return digest({ task, relations });
-}
-
-function globalMetadataDigest(connectorInstanceId: string): string {
-  const connector = sqlite.prepare(`
-    SELECT id, type, name, sync_mode, capabilities, settings, synced_lists, created_at
-    FROM connector_configs WHERE id = ?
-  `).get(connectorInstanceId);
-  const sourceLists = sqlite.prepare(`
-    SELECT * FROM source_lists WHERE connector_instance_id = ?
-  `).all(connectorInstanceId).sort(compareCanonical);
-  const suppressions = sqlite.prepare(`
-    SELECT * FROM task_ingest_suppressions WHERE connector_instance_id = ?
-  `).all(connectorInstanceId).sort(compareCanonical);
-  return digest({ connector, sourceLists, suppressions });
-}
-
-function tableHasColumn(table: string, column: string): boolean {
-  return (sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
-    .some((entry) => entry.name === column);
-}
-
-function compareCanonical(left: unknown, right: unknown): number {
-  return canonical(left).localeCompare(canonical(right));
-}
-
-function repositoryBinding(
-  connectorInstanceId: string,
-  repository: string,
-): { entityId: string; stableId: string } | null {
-  const [owner, name] = repository.toLowerCase().split('/');
-  const rows = sqlite.prepare(`
-    SELECT e.id AS entityId, e.stable_id AS stableId
-    FROM external_entity_bindings b
-    JOIN external_entities e ON e.id = b.external_entity_id
-    JOIN external_entity_locators l ON l.external_entity_id = e.id
-    WHERE b.connector_instance_id = ?
-      AND b.binding_type = 'source_list'
-      AND b.state IN ('shadow', 'active')
-      AND e.provider = 'github'
-      AND e.entity_type = 'repository'
-      AND l.valid_to IS NULL
-      AND l.issue_number IS NULL
-      AND l.owner_key = ?
-      AND l.repository_key = ?
-  `).all(connectorInstanceId, owner, name) as Array<{ entityId: string; stableId: string }>;
-  return rows.length === 1 ? rows[0] : null;
-}
-
-function connectorActivity(
-  connectorInstanceId: string,
-  ignoreOwnedOperationLease: boolean,
-): number {
-  return scalar(`
-    SELECT
-      (SELECT COUNT(*) FROM sync_jobs
-       WHERE connector_id = ? AND status IN ('queued', 'running'))
-      + (SELECT COUNT(*) FROM connector_operation_leases
-         WHERE connector_id = ? AND ? = 0)
-      + (SELECT COUNT(*) FROM connector_maintenance_locks WHERE connector_instance_id = ?)
-      AS value
-  `, connectorInstanceId, connectorInstanceId, ignoreOwnedOperationLease ? 1 : 0, connectorInstanceId);
-}
-
-function blockingStateCount(connectorInstanceId: string): number {
-  return scalar(`
-    SELECT
-      (SELECT COUNT(*) FROM tasks
-       WHERE connector_instance_id = ?
-         AND sync_status IN ('pending_push', 'push_error', 'push_failed'))
-      + (SELECT COUNT(*) FROM sync_deletion_candidates WHERE connector_id = ?)
-      + (SELECT COUNT(*) FROM github_identity_collisions
-         WHERE connector_instance_id = ? AND state = 'open')
-      + (SELECT COUNT(*) FROM github_identity_write_cycles
-         WHERE connector_instance_id = ?
-           AND (
-             reconciliation_state = 'quarantined'
-             OR state = 'running'
-             OR (
-               state = 'interrupted'
-               AND reconciliation_state NOT IN
-                 ('pre_dispatch_retryable', 'resolved', 'superseded')
-             )
-             OR (
-               state = 'completed'
-               AND reconciliation_state NOT IN
-                 ('pre_dispatch_retryable', 'resolved', 'superseded')
-               AND (
-                 pending_candidate_count > observed_route_count
-                 OR blocked_count > 0
-                 OR failed_count > 0
-                 OR unknown_count > 0
-               )
-             )
-           ))
-      + (SELECT COUNT(*) FROM dependency_reconciliation_snapshots
-         WHERE connector_instance_id = ? AND status != 'completed')
-      AS value
-  `, connectorInstanceId, connectorInstanceId, connectorInstanceId, connectorInstanceId,
-  connectorInstanceId);
-}
-
-/**
- * Tasks an operator durably retired with an authoritative-deletion exception.
- * The proof is the latest accepted exception event plus the task still being
- * cancelled; no comparison evidence is consulted.
- */
-function getDurablyAuthoritativeDeletedTaskIds(
-  connectorInstanceId: string,
-): ReadonlySet<string> {
-  const rows = sqlite.prepare(`
-    SELECT DISTINCT exception.local_id AS taskId
-    FROM github_identity_exception_events AS exception
-    INNER JOIN tasks AS task
-      ON task.id = exception.local_id
-      AND task.connector_instance_id = exception.connector_instance_id
-      AND task.status = 'cancelled'
-    WHERE exception.connector_instance_id = ?
-      AND exception.binding_type = 'task'
-      AND exception.category = 'terminal_inaccessible'
-      AND exception.action = 'accept'
-      AND exception.proof_type = 'post_backfill_authoritative_deletion'
-      AND exception.id = (
-        SELECT MAX(latest.id)
-        FROM github_identity_exception_events AS latest
-        WHERE latest.connector_instance_id = exception.connector_instance_id
-          AND latest.binding_type = exception.binding_type
-          AND latest.local_id = exception.local_id
-          AND latest.category = exception.category
-      )
-  `).all(connectorInstanceId) as Array<{ taskId: string }>;
-  return new Set(rows.map((row) => row.taskId));
-}
-
-function status(runId: string): GitHubBulkTransferStatus {
-  const run = requireRun(runId);
-  const counts = sqlite.prepare(`
-    SELECT
-      COUNT(*) AS totalCount,
-      SUM(CASE WHEN state = 'transferred' THEN 1 ELSE 0 END) AS transferredCount,
-      SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END) AS pendingCount,
-      SUM(CASE WHEN state = 'transferring' THEN 1 ELSE 0 END) AS ambiguousCount,
-      SUM(CASE WHEN state IN ('failed', 'transferring') THEN 1 ELSE 0 END) AS failedCount
-    FROM github_bulk_transfer_items WHERE run_id = ?
-  `).get(runId) as Record<string, number | null>;
-  const connector = requireConnector(run.connectorInstanceId);
+async function status(runId: string): Promise<GitHubBulkTransferStatus> {
+  const ports = await recovery();
+  const run = await requireRun(runId);
+  const counts = await ports.bulkTransfer.countItems(runId);
+  const connector = await requireConnector(run.connectorInstanceId);
   return {
     id: run.id,
     connectorInstanceId: run.connectorInstanceId,
@@ -1421,13 +1013,13 @@ function status(runId: string): GitHubBulkTransferStatus {
     sourceRepository: run.sourceRepository,
     targetRepository: run.targetRepository,
     planHash: run.planHash,
-    totalCount: counts.totalCount ?? 0,
-    transferredCount: counts.transferredCount ?? 0,
+    totalCount: counts.totalCount,
+    transferredCount: counts.transferredCount,
     skippedCount: run.skippedCount,
-    failedCount: counts.failedCount ?? run.failedCount,
-    pendingCount: counts.pendingCount ?? 0,
-    ambiguousCount: counts.ambiguousCount ?? 0,
-    reconciledCount: run.phase === 'completed' ? counts.transferredCount ?? 0 : 0,
+    failedCount: counts.failedCount,
+    pendingCount: counts.pendingCount,
+    ambiguousCount: counts.ambiguousCount,
+    reconciledCount: run.phase === 'completed' ? counts.transferredCount : 0,
     connectorEnabled: connector.enabled,
     lastError: run.lastError,
     createdAt: run.createdAt,
@@ -1436,51 +1028,16 @@ function status(runId: string): GitHubBulkTransferStatus {
   };
 }
 
-function sqlCountTransferred(runId: string): number {
-  return scalar(
-    `SELECT COUNT(*) AS value FROM github_bulk_transfer_items
-     WHERE run_id = ? AND state = 'transferred'`,
-    runId,
-  );
-}
-
-function scalar(query: string, ...values: unknown[]): number {
-  return Number((sqlite.prepare(query).get(...values) as { value?: number } | undefined)?.value ?? 0);
-}
-
-function appendEvent(
-  runId: string,
-  taskId: string | null,
-  eventType: string,
-  payload: Record<string, unknown>,
-  createdAt: string,
-): void {
-  db.insert(githubBulkTransferEvents).values({
-    runId,
-    taskId,
-    eventType,
-    payload,
-    createdAt,
-  }).run();
-}
-
-function findRun(connectorInstanceId: string, idempotencyKey: string) {
-  return db.select().from(githubBulkTransferRuns).where(and(
-    eq(githubBulkTransferRuns.connectorInstanceId, connectorInstanceId),
-    eq(githubBulkTransferRuns.idempotencyKey, idempotencyKey),
-  )).limit(1).get() ?? null;
-}
-
-function requireRun(runId: string) {
-  const run = db.select().from(githubBulkTransferRuns)
-    .where(eq(githubBulkTransferRuns.id, runId)).limit(1).get();
+async function requireRun(runId: string): Promise<GitHubBulkTransferRunRecord> {
+  const ports = await recovery();
+  const run = await ports.bulkTransfer.getRun(runId);
   if (!run) throw new Error('GitHub bulk transfer run was not found');
   return run;
 }
 
-function requireConnector(connectorInstanceId: string) {
-  const connector = db.select().from(connectorConfigs)
-    .where(eq(connectorConfigs.id, connectorInstanceId)).limit(1).get();
+async function requireConnector(connectorInstanceId: string) {
+  const ports = await recovery();
+  const connector = await ports.transfer.getConnector(connectorInstanceId);
   if (!connector || connector.type !== 'github-issues') {
     throw new Error('GitHub connector was not found');
   }
@@ -1488,7 +1045,7 @@ function requireConnector(connectorInstanceId: string) {
 }
 
 function assertSameRun(
-  run: typeof githubBulkTransferRuns.$inferSelect,
+  run: GitHubBulkTransferRunRecord,
   input: GitHubBulkTransferExecuteInput,
 ): void {
   if (
@@ -1590,27 +1147,17 @@ function validateActor(actor: string): void {
 }
 
 function backupReady(proof: GitHubRepointBackupProof, now: Date): boolean {
-  const verifiedAt = Date.parse(proof.verifiedAt);
-  return proof.integrityCheck === 'ok'
-    && /^[a-f0-9]{64}$/.test(proof.sha256)
-    && proof.sizeBytes > 0
-    && Number.isFinite(verifiedAt)
-    && now.getTime() - verifiedAt <= 24 * 60 * 60_000
-    && now.getTime() >= verifiedAt;
+  return isBackupAttestationReady(proof, now);
 }
 
 function digest(value: unknown): string {
-  return createHash('sha256').update(canonical(value)).digest('hex');
-}
-
-function identityDigest(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
+  return canonicalDigest(value);
 }
 
 function successionProofMatches(
-  succession: typeof githubBulkTransferSuccessions.$inferSelect,
-  run: typeof githubBulkTransferRuns.$inferSelect,
-  item: typeof githubBulkTransferItems.$inferSelect,
+  succession: GitHubBulkTransferSuccessionRecord,
+  run: GitHubBulkTransferRunRecord,
+  item: GitHubBulkTransferItemRecord,
 ): boolean {
   const proof = succession.proof;
   return digest(proof) === succession.proofDigest
@@ -1626,17 +1173,6 @@ function successionProofMatches(
     && proof.targetRepositoryEntityId === succession.targetRepositoryEntityId
     && proof.targetNumber === succession.targetNumber
     && proof.beforeDigest === item.beforeDigest;
-}
-
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function nowIso(dependencies: GitHubBulkTransferDependencies): string {

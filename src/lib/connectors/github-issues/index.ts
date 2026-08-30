@@ -65,10 +65,10 @@ export type { GitHubClient } from './github-client';
 export type { GraphQLIssue, GitHubRestIssue, GitHubNotification, GitHubProjectV2, GitHubProjectV2Item } from './github-client';
 export type { GitHubProjectAssociation } from './projects-sync-service';
 export type { GitHubNotificationPollState } from './notifications-adapter';
+export { inspectGitHubRepointBackup } from './backup-verifier';
 export {
   executeGitHubRepositoryRepoint,
   getGitHubRepositoryRepointStatus,
-  inspectGitHubRepointBackup,
   preflightGitHubRepositoryRepoint,
   reconcileHistoricalGitHubIssueTransfer,
   rollbackGitHubRepositoryRepoint,
@@ -985,7 +985,7 @@ export class GitHubIssuesConnector implements IConnector {
     throw new GitHubWriteFenceError('authorized_route_mismatch');
   }
 
-  canTransferTask(sourceId: string, targetSourceListId: string): boolean {
+  canTransferTask(sourceId: string, targetSourceListId: string): Promise<boolean> {
     return canTransferGitHubIssueSafely(this.id, sourceId, targetSourceListId);
   }
 

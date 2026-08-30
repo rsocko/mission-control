@@ -1,8 +1,13 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities';
+import {
+  digestHistoricalProof,
+  historicalProofDigestMatches,
+} from '@/db/persistence/github-transfer-succession';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -30,6 +35,17 @@ afterAll(() => {
 });
 
 describe('historical GitHub task transfer reconciliation', () => {
+  it('uses a JSONB-stable digest while accepting legacy SQLite proof digests', () => {
+    const original = { requestedSourceId: 'a:1', successorSourceId: 'b:2' };
+    const reordered = { successorSourceId: 'b:2', requestedSourceId: 'a:1' };
+    const legacyDigest = createHash('sha256')
+      .update(JSON.stringify(original))
+      .digest('hex');
+
+    expect(digestHistoricalProof(reordered)).toBe(digestHistoricalProof(original));
+    expect(historicalProofDigestMatches(original, legacyDigest)).toBe(true);
+  });
+
   it('records the exact historical endpoint to observable successor proof', async () => {
     const connectorId = 'historical-transfer-exact';
     const pair = seedTransferPair(connectorId);

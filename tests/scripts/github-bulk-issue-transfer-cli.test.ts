@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   buildSuccessorAuthorization,
   buildTransferScope,
   parseReviewedAllowlist,
   parseGitHubBulkTransferCommand,
+  resolveBackupAttestation,
   requireExecutionConfirmation,
   required,
 } from '../../scripts/github-bulk-issue-transfer';
@@ -101,5 +105,38 @@ describe('GitHub bulk issue transfer CLI', () => {
       reason: undefined,
       idempotencyKey: undefined,
     })).toThrow('--successor-node-digest is required');
+  });
+
+  it('requires exactly one bounded backup evidence source', async () => {
+    await expect(resolveBackupAttestation(undefined, undefined))
+      .rejects.toThrow('exactly one');
+    await expect(resolveBackupAttestation('backup.db', 'attestation.json'))
+      .rejects.toThrow('exactly one');
+  });
+
+  it('loads only bounded external backup attestations', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mc-backup-attestation-'));
+    const attestationPath = join(directory, 'attestation.json');
+    const attestation = {
+      path: 'approved-backup://mission-control/2026-08-30',
+      sha256: 'b'.repeat(64),
+      sizeBytes: 4096,
+      modifiedAt: '2026-08-30T19:00:00.000Z',
+      integrityCheck: 'ok',
+      verifiedAt: '2026-08-30T19:05:00.000Z',
+      source: 'external-preverified',
+    };
+
+    try {
+      writeFileSync(attestationPath, JSON.stringify(attestation));
+      await expect(resolveBackupAttestation(undefined, attestationPath))
+        .resolves.toEqual(attestation);
+
+      writeFileSync(attestationPath, JSON.stringify({ ...attestation, credentials: 'secret' }));
+      await expect(resolveBackupAttestation(undefined, attestationPath))
+        .rejects.toThrow('unsupported fields');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });

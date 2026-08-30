@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALERT_PROJECTION_VERSION,
+  PROJECT_PROJECTION_VERSION,
   SEMANTIC_PROJECTION_VERSION,
+  SEMANTIC_EMBEDDING_FIELD_WEIGHTS,
+  TAG_PROJECTION_VERSION,
   TASK_PROJECTION_VERSION,
+  TRIAGE_ITEM_PROJECTION_VERSION,
   buildEmbeddingText,
   projectAlert,
+  projectProject,
   projectSource,
+  projectTag,
   projectTask,
+  projectTriageItem,
 } from '@/lib/semantic-index/projections';
 import {
   SEMANTIC_BODY_MAX_LENGTH,
@@ -20,7 +27,10 @@ import {
 } from '@/lib/semantic-index/projections/normalize';
 import type {
   SemanticAlertSource,
+  SemanticProjectSource,
+  SemanticTagSource,
   SemanticTaskSource,
+  SemanticTriageItemSource,
 } from '@/lib/semantic-index/source/contracts';
 import type { SemanticSensitivity } from '@/lib/semantic-index/contracts';
 
@@ -30,6 +40,7 @@ const options = { resolveSensitivity: standard };
 function makeTask(overrides: Partial<SemanticTaskSource> = {}): SemanticTaskSource {
   return {
     entityType: 'task',
+    semanticEligible: true,
     id: 'task-1',
     title: 'Ship the durable semantic index',
     description: 'Persist versioned documents and vectors.',
@@ -49,6 +60,7 @@ function makeTask(overrides: Partial<SemanticTaskSource> = {}): SemanticTaskSour
     updatedAt: '2026-08-20T00:00:00.000Z',
     completedAt: null,
     tags: ['Platform', 'search'],
+    projects: [],
     ...overrides,
   };
 }
@@ -56,6 +68,7 @@ function makeTask(overrides: Partial<SemanticTaskSource> = {}): SemanticTaskSour
 function makeAlert(overrides: Partial<SemanticAlertSource> = {}): SemanticAlertSource {
   return {
     entityType: 'alert',
+    semanticEligible: true,
     id: 'alert-1',
     title: 'Sync failed',
     body: 'The connector could not reach the upstream API.',
@@ -78,6 +91,74 @@ function makeAlert(overrides: Partial<SemanticAlertSource> = {}): SemanticAlertS
     dismissedAt: null,
     relatedTaskId: null,
     relatedProjectId: null,
+    ...overrides,
+  };
+}
+
+function makeProject(overrides: Partial<SemanticProjectSource> = {}): SemanticProjectSource {
+  return {
+    entityType: 'project',
+    semanticEligible: true,
+    id: 'project-1',
+    name: 'Semantic platform',
+    description: 'Ship cross-entity retrieval.',
+    status: 'active',
+    statusOverride: null,
+    hidden: false,
+    category: 'engineering',
+    targetDate: '2026-10-01T00:00:00.000Z',
+    startedAt: null,
+    completedAt: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-20T00:00:00.000Z',
+    tags: ['Search', 'Platform'],
+    representativeTasks: ['Build adapters', 'Test parity'],
+    representativeTaskConnectorTypes: ['github-issues', 'local'],
+    taskCount: 2,
+    latestTaskUpdatedAt: '2026-08-22T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeTag(overrides: Partial<SemanticTagSource> = {}): SemanticTagSource {
+  return {
+    entityType: 'tag',
+    semanticEligible: true,
+    id: 'tag-1',
+    name: 'Semantic Search',
+    slug: 'semantic-search',
+    type: 'hub',
+    source: null,
+    confirmed: true,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    unifiedInto: null,
+    usageCount: 2,
+    representativeTasks: ['Build adapters', 'Test parity'],
+    representativeTaskConnectorTypes: ['github-issues', 'local'],
+    latestTaskUpdatedAt: '2026-08-22T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function makeTriageItem(
+  overrides: Partial<SemanticTriageItemSource> = {},
+): SemanticTriageItemSource {
+  return {
+    entityType: 'triage-item',
+    semanticEligible: true,
+    id: 'triage-1',
+    sourcePlatform: 'github',
+    title: 'Vector database research',
+    description: 'Compare bounded local indexes.',
+    contentType: 'repo',
+    capturedAt: '2026-08-01T00:00:00.000Z',
+    ingestedAt: '2026-08-20T00:00:00.000Z',
+    status: 'pending',
+    snoozedUntil: null,
+    aiSummary: 'Candidate libraries for semantic retrieval.',
+    aiCategories: ['software-development'],
+    aiRelevanceScore: 85,
+    aiUrgency: 'evergreen',
     ...overrides,
   };
 }
@@ -124,7 +205,80 @@ describe('semantic projection normalization', () => {
 describe('projection versions', () => {
   it('keeps the index-wide version at or above every per-kind version', () => {
     expect(SEMANTIC_PROJECTION_VERSION).toBeGreaterThanOrEqual(TASK_PROJECTION_VERSION);
+    expect(SEMANTIC_PROJECTION_VERSION).toBeGreaterThanOrEqual(PROJECT_PROJECTION_VERSION);
+    expect(SEMANTIC_PROJECTION_VERSION).toBeGreaterThanOrEqual(TAG_PROJECTION_VERSION);
+    expect(SEMANTIC_PROJECTION_VERSION).toBeGreaterThanOrEqual(TRIAGE_ITEM_PROJECTION_VERSION);
     expect(SEMANTIC_PROJECTION_VERSION).toBeGreaterThanOrEqual(ALERT_PROJECTION_VERSION);
+  });
+
+  describe('project, tag, and triage projections', () => {
+    it('projects bounded representative project context and authoritative navigation', () => {
+      const document = projectProject(makeProject(), options);
+      expect(document).toMatchObject({
+        entityType: 'project',
+        title: 'Semantic platform',
+        sourceUpdatedAt: '2026-08-20T00:00:00.000Z',
+        metadata: {
+          status: 'active',
+          category: 'engineering',
+          taskCount: 2,
+          navigationTarget: '/projects/project-1',
+        },
+      });
+      expect(document.body).toContain('Representative tasks: Build adapters; Test parity');
+      expect(document.keywords).toEqual(['active', 'engineering', 'platform', 'search']);
+    });
+
+    it('projects canonical tags with bounded usage examples', () => {
+      const document = projectTag(makeTag(), options);
+      expect(document).toMatchObject({
+        entityType: 'tag',
+        body: 'Used by: Build adapters; Test parity',
+        metadata: {
+          slug: 'semantic-search',
+          confirmed: true,
+          usageCount: 2,
+          navigationTarget: '/tags?tag=tag-1',
+        },
+      });
+    });
+
+    it('prefers the minimized triage summary and excludes URLs and raw metadata', () => {
+      const document = projectTriageItem(makeTriageItem(), options);
+      expect(document).toMatchObject({
+        entityType: 'triage-item',
+        metadata: {
+          sourcePlatform: 'github',
+          status: 'pending',
+          navigationTarget: '/triage?id=triage-1',
+        },
+      });
+      expect(document.body).toBe(
+        'Candidate libraries for semantic retrieval.\nCompare bounded local indexes.',
+      );
+      expect(JSON.stringify(document)).not.toContain('sourceUrl');
+    });
+
+    it('uses the most restrictive sensitivity across contributing task connectors', () => {
+      const document = projectProject(makeProject({
+        representativeTaskConnectorTypes: ['github-issues', 'monarch-money'],
+      }), {
+        resolveSensitivity: ({ connectorType }) =>
+          connectorType === 'monarch-money' ? 'restricted' : 'standard',
+      });
+
+      expect(document.sensitivity).toBe('restricted');
+    });
+
+    it('keeps fingerprints deterministic when category order changes', () => {
+      const first = projectTriageItem(makeTriageItem({
+        aiCategories: ['software-development', 'research'],
+      }), options);
+      const second = projectTriageItem(makeTriageItem({
+        aiCategories: ['research', 'software-development'],
+      }), options);
+      expect(second.contentFingerprint).toBe(first.contentFingerprint);
+    });
   });
 
   it('stamps documents with the requested projection version', () => {
@@ -208,15 +362,17 @@ describe('task projection', () => {
     expect(document.title.endsWith('…')).toBe(true);
   });
 
-  it('resolves sensitivity from the connector kind', () => {
+  it('resolves sensitivity from Mission Control and the connector kind', () => {
     const seen: string[] = [];
-    projectTask(makeTask({ connectorType: 'monarch-money' }), {
+    const document = projectTask(makeTask({ connectorType: 'monarch-money' }), {
       resolveSensitivity: ({ connectorType, entityType }) => {
         seen.push(`${entityType}:${connectorType}`);
-        return 'restricted';
+        return connectorType === 'mission-control' ? 'local-only' : 'restricted';
       },
     });
-    expect(seen).toEqual(['task:monarch-money']);
+    expect(seen).toEqual(['task:mission-control', 'task:monarch-money']);
+    expect(document.sensitivity).toBe('local-only');
+    expect(document.metadata.connectorTypes).toBe('mission-control,monarch-money');
   });
 });
 
@@ -227,6 +383,12 @@ describe('alert projection', () => {
     }), options);
     expect(document.retainUntil).toBe('2026-09-30T00:00:00.000Z');
     expect(document.entityType).toBe('alert');
+  });
+
+  it('minimizes alert bodies before provider egress', () => {
+    const document = projectAlert(makeAlert({ body: 's'.repeat(2_000) }), options);
+    expect(document.body.length).toBe(600);
+    expect(document.metadata.navigationTarget).toBe('/notifications?id=alert-1');
   });
 
   it('derives a monotonic stamp from the newest activity timestamp', () => {
@@ -255,13 +417,17 @@ describe('alert projection', () => {
 describe('projectSource dispatch and embedding text', () => {
   it('dispatches on the source discriminant', () => {
     expect(projectSource(makeTask(), options).entityType).toBe('task');
+    expect(projectSource(makeProject(), options).entityType).toBe('project');
+    expect(projectSource(makeTag(), options).entityType).toBe('tag');
+    expect(projectSource(makeTriageItem(), options).entityType).toBe('triage-item');
     expect(projectSource(makeAlert(), options).entityType).toBe('alert');
   });
 
   it('builds embedding text from title, keywords and body only', () => {
     const document = projectTask(makeTask(), options);
     const text = buildEmbeddingText(document);
-    expect(text.split('\n')[0]).toBe(document.title);
+    expect(text.split('\n').filter((line) => line === document.title))
+      .toHaveLength(SEMANTIC_EMBEDDING_FIELD_WEIGHTS.title);
     expect(text).toContain(document.keywords.join(', '));
     expect(text).toContain(document.body);
     expect(text).not.toContain(document.sourceRevision);

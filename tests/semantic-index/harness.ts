@@ -14,12 +14,15 @@ import type {
 } from '@/lib/semantic-index/embedding-provider';
 import type {
   SemanticAlertSource,
+  SemanticProjectSource,
   SemanticSourceEntityType,
   SemanticSourceIdPage,
   SemanticSourcePort,
   SemanticSourceRecord,
   SemanticSourceRecordPage,
   SemanticTaskSource,
+  SemanticTagSource,
+  SemanticTriageItemSource,
 } from '@/lib/semantic-index/source/contracts';
 import { SemanticIndexService } from '@/lib/semantic-index/service';
 import { getSemanticWorkerConfig, type SemanticWorkerConfig } from '@/lib/semantic-index/config';
@@ -47,6 +50,9 @@ export function createSemanticTestDatabase(): Database.Database {
  */
 export class FakeSemanticSourcePort implements SemanticSourcePort {
   readonly tasks = new Map<string, SemanticTaskSource>();
+  readonly projects = new Map<string, SemanticProjectSource>();
+  readonly tags = new Map<string, SemanticTagSource>();
+  readonly triageItems = new Map<string, SemanticTriageItemSource>();
   readonly alerts = new Map<string, SemanticAlertSource>();
   listIdsCalls = 0;
   /** Simulated per-page latency, used to make slice deadlines deterministic. */
@@ -60,8 +66,26 @@ export class FakeSemanticSourcePort implements SemanticSourcePort {
     this.alerts.set(alert.id, alert);
   }
 
+  putProject(project: SemanticProjectSource): void {
+    this.projects.set(project.id, project);
+  }
+
+  putTag(tag: SemanticTagSource): void {
+    this.tags.set(tag.id, tag);
+  }
+
+  putTriageItem(item: SemanticTriageItemSource): void {
+    this.triageItems.set(item.id, item);
+  }
+
   private bucket(entityType: SemanticSourceEntityType): Map<string, SemanticSourceRecord> {
-    return (entityType === 'task' ? this.tasks : this.alerts) as Map<string, SemanticSourceRecord>;
+    switch (entityType) {
+      case 'task': return this.tasks as Map<string, SemanticSourceRecord>;
+      case 'project': return this.projects as Map<string, SemanticSourceRecord>;
+      case 'tag': return this.tags as Map<string, SemanticSourceRecord>;
+      case 'triage-item': return this.triageItems as Map<string, SemanticSourceRecord>;
+      case 'alert': return this.alerts as Map<string, SemanticSourceRecord>;
+    }
   }
 
   async get(
@@ -233,6 +257,7 @@ export function createSemanticHarness(options: SemanticHarnessOptions = {}): Sem
 export function taskFixture(overrides: Partial<SemanticTaskSource> = {}): SemanticTaskSource {
   return {
     entityType: 'task',
+    semanticEligible: true,
     id: 'task-1',
     title: 'Ship the semantic index',
     description: 'Persist versioned documents and vectors.',
@@ -252,6 +277,7 @@ export function taskFixture(overrides: Partial<SemanticTaskSource> = {}): Semant
     updatedAt: '2026-08-20T00:00:00.000Z',
     completedAt: null,
     tags: [],
+    projects: [],
     ...overrides,
   };
 }
@@ -259,6 +285,7 @@ export function taskFixture(overrides: Partial<SemanticTaskSource> = {}): Semant
 export function alertFixture(overrides: Partial<SemanticAlertSource> = {}): SemanticAlertSource {
   return {
     entityType: 'alert',
+    semanticEligible: true,
     id: 'alert-1',
     title: 'Sync failed',
     body: 'Upstream API unreachable.',
@@ -281,6 +308,76 @@ export function alertFixture(overrides: Partial<SemanticAlertSource> = {}): Sema
     dismissedAt: null,
     relatedTaskId: null,
     relatedProjectId: null,
+    ...overrides,
+  };
+}
+
+export function projectFixture(
+  overrides: Partial<SemanticProjectSource> = {},
+): SemanticProjectSource {
+  return {
+    entityType: 'project',
+    semanticEligible: true,
+    id: 'project-1',
+    name: 'Semantic platform',
+    description: 'Deliver durable semantic retrieval.',
+    status: 'active',
+    statusOverride: null,
+    hidden: false,
+    category: 'engineering',
+    targetDate: null,
+    startedAt: null,
+    completedAt: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-20T00:00:00.000Z',
+    tags: ['platform'],
+    representativeTasks: ['Build projections'],
+    representativeTaskConnectorTypes: ['github-issues'],
+    taskCount: 1,
+    latestTaskUpdatedAt: '2026-08-21T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function tagFixture(overrides: Partial<SemanticTagSource> = {}): SemanticTagSource {
+  return {
+    entityType: 'tag',
+    semanticEligible: true,
+    id: 'tag-1',
+    name: 'Semantic search',
+    slug: 'semantic-search',
+    type: 'hub',
+    source: null,
+    confirmed: true,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    unifiedInto: null,
+    usageCount: 2,
+    representativeTasks: ['Build projections', 'Test retrieval'],
+    representativeTaskConnectorTypes: ['github-issues', 'local'],
+    latestTaskUpdatedAt: '2026-08-21T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+export function triageItemFixture(
+  overrides: Partial<SemanticTriageItemSource> = {},
+): SemanticTriageItemSource {
+  return {
+    entityType: 'triage-item',
+    semanticEligible: true,
+    id: 'triage-1',
+    sourcePlatform: 'github',
+    title: 'Vector database research',
+    description: 'Compare bounded local vector indexes.',
+    contentType: 'repo',
+    capturedAt: '2026-08-01T00:00:00.000Z',
+    ingestedAt: '2026-08-20T00:00:00.000Z',
+    status: 'pending',
+    snoozedUntil: null,
+    aiSummary: 'Candidate libraries for local semantic search.',
+    aiCategories: ['software-development'],
+    aiRelevanceScore: 87,
+    aiUrgency: 'evergreen',
     ...overrides,
   };
 }

@@ -23,6 +23,7 @@ import type { CreateTodoTaskOptions } from './actions/ms-todo';
 import { saveToModelCatalog } from './actions/model-catalog';
 import type { ModelCatalogOptions } from './actions/model-catalog';
 import { saveToKnowledgeBase, buildKnowledgeBaseActionRecord } from './actions/knowledge-base';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
 import type { KnowledgeBaseOptions } from './actions/knowledge-base';
 import {
   completeDocumentAction,
@@ -141,6 +142,7 @@ export async function completeTriageTaskCreation(
 
   const updated = await getTriageItemById(id);
   if (!updated) throw new Error('Triage item disappeared while completing task creation');
+  await publishSemanticEntityUpsert('triage-item', id);
   return updated;
 }
 
@@ -399,6 +401,7 @@ export async function applyTriageAction(
         logger.warn({ triageItemId: id, err: result.error }, 'DI complete_action write-back failed (action recorded locally)');
       }
     }
+    await publishSemanticEntityUpsert('triage-item', id);
     return mapRow(updated);
   }
 }
@@ -494,7 +497,9 @@ export async function undoTriageAction(
     .returning()
     .get();
 
-  return updated ? mapRow(updated) : null;
+  if (!updated) return null;
+  await publishSemanticEntityUpsert('triage-item', id);
+  return mapRow(updated);
 }
 
 export function isUndoableTriageAction(actionType: string): actionType is TriageActionType {

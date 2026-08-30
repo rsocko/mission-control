@@ -1,5 +1,5 @@
 /**
- * Versioned projection adapters for the two entity kinds this phase indexes.
+ * Versioned projection adapters for every enabled Mission Control entity kind.
  *
  * A projection adapter is a **pure function** from an authoritative source
  * snapshot to a `SemanticIndexDocument`. It performs no I/O, resolves no
@@ -23,17 +23,22 @@ import type {
   SemanticIndexDocument,
   SemanticSensitivity,
 } from '../contracts';
+import { semanticSensitivityRank } from '../contracts';
 import type {
   SemanticAlertSource,
+  SemanticProjectSource,
   SemanticSourceEntityType,
   SemanticSourceRecord,
+  SemanticTagSource,
   SemanticTaskSource,
+  SemanticTriageItemSource,
 } from '../source/contracts';
 import {
   computeContentFingerprint,
   computeSourceRevision,
   latestTimestamp,
   normalizeBodyField,
+  normalizeBoundedBodyField,
   normalizeKeywords,
   normalizeMetadata,
   normalizeTitleField,
@@ -41,19 +46,25 @@ import {
 } from './normalize';
 
 /** Bump when the task projection's shape or normalization changes. */
-export const TASK_PROJECTION_VERSION = 1;
+export const TASK_PROJECTION_VERSION = 2;
+export const PROJECT_PROJECTION_VERSION = 1;
+export const TAG_PROJECTION_VERSION = 1;
+export const TRIAGE_ITEM_PROJECTION_VERSION = 1;
 
 /** Bump when the alert projection's shape or normalization changes. */
-export const ALERT_PROJECTION_VERSION = 1;
+export const ALERT_PROJECTION_VERSION = 2;
 
 /**
  * The index-wide projection version. Must be >= every per-kind constant; the
  * assertion below fails the build the moment a kind is bumped in isolation.
  */
-export const SEMANTIC_PROJECTION_VERSION = 1;
+export const SEMANTIC_PROJECTION_VERSION = 2;
 
 const PER_KIND_PROJECTION_VERSIONS: Readonly<Record<SemanticSourceEntityType, number>> = {
   task: TASK_PROJECTION_VERSION,
+  project: PROJECT_PROJECTION_VERSION,
+  tag: TAG_PROJECTION_VERSION,
+  'triage-item': TRIAGE_ITEM_PROJECTION_VERSION,
   alert: ALERT_PROJECTION_VERSION,
 };
 
@@ -99,16 +110,18 @@ export function projectTask(
   source: SemanticTaskSource,
   options: SemanticProjectionOptions,
 ): SemanticIndexDocument {
-  const projectionVersion = options.projectionVersion ?? SEMANTIC_PROJECTION_VERSION;
-  const sensitivity = options.resolveSensitivity({
-    entityType: 'task',
-    connectorType: source.connectorType,
-  });
+  const connectorTypes = ['mission-control', source.connectorType];
+  const { projectionVersion, sensitivity } = sourceIdentity(
+    'task',
+    connectorTypes,
+    options,
+  );
 
   const title = normalizeTitleField(source.title);
   const body = normalizeBodyField(source.description);
   const keywords = normalizeKeywords([
     ...source.tags,
+    ...source.projects,
     source.status,
     source.microStatus,
     source.planningHorizon,
@@ -117,6 +130,7 @@ export function projectTask(
   ]);
   const metadata = normalizeMetadata({
     connectorType: source.connectorType,
+    connectorTypes: normalizeKeywords(connectorTypes).join(','),
     status: source.status,
     statusReason: source.statusReason,
     microStatus: source.microStatus,
@@ -128,6 +142,7 @@ export function projectTask(
     sourceListName: source.sourceListName,
     parentId: source.parentId,
     isChecklistItem: source.isChecklistItem,
+    projectIdsResolvedFromAuthority: true,
     createdAt: toIsoTimestamp(source.createdAt),
     completedAt: toIsoTimestamp(source.completedAt),
   } satisfies Record<string, SemanticDocumentMetadataValue | undefined>);
@@ -171,6 +186,7 @@ export function projectTask(
       updatedAt: source.updatedAt,
       completedAt: source.completedAt,
       tags: [...source.tags].sort(),
+      projects: [...source.projects].sort(),
     }),
     contentFingerprint: computeContentFingerprint({
       entityType: 'task',
@@ -184,6 +200,194 @@ export function projectTask(
       retainUntil: null,
     }),
   };
+}
+
+function sourceIdentity(
+  entityType: SemanticSourceEntityType,
+  connectorTypes: string[],
+  options: SemanticProjectionOptions,
+): { projectionVersion: number; sensitivity: SemanticSensitivity } {
+  const normalizedConnectorTypes = normalizeKeywords(connectorTypes);
+  const sensitivities = (normalizedConnectorTypes.length > 0
+    ? normalizedConnectorTypes
+    : ['mission-control'])
+    .map((connectorType) => options.resolveSensitivity({ entityType, connectorType }));
+  return {
+    projectionVersion: options.projectionVersion ?? SEMANTIC_PROJECTION_VERSION,
+    sensitivity: sensitivities.reduce((mostRestrictive, candidate) =>
+      semanticSensitivityRank(candidate) < semanticSensitivityRank(mostRestrictive)
+        ? candidate
+        : mostRestrictive
+    ),
+  };
+}
+
+function finalizeProjection(input: {
+  entityType: SemanticSourceEntityType;
+  entityId: string;
+  title: string;
+  body: string;
+  keywords: string[];
+  metadata: Record<string, SemanticDocumentMetadataValue>;
+  sourceSnapshot: Record<string, unknown>;
+  sourceUpdatedAt: string;
+  projectionVersion: number;
+  sensitivity: SemanticSensitivity;
+  retainUntil?: string | null;
+}): SemanticIndexDocument {
+  const retainUntil = input.retainUntil ?? null;
+  return {
+    entityType: input.entityType,
+    entityId: input.entityId,
+    title: input.title,
+    body: input.body,
+    keywords: input.keywords,
+    metadata: input.metadata,
+    sourceRevision: computeSourceRevision(input.sourceSnapshot),
+    contentFingerprint: computeContentFingerprint({
+      entityType: input.entityType,
+      entityId: input.entityId,
+      projectionVersion: input.projectionVersion,
+      title: input.title,
+      body: input.body,
+      keywords: input.keywords,
+      metadata: input.metadata,
+      sensitivity: input.sensitivity,
+      retainUntil,
+    }),
+    projectionVersion: input.projectionVersion,
+    sensitivity: input.sensitivity,
+    retainUntil,
+    sourceUpdatedAt: input.sourceUpdatedAt,
+  };
+}
+
+export function projectProject(
+  source: SemanticProjectSource,
+  options: SemanticProjectionOptions,
+): SemanticIndexDocument {
+  const connectorTypes = ['mission-control', ...source.representativeTaskConnectorTypes];
+  const identity = sourceIdentity('project', connectorTypes, options);
+  const title = normalizeTitleField(source.name);
+  const body = normalizeBodyField([
+    source.description,
+    source.representativeTasks.length
+      ? `Representative tasks: ${source.representativeTasks.join('; ')}`
+      : null,
+  ].filter(Boolean).join('\n'));
+  const keywords = normalizeKeywords([
+    ...source.tags, source.status, source.statusOverride, source.category,
+  ]);
+  const metadata = normalizeMetadata({
+    connectorType: 'mission-control',
+    connectorTypes: normalizeKeywords(connectorTypes).join(','),
+    status: source.status,
+    statusOverride: source.statusOverride,
+    category: source.category,
+    hidden: source.hidden,
+    taskCount: source.taskCount,
+    targetDate: toIsoTimestamp(source.targetDate) ?? source.targetDate ?? null,
+    navigationTarget: `/projects/${encodeURIComponent(source.id)}`,
+  });
+  return finalizeProjection({
+    entityType: 'project',
+    entityId: source.id,
+    title,
+    body,
+    keywords,
+    metadata,
+    sourceSnapshot: {
+      ...source,
+      tags: [...source.tags].sort(),
+      representativeTasks: [...source.representativeTasks],
+      representativeTaskConnectorTypes: [...source.representativeTaskConnectorTypes].sort(),
+    },
+    sourceUpdatedAt: latestTimestamp([source.updatedAt, source.completedAt], source.createdAt),
+    ...identity,
+  });
+}
+
+export function projectTag(
+  source: SemanticTagSource,
+  options: SemanticProjectionOptions,
+): SemanticIndexDocument {
+  const connectorType = source.source || 'mission-control';
+  const connectorTypes = [connectorType, ...source.representativeTaskConnectorTypes];
+  const identity = sourceIdentity('tag', connectorTypes, options);
+  const title = normalizeTitleField(source.name);
+  const body = normalizeBoundedBodyField(
+    source.representativeTasks.length
+      ? `Used by: ${source.representativeTasks.join('; ')}`
+      : null,
+    600,
+  );
+  const keywords = normalizeKeywords([source.slug, source.type, source.source]);
+  const metadata = normalizeMetadata({
+    connectorType,
+    connectorTypes: normalizeKeywords(connectorTypes).join(','),
+    slug: source.slug,
+    type: source.type,
+    source: source.source,
+    confirmed: source.confirmed,
+    unifiedInto: source.unifiedInto,
+    usageCount: source.usageCount,
+    navigationTarget: `/tags?tag=${encodeURIComponent(source.id)}`,
+  });
+  return finalizeProjection({
+    entityType: 'tag',
+    entityId: source.id,
+    title,
+    body,
+    keywords,
+    metadata,
+    sourceSnapshot: {
+      ...source,
+      representativeTasks: [...source.representativeTasks],
+      representativeTaskConnectorTypes: [...source.representativeTaskConnectorTypes].sort(),
+    },
+    sourceUpdatedAt: source.createdAt,
+    ...identity,
+  });
+}
+
+export function projectTriageItem(
+  source: SemanticTriageItemSource,
+  options: SemanticProjectionOptions,
+): SemanticIndexDocument {
+  const identity = sourceIdentity('triage-item', [source.sourcePlatform], options);
+  const title = normalizeTitleField(source.title);
+  const body = normalizeBoundedBodyField(
+    [source.aiSummary, source.description].filter(Boolean).join('\n'),
+    1_200,
+  );
+  const keywords = normalizeKeywords([
+    ...source.aiCategories,
+    source.sourcePlatform,
+    source.contentType,
+    source.status,
+    source.aiUrgency,
+  ]);
+  const metadata = normalizeMetadata({
+    connectorType: source.sourcePlatform,
+    sourcePlatform: source.sourcePlatform,
+    contentType: source.contentType,
+    status: source.status,
+    urgency: source.aiUrgency,
+    relevanceScore: source.aiRelevanceScore,
+    snoozedUntil: toIsoTimestamp(source.snoozedUntil),
+    navigationTarget: `/triage?id=${encodeURIComponent(source.id)}`,
+  });
+  return finalizeProjection({
+    entityType: 'triage-item',
+    entityId: source.id,
+    title,
+    body,
+    keywords,
+    metadata,
+    sourceSnapshot: { ...source, aiCategories: [...source.aiCategories].sort() },
+    sourceUpdatedAt: latestTimestamp([source.ingestedAt], source.capturedAt),
+    ...identity,
+  });
 }
 
 // ─── Alert ──────────────────────────────────────────────────────────────────
@@ -206,7 +410,9 @@ export function projectAlert(
   });
 
   const title = normalizeTitleField(source.title);
-  const body = normalizeBodyField(source.body);
+  // Alerts may contain connector payload details. Keep only the short summary
+  // needed for retrieval; the authoritative notification remains the detail view.
+  const body = normalizeBoundedBodyField(source.body, 600);
   const keywords = normalizeKeywords([
     source.level,
     source.category,
@@ -226,6 +432,7 @@ export function projectAlert(
     receivedAt: toIsoTimestamp(source.receivedAt),
     relatedTaskId: source.relatedTaskId,
     relatedProjectId: source.relatedProjectId,
+    navigationTarget: `/notifications?id=${encodeURIComponent(source.id)}`,
   } satisfies Record<string, SemanticDocumentMetadataValue | undefined>);
 
   const retainUntil = toIsoTimestamp(source.expiresAt);
@@ -307,6 +514,12 @@ export function projectSource(
   switch (source.entityType) {
     case 'task':
       return projectTask(source, options);
+    case 'project':
+      return projectProject(source, options);
+    case 'tag':
+      return projectTag(source, options);
+    case 'triage-item':
+      return projectTriageItem(source, options);
     case 'alert':
       return projectAlert(source, options);
   }
@@ -316,15 +529,27 @@ export function projectSource(
  * The text handed to the embedding provider. Kept separate from the document so
  * a change to embedding input alone is an explicit, reviewable decision.
  */
+export const SEMANTIC_EMBEDDING_FIELD_WEIGHTS = {
+  title: 3,
+  keywords: 2,
+  body: 1,
+} as const;
+
 export function buildEmbeddingText(document: SemanticIndexDocument): string {
-  return [document.title, document.keywords.join(', '), document.body]
+  const weighted = [
+    ...Array.from({ length: SEMANTIC_EMBEDDING_FIELD_WEIGHTS.title }, () => document.title),
+    ...Array.from(
+      { length: SEMANTIC_EMBEDDING_FIELD_WEIGHTS.keywords },
+      () => document.keywords.join(', '),
+    ),
+    document.body,
+  ];
+  return weighted
     .map((part) => part.trim())
     .filter(Boolean)
     .join('\n');
 }
 
 export function projectionVersionFor(entityType: SemanticEntityType): number | null {
-  return entityType === 'task' || entityType === 'alert'
-    ? PER_KIND_PROJECTION_VERSIONS[entityType]
-    : null;
+  return entityType === 'houston-summary' ? null : PER_KIND_PROJECTION_VERSIONS[entityType];
 }

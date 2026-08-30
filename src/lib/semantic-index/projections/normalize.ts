@@ -68,6 +68,13 @@ export function normalizeBodyField(value: string | null | undefined): string {
   return truncateStable(normalizeBlock(value), SEMANTIC_BODY_MAX_LENGTH);
 }
 
+export function normalizeBoundedBodyField(
+  value: string | null | undefined,
+  maxLength: number,
+): string {
+  return truncateStable(normalizeBlock(value), Math.min(maxLength, SEMANTIC_BODY_MAX_LENGTH));
+}
+
 /**
  * Lower-cases, de-duplicates, and sorts keywords so ordering differences in the
  * source (tag join order, for instance) never change the fingerprint.

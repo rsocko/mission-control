@@ -388,13 +388,29 @@ export class SemanticIndexService {
       resolveSensitivity: this.resolveSensitivity,
       projectionVersion: identity.projectionVersion,
     });
+    const requestedSourceUpdatedAt = document.sourceUpdatedAt > intent.requestedAt
+      ? document.sourceUpdatedAt
+      : intent.requestedAt;
+    if (!source.semanticEligible) {
+      return this.applyDelete(intent, intent.entityType, requestedSourceUpdatedAt);
+    }
     const now = this.now();
 
     const existing = await this.repository.getDocument(
       identity.id, document.entityType, document.entityId,
     );
+    const contentUnchanged = existing !== null
+      && existing.deletedAt === null
+      && existing.contentFingerprint === document.contentFingerprint
+      && existing.sourceRevision === document.sourceRevision
+      && existing.projectionVersion === document.projectionVersion
+      && existing.sensitivity === document.sensitivity
+      && existing.retainUntil === document.retainUntil;
     const write = await this.repository.upsertDocument({
       ...document,
+      sourceUpdatedAt: contentUnchanged
+        ? existing.sourceUpdatedAt
+        : requestedSourceUpdatedAt,
       id: existing?.id ?? this.newId(),
       indexId: identity.id,
       now,
@@ -443,10 +459,15 @@ export class SemanticIndexService {
         return { status: 'aborted', outcome: 'aborted' };
       }
       const connectorType = document.metadata.connectorType;
+      const connectorTypes = document.metadata.connectorTypes;
       const result = await this.embeddings.embed({
         text: buildEmbeddingText(document),
         sensitivity: document.sensitivity,
-        sources: typeof connectorType === 'string' && connectorType ? [connectorType] : [],
+        sources: typeof connectorTypes === 'string' && connectorTypes
+          ? connectorTypes.split(',').filter(Boolean)
+          : typeof connectorType === 'string' && connectorType
+            ? [connectorType]
+            : [],
         expect: {
           provider: identity.provider,
           model: identity.model,
@@ -514,12 +535,14 @@ export class SemanticIndexService {
   private async applyDelete(
     intent: SemanticIntent,
     entityType: SemanticSourceEntityType,
+    sourceUpdatedAt?: string,
   ): Promise<SemanticIntentOutcome> {
     const result = await this.repository.deleteDocument({
       indexId: intent.indexId,
       entityType,
       entityId: intent.entityId,
       now: this.now(),
+      sourceUpdatedAt,
     });
     return { status: 'succeeded', outcome: result.status };
   }

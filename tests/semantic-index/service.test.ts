@@ -5,7 +5,10 @@ import {
   FakeEmbeddingProvider,
   alertFixture,
   createSemanticHarness,
+  projectFixture,
+  tagFixture,
   taskFixture,
+  triageItemFixture,
   type SemanticHarness,
 } from './harness';
 
@@ -463,15 +466,15 @@ describe('SemanticIndexService', () => {
       expect(stored).toMatchObject({ status: 'running', leaseOwner: OWNER });
     });
 
-    it('rejects an entity kind that has no projection adapter', async () => {
+    it('rejects Houston summaries while retention and authorization remain gated', async () => {
       const identity = await bootstrap();
       await harness.repository.enqueueIntent({
-        id: 'intent-project',
+        id: 'intent-houston',
         idempotencyKey: 'k1',
         indexId: identity.id,
         kind: 'upsert',
-        entityType: 'project',
-        entityId: 'p-1',
+        entityType: 'houston-summary',
+        entityId: 'conversation-1',
         requestedAt: new Date().toISOString(),
         now: new Date().toISOString(),
       });
@@ -479,6 +482,69 @@ describe('SemanticIndexService', () => {
       const outcome = await harness.service.processIntent(intent, { owner: OWNER });
       expect(outcome).toMatchObject({ status: 'failed' });
       expect(outcome.outcome).toContain('unsupported-entity-type');
+    });
+
+    it('uses the same idempotent lifecycle for every enabled entity kind', async () => {
+      harness.source.putProject(projectFixture());
+      harness.source.putTag(tagFixture());
+      harness.source.putTriageItem(triageItemFixture());
+      const identity = await bootstrap();
+
+      for (const [entityType, entityId] of [
+        ['project', 'project-1'],
+        ['tag', 'tag-1'],
+        ['triage-item', 'triage-1'],
+      ] as const) {
+        await harness.service.publish({ kind: 'upsert', entityType, entityId, indexId: identity.id });
+        const created = await harness.service.processIntent(
+          await claimOne(identity.id), { owner: OWNER },
+        );
+        expect(created).toMatchObject({ status: 'succeeded', outcome: 'embedded' });
+        expect(await harness.repository.getVector(identity.id, entityType, entityId)).not.toBeNull();
+
+        await harness.service.publish({ kind: 'delete', entityType, entityId, indexId: identity.id });
+        const staleDelete = await harness.service.processIntent(
+          await claimOne(identity.id), { owner: OWNER },
+        );
+        expect(staleDelete).toMatchObject({ status: 'succeeded', outcome: 'unchanged' });
+      }
+    });
+
+    it('tombstones and resurrects sources when eligibility changes without a newer timestamp', async () => {
+      harness.source.putProject(projectFixture());
+      const identity = await bootstrap();
+      const processProject = async () => {
+        await harness.service.publish({
+          kind: 'upsert',
+          entityType: 'project',
+          entityId: 'project-1',
+          indexId: identity.id,
+        });
+        return harness.service.processIntent(
+          await claimOne(identity.id),
+          { owner: OWNER },
+        );
+      };
+
+      await expect(processProject()).resolves.toMatchObject({ outcome: 'embedded' });
+      const initiallyStored = await harness.repository.getDocument(
+        identity.id,
+        'project',
+        'project-1',
+      );
+      expect(initiallyStored).not.toBeNull();
+      expect(initiallyStored!.sourceUpdatedAt > '2026-08-20T00:00:00.000Z').toBe(true);
+      harness.source.putProject(projectFixture({ semanticEligible: false, hidden: true }));
+      await expect(processProject()).resolves.toMatchObject({ outcome: 'deleted' });
+      expect(await harness.repository.getDocument(identity.id, 'project', 'project-1'))
+        .toMatchObject({ entityId: 'project-1' });
+      expect((await harness.repository.getDocument(identity.id, 'project', 'project-1'))?.deletedAt)
+        .not.toBeNull();
+
+      harness.source.putProject(projectFixture());
+      await expect(processProject()).resolves.toMatchObject({ outcome: 'embedded' });
+      expect(await harness.repository.getDocument(identity.id, 'project', 'project-1'))
+        .toMatchObject({ entityId: 'project-1', deletedAt: null });
     });
 
     it('carries alert retention onto the document and its vector', async () => {
@@ -516,12 +582,46 @@ describe('SemanticIndexService', () => {
 
         const call = restricted.embeddings.calls.at(-1)!;
         expect(call.sensitivity).toBe('restricted');
-        expect(call.sources).toEqual(['monarch-money']);
+        expect(call.sources).toEqual(['mission-control', 'monarch-money']);
         expect(call.expect).toMatchObject({
           provider: 'openai', model: 'text-embedding-3-small', dimensions: 3,
         });
       } finally {
         restricted.close();
+      }
+    });
+
+    it('passes every contributing connector source for aggregate projections', async () => {
+      const aggregate = createSemanticHarness({
+        sensitivity: (connectorType) =>
+          connectorType === 'monarch-money' ? 'restricted' : 'standard',
+      });
+      try {
+        const identity = await aggregate.service.ensureIdentity({ create: true });
+        if (identity.status !== 'ready') throw new Error('identity unavailable');
+        aggregate.source.putProject(projectFixture({
+          representativeTaskConnectorTypes: ['github-issues', 'monarch-money'],
+        }));
+        await aggregate.service.publish({
+          kind: 'upsert',
+          entityType: 'project',
+          entityId: 'project-1',
+          indexId: identity.identity.id,
+        });
+        const [intent] = await aggregate.repository.claimIntents({
+          indexId: identity.identity.id,
+          owner: OWNER,
+          limit: 1,
+          leaseMs: 60_000,
+          now: new Date().toISOString(),
+        });
+        await aggregate.service.processIntent(intent, { owner: OWNER });
+
+        const call = aggregate.embeddings.calls.at(-1)!;
+        expect(call.sensitivity).toBe('restricted');
+        expect(call.sources).toEqual(['github-issues', 'mission-control', 'monarch-money']);
+      } finally {
+        aggregate.close();
       }
     });
   });

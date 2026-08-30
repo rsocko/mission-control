@@ -32,11 +32,48 @@ const SCHEMA = `
   );
   CREATE TABLE tags (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL DEFAULT '',
+    type TEXT NOT NULL DEFAULT 'hub',
+    source TEXT,
+    confirmed INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT '2026-08-01T00:00:00.000Z',
+    unified_into TEXT
   );
   CREATE TABLE task_tags (
     task_id TEXT NOT NULL,
     tag_id TEXT NOT NULL
+  );
+  CREATE TABLE hub_projects (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    status_override TEXT,
+    hidden INTEGER NOT NULL DEFAULT 0,
+    category TEXT,
+    target_date TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE project_tags (project_id TEXT NOT NULL, tag_id TEXT NOT NULL);
+  CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
+  CREATE TABLE triage_items (
+    id TEXT PRIMARY KEY,
+    source_platform TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    content_type TEXT NOT NULL,
+    captured_at TEXT NOT NULL,
+    ingested_at TEXT NOT NULL,
+    status TEXT NOT NULL,
+    snoozed_until TEXT,
+    ai_summary TEXT,
+    ai_categories TEXT NOT NULL DEFAULT '[]',
+    ai_relevance_score INTEGER NOT NULL DEFAULT 0,
+    ai_urgency TEXT NOT NULL DEFAULT 'evergreen'
   );
   CREATE TABLE notifications (
     id TEXT PRIMARY KEY,
@@ -90,6 +127,26 @@ describe('SqliteSemanticSourcePort', () => {
     db.prepare("INSERT INTO tags (id, name) VALUES ('tag-2', 'Search')").run();
     db.prepare("INSERT INTO task_tags (task_id, tag_id) VALUES ('task-1', 'tag-1')").run();
     db.prepare("INSERT INTO task_tags (task_id, tag_id) VALUES ('task-1', 'tag-2')").run();
+    db.prepare(`
+      INSERT INTO hub_projects (
+        id, name, description, category, created_at, updated_at
+      ) VALUES (
+        'project-1', 'Semantic platform', 'Build retrieval', 'engineering',
+        '2026-08-01T00:00:00.000Z', '2026-08-20T00:00:00.000Z'
+      )
+    `).run();
+    db.prepare("INSERT INTO task_projects VALUES ('task-1', 'project-1')").run();
+    db.prepare("INSERT INTO project_tags VALUES ('project-1', 'tag-1')").run();
+    db.prepare(`
+      INSERT INTO triage_items (
+        id, source_platform, title, description, content_type, captured_at,
+        ingested_at, status, ai_summary, ai_categories
+      ) VALUES (
+        'triage-1', 'github', 'Vector research', 'Compare indexes', 'repo',
+        '2026-08-01T00:00:00.000Z', '2026-08-20T00:00:00.000Z', 'pending',
+        'Candidate libraries', '["software-development"]'
+      )
+    `).run();
 
     db.prepare(`
       INSERT INTO notifications (
@@ -120,6 +177,39 @@ describe('SqliteSemanticSourcePort', () => {
       isChecklistItem: false,
     });
     expect((record as { tags: string[] }).tags.sort()).toEqual(['Platform', 'Search']);
+    expect((record as { projects: string[] }).projects).toEqual(['Semantic platform']);
+  });
+
+  it('reads project, canonical tag, and triage sources with bounded context', async () => {
+    await expect(port.get('project', 'project-1')).resolves.toMatchObject({
+      entityType: 'project',
+      tags: ['Platform'],
+      representativeTasks: ['Title task-1'],
+      taskCount: 1,
+    });
+    await expect(port.get('tag', 'tag-1')).resolves.toMatchObject({
+      entityType: 'tag',
+      representativeTasks: ['Title task-1'],
+      usageCount: 1,
+    });
+    await expect(port.get('triage-item', 'triage-1')).resolves.toMatchObject({
+      entityType: 'triage-item',
+      aiCategories: ['software-development'],
+    });
+  });
+
+  it('returns ineligible records by id but excludes them from scans', async () => {
+    db.prepare("UPDATE hub_projects SET hidden = 1 WHERE id = 'project-1'").run();
+    db.prepare("UPDATE tags SET unified_into = 'tag-2' WHERE id = 'tag-1'").run();
+    db.prepare("UPDATE tags SET confirmed = 0 WHERE id = 'tag-2'").run();
+    db.prepare("UPDATE triage_items SET status = 'dismissed' WHERE id = 'triage-1'").run();
+    db.prepare("UPDATE notifications SET source_state = 'stale' WHERE id = 'alert-1'").run();
+    expect(await port.get('project', 'project-1')).toMatchObject({ semanticEligible: false });
+    expect(await port.get('tag', 'tag-1')).toMatchObject({ semanticEligible: false });
+    expect(await port.get('triage-item', 'triage-1')).toMatchObject({ semanticEligible: false });
+    expect(await port.get('alert', 'alert-1')).toMatchObject({ semanticEligible: false });
+    expect((await port.listIds('project', { limit: 10 })).ids).toEqual([]);
+    expect((await port.listIds('tag', { limit: 10 })).ids).toEqual([]);
   });
 
   it('reads an alert with its coerced booleans', async () => {

@@ -997,6 +997,7 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
     entityType: SemanticEntityType;
     entityId: string;
     now: string;
+    sourceUpdatedAt?: string;
   }): Promise<SemanticDocumentDeleteResult> {
     return this.db.transaction((): SemanticDocumentDeleteResult => {
       const existing = this.documentRow(input.indexId, input.entityType, input.entityId);
@@ -1007,12 +1008,13 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
         DELETE FROM semantic_vectors WHERE document_id = ?
       `).run(existing.id).changes;
 
+      const sourceUpdatedAt = input.sourceUpdatedAt ?? input.now;
       this.db.prepare(`
         UPDATE semantic_documents
         SET deleted_at = ?, updated_at = ?,
             source_updated_at = CASE WHEN ? > source_updated_at THEN ? ELSE source_updated_at END
         WHERE id = ?
-      `).run(input.now, input.now, input.now, input.now, existing.id);
+      `).run(input.now, input.now, sourceUpdatedAt, sourceUpdatedAt, existing.id);
 
       this.adjustCounts(input.indexId, -1, -removedVectors, input.now);
       return { status: 'deleted', removedVectors };

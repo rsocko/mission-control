@@ -16,24 +16,27 @@
  * - `listExisting`— an existence probe for a bounded id batch, so reconciliation
  *                   can find orphaned documents without an N+1 read.
  *
- * Only the two kinds this phase indexes are modelled: `task` and `alert` (the
- * canonical name for Mission Control's `notifications` table).
+ * Houston summaries remain intentionally absent until issue #1665 provides
+ * retained summaries, per-conversation exclusion, and authorization controls.
  */
 
 import type { SemanticEntityType } from '../contracts';
 
 /** Entity kinds with a projection adapter in this phase. */
-export type SemanticSourceEntityType = Extract<SemanticEntityType, 'task' | 'alert'>;
+export type SemanticSourceEntityType = Exclude<SemanticEntityType, 'houston-summary'>;
 
 export const SEMANTIC_SOURCE_ENTITY_TYPES: readonly SemanticSourceEntityType[] = [
   'task',
+  'project',
+  'tag',
+  'triage-item',
   'alert',
 ] as const;
 
 export function isSemanticSourceEntityType(
   value: SemanticEntityType,
 ): value is SemanticSourceEntityType {
-  return value === 'task' || value === 'alert';
+  return value !== 'houston-summary';
 }
 
 /**
@@ -42,6 +45,7 @@ export function isSemanticSourceEntityType(
  */
 export interface SemanticTaskSource {
   entityType: 'task';
+  semanticEligible: true;
   id: string;
   title: string;
   description: string | null;
@@ -62,6 +66,67 @@ export interface SemanticTaskSource {
   completedAt: string | null;
   /** Tag names joined through `task_tags`, in whatever order the join yields. */
   tags: string[];
+  /** Project names joined through `task_projects`. */
+  projects: string[];
+}
+
+export interface SemanticProjectSource {
+  entityType: 'project';
+  semanticEligible: boolean;
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  statusOverride: string | null;
+  hidden: boolean;
+  category: string | null;
+  targetDate: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  tags: string[];
+  /** Stable, bounded representative task titles in ascending task-id order. */
+  representativeTasks: string[];
+  representativeTaskConnectorTypes: string[];
+  taskCount: number;
+  latestTaskUpdatedAt: string | null;
+}
+
+export interface SemanticTagSource {
+  entityType: 'tag';
+  semanticEligible: boolean;
+  id: string;
+  name: string;
+  slug: string;
+  type: string;
+  source: string | null;
+  confirmed: boolean;
+  createdAt: string;
+  unifiedInto: string | null;
+  usageCount: number;
+  /** Stable, bounded examples in ascending task-id order. */
+  representativeTasks: string[];
+  representativeTaskConnectorTypes: string[];
+  latestTaskUpdatedAt: string | null;
+}
+
+export interface SemanticTriageItemSource {
+  entityType: 'triage-item';
+  semanticEligible: boolean;
+  id: string;
+  sourcePlatform: string;
+  title: string;
+  description: string | null;
+  contentType: string;
+  capturedAt: string;
+  ingestedAt: string;
+  status: string;
+  snoozedUntil: string | null;
+  aiSummary: string | null;
+  aiCategories: string[];
+  aiRelevanceScore: number;
+  aiUrgency: string;
 }
 
 /**
@@ -71,6 +136,7 @@ export interface SemanticTaskSource {
  */
 export interface SemanticAlertSource {
   entityType: 'alert';
+  semanticEligible: boolean;
   id: string;
   title: string;
   body: string | null;
@@ -95,7 +161,12 @@ export interface SemanticAlertSource {
   relatedProjectId: string | null;
 }
 
-export type SemanticSourceRecord = SemanticTaskSource | SemanticAlertSource;
+export type SemanticSourceRecord =
+  | SemanticTaskSource
+  | SemanticProjectSource
+  | SemanticTagSource
+  | SemanticTriageItemSource
+  | SemanticAlertSource;
 
 export interface SemanticSourceIdPage {
   /** Entity ids in ascending id order. */

@@ -84,23 +84,54 @@ const ALERT_ROW = {
   relatedProjectId: null,
 };
 
+const PROJECT_ROW = {
+  id: 'project-1',
+  name: 'Semantic platform',
+  description: 'Build retrieval',
+  status: 'active',
+  statusOverride: null,
+  hidden: false,
+  category: 'engineering',
+  targetDate: null,
+  startedAt: null,
+  completedAt: null,
+  createdAt: '2026-08-01T00:00:00.000Z',
+  updatedAt: '2026-08-20T00:00:00.000Z',
+};
+
+const TAG_ROW = {
+  id: 'tag-1',
+  name: 'Platform',
+  slug: 'platform',
+  type: 'hub',
+  source: null,
+  confirmed: true,
+  createdAt: '2026-08-01T00:00:00.000Z',
+  unifiedInto: null,
+};
+
 describe('PostgresSemanticSourcePort', () => {
   it('reads a task and joins its tags', async () => {
     const mock = createMockPool([
       { match: /FROM tasks WHERE id = \$1/, rows: [TASK_ROW] },
       { match: /FROM task_tags/, rows: [{ name: 'Platform' }] },
+      { match: /FROM task_projects/, rows: [{ name: 'Semantic platform' }] },
     ]);
     const port = new PostgresSemanticSourcePort(mock.pool);
 
     const record = await port.get('task', 'task-1');
     expect(record).toMatchObject({
-      entityType: 'task', id: 'task-1', isChecklistItem: false, tags: ['Platform'],
+      entityType: 'task',
+      id: 'task-1',
+      isChecklistItem: false,
+      tags: ['Platform'],
+      projects: ['Semantic platform'],
     });
   });
 
   it('coerces alert booleans and returns null for a missing row', async () => {
     const mock = createMockPool([
-      { match: /FROM notifications WHERE id = \$1/, rows: [{ ...ALERT_ROW, isActionable: 1 }] },
+      { match: /FROM notifications\s+WHERE id = \$1/, rows: [{ ...ALERT_ROW, isActionable: 1 }] },
     ]);
     const port = new PostgresSemanticSourcePort(mock.pool);
     expect(await port.get('alert', 'alert-1')).toMatchObject({
@@ -119,8 +150,66 @@ describe('PostgresSemanticSourcePort', () => {
 
     const page = await port.listIds('task', { afterId: 'task-0', limit: 2 });
     expect(page).toEqual({ ids: ['task-1', 'task-2'], nextCursor: 'task-2' });
-    expect(mock.find(/SELECT id FROM tasks/)).toContain('WHERE id > $1 ORDER BY id ASC LIMIT $2');
+    expect(mock.find(/SELECT id FROM tasks/))
+      .toContain('WHERE id > $1 AND TRUE ORDER BY id ASC LIMIT $2');
     expect(mock.params[0]).toEqual(['task-0', 2]);
+  });
+
+  it('reads project, tag, and triage records through backend-equivalent queries', async () => {
+    const projectMock = createMockPool([
+      { match: /FROM hub_projects WHERE id = \$1/, rows: [PROJECT_ROW] },
+      { match: /FROM project_tags/, rows: [{ projectId: 'project-1', name: 'Platform' }] },
+      { match: /representatives WHERE row_number/, rows: [{ projectId: 'project-1', title: 'Task' }] },
+      { match: /COUNT\(\*\)[\s\S]*task_projects/, rows: [{ projectId: 'project-1', count: 1, latest: null }] },
+    ]);
+    await expect(new PostgresSemanticSourcePort(projectMock.pool).get('project', 'project-1'))
+      .resolves.toMatchObject({
+        entityType: 'project', tags: ['Platform'], representativeTasks: ['Task'], taskCount: 1,
+      });
+
+    const tagMock = createMockPool([
+      { match: /FROM tags\s+WHERE id = \$1/, rows: [TAG_ROW] },
+      { match: /representatives WHERE row_number/, rows: [{ tagId: 'tag-1', title: 'Task' }] },
+      { match: /COUNT\(\*\)[\s\S]*task_tags/, rows: [{ tagId: 'tag-1', count: 1, latest: null }] },
+    ]);
+    await expect(new PostgresSemanticSourcePort(tagMock.pool).get('tag', 'tag-1'))
+      .resolves.toMatchObject({
+        entityType: 'tag', representativeTasks: ['Task'], usageCount: 1,
+      });
+
+    const triageMock = createMockPool([
+      {
+        match: /FROM triage_items WHERE id = \$1/,
+        rows: [{
+          id: 'triage-1',
+          sourcePlatform: 'github',
+          title: 'Research',
+          description: null,
+          contentType: 'repo',
+          capturedAt: '2026-08-01T00:00:00.000Z',
+          ingestedAt: '2026-08-20T00:00:00.000Z',
+          status: 'pending',
+          snoozedUntil: null,
+          aiSummary: null,
+          aiCategories: ['research'],
+          aiRelevanceScore: 10,
+          aiUrgency: 'evergreen',
+        }],
+      },
+    ]);
+    await expect(new PostgresSemanticSourcePort(triageMock.pool).get('triage-item', 'triage-1'))
+      .resolves.toMatchObject({ entityType: 'triage-item', aiCategories: ['research'] });
+  });
+
+  it('puts authoritative eligibility predicates on source scans', async () => {
+    const mock = createMockPool();
+    const port = new PostgresSemanticSourcePort(mock.pool);
+    await port.listIds('project', { limit: 10 });
+    await port.listIds('tag', { limit: 10 });
+    await port.listIds('triage-item', { limit: 10 });
+    expect(mock.sql()[0]).toContain('hidden = false');
+    expect(mock.sql()[1]).toContain('confirmed = true AND unified_into IS NULL');
+    expect(mock.sql()[2]).toContain("status <> 'dismissed'");
   });
 
   it('reports the kind as exhausted when a page is short', async () => {

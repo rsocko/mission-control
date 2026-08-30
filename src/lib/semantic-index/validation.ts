@@ -473,7 +473,7 @@ export function jsonOrDefault<T>(raw: unknown, fallback: T): T {
  * are unique, so a superseded key can never collide with a live one.
  */
 export function supersededRunIdempotencyKey(idempotencyKey: string, runId: string): string {
-  return `${idempotencyKey}\u0000superseded:${runId}`;
+  return JSON.stringify(['superseded', runId, idempotencyKey]);
 }
 
 // ─── Observability projections ──────────────────────────────────────────────

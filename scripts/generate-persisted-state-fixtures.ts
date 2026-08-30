@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import {
-  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -50,12 +49,14 @@ function readJournal(): MigrationJournal {
   ) as MigrationJournal;
 }
 
+function normalizedMigrationSql(tag: string): string {
+  return readFileSync(join(MIGRATIONS_ROOT, `${tag}.sql`), 'utf8')
+    .replace(/\r\n?/g, '\n');
+}
+
 function migrationHash(tag: string): string {
   return createHash('sha256')
-    .update(
-      readFileSync(join(MIGRATIONS_ROOT, `${tag}.sql`), 'utf8')
-        .replace(/\r\n?/g, '\n'),
-    )
+    .update(normalizedMigrationSql(tag))
     .digest('hex');
 }
 
@@ -79,9 +80,9 @@ function createCheckpointMigrationDirectory(
     `${JSON.stringify({ ...journal, entries }, null, 2)}\n`,
   );
   for (const entry of entries) {
-    copyFileSync(
-      join(MIGRATIONS_ROOT, `${entry.tag}.sql`),
+    writeFileSync(
       join(directory, `${entry.tag}.sql`),
+      normalizedMigrationSql(entry.tag),
     );
   }
   return { directory, entries };

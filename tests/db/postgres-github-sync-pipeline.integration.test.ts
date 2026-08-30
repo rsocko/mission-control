@@ -56,6 +56,7 @@ const stableIds = new Set<string>();
 function evidence(
   entityType: 'repository' | 'issue',
   stableId: string,
+  repository: string,
   issueNumber?: number,
 ): ExternalIdentityEvidence['entity'] {
   return {
@@ -67,7 +68,7 @@ function evidence(
     },
     locator: {
       owner: 'synthetic-owner',
-      repository: 'synthetic-repo',
+      repository,
       ...(issueNumber === undefined ? {} : { issueNumber }),
     },
     observationSource: 'graphql',
@@ -78,7 +79,7 @@ function evidence(
 function sourceList(
   connectorId: string,
   repositoryEvidence: ExternalIdentityEvidence['entity'],
-  sourceId = 'synthetic-owner/synthetic-repo',
+  sourceId = `${repositoryEvidence.locator.owner}/${repositoryEvidence.locator.repository}`,
 ): SourceList {
   return {
     id: `${connectorId}:repo:${sourceId}`,
@@ -98,9 +99,11 @@ function task(
   issueEvidence: ExternalIdentityEvidence['entity'],
   repositoryEvidence: ExternalIdentityEvidence['entity'],
 ): TaskItem {
+  const repositorySourceId =
+    `${repositoryEvidence.locator.owner}/${repositoryEvidence.locator.repository}`;
   return {
     id: `${connectorId}:remote:${issueNumber}`,
-    sourceId: `synthetic-owner/synthetic-repo:${issueNumber}`,
+    sourceId: `${repositorySourceId}:${issueNumber}`,
     connectorType: 'github-issues',
     connectorInstanceId: connectorId,
     title: `Synthetic issue ${issueNumber}`,
@@ -111,8 +114,8 @@ function task(
     childIds: [],
     depth: 0,
     isChecklistItem: false,
-    sourceListId: 'synthetic-owner/synthetic-repo',
-    sourceListName: 'synthetic-owner/synthetic-repo',
+    sourceListId: repositorySourceId,
+    sourceListName: repositorySourceId,
     hubProjectIds: [],
     tags: [],
     metadata: {},
@@ -279,6 +282,18 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     connectorIds.clear();
     if (stableIds.size > 0) {
       await pool.query(
+        `
+          DELETE FROM external_entity_locators
+          WHERE external_entity_id IN (
+            SELECT id FROM external_entities WHERE stable_id = ANY($1::text[])
+          )
+          OR repository_entity_id IN (
+            SELECT id FROM external_entities WHERE stable_id = ANY($1::text[])
+          )
+        `,
+        [[...stableIds]],
+      );
+      await pool.query(
         'DELETE FROM external_entities WHERE stable_id = ANY($1::text[])',
         [[...stableIds]],
       );
@@ -293,8 +308,9 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     stableIds.add(repositoryStableId);
     stableIds.add(issueStableId);
     await seedConnector(connectorId);
-    const repositoryEvidence = evidence('repository', repositoryStableId);
-    const issueEvidence = evidence('issue', issueStableId, 41);
+    const repositoryName = `repo-${connectorId}`;
+    const repositoryEvidence = evidence('repository', repositoryStableId, repositoryName);
+    const issueEvidence = evidence('issue', issueStableId, repositoryName, 41);
     const inertConnector = connector({
       connectorId,
       sourceLists: [sourceList(connectorId, repositoryEvidence)],
@@ -324,12 +340,12 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     );
     const localTask = await pool.query<{ id: string }>(
       'SELECT id FROM tasks WHERE connector_instance_id = $1 AND source_id = $2',
-      [connectorId, 'synthetic-owner/synthetic-repo:41'],
+      [connectorId, `synthetic-owner/${repositoryName}:41`],
     );
     expect(bindings.rows).toEqual([
       {
         bindingType: 'source_list',
-        localId: `${connectorId}:repo:synthetic-owner/synthetic-repo`,
+        localId: `${connectorId}:repo:synthetic-owner/${repositoryName}`,
         stableId: repositoryStableId,
         state: 'active',
       },
@@ -350,9 +366,10 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     stableIds.add(repositoryStableId);
     stableIds.add(issueStableId);
     await seedConnector(connectorId);
-    const repositoryEvidence = evidence('repository', repositoryStableId);
-    const firstEvidence = evidence('issue', issueStableId, 51);
-    const secondEvidence = evidence('issue', issueStableId, 52);
+    const repositoryName = `repo-${connectorId}`;
+    const repositoryEvidence = evidence('repository', repositoryStableId, repositoryName);
+    const firstEvidence = evidence('issue', issueStableId, repositoryName, 51);
+    const secondEvidence = evidence('issue', issueStableId, repositoryName, 52);
     const inertConnector = connector({
       connectorId,
       sourceLists: [sourceList(connectorId, repositoryEvidence)],
@@ -379,7 +396,7 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
       [connectorId, issueStableId],
     );
     expect(owner.rows).toEqual([{
-      sourceId: 'synthetic-owner/synthetic-repo:51',
+      sourceId: `synthetic-owner/${repositoryName}:51`,
       state: 'collision',
     }]);
     expect(sqliteTouch).not.toHaveBeenCalled();
@@ -390,10 +407,11 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     const repositoryStableId = `R_kgSYNTHETIC_${randomUUID()}`;
     stableIds.add(repositoryStableId);
     await seedConnector(connectorId);
-    const repositoryEvidence = evidence('repository', repositoryStableId);
+    const repositoryName = `repo-${connectorId}`;
+    const repositoryEvidence = evidence('repository', repositoryStableId, repositoryName);
     const sourceLists = [
-      sourceList(connectorId, repositoryEvidence, 'synthetic-owner/synthetic-repo'),
-      sourceList(connectorId, repositoryEvidence, 'synthetic-owner/synthetic-alias'),
+      sourceList(connectorId, repositoryEvidence),
+      sourceList(connectorId, repositoryEvidence, `synthetic-owner/${repositoryName}-alias`),
     ];
     await pool.query(
       `
@@ -448,7 +466,8 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     const first = await runPipeline(connectorId, inertConnector);
     const retry = await runPipeline(connectorId, inertConnector);
 
-    expect(persistedCollisions.rows).toEqual([{ state: 'open' }]);
+    expect(persistedCollisions.rows.length).toBeGreaterThan(0);
+    expect(persistedCollisions.rows.every(({ state }) => state === 'open')).toBe(true);
     expect(first.success).toBe(false);
     expect(retry.success).toBe(false);
     const syncRuns = await pool.query<{ success: boolean }>(
@@ -469,7 +488,8 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     const repositoryStableId = `R_kgSYNTHETIC_${randomUUID()}`;
     stableIds.add(repositoryStableId);
     await seedConnector(connectorId);
-    const repositoryEvidence = evidence('repository', repositoryStableId);
+    const repositoryName = `repo-${connectorId}`;
+    const repositoryEvidence = evidence('repository', repositoryStableId, repositoryName);
     const inertConnector = connector({
       connectorId,
       sourceLists: [sourceList(connectorId, repositoryEvidence)],

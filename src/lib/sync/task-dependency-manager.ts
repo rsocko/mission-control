@@ -1865,7 +1865,7 @@ async function reconcileTaskDependenciesUnlocked(
   connector: IConnector,
   options: ReconcileOptions,
 ): Promise<DependencyReconciliationResult> {
-  const capabilities = await getConnectorCapabilities(connectorInstanceId);
+  const capabilities = connector.capabilities;
   const deps = await getGitHubDependencyRepository();
   const resumeSnapshot = options.resumeGenerationId
     ? await loadActiveSnapshot(connectorInstanceId)

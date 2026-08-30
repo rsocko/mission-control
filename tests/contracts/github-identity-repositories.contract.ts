@@ -205,6 +205,7 @@ export function describeGitHubIdentityRepositoriesContract(
             const { identity } = harness.repositories;
             await identity.ensureControls({ connectorInstanceId, now: NOW });
             const modeSnapshot = await identity.getModeSnapshot(connectorInstanceId, NOW);
+            const repositoryName = `repo-${connectorInstanceId}`;
             const repository = {
               identity: {
                 provider: 'github',
@@ -212,7 +213,7 @@ export function describeGitHubIdentityRepositoriesContract(
                 entityType: 'repository' as const,
                 stableId: `R_${connectorInstanceId}`,
               },
-              locator: { owner: 'synthetic-owner', repository: 'synthetic-repo' },
+              locator: { owner: 'synthetic-owner', repository: repositoryName },
               observationSource: 'graphql' as const,
               observedAt: NOW,
             };
@@ -225,7 +226,7 @@ export function describeGitHubIdentityRepositoriesContract(
               },
               locator: {
                 owner: 'synthetic-owner',
-                repository: 'synthetic-repo',
+                repository: repositoryName,
                 issueNumber: 42,
               },
               observationSource: 'graphql' as const,
@@ -237,7 +238,7 @@ export function describeGitHubIdentityRepositoriesContract(
                   connectorInstanceId,
                   bindingType: 'source_list' as const,
                   localId: sourceListId,
-                  legacyIdentity: 'synthetic-owner/synthetic-repo',
+                  legacyIdentity: `synthetic-owner/${repositoryName}`,
                 },
                 evidence: { entity: repository },
               },
@@ -246,7 +247,7 @@ export function describeGitHubIdentityRepositoriesContract(
                   connectorInstanceId,
                   bindingType: 'task' as const,
                   localId: taskId,
-                  legacyIdentity: 'synthetic-owner/synthetic-repo:42',
+                  legacyIdentity: `synthetic-owner/${repositoryName}:42`,
                 },
                 evidence: { entity: issue, repository },
               },
@@ -298,6 +299,7 @@ export function describeGitHubIdentityRepositoriesContract(
             const { identity } = harness.repositories;
             await identity.ensureControls({ connectorInstanceId, now: NOW });
             const modeSnapshot = await identity.getModeSnapshot(connectorInstanceId, NOW);
+            const repositoryName = `repo-${connectorInstanceId}`;
             const evidence = {
               entity: {
                 identity: {
@@ -306,7 +308,7 @@ export function describeGitHubIdentityRepositoriesContract(
                   entityType: 'repository' as const,
                   stableId: `R_${connectorInstanceId}`,
                 },
-                locator: { owner: 'synthetic-owner', repository: 'synthetic-repo' },
+                locator: { owner: 'synthetic-owner', repository: repositoryName },
                 observationSource: 'graphql' as const,
                 observedAt: NOW,
               },
@@ -317,7 +319,7 @@ export function describeGitHubIdentityRepositoriesContract(
               connectorInstanceId,
               bindingType: 'source_list' as const,
               localId: firstLocalId,
-              legacyIdentity: 'synthetic-owner/synthetic-repo',
+              legacyIdentity: `synthetic-owner/${repositoryName}`,
             };
             await identity.persistExternalIdentityBatch({
               connectorInstanceId,

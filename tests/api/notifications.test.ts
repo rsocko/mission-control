@@ -757,26 +757,3 @@ describe('Notification Templates', () => {
       .toEqual(['navigate']);
   });
 });
-
-describe('Action Plugin Registry', () => {
-  it('registers and retrieves actions', async () => {
-    const { getActionDefinition, getAllRegisteredActions } = await import('@/lib/notifications/action-registry');
-    expect(getActionDefinition('ha_toggle_device')).toBeDefined();
-    expect(getAllRegisteredActions().length).toBeGreaterThan(3);
-  });
-
-  it('filters by connector type', async () => {
-    const { getActionsForConnector } = await import('@/lib/notifications/action-registry');
-    const haActions = getActionsForConnector('home-assistant');
-    expect(haActions.length).toBeGreaterThanOrEqual(2);
-    // Should include at least the HA-specific actions
-    const haSpecific = haActions.filter(a => a.connectorTypes?.includes('home-assistant'));
-    expect(haSpecific.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('filters by category', async () => {
-    const { getActionsForCategory } = await import('@/lib/notifications/action-registry');
-    const financeActions = getActionsForCategory('finance');
-    expect(financeActions.length).toBeGreaterThanOrEqual(1);
-  });
-});

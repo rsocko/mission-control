@@ -99,6 +99,8 @@ private key and token-encryption key in the deployment secret store.
 | `AI_BASE_URL` | `http://localhost:11434/v1` | API endpoint (Ollama default shown) |
 | `AI_MODEL` | `llama3.1:8b` | Model to use for completions |
 | `AI_SEMANTIC_SEARCH_ENABLED` | `false` | Opt in to meaning-based search enrichment. The saved AI setting takes precedence |
+| `AI_HOUSTON_MEMORY_ENABLED` | `false` | Opt in to retained, privacy-minimized Houston summaries. Independent from global semantic search; the saved AI setting takes precedence |
+| `AI_HOUSTON_MEMORY_RETENTION_DAYS` | `90` | Retention applied to newly captured Houston summaries, bounded to 1–365 days |
 | `AI_EMBEDDING_PROVIDER` | `bifrost` | Embedding route, independent from `AI_PROVIDER`. Existing installations without this setting continue to inherit `AI_PROVIDER` |
 | `AI_EMBEDDING_MODEL` | `azure/text-embedding-3-small` | Embedding model or deployment. Bifrost IDs must include a provider prefix |
 | `AI_EMBEDDING_BASE_URL` | Provider default | Optional embedding-only endpoint override |
@@ -144,6 +146,17 @@ while query embeddings are kept only in a bounded in-memory cache and never
 written as query history. Interactive searches report `not-ready` until
 compatible entity embeddings exist; index maintenance runs separately and is
 never triggered by a query.
+
+Retained Houston memory is controlled independently under **Settings → AI
+Provider** and is disabled by default. When enabled, Houston sends bounded
+conversation text through the restricted completion route to produce a minimized
+record containing only a title, short summary, durable decisions, commitments,
+topics, and validated Mission Control entity links. Full transcripts, tool output,
+credentials, and model reasoning are not stored or indexed. The 90-day default
+applies to new summaries; changing it does not rewrite existing expiry dates, and
+disabling memory does not silently delete existing summaries. Users can inspect,
+exclude, or explicitly delete retained memories from Houston. A worker cleanup
+physically deletes expired summaries in bounded batches even while capture is off.
 
 Search requests may include `source`, `status`, and `excludeDone=true`. These
 filters are applied to both keyword and semantic results before they are

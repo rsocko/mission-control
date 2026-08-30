@@ -17,6 +17,13 @@ import type {
   SettingsRepository,
   TaskRepository,
 } from './core-repositories';
+import type {
+  HoustonConversationMemory,
+  HoustonConversationMemoryWrite,
+  HoustonMemoryEntityLink,
+  HoustonMemoryListRequest,
+  HoustonMemoryRepository,
+} from '@/lib/houston-memory/contracts';
 import {
   mergeConnectorSettings,
   patchConnectorSettingsState,
@@ -1081,6 +1088,152 @@ export class SqliteSettingsRepository implements SettingsRepository {
   }
 }
 
+interface HoustonMemoryRow {
+    id: string;
+    authorizationScope: string;
+    title: string;
+    summary: string;
+    decisions: unknown;
+    commitments: unknown;
+    topics: unknown;
+    linkedEntities: unknown;
+    sensitivity: HoustonConversationMemory['sensitivity'];
+    retainUntil: string;
+    excludedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }
+
+  const HOUSTON_MEMORY_COLUMNS = `
+    id, authorization_scope AS authorizationScope, title, summary, decisions,
+    commitments, topics, linked_entities AS linkedEntities, sensitivity,
+    retain_until AS retainUntil, excluded_at AS excludedAt,
+    created_at AS createdAt, updated_at AS updatedAt
+  `;
+
+  function parseStringList(value: unknown): string[] {
+    const parsed = parseJson(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  }
+
+  function parseHoustonMemory(row: HoustonMemoryRow): HoustonConversationMemory {
+    const linkedEntities = parseJson(row.linkedEntities);
+    return {
+      ...row,
+      decisions: parseStringList(row.decisions),
+      commitments: parseStringList(row.commitments),
+      topics: parseStringList(row.topics),
+      linkedEntities: Array.isArray(linkedEntities)
+        ? linkedEntities as HoustonMemoryEntityLink[]
+        : [],
+    };
+  }
+
+  export class SqliteHoustonMemoryRepository implements HoustonMemoryRepository {
+    constructor(private readonly database: SqliteDatabase) {}
+
+    async get(id: string, authorizationScope: string): Promise<HoustonConversationMemory | null> {
+      const row = this.database.prepare(`
+        SELECT ${HOUSTON_MEMORY_COLUMNS}
+        FROM houston_conversation_memories
+        WHERE id = ? AND authorization_scope = ?
+      `).get(id, authorizationScope) as HoustonMemoryRow | undefined;
+      return row ? parseHoustonMemory(row) : null;
+    }
+
+    async list(input: HoustonMemoryListRequest): Promise<HoustonConversationMemory[]> {
+      const limit = Math.max(1, Math.min(Math.trunc(input.limit), 100));
+      const rows = this.database.prepare(`
+        SELECT ${HOUSTON_MEMORY_COLUMNS}
+        FROM houston_conversation_memories
+        WHERE authorization_scope = ?
+          AND excluded_at IS NULL
+          AND retain_until > ?
+          AND updated_at < ?
+        ORDER BY updated_at DESC, id ASC
+        LIMIT ?
+      `).all(
+        input.authorizationScope,
+        input.now,
+        input.beforeUpdatedAt ?? '9999-12-31T23:59:59.999Z',
+        limit,
+      ) as HoustonMemoryRow[];
+      return rows.map(parseHoustonMemory);
+    }
+
+    async upsert(input: HoustonConversationMemoryWrite): Promise<HoustonConversationMemory> {
+      this.database.prepare(`
+        INSERT INTO houston_conversation_memories (
+          id, authorization_scope, title, summary, decisions, commitments, topics,
+          linked_entities, sensitivity, retain_until, excluded_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          summary = excluded.summary,
+          decisions = excluded.decisions,
+          commitments = excluded.commitments,
+          topics = excluded.topics,
+          linked_entities = excluded.linked_entities,
+          sensitivity = excluded.sensitivity,
+          retain_until = excluded.retain_until,
+          updated_at = excluded.updated_at
+        WHERE houston_conversation_memories.authorization_scope = excluded.authorization_scope
+          AND houston_conversation_memories.excluded_at IS NULL
+      `).run(
+        input.id,
+        input.authorizationScope,
+        input.title,
+        input.summary,
+        stringifyJson(input.decisions),
+        stringifyJson(input.commitments),
+        stringifyJson(input.topics),
+        stringifyJson(input.linkedEntities),
+        input.sensitivity,
+        input.retainUntil,
+        input.now,
+        input.now,
+      );
+      const stored = await this.get(input.id, input.authorizationScope);
+      if (!stored) throw new Error('Houston memory could not be persisted');
+      return stored;
+    }
+
+    async exclude(id: string, authorizationScope: string, now: string): Promise<boolean> {
+      return this.database.prepare(`
+        UPDATE houston_conversation_memories
+        SET excluded_at = ?, updated_at = ?
+        WHERE id = ? AND authorization_scope = ? AND excluded_at IS NULL
+      `).run(now, now, id, authorizationScope).changes === 1;
+    }
+
+    async delete(id: string, authorizationScope: string): Promise<boolean> {
+      return this.database.prepare(`
+        DELETE FROM houston_conversation_memories
+        WHERE id = ? AND authorization_scope = ?
+      `).run(id, authorizationScope).changes === 1;
+  }
+
+  async deleteExpired(now: string, limit: number): Promise<string[]> {
+    const boundedLimit = Math.max(1, Math.min(Math.trunc(limit), 100));
+    return this.database.transaction(() => {
+      const rows = this.database.prepare(`
+        SELECT id FROM houston_conversation_memories
+        WHERE retain_until <= ?
+        ORDER BY retain_until ASC, id ASC
+        LIMIT ?
+      `).all(now, boundedLimit) as Array<{ id: string }>;
+      if (rows.length === 0) return [];
+      this.database.prepare(`
+        DELETE FROM houston_conversation_memories
+        WHERE id IN (${rows.map(() => '?').join(', ')})
+      `).run(...rows.map(({ id }) => id));
+      return rows.map(({ id }) => id);
+    }).immediate();
+  }
+}
+
 export function createSqliteCorePersistenceRepositories(
   database: SqliteDatabase,
 ): CorePersistenceRepositories {
@@ -1090,6 +1243,7 @@ export function createSqliteCorePersistenceRepositories(
     connectors: new SqliteConnectorRepository(database),
     notifications: new SqliteNotificationRepository(database),
     settings: new SqliteSettingsRepository(database),
+    houstonMemories: new SqliteHoustonMemoryRepository(database),
   };
 }
 

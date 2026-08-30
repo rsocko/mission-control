@@ -862,6 +862,13 @@
       "when": 1788200001000,
       "tag": "0122_alertmanager_integration_operations",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1788066000000,
+      "tag": "0123_houston_summary_memory",
+      "breakpoints": true
     }
   ]
 }

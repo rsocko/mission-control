@@ -1490,6 +1490,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
 
   async claimIntents(request: SemanticIntentClaimRequest): Promise<SemanticIntent[]> {
     const limit = Math.max(1, Math.trunc(request.limit) || 1);
+    if (request.entityTypes?.length === 0) return [];
     await this.recoverExpiredIntentLeases(request.now);
     return withTransaction(this.pool, async (client) => {
       const leaseExpiresAt = addMs(request.now, request.leaseMs);
@@ -1503,19 +1504,20 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           WITH candidates AS (
             SELECT id AS candidate_id FROM semantic_intents
             WHERE index_id = $1 AND status = 'queued' AND available_at <= $2
+              AND ($3::text[] IS NULL OR entity_type = ANY($3::text[]))
             ORDER BY requested_at ASC, created_at ASC, id ASC
-            LIMIT $3
+            LIMIT $4
             FOR UPDATE SKIP LOCKED
           )
           UPDATE semantic_intents
           SET status = 'running', attempt = attempt + 1,
-              lease_owner = $4, lease_expires_at = $5, last_error = NULL, updated_at = $2
+              lease_owner = $5, lease_expires_at = $6, last_error = NULL, updated_at = $2
           FROM candidates
           WHERE semantic_intents.id = candidates.candidate_id
             AND semantic_intents.status = 'queued'
           RETURNING ${INTENT_COLUMNS}
         `,
-        [request.indexId, request.now, limit, request.owner, leaseExpiresAt],
+        [request.indexId, request.now, request.entityTypes ?? null, limit, request.owner, leaseExpiresAt],
       );
     });
   }

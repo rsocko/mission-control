@@ -1439,16 +1439,26 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
 
   async claimIntents(request: SemanticIntentClaimRequest): Promise<SemanticIntent[]> {
     const limit = Math.max(1, Math.trunc(request.limit) || 1);
+    if (request.entityTypes?.length === 0) return [];
     return this.db.transaction((): SemanticIntent[] => {
       this.recoverExpiredIntentLeasesSync(request.now);
       const leaseExpiresAt = addMs(request.now, request.leaseMs);
+      const entityFilter = request.entityTypes
+        ? ` AND entity_type IN (${request.entityTypes.map(() => '?').join(', ')})`
+        : '';
 
       const candidates = this.db.prepare(`
         SELECT id FROM semantic_intents
         WHERE index_id = ? AND status = 'queued' AND available_at <= ?
+          ${entityFilter}
         ORDER BY requested_at ASC, created_at ASC, id ASC
         LIMIT ?
-      `).all(request.indexId, request.now, limit) as Array<{ id: string }>;
+      `).all(
+        request.indexId,
+        request.now,
+        ...(request.entityTypes ?? []),
+        limit,
+      ) as Array<{ id: string }>;
 
       const claimed: SemanticIntent[] = [];
       for (const candidate of candidates) {

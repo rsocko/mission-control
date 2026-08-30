@@ -5,6 +5,7 @@ import type {
   TaskItem,
 } from '@/types';
 import type { PersistenceJson } from './contracts';
+import type { HoustonMemoryRepository } from '@/lib/houston-memory/contracts';
 
 export interface ConnectorSettingsStatePatchResult<TState> {
   settings: Record<string, unknown>;
@@ -62,4 +63,5 @@ export interface CorePersistenceRepositories {
   readonly connectors: ConnectorRepository;
   readonly notifications: NotificationRepository;
   readonly settings: SettingsRepository;
+  readonly houstonMemories: HoustonMemoryRepository;
 }

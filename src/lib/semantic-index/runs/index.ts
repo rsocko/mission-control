@@ -80,10 +80,26 @@ export function serializeKindCursor(cursor: KindCursor | null): string | null {
   return cursor === null ? null : JSON.stringify(cursor);
 }
 
-function nextKind(kind: SemanticSourceEntityType): SemanticSourceEntityType | null {
-  const index = SEMANTIC_SOURCE_ENTITY_TYPES.indexOf(kind);
-  return index >= 0 && index + 1 < SEMANTIC_SOURCE_ENTITY_TYPES.length
-    ? SEMANTIC_SOURCE_ENTITY_TYPES[index + 1]
+function enabledKinds(config: SemanticWorkerConfig): readonly SemanticSourceEntityType[] {
+  return config.entityTypes;
+}
+
+function initialCursor(
+  checkpoint: string | null,
+  kinds: readonly SemanticSourceEntityType[],
+): KindCursor | null {
+  if (kinds.length === 0) return null;
+  const parsed = parseKindCursor(checkpoint);
+  return kinds.includes(parsed.kind) ? parsed : { kind: kinds[0], after: null };
+}
+
+function nextKind(
+  kind: SemanticSourceEntityType,
+  kinds: readonly SemanticSourceEntityType[],
+): SemanticSourceEntityType | null {
+  const index = kinds.indexOf(kind);
+  return index >= 0 && index + 1 < kinds.length
+    ? kinds[index + 1]
     : null;
 }
 
@@ -102,9 +118,13 @@ export async function runBackfillSlice(
   context: SemanticRunContext,
   deps: SemanticRunDependencies,
 ): Promise<SemanticRunSliceResult> {
-  let cursor = parseKindCursor(context.run.checkpoint);
+  const kinds = enabledKinds(deps.config);
+  let cursor = initialCursor(context.run.checkpoint, kinds);
   let processed = 0;
   let skipped = 0;
+  if (!cursor) {
+    return { status: 'completed', processed, skipped, failed: 0, checkpoint: null };
+  }
 
   for (;;) {
     if (context.signal.aborted) {
@@ -140,7 +160,7 @@ export async function runBackfillSlice(
       continue;
     }
 
-    const following = nextKind(cursor.kind);
+    const following = nextKind(cursor.kind, kinds);
     if (!following) {
       return { status: 'completed', processed, skipped, failed: 0, checkpoint: null };
     }
@@ -185,7 +205,8 @@ export async function runReconcileSlice(
   context: SemanticRunContext,
   deps: SemanticRunDependencies,
 ): Promise<SemanticRunSliceResult> {
-  let cursor = parseKindCursor(context.run.checkpoint);
+  const kinds = enabledKinds(deps.config);
+  let cursor = initialCursor(context.run.checkpoint, kinds);
   const counts: SemanticReconciliationCounts = {
     scanned: 0,
     missing: 0,
@@ -211,6 +232,7 @@ export async function runReconcileSlice(
       retentionExpired: counts.retentionExpired,
     },
   } satisfies SemanticRunSliceResult);
+  if (!cursor) return finish('completed', null);
 
   for (;;) {
     if (context.signal.aborted) return finish('aborted', serializeKindCursor(cursor));
@@ -332,7 +354,7 @@ export async function runReconcileSlice(
       continue;
     }
 
-    const following = nextKind(cursor.kind);
+    const following = nextKind(cursor.kind, kinds);
     if (!following) return finish('completed', null);
     cursor = { kind: following, after: null };
   }

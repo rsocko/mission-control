@@ -40,7 +40,7 @@ gate.
 - Benchmark current semantic scan behavior at 10,000 and 100,000 entities.
 - Spike indexed vector retrieval for SQLite and PostgreSQL.
 - Define provider/model/dimension compatibility and staged cutover.
-- Decide Houston and alert/event retention defaults.
+- Use the confirmed 90-day Houston-summary default and decide alert/event retention defaults.
 
 ### Exit gates
 
@@ -141,7 +141,8 @@ privacy gates are complete.
 ### Deliverables
 
 - Conversation summary and linked-entity projection.
-- Configurable retention, per-conversation exclusion, deletion, and reconciliation.
+- Independently gated, default-off capture with a 90-day default, configurable
+  retention, per-conversation exclusion, deletion, and reconciliation.
 - Sensitivity classification before provider routing.
 - Bounded Houston retrieval tool over the shared service.
 - References back to source conversations and linked Mission Control entities.

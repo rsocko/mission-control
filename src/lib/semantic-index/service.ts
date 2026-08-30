@@ -388,6 +388,9 @@ export class SemanticIndexService {
       resolveSensitivity: this.resolveSensitivity,
       projectionVersion: identity.projectionVersion,
     });
+    if (document.retainUntil && document.retainUntil <= this.now()) {
+      return this.applyDelete(intent, intent.entityType, document.sourceUpdatedAt);
+    }
     const requestedSourceUpdatedAt = document.sourceUpdatedAt > intent.requestedAt
       ? document.sourceUpdatedAt
       : intent.requestedAt;
@@ -534,7 +537,7 @@ export class SemanticIndexService {
 
   private async applyDelete(
     intent: SemanticIntent,
-    entityType: SemanticSourceEntityType,
+    entityType: SemanticEntityType,
     sourceUpdatedAt?: string,
   ): Promise<SemanticIntentOutcome> {
     const result = await this.repository.deleteDocument({

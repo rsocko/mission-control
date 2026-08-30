@@ -7,6 +7,10 @@
  */
 
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  SEMANTIC_SOURCE_ENTITY_TYPES,
+  type SemanticSourceEntityType,
+} from './source/contracts';
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -23,6 +27,8 @@ function boundedInteger(
 }
 
 export interface SemanticWorkerConfig {
+  /** Entity kinds maintenance runs are allowed to scan for the active feature gates. */
+  entityTypes: readonly SemanticSourceEntityType[];
   /** Intents claimed per poll. */
   batchSize: number;
   /** Intents processed simultaneously within a batch. */
@@ -64,7 +70,14 @@ export function getSemanticWorkerConfig(): SemanticWorkerConfig {
   const runLeaseMs = boundedInteger(
     process.env.MC_SEMANTIC_RUN_LEASE_MS, 300_000, 10_000, 3_600_000,
   );
+  const ai = getResolvedAIConfig();
+  const entityTypes = SEMANTIC_SOURCE_ENTITY_TYPES.filter((entityType) =>
+    entityType === 'houston-summary'
+      ? ai.houstonMemoryEnabled
+      : ai.semanticSearchEnabled
+  );
   return {
+    entityTypes,
     batchSize: boundedInteger(process.env.MC_SEMANTIC_WORKER_BATCH_SIZE, 16, 1, 200),
     concurrency: boundedInteger(process.env.MC_SEMANTIC_WORKER_CONCURRENCY, 2, 1, 16),
     pollIntervalMs: boundedInteger(
@@ -116,10 +129,22 @@ export function isSemanticIndexEnabled(): boolean {
     return false;
   }
   try {
-    return getResolvedAIConfig().semanticSearchEnabled;
+    const config = getResolvedAIConfig();
+    return Boolean(config.semanticSearchEnabled || config.houstonMemoryEnabled);
   } catch {
     // A settings read can fail before the database exists; treat that as "not
     // enabled yet" rather than crashing the host worker process.
+    return false;
+  }
+}
+
+export function isSemanticEntityTypeEnabled(entityType: SemanticSourceEntityType): boolean {
+  try {
+    const config = getResolvedAIConfig();
+    return entityType === 'houston-summary'
+      ? config.houstonMemoryEnabled
+      : config.semanticSearchEnabled;
+  } catch {
     return false;
   }
 }

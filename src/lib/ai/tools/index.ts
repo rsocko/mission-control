@@ -4,6 +4,7 @@ import { reasoningTools } from './reasoning-tools';
 import { intakeTools } from './intake-tools';
 import { triageTools } from './triage-tools';
 import { createFinanceMutationTools, financeTools } from './finance-tools';
+import { houstonMemoryTools } from './houston-memory-tools';
 
 export const aiTools = {
   ...taskTools,
@@ -12,6 +13,7 @@ export const aiTools = {
   ...intakeTools,
   ...triageTools,
   ...financeTools,
+  ...houstonMemoryTools,
 };
 
 /**

@@ -916,7 +916,7 @@ describe('PostgresSemanticIndexRepository', () => {
       expect(response.results.map((result) => result.entityId)).toEqual(['near', 'far']);
       expect(response.scan).toMatchObject({
         kind: 'postgres-hnsw',
-        candidateCeiling: 100,
+        candidateCeiling: 200,
         extensionVersion: '0.8.6',
         guaranteedScale: 100_000,
       });

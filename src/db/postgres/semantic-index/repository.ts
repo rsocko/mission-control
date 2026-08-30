@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
   disabledPostgresVectorCapability,
+  POSTGRES_HNSW_MIN_CANDIDATES,
   POSTGRES_HNSW_VALIDATED_SCALE,
   type PostgresVectorCapability,
 } from '@/db/postgres/vector-support';
@@ -83,7 +84,6 @@ import {
 } from '@/lib/semantic-index/validation';
 
 type Client = Pool | PoolClient;
-const ANN_MIN_CANDIDATES = 100;
 const ANN_MAX_CANDIDATES = 1_000;
 const ANN_OVERSAMPLE_FACTOR = 10;
 
@@ -1475,7 +1475,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     const dimensions = identity.dimensions;
     const candidateCeiling = Math.min(
       ANN_MAX_CANDIDATES,
-      Math.max(ANN_MIN_CANDIDATES, limit * ANN_OVERSAMPLE_FACTOR),
+      Math.max(POSTGRES_HNSW_MIN_CANDIDATES, limit * ANN_OVERSAMPLE_FACTOR),
     );
     const metadataFilters = normalizeMetadataFilters(request.metadataFilters);
     const params: unknown[] = [serializeEmbedding(request.queryEmbedding), now];

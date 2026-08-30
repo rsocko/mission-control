@@ -89,6 +89,8 @@ metadata and vectors. For both corpus sizes it:
    the required order-producing ANN path with a full or B-tree-filtered scan;
    two unmeasured warm-up queries precede 20 measured queries so p95 does not collapse
    to a single cold-start sample;
+   candidate generation uses a minimum `ef_search`/rerank budget of 200 to keep
+   100,000-row recall above the required floor;
 4. parses `EXPLAIN (ANALYZE, FORMAT JSON)` and rejects any ANN plan that does not
   contain the named HNSW index or that contains a sequential scan;
 5. seeds explicit `restricted` and non-task (`project`) negative cohorts, queries

@@ -4,6 +4,7 @@ import { runPostgresVectorMigrations } from './migrations';
 
 export const POSTGRES_HNSW_MAX_DIMENSIONS = 4_000;
 export const POSTGRES_HNSW_VALIDATED_SCALE = 100_000;
+export const POSTGRES_HNSW_MIN_CANDIDATES = 200;
 const MINIMUM_PGVECTOR_VERSION = [0, 8, 0] as const;
 
 export type PostgresVectorMode = 'optional' | 'required';

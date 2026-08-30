@@ -8,7 +8,10 @@ import { promisify } from 'node:util';
 import { Pool } from 'pg';
 import { runPostgresMigrations } from '../src/db/postgres/migrations';
 import { PostgresSemanticIndexRepository } from '../src/db/postgres/semantic-index/repository';
-import { initializePostgresVectorSupport } from '../src/db/postgres/vector-support';
+import {
+  initializePostgresVectorSupport,
+  POSTGRES_HNSW_MIN_CANDIDATES,
+} from '../src/db/postgres/vector-support';
 import type {
   SemanticMetadataFilter,
   SemanticQueryRequest,
@@ -664,7 +667,7 @@ async function explainProductionAnn(
       AND a.metadata ->> $7 = ANY($8::text[])
     `;
   }
-  values.push(100);
+  values.push(POSTGRES_HNSW_MIN_CANDIDATES);
   const limitParam = values.length;
   const client = await pool.connect();
   try {
@@ -672,7 +675,7 @@ async function explainProductionAnn(
     await client.query('SET LOCAL jit = off');
     await client.query('SET LOCAL enable_seqscan = off');
     await client.query('SET LOCAL enable_sort = off');
-    await client.query('SET LOCAL hnsw.ef_search = 100');
+    await client.query(`SET LOCAL hnsw.ef_search = ${POSTGRES_HNSW_MIN_CANDIDATES}`);
     await client.query("SET LOCAL hnsw.iterative_scan = 'strict_order'");
     await client.query('SET LOCAL hnsw.max_scan_tuples = 20000');
     const explained = await client.query(`

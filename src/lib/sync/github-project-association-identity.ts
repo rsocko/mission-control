@@ -1,9 +1,11 @@
-import type {
-  ExternalIdentityEvidence,
-  GitHubStableIdentityRuntime,
-  GitHubIdentityResolutionDecision,
-} from '@/lib/external-identities';
+import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
+import type { GitHubIdentityResolutionDecision } from '@/lib/external-identities/stable-identity-types';
 import { digestExternalIdentifier } from '@/lib/external-identities/identifier-digest';
+import type {
+  GitHubProjectDecisionCheck,
+  GitHubProjectIdentityFence,
+} from '@/db/persistence/github-projects';
 
 export interface GitHubProjectAssociationIdentityInput {
   project: { id: string; number: number };
@@ -26,11 +28,11 @@ export interface GitHubProjectAssociationIdentityResult {
   blockedStableProjects: ReadonlySet<number>;
 }
 
-export function resolveGitHubProjectAssociations(
+export async function resolveGitHubProjectAssociations(
   runtime: GitHubStableIdentityRuntime,
   associations: readonly GitHubProjectAssociationIdentityInput[],
   localTasks: readonly GitHubProjectAssociationLocalTask[],
-): GitHubProjectAssociationIdentityResult {
+): Promise<GitHubProjectAssociationIdentityResult> {
   assertUniqueGitHubProjectIdentities(associations);
   const localBySourceId = new Map(localTasks.map((task) => [task.sourceId, task.id]));
   const applicableStableLocalIds = new Set(localTasks.map((task) => task.id));
@@ -58,7 +60,7 @@ export function resolveGitHubProjectAssociations(
       };
     });
   });
-  const decisions = runtime.resolveDeduplicatedBatch(
+  const decisions = await runtime.resolveDeduplicatedBatch(
     'project_association',
     'task',
     candidates,
@@ -139,6 +141,37 @@ export function resolveGitHubProjectIdentityDigest(
     );
   }
   return digest;
+}
+
+/**
+ * Freezes the identity fence values for the project reconciliation port. It
+ * mirrors `GitHubStableIdentityRuntime.assertDecisionsCurrent`'s check-building
+ * so the project adapter can re-verify each stable decision's binding and
+ * current locator revision with SQL *inside* its transaction, replacing the
+ * async identity callback that previously ran outside the write.
+ */
+export function buildGitHubProjectIdentityFence(
+  modeRevision: number,
+  decisions: Iterable<GitHubIdentityResolutionDecision>,
+): GitHubProjectIdentityFence {
+  const checks: GitHubProjectDecisionCheck[] = [];
+  for (const decision of decisions) {
+    if (
+      decision.appliedSource !== 'stable'
+      || !decision.selectedLocalId
+      || !decision.externalEntityId
+      || !decision.bindingRevision
+      || decision.locatorRevision === null
+    ) continue;
+    checks.push({
+      bindingType: decision.surface === 'source_list' ? 'source_list' : 'task',
+      localId: decision.selectedLocalId,
+      externalEntityId: decision.externalEntityId,
+      bindingRevision: decision.bindingRevision,
+      locatorRevision: decision.locatorRevision,
+    });
+  }
+  return { modeRevision, checks };
 }
 
 function collectAssociationEvidence(

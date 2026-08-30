@@ -178,7 +178,7 @@ export async function detectDeletions(
       };
     });
     for (let index = 0; index < candidates.length; index += 500) {
-      const decisions = identityOptions.identityRuntime.applyResolvedBatch(
+      const decisions = await identityOptions.identityRuntime.applyResolvedBatch(
         'deletion',
         candidates.slice(index, index + 500),
       );
@@ -186,7 +186,7 @@ export async function detectDeletions(
         if (decision.localTaskId) stableDecisionByLocalId.set(decision.localTaskId, decision);
       }
     }
-    identityOptions.identityRuntime.assertDecisionsCurrent(
+    await identityOptions.identityRuntime.assertDecisionsCurrent(
       stableDecisionByLocalId.values(),
     );
   }
@@ -491,7 +491,7 @@ async function quarantineOrArchive(
     return false;
   }
 
-  identityRuntime?.assertCurrentMode();
+  await identityRuntime?.assertCurrentMode();
   const archived = await archiveAndDeleteTask(
     task.id,
     removalReason,

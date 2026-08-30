@@ -292,7 +292,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
       createdAt: '2026-08-10T18:01:00.000Z',
       updatedAt: '2026-08-10T18:01:02.000Z',
     }).run();
-    identity.finalizeGitHubWrite({
+    await identity.finalizeGitHubWrite({
       leaseId: `${fixture.leaseId}-retry`,
       token: `${fixture.token}-retry`,
       connectorInstanceId: fixture.connectorId,
@@ -305,7 +305,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
       expiresAt: '2026-08-10T18:02:00.000Z',
       targets: [],
     }, 'succeeded');
-    identity.finishGitHubWriteCycle(retryCycle.id, {
+    await identity.finishGitHubWriteCycle(retryCycle.id, {
       observed: 1,
       applied: 1,
       blocked: 0,

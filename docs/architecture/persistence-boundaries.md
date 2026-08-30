@@ -2,7 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
-last_reviewed: 2026-08-29
+last_reviewed: 2026-08-30
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -157,14 +157,62 @@ Failure logs are linked by the same durable sync-run identity before the
 existing retry or terminal transition.
 
 PostgreSQL now supports the generic list/task push/task pull/notification path.
-GitHub identity and write fencing, dependency snapshots, GitHub hierarchy and
-project association persistence, Microsoft To Do hidden-list state, and
-connector-owned finance or Work To Do bridge state remain Layer 3+
-capabilities. The PostgreSQL execution guard rejects those configurations
-before connector construction or remote dispatch; deletion, restore, and
-retention adapters also reject a mutation when an unmigrated identity,
-dependency, or project relationship is present. SQLite continues to use its
-compatibility implementations for those legacy workflows.
+Layer 3A additionally migrates *normal* GitHub queue execution behind a second
+worker-registered composition, `GitHubWorkerRepositories`
+(`src/db/persistence/github-worker.ts`). It is registered atomically alongside
+`ConnectorExecutionRepositories`, so a backend either has all five members or
+none:
+
+- `identity` — the durable GitHub identity epoch, NodeID batch lookup,
+  binding/locator revision currency checks, linked-source identity
+  resolve/persist, and accepted terminal-inaccessible exception reads;
+- `writeFence` — write-cycle begin/observe/finish, task and source write-lease
+  authorization, dispatch confirmation, preflight verification, finalization,
+  block, and unknown-outcome quarantine;
+- `dependencies` — dependency snapshot/item/edge/candidate persistence, cursor
+  compare-and-set batch apply, retry/backoff, terminal-partial abandonment on an
+  identity-epoch change, bounded terminal snapshot history, idempotent edge
+  writes, targeted reconciliation, and health/resume reads;
+- `hierarchy` — GitHub task population reads, stable binding/locator
+  resolution, accepted terminal-inaccessible read protection, and the fenced
+  parent/depth/metadata apply; and
+- `projects` — sync-managed hub-project upsert and authoritative `task_projects`
+  association reconciliation.
+
+Every fence is frozen as a value and re-checked with SQL *inside* the final
+write transaction: the identity epoch, the write-cycle state, the lease token
+and state, the task push-lease claim (`sync_status='pushing'` plus the
+`last_synced_at` token), the lease-target binding and locator revisions, the
+dependency snapshot cursor, and the hierarchy population digest and identity
+fingerprint. No remote effect happens inside a transaction, and callers pass
+only synchronous pure derivation callbacks into a port method when a value must
+be computed from a row read within that transaction.
+
+Because the composition is atomic, `src/sync-worker.ts` starts dependency
+reconciliation resume and relationship polling only when the whole GitHub
+composition is present and the execution support reports the
+`dependency-reconciliation` workflow as allowed.
+
+Surfaces Layer 3A deliberately does not migrate stay SQLite-only and fail closed
+under PostgreSQL *before* any remote effect: repository repoint, bulk transfer,
+historical task-transfer reconciliation and succession operator workflows,
+identity backfill and status, manual identity-exception mutation, unknown
+write-outcome resolution, interrupted write-cycle recovery, connector-owned
+state, Microsoft To Do hidden-list state, Monarch, reminders, triage, and
+semantic/project automation. The PostgreSQL hierarchy adapter is explicitly
+strict here: if historical task-transfer succession state exists for a
+connector it throws `UnsupportedGitHubWorkerOperationError` rather than
+silently reconciling without the succession filter that SQLite applies. GitHub
+restore and operator recovery of deletion snapshots also remain unsupported on
+PostgreSQL; only identity-fenced deletion candidate quarantine, retention, and
+archival are enabled, and only when every frozen epoch/binding/locator/source
+and task fence still matches.
+
+The PostgreSQL execution guard continues to reject Microsoft To Do hidden-list
+state, connector-owned finance or Work To Do bridge state, and non-GitHub
+connector dependency or project state before connector construction or remote
+dispatch. SQLite continues to use its compatibility implementations for the
+remaining legacy workflows.
 Generic PostgreSQL runs use the backend-selected keyword search repository
 after commit. SQLite-only semantic enrichment, project-rule/planning
 post-processing, the legacy outbound-event outbox, and the legacy notification

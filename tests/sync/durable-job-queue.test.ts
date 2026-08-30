@@ -326,10 +326,10 @@ describe('durable sync job queue', () => {
     const { validateAndFreezeGitHubIdentityContext } = await import(
       '@/lib/sync/github-identity-context'
     );
-    expect(() => validateAndFreezeGitHubIdentityContext('github-1', {
+    await expect(validateAndFreezeGitHubIdentityContext('github-1', {
       connectorInstanceId: 'github-1',
       modeRevision: claimed.identityModeRevision!,
-    })).toThrow('revision 4 is stale');
+    })).rejects.toThrow('revision 4 is stale');
   });
 
   it('cancels a legacy unstamped GitHub queue row instead of stamping it at claim', () => {

@@ -57,14 +57,14 @@ export async function upsertSourceLists(
     lastKnownRemoteName: string | null;
   }> = [];
   const persistedIdsBySourceId = new Map<string, string>();
-  const stableDecisions = new Map<string, ReturnType<
+  const stableDecisions = new Map<string, Awaited<ReturnType<
     GitHubStableIdentityRuntime['resolveBatch']
-  >[number]>();
+  >>[number]>();
 
   if (identityRuntime) {
     for (let index = 0; index < remoteSourceLists.length; index += 500) {
       const chunk = remoteSourceLists.slice(index, index + 500);
-      const decisions = identityRuntime.resolveBatch(
+      const decisions = await identityRuntime.resolveBatch(
         'source_list',
         'source_list',
         chunk.map((remoteSourceList) => {
@@ -113,7 +113,7 @@ export async function upsertSourceLists(
     });
   }
 
-  identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
+  await identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
 
   const stale = existingRows.flatMap((row) => {
     if (discoveredListIds.has(row.id) || preserveStaleLists) return [];
@@ -126,7 +126,7 @@ export async function upsertSourceLists(
 
   // Bound adapter transactions so unusually large tenants remain responsive.
   for (let index = 0; index < pendingWrites.length; index += LIST_INSERT_BATCH_SIZE) {
-    identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
+    await identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
     const finalBatch = index + LIST_INSERT_BATCH_SIZE >= pendingWrites.length;
     await persistence.applyDiscovery({
       connectorId,

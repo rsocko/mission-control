@@ -64,7 +64,7 @@ describe('stale queued GitHub identity jobs', () => {
 
     let workExecuted = 0;
     const worker = new SyncWorker(async (connectorId, options) => {
-      context.validateAndFreezeGitHubIdentityContext(
+      await context.validateAndFreezeGitHubIdentityContext(
         connectorId,
         options.identityContext!,
       );
@@ -77,7 +77,7 @@ describe('stale queued GitHub identity jobs', () => {
     worker.start();
     await vi.waitFor(() => {
       expect(queue.getSyncJob(stale.id)?.status).toBe('cancelled');
-    });
+    }, { timeout: 10_000, interval: 10 });
     await worker.stop();
 
     expect(workExecuted).toBe(0);

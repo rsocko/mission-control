@@ -70,6 +70,7 @@ const mocks = vi.hoisted(() => {
           append: vi.fn(async () => undefined),
         },
         execution: {} as WorkerPersistenceRepositories['execution'],
+        github: {} as WorkerPersistenceRepositories['github'],
       };
       workerRepositories.push(repository);
       return repository;

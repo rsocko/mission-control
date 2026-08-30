@@ -139,3 +139,31 @@ index without a sequential scan, and each corpus passes:
 CI output is the run record. Capture representative 1536-dimension JSON alongside
 the deployment change and repeat it after changing the embedding model, dimensions,
 HNSW parameters, PostgreSQL/pgvector version, host class, or material filter shape.
+
+### Accepted PostgreSQL 17 / pgvector 0.8.6 evidence
+
+CI run `33322414963` validated the pinned image at 1,536 dimensions with two warm-up
+queries and 20 measured queries per corpus:
+
+| Metric | 10,000 entities | 100,000 entities |
+|---|---:|---:|
+| Unfiltered recall@10 | 1.00 | 1.00 |
+| Filtered recall@10 | 0.94 | 0.94 |
+| Vector lookup p50 / p95 | 44.12 / 302.73 ms | 35.50 / 117.02 ms |
+| Repository p50 / p95 | 67.06 / 321.72 ms | 60.19 / 137.08 ms |
+| Backfill | 20.45 s | 201.60 s |
+| HNSW build | 9.38 s | 38.40 s |
+| Production table storage | 216,547,328 bytes | 2,169,856,000 bytes |
+| Identity HNSW index | 40,968,192 bytes | 409,608,192 bytes |
+| PostgreSQL container memory delta | 685,518,848 bytes | 3,243,233,280 bytes |
+| Repository single-vector update | 10.07 ms | 11.06 ms |
+| 99-vector batch update | 637.32 ms | 614.20 ms |
+| 100 deletes plus 100 expirations | 219.32 ms | 232.77 ms |
+
+Every explained query used the matching identity-specific HNSW index with no
+sequential scan. Both corpora contained restricted and non-task negative cohorts and
+returned zero unauthorized results. The 100,000-entity run completed a full custom
+format backup in 237.81 seconds and fresh-database restore in 256.25 seconds, with
+pgvector installed before restore, matching row counts and checksums, a restored HNSW
+plan and repository query, and idempotent vector migration initialization. Both
+profiles passed every threshold declared above.

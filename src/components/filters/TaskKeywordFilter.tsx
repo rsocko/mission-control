@@ -906,12 +906,12 @@ export function TaskKeywordFilter({
               <X size={14} />
             </button>
           )}
-          {hasContent && onSaveView && (
+          {onSaveView && (
             <button
               onClick={(e) => { e.stopPropagation(); onSaveView(); }}
               className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              title="Save as view"
-              aria-label="Save current filters as a view"
+              title="Save current view"
+              aria-label="Save current view"
             >
               <Save size={13} />
             </button>

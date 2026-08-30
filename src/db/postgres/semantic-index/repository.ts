@@ -980,6 +980,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     entityType: SemanticEntityType;
     entityId: string;
     now: string;
+    sourceUpdatedAt?: string;
   }): Promise<SemanticDocumentDeleteResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticDocumentDeleteResult> => {
       const [existing] = await query<{ id: string; deletedAt: string | null }>(
@@ -1002,10 +1003,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         `
           UPDATE semantic_documents
           SET deleted_at = $1, updated_at = $1,
-              source_updated_at = GREATEST(source_updated_at, $1::text)
+              source_updated_at = GREATEST(source_updated_at, $3::text)
           WHERE id = $2
         `,
-        [input.now, existing.id],
+        [input.now, existing.id, input.sourceUpdatedAt ?? input.now],
       );
       await this.adjustCounts(client, input.indexId, -1, -removedVectors, input.now);
       return { status: 'deleted', removedVectors };

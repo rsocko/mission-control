@@ -118,12 +118,19 @@ export {
 
 export {
   ALERT_PROJECTION_VERSION,
+  PROJECT_PROJECTION_VERSION,
   SEMANTIC_PROJECTION_VERSION,
+  SEMANTIC_EMBEDDING_FIELD_WEIGHTS,
+  TAG_PROJECTION_VERSION,
   TASK_PROJECTION_VERSION,
+  TRIAGE_ITEM_PROJECTION_VERSION,
   buildEmbeddingText,
   projectAlert,
+  projectProject,
   projectSource,
+  projectTag,
   projectTask,
+  projectTriageItem,
   projectionVersionFor,
   type SemanticProjectionOptions,
   type SemanticSensitivityResolver,
@@ -139,6 +146,7 @@ export {
   latestTimestamp,
   normalizeBlock,
   normalizeBodyField,
+  normalizeBoundedBodyField,
   normalizeInline,
   normalizeKeywords,
   normalizeMetadata,
@@ -155,12 +163,15 @@ export {
   SEMANTIC_SOURCE_ENTITY_TYPES,
   isSemanticSourceEntityType,
   type SemanticAlertSource,
+  type SemanticProjectSource,
   type SemanticSourceEntityType,
   type SemanticSourceIdPage,
   type SemanticSourcePort,
   type SemanticSourceRecord,
   type SemanticSourceRecordPage,
   type SemanticTaskSource,
+  type SemanticTagSource,
+  type SemanticTriageItemSource,
 } from './source/contracts';
 
 export {

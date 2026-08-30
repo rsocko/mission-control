@@ -5,6 +5,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { evaluateRulesForTasks } from '@/lib/rules';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
 
 class TagUnifyInputError extends Error {}
 
@@ -233,19 +234,28 @@ export async function POST(request: Request) {
       'Tags unified successfully',
     );
 
+    let affectedTaskIds: string[] = [];
     try {
-      const affectedTaskIds = await db.select({ taskId: taskTags.taskId })
+      const affectedTasks = await db.select({ taskId: taskTags.taskId })
         .from(taskTags)
         .where(eq(taskTags.tagId, targetTagId));
-      await evaluateRulesForTasks([
+      affectedTaskIds = [
         ...new Set([
-          ...affectedTaskIds.map((row) => row.taskId),
+          ...affectedTasks.map((row) => row.taskId),
           ...detachedTaskIds,
         ]),
+      ];
+      await evaluateRulesForTasks([
+        ...affectedTaskIds,
       ]);
     } catch (error) {
       logger.error({ error, targetTagId }, 'Project auto-include evaluation failed after tag unification');
     }
+    await Promise.all([
+      ...[...new Set([targetTagId, ...tagsToUnify])]
+        .map((id) => publishSemanticEntityUpsert('tag', id)),
+      ...affectedTaskIds.map((id) => publishSemanticEntityUpsert('task', id)),
+    ]);
 
     return NextResponse.json({
       success: true,

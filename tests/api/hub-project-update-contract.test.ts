@@ -1,16 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { setUpdate, updateWhere, reevaluateProject } = vi.hoisted(() => ({
+const { setUpdate, updateWhere, selectWhere, reevaluateProject } = vi.hoisted(() => ({
   setUpdate: vi.fn(),
   updateWhere: vi.fn(),
+  selectWhere: vi.fn(),
   reevaluateProject: vi.fn(),
 }));
 
 const update = vi.fn(() => ({ set: setUpdate }));
+const select = vi.fn(() => ({
+  from: vi.fn(() => ({ where: selectWhere })),
+}));
 
 vi.mock('@/db', () => ({
   default: {
     update,
+    select,
   },
   runTransaction: vi.fn(),
 }));
@@ -57,6 +62,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   setUpdate.mockReturnValue({ where: updateWhere });
   updateWhere.mockResolvedValue(undefined);
+  selectWhere.mockResolvedValue([]);
 });
 
 async function callCollectionPatch(body: unknown) {

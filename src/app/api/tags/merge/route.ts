@@ -5,6 +5,10 @@ import { eq, inArray } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { evaluateRulesForTasks } from '@/lib/rules';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication';
 
 class TagMergeInputError extends Error {}
 
@@ -161,14 +165,21 @@ export async function POST(request: Request) {
       'Tags merged successfully',
     );
 
+    let affectedTaskIds: string[] = [];
     try {
-      const affectedTaskIds = await db.select({ taskId: taskTags.taskId })
+      const affectedTasks = await db.select({ taskId: taskTags.taskId })
         .from(taskTags)
         .where(eq(taskTags.tagId, targetTagId));
-      await evaluateRulesForTasks(affectedTaskIds.map((row) => row.taskId));
+      affectedTaskIds = affectedTasks.map((row) => row.taskId);
+      await evaluateRulesForTasks(affectedTaskIds);
     } catch (error) {
       logger.error({ error, targetTagId }, 'Project auto-include evaluation failed after tag merge');
     }
+    await Promise.all([
+      publishSemanticEntityUpsert('tag', targetTagId),
+      ...tagsToRemove.map((id) => publishSemanticEntityDelete('tag', id)),
+      ...affectedTaskIds.map((id) => publishSemanticEntityUpsert('task', id)),
+    ]);
 
     return NextResponse.json({
       success: true,

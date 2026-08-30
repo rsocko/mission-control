@@ -24,6 +24,7 @@ import {
   mergeScoutMetadata,
   type ScoutIngestResult,
 } from '@/lib/connectors/scout/ingest-contract';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
 
 // ─── Auth ───────────────────────────────────────────────────────────────────
 
@@ -438,6 +439,7 @@ async function routeToTriage(
     await db.update(triageItems)
       .set(triageValues)
       .where(eq(triageItems.id, existing.id));
+    await publishSemanticEntityUpsert('triage-item', existing.id);
     return createScoutIngestResult({
       sourceId: item.sourceId,
       mcTaskId: null,
@@ -481,6 +483,7 @@ async function routeToTriage(
     });
   }
 
+  await publishSemanticEntityUpsert('triage-item', stored?.id || id);
   return createScoutIngestResult({
     sourceId: item.sourceId,
     mcTaskId: null,

@@ -17,6 +17,7 @@ import { evaluateRules } from './suggestion-engine';
 import { parseDescriptionLinks } from './importers/youtube-importer';
 import { detectContentType as detectContentTypeFromRegistry } from './content-type-registry';
 import { ensureSeedData, mapRow, safeJsonObject } from './shared';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
 
 export interface TriageCaptureInput {
   url: string;
@@ -277,6 +278,7 @@ export async function createTriageCapture(input: TriageCaptureInput) {
   });
 
   const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
+  await publishSemanticEntityUpsert('triage-item', id);
 
   // Fire-and-forget embed resolution (design: don't block capture)
   resolveEmbedAsync(id, input.url);
@@ -342,6 +344,7 @@ export async function createTriageImageCapture(input: TriageImageCaptureInput) {
   });
 
   const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
+  await publishSemanticEntityUpsert('triage-item', id);
   return mapRow(created);
 }
 
@@ -410,6 +413,7 @@ export async function createTriageTextCapture(input: TriageTextCaptureInput) {
   });
 
   const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
+  await publishSemanticEntityUpsert('triage-item', id);
   return mapRow(created);
 }
 
@@ -617,6 +621,9 @@ export async function ingestTriageImports(
         ...(conflict ? { item: mapRow(conflict) } : {}),
       };
     }
+    await Promise.all(
+      createdRows.map((row) => publishSemanticEntityUpsert('triage-item', row.id)),
+    );
   }
 
   for (const [index, duplicate] of duplicatesWithinBatch) {

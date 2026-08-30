@@ -914,6 +914,7 @@ export interface SemanticIndexRepository {
     entityType: SemanticEntityType;
     entityId: string;
     now: string;
+    sourceUpdatedAt?: string;
   }): Promise<SemanticDocumentDeleteResult>;
   /** Tombstones documents past `retainUntil` and removes their vectors. */
   expireDocuments(input: { now: string; indexId?: string; limit?: number }): Promise<{

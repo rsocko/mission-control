@@ -18,6 +18,10 @@ import {
 } from '@/lib/projects/hub-project-update';
 import { normalizeProjectJsonCollections } from '@/lib/projects/normalize-project';
 import { reevaluateProject } from '@/lib/rules';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication';
 
 /**
  * GET /api/hub-projects/[id] — Get a single hub project
@@ -65,6 +69,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         dbLogger.error({ err: error, projectId: id }, 'Project rules saved but auto-include evaluation failed');
       }
     }
+    const affectedTasks = await db.select({ taskId: taskProjects.taskId })
+      .from(taskProjects)
+      .where(eq(taskProjects.projectId, id));
+    await Promise.all([
+      publishSemanticEntityUpsert('project', id),
+      ...affectedTasks.map(({ taskId }) => publishSemanticEntityUpsert('task', taskId)),
+    ]);
     return NextResponse.json({ success: true, evaluation, evaluationFailed });
   } catch (error) {
     return ApiErrors.internal('Failed to update project', error);
@@ -77,9 +88,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    let affectedTaskIds: string[] = [];
 
     try {
       runTransaction((tx) => {
+        affectedTaskIds = tx.select({ taskId: taskProjects.taskId })
+          .from(taskProjects)
+          .where(eq(taskProjects.projectId, id))
+          .all()
+          .map(({ taskId }) => taskId);
         const phases = tx.select({ id: projectPhases.id }).from(projectPhases).where(eq(projectPhases.projectId, id)).all();
         if (phases.length > 0) {
           const phaseIds = phases.map((p) => p.id);
@@ -100,6 +117,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       throw err;
     }
 
+    await Promise.all([
+      publishSemanticEntityDelete('project', id),
+      ...affectedTaskIds.map((taskId) => publishSemanticEntityUpsert('task', taskId)),
+    ]);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete project', error);

@@ -925,6 +925,7 @@ describe('PostgresSemanticIndexRepository', () => {
       expect(ann).toContain("a.index_id = 'idx-1'");
       expect(ann).toContain('LOWER(a.metadata ->>');
       expect(ann).toContain('v.document_version = d.version');
+      expect(mock.find(/SET LOCAL enable_seqscan/)).toContain('off');
       expect(mock.find(/SET LOCAL hnsw.iterative_scan/)).toContain('strict_order');
     });
 

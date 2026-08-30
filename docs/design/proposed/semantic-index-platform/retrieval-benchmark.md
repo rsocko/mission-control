@@ -84,7 +84,9 @@ metadata and vectors. For both corpus sizes it:
    index, index-only, and bitmap scans disabled; HNSW candidate generation remains
    the production `halfvec` expression followed by full-precision repository rerank;
 3. runs unfiltered and selective scope/category/expiry ANN queries through
-   `PostgresSemanticIndexRepository.queryVectors`;
+   `PostgresSemanticIndexRepository.queryVectors`, whose indexed transaction disables
+   sequential scans locally so PostgreSQL cannot silently replace the required ANN
+   path with a full table scan;
 4. parses `EXPLAIN (ANALYZE, FORMAT JSON)` and rejects any ANN plan that does not
   contain the named HNSW index or that contains a sequential scan;
 5. seeds explicit `restricted` and non-task (`project`) negative cohorts, queries

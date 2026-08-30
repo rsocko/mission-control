@@ -6,6 +6,7 @@ category: design
 related:
   - "../graph-workbench.md"
   - "./projections.md"
+  - "./retrieval-benchmark.md"
   - "../../graph-visualization-system.md"
   - "../../active/search-ux-redesign.md"
   - "https://github.com/rsocko/mission-control/issues/1668"

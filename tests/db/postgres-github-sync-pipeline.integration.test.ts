@@ -78,12 +78,13 @@ function evidence(
 function sourceList(
   connectorId: string,
   repositoryEvidence: ExternalIdentityEvidence['entity'],
+  sourceId = 'synthetic-owner/synthetic-repo',
 ): SourceList {
   return {
-    id: `${connectorId}:repo:synthetic-owner/synthetic-repo`,
+    id: `${connectorId}:repo:${sourceId}`,
     connectorInstanceId: connectorId,
-    sourceId: 'synthetic-owner/synthetic-repo',
-    name: 'synthetic-owner/synthetic-repo',
+    sourceId,
+    name: sourceId,
     type: 'repo',
     taskCount: 1,
     lastSyncedAt: NOW,
@@ -381,6 +382,85 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
       sourceId: 'synthetic-owner/synthetic-repo:51',
       state: 'collision',
     }]);
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  it('keeps a persisted source-list collision fail-closed on retry', async () => {
+    const connectorId = `gh-pipeline-${randomUUID()}`;
+    const repositoryStableId = `R_kgSYNTHETIC_${randomUUID()}`;
+    stableIds.add(repositoryStableId);
+    await seedConnector(connectorId);
+    const repositoryEvidence = evidence('repository', repositoryStableId);
+    const sourceLists = [
+      sourceList(connectorId, repositoryEvidence, 'synthetic-owner/synthetic-repo'),
+      sourceList(connectorId, repositoryEvidence, 'synthetic-owner/synthetic-alias'),
+    ];
+    await pool.query(
+      `
+        INSERT INTO source_lists (id, connector_instance_id, source_id, name, type)
+        VALUES
+          ($1, $3, $2, $2, 'repo'),
+          ($4, $3, $5, $5, 'repo')
+      `,
+      [
+        sourceLists[0].id,
+        sourceLists[0].sourceId,
+        connectorId,
+        sourceLists[1].id,
+        sourceLists[1].sourceId,
+      ],
+    );
+    const { persistGitHubPrimaryIdentityBatch } = await import(
+      '@/lib/external-identities/primary-identity'
+    );
+    await persistGitHubPrimaryIdentityBatch(
+      sourceLists.map((list) => ({
+        target: {
+          connectorInstanceId: connectorId,
+          bindingType: 'source_list' as const,
+          localId: list.id,
+          legacyIdentity: list.sourceId,
+        },
+        evidence: { entity: repositoryEvidence },
+      })),
+      {
+        connectorInstanceId: connectorId,
+        effectiveMode: 'stable',
+        modeRevision: 1,
+        capturedAt: NOW,
+      },
+    );
+    const inertConnector = connector({
+      connectorId,
+      sourceLists,
+      tasks: [],
+    });
+
+    const persistedCollisions = await pool.query<{ state: string }>(
+      `
+        SELECT state
+        FROM github_identity_collisions
+        WHERE connector_instance_id = $1
+          AND binding_type = 'source_list'
+      `,
+      [connectorId],
+    );
+    const first = await runPipeline(connectorId, inertConnector);
+    const retry = await runPipeline(connectorId, inertConnector);
+
+    expect(persistedCollisions.rows).toEqual([{ state: 'open' }]);
+    expect(first.success).toBe(false);
+    expect(retry.success).toBe(false);
+    const syncRuns = await pool.query<{ success: boolean }>(
+      `
+        SELECT success
+        FROM sync_log
+        WHERE connector_id = $1
+        ORDER BY synced_at
+      `,
+      [connectorId],
+    );
+    expect(syncRuns.rows).toEqual([{ success: false }, { success: false }]);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 

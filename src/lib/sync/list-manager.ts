@@ -89,7 +89,10 @@ export async function upsertSourceLists(
     const stableDecision = identityRuntime
       ? stableDecisions.get(remoteSourceList.sourceId)
       : undefined;
-    if (identityRuntime && stableDecision?.appliedSource !== 'stable') continue;
+    if (identityRuntime && stableDecision?.appliedSource !== 'stable') {
+      identityRuntime.markBlocked('source_list_identity_resolution_blocked');
+      continue;
+    }
     const listId = remoteSourceList.id || `${connectorId}:${remoteSourceList.sourceId}`;
     const existing = identityRuntime
       ? (stableDecision?.selectedLocalId

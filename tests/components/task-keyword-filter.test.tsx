@@ -34,6 +34,15 @@ describe('TaskKeywordFilter applied sidebar filters', () => {
     vi.useRealTimers();
   });
 
+  it('allows the unfiltered All Sources view to be saved', () => {
+    const onSaveView = vi.fn();
+
+    render(<TaskKeywordFilter {...defaultProps} onSaveView={onSaveView} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Save current view' }));
+
+    expect(onSaveView).toHaveBeenCalledOnce();
+  });
+
   it('renders sidebar filters in the unified input and removes dependent source filters', () => {
     useDashboardViewStore.setState({
       sourceFilter: 'github-issues',

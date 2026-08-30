@@ -7,13 +7,13 @@ import type {
   SyncResult,
 } from '@/types';
 import {
-  getGitHubIdentityModeSnapshot,
   GitHubStableIdentityRuntime,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/stable-identity-runtime';
+import { getGitHubIdentityRepository } from '@/lib/external-identities/worker-persistence';
 import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/stable-identity-types';
 import { randomUUID } from 'crypto';
 import { emitEvent } from '@/lib/events';
 import { syncEventBus } from './events';
@@ -61,9 +61,15 @@ import type { GitHubHierarchyObservation } from './github-hierarchy-reconciliati
 import {
   assertCompleteGitHubProjectAssociations,
   assertUniqueGitHubProjectIdentities,
+  buildGitHubProjectIdentityFence,
   resolveGitHubProjectAssociations,
   resolveGitHubProjectIdentityDigest,
 } from './github-project-association-identity';
+import { getGitHubProjectRepository } from './github-worker-persistence';
+import type {
+  GitHubProjectIdentityFence,
+  GitHubProjectReconciliation,
+} from '@/db/persistence/github-projects';
 import { evaluateRulesForTasks } from '@/lib/rules';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
 import {
@@ -376,7 +382,7 @@ export class SyncExecutionPipeline {
     if (this.hydratePromise) await this.hydratePromise;
     throwIfSyncAborted(options?.signal);
     const queuedIdentitySnapshot = options?.identityContext
-      ? validateAndFreezeGitHubIdentityContext(connectorId, options.identityContext)
+      ? await validateAndFreezeGitHubIdentityContext(connectorId, options.identityContext)
       : undefined;
 
     if (this.syncInProgress.has(connectorId)) {
@@ -426,7 +432,8 @@ export class SyncExecutionPipeline {
       const executionPersistence = (await getWorkerPersistenceRepositories()).execution;
       executionPersistence.support.assertConnectorSupported(connector);
       if (connector.type === 'github-issues') {
-        identitySnapshot ??= getGitHubIdentityModeSnapshot(connectorId);
+        identitySnapshot ??= await (await getGitHubIdentityRepository())
+          .getModeSnapshot(connectorId);
         identityRuntime = new GitHubStableIdentityRuntime({
           connectorInstanceId: connectorId,
           jobId: options?.jobId,
@@ -673,12 +680,12 @@ export class SyncExecutionPipeline {
           assertUniqueGitHubProjectIdentities(associations);
           assertCompleteGitHubProjectAssociations(associations);
           let stableProjectIdentity:
-            | ReturnType<typeof resolveGitHubProjectAssociations>
+            | Awaited<ReturnType<typeof resolveGitHubProjectAssociations>>
             | undefined;
           if (identityRuntime) {
             const localRows = await executionPersistence.support
               .listConnectorTaskIdentities(connectorId);
-            stableProjectIdentity = resolveGitHubProjectAssociations(
+            stableProjectIdentity = await resolveGitHubProjectAssociations(
               identityRuntime,
               associations,
               localRows,
@@ -691,33 +698,28 @@ export class SyncExecutionPipeline {
           if (identityRuntime && !stableProjectContext) {
             throw new Error('Stable GitHub project association routing is unavailable');
           }
-          const projectIdentityRuntime = identityRuntime;
-          const assertProjectIdentityCurrent = projectIdentityRuntime
-            ? () => projectIdentityRuntime.assertDecisionsCurrent(
+          const identityFence = identityRuntime
+            ? buildGitHubProjectIdentityFence(
+                identityRuntime.modeSnapshot.modeRevision,
                 stableProjectIdentity?.decisions ?? [],
               )
             : undefined;
           await withSyncPhaseTiming(
             connectorId,
             'project-reconciliation',
-            () => {
-              identityRuntime?.assertDecisionsCurrent(
-                stableProjectIdentity?.decisions ?? [],
-              );
-              return this.syncGitHubProjectsAsHubProjects(
-                connectorId,
-                associations,
-                stableProjectContext
-                  ? {
-                      stableProjectTaskIds:
-                        stableProjectContext.routing.stableProjectTaskIds,
-                      blockedStableProjects:
-                        stableProjectContext.routing.blockedStableProjects,
-                    }
-                  : undefined,
-                assertProjectIdentityCurrent,
-              );
-            },
+            async () => this.syncGitHubProjectsAsHubProjects(
+              connectorId,
+              associations,
+              stableProjectContext
+                ? {
+                    stableProjectTaskIds:
+                      stableProjectContext.routing.stableProjectTaskIds,
+                    blockedStableProjects:
+                      stableProjectContext.routing.blockedStableProjects,
+                  }
+                : undefined,
+              identityFence,
+            ),
           );
         }
       } catch (err) {
@@ -1481,13 +1483,14 @@ export class SyncExecutionPipeline {
         shortDescription: string | null;
         url: string;
       };
+      membershipState?: 'complete' | 'partial' | 'inaccessible';
       taskSourceIds: string[];
     }>,
     stableIdentity?: {
       stableProjectTaskIds: ReadonlyMap<number, ReadonlySet<string>>;
       blockedStableProjects: ReadonlySet<number>;
     },
-    assertIdentityCurrent?: () => void,
+    identityFence?: GitHubProjectIdentityFence,
   ): Promise<void> {
     if (associations.length === 0) {
       syncLogger.debug({ connectorId }, 'No GitHub Project associations to sync');
@@ -1495,14 +1498,38 @@ export class SyncExecutionPipeline {
     }
 
     syncLogger.info({ connectorId, projectCount: associations.length }, 'Syncing GitHub Projects as Hub Projects');
-    const support = (await getWorkerPersistenceRepositories()).execution.support;
-    await support.syncLegacyGitHubProjects({
-      connectorId,
-      associations,
-      stableProjectTaskIds: stableIdentity?.stableProjectTaskIds,
-      blockedStableProjects: stableIdentity?.blockedStableProjects,
-      resolveIdentityDigest: resolveGitHubProjectIdentityDigest,
-      assertIdentityCurrent,
+    const useStableRouting = stableIdentity !== undefined;
+    const projects: GitHubProjectReconciliation[] = [];
+    for (const association of associations) {
+      const { project } = association;
+      // Blocked stable project numbers must not have their associations rewritten.
+      if (stableIdentity?.blockedStableProjects.has(project.number)) continue;
+      const name = project.title.replace(
+        /^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]+\s*/u,
+        '',
+      );
+      const stableTaskIds = stableIdentity?.stableProjectTaskIds.get(project.number);
+      projects.push({
+        number: project.number,
+        name,
+        description: project.shortDescription ?? null,
+        url: project.url,
+        authoritative: (association.membershipState ?? 'complete') === 'complete',
+        taskSourceIds: association.taskSourceIds,
+        stableTaskIds: stableTaskIds ? [...stableTaskIds] : undefined,
+        useStableRouting,
+        resolveIdentityDigest: (existingDigest) =>
+          resolveGitHubProjectIdentityDigest(project, existingDigest),
+      });
+    }
+    if (projects.length === 0) return;
+
+    const repository = await getGitHubProjectRepository();
+    await repository.reconcileSyncManagedProjects({
+      connectorInstanceId: connectorId,
+      now: new Date().toISOString(),
+      identityFence,
+      projects,
     });
   }
 
@@ -2004,7 +2031,8 @@ export class SyncExecutionPipeline {
             || connector.dependencySnapshotStrategy !== 'task-stream'
             || !connector.capabilities.dependencyRead
           ) return;
-          const identitySnapshot = getGitHubIdentityModeSnapshot(config.id);
+          const identitySnapshot = await (await getGitHubIdentityRepository())
+            .getModeSnapshot(config.id);
           const generation = await beginDependencySnapshotGeneration(
             config.id,
             identitySnapshot,

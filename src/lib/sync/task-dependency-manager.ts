@@ -1,50 +1,23 @@
 import 'server-only';
 
 import { randomUUID } from 'crypto';
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  gte,
-  inArray,
-  isNull,
-  lt,
-  ne,
-  notInArray,
-  sql,
-} from 'drizzle-orm';
-import db, { runTransaction } from '@/db';
-import {
-  dependencyReconciliationEdges,
-  dependencyReconciliationItems,
-  dependencyReconciliationSnapshots,
-  dependencyReconciliationCandidates,
-  connectorConfigs,
-  taskDependencies,
-  tasks,
-} from '@/db/schema';
 import type { IConnector } from '@/lib/connectors';
 import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
-import {
-  GITHUB_IDENTITY_MODE,
-  getGitHubIdentityModeSnapshot,
-  getGitHubIdentityModeSnapshotInTransaction,
-  GitHubStableIdentityRuntime,
-} from '@/lib/external-identities';
+import { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
+import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityResolutionDecision,
-  ExternalIdentityTransaction,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/stable-identity-types';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import { getGitHubIdentityRepository } from '@/lib/external-identities/worker-persistence';
 import { syncLogger } from '@/lib/logger';
 import {
   runResumableReconciliation,
   type ReconciliationFailure,
 } from '@/lib/reconciliation';
-import { executeFencedGitHubTaskMutation } from '@/lib/external-identities';
+import { executeFencedGitHubTaskMutation } from '@/lib/external-identities/github-write-fence';
 import { isConnectorNativeTask } from './github-native-task';
 import type {
   SourceTaskDependencyGenerationWriter,
@@ -52,6 +25,37 @@ import type {
   SourceTaskDependencySnapshot,
 } from '@/types';
 import { fetchDependencySnapshot } from './dependency-snapshot';
+import type {
+
+  DependencySnapshotEdgeRecord,
+  DependencySnapshotFence,
+  DependencySnapshotInsert,
+  DependencySnapshotItemInsert,
+  DependencySnapshotRecord,
+  TaskDependencyInsert,
+} from '@/db/persistence/github-dependencies';
+import { getGitHubDependencyRepository } from './github-worker-persistence';
+
+/**
+ * Resolves the frozen GitHub identity epoch for a connector through the
+ * backend-neutral identity port. Mirrors the legacy synchronous
+ * `getGitHubIdentityModeSnapshot(connectorInstanceId)`.
+ */
+async function getModeSnapshot(
+  connectorInstanceId: string,
+): Promise<GitHubIdentityModeSnapshot> {
+  const identity = await getGitHubIdentityRepository();
+  return identity.getModeSnapshot(connectorInstanceId, new Date().toISOString());
+}
+
+function snapshotFence(snapshot: DependencySnapshotRecord): DependencySnapshotFence {
+  return {
+    id: snapshot.id,
+    connectorInstanceId: snapshot.connectorInstanceId,
+    identityMode: snapshot.identityMode,
+    identityModeRevision: snapshot.identityModeRevision,
+  };
+}
 
 interface DependencyTask {
   id: string;
@@ -181,7 +185,7 @@ export interface DependencyReconciliationResumeCandidate {
   nextAttemptAt: string | null;
 }
 
-type DependencySnapshot = typeof dependencyReconciliationSnapshots.$inferSelect;
+type DependencySnapshot = DependencySnapshotRecord;
 interface DependencyReconciliationBatch {
   sourceIds: string[];
   usesStagedGeneration: boolean;
@@ -224,71 +228,6 @@ function dependencyIdentityContextMatches(
   return current.modeRevision === frozen.identityModeRevision;
 }
 
-function validateDependencySnapshotMutationInTransaction(
-    tx: ExternalIdentityTransaction,
-    snapshot: Pick<
-      DependencySnapshot,
-      'id' | 'connectorInstanceId' | 'identityMode' | 'identityModeRevision'
-    >,
-    options: {
-      phase?: DependencySnapshot['phase'];
-      cursor?: number;
-      now?: string;
-    } = {},
-  ): boolean {
-    const persisted = tx.select({
-      status: dependencyReconciliationSnapshots.status,
-      phase: dependencyReconciliationSnapshots.phase,
-      cursor: dependencyReconciliationSnapshots.cursor,
-      identityMode: dependencyReconciliationSnapshots.identityMode,
-      identityModeRevision: dependencyReconciliationSnapshots.identityModeRevision,
-    }).from(dependencyReconciliationSnapshots)
-      .where(eq(dependencyReconciliationSnapshots.id, snapshot.id))
-      .limit(1)
-      .get();
-    if (
-      !persisted
-      || persisted.identityMode !== snapshot.identityMode
-      || persisted.identityModeRevision !== snapshot.identityModeRevision
-    ) {
-      return false;
-    }
-    const current = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      snapshot.connectorInstanceId,
-    );
-    if (!dependencyIdentityContextMatches(snapshot, current)) {
-      const now = options.now ?? new Date().toISOString();
-      tx.update(dependencyReconciliationSnapshots).set({
-        status: 'partial',
-        phase: 'completed',
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason: 'dependency_identity_context_changed',
-        completedAt: now,
-        failedAt: now,
-        updatedAt: now,
-        nextAttemptAt: null,
-        failureReason:
-          `identity context changed from ${snapshot.identityMode}:${snapshot.identityModeRevision}`
-          + ` to ${current.effectiveMode}:${current.modeRevision}`,
-      }).where(and(
-        eq(dependencyReconciliationSnapshots.id, snapshot.id),
-        eq(
-          dependencyReconciliationSnapshots.identityMode,
-          snapshot.identityMode,
-        ),
-        eq(
-          dependencyReconciliationSnapshots.identityModeRevision,
-          snapshot.identityModeRevision,
-        ),
-        inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-      )).run();
-      return false;
-    }
-    return (options.phase === undefined || persisted.phase === options.phase)
-      && (options.cursor === undefined || persisted.cursor === options.cursor);
-}
-
 async function withConnectorDependencyLock<T>(
   connectorInstanceId: string,
   operation: () => Promise<T>,
@@ -326,11 +265,13 @@ function dependencyError(error: unknown): string {
 }
 
 async function markDependencyFailed(id: string, action: 'create' | 'delete', error: unknown) {
-  await db.update(taskDependencies).set({
+  const dependencies = await getGitHubDependencyRepository();
+  await dependencies.updateDependencySync({
+    id,
     syncStatus: 'failed',
     syncAction: action,
     syncError: dependencyError(error),
-  }).where(eq(taskDependencies.id, id));
+  });
 }
 
 export async function synchronizeCreatedTaskDependency(
@@ -350,9 +291,8 @@ async function synchronizeCreatedTaskDependencyUnlocked(
   blocker: DependencyTask,
   blocked: DependencyTask,
 ): Promise<DependencyRecord> {
-  const [currentDependency] = await db.select().from(taskDependencies).where(
-    eq(taskDependencies.id, dependency.id),
-  ) as DependencyRecord[];
+  const dependencies = await getGitHubDependencyRepository();
+  const currentDependency = await dependencies.getDependencyById(dependency.id);
   if (!currentDependency) return dependency;
 
   let connector: IConnector | null;
@@ -362,12 +302,13 @@ async function synchronizeCreatedTaskDependencyUnlocked(
     connector = await getOrInitializeConnector(blocker.connectorInstanceId);
     if (!connector?.addTaskDependency) return dependency;
   } catch (error) {
-    await db.update(taskDependencies).set({
+    await dependencies.updateDependencySync({
+      id: dependency.id,
       connectorInstanceId: blocker.connectorInstanceId,
       syncStatus: 'failed',
       syncAction: 'create',
       syncError: dependencyError(error),
-    }).where(eq(taskDependencies.id, dependency.id));
+    });
     return {
       ...dependency,
       connectorInstanceId: blocker.connectorInstanceId,
@@ -377,12 +318,13 @@ async function synchronizeCreatedTaskDependencyUnlocked(
     };
   }
 
-  await db.update(taskDependencies).set({
+  await dependencies.updateDependencySync({
+    id: dependency.id,
     connectorInstanceId: blocker.connectorInstanceId,
     syncStatus: 'pending',
     syncAction: 'create',
     syncError: null,
-  }).where(eq(taskDependencies.id, dependency.id));
+  });
 
   try {
     await writeDependency(connector, blocker, blocked, 'create');
@@ -395,12 +337,13 @@ async function synchronizeCreatedTaskDependencyUnlocked(
       syncError: null,
       lastSyncedAt,
     };
-    await db.update(taskDependencies).set({
+    await dependencies.updateDependencySync({
+      id: dependency.id,
       syncStatus: synced.syncStatus,
       syncAction: synced.syncAction,
       syncError: synced.syncError,
       lastSyncedAt,
-    }).where(eq(taskDependencies.id, dependency.id));
+    });
     return synced;
   } catch (error) {
     await markDependencyFailed(dependency.id, 'create', error);
@@ -420,14 +363,13 @@ export async function removeTaskDependencyFromSource(
   blocked: DependencyTask,
 ): Promise<{ deleted: boolean; error?: string }> {
   const connectorInstanceId = dependency.connectorInstanceId;
+  const dependencies = await getGitHubDependencyRepository();
   if (!connectorInstanceId || dependency.type !== 'blocks') {
-    await db.delete(taskDependencies).where(eq(taskDependencies.id, dependency.id));
+    await dependencies.deleteDependencyById(dependency.id);
     return { deleted: true };
   }
   return withConnectorDependencyLock(connectorInstanceId, async () => {
-    const [currentDependency] = await db.select().from(taskDependencies).where(
-      eq(taskDependencies.id, dependency.id),
-    ) as DependencyRecord[];
+    const currentDependency = await dependencies.getDependencyById(dependency.id);
     if (!currentDependency) return { deleted: true };
     return removeTaskDependencyFromSourceUnlocked(
       { ...currentDependency, connectorInstanceId },
@@ -446,6 +388,7 @@ async function removeTaskDependencyFromSourceUnlocked(
   if (!connectorInstanceId) {
     throw new Error('Source-backed dependency is missing its connector instance');
   }
+  const dependencies = await getGitHubDependencyRepository();
   let connector: IConnector | null = null;
   try {
     const capabilities = await getConnectorCapabilities(connectorInstanceId);
@@ -462,15 +405,16 @@ async function removeTaskDependencyFromSourceUnlocked(
     return { deleted: false, error };
   }
 
-  await db.update(taskDependencies).set({
+  await dependencies.updateDependencySync({
+    id: dependency.id,
     syncStatus: 'pending',
     syncAction: 'delete',
     syncError: null,
-  }).where(eq(taskDependencies.id, dependency.id));
+  });
 
   try {
     await writeDependency(connector, blocker, blocked, 'delete');
-    await db.delete(taskDependencies).where(eq(taskDependencies.id, dependency.id));
+    await dependencies.deleteDependencyById(dependency.id);
     return { deleted: true };
   } catch (error) {
     await markDependencyFailed(dependency.id, 'delete', error);
@@ -484,6 +428,7 @@ async function retryPendingActions(
   dependencies: DependencyRecord[],
   taskById: Map<string, DependencyTask>,
 ): Promise<{ pushed: number; failed: number }> {
+  const repository = await getGitHubDependencyRepository();
   let pushed = 0;
   let failed = 0;
 
@@ -501,16 +446,17 @@ async function retryPendingActions(
       if (dependency.syncAction === 'create') {
         if (!connector.addTaskDependency) throw new Error('Connector cannot add dependencies');
         await writeDependency(connector, blocker, blocked, 'create');
-        await db.update(taskDependencies).set({
+        await repository.updateDependencySync({
+          id: dependency.id,
           syncStatus: 'synced',
           syncAction: null,
           syncError: null,
           lastSyncedAt: new Date().toISOString(),
-        }).where(eq(taskDependencies.id, dependency.id));
+        });
       } else {
         if (!connector.removeTaskDependency) throw new Error('Connector cannot remove dependencies');
         await writeDependency(connector, blocker, blocked, 'delete');
-        await db.delete(taskDependencies).where(eq(taskDependencies.id, dependency.id));
+        await repository.deleteDependencyById(dependency.id);
       }
       pushed++;
     } catch (error) {
@@ -553,48 +499,20 @@ function getDependencyRetryBaseMs(): number {
 async function getLastCompletedSnapshot(
   connectorInstanceId: string,
 ): Promise<DependencySnapshot | undefined> {
-  const [completed] = await db.select().from(dependencyReconciliationSnapshots).where(and(
-    eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-    eq(dependencyReconciliationSnapshots.status, 'completed'),
-  )).orderBy(desc(dependencyReconciliationSnapshots.completedAt)).limit(1);
-  return completed;
+  const repository = await getGitHubDependencyRepository();
+  return (await repository.getLastCompletedSnapshot(connectorInstanceId)) ?? undefined;
 }
 
 async function getTerminalSnapshotIdsToRetain(
   connectorInstanceId: string,
   currentSnapshotId: string,
 ): Promise<string[]> {
-  const [recentSnapshots, lastCompletedSnapshots] = await Promise.all([
-    db.select({
-      id: dependencyReconciliationSnapshots.id,
-    }).from(dependencyReconciliationSnapshots).where(and(
-      eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-      inArray(dependencyReconciliationSnapshots.status, ['completed', 'partial']),
-      ne(dependencyReconciliationSnapshots.id, currentSnapshotId),
-    )).orderBy(
-      desc(dependencyReconciliationSnapshots.updatedAt),
-      desc(dependencyReconciliationSnapshots.id),
-    ).limit(MAX_TERMINAL_SNAPSHOT_HISTORY - 1),
-    db.select({
-      id: dependencyReconciliationSnapshots.id,
-    }).from(dependencyReconciliationSnapshots).where(and(
-      eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-      eq(dependencyReconciliationSnapshots.status, 'completed'),
-      ne(dependencyReconciliationSnapshots.id, currentSnapshotId),
-    )).orderBy(
-      desc(dependencyReconciliationSnapshots.completedAt),
-      desc(dependencyReconciliationSnapshots.id),
-    ).limit(1),
-  ]);
-  const retainedIds = new Set([
+  const repository = await getGitHubDependencyRepository();
+  return repository.getTerminalSnapshotIdsToRetain({
+    connectorInstanceId,
     currentSnapshotId,
-    ...lastCompletedSnapshots.map(({ id }) => id),
-  ]);
-  for (const { id } of recentSnapshots) {
-    if (retainedIds.size >= MAX_TERMINAL_SNAPSHOT_HISTORY) break;
-    retainedIds.add(id);
-  }
-  return [...retainedIds];
+    maxHistory: MAX_TERMINAL_SNAPSHOT_HISTORY,
+  });
 }
 
 function snapshotProgress(
@@ -683,39 +601,10 @@ export async function getDependencyReconciliationHealth(
 > {
   if (connectorInstanceIds?.length === 0) return new Map();
   if (shouldDefer?.()) return new Map();
-  const connectorFilter = connectorInstanceIds
-    ? inArray(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceIds)
-    : undefined;
+  const repository = await getGitHubDependencyRepository();
   const [latestRows, completedRows] = await Promise.all([
-    db.select().from(dependencyReconciliationSnapshots).where(and(
-      connectorFilter,
-      eq(
-        dependencyReconciliationSnapshots.id,
-        sql`(
-          SELECT latest.id
-          FROM dependency_reconciliation_snapshots AS latest
-          WHERE latest.connector_instance_id =
-            ${dependencyReconciliationSnapshots.connectorInstanceId}
-          ORDER BY latest.started_at DESC
-          LIMIT 1
-        )`,
-      ),
-    )),
-    db.select().from(dependencyReconciliationSnapshots).where(and(
-      connectorFilter,
-      eq(
-        dependencyReconciliationSnapshots.id,
-        sql`(
-          SELECT completed.id
-          FROM dependency_reconciliation_snapshots AS completed
-          WHERE completed.connector_instance_id =
-            ${dependencyReconciliationSnapshots.connectorInstanceId}
-            AND completed.status = 'completed'
-          ORDER BY completed.completed_at DESC
-          LIMIT 1
-        )`,
-      ),
-    )),
+    repository.getHealthLatestSnapshots(connectorInstanceIds),
+    repository.getHealthCompletedSnapshots(connectorInstanceIds),
   ]);
   if (shouldDefer?.()) return new Map();
   const relevantSnapshotIds = Array.from(new Set([
@@ -725,26 +614,8 @@ export async function getDependencyReconciliationHealth(
   const [edgeCountRows, terminalRows] = await Promise.all([
     relevantSnapshotIds.length === 0
       ? Promise.resolve([])
-      : db.select({
-          snapshotId: dependencyReconciliationEdges.snapshotId,
-          count: sql<number>`COUNT(*)`,
-        }).from(dependencyReconciliationEdges)
-          .where(inArray(dependencyReconciliationEdges.snapshotId, relevantSnapshotIds))
-          .groupBy(dependencyReconciliationEdges.snapshotId),
-    db.select({
-      connectorInstanceId: dependencyReconciliationSnapshots.connectorInstanceId,
-      status: dependencyReconciliationSnapshots.status,
-      startedAt: dependencyReconciliationSnapshots.startedAt,
-    }).from(dependencyReconciliationSnapshots).where(and(
-      connectorFilter,
-      inArray(
-        dependencyReconciliationSnapshots.status,
-        ['completed', 'partial', 'failed'],
-      ),
-    )).orderBy(
-      dependencyReconciliationSnapshots.connectorInstanceId,
-      desc(dependencyReconciliationSnapshots.startedAt),
-    ),
+      : repository.countEdgesBySnapshotIds(relevantSnapshotIds),
+    repository.getHealthTerminalStatuses(connectorInstanceIds),
   ]);
   if (shouldDefer?.()) return new Map();
   const lastCompleted = new Map(
@@ -781,23 +652,14 @@ export async function getDependencyReconciliationHealth(
 export async function getLatestCompletedDependencyGeneration(
   connectorInstanceId: string,
 ): Promise<DependencyReconciliationProgress | undefined> {
-  const [snapshot] = await db.select().from(dependencyReconciliationSnapshots)
-    .where(and(
-      eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-      eq(dependencyReconciliationSnapshots.status, 'completed'),
-    ))
-    .orderBy(desc(dependencyReconciliationSnapshots.completedAt))
-    .limit(1);
+  const repository = await getGitHubDependencyRepository();
+  const snapshot = await repository.getLastCompletedSnapshot(connectorInstanceId);
   if (!snapshot) return undefined;
-  const [edgeCount] = await db.select({
-    count: sql<number>`COUNT(*)`,
-  }).from(dependencyReconciliationEdges).where(
-    eq(dependencyReconciliationEdges.snapshotId, snapshot.id),
-  );
+  const edgeCount = await repository.countSnapshotEdges(snapshot.id);
   return snapshotProgress(
     snapshot,
     snapshot,
-    new Map([[snapshot.id, Number(edgeCount?.count ?? 0)]]),
+    new Map([[snapshot.id, Number(edgeCount ?? 0)]]),
   );
 }
 
@@ -805,12 +667,9 @@ export async function* streamCompletedDependencyGenerationEdges(
   generationId: string,
   batchSize = 500,
 ) {
-  const [snapshot] = await db.select({
-    status: dependencyReconciliationSnapshots.status,
-  }).from(dependencyReconciliationSnapshots)
-    .where(eq(dependencyReconciliationSnapshots.id, generationId))
-    .limit(1);
-  if (snapshot?.status !== 'completed') {
+  const repository = await getGitHubDependencyRepository();
+  const status = await repository.getSnapshotStatus(generationId);
+  if (status !== 'completed') {
     throw new Error(`Dependency generation ${generationId} is not completed`);
   }
 
@@ -819,17 +678,11 @@ export async function* streamCompletedDependencyGenerationEdges(
     : 500;
   let offset = 0;
   while (true) {
-    const edges = await db.select({
-      blockerSourceId: dependencyReconciliationEdges.blockerSourceId,
-      blockedSourceId: dependencyReconciliationEdges.blockedSourceId,
-    }).from(dependencyReconciliationEdges)
-      .where(eq(dependencyReconciliationEdges.snapshotId, generationId))
-      .orderBy(
-        asc(dependencyReconciliationEdges.blockedSourceId),
-        asc(dependencyReconciliationEdges.blockerSourceId),
-      )
-      .limit(size)
-      .offset(offset);
+    const edges = await repository.listGenerationEdgePage({
+      snapshotId: generationId,
+      offset,
+      limit: size,
+    });
     if (edges.length === 0) return;
     yield edges;
     offset += edges.length;
@@ -839,27 +692,8 @@ export async function* streamCompletedDependencyGenerationEdges(
 export async function getResumableDependencyReconciliations(): Promise<
   DependencyReconciliationResumeCandidate[]
 > {
-  const rows = await db.select({
-    connectorId: dependencyReconciliationSnapshots.connectorInstanceId,
-    generationId: dependencyReconciliationSnapshots.id,
-    status: dependencyReconciliationSnapshots.status,
-    processed: dependencyReconciliationSnapshots.cursor,
-    total: dependencyReconciliationSnapshots.total,
-    nextAttemptAt: dependencyReconciliationSnapshots.nextAttemptAt,
-  }).from(dependencyReconciliationSnapshots)
-    .innerJoin(
-      connectorConfigs,
-      eq(
-        connectorConfigs.id,
-        dependencyReconciliationSnapshots.connectorInstanceId,
-      ),
-    )
-    .where(and(
-      inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-      ne(dependencyReconciliationSnapshots.phase, 'collecting'),
-      eq(connectorConfigs.enabled, true),
-      isNull(connectorConfigs.deletedAt),
-    ));
+  const repository = await getGitHubDependencyRepository();
+  const rows = await repository.getResumableReconciliations();
   return rows as DependencyReconciliationResumeCandidate[];
 }
 
@@ -874,66 +708,39 @@ export async function recordDependencyReconciliationResumeOutcome(
   reason: string,
   attemptedAt = new Date().toISOString(),
 ): Promise<void> {
-  runTransaction((tx) => {
-    const snapshot = tx.select().from(dependencyReconciliationSnapshots)
-      .where(eq(dependencyReconciliationSnapshots.id, generationId))
-      .limit(1)
-      .get();
-    if (!snapshot || !validateDependencySnapshotMutationInTransaction(
-      tx,
-      snapshot,
-      { now: attemptedAt },
-    )) return;
-    tx.update(dependencyReconciliationSnapshots).set({
-      lastResumeAttemptAt: attemptedAt,
-      lastResumeOutcome: outcome,
-      lastResumeReason: reason.slice(0, 120),
-    }).where(and(
-      eq(dependencyReconciliationSnapshots.id, generationId),
-      eq(
-        dependencyReconciliationSnapshots.identityMode,
-        snapshot.identityMode,
-      ),
-      eq(
-        dependencyReconciliationSnapshots.identityModeRevision,
-        snapshot.identityModeRevision,
-      ),
-    )).run();
+  const repository = await getGitHubDependencyRepository();
+  await repository.recordResumeOutcome({
+    generationId,
+    outcome,
+    reason,
+    attemptedAt,
   });
 }
 
 async function loadActiveSnapshot(
   connectorInstanceId: string,
 ): Promise<DependencySnapshot | undefined> {
-  const [snapshot] = await db.select().from(dependencyReconciliationSnapshots)
-    .where(and(
-      eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-      inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-    ))
-    .orderBy(desc(dependencyReconciliationSnapshots.startedAt))
-    .limit(1);
-  return snapshot;
+  const repository = await getGitHubDependencyRepository();
+  return (await repository.loadActiveSnapshot(connectorInstanceId)) ?? undefined;
 }
 
-async function getDependencyDeletionCandidates(connectorInstanceId: string) {
-  return db.select({
-    id: taskDependencies.id,
-  }).from(taskDependencies).where(and(
-    eq(taskDependencies.connectorInstanceId, connectorInstanceId),
-    eq(taskDependencies.syncStatus, 'synced'),
-    isNull(taskDependencies.syncAction),
-  ));
+async function getDependencyDeletionCandidates(
+  connectorInstanceId: string,
+): Promise<string[]> {
+  const repository = await getGitHubDependencyRepository();
+  return repository.getDeletionCandidateDependencyIds(connectorInstanceId);
 }
 
 export async function beginDependencySnapshotGeneration(
   connectorInstanceId: string,
-  frozenIdentityContext: GitHubIdentityModeSnapshot = getGitHubIdentityModeSnapshot(
-    connectorInstanceId,
-  ),
+  frozenIdentityContext?: GitHubIdentityModeSnapshot,
 ): Promise<SourceTaskDependencyGenerationWriter | undefined> {
-  if (frozenIdentityContext.connectorInstanceId !== connectorInstanceId) {
+  const frozen = frozenIdentityContext
+    ?? await getModeSnapshot(connectorInstanceId);
+  if (frozen.connectorInstanceId !== connectorInstanceId) {
     throw new Error('Dependency identity context belongs to another connector');
   }
+  const deps = await getGitHubDependencyRepository();
   const active = await loadActiveSnapshot(connectorInstanceId);
   if (active?.phase !== 'collecting') {
     if (active) {
@@ -946,31 +753,9 @@ export async function beginDependencySnapshotGeneration(
     }
   } else {
     const failedAt = new Date().toISOString();
-    const interrupted = runTransaction((tx) => {
-      if (!validateDependencySnapshotMutationInTransaction(
-        tx,
-        active,
-        { phase: 'collecting', now: failedAt },
-      )) return false;
-      tx.update(dependencyReconciliationSnapshots).set({
-        status: 'partial',
-        phase: 'completed',
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason: 'dependency_collection_incomplete',
-        completedAt: failedAt,
-        failedAt,
-        updatedAt: failedAt,
-        failureReason: 'dependency collection was interrupted before completion',
-      }).where(and(
-        eq(dependencyReconciliationSnapshots.id, active.id),
-        eq(dependencyReconciliationSnapshots.phase, 'collecting'),
-        eq(dependencyReconciliationSnapshots.identityMode, active.identityMode),
-        eq(
-          dependencyReconciliationSnapshots.identityModeRevision,
-          active.identityModeRevision,
-        ),
-      )).run();
-      return true;
+    const interrupted = await deps.abandonInterruptedCollection({
+      fence: snapshotFence(active),
+      failedAt,
     });
     if (!interrupted) {
       throw new Error('Dependency identity context changed before generation restart');
@@ -979,8 +764,9 @@ export async function beginDependencySnapshotGeneration(
 
   const deletionCandidates = await getDependencyDeletionCandidates(connectorInstanceId);
   const now = new Date().toISOString();
-  const snapshot: typeof dependencyReconciliationSnapshots.$inferInsert = {
-    id: randomUUID(),
+  const snapshotId = randomUUID();
+  const matchInsert: DependencySnapshotInsert = {
+    id: snapshotId,
     connectorInstanceId,
     status: 'running',
     phase: 'collecting',
@@ -990,46 +776,41 @@ export async function beginDependencySnapshotGeneration(
     failureCount: 0,
     importedCount: 0,
     removedCount: 0,
-    identityMode: frozenIdentityContext.effectiveMode,
-    identityModeRevision: frozenIdentityContext.modeRevision,
+    identityMode: frozen.effectiveMode,
+    identityModeRevision: frozen.modeRevision,
     identityEvidenceSource: 'legacy-unavailable',
     identityEvidenceEligible: false,
     startedAt: now,
     updatedAt: now,
   };
+  const mismatchInsert: DependencySnapshotInsert = {
+    ...matchInsert,
+    status: 'partial',
+    phase: 'completed',
+    identityEvidenceEligible: false,
+    identityEvidenceFailureReason: 'dependency_identity_context_changed',
+    completedAt: now,
+    failedAt: now,
+    failureReason: 'identity context changed before dependency generation creation',
+  };
 
-  const generationCreated = runTransaction((tx) => {
-    const currentIdentityMode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      connectorInstanceId,
-    );
-    const contextMatches = dependencyIdentityContextMatches(
-      snapshot as DependencySnapshot,
-      currentIdentityMode,
-    );
-    tx.insert(dependencyReconciliationSnapshots).values(contextMatches ? snapshot : {
-      ...snapshot,
-      status: 'partial',
-      phase: 'completed',
-      identityEvidenceEligible: false,
-      identityEvidenceFailureReason: 'dependency_identity_context_changed',
-      completedAt: now,
-      failedAt: now,
-      failureReason: 'identity context changed before dependency generation creation',
-    }).run();
-    if (contextMatches && deletionCandidates.length > 0) {
-      tx.insert(dependencyReconciliationCandidates).values(
-        deletionCandidates.map(({ id }) => ({
-          snapshotId: snapshot.id,
-          dependencyId: id,
-        })),
-      ).run();
-    }
-    return contextMatches;
+  const generationCreated = await deps.createGeneration({
+    connectorInstanceId,
+    frozenModeRevision: frozen.modeRevision,
+    matchInsert,
+    mismatchInsert,
+    deletionCandidateIds: deletionCandidates,
   });
   if (!generationCreated) {
     throw new Error('Dependency identity context changed before generation creation');
   }
+
+  const fence: DependencySnapshotFence = {
+    id: snapshotId,
+    connectorInstanceId,
+    identityMode: frozen.effectiveMode,
+    identityModeRevision: frozen.modeRevision,
+  };
 
   let tail = Promise.resolve();
   const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -1042,30 +823,19 @@ export async function beginDependencySnapshotGeneration(
     remote: SourceTaskDependencySnapshot,
     mode: SourceTaskDependencyReadMode,
   ) => enqueue(async () => {
-    const [current] = await db.select().from(dependencyReconciliationSnapshots)
-      .where(eq(dependencyReconciliationSnapshots.id, snapshot.id))
-      .limit(1);
+    const current = await deps.getSnapshotById(fence.id);
     if (!current || current.status !== 'running' || current.phase !== 'collecting') {
-      throw new Error(`Dependency generation ${snapshot.id} is not collecting`);
+      throw new Error(`Dependency generation ${fence.id} is not collecting`);
     }
     if (current.readMode && current.readMode !== mode) {
       throw new Error(
-        `Dependency generation ${snapshot.id} changed read mode from ${current.readMode} to ${mode}`,
+        `Dependency generation ${fence.id} changed read mode from ${current.readMode} to ${mode}`,
       );
     }
 
     const sourceIds = [...new Set(remote.completeBlockedSourceIds)];
     const existingItems = sourceIds.length > 0
-      ? await db.select({
-          sourceId: dependencyReconciliationItems.sourceId,
-          identityEvidence: dependencyReconciliationItems.identityEvidence,
-          identityEvidenceState: dependencyReconciliationItems.identityEvidenceState,
-        })
-          .from(dependencyReconciliationItems)
-          .where(and(
-            eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-            inArray(dependencyReconciliationItems.sourceId, sourceIds),
-          ))
+      ? await deps.listSnapshotItemsForSourceIds({ snapshotId: fence.id, sourceIds })
       : [];
     const existingSourceIds = new Set(existingItems.map(({ sourceId }) => sourceId));
     const newSourceIds = sourceIds.filter((sourceId) => !existingSourceIds.has(sourceId));
@@ -1085,7 +855,7 @@ export async function beginDependencySnapshotGeneration(
         )
       ) {
         throw new Error(
-          `Dependency generation ${snapshot.id} received conflicting identity evidence for ${sourceId}`,
+          `Dependency generation ${fence.id} received conflicting identity evidence for ${sourceId}`,
         );
       }
     }
@@ -1096,69 +866,31 @@ export async function beginDependencySnapshotGeneration(
     ).values()];
     const updatedAt = new Date().toISOString();
 
-    const staged = runTransaction((tx) => {
-      if (!validateDependencySnapshotMutationInTransaction(
-        tx,
-        snapshot as DependencySnapshot,
-        { phase: 'collecting', now: updatedAt },
-      )) return false;
-      const persisted = tx.select({ total: dependencyReconciliationSnapshots.total })
-        .from(dependencyReconciliationSnapshots)
-        .where(eq(dependencyReconciliationSnapshots.id, snapshot.id))
-        .limit(1)
-        .get();
-      if (!persisted || persisted.total !== current.total) return false;
-      if (newSourceIds.length > 0) {
-        tx.insert(dependencyReconciliationItems).values(
-          newSourceIds.map((sourceId, offset) => ({
-            snapshotId: snapshot.id,
-            position: current.total + offset,
-            sourceId,
-            verified: true,
-            identityEvidence: blockedEvidenceBySourceId.get(sourceId)?.evidence,
-            identityEvidenceState:
-              blockedEvidenceBySourceId.get(sourceId)?.state ?? 'missing',
-          })),
-        ).run();
-      }
-      if (edges.length > 0) {
-        tx.insert(dependencyReconciliationEdges).values(
-          edges.map((edge) => ({
-            snapshotId: snapshot.id,
-            blockerSourceId: edge.blockerSourceId,
-            blockedSourceId: edge.blockedSourceId,
-            blockerIdentityEvidence: edge.blockerIdentityEvidence,
-            blockerIdentityEvidenceState:
-              edge.blockerIdentityEvidenceState ?? 'missing',
-          })),
-        ).onConflictDoNothing().run();
-      }
-      const advanced = tx.update(dependencyReconciliationSnapshots).set({
-        readMode: mode,
-        identityEvidenceSource: dependencyIdentityEvidenceSource(mode),
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason: null,
-        total: current.total + newSourceIds.length,
-        collectionPageCount: sql`${dependencyReconciliationSnapshots.collectionPageCount} + 1`,
-        overflowFetchCount: sql`${dependencyReconciliationSnapshots.overflowFetchCount} + ${remote.overflowFetchCount ?? 0}`,
-        updatedAt,
-      }).where(and(
-        eq(dependencyReconciliationSnapshots.id, snapshot.id),
-        eq(dependencyReconciliationSnapshots.phase, 'collecting'),
-        eq(dependencyReconciliationSnapshots.total, current.total),
-        eq(
-          dependencyReconciliationSnapshots.identityMode,
-          frozenIdentityContext.effectiveMode,
-        ),
-        eq(
-          dependencyReconciliationSnapshots.identityModeRevision,
-          frozenIdentityContext.modeRevision,
-        ),
-      )).run();
-      if (advanced.changes !== 1) {
-        throw new Error('Dependency collection page CAS failed');
-      }
-      return true;
+    const newItems: DependencySnapshotItemInsert[] = newSourceIds.map((sourceId, offset) => ({
+      position: current.total + offset,
+      sourceId,
+      verified: true,
+      identityEvidence: blockedEvidenceBySourceId.get(sourceId)?.evidence ?? null,
+      identityEvidenceState:
+        blockedEvidenceBySourceId.get(sourceId)?.state ?? 'missing',
+    }));
+    const edgeRecords: DependencySnapshotEdgeRecord[] = edges.map((edge) => ({
+      blockerSourceId: edge.blockerSourceId,
+      blockedSourceId: edge.blockedSourceId,
+      blockerIdentityEvidence: edge.blockerIdentityEvidence ?? null,
+      blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState ?? 'missing',
+    }));
+
+    const staged = await deps.stageCollectionPage({
+      fence,
+      expectedTotal: current.total,
+      readMode: mode,
+      identityEvidenceSource: dependencyIdentityEvidenceSource(mode),
+      newItems,
+      edges: edgeRecords,
+      newSourceIdCount: newSourceIds.length,
+      overflowFetchCount: remote.overflowFetchCount ?? 0,
+      updatedAt,
     });
     if (!staged) {
       throw new Error('Dependency generation was fenced before page staging');
@@ -1169,68 +901,38 @@ export async function beginDependencySnapshotGeneration(
     stagePage,
     complete: (mode) => enqueue(async () => {
       const completedAt = new Date().toISOString();
-      const [current] = await db.select().from(dependencyReconciliationSnapshots)
-        .where(eq(dependencyReconciliationSnapshots.id, snapshot.id))
-        .limit(1);
+      const current = await deps.getSnapshotById(fence.id);
       if (!current || current.status !== 'running' || current.phase !== 'collecting') return;
       if (current.readMode && current.readMode !== mode) {
         throw new Error(
-          `Dependency generation ${snapshot.id} changed read mode from ${current.readMode} to ${mode}`,
+          `Dependency generation ${fence.id} changed read mode from ${current.readMode} to ${mode}`,
         );
       }
       const evidenceSource = dependencyIdentityEvidenceSource(mode);
-      const completed = runTransaction((tx) => {
-        if (!validateDependencySnapshotMutationInTransaction(
-          tx,
-          snapshot as DependencySnapshot,
-          { phase: 'collecting', now: completedAt },
-        )) return false;
-        const blockedEvidenceCounts = tx.select({
-          incomplete: sql<number>`SUM(CASE WHEN ${dependencyReconciliationItems.identityEvidenceState} != 'verified' THEN 1 ELSE 0 END)`,
-        }).from(dependencyReconciliationItems).where(
-          eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-        ).get();
-        const blockerEvidenceCounts = tx.select({
-          incomplete: sql<number>`SUM(CASE WHEN ${dependencyReconciliationEdges.blockerIdentityEvidenceState} != 'verified' THEN 1 ELSE 0 END)`,
-        }).from(dependencyReconciliationEdges).where(
-          eq(dependencyReconciliationEdges.snapshotId, snapshot.id),
-        ).get();
-        const incompleteEvidence = Number(blockedEvidenceCounts?.incomplete ?? 0)
-          + Number(blockerEvidenceCounts?.incomplete ?? 0);
-        const evidenceEligible = evidenceSource === 'graphql-node'
-          && incompleteEvidence === 0;
-        const changed = tx.update(dependencyReconciliationSnapshots).set({
-          phase: 'ready',
-          readMode: mode,
-          identityEvidenceSource: evidenceSource,
-          identityEvidenceEligible: evidenceEligible,
-          identityEvidenceFailureReason: evidenceEligible
-            ? null
-            : evidenceSource === 'rest-unavailable'
-              ? 'dependency_stable_evidence_unavailable'
-              : 'dependency_stable_evidence_incomplete',
-          collectionCompletedAt: completedAt,
-          updatedAt: completedAt,
-        }).where(and(
-          eq(dependencyReconciliationSnapshots.id, snapshot.id),
-          eq(dependencyReconciliationSnapshots.phase, 'collecting'),
-          eq(
-            dependencyReconciliationSnapshots.identityMode,
-            frozenIdentityContext.effectiveMode,
-          ),
-          eq(
-            dependencyReconciliationSnapshots.identityModeRevision,
-            frozenIdentityContext.modeRevision,
-          ),
-        )).run();
-        return changed.changes === 1;
+      const completed = await deps.completeCollection({
+        fence,
+        readMode: mode,
+        identityEvidenceSource: evidenceSource,
+        completedAt,
+        deriveEvidence: (incompleteEvidenceCount) => {
+          const evidenceEligible = evidenceSource === 'graphql-node'
+            && incompleteEvidenceCount === 0;
+          return {
+            identityEvidenceEligible: evidenceEligible,
+            identityEvidenceFailureReason: evidenceEligible
+              ? null
+              : evidenceSource === 'rest-unavailable'
+                ? 'dependency_stable_evidence_unavailable'
+                : 'dependency_stable_evidence_incomplete',
+          };
+        },
       });
       if (!completed) {
         throw new Error('Dependency generation was fenced before collection completion');
       }
       syncLogger.info({
         connectorId: connectorInstanceId,
-        dependencySnapshotId: snapshot.id,
+        dependencySnapshotId: fence.id,
         dependencyReadMode: mode,
         total: current.total,
       }, 'Dependency snapshot collection completed');
@@ -1238,38 +940,16 @@ export async function beginDependencySnapshotGeneration(
     fail: (error) => enqueue(async () => {
       const failedAt = new Date().toISOString();
       const failureReason = dependencyError(error);
-      const result = runTransaction((tx) => {
-        if (!validateDependencySnapshotMutationInTransaction(
-          tx,
-          snapshot as DependencySnapshot,
-          { phase: 'collecting', now: failedAt },
-        )) return { changes: 0 };
-        return tx.update(dependencyReconciliationSnapshots).set({
-        status: 'partial',
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason: 'dependency_collection_incomplete',
+      const failed = await deps.failCollection({
+        fence,
         failedAt,
-        updatedAt: failedAt,
         failureReason,
-        }).where(and(
-        eq(dependencyReconciliationSnapshots.id, snapshot.id),
-        eq(dependencyReconciliationSnapshots.status, 'running'),
-        eq(dependencyReconciliationSnapshots.phase, 'collecting'),
-        eq(
-          dependencyReconciliationSnapshots.identityMode,
-          frozenIdentityContext.effectiveMode,
-        ),
-        eq(
-          dependencyReconciliationSnapshots.identityModeRevision,
-          frozenIdentityContext.modeRevision,
-        ),
-        )).run();
       });
-      if (result.changes > 0) {
+      if (failed) {
         syncLogger.warn({
           err: error,
           connectorId: connectorInstanceId,
-          dependencySnapshotId: snapshot.id,
+          dependencySnapshotId: fence.id,
         }, 'Dependency snapshot collection failed; staged edges will not be reconciled');
       }
     }),
@@ -1435,13 +1115,13 @@ function isDependencyDecisionEligible(
   return decision?.appliedSource === 'stable';
 }
 
-function resolveDependencyIdentity(
+async function resolveDependencyIdentity(
   connectorInstanceId: string,
   modeSnapshot: GitHubIdentityModeSnapshot,
   remote: SourceTaskDependencySnapshot,
   taskBySourceId: ReadonlyMap<string, DependencyTask>,
   providedRuntime?: GitHubStableIdentityRuntime,
-): DependencyIdentityObservation {
+): Promise<DependencyIdentityObservation> {
   if (
     providedRuntime
     && providedRuntime.modeSnapshot.modeRevision !== modeSnapshot.modeRevision
@@ -1476,7 +1156,7 @@ function resolveDependencyIdentity(
       const chunk = endpoints.slice(index, index + 500);
       const resolvedCandidates = chunk.filter((endpoint) => endpoint.state !== 'partial');
       if (resolvedCandidates.length > 0) {
-        const decisions = runtime.resolveBatch(
+        const decisions = await runtime.resolveBatch(
           'dependency',
           'task',
           resolvedCandidates.map((endpoint) => {
@@ -1503,7 +1183,7 @@ function resolveDependencyIdentity(
       const partialCandidates = chunk.filter((endpoint) => endpoint.state === 'partial');
       if (partialCandidates.length > 0) {
         hasPartialEvidence = true;
-        const decisions = runtime.applyResolvedBatch(
+        const decisions = await runtime.applyResolvedBatch(
           'dependency',
           partialCandidates.map((endpoint) => {
             const local = taskBySourceId.get(endpoint.sourceId);
@@ -1530,7 +1210,7 @@ function resolveDependencyIdentity(
     if (hasNoEndpointEvidence) runtime.markBlocked('dependency_endpoint_evidence_empty');
     if (hasMissingEvidence) runtime.markBlocked('dependency_stable_evidence_missing');
     if (hasPartialEvidence) runtime.markBlocked('dependency_stable_evidence_partial');
-    runtime.assertDecisionsCurrent(decisionsBySourceId.values());
+    await runtime.assertDecisionsCurrent(decisionsBySourceId.values());
     const blockingDecision = [...decisionsBySourceId.values()].some(
       (decision) => !isDependencyDecisionEligible(decision),
     );
@@ -1571,19 +1251,14 @@ export async function reconcileTargetedTaskDependencies(
     );
     if (verifiedSourceIds.size === 0) return { imported: 0, removed: 0 };
 
-    const connectorTasks = await db.select({
-      id: tasks.id,
-      sourceId: tasks.sourceId,
-      connectorInstanceId: tasks.connectorInstanceId,
-      isChecklistItem: tasks.isChecklistItem,
-      metadata: tasks.metadata,
-    }).from(tasks).where(eq(tasks.connectorInstanceId, connectorInstanceId));
+    const deps = await getGitHubDependencyRepository();
+    const connectorTasks = await deps.listConnectorTasks(connectorInstanceId);
     const nativeTasks = connectorTasks.filter((task) =>
       isNativeDependencyTask(task, 'github-issues'));
     const taskById = new Map(nativeTasks.map((task) => [task.id, task]));
     const taskBySourceId = new Map(nativeTasks.map((task) => [task.sourceId, task]));
-    const identityMode = getGitHubIdentityModeSnapshot(connectorInstanceId);
-    const identityObservation = resolveDependencyIdentity(
+    const identityMode = await getModeSnapshot(connectorInstanceId);
+    const identityObservation = await resolveDependencyIdentity(
       connectorInstanceId,
       identityMode,
       remote,
@@ -1608,10 +1283,7 @@ export async function reconcileTargetedTaskDependencies(
       .filter((id): id is string => Boolean(id));
     if (blockedTaskIds.length === 0) return { imported: 0, removed: 0 };
 
-    const localDependencies = await db.select().from(taskDependencies).where(and(
-      inArray(taskDependencies.taskId, blockedTaskIds),
-      eq(taskDependencies.type, 'blocks'),
-    )) as DependencyRecord[];
+    const localDependencies = await deps.listBlocksDependenciesForTasks(blockedTaskIds);
     const existingByKey = new Map(localDependencies.map((dependency) => [
       `${dependency.dependsOnTaskId}\u0000${dependency.taskId}`,
       dependency,
@@ -1643,67 +1315,57 @@ export async function reconcileTargetedTaskDependencies(
       usableEdges.push({ blocker, blocked, key });
     }
 
-    let imported = 0;
-    let removed = 0;
     const syncedAt = new Date().toISOString();
-    runTransaction((tx) => {
-      const currentIdentityMode = getGitHubIdentityModeSnapshotInTransaction(
-        tx,
+    const syncedUpdateIds: string[] = [];
+    const inserts: TaskDependencyInsert[] = [];
+    for (const { blocker, blocked, key } of usableEdges) {
+      const existing = existingByKey.get(key);
+      if (existing) {
+        if (!existing.syncAction) syncedUpdateIds.push(existing.id);
+        continue;
+      }
+      inserts.push({
+        id: randomUUID(),
+        taskId: blocked.id,
+        dependsOnTaskId: blocker.id,
+        type: 'blocks',
         connectorInstanceId,
-      );
-      if (currentIdentityMode.modeRevision !== identityMode.modeRevision) {
-        throw new Error('Dependency identity context changed before targeted apply');
-      }
-      for (const { blocker, blocked, key } of usableEdges) {
-        const existing = existingByKey.get(key);
-        if (existing) {
-          if (!existing.syncAction) {
-            tx.update(taskDependencies).set({
-              connectorInstanceId,
-              syncStatus: 'synced',
-              syncError: null,
-              lastSyncedAt: syncedAt,
-            }).where(and(
-              eq(taskDependencies.id, existing.id),
-              isNull(taskDependencies.syncAction),
-            )).run();
-          }
-          continue;
-        }
-        imported += tx.insert(taskDependencies).values({
-          id: randomUUID(),
-          taskId: blocked.id,
-          dependsOnTaskId: blocker.id,
-          type: 'blocks',
-          connectorInstanceId,
-          syncStatus: 'synced',
-          syncAction: null,
-          syncError: null,
-          lastSyncedAt: syncedAt,
-          createdAt: syncedAt,
-        }).onConflictDoNothing().run().changes;
-      }
+        syncStatus: 'synced',
+        syncAction: null,
+        syncError: null,
+        lastSyncedAt: syncedAt,
+        createdAt: syncedAt,
+      });
+    }
 
-      for (const dependency of localDependencies) {
-        const blocked = taskById.get(dependency.taskId);
-        if (
-          !blocked
-          || !deletionEligibleTaskIds.has(blocked.id)
-          || unresolvedBlockedTaskIds.has(blocked.id)
-          || dependency.connectorInstanceId !== connectorInstanceId
-          || dependency.syncStatus !== 'synced'
-          || dependency.syncAction
-        ) continue;
-        const key = `${dependency.dependsOnTaskId}\u0000${dependency.taskId}`;
-        if (remoteKeys.has(key)) continue;
-        removed += tx.delete(taskDependencies).where(and(
-          eq(taskDependencies.id, dependency.id),
-          eq(taskDependencies.connectorInstanceId, connectorInstanceId),
-          eq(taskDependencies.syncStatus, 'synced'),
-          isNull(taskDependencies.syncAction),
-        )).run().changes;
-      }
+    const deletionIds: string[] = [];
+    for (const dependency of localDependencies) {
+      const blocked = taskById.get(dependency.taskId);
+      if (
+        !blocked
+        || !deletionEligibleTaskIds.has(blocked.id)
+        || unresolvedBlockedTaskIds.has(blocked.id)
+        || dependency.connectorInstanceId !== connectorInstanceId
+        || dependency.syncStatus !== 'synced'
+        || dependency.syncAction
+      ) continue;
+      const key = `${dependency.dependsOnTaskId}\u0000${dependency.taskId}`;
+      if (remoteKeys.has(key)) continue;
+      deletionIds.push(dependency.id);
+    }
+
+    const result = await deps.applyTargetedReconciliation({
+      connectorInstanceId,
+      expectedModeRevision: identityMode.modeRevision,
+      syncedAt,
+      syncedUpdateIds,
+      inserts,
+      deletionIds,
     });
+    if (result.status === 'identity-context-changed') {
+      throw new Error('Dependency identity context changed before targeted apply');
+    }
+    const { imported, removed } = result;
 
     syncLogger.info({
       connectorId: connectorInstanceId,
@@ -1721,9 +1383,10 @@ async function createSnapshot(
   sourceIds: string[],
   frozenIdentityContext?: GitHubIdentityModeSnapshot,
 ): Promise<DependencySnapshot> {
+  const deps = await getGitHubDependencyRepository();
   const deletionCandidates = await getDependencyDeletionCandidates(connectorInstanceId);
   const now = new Date().toISOString();
-  const snapshot: typeof dependencyReconciliationSnapshots.$inferInsert = {
+  const record: DependencySnapshotRecord = {
     id: randomUUID(),
     connectorInstanceId,
     status: 'running',
@@ -1735,53 +1398,50 @@ async function createSnapshot(
     failureCount: 0,
     importedCount: 0,
     removedCount: 0,
+    startedAt: now,
+    updatedAt: now,
+    completedAt: null,
+    collectionCompletedAt: null,
+    collectionPageCount: 0,
+    overflowFetchCount: 0,
     identityMode: frozenIdentityContext?.effectiveMode ?? 'legacy',
     identityModeRevision: frozenIdentityContext?.modeRevision ?? 0,
     identityEvidenceSource: 'legacy-unavailable',
     identityEvidenceEligible: false,
-    startedAt: now,
-    updatedAt: now,
+    identityEvidenceFailureReason: null,
+    failedAt: null,
+    nextAttemptAt: null,
+    failureReason: null,
+    lastResumeAttemptAt: null,
+    lastResumeOutcome: null,
+    lastResumeReason: null,
+  };
+
+  const items: DependencySnapshotItemInsert[] = sourceIds.map((sourceId, position) => ({
+    position,
+    sourceId,
+    verified: false,
+    identityEvidenceState: 'missing',
+  }));
+  const mismatchInsert: DependencySnapshotInsert = {
+    ...record,
+    status: 'partial',
+    phase: 'completed',
+    identityEvidenceEligible: false,
+    identityEvidenceFailureReason: 'dependency_identity_context_changed',
+    completedAt: now,
+    failedAt: now,
+    failureReason: 'identity context changed before dependency snapshot creation',
   };
 
   try {
-    const created = runTransaction((tx) => {
-      const currentIdentityMode = getGitHubIdentityModeSnapshotInTransaction(
-        tx,
-        connectorInstanceId,
-      );
-      const contextMatches = dependencyIdentityContextMatches(
-        snapshot as DependencySnapshot,
-        currentIdentityMode,
-      );
-      tx.insert(dependencyReconciliationSnapshots).values(contextMatches ? snapshot : {
-        ...snapshot,
-        status: 'partial',
-        phase: 'completed',
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason: 'dependency_identity_context_changed',
-        completedAt: now,
-        failedAt: now,
-        failureReason: 'identity context changed before dependency snapshot creation',
-      }).run();
-      if (contextMatches && sourceIds.length > 0) {
-        tx.insert(dependencyReconciliationItems).values(
-          sourceIds.map((sourceId, position) => ({
-            snapshotId: snapshot.id,
-            position,
-            sourceId,
-            verified: false,
-          })),
-        ).run();
-      }
-      if (contextMatches && deletionCandidates.length > 0) {
-        tx.insert(dependencyReconciliationCandidates).values(
-          deletionCandidates.map(({ id }) => ({
-            snapshotId: snapshot.id,
-            dependencyId: id,
-          })),
-        ).run();
-      }
-      return contextMatches;
+    const created = await deps.createGeneration({
+      connectorInstanceId,
+      frozenModeRevision: record.identityModeRevision,
+      matchInsert: record,
+      mismatchInsert,
+      items,
+      deletionCandidateIds: deletionCandidates,
     });
     if (!created) {
       throw new Error('Dependency identity context changed before snapshot creation');
@@ -1794,11 +1454,11 @@ async function createSnapshot(
 
   syncLogger.info({
     connectorId: connectorInstanceId,
-    dependencySnapshotId: snapshot.id,
+    dependencySnapshotId: record.id,
     total: sourceIds.length,
-    batchSize: snapshot.batchSize,
+    batchSize: record.batchSize,
   }, 'Dependency reconciliation generation started');
-  return snapshot as DependencySnapshot;
+  return record;
 }
 
 async function markSnapshotFailed(
@@ -1811,28 +1471,14 @@ async function markSnapshotFailed(
   const nextAttemptAt = failure.nextAttemptAt;
   const failureReason = dependencyError(error);
 
-  const updated = runTransaction((tx) => {
-    if (!validateDependencySnapshotMutationInTransaction(
-      tx,
-      snapshot,
-      { cursor: snapshot.cursor, now: failedAt },
-    )) return false;
-    return tx.update(dependencyReconciliationSnapshots).set({
-      status: 'failed',
-      failureCount,
-      failedAt,
-      updatedAt: failedAt,
-      nextAttemptAt,
-      failureReason,
-    }).where(and(
-      eq(dependencyReconciliationSnapshots.id, snapshot.id),
-      eq(dependencyReconciliationSnapshots.cursor, snapshot.cursor),
-      eq(dependencyReconciliationSnapshots.identityMode, snapshot.identityMode),
-      eq(
-        dependencyReconciliationSnapshots.identityModeRevision,
-        snapshot.identityModeRevision,
-      ),
-    )).run().changes === 1;
+  const deps = await getGitHubDependencyRepository();
+  const updated = await deps.markSnapshotFailed({
+    fence: snapshotFence(snapshot),
+    cursor: snapshot.cursor,
+    failureCount,
+    failedAt,
+    nextAttemptAt,
+    failureReason,
   });
   if (!updated) {
     return {
@@ -1875,13 +1521,11 @@ async function abandonSnapshotForIdentityContextChange(
 ): Promise<DependencySnapshot> {
   const failedAt = new Date().toISOString();
   const failureReason = `identity context changed from ${snapshot.identityMode}:${snapshot.identityModeRevision} to ${current.effectiveMode}:${current.modeRevision}`;
-  runTransaction((tx) => {
-    validateDependencySnapshotMutationInTransaction(
-      tx,
-      snapshot,
-      { now: failedAt },
-    );
-  });
+  const deps = await getGitHubDependencyRepository();
+  await deps.abandonSnapshotForIdentityContextChange(
+    snapshotFence(snapshot),
+    failedAt,
+  );
   syncLogger.warn({
     connectorId: snapshot.connectorInstanceId,
     dependencySnapshotId: snapshot.id,
@@ -1937,73 +1581,39 @@ async function applySnapshotBatch(
   // bindings, so a batch stages evidence and imports nothing.
   const imported = 0;
 
-  const applied = runTransaction((tx) => {
-    if (!validateDependencySnapshotMutationInTransaction(
-      tx,
-      snapshot,
-      { cursor: batchStart, now: lastSyncedAt },
-    )) return false;
-    if (stageRemoteEdges && usableEdges.length > 0) {
-      tx.insert(dependencyReconciliationEdges).values(
-        usableEdges.map((edge) => ({
-          snapshotId: snapshot.id,
-          blockerSourceId: edge.blockerSourceId,
-          blockedSourceId: edge.blockedSourceId,
-          blockerIdentityEvidence: edge.blockerIdentityEvidence,
-          blockerIdentityEvidenceState:
-            edge.blockerIdentityEvidenceState ?? 'missing',
-        })),
-      ).onConflictDoNothing().run();
-    }
-    if (verifiedSourceIds.length > 0) {
-      // Blocked endpoints are only usable once their NodeID evidence is staged,
-      // so record it alongside verification.
-      const blockedEvidenceBySourceId = new Map(
-        (remoteSnapshot.blockedIdentityEvidence ?? [])
-          .map((entry) => [entry.sourceId, entry] as const),
-      );
-      for (const sourceId of verifiedSourceIds) {
-        const evidence = blockedEvidenceBySourceId.get(sourceId);
-        tx.update(dependencyReconciliationItems).set({
-          verified: true,
-          ...(evidence
-            ? {
-                identityEvidence: evidence.evidence,
-                identityEvidenceState: evidence.state ?? 'missing',
-              }
-            : {}),
-        }).where(and(
-          eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-          eq(dependencyReconciliationItems.sourceId, sourceId),
-        )).run();
-      }
-    }
+  const deps = await getGitHubDependencyRepository();
+  const stagedEdges: DependencySnapshotEdgeRecord[] = stageRemoteEdges
+    ? usableEdges.map((edge) => ({
+        blockerSourceId: edge.blockerSourceId,
+        blockedSourceId: edge.blockedSourceId,
+        blockerIdentityEvidence: edge.blockerIdentityEvidence ?? null,
+        blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState ?? 'missing',
+      }))
+    : [];
+  // Blocked endpoints are only usable once their NodeID evidence is staged,
+  // so record it alongside verification.
+  const blockedEvidenceBySourceId = new Map(
+    (remoteSnapshot.blockedIdentityEvidence ?? [])
+      .map((entry) => [entry.sourceId, entry] as const),
+  );
+  const verifiedUpdates = verifiedSourceIds.map((sourceId) => {
+    const evidence = blockedEvidenceBySourceId.get(sourceId);
+    return evidence
+      ? {
+          sourceId,
+          identityEvidence: evidence.evidence ?? null,
+          identityEvidenceState: evidence.state ?? 'missing' as const,
+        }
+      : { sourceId };
+  });
 
-
-    const advanced = tx.update(dependencyReconciliationSnapshots).set({
-      status: 'running',
-      phase: 'reconciling',
-      cursor: batchEnd,
-      failureCount: 0,
-      failedAt: null,
-      nextAttemptAt: null,
-      failureReason: null,
-      importedCount: sql`${dependencyReconciliationSnapshots.importedCount} + ${imported}`,
-      updatedAt: lastSyncedAt,
-    }).where(and(
-      eq(dependencyReconciliationSnapshots.id, snapshot.id),
-      eq(dependencyReconciliationSnapshots.cursor, batchStart),
-      inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-      eq(dependencyReconciliationSnapshots.identityMode, snapshot.identityMode),
-      eq(
-        dependencyReconciliationSnapshots.identityModeRevision,
-        snapshot.identityModeRevision,
-      ),
-    )).run();
-    if (advanced.changes !== 1) {
-      throw new Error('Dependency snapshot cursor CAS failed');
-    }
-    return true;
+  const applied = await deps.applyReconciliationBatch({
+    fence: snapshotFence(snapshot),
+    batchStart,
+    batchEnd,
+    lastSyncedAt,
+    stagedEdges,
+    verifiedUpdates,
   });
   if (!applied) return 0;
 
@@ -2026,30 +1636,12 @@ async function finalizeSnapshot(
   snapshot: DependencySnapshot,
   identityRuntime?: GitHubStableIdentityRuntime,
 ): Promise<{ snapshot: DependencySnapshot; removed: number; imported: number }> {
-  const [connectorTasks, stagedEdges, verifiedItems, candidateRows] = await Promise.all([
-    db.select({
-      id: tasks.id,
-      sourceId: tasks.sourceId,
-      connectorInstanceId: tasks.connectorInstanceId,
-      isChecklistItem: tasks.isChecklistItem,
-      metadata: tasks.metadata,
-    }).from(tasks).where(eq(tasks.connectorInstanceId, connectorInstanceId)),
-    db.select().from(dependencyReconciliationEdges).where(
-      eq(dependencyReconciliationEdges.snapshotId, snapshot.id),
-    ),
-    db.select({
-      sourceId: dependencyReconciliationItems.sourceId,
-      evidence: dependencyReconciliationItems.identityEvidence,
-      state: dependencyReconciliationItems.identityEvidenceState,
-    })
-      .from(dependencyReconciliationItems)
-      .where(and(
-        eq(dependencyReconciliationItems.snapshotId, snapshot.id),
-        eq(dependencyReconciliationItems.verified, true),
-      )),
-    db.select({ dependencyId: dependencyReconciliationCandidates.dependencyId })
-      .from(dependencyReconciliationCandidates)
-      .where(eq(dependencyReconciliationCandidates.snapshotId, snapshot.id)),
+  const deps = await getGitHubDependencyRepository();
+  const [connectorTasks, stagedEdges, verifiedItems, candidateDependencyIds] = await Promise.all([
+    deps.listConnectorTasks(connectorInstanceId),
+    deps.listSnapshotEdges(snapshot.id),
+    deps.listVerifiedSnapshotItems(snapshot.id),
+    deps.listSnapshotCandidateDependencyIds(snapshot.id),
   ]);
   const nativeTasks = connectorTasks.filter((task) =>
     isNativeDependencyTask(task, connectorType));
@@ -2058,7 +1650,7 @@ async function finalizeSnapshot(
   const taskIds = nativeTasks.map((task) => task.id);
   const taskIdSet = new Set(taskIds);
   const verifiedSourceIds = new Set(verifiedItems.map((item) => item.sourceId));
-  const candidateIds = new Set(candidateRows.map((row) => row.dependencyId));
+  const candidateIds = new Set(candidateDependencyIds);
   const remoteKeys = new Set<string>();
   const unresolvedBlockedSourceIds = new Set<string>();
   const frozenIdentityMode: GitHubIdentityModeSnapshot = {
@@ -2067,7 +1659,7 @@ async function finalizeSnapshot(
     modeRevision: snapshot.identityModeRevision,
     capturedAt: snapshot.startedAt,
   };
-  const identityObservation = resolveDependencyIdentity(
+  const identityObservation = await resolveDependencyIdentity(
     connectorInstanceId,
     frozenIdentityMode,
     {
@@ -2078,11 +1670,13 @@ async function finalizeSnapshot(
         blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState,
       })),
       completeBlockedSourceIds: verifiedItems.map(({ sourceId }) => sourceId),
-      blockedIdentityEvidence: verifiedItems.map(({ sourceId, evidence, state }) => ({
-        sourceId,
-        evidence: evidence ?? undefined,
-        state,
-      })),
+      blockedIdentityEvidence: verifiedItems.map(
+        ({ sourceId, identityEvidence, identityEvidenceState }) => ({
+          sourceId,
+          evidence: identityEvidence ?? undefined,
+          state: identityEvidenceState,
+        }),
+      ),
     },
     taskBySourceId,
     identityRuntime,
@@ -2125,10 +1719,7 @@ async function finalizeSnapshot(
 
   let localDependencies: DependencyRecord[] = [];
   if (taskIds.length > 0) {
-    localDependencies = await db.select().from(taskDependencies).where(and(
-      inArray(taskDependencies.taskId, taskIds),
-      eq(taskDependencies.type, 'blocks'),
-    )) as DependencyRecord[];
+    localDependencies = await deps.listBlocksDependenciesForTasks(taskIds);
     localDependencies = localDependencies.filter((dependency) =>
       taskIdSet.has(dependency.dependsOnTaskId));
   }
@@ -2140,50 +1731,25 @@ async function finalizeSnapshot(
   );
   if (verifiedSourceIds.size !== snapshot.total) {
     const failureReason = `${snapshot.total - verifiedSourceIds.size} source task(s) could not be verified; dependency removals skipped`;
-    let prunedSnapshots = 0;
-    const partialApplied = runTransaction((tx) => {
-      if (!validateDependencySnapshotMutationInTransaction(
-        tx,
-        snapshot,
-        { cursor: snapshot.cursor, now: completedAt },
-      )) return false;
-      const changed = tx.update(dependencyReconciliationSnapshots).set({
-        status: 'partial',
-        phase: 'completed',
-        updatedAt: completedAt,
-        failedAt: completedAt,
-        nextAttemptAt: null,
-        failureReason,
-        identityEvidenceEligible: false,
-        identityEvidenceFailureReason:
-          identityEvidenceFailureReason ?? 'dependency_remote_verification_incomplete',
-      }).where(and(
-        eq(dependencyReconciliationSnapshots.id, snapshot.id),
-        inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-        gte(dependencyReconciliationSnapshots.cursor, snapshot.total),
-        eq(dependencyReconciliationSnapshots.identityMode, snapshot.identityMode),
-        eq(
-          dependencyReconciliationSnapshots.identityModeRevision,
-          snapshot.identityModeRevision,
-        ),
-      )).run();
-      if (changed.changes !== 1) {
-        throw new Error('Dependency partial completion CAS failed');
-      }
-      prunedSnapshots = tx.delete(dependencyReconciliationSnapshots).where(and(
-        eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-        inArray(dependencyReconciliationSnapshots.status, ['completed', 'partial']),
-        notInArray(dependencyReconciliationSnapshots.id, retainedSnapshotIds),
-      )).run().changes;
-      return true;
+    const partialResult = await deps.completeSnapshotPartial({
+      fence: snapshotFence(snapshot),
+      cursor: snapshot.cursor,
+      total: snapshot.total,
+      connectorInstanceId,
+      completedAt,
+      failureReason,
+      identityEvidenceFailureReason:
+        identityEvidenceFailureReason ?? 'dependency_remote_verification_incomplete',
+      retainedSnapshotIds,
     });
-    if (!partialApplied) {
+    if (partialResult.status === 'fenced') {
       return {
         snapshot: identityContextFencedSnapshot(snapshot, completedAt),
         removed: 0,
         imported: 0,
       };
     }
+    const prunedSnapshots = partialResult.prunedSnapshots;
     const partial: DependencySnapshot = {
       ...snapshot,
       status: 'partial',
@@ -2209,7 +1775,7 @@ async function finalizeSnapshot(
 
   // Decide the finalization mutations before acquiring the writer lock so the
   // transaction only executes a bounded number of set-based statements.
-  const insertableEdges = stableEdges.map(({ blocker, blocked }) => ({
+  const insertableEdges: TaskDependencyInsert[] = stableEdges.map(({ blocker, blocked }) => ({
     id: randomUUID(),
     taskId: blocked.id,
     dependsOnTaskId: blocker.id,
@@ -2237,80 +1803,28 @@ async function finalizeSnapshot(
     return !remoteKeys.has(`${dependency.dependsOnTaskId}\u0000${dependency.taskId}`);
   }).map((dependency) => dependency.id);
 
-  let removed = 0;
-  let imported = 0;
-  let prunedSnapshots = 0;
-  const finalized = runTransaction((tx) => {
-    if (!validateDependencySnapshotMutationInTransaction(
-      tx,
-      snapshot,
-      { cursor: snapshot.cursor, now: completedAt },
-    )) return false;
-    for (
-      let index = 0;
-      index < insertableEdges.length;
-      index += DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE
-    ) {
-      imported += tx.insert(taskDependencies).values(
-        insertableEdges.slice(index, index + DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE),
-      ).onConflictDoNothing().run().changes;
-    }
-    for (
-      let index = 0;
-      index < removableDependencyIds.length;
-      index += DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE
-    ) {
-      removed += tx.delete(taskDependencies).where(and(
-        inArray(
-          taskDependencies.id,
-          removableDependencyIds.slice(index, index + DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE),
-        ),
-        eq(taskDependencies.connectorInstanceId, connectorInstanceId),
-        eq(taskDependencies.syncStatus, 'synced'),
-        isNull(taskDependencies.syncAction),
-      )).run().changes;
-    }
-
-    const completed = tx.update(dependencyReconciliationSnapshots).set({
-      status: 'completed',
-      phase: 'completed',
-      identityEvidenceEligible,
-      identityEvidenceFailureReason,
-      importedCount: sql`${dependencyReconciliationSnapshots.importedCount} + ${imported}`,
-      removedCount: sql`${dependencyReconciliationSnapshots.removedCount} + ${removed}`,
-      completedAt,
-      updatedAt: completedAt,
-      failedAt: null,
-      nextAttemptAt: null,
-      failureReason: null,
-    }).where(and(
-      eq(dependencyReconciliationSnapshots.id, snapshot.id),
-      inArray(dependencyReconciliationSnapshots.status, ['running', 'failed']),
-      gte(dependencyReconciliationSnapshots.cursor, snapshot.total),
-      eq(dependencyReconciliationSnapshots.identityMode, snapshot.identityMode),
-      eq(
-        dependencyReconciliationSnapshots.identityModeRevision,
-        snapshot.identityModeRevision,
-      ),
-    )).run();
-    if (completed.changes !== 1) {
-      throw new Error('Dependency finalization CAS failed');
-    }
-    prunedSnapshots = tx.delete(dependencyReconciliationSnapshots).where(and(
-      eq(dependencyReconciliationSnapshots.connectorInstanceId, connectorInstanceId),
-      inArray(dependencyReconciliationSnapshots.status, ['completed', 'partial']),
-      notInArray(dependencyReconciliationSnapshots.id, retainedSnapshotIds),
-    )).run().changes;
-    return true;
+  const finalizeResult = await deps.finalizeSnapshotGeneration({
+    fence: snapshotFence(snapshot),
+    cursor: snapshot.cursor,
+    total: snapshot.total,
+    connectorInstanceId,
+    completedAt,
+    identityEvidenceEligible,
+    identityEvidenceFailureReason,
+    insertableEdges,
+    removableDependencyIds,
+    retainedSnapshotIds,
+    insertChunkSize: DEPENDENCY_FINALIZE_INSERT_CHUNK_SIZE,
+    deleteChunkSize: DEPENDENCY_FINALIZE_DELETE_CHUNK_SIZE,
   });
-  if (!finalized) {
+  if (finalizeResult.status === 'fenced') {
     return {
       snapshot: identityContextFencedSnapshot(snapshot, completedAt),
       removed: 0,
       imported: 0,
     };
   }
-
+  const { imported, removed, prunedSnapshots } = finalizeResult;
   const completed: DependencySnapshot = {
     ...snapshot,
     status: 'completed',
@@ -2352,6 +1866,7 @@ async function reconcileTaskDependenciesUnlocked(
   options: ReconcileOptions,
 ): Promise<DependencyReconciliationResult> {
   const capabilities = await getConnectorCapabilities(connectorInstanceId);
+  const deps = await getGitHubDependencyRepository();
   const resumeSnapshot = options.resumeGenerationId
     ? await loadActiveSnapshot(connectorInstanceId)
     : undefined;
@@ -2367,13 +1882,7 @@ async function reconcileTaskDependenciesUnlocked(
       resumeSkippedReason: 'snapshot-no-longer-active',
     };
   }
-  const connectorTasks = await db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    connectorInstanceId: tasks.connectorInstanceId,
-    isChecklistItem: tasks.isChecklistItem,
-    metadata: tasks.metadata,
-  }).from(tasks).where(eq(tasks.connectorInstanceId, connectorInstanceId));
+  const connectorTasks = await deps.listConnectorTasks(connectorInstanceId);
   const nativeTasks = connectorTasks
     .filter((task) => isNativeDependencyTask(task, connector.type))
     .sort((left, right) => left.sourceId.localeCompare(right.sourceId));
@@ -2388,7 +1897,7 @@ async function reconcileTaskDependenciesUnlocked(
       && emptySnapshot.total === 0
     ) {
       if (connector.type === 'github-issues') {
-        const currentIdentityContext = getGitHubIdentityModeSnapshot(connectorInstanceId);
+        const currentIdentityContext = await getModeSnapshot(connectorInstanceId);
         if (!dependencyIdentityContextMatches(emptySnapshot, currentIdentityContext)) {
           const fenced = await abandonSnapshotForIdentityContextChange(
             emptySnapshot,
@@ -2428,10 +1937,7 @@ async function reconcileTaskDependenciesUnlocked(
   const taskBySourceId = new Map(nativeTasks.map((task) => [task.sourceId, task]));
   const taskIds = nativeTasks.map((task) => task.id);
   const taskIdSet = new Set(taskIds);
-  let localDependencies = await db.select().from(taskDependencies).where(and(
-    inArray(taskDependencies.taskId, taskIds),
-    eq(taskDependencies.type, 'blocks'),
-  )) as DependencyRecord[];
+  let localDependencies = await deps.listBlocksDependenciesForTasks(taskIds);
   localDependencies = localDependencies.filter((dependency) =>
     taskIdSet.has(dependency.dependsOnTaskId));
 
@@ -2473,13 +1979,13 @@ async function reconcileTaskDependenciesUnlocked(
       connectorInstanceId,
       nativeTasks.map((task) => task.sourceId),
       connector.type === 'github-issues'
-        ? getGitHubIdentityModeSnapshot(connectorInstanceId)
+        ? await getModeSnapshot(connectorInstanceId)
         : undefined,
     );
   }
   const lastCompletedSnapshot = await getLastCompletedSnapshot(connectorInstanceId);
   if (connector.type === 'github-issues') {
-    const currentIdentityContext = getGitHubIdentityModeSnapshot(connectorInstanceId);
+    const currentIdentityContext = await getModeSnapshot(connectorInstanceId);
     if (!dependencyIdentityContextMatches(snapshot, currentIdentityContext)) {
       const fenced = await abandonSnapshotForIdentityContextChange(
         snapshot,
@@ -2510,13 +2016,11 @@ async function reconcileTaskDependenciesUnlocked(
   const engineResult = await runResumableReconciliation({
     createSnapshot: async () => activeSnapshot,
     loadBatch: async (current, window): Promise<DependencyReconciliationBatch> => {
-      const batchItems = await db.select().from(dependencyReconciliationItems)
-        .where(and(
-          eq(dependencyReconciliationItems.snapshotId, current.id),
-          gte(dependencyReconciliationItems.position, window.start),
-          lt(dependencyReconciliationItems.position, window.end),
-        ))
-        .orderBy(asc(dependencyReconciliationItems.position));
+      const batchItems = await deps.listSnapshotItemsInWindow({
+        snapshotId: current.id,
+        start: window.start,
+        end: window.end,
+      });
       const sourceIds = batchItems.map((item) => item.sourceId);
       if (sourceIds.length !== window.end - window.start) {
         throw new Error(
@@ -2542,48 +2046,38 @@ async function reconcileTaskDependenciesUnlocked(
       }
 
       const [stagedEdges, verifiedItems] = await Promise.all([
-        db.select({
-          blockerSourceId: dependencyReconciliationEdges.blockerSourceId,
-          blockedSourceId: dependencyReconciliationEdges.blockedSourceId,
-          blockerIdentityEvidence: dependencyReconciliationEdges.blockerIdentityEvidence,
-          blockerIdentityEvidenceState:
-            dependencyReconciliationEdges.blockerIdentityEvidenceState,
-        }).from(dependencyReconciliationEdges).where(and(
-          eq(dependencyReconciliationEdges.snapshotId, current.id),
-          inArray(dependencyReconciliationEdges.blockedSourceId, batch.sourceIds),
-        )),
-        db.select({
-          sourceId: dependencyReconciliationItems.sourceId,
-          evidence: dependencyReconciliationItems.identityEvidence,
-          state: dependencyReconciliationItems.identityEvidenceState,
-        }).from(dependencyReconciliationItems).where(and(
-          eq(dependencyReconciliationItems.snapshotId, current.id),
-          inArray(dependencyReconciliationItems.sourceId, batch.sourceIds),
-          eq(dependencyReconciliationItems.verified, true),
-        )),
+        deps.listStagedEdgesForSourceIds({
+          snapshotId: current.id,
+          blockedSourceIds: batch.sourceIds,
+        }),
+        deps.listVerifiedItemsForSourceIds({
+          snapshotId: current.id,
+          sourceIds: batch.sourceIds,
+        }),
       ]);
       return {
         ...batch,
         remoteSnapshot: {
           dependencies: stagedEdges.map((edge) => ({
-            ...edge,
+            blockerSourceId: edge.blockerSourceId,
+            blockedSourceId: edge.blockedSourceId,
             blockerIdentityEvidence: edge.blockerIdentityEvidence ?? undefined,
+            blockerIdentityEvidenceState: edge.blockerIdentityEvidenceState,
           })),
           completeBlockedSourceIds: verifiedItems.map(({ sourceId }) => sourceId),
-          blockedIdentityEvidence: verifiedItems.map(({ sourceId, evidence, state }) => ({
-            sourceId,
-            evidence: evidence ?? undefined,
-            state,
-          })),
+          blockedIdentityEvidence: verifiedItems.map(
+            ({ sourceId, identityEvidence, identityEvidenceState }) => ({
+              sourceId,
+              evidence: identityEvidence ?? undefined,
+              state: identityEvidenceState,
+            }),
+          ),
         },
         imported: 0,
       };
     },
     advanceCursor: async (current, batchResult, window) => {
-      let currentDependencies = await db.select().from(taskDependencies).where(and(
-        inArray(taskDependencies.taskId, taskIds),
-        eq(taskDependencies.type, 'blocks'),
-      )) as DependencyRecord[];
+      let currentDependencies = await deps.listBlocksDependenciesForTasks(taskIds);
       currentDependencies = currentDependencies.filter((dependency) =>
         taskIdSet.has(dependency.dependsOnTaskId));
       batchResult.imported = await applySnapshotBatch(
@@ -2597,9 +2091,7 @@ async function reconcileTaskDependenciesUnlocked(
         currentDependencies,
         !batchResult.usesStagedGeneration,
       );
-      const [refreshed] = await db.select().from(dependencyReconciliationSnapshots)
-        .where(eq(dependencyReconciliationSnapshots.id, current.id))
-        .limit(1);
+      const refreshed = await deps.getSnapshotById(current.id);
       return refreshed ?? {
         ...current,
         cursor: window.end,

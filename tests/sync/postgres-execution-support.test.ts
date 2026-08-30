@@ -35,8 +35,33 @@ describe('PostgreSQL generic connector execution support', () => {
     expect(() => support.assertConnectorSupported({ type: 'custom-rest' })).not.toThrow();
   });
 
+  it('accepts GitHub normal queue execution once Layer 3A is composed', () => {
+    expect(() => support.assertConfigSupported(config({
+      type: 'github-issues',
+      capabilities: { ...config().capabilities, dependencyRead: true, dependencyWrite: true },
+    }))).not.toThrow();
+    expect(() => support.assertConnectorSupported({
+      type: 'github-issues',
+      dependencySnapshotStrategy: 'task-stream',
+      fetchProjectAssociations: () => undefined,
+    })).not.toThrow();
+  });
+
+  it('enables only the dependency reconciliation legacy workflow', () => {
+    expect(support.allowsLegacyWorkflow('dependency-reconciliation')).toBe(true);
+    for (const workflow of [
+      'event-outbox',
+      'notification-dispatcher',
+      'notification-enrichment',
+      'planning-signals',
+      'project-automation',
+      'semantic-search',
+    ] as const) {
+      expect(support.allowsLegacyWorkflow(workflow)).toBe(false);
+    }
+  });
+
   it.each([
-    ['GitHub identity', config({ type: 'github-issues' })],
     ['connector-owned finance', config({ type: 'finance-manager' })],
     ['Microsoft To Do hidden-list state', config({ type: 'microsoft-todo' })],
     ['connector-owned Work To Do bridge', config({ type: 'microsoft-todo-work' })],

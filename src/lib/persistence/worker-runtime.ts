@@ -27,16 +27,32 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { sqliteCorePersistenceRepositories },
     { SqliteSyncRunRepository },
     { createSqliteConnectorExecutionRepositories },
+    { createSqliteGitHubIdentityRepositories },
+    { createSqliteGitHubDependencyRepositories },
+    { createSqliteGitHubHierarchyRepositories },
+    { createSqliteGitHubProjectRepositories },
   ] = await Promise.all([
     import('@/db'),
     import('@/db/persistence/sqlite-core-repositories'),
     import('@/db/persistence/sqlite-sync-run-repository'),
     import('@/db/persistence/sqlite-connector-execution-repositories'),
+    import('@/db/persistence/sqlite-github-identity-repositories'),
+    import('@/db/persistence/sqlite-github-dependency-repositories'),
+    import('@/db/persistence/sqlite-github-hierarchy-repositories'),
+    import('@/db/persistence/sqlite-github-project-repositories'),
   ]);
+  const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
   return {
     connectors: sqliteCorePersistenceRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),
     execution: createSqliteConnectorExecutionRepositories(sqlite, db),
+    github: {
+      identity: githubIdentity.identity,
+      writeFence: githubIdentity.writeFence,
+      dependencies: createSqliteGitHubDependencyRepositories(sqlite, db),
+      hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
+      projects: createSqliteGitHubProjectRepositories(sqlite, db),
+    },
   };
 }
 

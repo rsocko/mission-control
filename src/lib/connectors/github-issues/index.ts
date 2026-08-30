@@ -46,7 +46,7 @@ import { isMicroStatusSyncEnabled } from '@/lib/micro-status';
 import { connectorLogger } from '@/lib/logger';
 import { GITHUB_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
 import {
-  getGitHubIdentityModeSnapshot,
+
   GitHubWriteFenceError,
   type GitHubWriteAuthorization,
   type GitHubWriteOutcomeReadRequest,

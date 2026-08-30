@@ -96,6 +96,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  github: new Proxy({} as WorkerPersistenceRepositories['github'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().github[
+        property as keyof WorkerPersistenceRepositories['github']
+      ]
+    ),
+  }),
 };
 
 /**
@@ -103,7 +110,9 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * instantiates and registers the portable-contract adapters
  * (`createPostgresCoreRepositories`, `createPostgresSyncJobRepository`,
  * `createPostgresConnectorOperationLeaseRepository`, the worker persistence
- * composition, `createPostgresKeywordSearchRepository`,
+ * composition — which now includes the atomic
+ * `createPostgresGitHubWorkerRepositories` GitHub composition —
+ * `createPostgresKeywordSearchRepository`,
  * `createPostgresSemanticIndexRepository`, and
  * `createPostgresSemanticSourcePort`) from the freshly-initialized
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its

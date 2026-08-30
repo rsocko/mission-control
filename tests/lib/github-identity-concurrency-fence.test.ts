@@ -102,8 +102,8 @@ describe('GitHub identity persistence concurrency fences', () => {
 
     // The stable runtime writes no evidence, so the only durable fence is the
     // identity epoch: a resolution attempt after the bump must fail closed.
-    expect(() => runtime.assertCurrentMode())
-      .toThrow('GitHub identity runtime revision is stale');
+    await expect(runtime.assertCurrentMode())
+      .rejects.toThrow('GitHub identity runtime revision is stale');
     runtime.complete('cancelled', 'identity_context_changed');
   });
 });

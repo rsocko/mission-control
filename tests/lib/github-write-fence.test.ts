@@ -84,36 +84,36 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const firstCycle = identity.beginGitHubWriteCycle({
+    const firstCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
       identityRuntime: runtime,
       writeCycleId: firstCycle,
     });
-    identity.verifyGitHubWritePreflight(authorization, {
+    await identity.verifyGitHubWritePreflight(authorization, {
       targets: {
         primary_issue: { repositoryStableId: 'R_repo', issueStableId: 'I_issue' },
         source_repository: { repositoryStableId: 'R_repo' },
       },
     });
-    identity.confirmGitHubWriteDispatch(authorization);
-    identity.finalizeGitHubWrite(authorization, 'succeeded');
+    await identity.confirmGitHubWriteDispatch(authorization);
+    await identity.finalizeGitHubWrite(authorization, 'succeeded');
     expect(db.select().from(schema.taskSourceWriteLeases).all()
       .find((lease) => lease.id === authorization.leaseId)).toMatchObject({
       state: 'succeeded',
       modeRevision: 4,
     });
-    expect(() => identity.quarantineUnknownGitHubWrite(
+    await expect(identity.quarantineUnknownGitHubWrite(
       authorization,
       new Error('late transport failure'),
-    )).toThrow(identity.GitHubUnknownWriteOutcomeError);
-    identity.finishGitHubWriteCycle(firstCycle, {
+    )).rejects.toThrow(identity.GitHubUnknownWriteOutcomeError);
+    await identity.finishGitHubWriteCycle(firstCycle, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -121,12 +121,12 @@ describe('GitHub write fence', () => {
       unknown: 0,
     });
 
-    const staleCycle = identity.beginGitHubWriteCycle({
+    const staleCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const stale = identity.authorizeGitHubWrite({
+    const stale = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'comment',
@@ -138,8 +138,8 @@ describe('GitHub write fence', () => {
       SET mode_revision = 5, updated_at = ?
       WHERE connector_instance_id = ?
     `).run(now, 'github-fence');
-    expect(() => identity.confirmGitHubWriteDispatch(stale))
-      .toThrow('stale_mode_lease_or_locator');
+    await expect(identity.confirmGitHubWriteDispatch(stale))
+      .rejects.toThrow('stale_mode_lease_or_locator');
     expect(db.select().from(schema.taskSourceWriteLeases).all()
       .find((lease) => lease.id === stale.leaseId)?.state).toBe('blocked');
     runtime.complete('succeeded');
@@ -328,7 +328,7 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const disagreementCycle = identity.beginGitHubWriteCycle({
+    const disagreementCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
@@ -340,7 +340,7 @@ describe('GitHub write fence', () => {
       sourceId: 'owner/replacement:7',
       updatedAt: '2026-08-10T12:01:00.000Z',
     }).where((await import('drizzle-orm')).eq(schema.tasks.id, 'task-1')).run();
-    const renamed = identity.authorizeGitHubWrite({
+    const renamed = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
@@ -348,8 +348,8 @@ describe('GitHub write fence', () => {
       writeCycleId: disagreementCycle,
     });
     expect(renamed).toMatchObject({ owner: 'owner', repository: 'repo', issueNumber: 7 });
-    identity.blockGitHubWrite(renamed.leaseId, renamed.token, 'test_cleanup');
-    identity.finishGitHubWriteCycle(disagreementCycle, {
+    await identity.blockGitHubWrite(renamed.leaseId, renamed.token, 'test_cleanup');
+    await identity.finishGitHubWriteCycle(disagreementCycle, {
       observed: 1,
       applied: 0,
       blocked: 1,
@@ -361,12 +361,12 @@ describe('GitHub write fence', () => {
       sourceId: 'owner/repo:7',
       updatedAt: now,
     }).where((await import('drizzle-orm')).eq(schema.tasks.id, 'task-1')).run();
-    const bindingCycle = identity.beginGitHubWriteCycle({
+    const bindingCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
@@ -378,8 +378,8 @@ describe('GitHub write fence', () => {
       SET verified_at = ?, updated_at = ?
       WHERE id = 'issue-binding'
     `).run('2026-08-10T12:02:00.000Z', '2026-08-10T12:02:00.000Z');
-    expect(() => identity.confirmGitHubWriteDispatch(authorization))
-      .toThrow('stale_mode_lease_or_locator');
+    await expect(identity.confirmGitHubWriteDispatch(authorization))
+      .rejects.toThrow('stale_mode_lease_or_locator');
     runtime.complete('failed', 'binding_revision_race');
   });
 
@@ -390,14 +390,14 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
     const observe = runtime.applyResolvedBatch.bind(runtime);
-    runtime.applyResolvedBatch = ((...args: Parameters<typeof observe>) => {
-      const decisions = observe(...args);
+    runtime.applyResolvedBatch = (async (...args: Parameters<typeof observe>) => {
+      const decisions = await observe(...args);
       sqlite.prepare(`
         UPDATE github_identity_write_cycles
         SET state = 'interrupted', completed_at = ?
@@ -406,13 +406,13 @@ describe('GitHub write fence', () => {
       return decisions;
     }) as typeof runtime.applyResolvedBatch;
 
-    expect(() => identity.authorizeGitHubWrite({
+    await expect(identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
       identityRuntime: runtime,
       writeCycleId: cycleId,
-    })).toThrow('write_cycle_observation_lost');
+    })).rejects.toThrow('write_cycle_observation_lost');
 
     const [lease] = db.select().from(schema.taskSourceWriteLeases).all();
     expect(lease).toMatchObject({
@@ -438,12 +438,12 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
@@ -454,8 +454,8 @@ describe('GitHub write fence', () => {
       cycleObservedAt: null,
     }).where(eq(schema.taskSourceWriteLeases.id, authorization.leaseId)).run();
 
-    expect(() => identity.confirmGitHubWriteDispatch(authorization))
-      .toThrow('stale_mode_lease_or_locator');
+    await expect(identity.confirmGitHubWriteDispatch(authorization))
+      .rejects.toThrow('stale_mode_lease_or_locator');
     expect(db.select().from(schema.taskSourceWriteLeases)
       .where(eq(schema.taskSourceWriteLeases.id, authorization.leaseId)).get())
       .toMatchObject({
@@ -473,12 +473,12 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
@@ -491,9 +491,9 @@ describe('GitHub write fence', () => {
       WHERE id = ?
     `).run('2026-08-10T12:00:01.000Z', cycleId);
 
-    expect(() => identity.confirmGitHubWriteDispatch(authorization))
-      .toThrow('stale_mode_lease_or_locator');
-    expect(identity.finishGitHubWriteCycle(cycleId, {
+    await expect(identity.confirmGitHubWriteDispatch(authorization))
+      .rejects.toThrow('stale_mode_lease_or_locator');
+    expect(await identity.finishGitHubWriteCycle(cycleId, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -526,33 +526,33 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'full',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
       identityRuntime: runtime,
       writeCycleId: cycleId,
     });
-    identity.verifyGitHubWritePreflight(authorization, {
+    await identity.verifyGitHubWritePreflight(authorization, {
       targets: {
         primary_issue: { repositoryStableId: 'R_repo', issueStableId: 'I_issue' },
         source_repository: { repositoryStableId: 'R_repo' },
       },
     });
-    identity.confirmGitHubWriteDispatch(authorization);
+    await identity.confirmGitHubWriteDispatch(authorization);
     sqlite.prepare(`
       UPDATE github_identity_write_cycles
       SET state = 'interrupted', completed_at = ?
       WHERE id = ?
     `).run('2026-08-10T12:00:01.000Z', cycleId);
 
-    expect(() => identity.finalizeGitHubWrite(authorization, 'succeeded'))
-      .toThrow('lease_finalization_lost');
+    await expect(identity.finalizeGitHubWrite(authorization, 'succeeded'))
+      .rejects.toThrow('lease_finalization_lost');
     expect(db.select().from(schema.taskSourceWriteLeases)
       .where((await import('drizzle-orm')).eq(
         schema.taskSourceWriteLeases.id,
@@ -685,37 +685,37 @@ describe('GitHub write fence', () => {
       modeSnapshot,
       syncKind: 'incremental',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       pendingCandidateCount: 2,
     });
-    const first = identity.authorizeGitHubWrite({
+    const first = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
       identityRuntime: runtime,
       writeCycleId: cycleId,
     });
-    identity.confirmGitHubWriteDispatch(first);
-    identity.finalizeGitHubWrite(first, 'succeeded');
+    await identity.confirmGitHubWriteDispatch(first);
+    await identity.finalizeGitHubWrite(first, 'succeeded');
 
-    expect(() => identity.beginGitHubWriteCycle({
+    await expect(identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       pendingCandidateCount: 1,
-    })).toThrow('active_write_cycle');
+    })).rejects.toThrow('active_write_cycle');
     expect(db.select().from(schema.githubIdentityWriteCycles).all())
       .toHaveLength(1);
-    const second = identity.authorizeGitHubWrite({
+    const second = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
       identityRuntime: runtime,
       writeCycleId: cycleId,
     });
-    identity.blockGitHubWrite(second.leaseId, second.token, 'test_cleanup');
-    identity.finishGitHubWriteCycle(cycleId, {
+    await identity.blockGitHubWrite(second.leaseId, second.token, 'test_cleanup');
+    await identity.finishGitHubWriteCycle(cycleId, {
       observed: 2,
       applied: 1,
       blocked: 1,
@@ -738,7 +738,7 @@ describe('GitHub write fence', () => {
     expect(token).toEqual(expect.any(String));
     const claimed = await loadClaimedTaskForPush('task-1', token!);
     expect(claimed).not.toBeNull();
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
@@ -749,7 +749,7 @@ describe('GitHub write fence', () => {
       syncStatus: 'pending_push',
     }).where(eq(schema.tasks.id, 'task-1')).run();
 
-    expect(() => identity.authorizeGitHubWrite({
+    await expect(identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
@@ -757,8 +757,8 @@ describe('GitHub write fence', () => {
       writeCycleId: cycleId,
       expectedTaskVersion: claimed!.updatedAt,
       taskPushLeaseToken: token!,
-    })).toThrow('stale_task_push_claim');
-    expect(identity.finishGitHubWriteCycle(cycleId, {
+    })).rejects.toThrow('stale_task_push_claim');
+    expect(await identity.finishGitHubWriteCycle(cycleId, {
       observed: 0,
       applied: 0,
       blocked: 0,
@@ -780,7 +780,7 @@ describe('GitHub write fence', () => {
     const { db, schema, identity } = await setupFixture();
     const { eq } = await import('drizzle-orm');
     const modeSnapshot = identity.getGitHubIdentityModeSnapshot('github-fence');
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       pendingCandidateCount: 1,
@@ -790,7 +790,7 @@ describe('GitHub write fence', () => {
       reconciliationCode: 'operator_owned',
     }).where(eq(schema.githubIdentityWriteCycles.id, cycleId)).run();
 
-    expect(identity.finishGitHubWriteCycle(cycleId, {
+    expect(await identity.finishGitHubWriteCycle(cycleId, {
       observed: 1,
       applied: 0,
       blocked: 1,
@@ -814,12 +814,12 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
     });
-    const abandonedCycle = identity.beginGitHubWriteCycle({
+    const abandonedCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const abandoned = identity.authorizeGitHubWrite({
+    const abandoned = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
@@ -830,7 +830,7 @@ describe('GitHub write fence', () => {
       expiresAt: '2020-01-01T00:00:00.000Z',
     }).where(eq(schema.taskSourceWriteLeases.id, abandoned.leaseId)).run();
 
-    const retryCycle = identity.beginGitHubWriteCycle({
+    const retryCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
@@ -849,15 +849,15 @@ describe('GitHub write fence', () => {
       reconciliationState: 'unresolved',
     });
 
-    const retry = identity.authorizeGitHubWrite({
+    const retry = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
       identityRuntime: runtime,
       writeCycleId: retryCycle,
     });
-    identity.blockGitHubWrite(retry.leaseId, retry.token, 'test_cleanup');
-    identity.finishGitHubWriteCycle(retryCycle, {
+    await identity.blockGitHubWrite(retry.leaseId, retry.token, 'test_cleanup');
+    await identity.finishGitHubWriteCycle(retryCycle, {
       observed: 1,
       applied: 0,
       blocked: 1,
@@ -879,12 +879,12 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
     });
-    const firstCycle = identity.beginGitHubWriteCycle({
+    const firstCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const first = identity.authorizeGitHubWrite({
+    const first = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'create',
@@ -896,9 +896,9 @@ describe('GitHub write fence', () => {
       .get()).toMatchObject({
       idempotencyKey: 'task-1:create:2026-08-10T12:01:00.000Z',
     });
-    identity.confirmGitHubWriteDispatch(first);
-    identity.finalizeGitHubWrite(first, 'succeeded', undefined, { sourceId: 'owner/repo:8' });
-    identity.finishGitHubWriteCycle(firstCycle, {
+    await identity.confirmGitHubWriteDispatch(first);
+    await identity.finalizeGitHubWrite(first, 'succeeded', undefined, { sourceId: 'owner/repo:8' });
+    await identity.finishGitHubWriteCycle(firstCycle, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -909,20 +909,20 @@ describe('GitHub write fence', () => {
       title: 'Edited while create was in flight',
       updatedAt: '2026-08-10T12:02:00.000Z',
     }).where(eq(schema.tasks.id, 'task-1')).run();
-    const retryCycle = identity.beginGitHubWriteCycle({
+    const retryCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
 
-    expect(() => identity.authorizeGitHubWrite({
+    await expect(identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'create',
       identityRuntime: runtime,
       writeCycleId: retryCycle,
-    })).toThrow('write_already_succeeded');
-    expect(identity.finishGitHubWriteCycle(retryCycle, {
+    })).rejects.toThrow('write_already_succeeded');
+    expect(await identity.finishGitHubWriteCycle(retryCycle, {
       observed: 0,
       applied: 0,
       blocked: 0,
@@ -941,21 +941,21 @@ describe('GitHub write fence', () => {
       modeSnapshot,
       syncKind: 'incremental',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
       identityRuntime: runtime,
       writeCycleId: cycleId,
     });
-    identity.confirmGitHubWriteDispatch(authorization);
-    identity.finalizeGitHubWrite(authorization, 'succeeded');
-    identity.finishGitHubWriteCycle(cycleId, {
+    await identity.confirmGitHubWriteDispatch(authorization);
+    await identity.finalizeGitHubWrite(authorization, 'succeeded');
+    await identity.finishGitHubWriteCycle(cycleId, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -971,7 +971,7 @@ describe('GitHub write fence', () => {
       lastSyncedAt: '2026-08-10T12:03:00.000Z',
     }).where(eq(schema.tasks.id, 'task-1')).run();
 
-    expect(identity.hasSucceededGitHubWrite({
+    expect(await identity.hasSucceededGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'update',
@@ -990,21 +990,21 @@ describe('GitHub write fence', () => {
       modeSnapshot,
       syncKind: 'incremental',
     });
-    const cycleId = identity.beginGitHubWriteCycle({
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot,
       pendingCandidateCount: 1,
     });
-    const authorization = identity.authorizeGitHubWrite({
+    const authorization = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
       identityRuntime: runtime,
       writeCycleId: cycleId,
     });
-    identity.confirmGitHubWriteDispatch(authorization);
-    identity.finalizeGitHubWrite(authorization, 'failed', 'proven_not_applied');
-    identity.finishGitHubWriteCycle(cycleId, {
+    await identity.confirmGitHubWriteDispatch(authorization);
+    await identity.finalizeGitHubWrite(authorization, 'failed', 'proven_not_applied');
+    await identity.finishGitHubWriteCycle(cycleId, {
       observed: 1,
       applied: 0,
       blocked: 0,
@@ -1034,7 +1034,7 @@ describe('GitHub write fence', () => {
       lastSyncedAt: '2026-08-10T12:05:00.000Z',
     }).where(eq(schema.tasks.id, 'task-1')).run();
 
-    expect(identity.hasSucceededGitHubWrite({
+    expect(await identity.hasSucceededGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'complete',
@@ -1051,34 +1051,34 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
     });
-    const firstCycle = identity.beginGitHubWriteCycle({
+    const firstCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const first = identity.authorizeGitHubWrite({
+    const first = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'label',
       identityRuntime: runtime,
       writeCycleId: firstCycle,
     });
-    identity.confirmGitHubWriteDispatch(first);
-    identity.finalizeGitHubWrite(first, 'succeeded');
-    identity.finishGitHubWriteCycle(firstCycle, {
+    await identity.confirmGitHubWriteDispatch(first);
+    await identity.finalizeGitHubWrite(first, 'succeeded');
+    await identity.finishGitHubWriteCycle(firstCycle, {
       observed: 1,
       applied: 1,
       blocked: 0,
       failed: 0,
       unknown: 0,
     });
-    const secondCycle = identity.beginGitHubWriteCycle({
+    const secondCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
 
-    const second = identity.authorizeGitHubWrite({
+    const second = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'label',
@@ -1086,8 +1086,8 @@ describe('GitHub write fence', () => {
       writeCycleId: secondCycle,
     });
     expect(second.leaseId).not.toBe(first.leaseId);
-    identity.blockGitHubWrite(second.leaseId, second.token, 'test_cleanup');
-    identity.finishGitHubWriteCycle(secondCycle, {
+    await identity.blockGitHubWrite(second.leaseId, second.token, 'test_cleanup');
+    await identity.finishGitHubWriteCycle(secondCycle, {
       observed: 1,
       applied: 0,
       blocked: 1,
@@ -1272,12 +1272,12 @@ describe('GitHub write fence', () => {
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       syncKind: 'incremental',
     });
-    const staleCycle = identity.beginGitHubWriteCycle({
+    const staleCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-fence',
       modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-fence'),
       pendingCandidateCount: 1,
     });
-    const stale = identity.authorizeGitHubWrite({
+    const stale = await identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-fence',
       taskId: 'task-1',
       operation: 'comment',
@@ -1287,8 +1287,8 @@ describe('GitHub write fence', () => {
     // Bumping the connector identity epoch must fence an already authorized write.
     db.update(schema.githubIdentityControls).set({ modeRevision: 6, updatedAt: now })
       .where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-fence')).run();
-    expect(() => identity.confirmGitHubWriteDispatch(stale))
-      .toThrow('stale_mode_lease_or_locator');
+    await expect(identity.confirmGitHubWriteDispatch(stale))
+      .rejects.toThrow('stale_mode_lease_or_locator');
     expect(db.select().from(schema.taskSourceWriteLeases)
       .where(eq(schema.taskSourceWriteLeases.id, unknownLease.id)).get())
       .toMatchObject({ state: 'unknown' });

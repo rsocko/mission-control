@@ -123,7 +123,6 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         assertConnectorSupported: vi.fn(),
         listConnectorTaskIdentities: vi.fn(async () => []),
         listConnectorTaskIds: vi.fn(async () => []),
-        syncLegacyGitHubProjects: vi.fn(async () => undefined),
       },
       lists: {
         list: vi.fn(async () => []),
@@ -155,6 +154,21 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         archiveStale: vi.fn(async () => 0),
         mergeMetadata: vi.fn(async () => true),
       },
+    },
+    github: {
+      identity: {
+        getModeSnapshot: vi.fn(async (connectorInstanceId: string) => ({
+          connectorInstanceId,
+          effectiveMode: 'stable',
+          modeRevision: 1,
+          capturedAt: new Date().toISOString(),
+        })),
+        checkDecisionsCurrent: vi.fn(async () => true),
+      },
+      writeFence: {},
+      dependencies: {},
+      hierarchy: {},
+      projects: {},
     },
   }),
 }));

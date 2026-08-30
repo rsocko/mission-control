@@ -1,8 +1,12 @@
-import { sqlite } from '@/db';
 import type { ExternalBindingType } from '@/db/schema';
+import type {
+  GitHubStableLookupInputRow,
+  GitHubStableLookupRow,
+} from '@/db/persistence/github-identity';
 import type { GitHubStableResolution } from './stable-identity-types';
-import { digestExternalIdentifier } from './service';
+import { digestExternalIdentifier } from './identifier-digest';
 import type { ExternalIdentityEvidence } from './types';
+import { getGitHubIdentityRepository } from './worker-persistence';
 
 const MAX_BATCH_SIZE = 500;
 
@@ -19,24 +23,12 @@ export interface GitHubStableLookupResult {
   queryCount: number;
 }
 
-interface LookupRow {
-  candidateKey: string;
-  externalEntityId: string | null;
-  bindingLocalId: string | null;
-  localId: string | null;
-  bindingState: string | null;
-  bindingRevision: string | null;
-  locatorRevision: number | null;
-  currentOwnerKey: string | null;
-  currentRepositoryKey: string | null;
-  currentIssueNumber: number | null;
-  pathEntityId: string | null;
-}
+type LookupRow = GitHubStableLookupRow;
 
-export function resolveGitHubStableIdentityBatch(
+export async function resolveGitHubStableIdentityBatch(
   connectorInstanceId: string,
   candidates: readonly GitHubStableLookupCandidate[],
-): GitHubStableLookupResult {
+): Promise<GitHubStableLookupResult> {
   if (candidates.length > MAX_BATCH_SIZE) {
     throw new Error(`GitHub stable lookup batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
   }
@@ -76,85 +68,24 @@ export function resolveGitHubStableIdentityBatch(
     }
   }
 
-  const valuesSql = withEvidence.map(() => '(?, ?, ?, ?, ?)').join(', ');
-  const params: Array<string | number | null> = [];
-  for (const candidate of withEvidence) {
+  const inputRows: GitHubStableLookupInputRow[] = withEvidence.map((candidate) => {
     const observation = candidate.evidence!.entity;
-    params.push(
-      candidate.candidateKey,
-      observation.identity.stableId,
-      observation.locator.owner.toLowerCase(),
-      observation.locator.repository.toLowerCase(),
-      observation.locator.issueNumber ?? null,
-    );
-  }
-  params.push(
-    namespace.provider,
-    namespace.hostKey,
-    namespace.entityType,
-    connectorInstanceId,
-    namespace.bindingType,
-    namespace.provider,
-    namespace.hostKey,
-  );
+    return {
+      candidateKey: candidate.candidateKey,
+      stableId: observation.identity.stableId,
+      ownerKey: observation.locator.owner.toLowerCase(),
+      repositoryKey: observation.locator.repository.toLowerCase(),
+      issueNumber: observation.locator.issueNumber ?? null,
+    };
+  });
 
+  const identity = await getGitHubIdentityRepository();
   const startedAt = performance.now();
-  const rows = sqlite.prepare(`
-    WITH incoming(candidate_key, stable_id, owner_key, repository_key, issue_number) AS (
-      VALUES ${valuesSql}
-    )
-    SELECT
-      incoming.candidate_key AS candidateKey,
-      entity.id AS externalEntityId,
-      binding.local_id AS bindingLocalId,
-      CASE
-        WHEN binding.binding_type = 'task' AND local_task.id IS NOT NULL
-          THEN binding.local_id
-        WHEN binding.binding_type = 'source_list' AND local_source_list.id IS NOT NULL
-          THEN binding.local_id
-        ELSE NULL
-      END AS localId,
-      binding.state AS bindingState,
-      binding.verified_at AS bindingRevision,
-      current_locator.locator_revision AS locatorRevision,
-      current_locator.owner_key AS currentOwnerKey,
-      current_locator.repository_key AS currentRepositoryKey,
-      current_locator.issue_number AS currentIssueNumber,
-      path_locator.external_entity_id AS pathEntityId
-    FROM incoming
-    LEFT JOIN external_entities AS entity
-      ON entity.provider = ?
-      AND entity.host_key = ?
-      AND entity.entity_type = ?
-      AND entity.stable_id = incoming.stable_id
-    LEFT JOIN external_entity_bindings AS binding
-      ON binding.external_entity_id = entity.id
-      AND binding.connector_instance_id = ?
-      AND binding.binding_type = ?
-      AND binding.state != 'retired'
-    LEFT JOIN tasks AS local_task
-      ON binding.binding_type = 'task'
-      AND local_task.id = binding.local_id
-      AND local_task.connector_instance_id = binding.connector_instance_id
-    LEFT JOIN source_lists AS local_source_list
-      ON binding.binding_type = 'source_list'
-      AND local_source_list.id = binding.local_id
-      AND local_source_list.connector_instance_id = binding.connector_instance_id
-    LEFT JOIN external_entity_locators AS current_locator
-      ON current_locator.external_entity_id = entity.id
-      AND current_locator.valid_to IS NULL
-    LEFT JOIN external_entity_locators AS path_locator
-      ON path_locator.provider = ?
-      AND path_locator.host_key = ?
-      AND path_locator.owner_key = incoming.owner_key
-      AND path_locator.repository_key = incoming.repository_key
-      AND path_locator.valid_to IS NULL
-      AND (
-        path_locator.issue_number = incoming.issue_number
-        OR (path_locator.issue_number IS NULL AND incoming.issue_number IS NULL)
-      )
-    ORDER BY incoming.candidate_key COLLATE BINARY, binding.local_id COLLATE BINARY
-  `).all(...params) as LookupRow[];
+  const rows = await identity.lookupStableIdentityBatch({
+    connectorInstanceId,
+    namespace,
+    rows: inputRows,
+  });
   const lookupMs = Math.max(0, Math.round(performance.now() - startedAt));
 
   const rowsByCandidate = new Map<string, LookupRow[]>();

@@ -141,7 +141,6 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         listEnabledGitHubConfigs: vi.fn(async () => mocks.dependencyPollConfigs),
         listConnectorTaskIdentities: vi.fn(async () => []),
         listConnectorTaskIds: vi.fn(async () => []),
-        syncLegacyGitHubProjects: vi.fn(async () => undefined),
       },
       lists: {
         list: vi.fn(async () => []),
@@ -164,6 +163,21 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         archiveStale: vi.fn(async () => 0),
         mergeMetadata: vi.fn(async () => true),
       },
+    },
+    github: {
+      identity: {
+        getModeSnapshot: vi.fn(async (connectorInstanceId: string) => ({
+          connectorInstanceId,
+          effectiveMode: 'stable',
+          modeRevision: 1,
+          capturedAt: new Date().toISOString(),
+        })),
+        checkDecisionsCurrent: vi.fn(async () => true),
+      },
+      writeFence: {},
+      dependencies: {},
+      hierarchy: {},
+      projects: {},
     },
   }),
 }));
@@ -222,8 +236,7 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 vi.mock('@/lib/public-demo', () => ({ isPublicDemoMode: vi.fn(() => false) }));
-vi.mock('@/lib/external-identities', () => ({
-  GITHUB_IDENTITY_MODE: 'stable',
+const identityRuntimeStub = vi.hoisted(() => ({
   GitHubStableIdentityRuntime: class {
     modeSnapshot = {
       connectorInstanceId: 'github-1',
@@ -231,9 +244,9 @@ vi.mock('@/lib/external-identities', () => ({
       modeRevision: 1,
       capturedAt: '2026-08-09T00:00:00.000Z',
     };
-    markNetworkPage = mocks.identityRuntime.markNetworkPage;
-    markBlocked = mocks.identityRuntime.markBlocked;
-    complete = mocks.identityRuntime.complete;
+    markNetworkPage: unknown;
+    markBlocked: unknown;
+    complete: unknown;
     assertCurrentMode() {}
     assertDecisionsCurrent() {}
     hasResolvedStableLocalId() { return false; }
@@ -242,6 +255,23 @@ vi.mock('@/lib/external-identities', () => ({
     applyResolvedBatch() { return []; }
     resolveLinkedSourceBatch() { return []; }
   },
+}));
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.markNetworkPage =
+  mocks.identityRuntime.markNetworkPage;
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.markBlocked =
+  mocks.identityRuntime.markBlocked;
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.complete =
+  mocks.identityRuntime.complete;
+vi.mock('@/lib/external-identities/stable-identity-runtime', () => ({
+  GitHubStableIdentityRuntime: identityRuntimeStub.GitHubStableIdentityRuntime,
+}));
+vi.mock('@/lib/external-identities/stable-identity-types', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  GITHUB_IDENTITY_MODE: 'stable',
+}));
+vi.mock('@/lib/external-identities', () => ({
+  GITHUB_IDENTITY_MODE: 'stable',
+  GitHubStableIdentityRuntime: identityRuntimeStub.GitHubStableIdentityRuntime,
   getGitHubIdentityModeSnapshot: vi.fn((connectorInstanceId: string) => ({
     connectorInstanceId,
     effectiveMode: 'stable',

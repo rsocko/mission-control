@@ -283,10 +283,11 @@ describe('semantic index runs', () => {
     it('counts a retention-expired document without re-enqueuing it', async () => {
       harness.source.putAlert(alertFixture({
         id: 'alert-1',
-        expiresAt: '2000-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:00:00.000Z',
       }));
       await runBackfillSlice(context(), deps);
       await drainQueue();
+      deps.now = () => '2100-01-01T00:00:00.000Z';
 
       const result = await runReconcileSlice(
         context({ run: makeRun({ indexId: identity.id, kind: 'reconcile' }) }), deps,
@@ -346,11 +347,12 @@ describe('semantic index runs', () => {
     it('expires documents past their retention deadline and drops their vectors', async () => {
       harness.source.putAlert(alertFixture({
         id: 'alert-1',
-        expiresAt: '2000-01-01T00:00:00.000Z',
+        expiresAt: '2099-01-01T00:00:00.000Z',
       }));
       harness.source.putTask(taskFixture({ id: 'task-1' }));
       await runBackfillSlice(context(), deps);
       await drainQueue();
+      deps.now = () => '2100-01-01T00:00:00.000Z';
 
       const result = await runCleanupSlice(
         context({ run: makeRun({ indexId: identity.id, kind: 'cleanup' }) }), deps,

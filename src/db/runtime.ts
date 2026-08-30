@@ -78,6 +78,22 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
     set: (key, value) => requirePostgresRepositories().settings.set(key, value),
     delete: (key) => requirePostgresRepositories().settings.delete(key),
   },
+  houstonMemories: {
+    get: (id, authorizationScope) => (
+      requirePostgresRepositories().houstonMemories.get(id, authorizationScope)
+    ),
+    list: (input) => requirePostgresRepositories().houstonMemories.list(input),
+    upsert: (input) => requirePostgresRepositories().houstonMemories.upsert(input),
+    exclude: (id, authorizationScope, now) => (
+      requirePostgresRepositories().houstonMemories.exclude(id, authorizationScope, now)
+    ),
+    delete: (id, authorizationScope) => (
+      requirePostgresRepositories().houstonMemories.delete(id, authorizationScope)
+    ),
+    deleteExpired: (now, limit) => (
+      requirePostgresRepositories().houstonMemories.deleteExpired(now, limit)
+    ),
+  },
 };
 
 const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {

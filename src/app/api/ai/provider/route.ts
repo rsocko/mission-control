@@ -39,6 +39,8 @@ const providerConfigSchema = z.object({
   embeddingBaseUrl: z.union([z.literal(''), z.url()]).optional(),
   embeddingApiKey: z.string().max(10_000).optional(),
   semanticSearchEnabled: z.boolean().default(false),
+  houstonMemoryEnabled: z.boolean().default(false),
+  houstonMemoryRetentionDays: z.number().int().min(1).max(365).default(90),
   baseUrl: z.union([z.literal(''), z.url()]).default(''),
   apiKey: z.string().max(10_000).optional(),
   routingPolicy: z.unknown().optional(),
@@ -78,6 +80,8 @@ async function loadSavedProviderConfig() {
         embeddingBaseUrl?: string;
         embeddingApiKey?: string;
         semanticSearchEnabled?: boolean;
+        houstonMemoryEnabled?: boolean;
+        houstonMemoryRetentionDays?: number;
         baseUrl?: string;
         apiKey?: string;
       }
@@ -153,6 +157,9 @@ export async function GET() {
         embeddingModel: savedConfig.embeddingModel || resolved.embeddingModel,
         embeddingBaseUrl: savedConfig.embeddingBaseUrl || resolved.embeddingBaseUrl,
         semanticSearchEnabled: savedConfig.semanticSearchEnabled ?? resolved.semanticSearchEnabled,
+        houstonMemoryEnabled: savedConfig.houstonMemoryEnabled ?? resolved.houstonMemoryEnabled,
+        houstonMemoryRetentionDays: savedConfig.houstonMemoryRetentionDays
+          ?? resolved.houstonMemoryRetentionDays,
         baseUrl: savedConfig.baseUrl,
         hasApiKey: Boolean(savedConfig.apiKey || resolved.apiKey),
         embeddingHasApiKey: Boolean(
@@ -229,6 +236,8 @@ export async function POST(request: Request) {
       embeddingBaseUrl,
       embeddingApiKey,
       semanticSearchEnabled: parsed.data.semanticSearchEnabled,
+      houstonMemoryEnabled: parsed.data.houstonMemoryEnabled,
+      houstonMemoryRetentionDays: parsed.data.houstonMemoryRetentionDays,
       baseUrl: parsed.data.baseUrl,
       apiKey,
     };

@@ -340,8 +340,10 @@ resulting mutations. The transient cluster itself is not silently persisted.
 
 ## Houston Retrieval and Retention
 
-Houston indexes conversation summaries and linked entities, not indefinite raw
-transcripts. Summary generation records:
+Houston memory is independently gated and off by default. It stores conversation
+summaries and linked entities, never raw transcripts, messages, tool traces, or
+reasoning. Summary generation runs through the restricted sensitivity route and
+records:
 
 - durable decisions and commitments;
 - named topics;
@@ -349,13 +351,31 @@ transcripts. Summary generation records:
 - source conversation identity; and
 - sensitivity and retention deadline.
 
-Users can configure retention, delete indexed memories, and exclude a conversation.
-Deletion removes both keyword and vector projections. Retrieval applies conversation
-authorization and sensitivity policy before candidate scoring and result counts.
+New summaries retain for 90 days by default (configurable from 1–365 days), and
+each record exposes its fixed expiry. Changing the default affects new summaries
+only. Disabling capture retains existing rows until their current expiry or an
+explicit deletion. Users can inspect minimized content, delete a memory, and
+exclude a conversation from current and future capture.
 
-Houston accesses retrieval through a bounded tool/service contract. It never queries
-the vector repository directly and does not receive content outside the current
-request's authorized scope.
+Explicit deletion scrubs every retained content field and keeps only a
+conversation-ID exclusion tombstone so a late or future capture cannot recreate
+the deleted memory.
+
+Deletion and expiry remove both lexical documents and vectors. Retrieval filters
+installation authorization scope, sensitivity, exclusion, and expiry in repository
+predicates before candidate ceilings, scoring, result counts, or truncation
+metadata. Unauthorized and absent conversation IDs share the same not-found shape.
+The worker physically deletes expired authoritative summaries in bounded batches;
+semantic reconciliation removes any projection whose source disappeared before a
+delete intent was published.
+Reconciliation repairs missed publication intents and orphaned projections.
+
+Houston accesses retrieval through a bounded, read-only tool/service contract. It
+never queries vector tables directly and does not receive content outside the
+current request's authorized scope. Results use server-generated `/ai?memory=...`,
+task, project, and tag links. The service reports `disabled`, `keyword-only`,
+`unavailable`, or `ready`; provider or index failure leaves normal chat successful
+and does not imply that historical recall succeeded.
 
 ## Mission Control and Generic Graph Boundary
 
@@ -426,4 +446,4 @@ These require measured spikes rather than architectural assumptions:
 2. PostgreSQL vector extension/index parameters and deployment availability.
 3. The first deterministic cluster algorithm and resolution defaults.
 4. Whether project embeddings include sampled tasks or a maintained project summary.
-5. Retention defaults for Houston summaries and sensitive alerts/events.
+5. Retention defaults for sensitive alerts/events.

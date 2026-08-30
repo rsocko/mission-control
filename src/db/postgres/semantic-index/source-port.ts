@@ -9,6 +9,7 @@ import type { Pool } from 'pg';
 import type {
   SemanticAlertSource,
   SemanticProjectSource,
+  SemanticHoustonSummarySource,
   SemanticSourceEntityType,
   SemanticSourceIdPage,
   SemanticSourcePort,
@@ -55,6 +56,7 @@ type TriageRow = Omit<
 > & {
   aiCategories: unknown;
 };
+type HoustonSummaryRow = Omit<SemanticHoustonSummarySource, 'entityType' | 'semanticEligible'>;
 
 const TASK_COLUMNS = `
   id,
@@ -119,6 +121,13 @@ const TRIAGE_COLUMNS = `
   status, snoozed_until AS "snoozedUntil", ai_summary AS "aiSummary",
   ai_categories AS "aiCategories", ai_relevance_score AS "aiRelevanceScore",
   ai_urgency AS "aiUrgency"
+`;
+
+const HOUSTON_SUMMARY_COLUMNS = `
+  id, authorization_scope AS "authorizationScope", title, summary, decisions,
+  commitments, topics, linked_entities AS "linkedEntities", sensitivity,
+  retain_until AS "retainUntil", excluded_at AS "excludedAt",
+  created_at AS "createdAt", updated_at AS "updatedAt"
 `;
 
 function toBoolean(value: boolean | number | null): boolean {
@@ -200,6 +209,19 @@ export class PostgresSemanticSourcePort implements SemanticSourcePort {
       );
       const row = result.rows[0] as TriageRow | undefined;
       return row ? this.toTriage(row) : null;
+    }
+    if (entityType === 'houston-summary') {
+      const result = await this.pool.query(
+        `SELECT ${HOUSTON_SUMMARY_COLUMNS}
+         FROM houston_conversation_memories WHERE id = $1`,
+        [entityId],
+      );
+      const row = result.rows[0] as HoustonSummaryRow | undefined;
+      return row ? {
+        ...row,
+        entityType: 'houston-summary',
+        semanticEligible: row.excludedAt === null,
+      } : null;
     }
 
     const result = await this.pool.query(
@@ -347,6 +369,10 @@ export class PostgresSemanticSourcePort implements SemanticSourcePort {
         table: 'notifications',
         eligibility: "source_state NOT IN ('deleted', 'stale')",
       };
+      case 'houston-summary': return {
+        table: 'houston_conversation_memories',
+        eligibility: 'excluded_at IS NULL',
+      };
     }
   }
 
@@ -429,6 +455,22 @@ export class PostgresSemanticSourcePort implements SemanticSourcePort {
       const rows = result.rows as TriageRow[];
       return {
         records: rows.map((row) => this.toTriage(row)),
+        nextCursor: rows.length === limit ? rows[rows.length - 1].id : null,
+      };
+    }
+    if (entityType === 'houston-summary') {
+      const result = await this.pool.query(
+        `SELECT ${HOUSTON_SUMMARY_COLUMNS} FROM houston_conversation_memories
+         WHERE id > $1 AND excluded_at IS NULL ORDER BY id ASC LIMIT $2`,
+        [after, limit],
+      );
+      const rows = result.rows as HoustonSummaryRow[];
+      return {
+        records: rows.map((row) => ({
+          ...row,
+          entityType: 'houston-summary' as const,
+          semanticEligible: true,
+        })),
         nextCursor: rows.length === limit ? rows[rows.length - 1].id : null,
       };
     }

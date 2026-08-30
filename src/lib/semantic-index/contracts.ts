@@ -490,6 +490,8 @@ export interface SemanticIntentEnqueueResult {
 export interface SemanticIntentClaimRequest {
   indexId: string;
   owner: string;
+  /** Restricts claims before the batch limit so disabled corpora cannot consume provider work. */
+  entityTypes?: SemanticEntityType[];
   limit: number;
   leaseMs: number;
   now: string;

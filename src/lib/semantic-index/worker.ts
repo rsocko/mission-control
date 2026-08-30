@@ -45,7 +45,7 @@ import {
   type SemanticRunDependencies,
   type SemanticRunSliceResult,
 } from './runs';
-import type { SemanticSourcePort } from './source/contracts';
+import type { SemanticSourceEntityType, SemanticSourcePort } from './source/contracts';
 import type { SemanticEmbeddingProvider } from './embedding-provider';
 
 export interface SemanticIndexWorkerOptions {
@@ -56,6 +56,8 @@ export interface SemanticIndexWorkerOptions {
   config?: SemanticWorkerConfig;
   /** Overrides the feature gate; defaults to the AI settings check. */
   isEnabled?: () => boolean;
+  /** Re-reads corpus gates each cycle so settings changes take effect without a restart. */
+  enabledEntityTypes?: () => readonly SemanticSourceEntityType[];
   owner?: string;
   now?: () => string;
   /** Injected for tests so a cycle can be driven without real timers. */
@@ -119,6 +121,7 @@ export class SemanticIndexWorker {
   private readonly service: SemanticIndexService;
   private readonly config: SemanticWorkerConfig;
   private readonly isEnabled: () => boolean;
+  private readonly enabledEntityTypes: () => readonly SemanticSourceEntityType[];
   private readonly now: () => string;
   private readonly setTimer: (callback: () => void, ms: number) => NodeJS.Timeout;
   private readonly clearTimer: (timer: NodeJS.Timeout) => void;
@@ -139,6 +142,7 @@ export class SemanticIndexWorker {
     this.service = options.service;
     this.config = options.config ?? getSemanticWorkerConfig();
     this.isEnabled = options.isEnabled ?? isSemanticIndexEnabled;
+    this.enabledEntityTypes = options.enabledEntityTypes ?? (() => this.config.entityTypes);
     this.now = options.now ?? (() => new Date().toISOString());
     this.owner = options.owner ?? defaultOwner();
     this.setTimer = options.setTimer ?? defaultSetTimer;
@@ -238,6 +242,7 @@ export class SemanticIndexWorker {
     }
 
     const report: SemanticWorkerCycleReport = { ...EMPTY_REPORT };
+    const entityTypes = this.enabledEntityTypes();
     const maintenanceDue = Date.now() - this.lastMaintenanceMs >= this.config.maintenanceIntervalMs;
 
     if (maintenanceDue) {
@@ -262,11 +267,11 @@ export class SemanticIndexWorker {
       this.lastMaintenanceMs = Date.now();
     }
 
-    const intentReport = await this.drainIntents(identity.identity, abortSignal);
+    const intentReport = await this.drainIntents(identity.identity, entityTypes, abortSignal);
     Object.assign(report, intentReport);
 
     if (!abortSignal.aborted) {
-      report.runsExecuted = await this.executeRun(identity.identity, abortSignal) ? 1 : 0;
+      report.runsExecuted = await this.executeRun(identity.identity, entityTypes, abortSignal) ? 1 : 0;
     }
 
     const worked = report.intentsClaimed > 0 || report.runsExecuted > 0;
@@ -306,12 +311,14 @@ export class SemanticIndexWorker {
 
   private async drainIntents(
     identity: SemanticIndexIdentity,
+    entityTypes: readonly SemanticSourceEntityType[],
     signal: AbortSignal,
   ): Promise<Partial<SemanticWorkerCycleReport>> {
     if (signal.aborted) return {};
     const claimed = await this.repository.claimIntents({
       indexId: identity.id,
       owner: this.owner,
+      entityTypes: [...entityTypes],
       limit: this.config.batchSize,
       leaseMs: this.config.intentLeaseMs,
       now: this.now(),
@@ -486,6 +493,7 @@ export class SemanticIndexWorker {
    */
   private async executeRun(
     identity: SemanticIndexIdentity,
+    entityTypes: readonly SemanticSourceEntityType[],
     signal: AbortSignal,
   ): Promise<boolean> {
     let run: SemanticRun | null = null;
@@ -516,7 +524,7 @@ export class SemanticIndexWorker {
       repository: this.repository,
       source: this.source,
       service: this.service,
-      config: this.config,
+      config: { ...this.config, entityTypes },
       now: this.now,
     };
 

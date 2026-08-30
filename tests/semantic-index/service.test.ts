@@ -466,7 +466,24 @@ describe('SemanticIndexService', () => {
       expect(stored).toMatchObject({ status: 'running', leaseOwner: OWNER });
     });
 
-    it('rejects Houston summaries while retention and authorization remain gated', async () => {
+    it('indexes minimized Houston summaries with retention and authorization metadata', async () => {
+      harness.source.putHoustonSummary({
+        entityType: 'houston-summary',
+        semanticEligible: true,
+        id: 'conversation-1',
+        authorizationScope: 'installation',
+        title: 'Release planning',
+        summary: 'Use a staged rollout.',
+        decisions: ['Ship Friday'],
+        commitments: [],
+        topics: ['release'],
+        linkedEntities: [],
+        sensitivity: 'restricted',
+        retainUntil: '2099-01-01T00:00:00.000Z',
+        excludedAt: null,
+        createdAt: '2026-03-01T00:00:00.000Z',
+        updatedAt: '2026-03-01T00:00:00.000Z',
+      });
       const identity = await bootstrap();
       await harness.repository.enqueueIntent({
         id: 'intent-houston',
@@ -480,8 +497,87 @@ describe('SemanticIndexService', () => {
       });
       const intent = await claimOne(identity.id);
       const outcome = await harness.service.processIntent(intent, { owner: OWNER });
-      expect(outcome).toMatchObject({ status: 'failed' });
-      expect(outcome.outcome).toContain('unsupported-entity-type');
+      expect(outcome).toMatchObject({ status: 'succeeded' });
+      const document = await harness.repository.getDocument(identity.id, 'houston-summary', 'conversation-1');
+      expect(document).toMatchObject({
+        retainUntil: '2099-01-01T00:00:00.000Z',
+        metadata: { authorizationScope: 'installation' },
+      });
+    });
+
+    it('filters disabled entity kinds before applying the intent claim limit', async () => {
+      const identity = await bootstrap();
+      const now = new Date().toISOString();
+      await harness.repository.enqueueIntent({
+        id: 'intent-task-first',
+        idempotencyKey: 'task-first',
+        indexId: identity.id,
+        kind: 'upsert',
+        entityType: 'task',
+        entityId: 'task-1',
+        requestedAt: '2020-01-01T00:00:00.000Z',
+        now,
+      });
+      await harness.repository.enqueueIntent({
+        id: 'intent-houston-second',
+        idempotencyKey: 'houston-second',
+        indexId: identity.id,
+        kind: 'upsert',
+        entityType: 'houston-summary',
+        entityId: 'conversation-1',
+        requestedAt: '2020-01-02T00:00:00.000Z',
+        now,
+      });
+
+      const claimed = await harness.repository.claimIntents({
+        indexId: identity.id,
+        owner: OWNER,
+        entityTypes: ['houston-summary'],
+        limit: 1,
+        leaseMs: 60_000,
+        now,
+      });
+
+      expect(claimed).toHaveLength(1);
+      expect(claimed[0].entityType).toBe('houston-summary');
+    });
+
+    it('tombstones expired Houston summaries before embedding', async () => {
+      harness.source.putHoustonSummary({
+        entityType: 'houston-summary',
+        semanticEligible: true,
+        id: 'conversation-expired',
+        authorizationScope: 'installation',
+        title: 'Old planning',
+        summary: 'This memory has expired.',
+        decisions: [],
+        commitments: [],
+        topics: [],
+        linkedEntities: [],
+        sensitivity: 'restricted',
+        retainUntil: '2000-01-01T00:00:00.000Z',
+        excludedAt: null,
+        createdAt: '1999-01-01T00:00:00.000Z',
+        updatedAt: '1999-01-01T00:00:00.000Z',
+      });
+      const identity = await bootstrap();
+      const embeddingCalls = harness.embeddings.calls.length;
+      await harness.service.publish({
+        kind: 'upsert',
+        entityType: 'houston-summary',
+        entityId: 'conversation-expired',
+        indexId: identity.id,
+      });
+      const intent = await claimOne(identity.id);
+      const outcome = await harness.service.processIntent(intent, { owner: OWNER });
+
+      expect(outcome).toMatchObject({ status: 'succeeded', outcome: 'missing' });
+      expect(harness.embeddings.calls).toHaveLength(embeddingCalls);
+      expect(await harness.repository.getVector(
+        identity.id,
+        'houston-summary',
+        'conversation-expired',
+      )).toBeNull();
     });
 
     it('uses the same idempotent lifecycle for every enabled entity kind', async () => {

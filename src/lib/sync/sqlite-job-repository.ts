@@ -464,8 +464,95 @@ export function completeSyncJob(jobId: string, owner: string, result: SyncResult
   transaction.immediate();
 }
 
+export function finalizeSuccessfulSyncJob(
+  job: SyncJob,
+  owner: string,
+  result: SyncResult,
+): void {
+  if (!result.syncRunId) {
+    throw new Error(`Sync job ${job.id} returned no exact sync-run identity`);
+  }
+  const transaction = sqlite.transaction(() => {
+    const now = new Date().toISOString();
+    const ownedJob = sqlite.prepare(`
+      SELECT connector_id AS connectorId
+      FROM sync_jobs
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND lease_expires_at > ?
+    `).get(job.id, owner, now) as { connectorId: string } | undefined;
+    const lockOwner = connectorSyncLeaseOwner(job.id, owner);
+    const lease = ownedJob && sqlite.prepare(`
+      SELECT 1 FROM connector_operation_leases
+      WHERE connector_id = ? AND owner = ? AND lease_expires_at > ?
+    `).get(ownedJob.connectorId, lockOwner, now);
+    if (!ownedJob || !lease || ownedJob.connectorId !== job.connectorId) {
+      throw new Error(`Sync job ${job.id} ownership was lost before completion`);
+    }
+
+    const linked = sqlite.prepare(`
+      UPDATE sync_log
+      SET job_id = ?,
+          success = 1,
+          trigger = ?,
+          scheduled_for = ?,
+          started_at = ?,
+          attempt = ?,
+          max_attempts = ?,
+          identity_mode = ?,
+          identity_mode_revision = ?
+      WHERE id = ?
+        AND connector_id = ?
+        AND job_id IS NULL
+        AND synced_at = ?
+        AND success = 0
+    `).run(
+      job.id,
+      job.source,
+      job.scheduledFor,
+      job.startedAt,
+      job.attempt,
+      job.maxAttempts,
+      job.identityMode,
+      job.identityModeRevision,
+      result.syncRunId,
+      job.connectorId,
+      result.syncedAt,
+    );
+    if (linked.changes !== 1) {
+      throw new Error(`Sync job ${job.id} exact success log could not be linked`);
+    }
+
+    const completed = sqlite.prepare(`
+      UPDATE sync_jobs
+      SET status = 'succeeded',
+          result = ?,
+          error = NULL,
+          completed_at = ?,
+          updated_at = ?,
+          lease_owner = NULL,
+          lease_expires_at = NULL
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+    `).run(JSON.stringify(result), now, now, job.id, owner);
+    if (completed.changes !== 1) {
+      throw new Error(`Sync job ${job.id} ownership was lost before completion`);
+    }
+    const released = sqlite.prepare(`
+      DELETE FROM connector_operation_leases
+      WHERE connector_id = ? AND owner = ?
+    `).run(job.connectorId, lockOwner);
+    if (released.changes !== 1) {
+      throw new Error(`Sync job ${job.id} connector lease was lost before completion`);
+    }
+  });
+  transaction.immediate();
+}
+
 export function linkSyncLogToJob(job: SyncJob, result: SyncResult): void {
-  sqlite.prepare(`
+  const idClause = result.syncRunId ? 'id = ?' : 'connector_id = ? AND synced_at = ?';
+  const identityParams = result.syncRunId
+    ? [result.syncRunId]
+    : [job.connectorId, result.syncedAt];
+  const linked = sqlite.prepare(`
     UPDATE sync_log
     SET job_id = ?,
         trigger = ?,
@@ -475,9 +562,10 @@ export function linkSyncLogToJob(job: SyncJob, result: SyncResult): void {
         max_attempts = ?,
         identity_mode = ?,
         identity_mode_revision = ?
-    WHERE connector_id = ?
+    WHERE ${idClause}
+      AND connector_id = ?
       AND synced_at = ?
-      AND job_id IS NULL
+      AND (job_id IS NULL OR job_id = ?)
   `).run(
     job.id,
     job.source,
@@ -487,9 +575,14 @@ export function linkSyncLogToJob(job: SyncJob, result: SyncResult): void {
     job.maxAttempts,
     job.identityMode,
     job.identityModeRevision,
+    ...identityParams,
     job.connectorId,
     result.syncedAt,
+    job.id,
   );
+  if (result.syncRunId && linked.changes !== 1) {
+    throw new Error(`Sync job ${job.id} exact sync log could not be linked`);
+  }
 }
 
 export function failSyncJob(
@@ -976,6 +1069,7 @@ export const sqliteSyncJobRepository: SyncJobRepository = {
   renewLease: async (...args) => renewSyncJobLease(...args),
   isCancellationRequested: async (...args) => isSyncJobCancellationRequested(...args),
   complete: async (...args) => completeSyncJob(...args),
+  finalizeSuccess: async (...args) => finalizeSuccessfulSyncJob(...args),
   linkSyncLog: async (...args) => linkSyncLogToJob(...args),
   fail: async (...args) => failSyncJob(...args),
   release: async (...args) => releaseSyncJob(...args),

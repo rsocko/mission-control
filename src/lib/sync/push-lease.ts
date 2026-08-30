@@ -1,6 +1,5 @@
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { and, eq, isNull, like, lt, ne, not, or } from 'drizzle-orm';
+import type { ConnectorTaskRecord } from '@/db/persistence/connector-execution';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 const PUSH_LEASE_MS = 5 * 60 * 1000;
 
@@ -8,30 +7,8 @@ export async function claimTaskForPush(taskId: string): Promise<string | null> {
   const now = new Date();
   const leaseToken = now.toISOString();
   const staleBefore = new Date(now.getTime() - PUSH_LEASE_MS).toISOString();
-  const claimed = await db.update(tasks).set({
-    syncStatus: 'pushing',
-    lastSyncedAt: leaseToken,
-  }).where(and(
-    eq(tasks.id, taskId),
-    or(
-      eq(tasks.syncStatus, 'pending_push'),
-      eq(tasks.syncStatus, 'push_error'),
-      eq(tasks.syncStatus, 'pushing'),
-      like(tasks.sourceId, 'local:%'),
-      and(
-        eq(tasks.isChecklistItem, true),
-        eq(tasks.sourceId, tasks.id),
-        not(eq(tasks.syncStatus, 'push_failed')),
-      ),
-    ),
-    or(
-      ne(tasks.syncStatus, 'pushing'),
-      isNull(tasks.lastSyncedAt),
-      lt(tasks.lastSyncedAt, staleBefore),
-    ),
-  )).returning({ id: tasks.id }).get();
-
-  return claimed ? leaseToken : null;
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return await persistence.claim(taskId, leaseToken, staleBefore) ? leaseToken : null;
 }
 
 export async function releaseTaskPush(
@@ -40,28 +17,22 @@ export async function releaseTaskPush(
   syncStatus: string | null,
   expectedTaskVersion?: string,
 ): Promise<boolean> {
-  const released = await db.update(tasks).set({
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return persistence.release({
+    taskId,
+    leaseToken,
     syncStatus: syncStatus ?? 'pending_push',
-    lastSyncedAt: new Date().toISOString(),
-  }).where(and(
-    eq(tasks.id, taskId),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, leaseToken),
-    expectedTaskVersion === undefined ? undefined : eq(tasks.updatedAt, expectedTaskVersion),
-  )).returning({ id: tasks.id }).get();
-  return Boolean(released);
+    now: new Date().toISOString(),
+    expectedTaskVersion,
+  });
 }
 
 export async function loadClaimedTaskForPush(
   taskId: string,
   leaseToken: string,
-): Promise<typeof tasks.$inferSelect | null> {
-  const task = await db.select().from(tasks).where(and(
-    eq(tasks.id, taskId),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, leaseToken),
-  )).limit(1).get();
-  return task ?? null;
+): Promise<ConnectorTaskRecord | null> {
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return persistence.loadClaimed(taskId, leaseToken);
 }
 
 export async function completeTaskPush(
@@ -74,21 +45,19 @@ export async function completeTaskPush(
     completedAt?: string | null;
   },
   expectedTaskVersion?: string,
+  createdFromSourceId?: string,
 ): Promise<boolean> {
-  const completed = await db.update(tasks).set({
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return persistence.complete({
+    taskId,
+    leaseToken,
     sourceId,
-    syncStatus: 'synced',
-    lastSyncedAt: new Date().toISOString(),
-    ...(metadata ? { metadata: JSON.stringify(metadata) } : {}),
-    ...localUpdates,
-  }).where(and(
-    eq(tasks.id, taskId),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, leaseToken),
-    expectedTaskVersion === undefined ? undefined : eq(tasks.updatedAt, expectedTaskVersion),
-  )).returning({ id: tasks.id }).get();
-
-  return Boolean(completed);
+    metadata,
+    localUpdates,
+    expectedTaskVersion,
+    createdFromSourceId,
+    now: new Date().toISOString(),
+  });
 }
 
 export async function heartbeatTaskPush(
@@ -98,15 +67,10 @@ export async function heartbeatTaskPush(
   const renewedToken = new Date(
     Math.max(Date.now(), new Date(leaseToken).getTime() + 1),
   ).toISOString();
-  const renewed = await db.update(tasks).set({
-    lastSyncedAt: renewedToken,
-  }).where(and(
-    eq(tasks.id, taskId),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, leaseToken),
-  )).returning({ id: tasks.id }).get();
-
-  return renewed ? renewedToken : null;
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return await persistence.heartbeat(taskId, leaseToken, renewedToken)
+    ? renewedToken
+    : null;
 }
 
 export async function failTaskPush(
@@ -116,16 +80,13 @@ export async function failTaskPush(
   pushRetryCount?: number,
   expectedTaskVersion?: string,
 ): Promise<boolean> {
-  const failed = await db.update(tasks).set({
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pushes;
+  return persistence.fail({
+    taskId,
+    leaseToken,
     syncStatus,
-    lastSyncedAt: new Date().toISOString(),
-    ...(pushRetryCount === undefined ? {} : { pushRetryCount }),
-  }).where(and(
-    eq(tasks.id, taskId),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, leaseToken),
-    expectedTaskVersion === undefined ? undefined : eq(tasks.updatedAt, expectedTaskVersion),
-  )).returning({ id: tasks.id }).get();
-
-  return Boolean(failed);
+    pushRetryCount,
+    expectedTaskVersion,
+    now: new Date().toISOString(),
+  });
 }

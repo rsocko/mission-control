@@ -445,6 +445,105 @@ describe('durable sync job queue', () => {
     });
   });
 
+  it('atomically finalizes only the exact owned success log and releases its lease', async () => {
+      const queued = queue.enqueueSyncJob('github-1');
+      const claimed = queue.claimNextSyncJob('worker-a')!;
+      const result = {
+        ...success('github-1'),
+        syncRunId: 'exact-success-log',
+      };
+      const insert = database.sqlite.prepare(`
+        INSERT INTO sync_log (
+          id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+          tasks_pushed, local_only_protected, alerts_added, errors, details,
+          synced_at, job_id
+        ) VALUES (?, 'github-1', ?, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, ?)
+      `);
+      insert.run(result.syncRunId, 0, result.syncedAt, null);
+      insert.run('same-time-unlinked-log', 1, result.syncedAt, null);
+
+      await queue.sqliteSyncJobRepository.finalizeSuccess(claimed, 'worker-a', result);
+
+      expect(queue.getSyncJob(queued.id)).toMatchObject({ status: 'succeeded' });
+      expect(database.sqlite.prepare(`
+        SELECT job_id AS jobId, success, trigger, attempt FROM sync_log WHERE id = ?
+      `).get(result.syncRunId)).toEqual({
+        jobId: claimed.id,
+        success: 1,
+        trigger: claimed.source,
+        attempt: 1,
+      });
+      expect(database.sqlite.prepare(`
+        SELECT job_id AS jobId, trigger FROM sync_log WHERE id = 'same-time-unlinked-log'
+      `).get()).toEqual({ jobId: null, trigger: null });
+      expect(database.sqlite.prepare(`
+        SELECT 1 FROM connector_operation_leases WHERE connector_id = 'github-1'
+      `).get()).toBeUndefined();
+  });
+
+  it('rolls back exact-log finalization after job ownership is lost', async () => {
+      const queued = queue.enqueueSyncJob('github-1');
+      const claimed = queue.claimNextSyncJob('worker-a')!;
+      const result = {
+        ...success('github-1'),
+        syncRunId: 'lost-owner-log',
+      };
+      database.sqlite.prepare(`
+        INSERT INTO sync_log (
+          id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+          tasks_pushed, local_only_protected, alerts_added, errors, details,
+          synced_at, job_id
+        ) VALUES (?, 'github-1', 0, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, NULL)
+      `).run(result.syncRunId, result.syncedAt);
+
+      await expect(queue.sqliteSyncJobRepository.finalizeSuccess(
+        claimed,
+        'worker-b',
+        result,
+      )).rejects.toThrow(/ownership was lost/);
+      expect(queue.getSyncJob(queued.id)).toMatchObject({
+        status: 'running',
+        leaseOwner: 'worker-a',
+      });
+      expect(database.sqlite.prepare(`
+        SELECT success, job_id AS jobId, trigger, attempt FROM sync_log WHERE id = ?
+      `).get(result.syncRunId)).toEqual({
+        success: 0,
+        jobId: null,
+        trigger: null,
+        attempt: null,
+      });
+  });
+
+  it('does not publish a provisional success after the job lease expires', async () => {
+    queue.enqueueSyncJob('github-1');
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    const result = {
+      ...success('github-1'),
+      syncRunId: 'expired-owner-log',
+    };
+    database.sqlite.prepare(`
+      INSERT INTO sync_log (
+        id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+        tasks_pushed, local_only_protected, alerts_added, errors, details,
+        synced_at, job_id
+      ) VALUES (?, 'github-1', 0, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, NULL)
+    `).run(result.syncRunId, result.syncedAt);
+    database.sqlite.prepare(`
+      UPDATE sync_jobs SET lease_expires_at = '2000-01-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(claimed.id);
+
+    await expect(queue.sqliteSyncJobRepository.finalizeSuccess(
+      claimed,
+      'worker-a',
+      result,
+    )).rejects.toThrow(/ownership was lost/);
+    expect(database.sqlite.prepare(`
+      SELECT success, job_id AS jobId FROM sync_log WHERE id = ?
+    `).get(result.syncRunId)).toEqual({ success: 0, jobId: null });
+  });
+
   it('recovers an expired lease for another worker without duplicate execution', async () => {
     const queued = queue.enqueueSyncJob('github-1', { maxAttempts: 2 });
     expect(queue.claimNextSyncJob('worker-a', 1)?.attempt).toBe(1);

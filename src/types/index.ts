@@ -695,6 +695,8 @@ export interface SyncResult {
   notificationsAdded: number;
   errors: string[];
   syncedAt: string;
+  /** Exact durable sync journal row produced by this execution attempt. */
+  syncRunId?: string;
   domainStatus?: 'fresh' | 'stale' | 'partial' | 'unavailable';
   datasetErrors?: DomainSyncResult['datasetErrors'];
 }

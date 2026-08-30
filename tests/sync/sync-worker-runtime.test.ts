@@ -5,6 +5,7 @@ import type { SyncJob } from '@/lib/sync/job-queue';
 const queueMocks = vi.hoisted(() => ({
   claimNextSyncJob: vi.fn(),
   completeSyncJob: vi.fn(),
+  finalizeSuccessfulSyncJob: vi.fn(),
   enqueueDueSyncSchedules: vi.fn(() => []),
   failSyncJob: vi.fn(() => 'failed'),
   countQueuedSyncJobs: vi.fn(() => 0),
@@ -41,6 +42,7 @@ vi.mock('@/lib/sync/job-queue', () => ({
   getSyncJobRepository: () => Promise.resolve({
     claimNext: queueMocks.claimNextSyncJob,
     complete: queueMocks.completeSyncJob,
+    finalizeSuccess: queueMocks.finalizeSuccessfulSyncJob,
     countQueued: queueMocks.countQueuedSyncJobs,
     enqueueDueSchedules: queueMocks.enqueueDueSyncSchedules,
     fail: queueMocks.failSyncJob,
@@ -154,7 +156,7 @@ describe('sync worker runtime', () => {
     const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
     worker.start();
-    await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+    await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
     await worker.stop();
 
     expect(execute).toHaveBeenCalledWith(
@@ -169,10 +171,35 @@ describe('sync worker runtime', () => {
       }),
     );
     expect(queueMocks.failSyncJob).not.toHaveBeenCalled();
-    expect(queueMocks.linkSyncLogToJob).toHaveBeenCalledWith(
+    expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'job-1' }),
+      'worker-a',
       expect.objectContaining({ success: true }),
     );
+    expect(queueMocks.linkSyncLogToJob).not.toHaveBeenCalled();
+  });
+
+  it('records a failed attempt when atomic success ownership is lost', async () => {
+    queueMocks.finalizeSuccessfulSyncJob.mockRejectedValueOnce(
+      new Error('Sync job job-1 ownership was lost before completion'),
+    );
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(
+      vi.fn().mockResolvedValue(result(true)),
+      { ownerId: 'worker-a', pollIntervalMs: 1 },
+    );
+
+    worker.start();
+    await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalledOnce());
+    await worker.stop();
+
+    expect(queueMocks.failSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      'worker-a',
+      'Sync job job-1 ownership was lost before completion',
+      { retry: true, cancelled: false, terminal: false },
+    );
+    expect(queueMocks.completeSyncJob).not.toHaveBeenCalled();
   });
 
   it('forwards a frozen legacy identity context', async () => {
@@ -185,7 +212,7 @@ describe('sync worker runtime', () => {
       const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
       worker.start();
-      await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+      await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
       await worker.stop();
 
       expect(execute).toHaveBeenCalledWith(
@@ -209,7 +236,7 @@ describe('sync worker runtime', () => {
     const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
     worker.start();
-    await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+    await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
     await worker.stop();
 
     expect(execute).toHaveBeenCalledWith(
@@ -337,8 +364,8 @@ describe('sync worker runtime', () => {
       30_000,
       new Set(['todo-1']),
     );
-    expect(queueMocks.completeSyncJob).toHaveBeenCalledWith(
-      'job-2',
+    expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-2' }),
       'worker-a',
       expect.objectContaining({ success: true }),
     );
@@ -356,8 +383,8 @@ describe('sync worker runtime', () => {
 
     finishAbandoned?.(result(true));
     await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalled());
-    expect(queueMocks.completeSyncJob).not.toHaveBeenCalledWith(
-      'job-1',
+    expect(queueMocks.finalizeSuccessfulSyncJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
       expect.anything(),
       expect.anything(),
     );

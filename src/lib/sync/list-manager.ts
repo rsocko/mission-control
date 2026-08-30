@@ -1,13 +1,10 @@
 import type { IConnector } from '@/lib/connectors';
 import type { SourceList } from '@/types';
-import db from '@/db';
-import { sourceLists as sourceListsTable, listGroups as listGroupsTable } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
 import { syncLogger } from '@/lib/logger';
 import { persistExternalIdentityBatch } from '@/lib/external-identities';
 import type { ExternalIdentityWrite } from '@/lib/external-identities/types';
 import type { GitHubStableIdentityRuntime } from '@/lib/external-identities';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /**
  * Yield to the event loop so healthchecks and other callbacks can run.
@@ -31,15 +28,14 @@ export async function upsertSourceLists(
 ): Promise<Map<string, string>> {
   const now = new Date().toISOString();
   const discoveredListIds = new Set<string>();
+  const execution = (await getWorkerPersistenceRepositories()).execution;
+  if (identityRuntime) {
+    execution.support.assertConnectorSupported({ type: 'github-issues' });
+  }
+  const persistence = execution.lists;
 
   // Pre-fetch all existing lists for this connector in one query
-  const existingRows = await db.select({
-    id: sourceListsTable.id,
-    sourceId: sourceListsTable.sourceId,
-    groupId: sourceListsTable.groupId,
-  })
-    .from(sourceListsTable)
-    .where(eq(sourceListsTable.connectorInstanceId, connectorId));
+  const existingRows = await persistence.list(connectorId);
 
   const existingBySourceId = new Map<string, { id: string; groupId: string | null }>();
   const existingById = new Map<string, { id: string; groupId: string | null }>();
@@ -49,8 +45,17 @@ export async function upsertSourceLists(
     existingById.set(row.id, value);
   }
 
-  const pendingInserts: Array<typeof sourceListsTable.$inferInsert> = [];
-  const pendingUpdates: Array<{ id: string; payload: Record<string, unknown> }> = [];
+  const pendingWrites: Array<{
+    id: string;
+    connectorInstanceId: string;
+    sourceId: string;
+    name: string;
+    type: string;
+    taskCount: number;
+    lastSyncedAt: string | null;
+    wellKnownListName: string | null;
+    lastKnownRemoteName: string | null;
+  }> = [];
   const persistedIdsBySourceId = new Map<string, string>();
   const stableDecisions = new Map<string, ReturnType<
     GitHubStableIdentityRuntime['resolveBatch']
@@ -95,74 +100,45 @@ export async function upsertSourceLists(
     persistedIdsBySourceId.set(remoteSourceList.sourceId, persistedId);
     discoveredListIds.add(persistedId);
 
-    if (existing) {
-      pendingUpdates.push({
-        id: persistedId,
-        payload: {
-          connectorInstanceId: connectorId,
-          sourceId: remoteSourceList.sourceId,
-          name: remoteSourceList.name,
-          type: remoteSourceList.type,
-          taskCount: remoteSourceList.taskCount ?? 0,
-          lastSyncedAt: remoteSourceList.lastSyncedAt || now,
-          wellKnownListName: remoteSourceList.wellKnownListName || null,
-          lastKnownRemoteName: remoteSourceList.name,
-        },
-      });
-    } else {
-      pendingInserts.push({
-        id: persistedId,
-        connectorInstanceId: connectorId,
-        sourceId: remoteSourceList.sourceId,
-        name: remoteSourceList.name,
-        type: remoteSourceList.type,
-        taskCount: remoteSourceList.taskCount ?? 0,
-        lastSyncedAt: remoteSourceList.lastSyncedAt || now,
-        wellKnownListName: remoteSourceList.wellKnownListName || null,
-        lastKnownRemoteName: remoteSourceList.name,
-      });
-    }
+    pendingWrites.push({
+      id: persistedId,
+      connectorInstanceId: connectorId,
+      sourceId: remoteSourceList.sourceId,
+      name: remoteSourceList.name,
+      type: remoteSourceList.type,
+      taskCount: remoteSourceList.taskCount ?? 0,
+      lastSyncedAt: remoteSourceList.lastSyncedAt || now,
+      wellKnownListName: remoteSourceList.wellKnownListName || null,
+      lastKnownRemoteName: remoteSourceList.name,
+    });
   }
 
   identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
 
-  // Bound each synchronous SQLite statement so unusually large tenants do not
-  // block health checks while persisting list discovery.
-  for (let index = 0; index < pendingInserts.length; index += LIST_INSERT_BATCH_SIZE) {
+  const stale = existingRows.flatMap((row) => {
+    if (discoveredListIds.has(row.id) || preserveStaleLists) return [];
+    if (identityRuntime || inaccessibleSourceListIds.has(row.sourceId)) return [];
+    return [{
+      id: row.id,
+      action: row.groupId ? 'mark-unobserved' as const : 'delete' as const,
+    }];
+  });
+
+  // Bound adapter transactions so unusually large tenants remain responsive.
+  for (let index = 0; index < pendingWrites.length; index += LIST_INSERT_BATCH_SIZE) {
     identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
-    await db.insert(sourceListsTable).values(
-      pendingInserts.slice(index, index + LIST_INSERT_BATCH_SIZE),
-    );
-    if (index + LIST_INSERT_BATCH_SIZE < pendingInserts.length) {
+    const finalBatch = index + LIST_INSERT_BATCH_SIZE >= pendingWrites.length;
+    await persistence.applyDiscovery({
+      connectorId,
+      upserts: pendingWrites.slice(index, index + LIST_INSERT_BATCH_SIZE),
+      stale: finalBatch ? stale : [],
+    });
+    if (!finalBatch) {
       await yieldToEventLoop();
     }
   }
-
-  // Execute updates in batches of 10 with yields
-  for (let i = 0; i < pendingUpdates.length; i++) {
-    const { id, payload } = pendingUpdates[i];
-    identityRuntime?.assertDecisionsCurrent(stableDecisions.values());
-    await db.update(sourceListsTable).set(payload).where(eq(sourceListsTable.id, id));
-    if ((i + 1) % 10 === 0) await yieldToEventLoop();
-  }
-
-  // Remove stale lists (use pre-fetched data)
-  for (const row of existingRows) {
-    if (!discoveredListIds.has(row.id)) {
-      if (preserveStaleLists) continue;
-      // Under permanent NodeID identity, remote absence of a locator is never
-      // authoritative for a GitHub source list: retain it and let repoint or
-      // transfer tooling resolve the entity.
-      if (identityRuntime || inaccessibleSourceListIds.has(row.sourceId)) continue;
-      if (row.groupId) {
-        await db.update(sourceListsTable)
-          .set({ lastSyncedAt: null })
-          .where(eq(sourceListsTable.id, row.id));
-      } else {
-        await db.delete(sourceListsTable)
-          .where(eq(sourceListsTable.id, row.id));
-      }
-    }
+  if (pendingWrites.length === 0 && stale.length > 0) {
+    await persistence.applyDiscovery({ connectorId, upserts: [], stale });
   }
 
   if (identityRuntime) {
@@ -201,6 +177,8 @@ export async function autoAssignFolderGroups(
   remoteSourceLists: SourceList[],
 ): Promise<void> {
   if (!('fetchFolderGroups' in connector)) return;
+  const execution = (await getWorkerPersistenceRepositories()).execution;
+  execution.support.assertConnectorSupported(connector);
 
   const listsWithGroup = remoteSourceLists.filter(l => l.parentFolderGroupId);
   if (listsWithGroup.length === 0) return;
@@ -208,81 +186,14 @@ export async function autoAssignFolderGroups(
   try {
     const folderGroups = await (connector as { fetchFolderGroups: () => Promise<Array<{ id: string; name: string; orderDateTime?: string }>> }).fetchFolderGroups();
     if (folderGroups.length === 0) return;
-
-    const groupMap = new Map(folderGroups.map(g => [g.id, g]));
-
-    const existingGroups = await db.select().from(listGroupsTable);
-    const remoteIdToLocalId = new Map<string, string>();
-    const sourceIdToLocalGroup = new Map(
-      existingGroups.filter(g => g.sourceId).map(g => [g.sourceId!, g.id])
-    );
-    const nameToLocalGroup = new Map(existingGroups.map(g => [g.name, g.id]));
-
-    for (const [remoteId] of groupMap) {
-      const bySourceId = sourceIdToLocalGroup.get(remoteId);
-      if (bySourceId) {
-        remoteIdToLocalId.set(remoteId, bySourceId);
-      }
-    }
-    for (const eg of existingGroups) {
-      for (const [remoteId, fg] of groupMap) {
-        if (!remoteIdToLocalId.has(remoteId) && fg.name === eg.name) {
-          remoteIdToLocalId.set(remoteId, eg.id);
-          if (!eg.sourceId) {
-            await db.update(listGroupsTable)
-              .set({ sourceId: remoteId })
-              .where(eq(listGroupsTable.id, eg.id));
-          }
-        }
-      }
-    }
-
-    const now = new Date().toISOString();
-    let sortOrder = existingGroups.length;
-    for (const [remoteId, fg] of groupMap) {
-      if (!remoteIdToLocalId.has(remoteId)) {
-        const localId = nameToLocalGroup.get(fg.name);
-        if (localId) {
-          remoteIdToLocalId.set(remoteId, localId);
-          const matchedGroup = existingGroups.find(g => g.id === localId);
-          if (matchedGroup && !matchedGroup.sourceId) {
-            await db.update(listGroupsTable)
-              .set({ sourceId: remoteId })
-              .where(eq(listGroupsTable.id, localId));
-          }
-        } else {
-          const newId = `lg-${randomUUID().substring(0, 8)}`;
-          await db.insert(listGroupsTable).values({
-            id: newId,
-            name: fg.name,
-            sourceId: remoteId,
-            sortOrder: sortOrder++,
-            createdAt: now,
-          });
-          remoteIdToLocalId.set(remoteId, newId);
-          nameToLocalGroup.set(fg.name, newId);
-          syncLogger.info({ groupName: fg.name, groupId: newId }, 'Created list group');
-        }
-      }
-    }
-
-    let assigned = 0;
-    for (const list of listsWithGroup) {
-      const localGroupId = remoteIdToLocalId.get(list.parentFolderGroupId!);
-      if (!localGroupId) continue;
-
-      const [existing] = await db.select({ id: sourceListsTable.id, groupId: sourceListsTable.groupId })
-        .from(sourceListsTable)
-        .where(eq(sourceListsTable.sourceId, list.sourceId))
-        .limit(1);
-
-      if (existing && !existing.groupId) {
-        await db.update(sourceListsTable)
-          .set({ groupId: localGroupId })
-          .where(eq(sourceListsTable.id, existing.id));
-        assigned++;
-      }
-    }
+    const assigned = await execution.lists.assignFolderGroups({
+      groups: folderGroups.map((group) => ({ sourceId: group.id, name: group.name })),
+      lists: listsWithGroup.map((list) => ({
+        sourceId: list.sourceId,
+        parentFolderGroupId: list.parentFolderGroupId!,
+      })),
+      now: new Date().toISOString(),
+    });
 
     if (assigned > 0) {
       syncLogger.info({ assigned }, 'Auto-assigned lists to groups');

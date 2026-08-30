@@ -105,6 +105,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
     ),
     append: (record) => requirePostgresWorkerRepositories().syncRuns.append(record),
   },
+  execution: new Proxy({} as WorkerPersistenceRepositories['execution'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().execution[
+        property as keyof WorkerPersistenceRepositories['execution']
+      ]
+    ),
+  }),
 };
 
 /**
@@ -130,6 +137,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
   postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
     db,
+    pool,
     postgresRepositories,
   );
   registerWorkerPersistenceRepositories(postgresWorkerPersistenceRepositories);

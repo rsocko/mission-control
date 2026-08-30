@@ -133,6 +133,38 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
       listLatestSuccessfulPulls: vi.fn(async () => []),
       append: vi.fn(async () => undefined),
     },
+    execution: {
+      support: {
+        allowsLegacyWorkflow: vi.fn(() => true),
+        assertConfigSupported: vi.fn(),
+        assertConnectorSupported: vi.fn(),
+        listEnabledGitHubConfigs: vi.fn(async () => mocks.dependencyPollConfigs),
+        listConnectorTaskIdentities: vi.fn(async () => []),
+        listConnectorTaskIds: vi.fn(async () => []),
+        syncLegacyGitHubProjects: vi.fn(async () => undefined),
+      },
+      lists: {
+        list: vi.fn(async () => []),
+        removeLegacyProjectLists: vi.fn(async () => undefined),
+      },
+      pulls: {
+        listStaleInProgress: vi.fn(async () => []),
+        applyVerifiedTerminalStatus: vi.fn(async () => true),
+      },
+      notifications: {
+        ingest: vi.fn(async (commands: Array<{ input: { id: string } }>) =>
+          commands.map(({ input }) => ({
+            id: input.id,
+            created: true,
+            pendingDelivery: false,
+          }))),
+        listActive: vi.fn(async () => []),
+        applyReconciliation: vi.fn(async () => 0),
+        recordReconciliationFailure: vi.fn(async () => undefined),
+        archiveStale: vi.fn(async () => 0),
+        mergeMetadata: vi.fn(async () => true),
+      },
+    },
   }),
 }));
 

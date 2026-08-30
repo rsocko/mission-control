@@ -116,6 +116,46 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
       listLatestSuccessfulPulls: vi.fn(async () => [...mockSyncLogRows]),
       append: vi.fn(async () => undefined),
     },
+    execution: {
+      support: {
+        allowsLegacyWorkflow: vi.fn(() => true),
+        assertConfigSupported: vi.fn(),
+        assertConnectorSupported: vi.fn(),
+        listConnectorTaskIdentities: vi.fn(async () => []),
+        listConnectorTaskIds: vi.fn(async () => []),
+        syncLegacyGitHubProjects: vi.fn(async () => undefined),
+      },
+      lists: {
+        list: vi.fn(async () => []),
+        removeLegacyProjectLists: vi.fn(async () => undefined),
+      },
+      pulls: {
+        listStaleInProgress: vi.fn(async () => [...mockInProgressTasks]),
+        applyVerifiedTerminalStatus: vi.fn(async (input: {
+          taskId: string;
+          status: string;
+          completedAt: string;
+        }) => {
+          mockUpdateSets.push({
+            id: input.taskId,
+            data: {
+              status: input.status,
+              completedAt: input.completedAt,
+              syncStatus: 'synced',
+            },
+          });
+          return true;
+        }),
+      },
+      notifications: {
+        ingest: vi.fn(async () => []),
+        listActive: vi.fn(async () => []),
+        applyReconciliation: vi.fn(async () => 0),
+        recordReconciliationFailure: vi.fn(async () => undefined),
+        archiveStale: vi.fn(async () => 0),
+        mergeMetadata: vi.fn(async () => true),
+      },
+    },
   }),
 }));
 

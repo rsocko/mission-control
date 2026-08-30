@@ -6,7 +6,6 @@ import type {
   DomainSyncResult,
   SyncResult,
 } from '@/types';
-import db from '@/db';
 import {
   getGitHubIdentityModeSnapshot,
   GitHubStableIdentityRuntime,
@@ -15,9 +14,6 @@ import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
 } from '@/lib/external-identities';
-import { notifications as notificationsTable, notificationActions, connectorConfigs, sourceLists as sourceListsTable } from '@/db/schema';
-import { hubProjects, taskProjects, tasks as tasksTable } from '@/db/schema';
-import { eq, and, isNull, inArray, like, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { emitEvent } from '@/lib/events';
 import { syncEventBus } from './events';
@@ -40,9 +36,7 @@ import { upsertSourceLists, autoAssignFolderGroups } from './list-manager';
 import { indexAlertForSearch, warmUpSearchAfterSync } from './search-indexer';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
 import {
-  createNotificationsInTransaction,
   wakeNotificationDeliveryDispatcher,
-  type CreateNotificationInput,
 } from '@/lib/notifications';
 import {
   getSyncDurationBudgetMs,
@@ -78,6 +72,10 @@ import {
 } from '@/lib/telemetry/database-operation-context';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type { SyncRunRecord } from '@/db/persistence/worker-repositories';
+import type {
+  ConnectorNotificationCommand,
+  ConnectorNotificationInput,
+} from '@/db/persistence/connector-execution';
 
 type DependencyResumeTrigger = 'startup' | 'recurring' | 'retry' | 'manual';
 
@@ -281,6 +279,25 @@ export class SyncExecutionPipeline {
     syncLogger.info({ count: this.lastSyncResults.size }, 'Hydrated lastSyncResults from sync_log');
   }
 
+  private async loadDurableLastSyncResult(
+    connectorId: string,
+  ): Promise<SyncResult | undefined> {
+    const repositories = await getWorkerPersistenceRepositories();
+    const row = (await repositories.syncRuns.listLatestSuccessfulPulls())
+      .find(candidate => candidate.connectorId === connectorId);
+    if (!row || row.durationMs === 0) return undefined;
+    return {
+      connectorId: row.connectorId,
+      success: true,
+      tasksAdded: row.tasksAdded,
+      tasksUpdated: row.tasksUpdated,
+      tasksRemoved: row.tasksRemoved,
+      notificationsAdded: row.notificationsAdded,
+      errors: [],
+      syncedAt: row.syncedAt,
+    };
+  }
+
   async runExclusiveConnectorOperation<T>(
     connectorId: string,
     operation: () => Promise<T>,
@@ -406,6 +423,8 @@ export class SyncExecutionPipeline {
       if (!connector) {
         throw new Error(`Connector config not found in database: ${connectorId}`);
       }
+      const executionPersistence = (await getWorkerPersistenceRepositories()).execution;
+      executionPersistence.support.assertConnectorSupported(connector);
       if (connector.type === 'github-issues') {
         identitySnapshot ??= getGitHubIdentityModeSnapshot(connectorId);
         identityRuntime = new GitHubStableIdentityRuntime({
@@ -459,7 +478,11 @@ export class SyncExecutionPipeline {
       }
 
       // ─── PHASE 2: PULL — Fetch remote tasks/notifications ───────────────────
-      const lastSync = options?.full ? undefined : this.lastSyncResults.get(connectorId);
+      const lastSync = options?.full
+        ? undefined
+        : options?.jobId
+          ? await this.loadDurableLastSyncResult(connectorId)
+          : this.lastSyncResults.get(connectorId);
       const since = lastSync ? new Date(lastSync.syncedAt) : undefined;
       const isFullSync = !since;
       syncLogger.info(
@@ -522,12 +545,7 @@ export class SyncExecutionPipeline {
           },
         );
 
-        const persistedLists = await db.select({
-          sourceId: sourceListsTable.sourceId,
-          name: sourceListsTable.name,
-          userDisplayName: sourceListsTable.userDisplayName,
-        }).from(sourceListsTable)
-          .where(eq(sourceListsTable.connectorInstanceId, connectorId));
+        const persistedLists = await executionPersistence.lists.list(connectorId);
         discoveredLists = persistedLists.map(l => ({
           id: l.sourceId,
           name: resolveSourceListDisplayName(l),
@@ -595,7 +613,8 @@ export class SyncExecutionPipeline {
       }
 
       // ─── PHASE 4a: DEPENDENCIES — Reconcile native blocking edges ───
-      try {
+      if (executionPersistence.support.allowsLegacyWorkflow('dependency-reconciliation')) {
+        try {
         if (targetedDependencyCollection) {
           const targeted = targetedDependencyCollection.result();
           await withSyncPhaseTiming(
@@ -625,9 +644,10 @@ export class SyncExecutionPipeline {
           identityRuntime?.markBlocked('dependency_identity_context_changed');
           errors.push('Task dependency generation was fenced after an identity context change');
         }
-      } catch (err) {
-        identityRuntime?.markBlocked('dependency_identity_observation_failed');
-        errors.push(`Task dependency sync failed: ${err instanceof Error ? err.message : String(err)}`);
+        } catch (err) {
+          identityRuntime?.markBlocked('dependency_identity_observation_failed');
+          errors.push(`Task dependency sync failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       // ─── PHASE 4b: PROJECTS — Sync GitHub Projects V2 as Hub Projects ─
@@ -656,11 +676,8 @@ export class SyncExecutionPipeline {
             | ReturnType<typeof resolveGitHubProjectAssociations>
             | undefined;
           if (identityRuntime) {
-            const localRows = await db.select({
-              id: tasksTable.id,
-              sourceId: tasksTable.sourceId,
-            }).from(tasksTable)
-              .where(eq(tasksTable.connectorInstanceId, connectorId));
+            const localRows = await executionPersistence.support
+              .listConnectorTaskIdentities(connectorId);
             stableProjectIdentity = resolveGitHubProjectAssociations(
               identityRuntime,
               associations,
@@ -710,42 +727,20 @@ export class SyncExecutionPipeline {
 
       // ─── PHASE 4c: CLEANUP — Remove stale project source lists ──────
       try {
-        await db.delete(sourceListsTable).where(
-          and(
-            eq(sourceListsTable.connectorInstanceId, connectorId),
-            eq(sourceListsTable.type, 'project'),
-          ),
-        );
-
-        // Clear sourceListId on tasks that still reference deleted project lists.
-        // These tasks are now accessible via hub project associations instead.
-        await db.update(tasksTable).set({
-          sourceListId: null,
-          sourceListName: null,
-        }).where(
-          and(
-            eq(tasksTable.connectorInstanceId, connectorId),
-            like(tasksTable.sourceListId, 'project:%'),
-          ),
-        );
+        await executionPersistence.lists.removeLegacyProjectLists(connectorId);
       } catch {
         // Non-fatal: stale project source lists will just be empty
       }
 
       // ─── PHASE 4d: AUTO-INCLUDE — Re-evaluate tasks changed by this connector ─
-      try {
-        const connectorTasks = await db.select({
-          id: tasksTable.id,
-          sourceId: tasksTable.sourceId,
-        })
-          .from(tasksTable)
-          .where(eq(tasksTable.connectorInstanceId, connectorId));
-        const changedTaskIds = connectorTasks
-          .filter((task) => remoteSourceIds.has(task.sourceId))
-          .map((task) => task.id);
-        await evaluateRulesForTasks(changedTaskIds);
-      } catch (err) {
-        errors.push(`Project auto-include failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (executionPersistence.support.allowsLegacyWorkflow('project-automation')) {
+        try {
+          const changedTaskIds = await executionPersistence.support
+            .listConnectorTaskIds(connectorId, remoteSourceIds);
+          await evaluateRulesForTasks(changedTaskIds);
+        } catch (err) {
+          errors.push(`Project auto-include failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
 
       // ─── PHASE 4e: VERIFY — Check stale in_progress tasks ──────────
@@ -758,17 +753,8 @@ export class SyncExecutionPipeline {
         const verificationStartedAt = Date.now();
         let verificationSucceeded = true;
         try {
-          const staleInProgress = await db.select({
-            id: tasksTable.id,
-            sourceId: tasksTable.sourceId,
-            status: tasksTable.status,
-            completedAt: tasksTable.completedAt,
-          }).from(tasksTable).where(
-            and(
-              eq(tasksTable.connectorInstanceId, connectorId),
-              eq(tasksTable.status, 'in_progress'),
-            ),
-          );
+          const staleInProgress = await executionPersistence.pulls
+            .listStaleInProgress(connectorId);
 
           // Only verify tasks not already included in the pull results
           const tasksToVerify = staleInProgress.filter(t => !remoteSourceIds.has(t.sourceId));
@@ -792,12 +778,15 @@ export class SyncExecutionPipeline {
                 const { task, remoteState } = result.value;
                 const remoteIsTerminal = remoteState?.status === 'done' || remoteState?.status === 'cancelled';
                 if (remoteIsTerminal) {
-                  await db.update(tasksTable).set({
-                    status: remoteState.status,
-                    completedAt: remoteState.completedAt || new Date().toISOString(),
-                    syncStatus: 'synced',
-                    lastSyncedAt: new Date().toISOString(),
-                  }).where(eq(tasksTable.id, task.id));
+                  const correctedAt = new Date().toISOString();
+                  const corrected = await executionPersistence.pulls.applyVerifiedTerminalStatus({
+                    taskId: task.id,
+                    expectedStatus: task.status,
+                    status: remoteState.status as 'done' | 'cancelled',
+                    completedAt: remoteState.completedAt || correctedAt,
+                    now: correctedAt,
+                  });
+                  if (!corrected) continue;
                   tasksUpdated++;
                   details.push({
                     action: 'updated',
@@ -855,6 +844,7 @@ export class SyncExecutionPipeline {
       // Ancillary phase errors remain informational, while a blocked task
       // identity fails the run so it cannot advance the incremental baseline.
       const syncSucceeded = upsertResult.identityBlocked === 0;
+      const syncRunId = randomUUID();
       const result: SyncResult = {
         connectorId,
         success: syncSucceeded,
@@ -864,15 +854,18 @@ export class SyncExecutionPipeline {
         notificationsAdded,
         errors,
         syncedAt: new Date().toISOString(),
+        syncRunId,
         ...(domainDataResult?.status ? { domainStatus: domainDataResult.status } : {}),
         ...(domainDataResult?.datasetErrors
           ? { datasetErrors: domainDataResult.datasetErrors }
           : {}),
       };
       const syncLogEntry: SyncRunRecord = {
-        id: randomUUID(),
+        id: syncRunId,
         connectorId,
-        success: syncSucceeded,
+        // Job-backed successes remain provisional until the queue finalizer
+        // publishes this exact row while holding both durable leases.
+        success: syncSucceeded && options?.jobId === undefined,
         tasksAdded,
         tasksUpdated,
         tasksRemoved,
@@ -883,8 +876,8 @@ export class SyncExecutionPipeline {
         details,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
-        // The durable queue linker owns job timing/retry metadata and matches
-        // unlinked rows by connector and sync timestamp.
+        // The durable queue finalizer owns job timing/retry metadata and uses
+        // this row's exact durable ID.
         jobId: null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
@@ -896,7 +889,7 @@ export class SyncExecutionPipeline {
         syncSucceeded ? undefined : 'task_identity_blocked',
       );
 
-      if (syncSucceeded) {
+      if (syncSucceeded && options?.jobId === undefined) {
         this.lastSyncResults.set(connectorId, result);
       }
       syncEventBus.emitSyncEvent({
@@ -916,19 +909,21 @@ export class SyncExecutionPipeline {
           subtasksAdded: upsertResult.subtasksAdded,
         },
       });
-      emitEvent({
-        type: 'sync.completed',
-        timestamp: result.syncedAt,
-        payload: {
-          connectorId,
-          success: result.success,
-          tasksAdded,
-          tasksUpdated,
-          tasksRemoved,
-          notificationsAdded,
-          errors,
-        },
-      }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.completed event'));
+      if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+        emitEvent({
+          type: 'sync.completed',
+          timestamp: result.syncedAt,
+          payload: {
+            connectorId,
+            success: result.success,
+            tasksAdded,
+            tasksUpdated,
+            tasksRemoved,
+            notificationsAdded,
+            errors,
+          },
+        }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.completed event'));
+      }
 
       // Pre-warm search indexes in background so first Ctrl+K is instant
       warmUpSearchAfterSync().catch(() => {});
@@ -944,13 +939,15 @@ export class SyncExecutionPipeline {
         errors: errors.length,
       }, 'Sync completed');
 
-      try {
-        finalizePlanningSignalsIfDue();
-      } catch (planningSignalError) {
-        syncLogger.warn(
-          { err: planningSignalError, connectorId },
-          'Planning signal finalization will retry after the next sync',
-        );
+      if (executionPersistence.support.allowsLegacyWorkflow('planning-signals')) {
+        try {
+          finalizePlanningSignalsIfDue();
+        } catch (planningSignalError) {
+          syncLogger.warn(
+            { err: planningSignalError, connectorId },
+            'Planning signal finalization will retry after the next sync',
+          );
+        }
       }
 
       // ─── DURATION BUDGET GUARD ─────────────────────────────────────────
@@ -976,6 +973,7 @@ export class SyncExecutionPipeline {
 
       return result;
     } catch (err) {
+      const syncRunId = randomUUID();
       const result: SyncResult = {
         connectorId,
         success: false,
@@ -985,10 +983,11 @@ export class SyncExecutionPipeline {
         notificationsAdded: 0,
         errors: [err instanceof Error ? err.message : String(err)],
         syncedAt: new Date().toISOString(),
+        syncRunId,
       };
 
       const failureLog: SyncRunRecord = {
-        id: randomUUID(),
+        id: syncRunId,
         connectorId,
         success: false,
         tasksAdded: 0,
@@ -1001,7 +1000,7 @@ export class SyncExecutionPipeline {
         details,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
-        jobId: null,
+        jobId: options?.jobId ?? null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
@@ -1031,14 +1030,19 @@ export class SyncExecutionPipeline {
         error: err instanceof Error ? err.message : String(err),
         runtimeRelease: publicRuntimeRelease(),
       });
-      emitEvent({
-        type: 'sync.failed',
-        timestamp: result.syncedAt,
-        payload: {
-          connectorId,
-          errors: result.errors,
-        },
-      }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.failed event'));
+      const executionPersistence = (
+        await getWorkerPersistenceRepositories()
+      ).execution;
+      if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+        emitEvent({
+          type: 'sync.failed',
+          timestamp: result.syncedAt,
+          payload: {
+            connectorId,
+            errors: result.errors,
+          },
+        }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.failed event'));
+      }
 
       syncLogger.error({
         connectorId,
@@ -1062,6 +1066,7 @@ export class SyncExecutionPipeline {
       syncLogger.error({ connectorId }, 'No config row found in DB');
       return null;
     }
+    workerPersistence.execution.support.assertConfigSupported(config);
 
     const resolvedConfig: ConnectorConfig = {
       ...config,
@@ -1087,7 +1092,6 @@ export class SyncExecutionPipeline {
     const now = new Date().toISOString();
 
     // ─── Resolve source-provider signatures, presentation, and actions ───
-    const { enrichAlertBatch } = await import('@/lib/notifications/enrichment');
     const { materializeNotificationActions } = await import('@/lib/notifications/providers');
     const alertItemsForEnrichment = remoteNotifications.map(a => ({
         id: a.id,
@@ -1107,8 +1111,18 @@ export class SyncExecutionPipeline {
         metadata: a.metadata || {},
       }));
 
-    const enrichedResults = alertItemsForEnrichment.length > 0
-      ? await enrichAlertBatch(alertItemsForEnrichment, { enableAI: false })
+    const support = (
+      await getWorkerPersistenceRepositories()
+    ).execution.support;
+    const enrichedResults = (
+      alertItemsForEnrichment.length > 0
+      && support.allowsLegacyWorkflow('notification-enrichment')
+    )
+      ? await import('@/lib/notifications/enrichment')
+          .then(({ enrichAlertBatch }) => enrichAlertBatch(
+            alertItemsForEnrichment,
+            { enableAI: false },
+          ))
       : [];
 
     // Build a lookup map: original alert id → enrichment result
@@ -1118,7 +1132,7 @@ export class SyncExecutionPipeline {
     }
 
     const prepared: Array<{
-      input: CreateNotificationInput;
+      input: ConnectorNotificationInput;
       actionRecords: ReturnType<typeof materializeNotificationActions>;
       search: {
         id: string;
@@ -1149,7 +1163,17 @@ export class SyncExecutionPipeline {
       const templateKey = enriched?.templateKey || alert.templateKey || null;
       const { level } = normalizeNotificationLevel(alert.level);
       const notificationId = randomUUID();
-      const actionDrafts = enriched?.actions || [];
+      const actionDrafts = enriched?.actions ?? (alert.actionUrl
+        ? [{
+            actionType: 'open_url',
+            label: 'Open',
+            variant: 'primary' as const,
+            isPrimary: true,
+            payload: { url: alert.actionUrl },
+            opensExternal: /^https?:\/\//i.test(alert.actionUrl),
+            createdBy: 'connector' as const,
+          }]
+        : []);
       const actionRecords = materializeNotificationActions(
         notificationId,
         actionDrafts,
@@ -1207,20 +1231,18 @@ export class SyncExecutionPipeline {
       });
     }
 
-    const creationResults = db.transaction(transaction => {
-      const results = createNotificationsInTransaction(
-        transaction,
-        prepared.map(item => item.input),
-      );
-      results.forEach((result, index) => {
-        if (!result.created || prepared[index].actionRecords.length === 0) return;
-        transaction.insert(notificationActions)
-          .values(prepared[index].actionRecords)
-          .run();
-      });
-      return results;
-    });
-    if (creationResults.some(result => result.deliveryEvent?.status === 'pending')) {
+    const notificationPersistence = (
+      await getWorkerPersistenceRepositories()
+    ).execution.notifications;
+    const commands: ConnectorNotificationCommand[] = prepared.map((item) => ({
+      input: item.input,
+      actions: item.actionRecords,
+    }));
+    const creationResults = await notificationPersistence.ingest(commands);
+    if (
+      creationResults.some(result => result.pendingDelivery)
+      && support.allowsLegacyWorkflow('notification-dispatcher')
+    ) {
       wakeNotificationDeliveryDispatcher();
     }
 
@@ -1280,29 +1302,16 @@ export class SyncExecutionPipeline {
         });
 
         if (result) {
-          const existingRow = await db.select({ metadata: notificationsTable.metadata })
-            .from(notificationsTable)
-            .where(eq(notificationsTable.id, notificationId))
-            .limit(1);
-
-          if (existingRow.length > 0) {
-            const existingMeta = typeof existingRow[0].metadata === 'string'
-              ? JSON.parse(existingRow[0].metadata)
-              : existingRow[0].metadata || {};
-
-            const updatedMeta = {
-              ...existingMeta,
+          const persistence = (
+            await getWorkerPersistenceRepositories()
+          ).execution.notifications;
+          await persistence.mergeMetadata(notificationId, {
               aiSummary: result.summary,
               aiSuggestedAction: result.suggestedAction,
               aiSuggestedActionReason: result.suggestedActionReason,
               aiContextTags: result.contextTags,
               aiEnrichedAt: new Date().toISOString(),
-            };
-
-            await db.update(notificationsTable)
-              .set({ metadata: JSON.stringify(updatedMeta) })
-              .where(eq(notificationsTable.id, notificationId));
-          }
+          });
         }
       } catch {
         // Silent — AI enrichment is optional
@@ -1342,22 +1351,12 @@ export class SyncExecutionPipeline {
 
     const now = new Date().toISOString();
     let resolved = 0;
+    const notificationPersistence = (
+      await getWorkerPersistenceRepositories()
+    ).execution.notifications;
 
     // Reconcile every source-active notification, independent of local disposition.
-    const activeNotifications = await db.select({
-      id: notificationsTable.id,
-      sourceId: notificationsTable.sourceId,
-      reconcileAttempts: notificationsTable.reconcileAttempts,
-      staleSince: notificationsTable.staleSince,
-    })
-      .from(notificationsTable)
-      .where(
-        and(
-          eq(notificationsTable.connectorInstanceId, connectorId),
-          inArray(notificationsTable.sourceState, ['active', 'unknown']),
-          sql`(${notificationsTable.templateKey} IS NULL OR ${notificationsTable.templateKey} <> 'workflow_result')`,
-        )
-      );
+    const activeNotifications = await notificationPersistence.listActive(connectorId);
 
     if (activeNotifications.length === 0) return 0;
 
@@ -1374,30 +1373,24 @@ export class SyncExecutionPipeline {
         if (activeUpstream !== null) {
           const activeSet = new Set(activeUpstream.map(id => `${connectorId}:${id}`));
           const stillActive: typeof activeNotifications = [];
+          const outcomes: Array<{
+            notificationId: string;
+            resolved: boolean;
+            reason?: string;
+          }> = [];
 
           for (const notification of activeNotifications) {
             if (!activeSet.has(notification.sourceId)) {
-              // No longer reported by source — auto-resolve
-              await db.update(notificationsTable)
-                .set({
-                  state: sql`CASE
-                    WHEN ${notificationsTable.disposition} = 'dismissed' THEN 'dismissed'
-                    ELSE 'resolved'
-                  END`,
-                  sourceState: 'resolved',
-                  resolvedAt: now,
-                  sourceResolvedAt: now,
-                  lastReconciledAt: now,
-                  reconcileAttempts: 0,
-                  staleSince: null,
-                  autoResolveReason: 'not_in_source',
-                })
-                .where(eq(notificationsTable.id, notification.id));
-              resolved++;
+              outcomes.push({
+                notificationId: notification.id,
+                resolved: true,
+                reason: 'not_in_source',
+              });
             } else {
               stillActive.push(notification);
             }
           }
+          resolved += await notificationPersistence.applyReconciliation({ outcomes, now });
 
           remainingAfterStrategy1 = stillActive;
         }
@@ -1418,52 +1411,27 @@ export class SyncExecutionPipeline {
       try {
         const results = await connector.reconcileAlerts(sourceIds);
         const resultMap = new Map(results.map(r => [r.sourceId, r]));
-
-        for (const notification of batch) {
+        const outcomes = batch.map((notification) => {
           const result = resultMap.get(notification.sourceId);
           if (result?.resolved) {
-            await db.update(notificationsTable)
-              .set({
-                state: sql`CASE
-                  WHEN ${notificationsTable.disposition} = 'dismissed' THEN 'dismissed'
-                  ELSE 'resolved'
-                END`,
-                sourceState: 'resolved',
-                resolvedAt: result.resolvedAt || now,
-                sourceResolvedAt: result.resolvedAt || now,
-                lastReconciledAt: now,
-                reconcileAttempts: 0,
-                staleSince: null,
-                autoResolveReason: result.reason || 'handled_upstream',
-              })
-              .where(eq(notificationsTable.id, notification.id));
-            resolved++;
-          } else {
-            // Verified still active
-            await db.update(notificationsTable)
-              .set({
-                lastReconciledAt: now,
-                reconcileAttempts: 0,
-                staleSince: null,
-              })
-              .where(eq(notificationsTable.id, notification.id));
+            return {
+              notificationId: notification.id,
+              resolved: true,
+              resolvedAt: result.resolvedAt || now,
+              reason: result.reason || 'handled_upstream',
+            };
           }
-        }
+          return { notificationId: notification.id, resolved: false };
+        });
+        resolved += await notificationPersistence.applyReconciliation({ outcomes, now });
 
         return resolved;
       } catch (err) {
         syncLogger.warn({ connectorId, err }, 'reconcileAlerts failed, incrementing staleness');
-        // Increment reconcile attempts on failure
-        for (const notification of batch) {
-          const newAttempts = (notification.reconcileAttempts || 0) + 1;
-          const staleSince = notification.staleSince || now;
-          await db.update(notificationsTable)
-            .set({
-              reconcileAttempts: newAttempts,
-              staleSince,
-            })
-            .where(eq(notificationsTable.id, notification.id));
-        }
+        await notificationPersistence.recordReconciliationFailure({
+          notificationIds: batch.map((notification) => notification.id),
+          now,
+        });
       }
     }
 
@@ -1481,55 +1449,19 @@ export class SyncExecutionPipeline {
   private async archiveStaleNotifications(connectorId: string): Promise<number> {
     const now = new Date().toISOString();
     const cutoff = new Date(Date.now() - SyncExecutionPipeline.STALE_ARCHIVE_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-    const staleNotifications = await db.select({ id: notificationsTable.id })
-      .from(notificationsTable)
-      .where(
-        and(
-          eq(notificationsTable.connectorInstanceId, connectorId),
-          inArray(notificationsTable.sourceState, ['active', 'unknown']),
-          sql`(${notificationsTable.templateKey} IS NULL OR ${notificationsTable.templateKey} <> 'workflow_result')`,
-          sql`${notificationsTable.staleSince} IS NOT NULL AND ${notificationsTable.staleSince} < ${cutoff}`,
-          sql`${notificationsTable.reconcileAttempts} >= ${SyncExecutionPipeline.STALE_AFTER_ATTEMPTS}`,
-        )
-      );
-
-    if (staleNotifications.length === 0) return 0;
-
-    const ids = staleNotifications.map(n => n.id);
-    await db.update(notificationsTable)
-      .set({
-        state: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN 'dismissed'
-          ELSE 'archived'
-        END`,
-        disposition: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN 'dismissed'
-          ELSE 'handled'
-        END`,
-        sourceState: 'unknown',
-        handledAt: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN ${notificationsTable.handledAt}
-          ELSE ${now}
-        END`,
-        handledSourceActivityAt: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN ${notificationsTable.handledSourceActivityAt}
-          ELSE ${notificationsTable.lastSourceActivityAt}
-        END`,
-        handledSourceActivityKey: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN ${notificationsTable.handledSourceActivityKey}
-          ELSE ${notificationsTable.lastSourceActivityKey}
-        END`,
-        archivedAt: sql`CASE
-          WHEN ${notificationsTable.disposition} = 'dismissed' THEN ${notificationsTable.archivedAt}
-          ELSE ${now}
-        END`,
-        autoResolveReason: 'stale_unverifiable',
-      })
-      .where(inArray(notificationsTable.id, ids));
-
-    syncLogger.info({ connectorId, count: ids.length }, 'Auto-archived stale unverifiable notifications');
-    return ids.length;
+    const persistence = (
+      await getWorkerPersistenceRepositories()
+    ).execution.notifications;
+    const count = await persistence.archiveStale({
+      connectorId,
+      cutoff,
+      minimumAttempts: SyncExecutionPipeline.STALE_AFTER_ATTEMPTS,
+      now,
+    });
+    if (count > 0) {
+      syncLogger.info({ connectorId, count }, 'Auto-archived stale unverifiable notifications');
+    }
+    return count;
   }
 
   // ─── GitHub Projects → Hub Projects ─────────────────────────────────────
@@ -1563,156 +1495,15 @@ export class SyncExecutionPipeline {
     }
 
     syncLogger.info({ connectorId, projectCount: associations.length }, 'Syncing GitHub Projects as Hub Projects');
-
-    const now = new Date().toISOString();
-
-    for (const { project, taskSourceIds } of associations) {
-      assertIdentityCurrent?.();
-      if (stableIdentity?.blockedStableProjects.has(project.number)) {
-        syncLogger.warn(
-          { connectorId, projectNumber: project.number },
-          'Stable GitHub project association was fenced by identity evidence',
-        );
-        continue;
-      }
-      // Stable hub project ID derived from connector + project number
-      const hubProjectId = `gh-project:${connectorId}:${project.number}`;
-
-      // Upsert the hub project
-      const [existing] = await db.select({
-        id: hubProjects.id,
-        metadata: hubProjects.metadata,
-      })
-        .from(hubProjects)
-        .where(eq(hubProjects.id, hubProjectId))
-        .limit(1);
-
-      if (existing) {
-        const existingIdentityDigest = (
-          existing.metadata
-          && typeof existing.metadata === 'object'
-          && 'githubProjectIdentityDigest' in existing.metadata
-          && typeof existing.metadata.githubProjectIdentityDigest === 'string'
-        )
-          ? existing.metadata.githubProjectIdentityDigest
-          : undefined;
-        const projectIdentityDigest = resolveGitHubProjectIdentityDigest(
-          project,
-          existingIdentityDigest,
-        );
-        assertIdentityCurrent?.();
-        await db.update(hubProjects)
-          .set({
-            name: project.title.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]+\s*/u, ''),
-            description: project.shortDescription || undefined,
-            metadata: {
-              githubProjectNumber: project.number,
-              githubProjectUrl: project.url,
-              githubProjectIdentityDigest: projectIdentityDigest,
-              connectorId,
-              syncManaged: true,
-            },
-            updatedAt: now,
-          })
-          .where(eq(hubProjects.id, hubProjectId));
-      } else {
-        const projectIdentityDigest = resolveGitHubProjectIdentityDigest(project);
-        assertIdentityCurrent?.();
-        await db.insert(hubProjects).values({
-          id: hubProjectId,
-          name: project.title.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}\uFE0F]+\s*/u, ''),
-          description: project.shortDescription || undefined,
-          color: '#6e40c9', // GitHub purple
-          icon: null,
-          sourceBindings: [{
-            connectorId,
-            type: 'github-project',
-            projectNumber: project.number,
-          }],
-          metadata: {
-            githubProjectNumber: project.number,
-            githubProjectUrl: project.url,
-            githubProjectIdentityDigest: projectIdentityDigest,
-            connectorId,
-            syncManaged: true,
-          },
-          createdAt: now,
-          updatedAt: now,
-        });
-      }
-
-      // Resolve sourceIds to task DB IDs
-      if (taskSourceIds.length === 0 && !stableIdentity) continue;
-
-      const stableTaskIds = stableIdentity?.stableProjectTaskIds.get(project.number);
-      const matchingTasks = stableIdentity
-        ? (
-            stableTaskIds && stableTaskIds.size > 0
-              ? await db.select({
-                  id: tasksTable.id,
-                  sourceId: tasksTable.sourceId,
-                }).from(tasksTable).where(and(
-                  eq(tasksTable.connectorInstanceId, connectorId),
-                  inArray(tasksTable.id, [...stableTaskIds]),
-                ))
-              : []
-          )
-        : await db.select({
-            id: tasksTable.id,
-            sourceId: tasksTable.sourceId,
-          })
-            .from(tasksTable)
-            .where(
-              and(
-                eq(tasksTable.connectorInstanceId, connectorId),
-                inArray(tasksTable.sourceId, taskSourceIds),
-              ),
-            );
-
-      if (matchingTasks.length === 0 && !stableIdentity) continue;
-
-      // Get existing associations for this hub project
-      const existingAssocs = await db.select({ taskId: taskProjects.taskId })
-        .from(taskProjects)
-        .where(eq(taskProjects.projectId, hubProjectId));
-      const existingTaskIds = new Set(existingAssocs.map(a => a.taskId));
-
-      // Insert new associations (skip already-linked tasks)
-      const newAssocs = matchingTasks
-        .filter(t => !existingTaskIds.has(t.id))
-        .map(t => ({ taskId: t.id, projectId: hubProjectId }));
-
-      if (newAssocs.length > 0) {
-        assertIdentityCurrent?.();
-        await db.insert(taskProjects).values(newAssocs).onConflictDoNothing();
-      }
-
-      // Remove associations for tasks no longer in the project
-      const currentTaskIds = new Set(matchingTasks.map(t => t.id));
-      const staleTaskIds = existingAssocs
-        .filter(a => !currentTaskIds.has(a.taskId))
-        .map(a => a.taskId);
-
-      if (staleTaskIds.length > 0) {
-        for (const staleId of staleTaskIds) {
-          assertIdentityCurrent?.();
-          await db.delete(taskProjects).where(
-            and(
-              eq(taskProjects.taskId, staleId),
-              eq(taskProjects.projectId, hubProjectId),
-            ),
-          );
-        }
-      }
-
-      syncLogger.info({
-        connectorId,
-        projectNumber: project.number,
-        projectTitle: project.title,
-        tasksLinked: newAssocs.length,
-        tasksUnlinked: staleTaskIds.length,
-      }, 'Synced GitHub Project as Hub Project');
-    }
+    const support = (await getWorkerPersistenceRepositories()).execution.support;
+    await support.syncLegacyGitHubProjects({
+      connectorId,
+      associations,
+      stableProjectTaskIds: stableIdentity?.stableProjectTaskIds,
+      blockedStableProjects: stableIdentity?.blockedStableProjects,
+      resolveIdentityDigest: resolveGitHubProjectIdentityDigest,
+      assertIdentityCurrent,
+    });
   }
 
   // ─── Orchestration ──────────────────────────────────────────────────────
@@ -1721,11 +1512,8 @@ export class SyncExecutionPipeline {
    * Run sync for ALL active connectors.
    */
   async runAll(full?: boolean): Promise<SyncResult[]> {
-    const allConfigs = await db.select({ id: connectorConfigs.id })
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
-
-    const connectorIds = allConfigs.map(c => c.id);
+    const support = (await getWorkerPersistenceRepositories()).execution.support;
+    const connectorIds = await support.listEnabledConnectorIds();
     for (const c of connectorRegistry.getAllConnectors()) {
       if (!connectorIds.includes(c.id)) connectorIds.push(c.id);
     }
@@ -2179,16 +1967,9 @@ export class SyncExecutionPipeline {
   ): Promise<void> {
     const intervalMinutes = this.getDependencyRelationshipPollIntervalMinutes();
     const dueBefore = Date.now() - intervalMinutes * 60_000;
+    const support = (await getWorkerPersistenceRepositories()).execution.support;
     const [configs, health] = await Promise.all([
-      db.select({
-        id: connectorConfigs.id,
-        type: connectorConfigs.type,
-        capabilities: connectorConfigs.capabilities,
-      }).from(connectorConfigs).where(and(
-        eq(connectorConfigs.enabled, true),
-        isNull(connectorConfigs.deletedAt),
-        eq(connectorConfigs.type, 'github-issues'),
-      )),
+      support.listEnabledGitHubConfigs(),
       getDependencyReconciliationHealth(),
     ]);
 

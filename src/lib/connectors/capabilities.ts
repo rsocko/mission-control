@@ -3,52 +3,11 @@ import { connectorConfigs } from '@/db/schema';
 import { eq, isNull, and } from 'drizzle-orm';
 import type { ConnectorCapabilities } from '@/types';
 import {
-  DOCUMENT_INTELLIGENCE_TASK_AUTHORITY,
-  GITHUB_ISSUES_TASK_AUTHORITY,
-  MICROSOFT_TODO_TASK_AUTHORITY,
-  WORK_TODO_TASK_AUTHORITY,
-  SCOUT_TASK_AUTHORITY,
-  resolveConnectorCapabilities,
-} from './task-source-profiles';
+  CAPABILITY_DEFAULTS,
+  resolvePersistedConnectorCapabilities,
+} from './resolved-capabilities';
 
-/** Runtime capability defaults per connector type (for fields added after initial setup) */
-export const CAPABILITY_DEFAULTS: Record<string, Partial<ConnectorCapabilities>> = {
-  'microsoft-todo': {
-    attachments: true,
-    taskCreate: true,
-    taskMove: true,
-    microStatusSync: true,
-    microStatusWriteBack: true,
-    tagScope: 'global',
-    ...MICROSOFT_TODO_TASK_AUTHORITY,
-  },
-  'microsoft-todo-work': {
-    taskCreate: false,
-    taskMove: false,
-    attachments: false,
-    microStatusSync: false,
-    microStatusWriteBack: false,
-    tagScope: 'global',
-    ...WORK_TODO_TASK_AUTHORITY,
-  },
-  'github-issues': {
-    close: true,
-    taskCreate: true,
-    taskMove: false,
-    dependencyRead: true,
-    dependencyWrite: true,
-    microStatusSync: true,
-    microStatusWriteBack: true,
-    tagScope: 'per-list',
-    ...GITHUB_ISSUES_TASK_AUTHORITY,
-  },
-  'document-intelligence': {
-    ...DOCUMENT_INTELLIGENCE_TASK_AUTHORITY,
-  },
-  scout: {
-    ...SCOUT_TASK_AUTHORITY,
-  },
-};
+export { CAPABILITY_DEFAULTS } from './resolved-capabilities';
 
 /**
  * Look up a connector's capabilities by its instance ID.
@@ -77,14 +36,11 @@ export async function getConnectorCapabilities(
 
   if (!config?.capabilities) return null;
 
-  const stored = config.capabilities as ConnectorCapabilities;
-  const defaults = CAPABILITY_DEFAULTS[config.type] ?? {};
-  const settings = config.settings as Record<string, unknown>;
-  return resolveConnectorCapabilities(
-    config.type,
-    { ...defaults, ...stored } as ConnectorCapabilities,
-    settings,
-  );
+  return resolvePersistedConnectorCapabilities({
+    type: config.type,
+    capabilities: config.capabilities as ConnectorCapabilities,
+    settings: config.settings as Record<string, unknown>,
+  });
 }
 
 /**

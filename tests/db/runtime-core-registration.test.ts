@@ -62,13 +62,14 @@ const mocks = vi.hoisted(() => {
     }),
     registerWorker,
     workerRepositories,
-    createWorker: vi.fn((_db, core: CorePersistenceRepositories) => {
+    createWorker: vi.fn((_db, _pool, core: CorePersistenceRepositories) => {
       const repository: WorkerPersistenceRepositories = {
         connectors: core.connectors,
         syncRuns: {
           listLatestSuccessfulPulls: vi.fn(async () => []),
           append: vi.fn(async () => undefined),
         },
+        execution: {} as WorkerPersistenceRepositories['execution'],
       };
       workerRepositories.push(repository);
       return repository;

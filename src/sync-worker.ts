@@ -83,8 +83,12 @@ async function main(): Promise<void> {
 
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
-  syncScheduler.startDependencyReconciliationResume();
-  syncScheduler.startDependencyRelationshipPolling();
+  const { getWorkerPersistenceRepositories } = await import('@/lib/persistence/worker-runtime');
+  const workerPersistence = await getWorkerPersistenceRepositories();
+  if (workerPersistence.execution.support.allowsLegacyWorkflow('dependency-reconciliation')) {
+    syncScheduler.startDependencyReconciliationResume();
+    syncScheduler.startDependencyRelationshipPolling();
+  }
   syncScheduler.startWatchdog();
   await financeConnectionRecoveryScheduler.start();
 

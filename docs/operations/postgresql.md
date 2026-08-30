@@ -118,6 +118,12 @@ semantic mode can remain keyword-only when the extension or compatible index is
 unavailable. Required mode must fail readiness rather than fall back to an
 unbounded scan.
 
+HNSW index builds at the validated 100,000-entity, 1,536-dimension profile require
+at least 2 GiB of container shared memory. The opt-in Compose environment and CI
+service set this explicitly. The coordinated production deployment must carry the
+same `shm_size` contract, or an independently revalidated equivalent, before
+activation.
+
 The repository's local environment is opt-in and does not alter the SQLite-default
 `docker-compose.yml` deployment:
 

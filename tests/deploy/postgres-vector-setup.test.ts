@@ -10,6 +10,7 @@ interface ComposeConfiguration {
       image: string;
       environment: Record<string, string>;
       entrypoint: string[];
+      shm_size: string;
       healthcheck: { test: string[] };
     };
   };
@@ -28,6 +29,7 @@ describe('opt-in PostgreSQL vector environment', () => {
       'pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f',
     );
     expect(postgres.environment.POSTGRES_DB).toContain('mission_control_vector_dev');
+    expect(postgres.shm_size).toBe('2gb');
     expect(postgres.entrypoint.join('\n')).toContain(
       'CREATE EXTENSION IF NOT EXISTS vector',
     );

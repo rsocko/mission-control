@@ -394,7 +394,7 @@ if (connectionString) {
         .toHaveLength(1);
       expect(statements.filter((text) => text.includes('INSERT INTO external_entity_bindings')))
         .toHaveLength(1);
-      expect(statements.filter((text) => text.includes('FROM unnest'))).toHaveLength(6);
+      expect(statements.filter((text) => text.includes('FROM unnest'))).toHaveLength(8);
 
       const persisted = await pool.query<{ count: string }>(
         `

@@ -18,7 +18,8 @@ import type {
 const EXPECTED_VECTOR_VERSION = '0.8.6';
 const CORPUS_SIZES = [10_000, 100_000] as const;
 const DEFAULT_DIMENSIONS = 1536;
-const DEFAULT_QUERY_RUNS = 8;
+const DEFAULT_QUERY_RUNS = 20;
+const WARMUP_QUERY_RUNS = 2;
 const K = 10;
 const BENCHMARK_NOW = '2030-01-01T00:00:00.000Z';
 const FUTURE = '2031-01-01T00:00:00.000Z';
@@ -82,6 +83,7 @@ interface BenchmarkResult {
   entities: number;
   dimensions: number;
   runs: number;
+  warmupRuns: number;
   backfillMs: number;
   indexBuildMs: number;
   vectorLookup: TimingSummary;
@@ -1173,6 +1175,26 @@ async function benchmarkCorpus(
     let filtersVerified = true;
     let unauthorizedResults = 0;
 
+    for (let run = 0; run < WARMUP_QUERY_RUNS; run++) {
+      const seed = vectorSeed(config.queryRuns + run, size);
+      const vector = await queryVector(rawPool, seed, config.dimensions);
+      const filter = run % 2 === 0
+        ? null
+        : { scopeId: seed % 10, category: seed % 4 };
+      const response = await repository.queryVectors({
+        indexId: identityId,
+        queryEmbedding: vector.embedding,
+        limit: K,
+        entityTypes: ['task'],
+        sensitivities: ['standard'],
+        metadataFilters: metadataFilters(filter),
+        now: BENCHMARK_NOW,
+      });
+      if (response.scan.kind !== 'postgres-hnsw') {
+        throw new Error('warmup_query_not_indexed');
+      }
+    }
+
     for (let run = 0; run < config.queryRuns; run++) {
       const seed = vectorSeed(run, size);
       const vector = await queryVector(rawPool, seed, config.dimensions);
@@ -1303,6 +1325,7 @@ async function benchmarkCorpus(
       entities: size,
       dimensions: config.dimensions,
       runs: config.queryRuns,
+      warmupRuns: WARMUP_QUERY_RUNS,
       backfillMs,
       indexBuildMs,
       vectorLookup,

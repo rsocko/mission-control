@@ -71,6 +71,7 @@ describe('PostgreSQL vector benchmark helpers', () => {
     expect(source).toContain('unauthorizedResults');
     expect(source).toContain('repository.upsertVector(repositoryUpdate)');
     expect(source).toContain('/sys/fs/cgroup/memory.current');
+    expect(source).toContain('WARMUP_QUERY_RUNS = 2');
     expect(source).not.toContain('database-local-logical-copy');
   });
 });

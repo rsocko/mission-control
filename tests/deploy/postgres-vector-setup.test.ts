@@ -47,6 +47,7 @@ describe('opt-in PostgreSQL vector environment', () => {
 
     expect(workflow).toContain('timeout-minutes: 120');
     expect(workflow).toContain('MC_BENCHMARK_DIMENSIONS: 1536');
+    expect(workflow).toContain('MC_BENCHMARK_QUERY_RUNS: 20');
     expect(workflow).toContain('MC_BENCHMARK_POSTGRES_CONTAINER=');
     expect(workflow).toContain('npm run --silent benchmark:postgres-vector');
   });

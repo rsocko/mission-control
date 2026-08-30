@@ -531,5 +531,5 @@ jobs:
         env:
           MC_BENCHMARK_DIMENSIONS: 1536
           MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
-          MC_BENCHMARK_QUERY_RUNS: 8
+          MC_BENCHMARK_QUERY_RUNS: 20
         run: npm run --silent benchmark:postgres-vector

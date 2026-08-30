@@ -87,6 +87,8 @@ metadata and vectors. For both corpus sizes it:
    `PostgresSemanticIndexRepository.queryVectors`, whose indexed transaction disables
    sequential scans and explicit sorts locally so PostgreSQL cannot silently replace
    the required order-producing ANN path with a full or B-tree-filtered scan;
+   two unmeasured warm-up queries precede 20 measured queries so p95 does not collapse
+   to a single cold-start sample;
 4. parses `EXPLAIN (ANALYZE, FORMAT JSON)` and rejects any ANN plan that does not
   contain the named HNSW index or that contains a sequential scan;
 5. seeds explicit `restricted` and non-task (`project`) negative cohorts, queries

@@ -355,10 +355,23 @@ than the full corpus:
 Clusters may drive color, hulls, layout grouping, filters, and summaries. Recomputing
 the index may change them.
 
+The first implementation uses `deterministic-threshold-components-v1`: task nodes are
+joined by semantic edges at or above a `0.72` resolution threshold, connected
+components require at least two members, components below `0.45` mean strongest-link
+confidence remain outliers, and seed `1666` fixes traversal, representative, label,
+identifier, and color tie-breaking. Explicit task-to-task edges are declared but off
+by default. Labels use shared normalized title terms plus the highest weighted-degree
+representatives. The projection fingerprint includes the authorized bounded task IDs,
+accepted weighted edges, and all settings.
+
 Saving a cluster is an explicit promotion workflow. The user chooses the destination
-semantic construct, such as a project, tag, saved graph view, or named collection,
+semantic construct, currently a project or tag,
 reviews membership, and confirms. Mission Control domain services perform the
 resulting mutations. The transient cluster itself is not silently persisted.
+Project saves use the revisioned, audited hierarchy command. Tag saves use task tag
+domain mutations and record reviewed-cluster task history. Authorization is repeated
+server-side before the first domain mutation. Saved graph views and named collections
+remain unavailable until their domain commands ship under #1203.
 
 ## Houston Retrieval and Retention
 
@@ -471,6 +484,5 @@ These require measured spikes rather than architectural assumptions:
    index.
 2. Production HNSW parameter tuning by dimension and workload after representative
    deployment measurements.
-3. The first deterministic cluster algorithm and resolution defaults.
-4. Whether project embeddings include sampled tasks or a maintained project summary.
-5. Retention defaults for sensitive alerts/events.
+3. Whether project embeddings include sampled tasks or a maintained project summary.
+4. Retention defaults for sensitive alerts/events.

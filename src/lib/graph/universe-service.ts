@@ -19,7 +19,10 @@ import type {
 } from './universe-types';
 import { normalizeGraphBudgets } from './query';
 import { getCanonicalTaskFilterWhere } from '@/app/api/tasks/canonical-filter';
-import { isUniverseSemanticNeighborsEnabled } from './universe-semantic-config';
+import {
+  isUniverseClustersEnabled,
+  isUniverseSemanticNeighborsEnabled,
+} from './universe-semantic-config';
 
 export async function getUniverseSubgraph(
   filters: UniverseGraphFilters,
@@ -92,6 +95,7 @@ export async function getUniverseSubgraph(
     ...graph,
     capabilities: {
       semanticNeighbors: isUniverseSemanticNeighborsEnabled(),
+      clusters: isUniverseClustersEnabled(),
     },
     stats: {
       ...graph.stats,

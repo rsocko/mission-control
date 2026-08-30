@@ -12,6 +12,8 @@ import {
 } from '@/lib/graph/universe-types';
 import type { SemanticSimilarityGraphEdge } from '@/lib/graph/types';
 import type {
+  UniverseCluster,
+  UniverseClusterProjection,
   UniverseDimension,
   UniverseNeighborLayer,
   UniverseNode,
@@ -465,14 +467,20 @@ export function SelectionToolbar({
 
 export function AccessibleUniverseList({
   graph,
+  clusterProjection,
   selectedNodeIds,
   onNodeSelect,
   onTaskActivate,
+  onClusterSelect,
+  onClusterSave,
 }: {
   graph: UniverseSubgraph;
+  clusterProjection?: UniverseClusterProjection | null;
   selectedNodeIds: string[];
   onNodeSelect: (nodeId: string) => void;
   onTaskActivate: (taskId: string, nodeId: string) => void;
+  onClusterSelect?: (clusterId: string) => void;
+  onClusterSave?: (cluster: UniverseCluster) => void;
 }) {
   const tasks = graph.nodes.filter((node) => node.kind === 'task');
   const attributes = graph.nodes
@@ -484,6 +492,61 @@ export function AccessibleUniverseList({
         Accessible graph list ({tasks.length} tasks, {attributes.length} attributes)
       </summary>
       <div className="grid max-h-[40vh] gap-5 overflow-y-auto px-4 pb-4 pt-2 lg:grid-cols-2">
+        {clusterProjection ? (
+          <section className="lg:col-span-2" aria-labelledby="accessible-clusters-heading">
+            <h2 id="accessible-clusters-heading" className="text-xs font-semibold uppercase tracking-wide text-[var(--text-primary)]">
+              Computed transient groups
+            </h2>
+            <p className="mt-1 text-xs text-[var(--text-tertiary)]">
+              Not saved domain state. {clusterProjection.settings.algorithm};
+              {' '}resolution {clusterProjection.settings.resolution};
+              {' '}minimum {clusterProjection.settings.minimumSize};
+              {' '}outlier threshold {clusterProjection.settings.outlierThreshold};
+              {' '}seed {clusterProjection.settings.seed}.
+            </p>
+            <ol className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {clusterProjection.clusters.map((cluster) => (
+                <li key={cluster.id} className="rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: cluster.color }}
+                      aria-hidden="true"
+                    />
+                    <h3 className="text-xs font-semibold text-[var(--text-primary)]">{cluster.label}</h3>
+                  </div>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
+                    {cluster.explanation} Confidence {Math.round(cluster.confidence * 100)}%.
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    {onClusterSelect ? (
+                      <button
+                        type="button"
+                        onClick={() => onClusterSelect(cluster.id)}
+                        className="text-xs font-semibold text-[var(--accent-400)] underline underline-offset-4"
+                      >
+                        Isolate {cluster.taskIds.length} tasks
+                      </button>
+                    ) : null}
+                    {onClusterSave ? (
+                      <button
+                        type="button"
+                        onClick={() => onClusterSave(cluster)}
+                        className="text-xs font-semibold text-[var(--accent-400)] underline underline-offset-4"
+                      >
+                        Review & save
+                      </button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+              <li className="rounded-lg border border-[var(--border)] p-3 text-xs text-[var(--text-secondary)]">
+                {clusterProjection.outlierNodeIds.length} ungrouped task
+                {clusterProjection.outlierNodeIds.length === 1 ? '' : 's'}
+              </li>
+            </ol>
+          </section>
+        ) : null}
         <section>
           <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Tasks</h2>
           <ol className="mt-2 grid gap-1.5 sm:grid-cols-2">

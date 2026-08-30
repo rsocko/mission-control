@@ -263,6 +263,10 @@ The Universe gate is `MC_UNIVERSE_SEMANTIC_NEIGHBORS_ENABLED`. It is independent
 global semantic-search enablement: disabling it leaves keyword seeding plus explicit
 and derived expansion intact.
 
+Transient grouping is independently gated by `MC_UNIVERSE_CLUSTERS_ENABLED`. Disabling
+it removes grouping and promotion controls without changing Universe search, expansion,
+focus/history, filters, or canonical saved state.
+
 ## Definition of Done
 
 The roadmap is complete when:

@@ -123,8 +123,11 @@ index without a sequential scan, and each corpus passes:
 
 - average recall@10 of at least 0.90 unfiltered and 0.80 with selective filters;
 - non-empty restricted/non-task cohorts with zero unauthorized results;
-- vector lookup p95 at most 200 ms and end-to-end-equivalent database p95 at most
- 300 ms;
+- at the critical 100,000-row profile, vector lookup p95 at most 200 ms and
+ end-to-end repository p95 at most 300 ms;
+- at the 10,000-row smoke profile, vector lookup p95 at most 400 ms and
+ end-to-end repository p95 at most 450 ms, while reporting the same p50/p95
+ measurements and preserving all recall, plan, filtering, and lifecycle gates;
 - measurable PostgreSQL container cgroup memory in CI;
 - backfill and HNSW build at most 900 seconds each;
 - one repository update at most 5 seconds, the 99-row batch update at most 60

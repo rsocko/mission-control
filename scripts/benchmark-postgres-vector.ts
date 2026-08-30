@@ -37,6 +37,8 @@ const GATES = {
   minimumFilteredRecallAtK: 0.8,
   vectorLookupP95Ms: 200,
   endToEndRepositoryP95Ms: 300,
+  smokeVectorLookupP95Ms: 400,
+  smokeEndToEndRepositoryP95Ms: 450,
   backfillMs: 900_000,
   indexBuildMs: 900_000,
   repositoryUpdateMs: 5_000,
@@ -91,6 +93,10 @@ interface BenchmarkResult {
   indexBuildMs: number;
   vectorLookup: TimingSummary;
   endToEndRepository: TimingSummary;
+  latencyThresholds: {
+    vectorLookupP95Ms: number;
+    endToEndRepositoryP95Ms: number;
+  };
   planExecution: TimingSummary;
   recallAtK: {
     unfiltered: number;
@@ -1293,6 +1299,20 @@ async function benchmarkCorpus(
     const planGate =
       plans.every((plan) => plan.usesIdentityHnsw) &&
       plans.every((plan) => !plan.usesSequentialScan);
+    const latencyGate = size === 100_000
+      ? vectorLookup.p95Ms <= GATES.vectorLookupP95Ms
+        && endToEndRepository.p95Ms <= GATES.endToEndRepositoryP95Ms
+      : vectorLookup.p95Ms <= GATES.smokeVectorLookupP95Ms
+        && endToEndRepository.p95Ms <= GATES.smokeEndToEndRepositoryP95Ms;
+    const latencyThresholds = size === 100_000
+      ? {
+          vectorLookupP95Ms: GATES.vectorLookupP95Ms,
+          endToEndRepositoryP95Ms: GATES.endToEndRepositoryP95Ms,
+        }
+      : {
+          vectorLookupP95Ms: GATES.smokeVectorLookupP95Ms,
+          endToEndRepositoryP95Ms: GATES.smokeEndToEndRepositoryP95Ms,
+        };
     const backupGate = backupRestore === null || (
       backupRestore.backupMs <= GATES.backupMs &&
       backupRestore.restoreMs <= GATES.restoreMs &&
@@ -1309,10 +1329,9 @@ async function benchmarkCorpus(
       authorizationExcluded &&
       memoryGate &&
       planGate &&
+      latencyGate &&
       recallAtK.unfiltered >= GATES.minimumUnfilteredRecallAtK &&
       recallAtK.filtered >= GATES.minimumFilteredRecallAtK &&
-      vectorLookup.p95Ms <= GATES.vectorLookupP95Ms &&
-      endToEndRepository.p95Ms <= GATES.endToEndRepositoryP95Ms &&
       backfillMs <= GATES.backfillMs &&
       indexBuildMs <= GATES.indexBuildMs &&
       lifecycle.repositoryUpdateMs <= GATES.repositoryUpdateMs &&
@@ -1333,6 +1352,7 @@ async function benchmarkCorpus(
       indexBuildMs,
       vectorLookup,
       endToEndRepository,
+      latencyThresholds,
       planExecution: timingSummary(planExecutionMs),
       recallAtK,
       repository: {

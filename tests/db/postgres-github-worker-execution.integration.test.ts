@@ -819,7 +819,6 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
     // Provisional sync_log publish + link + connector-lease release.
     const syncRunId = `${ids.connectorId}:success-log`;
     const syncedAt = new Date().toISOString();
-    await seedProvisionalSyncLog(pool, syncRunId, ids.connectorId, syncedAt);
     const result = {
       connectorId: ids.connectorId,
       success: true,
@@ -1165,6 +1164,13 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
       }),
     ).toBe(true);
     expect(await github.dependencies.countSnapshotEdges(collecting.id)).toBe(1);
+
+    await pool.query(
+      `UPDATE dependency_reconciliation_snapshots
+       SET status = 'completed', phase = 'completed', completed_at = $2, updated_at = $2
+       WHERE id = $1`,
+      [collecting.id, LATER],
+    );
 
     // Resume read path reports the recorded outcome.
     const resumable = depSnapshot(ids.connectorId, {

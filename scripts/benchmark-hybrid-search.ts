@@ -4,7 +4,7 @@ import type { SearchResult } from '../src/lib/search/repository';
 import {
   applyEvaluationFilter,
   SYNTHETIC_HYBRID_EVALUATION,
-} from '../tests/search/fixtures/hybrid-evaluation';
+} from './fixtures/hybrid-evaluation';
 
 const DIMENSIONS = 64;
 const QUERY_RUNS = 20;

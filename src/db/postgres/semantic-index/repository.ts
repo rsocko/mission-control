@@ -86,6 +86,7 @@ import {
 type Client = Pool | PoolClient;
 const ANN_MAX_CANDIDATES = 1_000;
 const ANN_OVERSAMPLE_FACTOR = 10;
+export const POSTGRES_ANN_INDEX_PROVISION_TIMEOUT_MS = 900_000;
 
 async function query<T>(client: Client, text: string, params: unknown[] = []): Promise<T[]> {
   const result = await client.query(text, params);
@@ -596,8 +597,12 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     const dimensions = identity.dimensions;
     const client = await this.pool.connect();
     let operationError: unknown;
-    let cleanupError: unknown;
+    const cleanupErrors: unknown[] = [];
     try {
+      await client.query(
+        `SELECT set_config('statement_timeout', $1, false)`,
+        [`${POSTGRES_ANN_INDEX_PROVISION_TIMEOUT_MS}ms`],
+      );
       await client.query(
         `SELECT pg_advisory_lock(hashtext($1), hashtext($2))`,
         ['mission-control-semantic-ann', identity.id],
@@ -633,18 +638,32 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           ['mission-control-semantic-ann', identity.id],
         );
       } catch (error) {
-        cleanupError = error;
+        cleanupErrors.push(error);
       }
-      client.release(cleanupError instanceof Error ? cleanupError : undefined);
+      try {
+        await client.query('RESET statement_timeout');
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+      const releaseError = cleanupErrors.find(
+        (error): error is Error => error instanceof Error,
+      );
+      client.release(releaseError);
     }
-    if (operationError && cleanupError) {
+    if (operationError && cleanupErrors.length > 0) {
       throw new AggregateError(
-        [operationError, cleanupError],
+        [operationError, ...cleanupErrors],
         `PostgreSQL HNSW index creation and advisory-lock cleanup failed`,
       );
     }
     if (operationError) throw operationError;
-    if (cleanupError) throw cleanupError;
+    if (cleanupErrors.length === 1) throw cleanupErrors[0];
+    if (cleanupErrors.length > 1) {
+      throw new AggregateError(
+        cleanupErrors,
+        `PostgreSQL HNSW advisory-lock and timeout cleanup failed`,
+      );
+    }
     this.knownAnnIndexes.add(name);
     return true;
   }

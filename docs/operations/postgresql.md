@@ -124,6 +124,13 @@ service set this explicitly. The coordinated production deployment must carry th
 same `shm_size` contract, or an independently revalidated equivalent, before
 activation.
 
+Identity-specific HNSW provisioning runs outside a transaction because PostgreSQL
+requires that for `CREATE INDEX CONCURRENTLY`. The repository raises
+`statement_timeout` to 15 minutes only on the checked-out provisioning session,
+matching the validated build-time gate, and resets it before returning the client
+to the production pool. Normal application statements retain the default 30-second
+timeout.
+
 The repository's local environment is opt-in and does not alter the SQLite-default
 `docker-compose.yml` deployment:
 

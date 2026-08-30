@@ -71,6 +71,9 @@ MC_BENCHMARK_POSTGRES_URL=postgresql://... \
 The default and required CI dimension is the production-representative 1536.
 Both local and CI runs use the same pgvector image, production repository,
 semantic tables, ANN projection, HNSW parameters, corpus sizes, filters, and gates.
+The harness also requires the production pool's 30-second default statement timeout;
+the repository's scoped provisioning override must therefore carry the 100,000-row
+concurrent HNSW build to completion.
 
 ### Method
 
@@ -128,7 +131,11 @@ index without a sequential scan, and each corpus passes:
 - at the 10,000-row smoke profile, vector lookup p95 at most 400 ms and
  end-to-end repository p95 at most 450 ms, while reporting the same p50/p95
  measurements and preserving all recall, plan, filtering, and lifecycle gates;
-- measurable PostgreSQL container cgroup memory in CI;
+- at the 100,000-row profile, PostgreSQL container cgroup memory growth at most
+  4 GiB, production semantic table storage at most 2.5 GiB, and the
+  identity-specific HNSW index at most 512 MiB; the roughly 24-32% headroom over
+  the accepted run catches material regressions without gating on allocator and
+  page-cache noise;
 - backfill and HNSW build at most 900 seconds each;
 - one repository update at most 5 seconds, the 99-row batch update at most 60
  seconds, and delete/expiry at most 60 seconds; and

@@ -1,6 +1,9 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { Pool } from 'pg';
-import { PostgresSemanticIndexRepository } from '@/db/postgres/semantic-index/repository';
+import {
+  POSTGRES_ANN_INDEX_PROVISION_TIMEOUT_MS,
+  PostgresSemanticIndexRepository,
+} from '@/db/postgres/semantic-index/repository';
 import {
   computeSemanticRetryAt,
   supersededRunIdempotencyKey,
@@ -187,11 +190,20 @@ describe('PostgresSemanticIndexRepository', () => {
       expect(ddl).toContain("index_id = 'idx-''quoted'");
       expect(ddl).toContain('dimensions = 1536');
       const statements = mock.sql();
+      const timeoutIndex = statements.findIndex((sql) => /set_config\('statement_timeout'/.test(sql));
+      const createIndex = statements.findIndex((sql) => /CREATE INDEX CONCURRENTLY/.test(sql));
+      const unlockIndex = statements.findIndex((sql) => /pg_advisory_unlock/.test(sql));
+      const resetIndex = statements.findIndex((sql) => /RESET statement_timeout/.test(sql));
+      expect(mock.params[timeoutIndex]).toEqual([
+        `${POSTGRES_ANN_INDEX_PROVISION_TIMEOUT_MS}ms`,
+      ]);
+      expect(timeoutIndex).toBeLessThan(createIndex);
       expect(statements.findIndex((sql) => /pg_advisory_lock/.test(sql)))
-        .toBeLessThan(statements.findIndex((sql) => /CREATE INDEX CONCURRENTLY/.test(sql)));
-      expect(statements.findIndex((sql) => /CREATE INDEX CONCURRENTLY/.test(sql)))
+        .toBeLessThan(createIndex);
+      expect(createIndex)
         .toBeLessThan(statements.findIndex((sql) => /UPDATE semantic_index_identities/.test(sql)));
-      expect(mock.find(/pg_advisory_unlock/)).toBeDefined();
+      expect(unlockIndex).toBeLessThan(resetIndex);
+      expect(statements).not.toContain('BEGIN');
     });
 
     it('rejects dimensions above the indexed limit in required mode', async () => {

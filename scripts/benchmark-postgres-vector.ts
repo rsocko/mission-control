@@ -6,6 +6,8 @@ import { pipeline } from 'node:stream/promises';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { Pool } from 'pg';
+import { createPostgresPool } from '../src/db/postgres/connection';
+import { resolvePostgresConfig } from '../src/db/postgres/config';
 import { runPostgresMigrations } from '../src/db/postgres/migrations';
 import { PostgresSemanticIndexRepository } from '../src/db/postgres/semantic-index/repository';
 import {
@@ -47,6 +49,51 @@ const GATES = {
   backupMs: 900_000,
   restoreMs: 900_000,
 } as const;
+
+export const POSTGRES_VECTOR_100K_RESOURCE_CEILINGS = {
+  memoryDeltaBytes: 4 * 1024 ** 3,
+  productionTableBytes: 2_560 * 1024 ** 2,
+  identityIndexBytes: 512 * 1024 ** 2,
+} as const;
+
+interface ResourceMeasurements {
+  memoryDeltaBytes: number | null;
+  productionTableBytes: number;
+  identityIndexBytes: number;
+}
+
+export function evaluateResourceGates(
+  size: number,
+  measurements: ResourceMeasurements,
+  requireMemoryMeasurement: boolean,
+): {
+  memoryDeltaPassed: boolean;
+  productionTablePassed: boolean;
+  identityIndexPassed: boolean;
+  passed: boolean;
+} {
+  const enforceCeilings = size === 100_000;
+  const memoryDeltaPassed =
+    measurements.memoryDeltaBytes === null
+      ? !requireMemoryMeasurement
+      : !enforceCeilings
+        || measurements.memoryDeltaBytes
+          <= POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.memoryDeltaBytes;
+  const productionTablePassed =
+    !enforceCeilings
+    || measurements.productionTableBytes
+      <= POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.productionTableBytes;
+  const identityIndexPassed =
+    !enforceCeilings
+    || measurements.identityIndexBytes
+      <= POSTGRES_VECTOR_100K_RESOURCE_CEILINGS.identityIndexBytes;
+  return {
+    memoryDeltaPassed,
+    productionTablePassed,
+    identityIndexPassed,
+    passed: memoryDeltaPassed && productionTablePassed && identityIndexPassed,
+  };
+}
 
 interface TimingSummary {
   p50Ms: number;
@@ -120,6 +167,13 @@ interface BenchmarkResult {
   storage: {
     productionTableBytes: number;
     identityIndexBytes: number;
+  };
+  resourceGates: {
+    ceilings: typeof POSTGRES_VECTOR_100K_RESOURCE_CEILINGS;
+    enforced: boolean;
+    memoryDeltaPassed: boolean;
+    productionTablePassed: boolean;
+    identityIndexPassed: boolean;
   };
   postgresMemory: {
     source: 'postgres-container-cgroup' | 'backend-context-fallback';
@@ -1147,12 +1201,10 @@ async function benchmarkCorpus(
     model: 'deterministic-synthetic',
     dimensions: config.dimensions,
     projectionVersion: 1,
-    status: 'ready',
+    status: 'building',
     now: BENCHMARK_NOW,
   });
-  const identityIndex = await identityIndexDefinition(rawPool, identityId);
-  const indexName = identityIndex.name;
-  await rawPool.query(`DROP INDEX ${quoteIdentifier(indexName)}`);
+  let indexName: string | undefined;
 
   try {
     const backfillMs = await seedProductionTables(
@@ -1162,15 +1214,12 @@ async function benchmarkCorpus(
       config.dimensions,
     );
     const indexStartedAt = performance.now();
-    const indexClient = await rawPool.connect();
-    try {
-      await indexClient.query(`SET maintenance_work_mem = '512MB'`);
-      await indexClient.query(identityIndex.definition);
-    } finally {
-      await indexClient.query('RESET maintenance_work_mem').catch(() => undefined);
-      indexClient.release();
+    if (!await repository.markIdentityReady(identityId, BENCHMARK_NOW)) {
+      throw new Error('production_index_provisioning_failed');
     }
     const indexBuildMs = roundMilliseconds(indexStartedAt);
+    const identityIndex = await identityIndexDefinition(rawPool, identityId);
+    indexName = identityIndex.name;
     await rawPool.query('ANALYZE semantic_vector_ann');
     const cohorts = await authorizationCohorts(rawPool, identityId);
 
@@ -1279,7 +1328,21 @@ async function benchmarkCorpus(
     const memoryMeasurable =
       memoryBefore.bytes !== null &&
       memoryAfter.bytes !== null;
-    const memoryGate = !config.postgresContainer || memoryMeasurable;
+    const memoryDeltaBytes =
+      memoryBefore.bytes === null ||
+      memoryAfter.bytes === null ||
+      (memoryBefore.source === 'backend-context-fallback' && !sameMemoryBackend)
+        ? null
+        : Math.max(0, memoryAfter.bytes - memoryBefore.bytes);
+    const resourceGates = evaluateResourceGates(
+      size,
+      {
+        memoryDeltaBytes,
+        productionTableBytes: storage.productionTableBytes,
+        identityIndexBytes: storage.identityIndexBytes,
+      },
+      config.postgresContainer !== null,
+    );
     const authorizationExcluded =
       cohorts.restricted > 0 &&
       cohorts.nonTask > 0 &&
@@ -1327,7 +1390,7 @@ async function benchmarkCorpus(
       indexedScanContract &&
       filtersVerified &&
       authorizationExcluded &&
-      memoryGate &&
+      resourceGates.passed &&
       planGate &&
       latencyGate &&
       recallAtK.unfiltered >= GATES.minimumUnfilteredRecallAtK &&
@@ -1368,6 +1431,13 @@ async function benchmarkCorpus(
         anySequentialScan: plans.some((plan) => plan.usesSequentialScan),
       },
       storage,
+      resourceGates: {
+        ceilings: POSTGRES_VECTOR_100K_RESOURCE_CEILINGS,
+        enforced: size === 100_000,
+        memoryDeltaPassed: resourceGates.memoryDeltaPassed,
+        productionTablePassed: resourceGates.productionTablePassed,
+        identityIndexPassed: resourceGates.identityIndexPassed,
+      },
       postgresMemory: {
         source: memoryBefore.source,
         required: config.postgresContainer !== null,
@@ -1378,12 +1448,7 @@ async function benchmarkCorpus(
             : null,
         beforeBytes: memoryBefore.bytes,
         afterBytes: memoryAfter.bytes,
-        deltaBytes:
-          memoryBefore.bytes === null ||
-          memoryAfter.bytes === null ||
-          (memoryBefore.source === 'backend-context-fallback' && !sameMemoryBackend)
-            ? null
-            : memoryAfter.bytes - memoryBefore.bytes,
+        deltaBytes: memoryDeltaBytes,
       },
       lifecycle,
       backupRestore,
@@ -1396,11 +1461,15 @@ async function benchmarkCorpus(
 
 async function main() {
   const config = configuration();
-  const rawPool = new Pool({
-    connectionString: config.connectionString,
-    application_name: 'mission-control-pgvector-benchmark',
-    max: 4,
+  const postgresConfig = resolvePostgresConfig({
+    MC_POSTGRES_URL: config.connectionString,
+    MC_POSTGRES_MAX_CONNECTIONS: '4',
+    MC_POSTGRES_APPLICATION_NAME: 'mission-control-pgvector-benchmark',
   });
+  if (postgresConfig.pool.statement_timeout !== 30_000) {
+    throw new Error('non_production_statement_timeout');
+  }
+  const rawPool = createPostgresPool(postgresConfig);
   const annQueryTimings: number[] = [];
 
   try {
@@ -1442,6 +1511,7 @@ async function main() {
       benchmark: 'postgres-semantic-repository-pgvector-hnsw',
       postgresMajor: 17,
       vectorVersion: vectorCapability.extensionVersion,
+      poolStatementTimeoutMs: postgresConfig.pool.statement_timeout,
       dimensions: config.dimensions,
       k: K,
       gates: GATES,

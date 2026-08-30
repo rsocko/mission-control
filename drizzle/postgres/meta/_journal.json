@@ -8,13 +8,6 @@
       "when": 1788051882260,
       "tag": "0000_handy_orphan",
       "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1788065944796,
-      "tag": "0001_houston-summary-memory",
-      "breakpoints": true
     }
   ]
 }

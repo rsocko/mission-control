@@ -1,6 +1,5 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import { retrieveHoustonMemories } from '@/lib/houston-memory/retrieval';
 
 export const houstonMemoryTools = {
   recall_houston_memory: tool({
@@ -9,6 +8,9 @@ export const houstonMemoryTools = {
       query: z.string().min(1).max(500),
       limit: z.number().int().min(1).max(8).optional(),
     }).strict(),
-    execute: async ({ query, limit }) => retrieveHoustonMemories({ query, limit }),
+    execute: async ({ query, limit }) => {
+      const { retrieveHoustonMemories } = await import('@/lib/houston-memory/retrieval');
+      return retrieveHoustonMemories({ query, limit });
+    },
   }),
 };

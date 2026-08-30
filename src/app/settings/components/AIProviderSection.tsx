@@ -717,18 +717,23 @@ function AIProviderSection() {
               <label htmlFor="houston-memory-retention" className="text-xs leading-5 text-[var(--text-muted)]">
                 Retain each new summary for
               </label>
-              <select
-                id="houston-memory-retention"
-                value={houstonMemoryRetentionDays}
-                onChange={(event) => setHoustonMemoryRetentionDays(Number(event.target.value))}
+              <Select
+                value={String(houstonMemoryRetentionDays)}
+                onValueChange={(value) => setHoustonMemoryRetentionDays(Number(value))}
                 disabled={!houstonMemoryEnabled}
-                className="min-h-10 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                <option value={30}>30 days</option>
-                <option value={90}>90 days</option>
-                <option value={180}>180 days</option>
-                <option value={365}>365 days</option>
-              </select>
+                <SelectTrigger
+                  id="houston-memory-retention"
+                  className="min-h-10 w-32 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[30, 90, 180, 365].map((days) => (
+                    <SelectItem key={days} value={String(days)}>{days} days</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
               Changes apply to new summaries. Disabling memory does not delete existing summaries; their current expiry still applies.

@@ -40,7 +40,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(159);
+    expect(Object.keys(postgresTables)).toHaveLength(160);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -216,8 +216,8 @@ describe('PostgreSQL schema', () => {
     expect(migrations).toHaveLength(1);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
-    // 159 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
-    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(161);
+    // 160 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
+    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(162);
     expect(sql).toContain('CREATE TABLE "task_search_documents"');
     expect(sql).toContain('CREATE TABLE "notification_search_documents"');
     expect(sql).toContain('"id" serial PRIMARY KEY NOT NULL');

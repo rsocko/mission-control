@@ -49,6 +49,7 @@ const describePostgres = describe.skipIf(!connectionString);
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
 const ORIGINAL_POSTGRES_URL = process.env.MC_POSTGRES_URL;
 const ORIGINAL_SSL_MODE = process.env.MC_POSTGRES_SSL_MODE;
+const ORIGINAL_MODE = process.env.MC_MODE;
 const NOW = '2026-09-02T12:00:00.000Z';
 
 let pool: Pool;
@@ -308,6 +309,7 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     process.env.MC_POSTGRES_URL = connectionString;
     process.env.MC_POSTGRES_SSL_MODE = new URL(connectionString!).searchParams.get('sslmode')
       ?? 'disable';
+    process.env.MC_MODE = 'live';
     const runtime = await import('@/db/runtime');
     await runtime.initializeRuntimeDatabase();
     pool = runtime.getPostgresPersistenceBackend().context.pool;
@@ -715,4 +717,6 @@ afterAll(async () => {
   else process.env.MC_POSTGRES_URL = ORIGINAL_POSTGRES_URL;
   if (ORIGINAL_SSL_MODE === undefined) delete process.env.MC_POSTGRES_SSL_MODE;
   else process.env.MC_POSTGRES_SSL_MODE = ORIGINAL_SSL_MODE;
+  if (ORIGINAL_MODE === undefined) delete process.env.MC_MODE;
+  else process.env.MC_MODE = ORIGINAL_MODE;
 });

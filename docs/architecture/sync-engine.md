@@ -2,12 +2,13 @@
 title: "Sync Engine"
 status: active
 created: 2026-06-15
-last_reviewed: 2026-08-07
+last_reviewed: 2026-08-29
 category: architecture
 related:
   - "[Architecture Overview](overview.md)"
   - "[Connectors](connectors.md)"
   - "[Task Sync Integration](task-sync-integration.md)"
+  - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
 ---
 
 # Sync Engine — Detail Architecture
@@ -28,7 +29,7 @@ flowchart LR
     WebMetrics["Runtime sampler"]
   end
 
-  subgraph SQLite["Shared SQLite WAL"]
+  subgraph Database["Configured relational backend"]
     Jobs[("sync_jobs")]
     Events[("sync_job_events")]
     Telemetry[("runtime_telemetry")]
@@ -95,7 +96,10 @@ be executing. Horizontal worker scaling could therefore duplicate remote
 writes after lease takeover. Compose uses a fixed worker container name, and
 worker startup rejects a configured replica count other than `1`.
 
-Both processes share the SQLite WAL database. `sync_jobs` is the process
+Both processes share one configured relational backend. PostgreSQL is the
+approved production target and has dedicated queue, lease, search, health, and
+telemetry adapters. SQLite remains the default compatibility backend and the
+documented homelab backend until the tracked cutover. `sync_jobs` is the process
 boundary:
 
 1. Connector polling uses `sync_schedules` as a durable clock. The worker checks
@@ -103,9 +107,10 @@ boundary:
    and advances `next_due_at` to the next future cadence boundary. This catches
    up after event-loop stalls or container restarts without creating a backlog
    for every elapsed interval.
-2. Enqueue and claim use `BEGIN IMMEDIATE` transactions. A partial unique index
-   permits only one queued or running job per connector; a duplicate full
-   request upgrades a queued incremental job.
+2. Enqueue and claim are transactional. SQLite uses `BEGIN IMMEDIATE`;
+   PostgreSQL uses its backend-specific queue and locking implementation. A
+   partial unique index permits only one queued or running job per connector; a
+   duplicate full request upgrades a queued incremental job.
 3. A worker atomically claims one job, increments its attempt, records its
    owner, and renews an expiring lease. Renew, complete, fail, and graceful
    release are qualified by both job ID and lease owner. The duration budget is
@@ -138,12 +143,12 @@ boundary:
    the same durable job, lease heartbeat, retry, cancellation, and terminal
    result boundary as the rest of the connector run. Finance transaction
    snapshots therefore cannot bypass queue deduplication or worker recovery.
-10. Connector persistence bounds synchronous SQLite work. Task pages use small
-   mutation batches, source-list discovery chunks bulk inserts, and retention
-   yields between independent records while keeping each archive/delete
-   transaction atomic. Task-owned relationship columns used during archival
-   are indexed in both dependency directions so deletion does not repeatedly
-   scan relationship and notification tables.
+10. Connector persistence bounds database work. On SQLite, task pages use small
+   synchronous mutation batches, source-list discovery chunks bulk inserts,
+   and retention yields between independent records while keeping each
+   archive/delete transaction atomic. Task-owned relationship columns used
+   during archival are indexed in both dependency directions so deletion does
+   not repeatedly scan relationship and notification tables.
 
 For the issue #2449 query-plan validation, 100 archive-style deletes against a
 100,000-row dependency table took 364.6 ms with a full table scan and 0.4 ms
@@ -158,12 +163,15 @@ cancellation records the attempt but leaves the last successful window
 unchanged.
 
 The worker intentionally claims one job at a time. This isolates request
-serving from connector load while keeping connector ordering and SQLite write
-pressure predictable.
+serving from connector load and preserves connector ordering. PostgreSQL does
+not remove the risk of duplicate external side effects after lease takeover, so
+the single-worker invariant remains in force.
 
 Development remains inline unless `MC_SYNC_EXECUTION_MODE=worker` is set. To
 exercise worker mode outside Compose, run Next.js and `npm run worker` as
-separate processes against the same `MC_DB_PATH`.
+separate processes against the same configured backend. SQLite uses the same
+`MC_DB_PATH`; PostgreSQL requires the same explicit backend and connection
+settings in both processes.
 
 In worker mode, `SyncScheduler.requestSync` in the web process performs only
 durable enqueue/deduplication and result polling; it does not initialize or load
@@ -177,12 +185,10 @@ The web and worker processes sample telemetry independently and persist their
 latest heartbeat in `runtime_telemetry`. `GET /api/health` returns:
 
 - event-loop delay p50/p95/p99/max, timer drift, and sustained-lag state;
-- bounded SQLite read/write/transaction latency percentiles, slow operations,
-  successful writer-lock wait time, terminal busy failures, and timeout
-  exhaustion for each process;
-- WAL bytes, passive-checkpoint results and age, pending frames, and checkpoint
-  starvation indicators. WAL size is captured before checkpoint probes, which
-  run at a bounded interval or when growth crosses a configured threshold;
+- backend-selected database health. SQLite reports bounded
+  read/write/transaction latency, writer-lock waits, busy failures, WAL, and
+  checkpoint state; PostgreSQL reports connectivity, probe latency, database
+  size, and pool utilization;
 - process CPU, RSS, heap, PID, and uptime;
 - host CPU count, load average, and free/total memory;
 - cgroup v2 CPU usage, throttled time/events, CPU quota, and memory
@@ -194,22 +200,20 @@ latest heartbeat in `runtime_telemetry`. `GET /api/health` returns:
 - liveness handler latency and whether the first Docker health probe missed
   its configured startup deadline.
 
-`GET /api/metrics` exposes the current web and worker SQLite snapshots in
-Prometheus text format. It includes bounded role/category labels for rolling
-operation latency and failures, health severity, writer-lock contention, busy
-timeouts, WAL availability and state, configured latency thresholds, observation-window length,
-and runtime heartbeat age. It intentionally excludes SQL text, health-reason
-strings, connector identifiers, and other unbounded labels. Prometheus should
-alert on sustained p95/p99 threshold breaches or any busy timeout, then use the
-structured database logs for per-operation diagnosis.
+`GET /api/metrics` reads runtime records from the configured backend and exposes
+process heartbeat series in Prometheus text format. Its database-specific
+operation, lock, busy-timeout, WAL, and threshold series are SQLite-only and are
+omitted when PostgreSQL is selected. PostgreSQL connectivity, probe latency,
+database size, and pool utilization are available through the health endpoints.
+Metrics exclude SQL text, health-reason strings, connector identifiers, and
+other unbounded labels.
 
-Health changes to `attention` for sustained event-loop lag, SQLite latency or
-contention, abnormal WAL growth with frames still awaiting checkpoint,
-checkpoint starvation, stale/missing worker telemetry, a missed schedule, an
-expired lease, an over-budget sync, or a missed startup probe. A large WAL that
-has been fully checkpointed remains visible in telemetry without degrading
-health. Busy failures that consume the configured five-second timeout and
-checkpoint starvation are marked `critical` in degradation reasons.
+Health changes to `attention` for sustained event-loop lag, backend database
+degradation, stale or missing worker telemetry, a missed schedule, an expired
+lease, an over-budget sync, or a missed startup probe. On SQLite, abnormal WAL
+growth with pending frames, checkpoint starvation, and lock contention remain
+backend-specific degradation signals. Busy failures that consume the configured
+five-second timeout and checkpoint starvation are marked `critical`.
 `/api/health/live` intentionally remains a minimal
 always-200 process-liveness probe. Docker's end-to-end probe latency and
 restart count are controlled by the Docker daemon and are not available
@@ -376,8 +380,8 @@ degradation.
 
 | Decision | Rationale |
 |---|---|
-| SQLite WAL instead of a message broker | The supported production shape is one host with a shared volume. Durable tables avoid another service while retaining restart recovery and cross-process coordination. |
-| Exactly one sequential worker replica | Sequential execution bounds connector CPU and memory pressure and keeps SQLite write contention predictable. Multiple replicas are unsafe because queue leases cannot fence remote side effects in a stalled predecessor. |
+| Relational tables instead of a message broker | Both supported backends provide durable jobs, leases, schedules, and events without adding a separate queue service. |
+| Exactly one sequential worker replica | Sequential execution bounds connector CPU and memory pressure. Multiple replicas remain unsafe because database leases cannot fence remote side effects in a stalled predecessor. |
 | Polling for the API response | Existing callers receive the same synchronous result shape while execution moves across a durable process boundary. |
 | Durable SSE events | Monotonic IDs let the web process replay progress after reconnects or process restarts. |
 | Checkpointed per-issue GitHub REST reads | REST cancellation and partial-result behavior are proven; GraphQL parity for errors, permissions, deletion, pagination, and aborts is not. |

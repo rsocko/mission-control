@@ -21,14 +21,21 @@ export interface QueryEmbeddingCacheMetrics {
   expirations: number;
 }
 
-interface CacheEntry {
-  value: QueryEmbedding;
+interface CacheEntry<TValue> {
+  value: TValue;
   expiresAt: number;
 }
 
-export class QueryEmbeddingCache {
-  private readonly entries = new Map<string, CacheEntry>();
-  private readonly inFlight = new Map<string, Promise<QueryEmbedding | null>>();
+/**
+ * A small TTL/LRU cache for query embeddings that coalesces concurrent loads.
+ *
+ * Generic over the cached value so callers can store whatever binding they need
+ * to keep a vector attached to the space it belongs to; the caching semantics
+ * (single in-flight load per key, no negative caching) are unchanged.
+ */
+export class QueryEmbeddingCache<TValue = QueryEmbedding> {
+  private readonly entries = new Map<string, CacheEntry<TValue>>();
+  private readonly inFlight = new Map<string, Promise<TValue | null>>();
   private hits = 0;
   private misses = 0;
   private coalesced = 0;
@@ -45,8 +52,8 @@ export class QueryEmbeddingCache {
 
   async getOrCreate(
     key: string,
-    load: () => Promise<QueryEmbedding | null>,
-  ): Promise<QueryEmbedding | null> {
+    load: () => Promise<TValue | null>,
+  ): Promise<TValue | null> {
     const now = this.clock();
     const cached = this.entries.get(key);
     if (cached && cached.expiresAt > now) {

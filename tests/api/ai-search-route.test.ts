@@ -19,7 +19,22 @@ describe('AI search route', () => {
       enabled: true,
       state: 'ready',
       note: null,
-      semanticMetrics: { queryCache: { hits: 2 } },
+      semanticMetrics: {
+        queryCache: { hits: 2 },
+        index: {
+          active: {
+            id: 'idx-1',
+            provider: 'openai',
+            model: 'text-embedding-3-small',
+            dimensions: 3,
+            vectorCount: 12,
+          },
+          staging: [],
+          totals: { documents: 12, vectors: 12, stale: 0, incompatible: 0, expired: 0 },
+          intents: { queued: 0, permanentFailures: 0 },
+          scan: { kind: 'bounded-in-process', candidateCeiling: 5000 },
+        },
+      },
     });
   });
 
@@ -38,6 +53,13 @@ describe('AI search route', () => {
       branches: {},
       results: [],
     });
+    expect(body.semanticIndex).toMatchObject({
+      active: { provider: 'openai', model: 'text-embedding-3-small', vectorCount: 12 },
+      staging: [],
+      totals: { stale: 0, incompatible: 0 },
+      scan: { kind: 'bounded-in-process' },
+    });
+    expect(JSON.stringify(body)).not.toContain('embedding":[');
     expect(mocks.searchWithBranches).not.toHaveBeenCalled();
   });
 

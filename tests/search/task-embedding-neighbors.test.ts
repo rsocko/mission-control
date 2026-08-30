@@ -1,344 +1,236 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  createSearchIndexHarness,
+  MODEL,
+  PROVIDER,
+  T1,
+  T2,
+  type SearchIndexHarness,
+} from './harness';
+
+const mocks = vi.hoisted(() => ({
+  semanticSearchEnabled: true,
+  runtime: null as unknown,
+}));
 
 vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: () => ({
-    provider: 'ollama',
+    provider: 'openai',
     configured: true,
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: undefined,
-    model: 'llama3.1:8b',
-    embeddingModel: 'nomic-embed-text',
-    semanticSearchEnabled: true,
+    baseUrl: 'https://api.openai.test/v1',
+    apiKey: 'test',
+    model: 'gpt-4o-mini',
+    embeddingModel: 'text-embedding-3-small',
+    semanticSearchEnabled: mocks.semanticSearchEnabled,
   }),
 }));
 
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getAIRequestContext: () => ({
-    featureId: 'semantic-embedding',
-    sensitivity: 'restricted',
-    allowedRoutes: ['ollama'],
-    correlationId: 'test-correlation',
-  }),
-  getAIRoutingHeaders: () => ({}),
-  getAIRouteOutcome: vi.fn(() => ({
-    provider: 'ollama',
-    model: 'nomic-embed-text',
-    fallbackOccurred: false,
-  })),
-}));
-
-vi.mock('@/lib/logger', () => ({
-  aiLogger: { info: vi.fn(), warn: vi.fn() },
-  dbLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+vi.mock('@/lib/semantic-index/runtime', () => ({
+  getSemanticIndexRuntime: async () => mocks.runtime,
+  scheduleSemanticBackfill: vi.fn(),
+  publishSemanticUpsert: vi.fn(),
+  publishSemanticDelete: vi.fn(),
 }));
 
 describe('findSimilarTaskEmbeddings', () => {
-  let findSimilarTaskEmbeddings:
-    typeof import('@/lib/search/semantic').findSimilarTaskEmbeddings;
-  let rebuildEmbeddingIndex:
-    typeof import('@/lib/search/semantic').rebuildEmbeddingIndex;
-  let indexEntityEmbedding:
-    typeof import('@/lib/search/semantic').indexEntityEmbedding;
-  let sqlite: typeof import('@/db').sqlite;
+  let harness: SearchIndexHarness;
+  let semantic: typeof import('@/lib/search/semantic');
 
-  beforeAll(async () => {
-    process.env.MC_DB_PATH = ':memory:';
-    vi.doUnmock('drizzle-orm');
+  beforeEach(async () => {
     vi.resetModules();
-    const [database, schema, semantic] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
-      import('@/lib/search/semantic'),
-    ]);
-    const db = database.default;
-    sqlite = database.sqlite;
-    findSimilarTaskEmbeddings = semantic.findSimilarTaskEmbeddings;
-    rebuildEmbeddingIndex = semantic.rebuildEmbeddingIndex;
-    indexEntityEmbedding = semantic.indexEntityEmbedding;
-    const task = (id: string, updatedAt: string) => ({
-      id,
-      sourceId: `source-${id}`,
-      connectorType: 'local',
-      connectorInstanceId: 'local',
-      title: id,
-      status: 'todo',
-      priority: 'none',
-      metadata: {},
-      syncStatus: 'synced' as const,
-      createdAt: '2029-01-01T00:00:00.000Z',
-      updatedAt,
-      lastSyncedAt: updatedAt,
-    });
-    await db.insert(schema.tasks).values([
-      task('source', '2030-01-01T00:00:00.000Z'),
-      task('fresh-target', '2029-01-01T00:00:00.000Z'),
-      task('stale-target', '2031-01-01T00:00:00.000Z'),
-      task('stale-source', '2031-01-01T00:00:00.000Z'),
-      task('missing-source', '2030-01-01T00:00:00.000Z'),
-      task('incompatible-source', '2030-01-01T00:00:00.000Z'),
-      task('wrong-dimension', '2029-01-01T00:00:00.000Z'),
-    ]);
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS search_embeddings (
-        id TEXT PRIMARY KEY,
-        entity_type TEXT NOT NULL,
-        entity_id TEXT NOT NULL,
-        embedding TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        provider TEXT,
-        model TEXT
-      );
-      CREATE UNIQUE INDEX IF NOT EXISTS search_embeddings_entity_idx
-        ON search_embeddings(entity_type, entity_id);
-    `);
-    const insert = sqlite.prepare(`
-      INSERT INTO search_embeddings (
-        id, entity_type, entity_id, embedding, updated_at, provider, model
-      )
-      VALUES (?, 'task', ?, ?, ?, 'ollama', 'nomic-embed-text')
-    `);
-    insert.run('task:source', 'source', JSON.stringify([1, 0]), '2030-01-01T00:00:00.000Z');
-    insert.run(
-      'task:fresh-target',
-      'fresh-target',
-      JSON.stringify([0.9, 0.1]),
-      '2030-01-01T00:00:00.000Z',
-    );
-    insert.run(
-      'task:stale-target',
-      'stale-target',
-      JSON.stringify([1, 0]),
-      '2030-01-01T00:00:00.000Z',
-    );
-    insert.run(
-      'task:stale-source',
-      'stale-source',
-      JSON.stringify([1, 0]),
-      '2030-01-01T00:00:00.000Z',
-    );
-    sqlite.prepare(`
-      INSERT INTO search_embeddings (
-        id, entity_type, entity_id, embedding, updated_at, provider, model
-      )
-      VALUES (?, 'task', ?, ?, ?, 'ollama', 'different-model')
-    `).run(
-      'task:incompatible-source',
-      'incompatible-source',
-      JSON.stringify([1, 0]),
-      '2030-01-01T00:00:00.000Z',
-    );
-    insert.run(
-      'task:wrong-dimension',
-      'wrong-dimension',
-      JSON.stringify([1, 0, 0]),
-      '2030-01-01T00:00:00.000Z',
-    );
-    insert.run(
-      'task:deleted-task',
-      'deleted-task',
-      JSON.stringify([1, 0]),
-      '2030-01-01T00:00:00.000Z',
-    );
+    mocks.semanticSearchEnabled = true;
+    harness = createSearchIndexHarness();
+    mocks.runtime = {
+      repository: harness.repository,
+      embeddings: harness.embeddings,
+      config: {},
+    };
+    semantic = await import('@/lib/search/semantic');
+    semantic.resetSemanticSearchStateForTests();
   });
 
-  it('returns fresh task embeddings only and includes model metadata', async () => {
-    const result = await findSimilarTaskEmbeddings('source', {
-      limit: 5,
-      minScore: 0,
+  afterEach(() => {
+    harness.close();
+  });
+
+  async function seedNeighbourCorpus() {
+    const indexId = await harness.createIdentity();
+    await harness.seedEntity({
+      entityType: 'task',
+      entityId: 'source',
+      title: 'Source task',
+      embedding: [1, 0, 0],
+      embeddedAt: T1,
     });
+    await harness.seedEntity({
+      entityType: 'task',
+      entityId: 'near',
+      title: 'Near task',
+      embedding: [0.9, 0.1, 0],
+      embeddedAt: T2,
+    });
+    await harness.seedEntity({
+      entityType: 'task',
+      entityId: 'far',
+      title: 'Far task',
+      embedding: [0, 0, 1],
+    });
+    await harness.seedEntity({
+      entityType: 'alert',
+      entityId: 'alert-near',
+      title: 'Near alert',
+      embedding: [1, 0, 0],
+    });
+    await harness.activate(indexId);
+    return indexId;
+  }
+
+  it('ranks neighbours from the stored vector without embedding anything', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 5, minScore: 0 });
+
     expect(result).toMatchObject({
       status: 'available',
-      provider: 'ollama',
-      model: 'nomic-embed-text',
-      sourceUpdatedAt: '2030-01-01T00:00:00.000Z',
+      provider: PROVIDER,
+      model: MODEL,
+      sourceUpdatedAt: T1,
     });
-    if (result.status !== 'available') throw new Error('Expected available embeddings');
-    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['fresh-target']);
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    // Self is excluded, alerts are out of scope, and the closer task ranks first.
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['near', 'far']);
+    expect(result.neighbors[0]).toMatchObject({ embeddingUpdatedAt: T2 });
+    expect(result.neighbors[0].score).toBeGreaterThan(result.neighbors[1].score);
+    expect(harness.embeddings.calls).toHaveLength(0);
   });
 
-  it('distinguishes stale and missing source embeddings', async () => {
-    await expect(findSimilarTaskEmbeddings('stale-source')).resolves.toMatchObject({
-      status: 'stale',
-      neighbors: [],
+  it('reports the resolved route identity that produced the neighbour vectors', async () => {
+    // The active identity was created from a real provider response, so it may
+    // name a fallback route rather than the configured one. Callers render this
+    // identity, so it must be the resolved route and never the configured proxy.
+    const fallbackIndexId = await harness.createIdentity({
+      id: 'idx-fallback',
+      model: 'fallback-embed-model',
     });
-    await expect(findSimilarTaskEmbeddings('missing-source')).resolves.toMatchObject({
+    await harness.seedEntity({
+      indexId: fallbackIndexId,
+      entityType: 'task',
+      entityId: 'source',
+      title: 'Source task',
+      embedding: [1, 0, 0],
+      embeddedAt: T1,
+      model: 'fallback-embed-model',
+    });
+    await harness.seedEntity({
+      indexId: fallbackIndexId,
+      entityType: 'task',
+      entityId: 'near',
+      title: 'Near task',
+      embedding: [0.9, 0.1, 0],
+      embeddedAt: T2,
+      model: 'fallback-embed-model',
+    });
+    await harness.activate(fallbackIndexId);
+    harness.embeddings.route = {
+      status: 'ok',
+      route: { provider: PROVIDER, model: 'fallback-embed-model' },
+    };
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 5, minScore: 0 });
+
+    expect(result).toMatchObject({
+      status: 'available',
+      provider: PROVIDER,
+      model: 'fallback-embed-model',
+    });
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['near']);
+    expect(harness.embeddings.calls).toHaveLength(0);
+  });
+
+  it('bounds the neighbour count', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 1, minScore: 0 });
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors).toHaveLength(1);
+    expect(result.neighbors[0].taskId).toBe('near');
+  });
+
+  it('honours the minimum score', async () => {
+    await seedNeighbourCorpus();
+
+    const result = await semantic.findSimilarTaskEmbeddings('source', { limit: 5 });
+    if (result.status !== 'available') throw new Error('expected available neighbours');
+    expect(result.neighbors.map((neighbor) => neighbor.taskId)).toEqual(['near']);
+  });
+
+  it('reports missing when the task has no vector in the active identity', async () => {
+    await seedNeighbourCorpus();
+
+    await expect(semantic.findSimilarTaskEmbeddings('never-indexed')).resolves.toMatchObject({
       status: 'missing',
       neighbors: [],
     });
-    await expect(findSimilarTaskEmbeddings('incompatible-source')).resolves.toMatchObject({
+  });
+
+  it('reports stale when the document has moved past its vector', async () => {
+    const indexId = await harness.createIdentity();
+    await harness.seedEntity({
+      entityType: 'task',
+      entityId: 'drifted',
+      title: 'Drifted task',
+      embedding: [1, 0, 0],
+      stale: true,
+    });
+    await harness.activate(indexId);
+
+    await expect(semantic.findSimilarTaskEmbeddings('drifted')).resolves.toMatchObject({
+      status: 'stale',
+      neighbors: [],
+    });
+    expect(harness.embeddings.calls).toHaveLength(0);
+  });
+
+  it('reports incompatible when the stored vector is in a foreign space', async () => {
+    const indexId = await seedNeighbourCorpus();
+    // Only legacy/adopted rows can be in a foreign space beneath a live
+    // identity, so this is written beneath the repository's write validation.
+    harness.db.prepare(`
+      UPDATE semantic_vectors SET model = 'legacy-model'
+      WHERE index_id = ? AND entity_type = 'task' AND entity_id = 'source'
+    `).run(indexId);
+
+    await expect(semantic.findSimilarTaskEmbeddings('source')).resolves.toMatchObject({
       status: 'incompatible',
       neighbors: [],
     });
   });
 
-  it('uses the source-recency index before applying the candidate limit', () => {
-    const plan = sqlite.prepare(`
-      EXPLAIN QUERY PLAN
-      SELECT e.id
-      FROM search_embeddings e
-      WHERE e.provider = ?
-        AND e.model = ?
-        AND e.dimensions = ?
-        AND e.source_sort_at IS NOT NULL
-        AND e.entity_type = 'task'
-      ORDER BY e.source_sort_at DESC, e.entity_type, e.entity_id
-      LIMIT ?
-    `).all(
-      'ollama',
-      'nomic-embed-text',
-      2,
-      2_000,
-    ) as Array<{ detail: string }>;
+  it('reports unavailable when no identity is active or the feature is off', async () => {
+    await harness.createIdentity();
+    await expect(semantic.findSimilarTaskEmbeddings('source')).resolves.toMatchObject({
+      status: 'unavailable',
+      neighbors: [],
+    });
 
-    expect(plan.some(({ detail }) => detail.includes('search_embeddings_tasks_idx'))).toBe(true);
-    expect(plan.some(({ detail }) => detail.includes('USE TEMP B-TREE'))).toBe(false);
+    mocks.semanticSearchEnabled = false;
+    await expect(semantic.findSimilarTaskEmbeddings('source')).resolves.toMatchObject({
+      status: 'unavailable',
+      neighbors: [],
+    });
   });
 
-  it('marks notification embeddings invalid when searchable text changes', () => {
-    sqlite.prepare(`
-      INSERT INTO notifications (
-        id, source_id, connector_type, connector_instance_id, title, body,
-        level, level_rank, category, state, is_actionable, received_at, sort_at,
-        metadata, presentation
-      ) VALUES (
-        'notification-update', 'source-notification-update', 'local', 'local',
-        'Original title', 'Original body', 'fyi', 3, 'system', 'unread', 0,
-        '2030-01-01T00:00:00.000Z', '2030-01-01T00:00:00.000Z', '{}', '{}'
-      )
-    `).run();
-    sqlite.prepare(`
-      INSERT INTO search_embeddings (
-        id, entity_type, entity_id, embedding, updated_at, provider, model,
-        source_sort_at
-      ) VALUES (
-        'alert:notification-update', 'alert', 'notification-update', '[1,0]',
-        '2030-01-01T00:00:00.000Z', 'ollama', 'nomic-embed-text',
-        '2030-01-01T00:00:00.000Z'
-      )
-    `).run();
+  it('reports unavailable rather than querying an old space after a route change', async () => {
+    await seedNeighbourCorpus();
+    harness.embeddings.route = {
+      status: 'ok',
+      route: { provider: PROVIDER, model: 'text-embedding-3-large' },
+    };
 
-    sqlite.prepare(`
-      UPDATE notifications SET body = 'Updated body' WHERE id = 'notification-update'
-    `).run();
-
-    expect(
-      (sqlite.prepare(`
-        SELECT source_sort_at AS sourceSortAt
-        FROM search_embeddings
-        WHERE entity_type = 'alert' AND entity_id = 'notification-update'
-      `).get() as { sourceSortAt: string | null }).sourceSortAt,
-    ).toBeNull();
-  });
-
-  it('stores fallback vectors under the actual routed provider and model', async () => {
-    const ai = await import('@/lib/ai/provider-factory');
-    vi.mocked(ai.getAIRouteOutcome).mockReturnValueOnce({
-      provider: 'fallback-provider',
-      model: 'fallback-model',
-      fallbackOccurred: true,
-      context: ai.getAIRequestContext('semantic-embedding'),
+    await expect(semantic.findSimilarTaskEmbeddings('source')).resolves.toMatchObject({
+      status: 'unavailable',
     });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: [{ embedding: [1, 0] }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
-
-    await expect(indexEntityEmbedding(
-      'task',
-      'source',
-      'source',
-      [],
-      {
-        title: 'source',
-        body: null,
-        sortAt: '2030-01-01T00:00:00.000Z',
-      },
-    )).resolves.toBe(true);
-    expect(
-      sqlite.prepare(`
-        SELECT provider, model
-        FROM search_embeddings
-        WHERE entity_type = 'task'
-          AND entity_id = 'source'
-          AND provider = 'fallback-provider'
-      `).get(),
-    ).toMatchObject({
-      provider: 'fallback-provider',
-      model: 'fallback-model',
-    });
-    sqlite.prepare(`
-      DELETE FROM search_embeddings WHERE provider = 'fallback-provider'
-    `).run();
-  });
-
-  it('keeps the last-good rows when a rebuild batch fails', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('provider unavailable', { status: 503 }),
-    );
-
-    await expect(rebuildEmbeddingIndex()).rejects.toThrow(
-      'Embedding index rebuild batch failed',
-    );
-    expect(
-      (sqlite.prepare('SELECT COUNT(*) AS count FROM search_embeddings').get() as {
-        count: number;
-      }).count,
-    ).toBe(7);
-  });
-
-  it('serializes rebuilds and preserves the live index until replacement rows exist', async () => {
-    let releaseFetch!: () => void;
-    const fetchGate = new Promise<void>((resolve) => {
-      releaseFetch = resolve;
-    });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
-      await fetchGate;
-      return new Response(JSON.stringify({ data: [{ embedding: [1, 0] }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    });
-    fetchSpy.mockClear();
-
-    const rebuilds = [
-      rebuildEmbeddingIndex(),
-      rebuildEmbeddingIndex(),
-      rebuildEmbeddingIndex(),
-    ];
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(5));
-    expect(
-      (sqlite.prepare('SELECT COUNT(*) AS count FROM search_embeddings').get() as {
-        count: number;
-      }).count,
-    ).toBe(7);
-    sqlite.prepare(`
-      UPDATE tasks
-      SET updated_at = '2032-01-01T00:00:00.000Z'
-      WHERE id = 'fresh-target'
-    `).run();
-
-    releaseFetch();
-    await Promise.all(rebuilds);
-
-    expect(fetchSpy).toHaveBeenCalledTimes(8);
-    expect(
-      (sqlite.prepare(`
-        SELECT COUNT(*) AS count
-        FROM search_embeddings
-        WHERE entity_type = 'task' AND entity_id = 'incompatible-source'
-      `).get() as { count: number }).count,
-    ).toBe(2);
-    expect(
-      (sqlite.prepare(`
-        SELECT COUNT(*) AS count
-        FROM search_embeddings
-        WHERE entity_type = 'task'
-          AND entity_id = 'fresh-target'
-          AND provider = 'ollama'
-          AND model = 'nomic-embed-text'
-      `).get() as { count: number }).count,
-    ).toBe(0);
+    expect(harness.embeddings.calls).toHaveLength(0);
   });
 });

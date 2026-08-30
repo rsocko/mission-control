@@ -54,7 +54,7 @@ describePostgres('PostgreSQL schema integration', () => {
         AND table_type = 'BASE TABLE'
     `);
 
-    expect(Number(result.rows[0]?.count)).toBe(156);
+    expect(Number(result.rows[0]?.count)).toBe(161);
   });
 
   it('round-trips booleans and JSON through the PostgreSQL schema', async () => {

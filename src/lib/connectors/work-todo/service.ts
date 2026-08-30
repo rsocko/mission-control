@@ -21,7 +21,7 @@ import {
   workTodoListDeltaState,
   workTodoOutboundChanges,
 } from '@/db/schema';
-import { indexTaskSearch } from '@/lib/search';
+import { indexTaskSearch, removeTaskSearch } from '@/lib/search';
 import { connectorLogger } from '@/lib/logger';
 import { getTimezone, windowsToIanaTimezone } from '@/lib/mode';
 import {
@@ -99,9 +99,13 @@ function slugifyTag(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function removeTask(tx: Parameters<Parameters<typeof runTransaction>[0]>[0], taskId: string): void {
+function removeTask(
+  tx: Parameters<Parameters<typeof runTransaction>[0]>[0],
+  taskId: string,
+  removedIds?: Set<string>,
+): void {
   const children = tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentId, taskId)).all();
-  for (const child of children) removeTask(tx, child.id);
+  for (const child of children) removeTask(tx, child.id, removedIds);
   tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
   tx.delete(projectAutoIncludeExclusions)
     .where(eq(projectAutoIncludeExclusions.taskId, taskId))
@@ -118,6 +122,9 @@ function removeTask(tx: Parameters<Parameters<typeof runTransaction>[0]>[0], tas
     eq(taskDependencies.dependsOnTaskId, taskId),
   )).run();
   tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+  // Collected rather than published inline: search index removal must happen
+  // after the authoritative transaction commits, never inside it.
+  removedIds?.add(taskId);
 }
 
 function assertConnector(
@@ -163,6 +170,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
   const observedSourceIds = new Set<string>();
   const observedListIds = new Set<string>();
   const touchedTaskIds = new Set<string>();
+  const removedTaskIds = new Set<string>();
   let created = 0;
   let updated = 0;
   let removed = 0;
@@ -197,7 +205,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           if (task.syncStatus === 'pending_push') {
             protectedPending++;
           } else {
-            removeTask(tx, task.id);
+            removeTask(tx, task.id, removedTaskIds);
             removed++;
           }
         }
@@ -252,7 +260,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           if (existing.syncStatus === 'pending_push') {
             protectedPending++;
           } else {
-            removeTask(tx, existing.id);
+            removeTask(tx, existing.id, removedTaskIds);
             removed++;
           }
           continue;
@@ -418,7 +426,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           }).from(tasks).where(eq(tasks.parentId, taskId)).all();
           for (const child of existingChildren) {
             if (!observedChecklistIds.has(child.sourceId) && child.syncStatus !== 'pending_push') {
-              removeTask(tx, child.id);
+              removeTask(tx, child.id, removedTaskIds);
               removed++;
             }
           }
@@ -453,7 +461,7 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
           if (task.syncStatus === 'pending_push') {
             protectedPending++;
           } else {
-            removeTask(tx, task.id);
+            removeTask(tx, task.id, removedTaskIds);
             removed++;
           }
         }
@@ -508,6 +516,17 @@ export async function ingestWorkTodo(payload: WorkTodoIngest) {
         );
       }
     }));
+  }
+
+  for (const taskId of removedTaskIds) {
+    try {
+      await removeTaskSearch(taskId);
+    } catch (error) {
+      connectorLogger.error(
+        { err: error, taskId, connectorId: payload.connectorInstanceId },
+        'Work To Do task removed but search index cleanup failed',
+      );
+    }
   }
 
   return {
@@ -747,9 +766,10 @@ export function createWorkTodoPullRequest(connectorId: string) {
   }, { readOnly: true });
 }
 
-export function acknowledgeWorkTodoChanges(payload: WorkTodoAck) {
+export async function acknowledgeWorkTodoChanges(payload: WorkTodoAck) {
   const now = new Date().toISOString();
-  return runTransaction((tx) => {
+  const removedTaskIds = new Set<string>();
+  const acknowledgement = runTransaction((tx) => {
     assertConnector(tx, payload.connectorInstanceId);
     let succeeded = 0;
     let failed = 0;
@@ -799,7 +819,7 @@ export function acknowledgeWorkTodoChanges(payload: WorkTodoAck) {
         }).from(tasks).where(eq(tasks.id, change.taskId)).get();
         if (currentTask?.updatedAt === change.taskVersion) {
           if (change.operation === 'delete') {
-            removeTask(tx, change.taskId);
+            removeTask(tx, change.taskId, removedTaskIds);
           } else {
             const metadata = currentTask.metadata
               && typeof currentTask.metadata === 'object'
@@ -864,6 +884,19 @@ export function acknowledgeWorkTodoChanges(payload: WorkTodoAck) {
       acknowledgedAt: payload.processedAt,
     };
   });
+
+  for (const taskId of removedTaskIds) {
+    try {
+      await removeTaskSearch(taskId);
+    } catch (error) {
+      connectorLogger.error(
+        { err: error, taskId, connectorId: payload.connectorInstanceId },
+        'Work To Do task removed but search index cleanup failed',
+      );
+    }
+  }
+
+  return acknowledgement;
 }
 
 export async function getWorkTodoBridgeStatus(connectorId: string) {

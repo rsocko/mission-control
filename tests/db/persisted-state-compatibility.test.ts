@@ -17,7 +17,7 @@ import {
   PERSISTED_STATE_FIXTURES,
   PERSISTED_STATE_FIXTURE_VERSION,
   type PersistedStateFixture,
-} from '../fixtures/persisted-state/manifest';
+} from '../../scripts/persisted-state-fixture-manifest';
 
 interface MigrationJournalEntry {
   readonly tag: string;

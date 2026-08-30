@@ -18,7 +18,7 @@ import {
   PERSISTED_STATE_FIXTURES,
   PERSISTED_STATE_FIXTURE_VERSION,
   type PersistedStateFixture,
-} from '../tests/fixtures/persisted-state/manifest';
+} from './persisted-state-fixture-manifest';
 
 interface MigrationJournalEntry {
   readonly idx: number;

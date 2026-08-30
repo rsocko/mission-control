@@ -387,7 +387,7 @@ if (connectionString) {
           collisionCategory: 'one_local_multiple_stable',
         }),
       ]);
-      expect(statements).toHaveLength(14);
+      expect(statements).toHaveLength(12);
       expect(statements.filter((text) => text.includes('INSERT INTO external_entities')))
         .toHaveLength(1);
       expect(statements.filter((text) => text.includes('INSERT INTO external_entity_locators')))
@@ -444,6 +444,159 @@ if (connectionString) {
         [connectorInstanceId, existingStableTarget.localId],
       );
       expect(collisionState.rows[0]?.state).toBe('collision');
+    });
+
+    it('persists 500 independent ownership collisions with bounded query count', async () => {
+      const pool = backend.context.pool;
+      const repositories = createPostgresGitHubIdentityRepositories(pool);
+      const connectorInstanceId = `fresh-primary-collision-bulk-${randomUUID()}`;
+      const observedAt = '2026-08-20T10:00:00.000Z';
+      await pool.query(
+        `
+          INSERT INTO connector_configs (
+            id, type, name, enabled, capabilities, credentials, settings,
+            synced_lists, created_at, updated_at
+          ) VALUES (
+            $1, 'github-issues', 'GitHub collision bulk', true, '{}'::jsonb,
+            '{}'::jsonb, '{}'::jsonb, '[]'::jsonb, $2, $2
+          )
+        `,
+        [connectorInstanceId, observedAt],
+      );
+      await repositories.identity.ensureControls({ connectorInstanceId, now: observedAt });
+      const modeSnapshot = await repositories.identity.getModeSnapshot(
+        connectorInstanceId,
+        observedAt,
+      );
+      const repositoryObservation = (
+        stableId: string,
+        repository: string,
+      ) => ({
+        identity: {
+          provider: 'github' as const,
+          hostKey: 'github.com',
+          entityType: 'repository' as const,
+          stableId,
+        },
+        locator: { owner: 'bulk-owner', repository },
+        observationSource: 'graphql' as const,
+        observedAt,
+      });
+      await repositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: Array.from({ length: 500 }, (_, index): ExternalIdentityWrite => ({
+          target: {
+            connectorInstanceId,
+            bindingType: 'source_list',
+            localId: `${connectorInstanceId}:owner-${index}`,
+            legacyIdentity: `bulk-owner/claimed-${index}`,
+          },
+          evidence: {
+            entity: repositoryObservation(
+              `R_fresh-primary-collision-owner-${index}`,
+              `claimed-${index}`,
+            ),
+          },
+        })),
+      });
+
+      const rejectedIssueStableIds = Array.from(
+        { length: 500 },
+        (_, index) => `I_fresh-primary-collision-rejected-${index}`,
+      );
+      const statements: string[] = [];
+      const instrumentedRepositories = createPostgresGitHubIdentityRepositories(
+        instrumentPostgresPool(pool, statements),
+      );
+      const results = await instrumentedRepositories.identity.persistExternalIdentityBatch({
+        connectorInstanceId,
+        modeSnapshot,
+        writes: rejectedIssueStableIds.map((stableId, index): ExternalIdentityWrite => ({
+          target: {
+            connectorInstanceId,
+            bindingType: 'task',
+            localId: `${connectorInstanceId}:rejected-${index}`,
+            legacyIdentity: `bulk-owner/claimed-${index}:${index + 1}`,
+          },
+          evidence: {
+            repository: repositoryObservation(
+              `R_fresh-primary-collision-competitor-${index}`,
+              `claimed-${index}`,
+            ),
+            entity: {
+              identity: {
+                provider: 'github',
+                hostKey: 'github.com',
+                entityType: 'issue',
+                stableId,
+              },
+              locator: {
+                owner: 'bulk-owner',
+                repository: `claimed-${index}`,
+                issueNumber: index + 1,
+              },
+              observationSource: 'graphql',
+              observedAt,
+            },
+          },
+        })),
+      });
+
+      expect(results).toHaveLength(500);
+      expect(results.every((result) => (
+        result.state === 'collision'
+        && result.collisionCategory === 'repository_path_replacement'
+      ))).toBe(true);
+      expect(statements.length).toBeLessThanOrEqual(10);
+      expect(statements.filter((text) => text.includes('INSERT INTO github_identity_collisions')))
+        .toHaveLength(1);
+      expect(statements.filter((text) => text.includes('UPDATE external_entity_bindings')))
+        .toHaveLength(1);
+
+      const ownership = await pool.query<{
+        localId: string;
+        stableId: string;
+        state: string;
+      }>(
+        `
+          SELECT binding.local_id AS "localId", entity.stable_id AS "stableId", binding.state
+          FROM external_entity_bindings binding
+          INNER JOIN external_entities entity
+            ON entity.id = binding.external_entity_id
+          WHERE binding.connector_instance_id = $1
+          ORDER BY binding.local_id
+        `,
+        [connectorInstanceId],
+      );
+      expect(ownership.rows).toHaveLength(500);
+      expect(ownership.rows.every(({ localId, stableId, state }) => (
+        stableId === `R_fresh-primary-collision-owner-${localId.split(':owner-')[1]}`
+        && state === 'collision'
+      ))).toBe(true);
+      const persistedCollisions = await pool.query<{ count: string }>(
+        `
+          SELECT count(*)::text AS count
+          FROM github_identity_collisions
+          WHERE connector_instance_id = $1
+            AND category = 'repository_path_replacement'
+            AND state = 'open'
+        `,
+        [connectorInstanceId],
+      );
+      expect(persistedCollisions.rows[0]?.count).toBe('500');
+      const rejectedIssues = await pool.query<{ count: string }>(
+        `
+          SELECT count(*)::text AS count
+          FROM external_entities
+          WHERE provider = 'github'
+            AND host_key = 'github.com'
+            AND entity_type = 'issue'
+            AND stable_id = ANY($1::text[])
+        `,
+        [rejectedIssueStableIds],
+      );
+      expect(rejectedIssues.rows[0]?.count).toBe('0');
     });
 
     it('preserves ordered locator handoffs through the sequential fallback', async () => {

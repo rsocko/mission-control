@@ -174,6 +174,14 @@ interface PrimaryIdentityObservationEntry {
   observation: ExternalIdentityObservation;
 }
 
+interface PrimaryIdentityCollision {
+  write: ExternalIdentityWrite;
+  category: GitHubCollisionCategory;
+  externalEntityIds: readonly string[];
+  observedAt: string;
+  localIds?: readonly string[];
+}
+
 type PrimaryIdentityLocatorPlan =
   | {
       state: 'collision';
@@ -625,25 +633,75 @@ async function recordPrimaryIdentityCollision(
   observedAt: string,
   localIds: readonly string[] = [write.target.localId],
 ): Promise<ExternalIdentityWriteResult> {
-  const boundedLocalIds = boundedPrimaryIdentityCollisionIds(localIds);
-  const boundedEntityIds = boundedPrimaryIdentityCollisionIds(externalEntityIds);
-  const fingerprint = digestExternalIdentifier(JSON.stringify({
+  const [result] = await recordPrimaryIdentityCollisionsBatch(client, [{
+    write,
     category,
-    bindingType: write.target.bindingType,
-    localIds: boundedLocalIds,
-    externalEntityIds: boundedEntityIds,
-  }));
+    externalEntityIds,
+    observedAt,
+    localIds,
+  }]);
+  return result;
+}
+
+async function recordPrimaryIdentityCollisionsBatch(
+  client: PoolClient,
+  collisions: readonly PrimaryIdentityCollision[],
+): Promise<ExternalIdentityWriteResult[]> {
+  if (collisions.length === 0) return [];
+  const prepared = collisions.map((collision) => {
+    const localIds = boundedPrimaryIdentityCollisionIds(
+      collision.localIds ?? [collision.write.target.localId],
+    );
+    const externalEntityIds = boundedPrimaryIdentityCollisionIds(
+      collision.externalEntityIds,
+    );
+    const fingerprint = digestExternalIdentifier(JSON.stringify({
+      category: collision.category,
+      bindingType: collision.write.target.bindingType,
+      localIds,
+      externalEntityIds,
+    }));
+    return {
+      ...collision,
+      localIds,
+      externalEntityIds,
+      fingerprint,
+      legacyIdentityDigest: digestExternalIdentifier(
+        collision.write.target.legacyIdentity,
+      ),
+    };
+  });
+  const uniqueCollisions = [...new Map(prepared.map((collision) => [
+    JSON.stringify([
+      collision.write.target.connectorInstanceId,
+      collision.category,
+      collision.fingerprint,
+    ]),
+    collision,
+  ])).values()];
   await query(
     client,
     `
+      WITH incoming(
+        id, connector_instance_id, category, fingerprint, binding_type,
+        local_ids, external_entity_ids, legacy_identity_digest, observed_at
+      ) AS (
+        SELECT *
+        FROM unnest(
+          $1::text[], $2::text[], $3::text[], $4::text[], $5::text[],
+          $6::text[], $7::text[], $8::text[], $9::text[]
+        )
+      )
       INSERT INTO github_identity_collisions (
         id, connector_instance_id, category, fingerprint, binding_type,
         local_ids, external_entity_ids, legacy_identity_digest, state,
         resolution, first_seen_at, last_seen_at, resolved_at, resolved_by
-      ) VALUES (
-        $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, 'open',
-        NULL, $9, $9, NULL, NULL
       )
+      SELECT
+        id, connector_instance_id, category, fingerprint, binding_type,
+        local_ids::jsonb, external_entity_ids::jsonb, legacy_identity_digest,
+        'open', NULL, observed_at, observed_at, NULL, NULL
+      FROM incoming
       ON CONFLICT (connector_instance_id, category, fingerprint)
       DO UPDATE SET
         local_ids = EXCLUDED.local_ids,
@@ -656,42 +714,89 @@ async function recordPrimaryIdentityCollision(
         resolved_by = NULL
     `,
     [
-      randomUUID(),
-      write.target.connectorInstanceId,
-      category,
-      fingerprint,
-      write.target.bindingType,
-      JSON.stringify(boundedLocalIds),
-      JSON.stringify(boundedEntityIds),
-      digestExternalIdentifier(write.target.legacyIdentity),
-      observedAt,
+      uniqueCollisions.map(() => randomUUID()),
+      uniqueCollisions.map(({ write }) => write.target.connectorInstanceId),
+      uniqueCollisions.map(({ category }) => category),
+      uniqueCollisions.map(({ fingerprint }) => fingerprint),
+      uniqueCollisions.map(({ write }) => write.target.bindingType),
+      uniqueCollisions.map(({ localIds }) => JSON.stringify(localIds)),
+      uniqueCollisions.map(({ externalEntityIds }) => JSON.stringify(externalEntityIds)),
+      uniqueCollisions.map(({ legacyIdentityDigest }) => legacyIdentityDigest),
+      uniqueCollisions.map(({ observedAt }) => observedAt),
     ],
   );
+  const localMatches = prepared.flatMap((collision) => (
+    collision.localIds.map((localId) => ({
+      connectorInstanceId: collision.write.target.connectorInstanceId,
+      bindingType: collision.write.target.bindingType,
+      localId,
+      observedAt: collision.observedAt,
+    }))
+  ));
+  const entityMatches = prepared.flatMap((collision) => (
+    collision.externalEntityIds.map((externalEntityId) => ({
+      connectorInstanceId: collision.write.target.connectorInstanceId,
+      externalEntityId,
+      observedAt: collision.observedAt,
+    }))
+  ));
   await query(
     client,
     `
+      WITH local_matches(
+        connector_instance_id, binding_type, local_id, observed_at
+      ) AS (
+        SELECT *
+        FROM unnest($1::text[], $2::text[], $3::text[], $4::text[])
+      ),
+      entity_matches(
+        connector_instance_id, external_entity_id, observed_at
+      ) AS (
+        SELECT *
+        FROM unnest($5::text[], $6::text[], $7::text[])
+      ),
+      matched_bindings AS (
+        SELECT matches.id, max(matches.observed_at) AS observed_at
+        FROM (
+          SELECT binding.id, local_matches.observed_at
+          FROM external_entity_bindings binding
+          INNER JOIN local_matches
+            ON local_matches.connector_instance_id = binding.connector_instance_id
+           AND local_matches.binding_type = binding.binding_type
+           AND local_matches.local_id = binding.local_id
+          WHERE binding.state != 'retired'
+          UNION ALL
+          SELECT binding.id, entity_matches.observed_at
+          FROM external_entity_bindings binding
+          INNER JOIN entity_matches
+            ON entity_matches.connector_instance_id = binding.connector_instance_id
+           AND entity_matches.external_entity_id = binding.external_entity_id
+          WHERE binding.state != 'retired'
+        ) matches
+        GROUP BY matches.id
+      )
       UPDATE external_entity_bindings
-      SET state = 'collision', updated_at = $5
-      WHERE connector_instance_id = $1
-        AND state != 'retired'
-        AND (
-          (binding_type = $2 AND local_id = ANY($3::text[]))
-          OR external_entity_id = ANY($4::text[])
-        )
+      SET
+        state = 'collision',
+        updated_at = matched_bindings.observed_at
+      FROM matched_bindings
+      WHERE external_entity_bindings.id = matched_bindings.id
     `,
     [
-      write.target.connectorInstanceId,
-      write.target.bindingType,
-      boundedLocalIds,
-      boundedEntityIds,
-      observedAt,
+      localMatches.map(({ connectorInstanceId }) => connectorInstanceId),
+      localMatches.map(({ bindingType }) => bindingType),
+      localMatches.map(({ localId }) => localId),
+      localMatches.map(({ observedAt }) => observedAt),
+      entityMatches.map(({ connectorInstanceId }) => connectorInstanceId),
+      entityMatches.map(({ externalEntityId }) => externalEntityId),
+      entityMatches.map(({ observedAt }) => observedAt),
     ],
   );
-  return {
+  return prepared.map(({ write, category }) => ({
     target: write.target,
     state: 'collision',
     collisionCategory: category,
-  };
+  }));
 }
 
 async function persistPrimaryIdentityWrite(
@@ -1438,13 +1543,8 @@ async function persistPrimaryIdentityFastBatch(
     entityId: string;
     write: ExternalIdentityWrite;
   }> = [];
-  const collisions: Array<{
+  const collisions: Array<PrimaryIdentityCollision & {
     index: number;
-    write: ExternalIdentityWrite;
-    category: GitHubCollisionCategory;
-    externalEntityIds: string[];
-    localIds?: string[];
-    observedAt: string;
   }> = [];
 
   for (const index of indexes) {
@@ -1545,15 +1645,9 @@ async function persistPrimaryIdentityFastBatch(
     entities,
   );
   await applyPrimaryIdentityBindingsBatch(client, connectorInstanceId, bindingsToApply);
-  for (const collision of collisions) {
-    results[collision.index] = await recordPrimaryIdentityCollision(
-      client,
-      collision.write,
-      collision.category,
-      collision.externalEntityIds,
-      collision.observedAt,
-      collision.localIds,
-    );
+  const collisionResults = await recordPrimaryIdentityCollisionsBatch(client, collisions);
+  for (const [collisionIndex, collision] of collisions.entries()) {
+    results[collision.index] = collisionResults[collisionIndex];
   }
 }
 

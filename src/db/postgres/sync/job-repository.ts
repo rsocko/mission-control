@@ -925,6 +925,14 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     };
   }
 
+  async countQueued(): Promise<number> {
+    const [row] = await query<{ count: string }>(
+      this.pool,
+      `SELECT COUNT(*) AS count FROM sync_jobs WHERE status = 'queued'`,
+    );
+    return Number(row?.count ?? 0);
+  }
+
   async registerSchedule(connectorId: string, intervalMinutes: number): Promise<void> {
     await withTransaction(this.pool, async (client) => {
       const [quarantined] = await query(

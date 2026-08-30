@@ -126,6 +126,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
   it('reports queue metrics reflecting queued and running jobs', async () => {
     const connectorId = await createConnector();
     await repository.enqueue(connectorId);
+    await expect(repository.countQueued()).resolves.toBeGreaterThanOrEqual(1);
     const metrics = await repository.getMetrics();
     expect(metrics.queued).toBeGreaterThanOrEqual(1);
   });

@@ -8,6 +8,7 @@ import {
   createObservedDatabase,
   DatabaseTelemetryCollector,
 } from '@/lib/telemetry/database';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 function sleep(milliseconds: number): void {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
@@ -86,6 +87,28 @@ describe('SQLite database observability', () => {
     expect(snapshot.severity).toBe('degraded');
     expect(snapshot.operations.total.p95Ms).toBeGreaterThanOrEqual(1);
     expect(snapshot.slowOperations).toHaveLength(2);
+  });
+
+  it('attributes timings only to fixed low-cardinality operation names', () => {
+    process.env.MC_DB_SLOW_OPERATION_MS = '1';
+    collector = new DatabaseTelemetryCollector();
+
+    withDatabaseOperation('sync-phase-tasks', () => {
+      collector.observe('SELECT', 'read', () => sleep(3));
+    });
+    withDatabaseOperation('private-connector-id' as never, () => {
+      collector.observe('UPDATE', 'write', () => undefined);
+    });
+
+    const snapshot = collector.snapshot(rawDatabase);
+
+    expect(snapshot.operations.byAttribution['sync-phase-tasks']?.count).toBe(1);
+    expect(snapshot.operations.byAttribution.unattributed?.count).toBe(1);
+    expect(snapshot.slowOperations[0]).toMatchObject({
+      attribution: 'sync-phase-tasks',
+      operation: 'SELECT',
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('private-connector-id');
   });
 
   it('distinguishes a successful writer wait from a terminal failure', () => {

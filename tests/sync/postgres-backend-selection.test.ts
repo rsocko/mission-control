@@ -32,6 +32,7 @@ const postgresMocks = vi.hoisted(() => ({
       status: 'queued',
     })),
     getScheduleHealth: vi.fn(async () => []),
+    countQueued: vi.fn(async () => 1),
     getMetrics: vi.fn(async () => ({
       queued: 1,
       running: 0,
@@ -110,6 +111,8 @@ describe('PostgreSQL backend selection — sync job queue', () => {
     const job = await repository.enqueue('pg-connector', { source: 'api' });
     expect(postgresMocks.syncJobRepository.enqueue).toHaveBeenCalledWith('pg-connector', { source: 'api' });
     expect(job.connectorId).toBe('pg-connector');
+    await expect(repository.countQueued()).resolves.toBe(1);
+    expect(postgresMocks.syncJobRepository.countQueued).toHaveBeenCalledOnce();
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 

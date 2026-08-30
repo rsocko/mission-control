@@ -45,6 +45,7 @@ vi.mock('@/db', () => ({
         },
       },
       byOperation: {},
+      byAttribution: {},
     },
     contention: {
       writerAcquisitionCount: 0,
@@ -454,6 +455,30 @@ describe('runtime telemetry', () => {
     expect(metrics.memory.intervalHighWater.rssBytes).toBe(100);
     expect(metrics.memory.postGcFloor).toBeNull();
     expect(metrics.workload.active).toEqual([]);
+  });
+
+  it('deserializes database telemetry written before operation attribution was added', async () => {
+    const { deserializeRuntimeMetrics } = await import('@/lib/telemetry/runtime');
+    const metrics = deserializeRuntimeMetrics(JSON.stringify({
+      database: {
+        operations: {
+          total: {},
+          byCategory: {},
+          byOperation: {},
+        },
+        slowOperations: [{
+          operation: 'SELECT',
+          category: 'read',
+          durationMs: 150,
+          failed: false,
+          errorCode: null,
+          observedAt: '2026-08-03T00:00:10.000Z',
+        }],
+      },
+    }));
+
+    expect(metrics.database?.operations.byAttribution).toEqual({});
+    expect(metrics.database?.slowOperations[0].attribution).toBe('unattributed');
   });
 
   it('downsamples old raw samples, preserves peaks, and expires retained history', async () => {

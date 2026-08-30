@@ -2,6 +2,7 @@ import 'server-only';
 
 import logger from '@/lib/logger';
 import { probeAllFinanceConnections } from './connection-recovery';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 const MONITOR_INTERVAL_MS = 5 * 60 * 1_000;
 
@@ -24,7 +25,10 @@ export class FinanceConnectionRecoveryScheduler {
     if (this.running) return;
     this.running = true;
     try {
-      await probeAllFinanceConnections();
+      await withDatabaseOperation(
+        'worker-finance-recovery',
+        () => probeAllFinanceConnections(),
+      );
     } catch (error) {
       logger.error({ err: error }, 'Finance connection recovery monitor failed');
     } finally {

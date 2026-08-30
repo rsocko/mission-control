@@ -31,6 +31,7 @@ import {
   ensureHealthSnapshotCanRun,
   type WorkerHealthSnapshotIdentity,
 } from './health-snapshot-status';
+import { withDatabaseOperation } from './database-operation-context';
 import {
   createHealthSnapshotStore,
   databaseHealthProbe,
@@ -381,9 +382,12 @@ export class WorkerHealthSnapshotScheduler {
     }
     let nextDelayMs = this.intervalMs;
     try {
-      const snapshot = await generateWorkerHealthSnapshot(
-        this.workerInstanceId,
-        this.isSyncActive,
+      const snapshot = await withDatabaseOperation(
+        'worker-health-snapshot',
+        () => generateWorkerHealthSnapshot(
+          this.workerInstanceId,
+          this.isSyncActive,
+        ),
       );
       logger.info(
         {

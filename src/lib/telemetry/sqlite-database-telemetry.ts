@@ -3,6 +3,10 @@ import { performance } from 'node:perf_hooks';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type Database from 'better-sqlite3';
 import { dbLogger } from '@/lib/logger';
+import {
+  getCurrentDatabaseOperation,
+  type DatabaseOperationName,
+} from './database-operation-context';
 
 export type DatabaseOperationCategory = 'read' | 'write' | 'transaction' | 'maintenance';
 export type DatabaseTelemetrySeverity = 'healthy' | 'degraded' | 'critical';
@@ -32,6 +36,7 @@ export interface DatabaseTelemetrySnapshot {
     total: DatabaseOperationAggregate;
     byCategory: Partial<Record<DatabaseOperationCategory, DatabaseOperationAggregate>>;
     byOperation: Record<string, DatabaseOperationAggregate>;
+    byAttribution: Partial<Record<DatabaseOperationName, DatabaseOperationAggregate>>;
   };
   contention: {
     writerAcquisitionCount: number;
@@ -60,6 +65,7 @@ export interface DatabaseTelemetrySnapshot {
   };
   slowOperations: Array<{
     operation: string;
+    attribution: DatabaseOperationName;
     category: DatabaseOperationCategory;
     durationMs: number;
     failed: boolean;
@@ -85,6 +91,7 @@ export interface DatabaseTelemetrySnapshot {
 
 interface OperationSample {
   operation: string;
+  attribution: DatabaseOperationName;
   category: DatabaseOperationCategory;
   durationMs: number;
   failed: boolean;
@@ -95,6 +102,7 @@ interface OperationSample {
 
 interface WriterAcquisitionSample {
   durationMs: number;
+  attribution: DatabaseOperationName;
   observedAt: string;
 }
 
@@ -213,10 +221,11 @@ export class DatabaseTelemetryCollector {
     } = {},
   ): T {
     if (this.observationContext.getStore()) return callback();
+    const attribution = getCurrentDatabaseOperation();
     const startedAt = performance.now();
     try {
       const result = callback();
-      this.record(operation, category, performance.now() - startedAt, null);
+      this.record(operation, attribution, category, performance.now() - startedAt, null);
       return result;
     } catch (error) {
       const countContention = typeof options.countContention === 'function'
@@ -224,6 +233,7 @@ export class DatabaseTelemetryCollector {
         : options.countContention ?? true;
       this.record(
         operation,
+        attribution,
         category,
         performance.now() - startedAt,
         error,
@@ -239,12 +249,13 @@ export class DatabaseTelemetryCollector {
     createIterator: () => IterableIterator<unknown>,
   ): IterableIterator<unknown> {
     if (this.observationContext.getStore()) return createIterator();
+    const attribution = getCurrentDatabaseOperation();
     const startedAt = performance.now();
     let iterator: IterableIterator<unknown>;
     try {
       iterator = createIterator();
     } catch (error) {
-      this.record(operation, category, performance.now() - startedAt, error);
+      this.record(operation, attribution, category, performance.now() - startedAt, error);
       throw error;
     }
 
@@ -253,7 +264,7 @@ export class DatabaseTelemetryCollector {
     const finalize = (error: unknown) => {
       if (finalized) return;
       finalized = true;
-      this.record(operation, category, durationMs, error);
+      this.record(operation, attribution, category, durationMs, error);
     };
     const invoke = (
       method: 'next' | 'return' | 'throw',
@@ -288,15 +299,16 @@ export class DatabaseTelemetryCollector {
 
   recordWriterAcquisition(durationMs: number): void {
     if (this.observationContext.getStore()) return;
+    const attribution = getCurrentDatabaseOperation();
     const observedAt = new Date().toISOString();
-    this.writerAcquisitions.push({ durationMs: round(durationMs), observedAt });
+    this.writerAcquisitions.push({ durationMs: round(durationMs), attribution, observedAt });
     this.intervalWriterAcquisitionDurationMs += durationMs;
     if (this.writerAcquisitions.length > this.maxSamples) this.writerAcquisitions.shift();
 
     const warningMs = this.thresholds().busyWaitWarningMs;
     if (durationMs >= warningMs) {
       dbLogger.warn(
-        { durationMs: round(durationMs), thresholdMs: warningMs },
+        { attribution, durationMs: round(durationMs), thresholdMs: warningMs },
         'SQLite write transaction waited for writer lock',
       );
     }
@@ -326,6 +338,7 @@ export class DatabaseTelemetryCollector {
     const wal = this.readWalHealth(database, sampledAt.getTime(), thresholds);
     const byCategory: DatabaseTelemetrySnapshot['operations']['byCategory'] = {};
     const byOperation: Record<string, DatabaseOperationAggregate> = {};
+    const byAttribution: DatabaseTelemetrySnapshot['operations']['byAttribution'] = {};
 
     for (const category of ['read', 'write', 'transaction', 'maintenance'] as const) {
       const categorySamples = this.samples.filter((sample) => sample.category === category);
@@ -334,6 +347,11 @@ export class DatabaseTelemetryCollector {
     for (const operation of new Set(this.samples.map((sample) => sample.operation))) {
       byOperation[operation] = aggregate(
         this.samples.filter((sample) => sample.operation === operation),
+      );
+    }
+    for (const attribution of new Set(this.samples.map((sample) => sample.attribution))) {
+      byAttribution[attribution] = aggregate(
+        this.samples.filter((sample) => sample.attribution === attribution),
       );
     }
 
@@ -421,7 +439,7 @@ export class DatabaseTelemetryCollector {
       sampledAt: sampledAt.toISOString(),
       windowStartedAt: this.windowStartedAt.toISOString(),
       sampleInterval,
-      operations: { total, byCategory, byOperation },
+      operations: { total, byCategory, byOperation, byAttribution },
       contention: {
         writerAcquisitionCount: acquisitionDurations.length,
         writerAcquisitionDurationMs: round(
@@ -444,6 +462,7 @@ export class DatabaseTelemetryCollector {
         .slice(0, this.maxSlowOperations)
         .map((sample) => ({
           operation: sample.operation,
+          attribution: sample.attribution,
           category: sample.category,
           durationMs: sample.durationMs,
           failed: sample.failed,
@@ -480,6 +499,7 @@ export class DatabaseTelemetryCollector {
 
   private record(
     operation: string,
+    attribution: DatabaseOperationName,
     category: DatabaseOperationCategory,
     durationMs: number,
     error: unknown,
@@ -488,6 +508,7 @@ export class DatabaseTelemetryCollector {
     const code = errorCode(error);
     const sample: OperationSample = {
       operation,
+      attribution,
       category,
       durationMs: round(durationMs),
       failed: error !== null,
@@ -515,6 +536,7 @@ export class DatabaseTelemetryCollector {
       if (timedOut) this.intervalBusyTimeoutCount++;
       const logDetails = {
         operation,
+        attribution,
         category,
         durationMs: sample.durationMs,
         errorCode: code,
@@ -529,6 +551,7 @@ export class DatabaseTelemetryCollector {
       dbLogger.warn(
         {
           operation,
+          attribution,
           category,
           durationMs: sample.durationMs,
           failed: sample.failed,

@@ -1,8 +1,9 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
-import db, { sqlite } from '@/db';
-import { connectorConfigs } from '@/db/schema';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/runtime';
+import type {
+  ConnectorSettingsStatePatchResult,
+} from '@/db/persistence/core-repositories';
 
 /**
  * Shared persistence abstraction for a connector instance's `settings` JSON
@@ -28,57 +29,33 @@ export async function mergeConnectorSettings(
   currentSettings: Record<string, unknown>,
   patch: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const updatedSettings = { ...currentSettings, ...patch };
-  await db.update(connectorConfigs)
-    .set({ settings: JSON.stringify(updatedSettings) })
-    .where(eq(connectorConfigs.id, connectorId));
-  return updatedSettings;
+  return getWorkerPersistenceRepositories().connectors.mergeSettings(
+    connectorId,
+    currentSettings,
+    patch,
+  );
 }
 
-export interface ConnectorSettingsStatePatchResult<TState> {
-  settings: Record<string, unknown>;
-  state: TState;
-}
+export type { ConnectorSettingsStatePatchResult };
 
 /**
  * Read-modify-write helper for a nested sub-object within a connector's
- * settings JSON (e.g. a notification poll checkpoint) inside a single
- * immediate SQLite transaction.
+ * settings JSON (e.g. a notification poll checkpoint) inside one
+ * adapter-owned write transaction.
  *
  * Unlike {@link mergeConnectorSettings}, this always re-reads the latest
  * persisted settings first so concurrent writers (other sync/poll workers)
  * are not clobbered. Patch values of `undefined` delete the corresponding
  * key from the sub-state instead of setting it.
  */
-export function patchConnectorSettingsState<TState extends object>(
+export async function patchConnectorSettingsState<TState extends object>(
   connectorId: string,
   stateKey: string,
   patch: Partial<TState>,
-): ConnectorSettingsStatePatchResult<TState> {
-  const transaction = sqlite.transaction(() => {
-    const row = sqlite.prepare(
-      'SELECT settings FROM connector_configs WHERE id = ?',
-    ).get(connectorId) as { settings: string | null } | undefined;
-    if (!row) throw new Error(`Connector ${connectorId} no longer exists`);
-    const latestSettings = row.settings
-      ? JSON.parse(row.settings) as Record<string, unknown>
-      : {};
-    const nextState: Record<string, unknown> = {
-      ...(latestSettings[stateKey] as TState | undefined || {}),
-    };
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) {
-        delete nextState[key];
-      } else {
-        nextState[key] = value;
-      }
-    }
-    const settings = { ...latestSettings, [stateKey]: nextState };
-    sqlite.prepare(
-      'UPDATE connector_configs SET settings = ?, updated_at = ? WHERE id = ?',
-    ).run(JSON.stringify(settings), new Date().toISOString(), connectorId);
-    return { settings, nextState };
-  });
-  const { settings, nextState } = transaction.immediate();
-  return { settings, state: nextState as TState };
+): Promise<ConnectorSettingsStatePatchResult<TState>> {
+  return getWorkerPersistenceRepositories().connectors.patchSettingsState(
+    connectorId,
+    stateKey,
+    patch,
+  );
 }

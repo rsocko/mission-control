@@ -117,6 +117,14 @@ request handling. Consumers must not select repositories individually because
 that can split one workflow across backends. Registration is one-time and
 cannot replace a composition after it has been registered or consumed.
 
+Worker connector refresh, connector-settings updates, and sync-run journal
+hydration/finalization are composed together through
+`registerWorkerPersistenceRepositories(repositories)`. Both backends implement
+the same atomic nested-settings patch and successful-pull baseline contract.
+The PostgreSQL runtime registers this complete worker composition before loading
+worker schedulers; remaining connector task/list/notification execution stays
+explicitly unsupported until its workflow-specific ports are migrated.
+
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health
 snapshots, and runtime telemetry. This is application capability, not evidence

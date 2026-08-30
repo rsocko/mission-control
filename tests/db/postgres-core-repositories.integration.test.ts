@@ -218,6 +218,57 @@ describePostgres('PostgreSQL core repositories integration', () => {
     expect(await repositories.connectors.get(connectorId)).not.toBeNull();
   });
 
+  it('merges and atomically patches connector settings', async () => {
+    const connectorId = `connector-${randomUUID()}`;
+    const connector: ConnectorConfig = {
+      id: connectorId,
+      type: 'test',
+      name: 'Settings connector',
+      enabled: true,
+      syncMode: 'poll',
+      capabilities: {
+        read: true,
+        write: true,
+        delete: true,
+        sync: true,
+        subtasks: false,
+        lists: false,
+        tags: false,
+        tagWriteBack: false,
+      },
+      credentials: {},
+      settings: { retained: true },
+      syncedLists: [],
+    };
+    await repositories.connectors.upsert(connector);
+    cleanupIds.connectors.add(connectorId);
+
+    await repositories.connectors.mergeSettings(
+      connectorId,
+      connector.settings,
+      { authenticatedUser: 'octocat' },
+    );
+    await Promise.all([
+      repositories.connectors.patchSettingsState(
+        connectorId,
+        'checkpoint',
+        { cursor: 'page-1' },
+      ),
+      repositories.connectors.patchSettingsState(
+        connectorId,
+        'checkpoint',
+        { retained: true },
+      ),
+    ]);
+    await expect(repositories.connectors.get(connectorId)).resolves.toMatchObject({
+      settings: {
+        retained: true,
+        authenticatedUser: 'octocat',
+        checkpoint: { cursor: 'page-1', retained: true },
+      },
+    });
+  });
+
   it('hydrates notification actions on read and only writes them when provided', async () => {
     const notificationId = `notification-${randomUUID()}`;
     const now = new Date().toISOString();

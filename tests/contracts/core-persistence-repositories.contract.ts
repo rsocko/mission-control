@@ -185,6 +185,41 @@ export function describeCorePersistenceRepositoriesContract(
       });
     });
 
+    it('merges connector settings and atomically patches nested state', async () => {
+      await harness.repositories.connectors.upsert(coreConnectorFixture);
+
+      await expect(harness.repositories.connectors.mergeSettings(
+        coreConnectorFixture.id,
+        coreConnectorFixture.settings,
+        { authenticatedUser: 'octocat' },
+      )).resolves.toEqual({
+        nested: { portable: true },
+        authenticatedUser: 'octocat',
+      });
+      await expect(harness.repositories.connectors.patchSettingsState(
+        coreConnectorFixture.id,
+        'checkpoint',
+        { cursor: 'page-1', retained: true },
+      )).resolves.toMatchObject({
+        state: { cursor: 'page-1', retained: true },
+      });
+      await expect(harness.repositories.connectors.patchSettingsState(
+        coreConnectorFixture.id,
+        'checkpoint',
+        { cursor: undefined },
+      )).resolves.toMatchObject({
+        state: { retained: true },
+      });
+      await expect(harness.repositories.connectors.get(coreConnectorFixture.id))
+        .resolves.toMatchObject({
+          settings: {
+            nested: { portable: true },
+            authenticatedUser: 'octocat',
+            checkpoint: { retained: true },
+          },
+        });
+    });
+
     it('round trips notification JSON and pending actions', async () => {
       expect(await harness.repositories.notifications.upsert(coreNotificationFixture))
         .toMatchObject(coreNotificationFixture);

@@ -227,7 +227,7 @@ export class GitHubIssuesConnector implements IConnector {
     patch: Partial<GitHubNotificationPollState>,
   ): Promise<GitHubNotificationPollState> {
     if (!this.config) throw new Error('GitHub connector is not initialized');
-    const { settings, state } = patchConnectorSettingsState<GitHubNotificationPollState>(
+    const { settings, state } = await patchConnectorSettingsState<GitHubNotificationPollState>(
       this.id,
       'notificationPollState',
       patch,

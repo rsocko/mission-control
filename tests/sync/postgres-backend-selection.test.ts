@@ -72,6 +72,27 @@ const postgresMocks = vi.hoisted(() => ({
     indexTask: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
   },
+  workerRepositories: {
+    connectors: {
+      mergeSettings: vi.fn(async (
+        _id: string,
+        settings: Record<string, unknown>,
+        patch: Record<string, unknown>,
+      ) => ({ ...settings, ...patch })),
+      patchSettingsState: vi.fn(async (
+        _id: string,
+        key: string,
+        patch: Record<string, unknown>,
+      ) => ({
+        settings: { [key]: patch },
+        state: patch,
+      })),
+    },
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+    },
+  },
   isConnectorSyncQuarantinedInPostgres: vi.fn(async () => false),
   assertConnectorSyncEnqueueAllowedInPostgres: vi.fn(async () => undefined),
   pool: { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) },
@@ -87,6 +108,10 @@ vi.mock('@/db/runtime', () => ({
 vi.mock('@/db/postgres/sync/job-repository', () => ({
   isConnectorSyncQuarantinedInPostgres: postgresMocks.isConnectorSyncQuarantinedInPostgres,
   assertConnectorSyncEnqueueAllowedInPostgres: postgresMocks.assertConnectorSyncEnqueueAllowedInPostgres,
+}));
+
+vi.mock('@/lib/persistence/runtime', () => ({
+  getWorkerPersistenceRepositories: () => postgresMocks.workerRepositories,
 }));
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
@@ -114,6 +139,27 @@ describe('PostgreSQL backend selection — sync job queue', () => {
     await expect(repository.countQueued()).resolves.toBe(1);
     expect(postgresMocks.syncJobRepository.countQueued).toHaveBeenCalledOnce();
     expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  describe('PostgreSQL backend selection — worker persistence', () => {
+    it('connector settings use the selected worker composition without touching SQLite', async () => {
+      const {
+        mergeConnectorSettings,
+        patchConnectorSettingsState,
+      } = await import('@/lib/connectors/shared/connector-config-store');
+
+      await expect(mergeConnectorSettings(
+        'pg-connector',
+        { retained: true },
+        { authenticatedUser: 'octocat' },
+      )).resolves.toEqual({ retained: true, authenticatedUser: 'octocat' });
+      await expect(patchConnectorSettingsState(
+        'pg-connector',
+        'checkpoint',
+        { cursor: 'page-1' },
+      )).resolves.toMatchObject({ state: { cursor: 'page-1' } });
+      expect(sqliteTouch).not.toHaveBeenCalled();
+    });
   });
 
   it('enqueueSyncJobInCurrentTransaction explicitly rejects (no ambient-transaction contract) under PostgreSQL', async () => {

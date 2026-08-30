@@ -3,11 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-// This suite exercises real drizzle query building (`db.update(...).where(eq(...))`
-// inside `mergeConnectorSettings`) against a real temp SQLite database, so it needs
-// the genuine `drizzle-orm` operators rather than the lightweight structural mock
-// installed globally in tests/setup.ts (which only supports shallow inspection, not
-// actual SQL compilation/execution).
+// This suite exercises the real SQLite worker-persistence adapter.
 vi.unmock('drizzle-orm');
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'mc-connector-config-store-'));
@@ -68,16 +64,6 @@ describe('shared connector config store', () => {
   }
 
   describe('mergeConnectorSettings', () => {
-    // NOTE: `mergeConnectorSettings` intentionally preserves the historical
-    // `testConnection()` write path byte-for-byte: it manually
-    // `JSON.stringify`s the merged settings object before calling
-    // `.set({ settings: ... })`. Because the `settings` column is declared
-    // with `{ mode: 'json' }`, drizzle's own `mapToDriverValue` JSON-encodes
-    // whatever it is given a second time, so the column ends up holding a
-    // *double*-encoded JSON string. This is a pre-existing quirk of the code
-    // being extracted here (not introduced by this refactor) - the in-memory
-    // return value from `mergeConnectorSettings` is unaffected and remains a
-    // plain merged object, which is all any current caller relies on.
     it('merge-patches the settings blob and returns the merged result', async () => {
       await insertConnector('merge-1', { repos: ['octo/repo'], fetchNotifications: true });
 
@@ -92,10 +78,7 @@ describe('shared connector config store', () => {
         fetchNotifications: true,
         authenticatedUser: 'octocat',
       });
-      // Column mode is 'json', so the driver JSON-encodes the already-stringified
-      // value once more; `readRawSettings` undoes only the outer layer, leaving
-      // the inner JSON string.
-      expect(readRawSettings('merge-1')).toBe(JSON.stringify(merged));
+      expect(readRawSettings('merge-1')).toEqual(merged);
     });
 
     it('overwrites existing keys named in the patch while leaving others untouched', async () => {
@@ -108,9 +91,16 @@ describe('shared connector config store', () => {
       );
 
       expect(merged).toEqual({ authenticatedUser: 'new-login', repos: [] });
-      expect(JSON.parse(readRawSettings('merge-2') as string).authenticatedUser).toBe(
-        'new-login',
-      );
+      expect((readRawSettings('merge-2') as Record<string, unknown>).authenticatedUser)
+        .toBe('new-login');
+    });
+
+    it('rejects updates for a connector that no longer exists', async () => {
+      await expect(mergeConnectorSettings(
+        'missing-connector',
+        {},
+        { authenticatedUser: 'octocat' },
+      )).rejects.toThrow(/was not found/);
     });
   });
 
@@ -123,7 +113,7 @@ describe('shared connector config store', () => {
     it('initializes a nested sub-state key when absent and persists it under the settings blob', async () => {
       await insertConnector('state-2', { repos: [] });
 
-      const { settings, state } = patchConnectorSettingsState<PollState>(
+      const { settings, state } = await patchConnectorSettingsState<PollState>(
         'state-2',
         'notificationPollState',
         { cursor: 'abc', lastPolledAt: '2026-01-01T00:00:00.000Z' },
@@ -140,7 +130,7 @@ describe('shared connector config store', () => {
         notificationPollState: { cursor: 'page-1', lastPolledAt: '2026-01-01T00:00:00.000Z' },
       });
 
-      const { state } = patchConnectorSettingsState<PollState>(
+      const { state } = await patchConnectorSettingsState<PollState>(
         'state-3',
         'notificationPollState',
         { cursor: 'page-2' },
@@ -155,7 +145,7 @@ describe('shared connector config store', () => {
         notificationPollState: { cursor: 'page-1', lastPolledAt: '2026-01-01T00:00:00.000Z' },
       });
 
-      const { state } = patchConnectorSettingsState<PollState>(
+      const { state } = await patchConnectorSettingsState<PollState>(
         'state-4',
         'notificationPollState',
         { cursor: undefined },
@@ -177,7 +167,7 @@ describe('shared connector config store', () => {
         'state-5',
       );
 
-      const { state } = patchConnectorSettingsState<PollState>(
+      const { state } = await patchConnectorSettingsState<PollState>(
         'state-5',
         'notificationPollState',
         { lastPolledAt: '2026-02-02T00:00:00.000Z' },
@@ -189,12 +179,12 @@ describe('shared connector config store', () => {
       });
     });
 
-    it('throws when the connector row no longer exists', () => {
-      expect(() =>
+    it('throws when the connector row no longer exists', async () => {
+      await expect(
         patchConnectorSettingsState<PollState>('missing-connector', 'notificationPollState', {
           cursor: 'x',
         }),
-      ).toThrow(/no longer exists/);
+      ).rejects.toThrow(/was not found/);
     });
   });
 });

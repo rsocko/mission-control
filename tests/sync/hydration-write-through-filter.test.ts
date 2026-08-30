@@ -55,6 +55,16 @@ vi.mock('@/db/schema', () => ({
   tasks: {},
 }));
 
+vi.mock('@/lib/persistence/runtime', () => ({
+  getWorkerPersistenceRepositories: () => ({
+    connectors: {},
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => [...mockSyncLogRows]),
+      append: vi.fn(async () => undefined),
+    },
+  }),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...a: unknown[]) => a),
   and: vi.fn((...a: unknown[]) => a),

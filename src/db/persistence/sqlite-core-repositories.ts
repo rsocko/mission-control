@@ -17,6 +17,10 @@ import type {
   SettingsRepository,
   TaskRepository,
 } from './core-repositories';
+import {
+  mergeConnectorSettings,
+  patchConnectorSettingsState,
+} from './connector-settings';
 
 type SqliteDatabase = Database.Database;
 
@@ -677,6 +681,48 @@ export class SqliteConnectorRepository implements ConnectorRepository {
       SET enabled = 0, deleted_at = ?, updated_at = ?
       WHERE id = ? AND deleted_at IS NULL
     `).run(now, now, id).changes === 1;
+  }
+
+  async mergeSettings(
+    id: string,
+    currentSettings: Record<string, unknown>,
+    patch: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const settings = mergeConnectorSettings(currentSettings, patch);
+    const result = this.database.prepare(`
+      UPDATE connector_configs
+      SET settings = ?, updated_at = ?
+      WHERE id = ? AND deleted_at IS NULL
+    `).run(stringifyJson(settings), new Date().toISOString(), id);
+    if (result.changes !== 1) {
+      throw new RepositoryError('not-found', `Connector ${id} was not found`);
+    }
+    return settings;
+  }
+
+  async patchSettingsState<T extends object>(
+    id: string,
+    key: string,
+    patch: Partial<T>,
+  ): Promise<{ settings: Record<string, unknown>; state: T }> {
+    const update = this.database.transaction(() => {
+      const connector = this.getSync(id);
+      if (!connector) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      const { settings, state } = patchConnectorSettingsState(
+        connector.settings,
+        key,
+        patch,
+      );
+      this.database.prepare(`
+        UPDATE connector_configs
+        SET settings = ?, updated_at = ?
+        WHERE id = ? AND deleted_at IS NULL
+      `).run(stringifyJson(settings), new Date().toISOString(), id);
+      return { settings, state };
+    });
+    return update.immediate();
   }
 }
 

@@ -30,7 +30,6 @@ export async function POST(request: Request) {
     }
     aiLogger.warn({
       event: 'houston_memory_capture_failed',
-      err: error,
     }, 'Houston memory capture failed');
     return NextResponse.json(
       { status: 'unavailable', reason: 'capture-failed' },

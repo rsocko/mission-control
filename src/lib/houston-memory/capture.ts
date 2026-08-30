@@ -20,13 +20,14 @@ export async function captureHoustonMemory(input: unknown): Promise<HoustonMemor
   const retainUntil = new Date(
     now.getTime() + settings.retentionDays * 24 * 60 * 60 * 1_000,
   ).toISOString();
-  await upsertHoustonMemory({
+  const stored = await upsertHoustonMemory({
     id: parsed.conversationId,
     ...summary,
     sensitivity: 'restricted',
     retainUntil,
     now: now.toISOString(),
   });
+  if (stored.excludedAt) return { status: 'skipped', reason: 'excluded' };
   aiLogger.info({
     event: 'houston_memory_captured',
     decisionCount: summary.decisions.length,

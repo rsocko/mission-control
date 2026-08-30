@@ -92,7 +92,19 @@ export class PostgresHoustonMemoryRepository implements HoustonMemoryRepository 
   }
 
   async delete(id: string, authorizationScope: string): Promise<boolean> {
-    const rows = await this.db.delete(houstonConversationMemories)
+    const now = new Date().toISOString();
+    const rows = await this.db.update(houstonConversationMemories)
+      .set({
+        title: '',
+        summary: '',
+        decisions: [],
+        commitments: [],
+        topics: [],
+        linkedEntities: [],
+        excludedAt: now,
+        retainUntil: '9999-12-31T23:59:59.999Z',
+        updatedAt: now,
+      })
       .where(and(
         eq(houstonConversationMemories.id, id),
         eq(houstonConversationMemories.authorizationScope, authorizationScope),

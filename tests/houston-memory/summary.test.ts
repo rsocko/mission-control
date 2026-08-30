@@ -59,4 +59,50 @@ describe('Houston summary minimization', () => {
       { type: 'task', id: 'task-1', label: 'Launch checklist' },
     ]);
   });
+
+  it('fails closed when model output copies substantial source text', async () => {
+    generateObject.mockResolvedValue({
+      object: {
+        version: 1,
+        title: 'Planning',
+        summary: 'My private account recovery phrase should remain only inside this conversation.',
+        decisions: [],
+        commitments: [],
+        topics: [],
+        linkedEntities: [],
+      },
+    });
+    const { generateMinimizedHoustonSummary } = await import('@/lib/houston-memory/summary');
+
+    await expect(generateMinimizedHoustonSummary({
+      conversationId: '11111111-1111-4111-8111-111111111111',
+      messages: [
+        { role: 'user', text: 'My private account recovery phrase should remain only inside this conversation.' },
+        { role: 'assistant', text: 'Understood.' },
+      ],
+    })).rejects.toThrow('houston-summary-copied-source-text');
+  });
+
+  it('applies copied-source detection to generated topics', async () => {
+    generateObject.mockResolvedValue({
+      object: {
+        version: 1,
+        title: 'Planning',
+        summary: 'A durable planning topic was discussed.',
+        decisions: [],
+        commitments: [],
+        topics: ['private account recovery phrase should remain hidden'],
+        linkedEntities: [],
+      },
+    });
+    const { generateMinimizedHoustonSummary } = await import('@/lib/houston-memory/summary');
+
+    await expect(generateMinimizedHoustonSummary({
+      conversationId: '11111111-1111-4111-8111-111111111111',
+      messages: [
+        { role: 'user', text: 'The private account recovery phrase should remain hidden from every durable record.' },
+        { role: 'assistant', text: 'Understood.' },
+      ],
+    })).rejects.toThrow('houston-summary-copied-source-text');
+  });
 });

@@ -1209,10 +1209,14 @@ interface HoustonMemoryRow {
     }
 
     async delete(id: string, authorizationScope: string): Promise<boolean> {
+      const now = new Date().toISOString();
       return this.database.prepare(`
-        DELETE FROM houston_conversation_memories
+        UPDATE houston_conversation_memories
+        SET title = '', summary = '', decisions = '[]', commitments = '[]',
+            topics = '[]', linked_entities = '[]', excluded_at = ?,
+            retain_until = '9999-12-31T23:59:59.999Z', updated_at = ?
         WHERE id = ? AND authorization_scope = ?
-      `).run(id, authorizationScope).changes === 1;
+      `).run(now, now, id, authorizationScope).changes === 1;
   }
 
   async deleteExpired(now: string, limit: number): Promise<string[]> {

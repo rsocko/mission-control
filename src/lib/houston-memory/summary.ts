@@ -51,6 +51,25 @@ function minimizeList(values: string[], count: number, chars: number): string[] 
   return [...new Set(values.map((value) => minimizeText(value, chars)).filter(Boolean))].slice(0, count);
 }
 
+function normalizedWords(value: string): string[] {
+  return value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).filter(Boolean);
+}
+
+function containsCopiedSourceText(value: string, messages: Array<{ text: string }>): boolean {
+  const candidateWords = normalizedWords(value);
+  if (candidateWords.length === 0) return false;
+  const candidate = candidateWords.join(' ');
+  for (const message of messages) {
+    const source = normalizedWords(message.text).join(' ');
+    if (candidate.length >= 24 && source.includes(candidate)) return true;
+    for (let index = 0; index <= candidateWords.length - 6; index += 1) {
+      const phrase = candidateWords.slice(index, index + 6).join(' ');
+      if (phrase.length >= 32 && source.includes(phrase)) return true;
+    }
+  }
+  return false;
+}
+
 function sourceLabel(source: SemanticSourceRecord | null): string | null {
   if (!source) return null;
   if (source.entityType === 'task') return minimizeText(source.title, 160);
@@ -104,7 +123,7 @@ Never reproduce message text, quotations, credentials, secrets, tool output, hid
     prompt: JSON.stringify({ messages: input.messages }),
   });
 
-  return {
+  const summary = {
     title: minimizeText(object.title, 160) || 'Houston conversation',
     summary: minimizeText(object.summary, 1_500),
     decisions: minimizeList(object.decisions, 10, 300),
@@ -112,4 +131,15 @@ Never reproduce message text, quotations, credentials, secrets, tool output, hid
     topics: minimizeList(object.topics, 12, 80),
     linkedEntities: await validateLinks(object.linkedEntities),
   };
+  const generatedText = [
+    summary.title,
+    summary.summary,
+    ...summary.decisions,
+    ...summary.commitments,
+    ...summary.topics,
+  ];
+  if (generatedText.some((value) => containsCopiedSourceText(value, input.messages))) {
+    throw new Error('houston-summary-copied-source-text');
+  }
+  return summary;
 }

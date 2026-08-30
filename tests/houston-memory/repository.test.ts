@@ -69,7 +69,19 @@ describe('Houston memory SQLite repository', () => {
     })).resolves.toEqual([]);
 
     await expect(repository.delete(write.id, 'installation')).resolves.toBe(true);
-    await expect(repository.get(write.id, 'installation')).resolves.toBeNull();
+    const deleted = await repository.get(write.id, 'installation');
+    expect(deleted).toMatchObject({
+      title: '',
+      summary: '',
+      decisions: [],
+      commitments: [],
+      topics: [],
+      linkedEntities: [],
+      retainUntil: '9999-12-31T23:59:59.999Z',
+    });
+    expect(deleted?.excludedAt).not.toBeNull();
+    await repository.upsert({ ...write, summary: 'Must not be recreated' });
+    expect((await repository.get(write.id, 'installation'))?.summary).toBe('');
     database.close();
   });
 

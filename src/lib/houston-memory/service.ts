@@ -52,7 +52,7 @@ export async function upsertHoustonMemory(
     ...input,
     authorizationScope: HOUSTON_MEMORY_SCOPE,
   });
-  await publish('upsert', memory.id);
+  await publish(memory.excludedAt ? 'delete' : 'upsert', memory.id);
   return memory;
 }
 

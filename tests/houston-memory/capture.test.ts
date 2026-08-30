@@ -41,6 +41,7 @@ describe('Houston memory capture', () => {
       topics: ['release'],
       linkedEntities: [],
     });
+    upsertHoustonMemory.mockResolvedValue({ excludedAt: null });
   });
 
   it('uses the configured 90-day retention without persisting request messages', async () => {
@@ -79,5 +80,16 @@ describe('Houston memory capture', () => {
 
     await expect(captureHoustonMemory(input)).rejects.toThrow('provider unavailable');
     expect(upsertHoustonMemory).not.toHaveBeenCalled();
+  });
+
+  it('does not revive a memory deleted while summary generation is in flight', async () => {
+    upsertHoustonMemory.mockResolvedValueOnce({
+      excludedAt: '2026-08-30T00:00:00.000Z',
+    });
+
+    await expect(captureHoustonMemory(input)).resolves.toEqual({
+      status: 'skipped',
+      reason: 'excluded',
+    });
   });
 });

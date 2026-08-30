@@ -357,6 +357,10 @@ only. Disabling capture retains existing rows until their current expiry or an
 explicit deletion. Users can inspect minimized content, delete a memory, and
 exclude a conversation from current and future capture.
 
+Explicit deletion scrubs every retained content field and keeps only a
+conversation-ID exclusion tombstone so a late or future capture cannot recreate
+the deleted memory.
+
 Deletion and expiry remove both lexical documents and vectors. Retrieval filters
 installation authorization scope, sensitivity, exclusion, and expiry in repository
 predicates before candidate ceilings, scoring, result counts, or truncation

@@ -2,10 +2,11 @@
 title: "AI Engine"
 status: active
 created: 2026-06-15
-last_reviewed: 2026-07-30
+last_reviewed: 2026-08-29
 category: architecture
 related:
-  - "[Architecture Overview](OVERVIEW.md)"
+  - "[Architecture Overview](overview.md)"
+  - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
   - "[AI Assistant Completion](../design/AI-ASSISTANT-COMPLETION-DESIGN.md)"
   - "[External Agent Integration](../design/EXTERNAL-AGENT-INTEGRATION-DESIGN.md)"
 ---
@@ -42,7 +43,7 @@ graph TB
   BG --> Engine
   Provider --> Config
   Engine --> ToolSet
-  ToolSet --> DB[("SQLite")]
+  ToolSet --> DB[("SQLite compatibility API")]
 
   classDef ui fill:#111827,stroke:#10b981,color:#f8fafc
   classDef engine fill:#111827,stroke:#3b82f6,color:#f8fafc
@@ -117,6 +118,14 @@ graph LR
 
 ## Configuration
 
+PostgreSQL is the approved production target and is implemented for the core
+persistence composition. The AI paths shown here still use the legacy SQLite
+compatibility API, including direct Drizzle and `better-sqlite3` access. They
+fail explicitly rather than falling back or mixing backends when PostgreSQL is
+selected. Port each required AI workflow behind a backend-neutral repository
+before enabling it in the PostgreSQL deployment. See the
+[database scaling and migration strategy](../design/active/database-scaling-strategy.md).
+
 AI config is resolved from `app_settings` in the database:
 
 - **Provider** — which LLM service (openai, anthropic, etc.)
@@ -141,13 +150,13 @@ is an append-only, idempotent progress stream addressed by a durable cursor.
 with AES-256-GCM. The provider reference is never a run identifier and is never
 returned by an API.
 
-The durable worker claims runs with a SQLite immediate transaction and a renewable
-lease. Completion, failure, retry, cancellation, timeout, and cleanup mutations are
-revision/owner guarded. Retry commands and events carry idempotency keys. An expired
-worker lease either requeues the same MC run for resume or records a terminal
-timeout/failure; it never creates a second MC run. Provider adapters receive
-`cancel` and `cleanup` seams and can load or atomically attach the run's protected
-session reference.
+The current durable AI worker is a SQLite compatibility workflow. It claims
+runs with an immediate transaction and a renewable lease. Completion, failure,
+retry, cancellation, timeout, and cleanup mutations are revision/owner guarded.
+Retry commands and events carry idempotency keys. An expired worker lease either
+requeues the same MC run for resume or records a terminal timeout/failure; it
+never creates a second MC run. Provider adapters receive `cancel` and `cleanup`
+seams and can load or atomically attach the run's protected session reference.
 
 The long-lived worker runtime always starts the provider-neutral retention loop.
 Workers reclaim expired execution leases only for routes backed by their registered

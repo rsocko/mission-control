@@ -541,7 +541,7 @@ Add a "📦 Packages" nav item between "Kanban" and "Timeline". Show a badge cou
 
 4. **Manual tracking numbers**: Users often know a tracking number before Mission Control sees it. The `/packages` quick-add should accept a paste-in tracking number + optional description.
 
-5. **Privacy of tracking history**: Tracking numbers, carrier data, sender names are personal. The existing SQLite local-first model handles this correctly — nothing leaves the machine unless you opt into AfterShip/n8n.
+5. **Privacy of tracking history**: Tracking numbers, carrier data, and sender names are personal. The self-hosted relational backend keeps this data inside the configured deployment unless you opt into AfterShip or n8n.
 
 ---
 

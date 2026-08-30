@@ -2,6 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
+last_reviewed: 2026-08-29
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -19,9 +20,11 @@ backend error strings are adapter details. Existing direct SQLite access will be
 migrated incrementally behind compatibility facades rather than rewritten all
 at once.
 
-This boundary does not select or implement PostgreSQL. It keeps the current
-SQLite runtime replaceable and gives another backend a stable application
-contract to implement.
+These boundaries now support the core SQLite and PostgreSQL persistence
+compositions. PostgreSQL is the approved production target and is selected
+explicitly; SQLite remains the default compatibility backend. Existing direct
+SQLite workflows are still being migrated incrementally and fail explicitly
+under PostgreSQL instead of falling back or creating a split-backend workflow.
 
 ## Current dependency inventory
 
@@ -108,11 +111,17 @@ Facades expose domain values and operations, never the backend handle.
 Core task, project, connector, notification, and settings CRUD is composed once
 through `registerCorePersistenceRepositories(repositories)` and consumed through
 `getCorePersistenceRepositories()`. SQLite is the compatibility default. A
-runtime backend selector may register another complete
-`CorePersistenceRepositories` composition before request handling; consumers
-must not select repositories individually because that can split one workflow
-across backends. Registration is one-time and cannot replace a composition after
-it has been registered or consumed.
+runtime backend selector registers the complete PostgreSQL
+`CorePersistenceRepositories` composition when explicitly configured before
+request handling. Consumers must not select repositories individually because
+that can split one workflow across backends. Registration is one-time and
+cannot replace a composition after it has been registered or consumed.
+
+The PostgreSQL implementation also supplies backend-specific migrations, sync
+jobs and connector-operation leases, full-text search, database health
+snapshots, and runtime telemetry. This is application capability, not evidence
+that a deployment has completed its data migration or cutover. See the
+[database scaling and migration strategy](../design/active/database-scaling-strategy.md).
 
 ## Domain migration sequence
 

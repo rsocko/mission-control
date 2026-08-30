@@ -115,6 +115,7 @@ describe('PostgreSQL vector benchmark helpers', () => {
     expect(source).toContain('repository.queryVectors(request)');
     expect(source).toContain('repository.markIdentityReady(identityId');
     expect(source).toContain('resolvePostgresConfig');
+    expect(source).toContain('instrumentAnnQueries(productionPool');
     expect(source).toContain("throw new Error('non_production_statement_timeout')");
     expect(source).toContain('poolStatementTimeoutMs: postgresConfig.pool.statement_timeout');
     expect(source).not.toContain("SET maintenance_work_mem = '512MB'");

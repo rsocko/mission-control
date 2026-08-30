@@ -1461,6 +1461,11 @@ async function benchmarkCorpus(
 
 async function main() {
   const config = configuration();
+  const rawPool = new Pool({
+    connectionString: config.connectionString,
+    application_name: 'mission-control-pgvector-benchmark-fixture',
+    max: 4,
+  });
   const postgresConfig = resolvePostgresConfig({
     MC_POSTGRES_URL: config.connectionString,
     MC_POSTGRES_MAX_CONNECTIONS: '4',
@@ -1469,7 +1474,7 @@ async function main() {
   if (postgresConfig.pool.statement_timeout !== 30_000) {
     throw new Error('non_production_statement_timeout');
   }
-  const rawPool = createPostgresPool(postgresConfig);
+  const productionPool = createPostgresPool(postgresConfig);
   const annQueryTimings: number[] = [];
 
   try {
@@ -1495,7 +1500,7 @@ async function main() {
     currentStage = 'synthetic-vector-function';
     await createSyntheticVectorFunction(rawPool);
     const repository = new PostgresSemanticIndexRepository(
-      instrumentAnnQueries(rawPool, annQueryTimings),
+      instrumentAnnQueries(productionPool, annQueryTimings),
       5_000,
       vectorCapability,
     );
@@ -1524,6 +1529,7 @@ async function main() {
     await rawPool.query(
       `DROP FUNCTION IF EXISTS ${SYNTHETIC_VECTOR_FUNCTION}(bigint, integer)`,
     ).catch(() => undefined);
+    await productionPool.end();
     await rawPool.end();
   }
 }

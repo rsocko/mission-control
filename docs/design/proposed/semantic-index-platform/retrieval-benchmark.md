@@ -73,7 +73,8 @@ Both local and CI runs use the same pgvector image, production repository,
 semantic tables, ANN projection, HNSW parameters, corpus sizes, filters, and gates.
 The harness also requires the production pool's 30-second default statement timeout;
 the repository's scoped provisioning override must therefore carry the 100,000-row
-concurrent HNSW build to completion.
+concurrent HNSW build to completion. A separate fixture pool performs synthetic
+bulk-loading and exact-reference work that is not part of the application query path.
 
 ### Method
 

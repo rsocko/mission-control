@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import type { GitHubRecoveryBackupAttestation } from '@/db/persistence/github-recovery';
+import { isBackupAttestationReady } from '@/db/persistence/github-recovery-values';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 import {
   abortGitHubBulkTransfer,
@@ -8,10 +10,19 @@ import {
   previewGitHubBulkTransfer,
   reconcileGitHubBulkTransferItem,
 } from '@/lib/connectors/github-issues/bulk-transfer-service';
-import { inspectGitHubRepointBackup } from '@/lib/connectors/github-issues/repoint-service';
+import { inspectGitHubRepointBackup } from '@/lib/connectors/github-issues/backup-verifier';
 
 const repository = z.string().regex(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/);
 const sha256Digest = z.string().regex(/^[a-f0-9]{64}$/);
+const externalBackupAttestation = z.object({
+  path: z.string().min(1).max(2_048),
+  sha256: sha256Digest,
+  sizeBytes: z.number().int().positive().safe(),
+  modifiedAt: z.iso.datetime({ offset: true }),
+  integrityCheck: z.literal('ok'),
+  verifiedAt: z.iso.datetime({ offset: true }),
+  source: z.literal('external-preverified'),
+}).strict();
 const transferScope = z.discriminatedUnion('mode', [
   z.object({
     mode: z.literal('reviewed-allowlist'),
@@ -39,7 +50,8 @@ const common = z.object({
   sourceRepository: repository,
   targetRepository: repository,
   actor: z.string().min(1).max(80),
-  backupPath: z.string().min(1).max(2_048),
+  backupPath: z.string().min(1).max(2_048).optional(),
+  backupAttestation: externalBackupAttestation.optional(),
   scope: transferScope,
 });
 const requestSchema = z.discriminatedUnion('action', [
@@ -88,15 +100,38 @@ export async function POST(request: Request) {
   try {
     const input = parsed.data;
     if (input.action === 'status') {
-      return NextResponse.json(getGitHubBulkTransferStatus(input.runId));
+      return NextResponse.json(await getGitHubBulkTransferStatus(input.runId));
     }
     if (input.action === 'abort') {
-      return NextResponse.json(abortGitHubBulkTransfer(input.runId, input.actor));
+      return NextResponse.json(await abortGitHubBulkTransfer(input.runId, input.actor));
     }
     if (input.action === 'reconcile') {
       return NextResponse.json(await reconcileGitHubBulkTransferItem(input));
     }
-    const backupProof = await inspectGitHubRepointBackup(input.backupPath);
+    if (Boolean(input.backupPath) === Boolean(input.backupAttestation)) {
+      return NextResponse.json(
+        { error: 'Exactly one backup evidence source is required' },
+        { status: 400 },
+      );
+    }
+    let backupProof: GitHubRecoveryBackupAttestation;
+    if (input.backupAttestation) {
+      if (!isBackupAttestationReady(input.backupAttestation, new Date())) {
+        return NextResponse.json(
+          { error: 'Backup attestation must describe a recent snapshot and verification' },
+          { status: 400 },
+        );
+      }
+      backupProof = input.backupAttestation;
+    } else {
+      if (!input.backupPath) {
+        return NextResponse.json(
+          { error: 'Exactly one backup evidence source is required' },
+          { status: 400 },
+        );
+      }
+      backupProof = await inspectGitHubRepointBackup(input.backupPath);
+    }
     const commonInput = {
       connectorInstanceId: input.connectorInstanceId,
       sourceRepository: input.sourceRepository,

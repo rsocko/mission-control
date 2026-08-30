@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -91,6 +91,27 @@ describe('GitHub repository repoint service', () => {
     expect(proof.sha256).toMatch(/^[a-f0-9]{64}$/);
     await expect(service.inspectGitHubRepointBackup(process.env.MC_DB_PATH!, new Date()))
       .rejects.toThrow('must not be the active');
+  });
+
+  it('enforces SQLite snapshot age and future-clock boundaries', async () => {
+    const backupPath = join(directory, 'freshness-backup.db');
+    const now = new Date('2026-08-30T20:00:00.000Z');
+    await database.sqlite.backup(backupPath);
+
+    const exactBoundary = new Date(now.getTime() - 24 * 60 * 60_000);
+    utimesSync(backupPath, exactBoundary, exactBoundary);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .resolves.toMatchObject({ modifiedAt: exactBoundary.toISOString() });
+
+    const oldSnapshot = new Date(exactBoundary.getTime() - 1);
+    utimesSync(backupPath, oldSnapshot, oldSnapshot);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .rejects.toThrow('older than 24 hours');
+
+    const futureSnapshot = new Date(now.getTime() + 5 * 60_000 + 1);
+    utimesSync(backupPath, futureSnapshot, futureSnapshot);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .rejects.toThrow('future');
   });
 
   it('repoints a rename atomically, verifies identities, and preserves local relationships', async () => {
@@ -324,7 +345,7 @@ describe('GitHub repository repoint service', () => {
     )).rejects.toThrow('simulated verification interruption');
     const operation = database.default.select().from(schema.githubRepositoryRepoints)
       .where(eq(schema.githubRepositoryRepoints.connectorInstanceId, 'resume')).get()!;
-    expect(service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
+    expect(await service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
       phase: 'verifying',
       connectorLocked: true,
     });
@@ -439,7 +460,7 @@ describe('GitHub repository repoint service', () => {
         { oldStableId: 'R_reused' },
       )),
     )).rejects.toThrow('Rollback source repository identity verification failed');
-    expect(service.getGitHubRepositoryRepointStatus(failed.id))
+    expect(await service.getGitHubRepositoryRepointStatus(failed.id))
       .toMatchObject({ phase: 'verification_failed', connectorLocked: true });
 
     const rolledBack = await service.rollbackGitHubRepositoryRepoint(

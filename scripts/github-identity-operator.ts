@@ -1,6 +1,8 @@
 import { parseArgs } from 'node:util';
 import db from '@/db';
 import { connectorConfigs } from '@/db/schema';
+import { initializeDatabaseWithRetry } from '@/db/startup';
+import { shutdownRuntimeDatabase } from '@/db/runtime';
 import {
   GitHubIssuesConnector,
   reconcileHistoricalGitHubIssueTransfer,
@@ -60,6 +62,7 @@ async function main(): Promise<void> {
   if (!COMMANDS.has(rawCommand as Command)) {
     throw new OperatorError(`Unsupported command: ${rawCommand}`, 2);
   }
+  await initializeDatabaseWithRetry();
   const command = rawCommand as Command;
   const { values } = parseArgs({
     args: process.argv.slice(3),
@@ -396,9 +399,11 @@ class OperatorError extends Error {
   }
 }
 
-main().catch((error: unknown) => {
-  const operatorError = error instanceof OperatorError ? error : null;
-  console.error(operatorError?.message ?? (error instanceof Error ? error.message : String(error)));
-  if (operatorError?.exitCode === 2) console.error(usage());
-  process.exitCode = operatorError?.exitCode ?? 1;
-});
+main()
+  .catch((error: unknown) => {
+    const operatorError = error instanceof OperatorError ? error : null;
+    console.error(operatorError?.message ?? (error instanceof Error ? error.message : String(error)));
+    if (operatorError?.exitCode === 2) console.error(usage());
+    process.exitCode = operatorError?.exitCode ?? 1;
+  })
+  .finally(() => shutdownRuntimeDatabase());

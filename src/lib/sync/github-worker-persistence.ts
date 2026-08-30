@@ -1,6 +1,7 @@
 import type { GitHubDependencyPersistence } from '@/db/persistence/github-dependencies';
 import type { GitHubHierarchyPersistence } from '@/db/persistence/github-hierarchy';
 import type { GitHubProjectPersistence } from '@/db/persistence/github-projects';
+import type { GitHubRecoveryPersistence } from '@/db/persistence/github-recovery';
 import type { GitHubWorkerRepositories } from '@/db/persistence/github-worker';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
@@ -24,4 +25,14 @@ export async function getGitHubHierarchyRepository(): Promise<GitHubHierarchyPer
 
 export async function getGitHubProjectRepository(): Promise<GitHubProjectPersistence> {
   return (await getGitHubWorkerRepositories()).projects;
+}
+
+/**
+ * The Layer 3B recovery composition (native transfer, historical succession,
+ * bulk transfer, repository repoint). Absent or partial compositions cannot be
+ * represented, so an unsupported backend fails closed here before any remote
+ * GitHub effect is attempted.
+ */
+export async function getGitHubRecoveryRepository(): Promise<GitHubRecoveryPersistence> {
+  return (await getGitHubWorkerRepositories()).recovery;
 }

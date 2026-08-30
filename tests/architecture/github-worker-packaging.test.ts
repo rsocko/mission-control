@@ -19,6 +19,8 @@ const POSTGRES_GITHUB_ADAPTERS = [
   'src/db/postgres/repositories/github-dependency-repositories.ts',
   'src/db/postgres/repositories/github-hierarchy-repositories.ts',
   'src/db/postgres/repositories/github-project-repositories.ts',
+  'src/db/postgres/repositories/github-recovery-repositories.ts',
+  'src/db/postgres/repositories/github-recovery-support.ts',
   'src/db/postgres/repositories/connector-execution-repositories.ts',
   'src/db/postgres/repositories/index.ts',
 ];
@@ -28,6 +30,7 @@ const SQLITE_GITHUB_ADAPTERS = [
   'src/db/persistence/sqlite-github-dependency-repositories.ts',
   'src/db/persistence/sqlite-github-hierarchy-repositories.ts',
   'src/db/persistence/sqlite-github-project-repositories.ts',
+  'src/db/persistence/sqlite-github-recovery-repositories.ts',
 ];
 
 function read(path: string): string {
@@ -87,6 +90,7 @@ describe('sync worker persistence packaging reachability', () => {
       'sqlite-github-dependency-repositories',
       'sqlite-github-hierarchy-repositories',
       'sqlite-github-project-repositories',
+      'sqlite-github-recovery-repositories',
     ]) {
       expect(runtime).toContain(`import('@/db/persistence/${adapter}')`);
       expect(runtime).not.toMatch(
@@ -99,6 +103,8 @@ describe('sync worker persistence packaging reachability', () => {
     const index = read('src/db/postgres/repositories/index.ts');
     expect(index).toContain('export function createPostgresGitHubWorkerRepositories');
     expect(index).toContain('github: createPostgresGitHubWorkerRepositories(pool)');
+    // Layer 3B must be part of the same atomic composition.
+    expect(index).toContain('recovery: createPostgresGitHubRecoveryRepositories(pool)');
 
     const worker = read('src/sync-worker.ts');
     expect(worker).toContain('githubWorkerCompositionPresent');

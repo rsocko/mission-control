@@ -9,7 +9,6 @@ import {
 } from '@/db/postgres/repositories';
 import { PostgresSyncJobRepository } from '@/db/postgres/sync/job-repository';
 import { PostgresSyncRunRepository } from '@/db/postgres/repositories/sync-run-repository';
-import { UnsupportedGitHubWorkerOperationError } from '@/db/persistence/github-worker-errors';
 import type {
   GitHubFenceTaskRow,
   GitHubWriteIdentity,
@@ -1249,7 +1248,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
     expect(open.rows.map((row) => row.taskId)).toEqual([ids.childTaskId]);
   });
 
-  it('fails closed on historical task-transfer succession state', async () => {
+  it('ignores historical succession state that cannot be revalidated', async () => {
     const ids = makeIds();
     connectorIds.add(ids.connectorId);
     const pool = backend.context.pool;
@@ -1261,7 +1260,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
 
     await expect(
       github.hierarchy.provenSupersededTaskIds(ids.connectorId, ['source', 'successor']),
-    ).rejects.toThrow(UnsupportedGitHubWorkerOperationError);
+    ).resolves.toEqual([]);
 
     await expect(
       github.hierarchy.applyReconciliation({
@@ -1269,7 +1268,7 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
         observedEndpointTaskIds: ['source', 'successor'],
         reconcile: () => ({ fenced: false, updates: [] }),
       }),
-    ).rejects.toThrow(UnsupportedGitHubWorkerOperationError);
+    ).resolves.toEqual({ applied: true, updated: 0, fenced: false });
   });
 });
 

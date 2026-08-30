@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -135,6 +135,21 @@ describe('production GitHub identity operator artifact', () => {
     expect(result.stderr).not.toContain('operator-secret');
   });
 
+  it('fails closed on an unreachable PostgreSQL backend without touching SQLite', () => {
+    const sqliteFallbackPath = join(directory, 'must-not-create.db');
+    const result = runOperatorWithEnvironment({
+      MC_DATABASE_BACKEND: 'postgres',
+      MC_POSTGRES_URL: 'postgres://test:test@127.0.0.1:1/mission_control',
+      MC_DB_PATH: sqliteFallbackPath,
+      MC_DB_STARTUP_MAX_ATTEMPTS: '1',
+    }, 'status', '--connector', 'operator-artifact');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('connect ECONNREFUSED 127.0.0.1:1');
+    expect(result.stderr).not.toContain('worker.js');
+    expect(existsSync(sqliteFallbackPath)).toBe(false);
+  });
+
   it('requires explicit pre-dispatch confirmation for interrupted cycles', () => {
     const result = runOperator(
       'write-cycle-reconcile',
@@ -202,12 +217,19 @@ describe('production GitHub identity operator artifact', () => {
 });
 
 function runOperator(...args: string[]) {
+  return runOperatorWithEnvironment({}, ...args);
+}
+
+function runOperatorWithEnvironment(
+  overrides: Partial<NodeJS.ProcessEnv>,
+  ...args: string[]
+) {
   return spawnSync(
     process.execPath,
     ['--conditions=react-server', artifactPath, ...args],
     {
       cwd: process.cwd(),
-      env: environment,
+      env: { ...environment, ...overrides },
       encoding: 'utf8',
       timeout: 15_000,
     },

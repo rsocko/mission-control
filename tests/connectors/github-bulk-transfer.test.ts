@@ -404,7 +404,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       ambiguousCount: 1,
       connectorEnabled: false,
@@ -460,7 +460,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       failedCount: 1,
       ambiguousCount: 0,
@@ -633,7 +633,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       failedCount: 1,
       ambiguousCount: 0,
@@ -679,7 +679,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       ambiguousCount: 1,
       connectorEnabled: false,
@@ -987,7 +987,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       ambiguousCount: 1,
       connectorEnabled: false,
     });
@@ -1028,7 +1028,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       ambiguousCount: 1,
       connectorEnabled: false,
@@ -1088,7 +1088,7 @@ describe('GitHub bulk issue transfer', () => {
         schema.githubBulkTransferRuns.connectorInstanceId,
         seeded.connectorId,
       )).get()!;
-    expect(service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
+    expect(await service.getGitHubBulkTransferStatus(run.id)).toMatchObject({
       phase: 'failed',
       ambiguousCount: 1,
       connectorEnabled: false,

@@ -20,9 +20,8 @@
  * epoch before returning the parent/depth/metadata updates to apply.
  *
  * Historical task-transfer succession state (`github_identity_task_transfer_
- * reconciliations`) remains a legacy SQLite-only surface. The SQLite adapter
- * preserves the exact succession filtering; the PostgreSQL adapter fails closed
- * with `UnsupportedGitHubWorkerOperationError` when any succession state exists.
+ * reconciliations`) is revalidated against current task bindings and locators
+ * by both adapters before a source task is excluded.
  */
 
 /** Task identity columns the population reads scope to a connector. */
@@ -114,10 +113,8 @@ export interface GitHubHierarchyPersistence {
   /**
    * Historical task-transfer succession task ids to exclude from the population.
    *
-   * The SQLite adapter reproduces the legacy proven-succession filtering. The
-   * PostgreSQL adapter fails closed with
-   * `UnsupportedGitHubWorkerOperationError('GitHub historical task-transfer
-   * succession state')` when any succession state exists for the connector.
+   * Both adapters reproduce the proven-succession filtering and ignore records
+   * whose proof digest, current binding, or current locator no longer matches.
    */
   provenSupersededTaskIds(
     connectorInstanceId: string,

@@ -124,7 +124,7 @@ describe('task transfer identity persistence', () => {
       ],
     });
 
-    expect(canTransferGitHubIssueSafely(
+    expect(await canTransferGitHubIssueSafely(
       'github-targeted',
       'acme/source:7',
       'acme/target',

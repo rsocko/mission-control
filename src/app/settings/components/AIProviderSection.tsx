@@ -157,6 +157,8 @@ function AIProviderSection() {
   const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState('');
   const [embeddingApiKey, setEmbeddingApiKey] = useState('');
   const [semanticSearchEnabled, setSemanticSearchEnabled] = useState(false);
+  const [houstonMemoryEnabled, setHoustonMemoryEnabled] = useState(false);
+  const [houstonMemoryRetentionDays, setHoustonMemoryRetentionDays] = useState(90);
   const [configured, setConfigured] = useState(false);
   const [activeProvider, setActiveProvider] = useState('openai');
   const [activeModel, setActiveModel] = useState('gpt-4o-mini');
@@ -239,6 +241,8 @@ function AIProviderSection() {
     setEmbeddingBaseUrl(savedConfig.embeddingBaseUrl || '');
     setEmbeddingApiKey(savedConfig.embeddingHasApiKey ? '********' : '');
     setSemanticSearchEnabled(Boolean(savedConfig.semanticSearchEnabled));
+    setHoustonMemoryEnabled(Boolean(savedConfig.houstonMemoryEnabled));
+    setHoustonMemoryRetentionDays(savedConfig.houstonMemoryRetentionDays || 90);
     setRoutingPolicy(data.routingPolicy || DEFAULT_ROUTING_POLICY);
     setProviderHealth(Array.isArray(data.providerHealth) ? data.providerHealth : []);
     setEntitlement(data.entitlement || null);
@@ -270,6 +274,8 @@ function AIProviderSection() {
           embeddingBaseUrl,
           embeddingApiKey,
           semanticSearchEnabled,
+          houstonMemoryEnabled,
+          houstonMemoryRetentionDays,
           baseUrl,
           apiKey,
           routingPolicy,
@@ -690,6 +696,49 @@ function AIProviderSection() {
               className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--border-strong)]"
             />
           </label>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-4">
+            <label className="flex cursor-pointer items-start justify-between gap-4">
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-[var(--text-secondary)]">
+                  Retained Houston memory
+                </span>
+                <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">
+                  Keep privacy-minimized conversation summaries for future recall. Full transcripts are never indexed.
+                </span>
+              </span>
+              <input
+                type="checkbox"
+                checked={houstonMemoryEnabled}
+                onChange={(event) => setHoustonMemoryEnabled(event.target.checked)}
+                className="mt-0.5 h-5 w-5 shrink-0 rounded border-[var(--border-strong)]"
+              />
+            </label>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+              <label htmlFor="houston-memory-retention" className="text-xs leading-5 text-[var(--text-muted)]">
+                Retain each new summary for
+              </label>
+              <Select
+                value={String(houstonMemoryRetentionDays)}
+                onValueChange={(value) => setHoustonMemoryRetentionDays(Number(value))}
+                disabled={!houstonMemoryEnabled}
+              >
+                <SelectTrigger
+                  id="houston-memory-retention"
+                  className="min-h-10 w-32 rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 text-sm text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[30, 90, 180, 365].map((days) => (
+                    <SelectItem key={days} value={String(days)}>{days} days</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
+              Changes apply to new summaries. Disabling memory does not delete existing summaries; their current expiry still applies.
+            </p>
+          </div>
         </div>
       </motion.div>
 

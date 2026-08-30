@@ -16,14 +16,14 @@
  * - `listExisting`— an existence probe for a bounded id batch, so reconciliation
  *                   can find orphaned documents without an N+1 read.
  *
- * Houston summaries remain intentionally absent until issue #1665 provides
- * retained summaries, per-conversation exclusion, and authorization controls.
+ * Houston summaries are authoritative minimized records. Raw conversation
+ * messages never cross this port.
  */
 
 import type { SemanticEntityType } from '../contracts';
 
-/** Entity kinds with a projection adapter in this phase. */
-export type SemanticSourceEntityType = Exclude<SemanticEntityType, 'houston-summary'>;
+/** Entity kinds with an authoritative source adapter. */
+export type SemanticSourceEntityType = SemanticEntityType;
 
 export const SEMANTIC_SOURCE_ENTITY_TYPES: readonly SemanticSourceEntityType[] = [
   'task',
@@ -31,12 +31,13 @@ export const SEMANTIC_SOURCE_ENTITY_TYPES: readonly SemanticSourceEntityType[] =
   'tag',
   'triage-item',
   'alert',
+  'houston-summary',
 ] as const;
 
 export function isSemanticSourceEntityType(
   value: SemanticEntityType,
 ): value is SemanticSourceEntityType {
-  return value !== 'houston-summary';
+  return SEMANTIC_SOURCE_ENTITY_TYPES.includes(value);
 }
 
 /**
@@ -161,12 +162,35 @@ export interface SemanticAlertSource {
   relatedProjectId: string | null;
 }
 
+export interface SemanticHoustonSummarySource {
+  entityType: 'houston-summary';
+  semanticEligible: boolean;
+  id: string;
+  authorizationScope: string;
+  title: string;
+  summary: string;
+  decisions: string[];
+  commitments: string[];
+  topics: string[];
+  linkedEntities: Array<{
+    type: 'task' | 'project' | 'tag';
+    id: string;
+    label: string;
+  }>;
+  sensitivity: 'local-only' | 'restricted' | 'standard';
+  retainUntil: string;
+  excludedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type SemanticSourceRecord =
   | SemanticTaskSource
   | SemanticProjectSource
   | SemanticTagSource
   | SemanticTriageItemSource
-  | SemanticAlertSource;
+  | SemanticAlertSource
+  | SemanticHoustonSummarySource;
 
 export interface SemanticSourceIdPage {
   /** Entity ids in ascending id order. */

@@ -9,6 +9,7 @@ import type Database from 'better-sqlite3';
 import type {
   SemanticAlertSource,
   SemanticProjectSource,
+  SemanticHoustonSummarySource,
   SemanticSourceEntityType,
   SemanticSourceIdPage,
   SemanticSourcePort,
@@ -97,6 +98,16 @@ interface AlertRow {
   relatedProjectId: string | null;
 }
 
+type HoustonSummaryRow = Omit<
+  SemanticHoustonSummarySource,
+  'entityType' | 'semanticEligible' | 'decisions' | 'commitments' | 'topics' | 'linkedEntities'
+> & {
+  decisions: string;
+  commitments: string;
+  topics: string;
+  linkedEntities: string;
+};
+
 const TASK_COLUMNS = `
   id,
   title,
@@ -160,6 +171,13 @@ const ALERT_COLUMNS = `
   dismissed_at AS dismissedAt,
   related_task_id AS relatedTaskId,
   related_project_id AS relatedProjectId
+`;
+
+const HOUSTON_SUMMARY_COLUMNS = `
+  id, authorization_scope AS authorizationScope, title, summary, decisions,
+  commitments, topics, linked_entities AS linkedEntities, sensitivity,
+  retain_until AS retainUntil, excluded_at AS excludedAt,
+  created_at AS createdAt, updated_at AS updatedAt
 `;
 
 function toTask(row: TaskRow, tags: string[]): SemanticTaskSource {
@@ -236,6 +254,32 @@ function toAlert(row: AlertRow): SemanticAlertSource {
   };
 }
 
+function toHoustonSummary(row: HoustonSummaryRow): SemanticHoustonSummarySource {
+  const links = (() => {
+    try {
+      const parsed = JSON.parse(row.linkedEntities) as unknown;
+      return Array.isArray(parsed)
+        ? parsed.filter((item): item is SemanticHoustonSummarySource['linkedEntities'][number] =>
+            typeof item === 'object' && item !== null
+            && ['task', 'project', 'tag'].includes(String((item as { type?: unknown }).type))
+            && typeof (item as { id?: unknown }).id === 'string'
+            && typeof (item as { label?: unknown }).label === 'string')
+        : [];
+    } catch {
+      return [];
+    }
+  })();
+  return {
+    ...row,
+    entityType: 'houston-summary',
+    semanticEligible: row.excludedAt === null,
+    decisions: parseStringArray(row.decisions),
+    commitments: parseStringArray(row.commitments),
+    topics: parseStringArray(row.topics),
+    linkedEntities: links,
+  };
+}
+
 /** Guards against an unbounded `IN (...)` list or `LIMIT`. */
 const MAX_PAGE = 1_000;
 const REPRESENTATIVE_LIMIT = 5;
@@ -291,6 +335,13 @@ export class SqliteSemanticSourcePort implements SemanticSourcePort {
         SELECT ${TRIAGE_COLUMNS} FROM triage_items WHERE id = ?
       `).get(entityId) as TriageRow | undefined;
       return row ? toTriage(row) : null;
+    }
+    if (entityType === 'houston-summary') {
+      const row = this.db.prepare(`
+        SELECT ${HOUSTON_SUMMARY_COLUMNS}
+        FROM houston_conversation_memories WHERE id = ?
+      `).get(entityId) as HoustonSummaryRow | undefined;
+      return row ? toHoustonSummary(row) : null;
     }
 
     const row = this.db
@@ -373,6 +424,10 @@ export class SqliteSemanticSourcePort implements SemanticSourcePort {
         table: 'notifications',
         eligibility: "source_state NOT IN ('deleted', 'stale')",
       };
+      case 'houston-summary': return {
+        table: 'houston_conversation_memories',
+        eligibility: 'excluded_at IS NULL',
+      };
     }
   }
 
@@ -441,6 +496,16 @@ export class SqliteSemanticSourcePort implements SemanticSourcePort {
       `).all(after, limit) as TriageRow[];
       return {
         records: rows.map(toTriage),
+        nextCursor: rows.length === limit ? rows[rows.length - 1].id : null,
+      };
+    }
+    if (entityType === 'houston-summary') {
+      const rows = this.db.prepare(`
+        SELECT ${HOUSTON_SUMMARY_COLUMNS} FROM houston_conversation_memories
+        WHERE id > ? AND excluded_at IS NULL ORDER BY id ASC LIMIT ?
+      `).all(after, limit) as HoustonSummaryRow[];
+      return {
+        records: rows.map(toHoustonSummary),
         nextCursor: rows.length === limit ? rows[rows.length - 1].id : null,
       };
     }

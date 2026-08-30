@@ -26,10 +26,6 @@ export function HoustonHomeScreen({ onStartChat, loading = false }: HoustonHomeS
     onStartChat(prompt);
   }, [onStartChat]);
 
-  const handleResumeConversation = useCallback(() => {
-    onStartChat('');
-  }, [onStartChat]);
-
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim();
     if (!trimmed) return;
@@ -55,7 +51,7 @@ export function HoustonHomeScreen({ onStartChat, loading = false }: HoustonHomeS
         <HoustonGreeting />
         <HoustonQuickActions onAction={handleAction} disabled={loading} />
         <HoustonSuggestions onAction={handleAction} disabled={loading} />
-        <HoustonRecentConversations onResumeConversation={handleResumeConversation} />
+        <HoustonRecentConversations />
       </div>
 
       {/* Composer pinned to bottom */}

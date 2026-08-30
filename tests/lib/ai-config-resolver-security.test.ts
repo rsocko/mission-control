@@ -62,6 +62,8 @@ describe('AI provider credential resolution', () => {
       embeddingProvider: 'bifrost',
       embeddingModel: 'ollama/snowflake-arctic-embed',
       semanticSearchEnabled: false,
+      houstonMemoryEnabled: false,
+      houstonMemoryRetentionDays: 90,
     });
   });
 

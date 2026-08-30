@@ -54,6 +54,7 @@ const postgresMocks = vi.hoisted(() => ({
     markScheduleEnqueued: vi.fn(async () => undefined),
     getSchedules: vi.fn(async () => []),
     complete: vi.fn(async () => undefined),
+    finalizeSuccess: vi.fn(async () => undefined),
     fail: vi.fn(async () => 'failed'),
     linkSyncLog: vi.fn(async () => undefined),
     persistEvent: vi.fn(async () => undefined),
@@ -70,10 +71,13 @@ const postgresMocks = vi.hoisted(() => ({
   },
   searchRepository: {
     indexTask: vi.fn(async () => undefined),
+    indexNotification: vi.fn(async () => undefined),
+    warmUp: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
   },
   workerRepositories: {
     connectors: {
+      get: vi.fn(async () => null),
       mergeSettings: vi.fn(async (
         _id: string,
         settings: Record<string, unknown>,
@@ -91,6 +95,22 @@ const postgresMocks = vi.hoisted(() => ({
     syncRuns: {
       listLatestSuccessfulPulls: vi.fn(async () => []),
       append: vi.fn(async () => undefined),
+    },
+    execution: {
+      support: {
+        allowsLegacyWorkflow: vi.fn(() => false),
+        assertConfigSupported: vi.fn((config: { type: string }) => {
+          if (config.type === 'github-issues') throw new Error('unsupported GitHub identity state');
+        }),
+        assertConnectorSupported: vi.fn((connector: { type: string; syncDomainData?: unknown }) => {
+          if (connector.type === 'github-issues' || connector.syncDomainData) {
+            throw new Error('unsupported connector execution');
+          }
+        }),
+      },
+      pushes: {
+        listCandidates: vi.fn(async () => []),
+      },
     },
   },
   isConnectorSyncQuarantinedInPostgres: vi.fn(async () => false),
@@ -158,6 +178,20 @@ describe('PostgreSQL backend selection — sync job queue', () => {
         'checkpoint',
         { cursor: 'page-1' },
       )).resolves.toMatchObject({ state: { cursor: 'page-1' } });
+      expect(sqliteTouch).not.toHaveBeenCalled();
+    });
+
+    it('fails closed before an unsupported connector write is dispatched', async () => {
+      const updateTask = vi.fn(async () => undefined);
+      const { pushPendingChanges } = await import('@/lib/sync/push-manager');
+
+      await expect(pushPendingChanges('pg-github', {
+        type: 'github-issues',
+        updateTask,
+      } as never)).rejects.toThrow('unsupported connector execution');
+      expect(updateTask).not.toHaveBeenCalled();
+      expect(postgresMocks.workerRepositories.execution.pushes.listCandidates)
+        .not.toHaveBeenCalled();
       expect(sqliteTouch).not.toHaveBeenCalled();
     });
   });
@@ -248,6 +282,29 @@ describe('PostgreSQL backend selection — keyword search', () => {
 
     await searchFTS('quokka');
     expect(postgresMocks.searchRepository.search).toHaveBeenCalledWith('quokka');
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  it('uses keyword-only post-sync indexing without touching SQLite semantic state', async () => {
+    const {
+      indexAlertForSearch,
+      indexTaskForSearch,
+      warmUpSearchAfterSync,
+    } = await import('@/lib/sync/search-indexer');
+    await indexTaskForSearch({ id: 'pg-task-2', title: 'Portable task' });
+    await indexAlertForSearch({
+      id: 'pg-notification-1',
+      title: 'Portable notification',
+    });
+    await warmUpSearchAfterSync();
+
+    expect(postgresMocks.searchRepository.indexTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'pg-task-2' }),
+    );
+    expect(postgresMocks.searchRepository.indexNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'pg-notification-1' }),
+    );
+    expect(postgresMocks.searchRepository.warmUp).toHaveBeenCalled();
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 });
@@ -399,14 +456,14 @@ describe('PostgreSQL backend selection — worker drain loop', () => {
     worker.start();
     try {
       await vi.waitFor(() => {
-        expect(postgresMocks.syncJobRepository.complete).toHaveBeenCalledOnce();
+        expect(postgresMocks.syncJobRepository.finalizeSuccess).toHaveBeenCalledOnce();
       }, { timeout: 2000, interval: 10 });
     } finally {
       await worker.stop();
     }
 
     expect(postgresMocks.syncJobRepository.claimNext).toHaveBeenCalled();
-    expect(postgresMocks.syncJobRepository.linkSyncLog).toHaveBeenCalled();
+    expect(postgresMocks.syncJobRepository.linkSyncLog).not.toHaveBeenCalled();
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 });

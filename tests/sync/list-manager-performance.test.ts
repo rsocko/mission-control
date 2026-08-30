@@ -2,33 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SourceList } from '@/types';
 
 const insertedBatchSizes: number[] = [];
-const mockDb = {
-  select: vi.fn(() => ({
-    from: vi.fn(() => ({
-      where: vi.fn(async () => []),
-    })),
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      lists: {
+        list: vi.fn(async () => []),
+        applyDiscovery: vi.fn(async (command: { upserts: unknown[] }) => {
+          insertedBatchSizes.push(command.upserts.length);
+        }),
+      },
+    },
   })),
-  insert: vi.fn(() => ({
-    values: vi.fn(async (rows: unknown[]) => {
-      insertedBatchSizes.push(rows.length);
-    }),
-  })),
-  update: vi.fn(),
-  delete: vi.fn(),
-};
-
-vi.mock('@/db', () => ({ default: mockDb }));
-vi.mock('@/db/schema', () => ({
-  sourceLists: {
-    id: 'id',
-    sourceId: 'source_id',
-    groupId: 'group_id',
-    connectorInstanceId: 'connector_instance_id',
-  },
-  listGroups: {},
-}));
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((...values: unknown[]) => values),
 }));
 vi.mock('@/lib/external-identities', () => ({
   getGitHubIdentityPhase: vi.fn(() => false),

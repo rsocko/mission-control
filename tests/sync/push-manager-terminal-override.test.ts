@@ -19,10 +19,29 @@ let mockCapabilities: import('@/types').ConnectorCapabilities | null = null;
 const {
   mockCompleteTaskPush,
   mockDelete,
+  mockFailTaskPush,
   mockLoadClaimedTask,
 } = vi.hoisted(() => ({
-  mockCompleteTaskPush: vi.fn(() => Promise.resolve(true)),
+  mockCompleteTaskPush: vi.fn((
+    _taskId: string,
+    _leaseToken: string,
+    _sourceId: string,
+    _metadata?: unknown,
+    _localUpdates?: Record<string, unknown>,
+  ) => {
+    void [_taskId, _leaseToken, _sourceId, _metadata, _localUpdates];
+    return Promise.resolve(true);
+  }),
   mockDelete: vi.fn(() => ({ where: vi.fn() })),
+  mockFailTaskPush: vi.fn((
+    _taskId: string,
+    _leaseToken: string,
+    _syncStatus: string,
+    _pushRetryCount?: number,
+  ) => {
+    void [_taskId, _leaseToken, _syncStatus, _pushRetryCount];
+    return Promise.resolve(true);
+  }),
   mockLoadClaimedTask: vi.fn(),
 }));
 
@@ -54,6 +73,43 @@ vi.mock('@/db/schema', () => ({
   myDayItems: { taskId: 'taskId' },
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: {
+      get: vi.fn(async () => mockCapabilities
+        ? { capabilities: mockCapabilities }
+        : null),
+    },
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      pushes: {
+        listCandidates: vi.fn(async () => [...mockPendingTasks]),
+        listSourceIds: vi.fn(async (ids: string[]) => mockPendingTasks
+          .filter((task) => ids.includes((task as { id: string }).id))
+          .map((task) => ({
+            id: (task as { id: string }).id,
+            sourceId: (task as { sourceId: string }).sourceId,
+          })).concat(
+            mockPendingTasks.some((task) => ids.includes((task as { id: string }).id))
+              ? []
+              : mockPendingTasks.slice(0, 1).map((task) => ({
+                  id: ids[0],
+                  sourceId: (task as { sourceId: string }).sourceId,
+                })),
+          )),
+        markSynced: vi.fn(async (id: string, _now: string, data: unknown = {}) => {
+          mockUpdateSets.push({ data: { ...(data as object), syncStatus: 'synced' }, id });
+          return true;
+        }),
+        markFailure: vi.fn(async (id: string, syncStatus: string, pushRetryCount: number) => {
+          mockUpdateSets.push({ data: { syncStatus, pushRetryCount }, id });
+          return true;
+        }),
+      },
+    },
+  })),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col: string, val: string) => ({ col, val })),
   and: vi.fn((...args: unknown[]) => args),
@@ -78,7 +134,7 @@ vi.mock('@/lib/mode', () => ({
 vi.mock('@/lib/sync/push-lease', () => ({
   claimTaskForPush: vi.fn(() => Promise.resolve('lease-token')),
   completeTaskPush: mockCompleteTaskPush,
-  failTaskPush: vi.fn(() => Promise.resolve(true)),
+  failTaskPush: mockFailTaskPush,
   heartbeatTaskPush: vi.fn(() => Promise.resolve('renewed-lease-token')),
   loadClaimedTaskForPush: mockLoadClaimedTask,
   releaseTaskPush: vi.fn(() => Promise.resolve(true)),
@@ -124,6 +180,31 @@ describe('push-manager terminal status override', () => {
     mockUpdateSets.length = 0;
     mockCapabilities = null;
     vi.clearAllMocks();
+    mockCompleteTaskPush.mockImplementation((
+      taskId: string,
+      _leaseToken: string,
+      _sourceId: string,
+      _metadata?: unknown,
+      localUpdates?: Record<string, unknown>,
+    ) => {
+      mockUpdateSets.push({
+        data: { ...(localUpdates ?? {}), syncStatus: 'synced' },
+        id: taskId,
+      });
+      return Promise.resolve(true);
+    });
+    mockFailTaskPush.mockImplementation((
+      taskId: string,
+      _leaseToken: string,
+      syncStatus: string,
+      pushRetryCount?: number,
+    ) => {
+      mockUpdateSets.push({
+        data: { syncStatus, pushRetryCount },
+        id: taskId,
+      });
+      return Promise.resolve(true);
+    });
     mockLoadClaimedTask.mockImplementation((taskId: string) =>
       Promise.resolve(mockPendingTasks.find(
         (task) => (task as { id: string }).id === taskId,
@@ -279,10 +360,10 @@ describe('push-manager terminal status override', () => {
           _authorization: unknown,
           write: () => Promise<unknown>,
         ) => write()),
-      } as Partial<IConnector> as IConnector;
+      } as unknown as Partial<IConnector> as IConnector;
 
       await pushPendingChanges('github-1', connector, [], undefined, {
-        identityMode: { effectiveMode: 'comparison', modeRevision: 1 },
+        identityMode: { modeRevision: 1 },
         connectorOperationLeaseHeld: true,
       });
 

@@ -28,6 +28,7 @@ describePostgres('PostgreSQL worker repositories integration', () => {
     const core = createPostgresCoreRepositories(backend.context.db);
     const repositories = createPostgresWorkerPersistenceRepositories(
       backend.context.db,
+      backend.context.pool,
       core,
     );
     return {

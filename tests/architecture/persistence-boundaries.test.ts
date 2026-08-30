@@ -47,12 +47,25 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/push/dispatcher.ts',
   'src/lib/search/semantic.ts',
   'src/lib/sync/control-state.ts',
-  'src/lib/sync/deletion-detector.ts',
   'src/lib/sync/github-hierarchy-reconciliation.ts',
   'src/lib/sync/maintenance-lock.ts',
   'src/lib/sync/operator-control.ts',
   'src/lib/telemetry/runtime.ts',
 ]);
+
+const MIGRATED_CONNECTOR_EXECUTION_MODULES = [
+  'src/lib/sync/conflict-resolution.ts',
+  'src/lib/sync/deletion-detector.ts',
+  'src/lib/sync/deletion-recovery.ts',
+  'src/lib/sync/execution-pipeline.ts',
+  'src/lib/sync/list-manager.ts',
+  'src/lib/sync/pull-manager.ts',
+  'src/lib/sync/push-lease.ts',
+  'src/lib/sync/push-manager.ts',
+  'src/lib/sync/retention-resolution.ts',
+  'src/lib/sync/search-indexer.ts',
+  'src/lib/sync/write-through-log.ts',
+] as const;
 
 function listTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -134,5 +147,16 @@ describe('portable persistence dependency ratchet', () => {
     });
 
     expect(unexpected).toEqual([]);
+  });
+
+  it('keeps migrated connector execution modules behind persistence ports', () => {
+    const violations = MIGRATED_CONNECTOR_EXECUTION_MODULES.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      return /from\s+['"]@\/db(?:['"]|\/(?:index|schema)(?:['"/]))/.test(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
   });
 });

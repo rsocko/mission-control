@@ -1,4 +1,5 @@
 import type { ConnectorRepository } from './core-repositories';
+import type { ConnectorExecutionRepositories } from './connector-execution';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -30,4 +31,5 @@ export interface SyncRunRepository {
 export interface WorkerPersistenceRepositories {
   connectors: ConnectorRepository;
   syncRuns: SyncRunRepository;
+  execution: ConnectorExecutionRepositories;
 }

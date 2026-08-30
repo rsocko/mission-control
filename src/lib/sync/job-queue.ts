@@ -26,6 +26,7 @@ export {
   enqueueDueSyncSchedules,
   enqueueSyncJob,
   failSyncJob,
+  finalizeSuccessfulSyncJob,
   getActiveSyncJobConnectorIds,
   getLatestDurableSyncResult,
   getLatestSyncJobEventId,

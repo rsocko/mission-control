@@ -1,19 +1,13 @@
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem, ConnectorCapabilities } from '@/types';
 import type { SyncAuditEntry } from './index';
-import db from '@/db';
-import {
-  tasks,
-  externalEntities,
-  syncDeletionSnapshots,
-  taskLinkedSourceEntities,
-  taskLinkedSources,
-  taskTags,
-  tags as tagsTable,
-} from '@/db/schema';
-import { eq, and, inArray, like } from 'drizzle-orm';
+import type {
+  ConnectorTaskRecord,
+  ConnectorTaskUpdate,
+  PullTag,
+} from '@/db/persistence/connector-execution';
+import { resolvePersistedConnectorCapabilities } from '@/lib/connectors/resolved-capabilities';
 import { randomUUID } from 'crypto';
-import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
 import { syncLogger } from '@/lib/logger';
 
 import { syncEventBus } from './events';
@@ -52,6 +46,7 @@ import {
 } from './github-hierarchy-reconciliation';
 import type { GitHubHierarchyObservation } from './github-hierarchy-reconciliation';
 import { needsMicrosoftTodoLinkedResourceHydration } from './task-metadata-hydration';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** How many tasks to process per batch before yielding to the event loop.
  *  Balances throughput (fewer yields = fewer context switches) against
@@ -161,7 +156,18 @@ export async function upsertTasks(
   const identityBlocks: GitHubTaskIdentityBlockSummary = { count: 0, outcomes: {} };
   const audit = auditLog || [];
   const now = new Date().toISOString();
-  const caps = await getConnectorCapabilities(connectorId);
+  const repositories = await getWorkerPersistenceRepositories();
+  const execution = repositories.execution;
+  execution.support.assertConnectorSupported(connector);
+  const pullPersistence = execution.pulls;
+  const persistedConnector = await repositories.connectors.get(connectorId);
+  const caps = persistedConnector
+    ? resolvePersistedConnectorCapabilities({
+        type: persistedConnector.type,
+        capabilities: persistedConnector.capabilities,
+        settings: persistedConnector.settings,
+      })
+    : connector.capabilities ?? null;
   const canSyncTags = !caps || caps.tags !== false;
   const remoteSourceIds = new Set<string>();
   const tempIdToDbId = new Map<string, string>();
@@ -175,26 +181,17 @@ export async function upsertTasks(
   let githubHierarchyGenerationComplete = true;
 
   // ─── PRE-FETCH: Load all existing tasks for this connector in one query ───
-  const existingTaskRows = await db.select()
-    .from(tasks)
-    .where(eq(tasks.connectorInstanceId, connectorId));
-  const archivedRecurringDuplicateRows = connector.type === 'microsoft-todo'
-    ? await db.select({ sourceId: syncDeletionSnapshots.sourceId })
-        .from(syncDeletionSnapshots)
-        .where(and(
-          eq(syncDeletionSnapshots.connectorId, connectorId),
-          like(
-            syncDeletionSnapshots.reason,
-            'Duplicate open Microsoft To Do recurrence%',
-          ),
-        ))
-    : [];
+  const snapshot = await pullPersistence.loadSnapshot(connectorId, {
+    includeArchivedRecurringDuplicates: connector.type === 'microsoft-todo',
+    includeLinkedSources: connector.type === 'github-issues' && Boolean(identityRuntime),
+  });
+  const existingTaskRows = snapshot.tasks;
   const archivedRecurringDuplicateSourceIds = new Set(
-    archivedRecurringDuplicateRows.map(row => row.sourceId),
+    snapshot.archivedRecurringDuplicateSourceIds,
   );
 
-  const existingBySourceId = new Map<string, typeof existingTaskRows[number]>();
-  const existingById = new Map<string, typeof existingTaskRows[number]>();
+  const existingBySourceId = new Map<string, ConnectorTaskRecord>();
+  const existingById = new Map<string, ConnectorTaskRecord>();
   const openRecurringTitleKeys = connector.type === 'microsoft-todo'
     ? inferRecurringTitleKeys(existingTaskRows.filter(row => row.depth === 0))
     : new Set<string>();
@@ -209,30 +206,7 @@ export async function upsertTasks(
       openRecurringTitleKeys.add(getRecurringTitleKey(row));
     }
   }
-  const githubLinkedSourceRows = connector.type === 'github-issues'
-    && Boolean(identityRuntime)
-    ? await db.select({
-        id: taskLinkedSources.id,
-        taskId: taskLinkedSources.taskId,
-        sourceId: taskLinkedSources.sourceId,
-        entityProvider: externalEntities.provider,
-        entityHostKey: externalEntities.hostKey,
-        entityType: externalEntities.entityType,
-        entityStableId: externalEntities.stableId,
-      }).from(taskLinkedSources)
-        .leftJoin(
-          taskLinkedSourceEntities,
-          eq(taskLinkedSourceEntities.linkedSourceId, taskLinkedSources.id),
-        )
-        .leftJoin(
-          externalEntities,
-          eq(externalEntities.id, taskLinkedSourceEntities.externalEntityId),
-        )
-        .where(and(
-        eq(taskLinkedSources.connectorInstanceId, connectorId),
-        eq(taskLinkedSources.connectorType, 'github-issues'),
-      ))
-    : [];
+  const githubLinkedSourceRows = snapshot.linkedSources;
   const githubLinkedSourceBySourceId = new Map(
     githubLinkedSourceRows.map((row) => [row.sourceId, row]),
   );
@@ -257,14 +231,6 @@ export async function upsertTasks(
   const existingSourceListIds = new Set<string>();
   for (const row of existingTaskRows) {
     if (row.sourceListId) existingSourceListIds.add(row.sourceListId);
-  }
-
-  // ─── PRE-FETCH: Load all tag slugs for batch tag resolution ───────────────
-  const allTagRows = await db.select({ id: tagsTable.id, slug: tagsTable.slug, type: tagsTable.type })
-    .from(tagsTable);
-  const tagsBySlug = new Map<string, { id: string; type: string }>();
-  for (const row of allTagRows) {
-    tagsBySlug.set(row.slug, { id: row.id, type: row.type });
   }
 
   // Build list name lookup
@@ -432,9 +398,10 @@ export async function upsertTasks(
                 ? `${locator.owner}/${locator.repository}:${locator.issueNumber}`
                 : null;
               if (currentSourceId && linked.sourceId !== currentSourceId) {
-                await db.update(taskLinkedSources).set({
-                  sourceId: currentSourceId,
-                }).where(eq(taskLinkedSources.id, linked.linkedSourceId));
+                await pullPersistence.updateLinkedSourceLocator(
+                  linked.linkedSourceId,
+                  currentSourceId,
+                );
                 linked.sourceId = currentSourceId;
               }
             }
@@ -485,12 +452,10 @@ export async function upsertTasks(
       const batch = listTasks.slice(batchStart, batchStart + BATCH_SIZE);
 
       // Collect new task rows for bulk insert
-      const pendingInserts: Array<{ row: typeof tasks.$inferInsert; remoteTask: TaskItem }> = [];
-      // Collect tag work to execute after the bulk insert
-      const pendingTagWork: Array<{ taskId: string; tags: Array<{ name: string; slug: string; type: string; source?: string; confirmed?: boolean; color?: string | null }> }> = [];
+      const pendingInserts: Array<{ row: ConnectorTaskRecord; remoteTask: TaskItem }> = [];
       // Track tasks that need individual updates (conflict resolution / remote-newer)
-      const pendingUpdates: Array<{ existing: typeof existingTaskRows[number]; remoteTask: TaskItem }> = [];
-      const pendingAdoptions: Array<{ existing: typeof existingTaskRows[number]; remoteTask: TaskItem }> = [];
+      const pendingUpdates: Array<{ existing: ConnectorTaskRecord; remoteTask: TaskItem }> = [];
+      const pendingAdoptions: Array<{ existing: ConnectorTaskRecord; remoteTask: TaskItem }> = [];
 
       for (const remoteTask of batch) {
         remoteSourceIds.add(remoteTask.sourceId);
@@ -545,13 +510,17 @@ export async function upsertTasks(
             title: remoteTask.title,
             description: remoteTask.description || null,
             status: remoteTask.status,
+            localDisposition: 'active',
             microStatus: remoteTask.microStatus || null,
             statusReason: remoteTask.statusReason || null,
             priority: remoteTask.priority || 'none',
+            planningHorizon: null,
             dueDate: remoteTask.dueDate || null,
+            pushCount: 0,
             createdAt: remoteTask.createdAt || now,
             updatedAt: remoteTask.updatedAt || now,
             completedAt: remoteTask.completedAt || null,
+            recurrenceGeneratedFromTaskId: null,
             snoozedUntil: remoteTask.snoozedUntil || null,
             parentId: remoteTask.parentId || null,
             depth: remoteTask.depth || 0,
@@ -559,11 +528,18 @@ export async function upsertTasks(
             sourceListId: remoteTask.sourceListId || null,
             sourceListName: (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || remoteTask.sourceListName || null,
             assignee: remoteTask.assignee || null,
-            metadata: JSON.stringify(remoteTask.metadata || {}),
+            metadata: remoteTask.metadata || {},
             syncStatus: 'synced' as const,
             lastSyncedAt: now,
+            pushRetryCount: 0,
+            kanbanColumn: null,
+            kanbanOrder: null,
+            reminderAt: null,
+            reminderRelative: null,
+            reminderDueTime: null,
+            effort: remoteTask.effort ?? null,
             isBulkImport: isInitialSync || (!!remoteTask.sourceListId && !existingSourceListIds.has(remoteTask.sourceListId)),
-          };
+          } satisfies ConnectorTaskRecord;
 
           pendingInserts.push({ row: insertedTask, remoteTask });
         } else {
@@ -586,9 +562,7 @@ export async function upsertTasks(
             // Refs: #1692
             if (stableDecision?.outcome === 'locator_change') {
               identityRuntime?.assertDecisionsCurrent([stableDecision]);
-              await db.update(tasks).set({
-                sourceId: remoteTask.sourceId,
-              }).where(eq(tasks.id, existing.id));
+              await pullPersistence.updateTaskSourceId(existing.id, remoteTask.sourceId);
               existingBySourceId.delete(existing.sourceId);
               const refreshed = { ...existing, sourceId: remoteTask.sourceId };
               existingBySourceId.set(remoteTask.sourceId, refreshed);
@@ -642,20 +616,13 @@ export async function upsertTasks(
 
       for (const { existing, remoteTask } of pendingAdoptions) {
         const hasLocalEdits = existing.updatedAt > existing.createdAt;
-        const adopted = await db.update(tasks).set({
-          sourceId: remoteTask.sourceId,
-          syncStatus: hasLocalEdits ? 'pending_push' : 'synced',
-          lastSyncedAt: now,
-        }).where(and(
-          eq(tasks.id, existing.id),
-          like(tasks.sourceId, 'local:%'),
-        )).returning().get();
-        const [persisted] = adopted
-          ? [adopted]
-          : await db.select().from(tasks).where(and(
-              eq(tasks.connectorInstanceId, connectorId),
-              eq(tasks.sourceId, remoteTask.sourceId),
-            )).limit(1);
+        const persisted = await pullPersistence.adoptLocalTask({
+          taskId: existing.id,
+          connectorId,
+          remoteSourceId: remoteTask.sourceId,
+          hasLocalEdits,
+          now,
+        });
         if (!persisted) {
           throw new Error(`Failed to adopt pushed task ${remoteTask.sourceId}`);
         }
@@ -666,7 +633,8 @@ export async function upsertTasks(
           tasksToIndex.push(persisted as SearchableTask);
         } else {
           const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-          const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, tagsBySlug, caps);
+          const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, caps);
+          if (!indexedTask) continue;
           tasksToIndex.push(indexedTask);
         }
         if (!countedSourceIds.has(remoteTask.sourceId)) {
@@ -691,41 +659,28 @@ export async function upsertTasks(
             return decision ? [decision] : [];
           }),
         );
-        const insertedRows = await db.insert(tasks)
-          .values(pendingInserts.map(candidate => candidate.row))
-          .onConflictDoNothing()
-          .returning();
-        const insertedBySourceId = new Map(insertedRows.map(row => [row.sourceId, row]));
-        const conflictSourceIds = pendingInserts
-          .map(candidate => candidate.row.sourceId)
-          .filter(sourceId => !insertedBySourceId.has(sourceId));
-        const conflictRows = conflictSourceIds.length > 0
-          ? await db.select()
-              .from(tasks)
-              .where(
-                and(
-                  eq(tasks.connectorInstanceId, connectorId),
-                  inArray(tasks.sourceId, conflictSourceIds),
-                )
-              )
-          : [];
-        const conflictBySourceId = new Map(conflictRows.map(row => [row.sourceId, row]));
+        const persistedBatch = await pullPersistence.insertBatch(
+          pendingInserts.map(({ row, remoteTask }) => ({
+            task: row,
+            tags: canSyncTags ? remoteTask.tags ?? [] : [],
+          })),
+        );
+        const persistedBySourceId = new Map(
+          persistedBatch.records.map(row => [row.sourceId, row]),
+        );
 
         for (const { row, remoteTask } of pendingInserts) {
-          const inserted = insertedBySourceId.get(row.sourceId);
-          const persisted = inserted ?? conflictBySourceId.get(row.sourceId);
+          const persisted = persistedBySourceId.get(row.sourceId);
           if (!persisted) {
             throw new Error(`Task upsert failed to persist source ${row.sourceId}`);
           }
+          const inserted = persistedBatch.insertedIds.has(row.id);
 
           existingBySourceId.set(row.sourceId, persisted);
           if (remoteTask.id) tempIdToDbId.set(remoteTask.id, persisted.id);
 
           if (inserted) {
             tasksToIndex.push(row as SearchableTask);
-            if (canSyncTags && remoteTask.tags && remoteTask.tags.length > 0) {
-              pendingTagWork.push({ taskId: persisted.id, tags: remoteTask.tags });
-            }
             if (!countedSourceIds.has(remoteTask.sourceId)) {
               countedSourceIds.add(remoteTask.sourceId);
               added++;
@@ -737,8 +692,8 @@ export async function upsertTasks(
             }
           } else {
             const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-            const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, tagsBySlug, caps);
-            tasksToIndex.push(indexedTask);
+            const indexedTask = await applyRemoteUpdate(persisted, remoteTask, now, canSyncTags, resolvedName, caps);
+            if (indexedTask) tasksToIndex.push(indexedTask);
             if (!countedSourceIds.has(remoteTask.sourceId)) {
               countedSourceIds.add(remoteTask.sourceId);
               updated++;
@@ -754,7 +709,8 @@ export async function upsertTasks(
         const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
         if (decision) identityRuntime?.assertDecisionsCurrent([decision]);
         const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
-        const indexedTask = await applyRemoteUpdate(existing, remoteTask, now, canSyncTags, resolvedName, tagsBySlug, caps);
+        const indexedTask = await applyRemoteUpdate(existing, remoteTask, now, canSyncTags, resolvedName, caps);
+        if (!indexedTask) continue;
         tasksToIndex.push(indexedTask);
         if (existing.sourceId !== remoteTask.sourceId) {
           const refreshed = { ...existing, sourceId: remoteTask.sourceId };
@@ -767,13 +723,6 @@ export async function upsertTasks(
           updated++;
         }
         if ((ui + 1) % 10 === 0) await yieldToEventLoop();
-      }
-
-      // ─── Execute tag operations for new tasks ──────────────────────────
-      for (let ti = 0; ti < pendingTagWork.length; ti++) {
-        const { taskId, tags } = pendingTagWork[ti];
-        await upsertTaskTags(taskId, tags, tagsBySlug, true);
-        if ((ti + 1) % 10 === 0) await yieldToEventLoop();
       }
 
       if (identityRuntime) {
@@ -981,14 +930,7 @@ export async function upsertTasks(
 
   // ─── PARENT ID RESOLUTION ─────────────────────────────────────
   // Use the pre-fetched map instead of individual queries
-  const orphanedItems = await db.select({ id: tasks.id, sourceId: tasks.sourceId, parentId: tasks.parentId })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorInstanceId, connectorId),
-        eq(tasks.isChecklistItem, true),
-      )
-    );
+  const orphanedItems = await pullPersistence.listChecklistItems(connectorId);
 
   // Build sourceId → dbId lookup from pre-fetched data
   const sourceIdToDbId = new Map<string, string>();
@@ -997,12 +939,13 @@ export async function upsertTasks(
   }
 
   let resolveCount = 0;
+  const parentCorrections: Array<{ taskId: string; parentId: string }> = [];
   for (const item of orphanedItems) {
     if (!item.parentId) continue;
     if (tempIdToDbId.has(item.parentId)) {
       const resolvedId = tempIdToDbId.get(item.parentId)!;
       if (resolvedId !== item.parentId) {
-        await db.update(tasks).set({ parentId: resolvedId }).where(eq(tasks.id, item.id));
+        parentCorrections.push({ taskId: item.id, parentId: resolvedId });
       }
     } else {
       const parts = item.sourceId.split(':');
@@ -1010,7 +953,7 @@ export async function upsertTasks(
         const parentSourceId = parts.slice(0, -1).join(':');
         const parentDbId = sourceIdToDbId.get(parentSourceId);
         if (parentDbId && parentDbId !== item.parentId) {
-          await db.update(tasks).set({ parentId: parentDbId }).where(eq(tasks.id, item.id));
+          parentCorrections.push({ taskId: item.id, parentId: parentDbId });
         }
       }
     }
@@ -1018,6 +961,9 @@ export async function upsertTasks(
     if (++resolveCount % BATCH_SIZE === 0) {
       await yieldToEventLoop();
     }
+  }
+  if (parentCorrections.length > 0) {
+    await pullPersistence.correctParents(parentCorrections);
   }
 
   // ─── RECURRING TASK CLEANUP ──────────────────────────────────────
@@ -1084,14 +1030,13 @@ function linkedSourceStableIdentityKey(hostKey: string, stableId: string): strin
 }
 
 async function applyRemoteUpdate(
-  existingTask: typeof tasks.$inferSelect,
+  existingTask: ConnectorTaskRecord,
   remote: TaskItem,
   now: string,
   canSyncTags = true,
   resolvedListName?: string | null,
-  tagsBySlug?: Map<string, { id: string; type: string }>,
   caps?: ConnectorCapabilities | null,
-): Promise<SearchableTask> {
+): Promise<SearchableTask | null> {
   // When the connector doesn't support a field, preserve the MC-local value
   // instead of overwriting it with the remote's null/empty value.
   const connectorHasDueDate = caps?.dueDate === true;
@@ -1148,7 +1093,7 @@ async function applyRemoteUpdate(
     updatedAt: remote.updatedAt || now,
   };
 
-  const taskUpdate: Partial<typeof tasks.$inferInsert> = {
+  const taskUpdate: ConnectorTaskUpdate = {
     sourceId: remote.sourceId,
     title: indexedTask.title,
     description: indexedTask.description,
@@ -1174,7 +1119,7 @@ async function applyRemoteUpdate(
     sourceListName: indexedTask.sourceListName,
     connectorType: indexedTask.connectorType,
     assignee: remote.assignee || null,
-    metadata: JSON.stringify({ ...existingMetadata, ...remoteMetadata }),
+    metadata: { ...existingMetadata, ...remoteMetadata },
     syncStatus: 'synced',
     lastSyncedAt: now,
   };
@@ -1198,14 +1143,15 @@ async function applyRemoteUpdate(
     taskUpdate.depth = remote.depth ?? existingTask.depth;
   }
 
-  await db.update(tasks).set(taskUpdate)
-    .where(and(eq(tasks.id, existingTask.id), eq(tasks.syncStatus, existingTask.syncStatus)));
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
+  const applied = await persistence.applyRemoteUpdate({
+    taskId: existingTask.id,
+    expectedSyncStatus: existingTask.syncStatus,
+    values: taskUpdate,
+    sourceTags: canSyncTags ? remote.tags || [] : undefined,
+  });
 
-  if (canSyncTags) {
-    await upsertTaskTags(existingTask.id, remote.tags || [], tagsBySlug);
-  }
-
-  return indexedTask;
+  return applied ? indexedTask : null;
 }
 
 function parseTaskMetadata(metadata: unknown): Record<string, unknown> {
@@ -1235,12 +1181,11 @@ interface ArchivedTreeTask {
 }
 
 async function deleteSyncedTask(taskId: string, reason: string): Promise<ArchivedTreeTask[]> {
-  const childTasks = await db.select({ id: tasks.id })
-    .from(tasks)
-    .where(eq(tasks.parentId, taskId));
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
+  const childTasks = await persistence.listChildren(taskId);
   const archivedTasks: ArchivedTreeTask[] = [];
-  for (const childTask of childTasks) {
-    archivedTasks.push(...await deleteSyncedTask(childTask.id, `${reason} (child task)`));
+  for (const childTaskId of childTasks) {
+    archivedTasks.push(...await deleteSyncedTask(childTaskId, `${reason} (child task)`));
   }
   const archived = await archiveAndDeleteTask(taskId, reason);
   if (archived) {
@@ -1259,88 +1204,15 @@ async function deleteSyncedTask(taskId: string, reason: string): Promise<Archive
 
 export async function upsertTaskTags(
   taskId: string,
-  remoteTags: Array<{ name: string; slug: string; type: string; source?: string; confirmed?: boolean; color?: string | null }>,
+  remoteTags: PullTag[],
   tagsBySlug?: Map<string, { id: string; type: string }>,
   /** When true, skip querying for existing tag links (used for newly-inserted tasks). */
   isNewTask?: boolean,
 ): Promise<void> {
-  // For new tasks there are no existing links to clean up — skip the 2 SELECTs + DELETE
-  if (!isNewTask) {
-    const existingLinks = await db.select({ tagId: taskTags.tagId })
-      .from(taskTags)
-      .where(eq(taskTags.taskId, taskId));
-
-    if (existingLinks.length > 0) {
-      const linkedTagIds = existingLinks.map(l => l.tagId);
-      const linkedTags = await db.select({ id: tagsTable.id, type: tagsTable.type })
-        .from(tagsTable)
-        .where(inArray(tagsTable.id, linkedTagIds));
-
-      const sourceTagIds = linkedTags
-        .filter(t => t.type === 'source')
-        .map(t => t.id);
-
-      if (sourceTagIds.length > 0) {
-        await db.delete(taskTags).where(
-          and(eq(taskTags.taskId, taskId), inArray(taskTags.tagId, sourceTagIds))
-        );
-      }
-    }
-  }
-
-  for (const tag of remoteTags) {
-    // Use pre-fetched tag cache when available
-    const cached = tagsBySlug?.get(tag.slug);
-    let tagId: string;
-
-    if (cached) {
-      tagId = cached.id;
-      if (tag.color) {
-        await db.update(tagsTable).set({ color: tag.color }).where(eq(tagsTable.id, tagId));
-      }
-    } else {
-      const [existing] = await db.select({ id: tagsTable.id })
-        .from(tagsTable)
-        .where(eq(tagsTable.slug, tag.slug))
-        .limit(1);
-
-      if (existing) {
-        tagId = existing.id;
-        if (tag.color) {
-          await db.update(tagsTable).set({ color: tag.color }).where(eq(tagsTable.id, tagId));
-        }
-        // Update cache
-        if (tagsBySlug) tagsBySlug.set(tag.slug, { id: tagId, type: tag.type || 'source' });
-      } else {
-        tagId = randomUUID();
-        await db.insert(tagsTable).values({
-          id: tagId,
-          name: tag.name,
-          slug: tag.slug,
-          type: tag.type || 'source',
-          source: tag.source || null,
-          color: tag.color || null,
-          confirmed: tag.confirmed ?? true,
-          createdAt: new Date().toISOString(),
-        });
-        // Update cache
-        if (tagsBySlug) tagsBySlug.set(tag.slug, { id: tagId, type: tag.type || 'source' });
-      }
-    }
-
-    if (isNewTask) {
-      // For new tasks, no existing links — skip the duplicate check and batch-insert
-      await db.insert(taskTags).values({ taskId, tagId });
-    } else {
-      const [alreadyLinked] = await db.select({ tagId: taskTags.tagId })
-        .from(taskTags)
-        .where(and(eq(taskTags.taskId, taskId), eq(taskTags.tagId, tagId)))
-        .limit(1);
-      if (!alreadyLinked) {
-        await db.insert(taskTags).values({ taskId, tagId });
-      }
-    }
-  }
+  void tagsBySlug;
+  void isNewTask;
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
+  await persistence.replaceSourceTags(taskId, remoteTags);
 }
 
 /**
@@ -1350,22 +1222,9 @@ async function cleanupCompletedRecurringTasks(
   connectorId: string,
   audit: SyncAuditEntry[],
 ): Promise<number> {
-  const completedTasks = await db.select({
-    id: tasks.id,
-    title: tasks.title,
-    sourceId: tasks.sourceId,
-    sourceListId: tasks.sourceListId,
-    completedAt: tasks.completedAt,
-    updatedAt: tasks.updatedAt,
-    metadata: tasks.metadata,
-  })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorInstanceId, connectorId),
-        eq(tasks.status, 'done'),
-      )
-    );
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
+  const completedTasks = (await persistence.listTasks(connectorId))
+    .filter((task) => task.status === 'done');
 
   const groups = new Map<string, Array<{ id: string; sourceId: string; title: string; completedAt: string | null; updatedAt: string }>>();
 
@@ -1413,39 +1272,12 @@ async function cleanupOpenRecurringTasks(
   connectorId: string,
   audit: SyncAuditEntry[],
 ): Promise<number> {
-  const openTasks = await db.select({
-    id: tasks.id,
-    title: tasks.title,
-    sourceId: tasks.sourceId,
-    sourceListId: tasks.sourceListId,
-    dueDate: tasks.dueDate,
-    updatedAt: tasks.updatedAt,
-    metadata: tasks.metadata,
-  })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorInstanceId, connectorId),
-        inArray(tasks.status, ['todo', 'in_progress']),
-        eq(tasks.depth, 0),
-      )
-    );
-
-  const historyTasks = await db.select({
-    title: tasks.title,
-    sourceListId: tasks.sourceListId,
-    status: tasks.status,
-    dueDate: tasks.dueDate,
-    completedAt: tasks.completedAt,
-    metadata: tasks.metadata,
-  })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorInstanceId, connectorId),
-        eq(tasks.depth, 0),
-      )
-    );
+  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
+  const historyTasks = (await persistence.listTasks(connectorId))
+    .filter((task) => task.depth === 0);
+  const openTasks = historyTasks.filter(
+    (task) => task.status === 'todo' || task.status === 'in_progress',
+  );
   const knownRecurringTitleKeys = inferRecurringTitleKeys(historyTasks);
   const duplicateGroups = findOpenRecurringTaskDuplicates(
     openTasks,

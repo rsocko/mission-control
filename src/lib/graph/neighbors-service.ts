@@ -1,8 +1,9 @@
 import 'server-only';
 
-import { and, asc, eq, inArray, or, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import db from '@/db';
 import {
+  connectorConfigs,
   hubProjects,
   projectPhaseItems,
   projectPhases,
@@ -12,7 +13,9 @@ import {
   tasks,
   taskTags,
 } from '@/db/schema';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { findSimilarTaskEmbeddings } from '@/lib/search/semantic';
+import { isUniverseSemanticNeighborsEnabled } from './universe-semantic-config';
 import {
   boundGraph,
   canonicalizeExplicitEdge,
@@ -48,7 +51,37 @@ export interface NodeNeighborQuery {
   maxNodes?: number;
   maxEdges?: number;
   semanticTopK?: number;
+  eligibleTaskIds?: string[];
   authorizeTask?: (taskId: string) => boolean | Promise<boolean>;
+}
+
+function visibleTaskCondition(): SQL {
+  return and(
+    sql`${tasks.connectorInstanceId} NOT IN (
+      SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
+      WHERE ${connectorConfigs.deletedAt} IS NOT NULL
+    )`,
+    notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
+  ) as SQL;
+}
+
+function visibleDependencyNeighborCondition(taskId: string): SQL {
+  const neighborId = sql`CASE
+    WHEN ${taskDependencies.taskId} = ${taskId}
+    THEN ${taskDependencies.dependsOnTaskId}
+    ELSE ${taskDependencies.taskId}
+  END`;
+  return sql`${neighborId} IN (
+    SELECT ${tasks.id} FROM ${tasks}
+    WHERE ${tasks.connectorInstanceId} NOT IN (
+      SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
+      WHERE ${connectorConfigs.deletedAt} IS NOT NULL
+    )
+    AND ${tasks.connectorType} NOT IN (${sql.join(
+      [...NOTIFICATION_ONLY_CONNECTOR_TYPES].map((type) => sql`${type}`),
+      sql`, `,
+    )})
+  )`;
 }
 
 function normalizeStatus(status: string, microStatus?: string | null) {
@@ -172,7 +205,7 @@ async function getAggregateNodeNeighbors(
   nodeRef: Exclude<NeighborNodeRef, { kind: 'task' }>,
   include: Set<NeighborRelationship>,
   budgets: { maxNodes: number; maxEdges: number },
-  authorizeTask?: NodeNeighborQuery['authorizeTask'],
+  eligibleTaskIds?: string[],
 ) {
   let centerNode: SharedGraphNode;
   let taskRows: Array<{
@@ -197,10 +230,14 @@ async function getAggregateNodeNeighbors(
       label: tag.name,
       color: tag.color,
     };
-    taskRows = await db.select(neighborTaskColumns)
+    taskRows = eligibleTaskIds?.length === 0 ? [] : await db.select(neighborTaskColumns)
       .from(taskTags)
       .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
-      .where(eq(taskTags.tagId, nodeRef.id))
+      .where(and(
+        eq(taskTags.tagId, nodeRef.id),
+        visibleTaskCondition(),
+        eligibleTaskIds ? inArray(tasks.id, eligibleTaskIds) : undefined,
+      ))
       .orderBy(asc(tasks.id))
       .limit(budgets.maxNodes);
   } else if (nodeRef.kind === 'project') {
@@ -221,10 +258,14 @@ async function getAggregateNodeNeighbors(
       status: normalizeStatus(project.status),
       color: project.color,
     };
-    taskRows = await db.select(neighborTaskColumns)
+    taskRows = eligibleTaskIds?.length === 0 ? [] : await db.select(neighborTaskColumns)
       .from(taskProjects)
       .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-      .where(eq(taskProjects.projectId, nodeRef.id))
+      .where(and(
+        eq(taskProjects.projectId, nodeRef.id),
+        visibleTaskCondition(),
+        eligibleTaskIds ? inArray(tasks.id, eligibleTaskIds) : undefined,
+      ))
       .orderBy(asc(tasks.id))
       .limit(budgets.maxNodes);
   } else {
@@ -258,24 +299,20 @@ async function getAggregateNodeNeighbors(
       }
       condition = listCondition;
     }
-    taskRows = await db.select(neighborTaskColumns)
+    taskRows = eligibleTaskIds?.length === 0 ? [] : await db.select(neighborTaskColumns)
       .from(tasks)
-      .where(condition)
+      .where(and(
+        condition,
+        visibleTaskCondition(),
+        eligibleTaskIds ? inArray(tasks.id, eligibleTaskIds) : undefined,
+      ))
       .orderBy(asc(tasks.id))
       .limit(budgets.maxNodes);
     if (!taskRows.length) throw new GraphNodeNotFoundError('Graph node not found');
   }
 
-  if (authorizeTask) {
-    const candidateCount = taskRows.length;
-    const authorized = await Promise.all(taskRows.map(async (task) => ({
-      task,
-      allowed: await authorizeTask(task.id),
-    })));
-    taskRows = authorized.filter((result) => result.allowed).map((result) => result.task);
-    if (candidateCount > 0 && taskRows.length === 0) {
-      throw new GraphAuthorizationError('Access to this graph node is forbidden');
-    }
+  if (eligibleTaskIds && taskRows.length === 0) {
+    throw new GraphNodeNotFoundError('Graph node not found');
   }
   if (!include.has('derived')) taskRows = [];
   const sourceTruncated = taskRows.length >= budgets.maxNodes;
@@ -328,10 +365,33 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     neighborQuery: true,
   });
   const semanticTopK = normalizeSemanticTopK(input.semanticTopK);
+  let eligibleTaskIds = input.eligibleTaskIds;
+  if (input.authorizeTask) {
+    if (!eligibleTaskIds) {
+      throw new GraphAuthorizationError(
+        'An eligible task scope is required before authorized neighborhood expansion',
+      );
+    }
+    const authorized = await Promise.all(eligibleTaskIds.map(async (id) => ({
+      id,
+      allowed: await input.authorizeTask?.(id),
+    })));
+    eligibleTaskIds = authorized
+      .filter((candidate) => candidate.allowed)
+      .map((candidate) => candidate.id);
+  }
   if (nodeRef.kind !== 'task') {
-    return getAggregateNodeNeighbors(nodeRef, include, budgets, input.authorizeTask);
+    return getAggregateNodeNeighbors(
+      nodeRef,
+      include,
+      budgets,
+      eligibleTaskIds,
+    );
   }
   const taskId = nodeRef.id;
+  if (eligibleTaskIds && !eligibleTaskIds.includes(taskId)) {
+    throw new GraphAuthorizationError('Access to this graph node is forbidden');
+  }
   if (input.authorizeTask && !await input.authorizeTask(taskId)) {
     throw new GraphAuthorizationError('Access to this graph node is forbidden');
   }
@@ -347,7 +407,7 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     sourceListId: tasks.sourceListId,
     sourceListName: tasks.sourceListName,
     effort: tasks.effort,
-  }).from(tasks).where(eq(tasks.id, taskId));
+  }).from(tasks).where(and(eq(tasks.id, taskId), visibleTaskCondition()));
   if (!center) {
     throw new GraphNodeNotFoundError('Graph node not found');
   }
@@ -358,30 +418,65 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
   const edges = new Map<string, SharedGraphEdge>();
 
   if (include.has('explicit')) {
-    const dependencies = await db.select().from(taskDependencies).where(or(
-      eq(taskDependencies.taskId, taskId),
-      eq(taskDependencies.dependsOnTaskId, taskId),
-    )).orderBy(asc(taskDependencies.createdAt), asc(taskDependencies.id));
+    const eligibleIds = eligibleTaskIds;
+    const dependencyScope = eligibleIds
+      ? eligibleIds.length
+        ? or(
+            and(
+              eq(taskDependencies.taskId, taskId),
+              inArray(taskDependencies.dependsOnTaskId, eligibleIds),
+            ),
+            and(
+              eq(taskDependencies.dependsOnTaskId, taskId),
+              inArray(taskDependencies.taskId, eligibleIds),
+            ),
+          )
+        : undefined
+      : or(
+          eq(taskDependencies.taskId, taskId),
+          eq(taskDependencies.dependsOnTaskId, taskId),
+        );
+    const visibleDependencyScope = dependencyScope
+      ? and(dependencyScope, visibleDependencyNeighborCondition(taskId))
+      : undefined;
+    const dependencies = visibleDependencyScope
+      ? await db.select().from(taskDependencies)
+          .where(visibleDependencyScope)
+          .orderBy(asc(taskDependencies.createdAt), asc(taskDependencies.id))
+          .limit(budgets.maxEdges + 1)
+      : [];
     const neighborTaskIds = [...new Set(dependencies.flatMap((dependency) => [
       dependency.taskId,
       dependency.dependsOnTaskId,
     ]).filter((id) => id !== taskId))];
-    const dependencyTasks = neighborTaskIds.length
+    const eligibleNeighborTaskIds = neighborTaskIds;
+    const dependencyTasks = eligibleNeighborTaskIds.length
       ? await db.select({
           id: tasks.id,
           title: tasks.title,
           description: tasks.description,
           status: tasks.status,
           microStatus: tasks.microStatus,
-        }).from(tasks).where(inArray(tasks.id, neighborTaskIds))
+        }).from(tasks).where(and(
+          inArray(tasks.id, eligibleNeighborTaskIds),
+          visibleTaskCondition(),
+        ))
       : [];
     const dependencyTaskById = new Map(dependencyTasks.map((task) => [task.id, task]));
-    for (const taskId of neighborTaskIds) {
+    for (const taskId of eligibleNeighborTaskIds) {
       const dependencyTask = dependencyTaskById.get(taskId);
       if (!dependencyTask) continue;
       nodes.set(`task:${dependencyTask.id}`, taskNode(dependencyTask));
     }
     for (const dependency of dependencies) {
+      if (
+        dependency.taskId !== taskId
+        && !eligibleNeighborTaskIds.includes(dependency.taskId)
+      ) continue;
+      if (
+        dependency.dependsOnTaskId !== taskId
+        && !eligibleNeighborTaskIds.includes(dependency.dependsOnTaskId)
+      ) continue;
       const metadata = {
         id: `dependency:${dependency.id}`,
         source: `task:${dependency.dependsOnTaskId}`,
@@ -521,6 +616,8 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     status:
       | 'not-requested'
       | 'available'
+      | 'partial'
+      | 'denied'
       | 'unavailable'
       | 'missing'
       | 'stale'
@@ -528,13 +625,37 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     note?: string;
   } = { requested: false, status: 'not-requested' };
   if (include.has('semantic')) {
-    const similarity = await findSimilarTaskEmbeddings(taskId, { limit: semanticTopK });
+    if (!isUniverseSemanticNeighborsEnabled()) {
+      semantic = {
+        requested: true,
+        status: 'denied',
+        note: 'Universe semantic neighborhoods are disabled by the independent feature gate.',
+      };
+    } else {
+      const deletedConnectorRows = await db.select({ id: connectorConfigs.id })
+        .from(connectorConfigs)
+        .where(sql`${connectorConfigs.deletedAt} IS NOT NULL`);
+      const similarity = await findSimilarTaskEmbeddings(taskId, {
+        limit: semanticTopK,
+        eligibleTaskIds,
+        eligibilityFilters: [
+          {
+            keys: ['connectorType'],
+            match: 'none',
+            values: [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+          },
+        ],
+        excludedConnectorInstanceIds: deletedConnectorRows.map((row) => row.id),
+      });
     semantic = {
       requested: true,
       status: similarity.status,
       ...('note' in similarity ? { note: similarity.note } : {}),
     };
-    if (similarity.status === 'available' && similarity.neighbors.length) {
+    if (
+      (similarity.status === 'available' || similarity.status === 'partial')
+      && similarity.neighbors.length
+    ) {
       const semanticTasks = await db.select({
         id: tasks.id,
         title: tasks.title,
@@ -556,12 +677,17 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
           embedding: {
             provider: similarity.provider,
             model: similarity.model,
+            indexId: similarity.indexId,
+            projectionVersion: similarity.projectionVersion,
             sourceUpdatedAt: similarity.sourceUpdatedAt,
-            targetUpdatedAt: neighbor.embeddingUpdatedAt,
+            targetUpdatedAt: neighbor.sourceUpdatedAt,
+            sourceEmbeddedAt: similarity.sourceEmbeddedAt,
+            targetEmbeddedAt: neighbor.embeddedAt,
           },
         });
         edges.set(edge.id, edge);
       }
+    }
     }
   }
 

@@ -1,5 +1,6 @@
 import db, { sqlite } from '@/db';
 import { notifications, tasks } from '@/db/schema';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import type {
   KeywordSearchRepository,
   SearchFilters,
@@ -238,6 +239,12 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
           AND (? = 0 OR LOWER(t.status) <> 'done')
+          AND (? = 0 OR (
+            t.parent_id IS NULL
+            AND t.local_disposition = 'active'
+            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+            AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
+          ))
         ORDER BY rank
         LIMIT ?
       `
@@ -250,6 +257,9 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
       status,
       status,
       filters.excludeDone ? 1 : 0,
+      filters.universeEligible ? 1 : 0,
+      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
+      JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
       rowid: number;
@@ -315,6 +325,12 @@ function searchTasksByIssueNumber(
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
           AND (? = 0 OR LOWER(t.status) <> 'done')
+          AND (? = 0 OR (
+            t.parent_id IS NULL
+            AND t.local_disposition = 'active'
+            AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+            AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
+          ))
         ORDER BY t.updated_at DESC
         LIMIT ?
       `,
@@ -327,6 +343,9 @@ function searchTasksByIssueNumber(
       status,
       status,
       filters.excludeDone ? 1 : 0,
+      filters.universeEligible ? 1 : 0,
+      ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
+      JSON.stringify(filters.excludeConnectorInstanceIds ?? []),
       limit,
     ) as Array<{
       id: string;

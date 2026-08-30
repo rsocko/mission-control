@@ -1267,6 +1267,38 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       sql += ` AND v.sensitivity IN (${request.sensitivities.map(() => '?').join(', ')})`;
       params.push(...request.sensitivities);
     }
+    if (request.includeEntityIds) {
+      if (request.includeEntityIds.length === 0) {
+        return {
+          identityId: identity.id,
+          results: [],
+          scan: {
+            kind: 'bounded-in-process',
+            candidatesScanned: 0,
+            candidateCeiling: ceiling,
+            guaranteesFullRecall: false,
+            guaranteedScale: ceiling,
+            truncated: false,
+          },
+        };
+      }
+      sql += ' AND v.entity_id IN (SELECT value FROM json_each(?))';
+      params.push(JSON.stringify(request.includeEntityIds));
+    }
+    if (request.excludeConnectorInstanceIds?.length) {
+      sql += ` AND (
+        json_extract(d.metadata, '$.connectorInstanceId') IS NULL
+        OR json_extract(d.metadata, '$.connectorInstanceId')
+          NOT IN (SELECT value FROM json_each(?))
+      )`;
+      params.push(JSON.stringify(request.excludeConnectorInstanceIds));
+    }
+    if (request.rootTaskOnly) {
+      sql += ` AND (
+        json_type(d.metadata, '$.parentId') IS NULL
+        OR json_type(d.metadata, '$.parentId') = 'null'
+      )`;
+    }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       sql += ` AND v.entity_id NOT IN (${request.excludeEntityIds.map(() => '?').join(', ')})`;
       params.push(...request.excludeEntityIds);

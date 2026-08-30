@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type RefObject } from 'react';
-import { CircleDot, Eye, Expand, HelpCircle, LoaderCircle, Maximize2, Network, Tag, X } from 'lucide-react';
+import { CircleDot, Eye, Expand, HelpCircle, LoaderCircle, Maximize2, Network, Sparkles, Tag, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
@@ -9,9 +9,14 @@ import {
   UNIVERSE_DIMENSION_ICONS,
   UNIVERSE_DIMENSION_LABELS,
   UNIVERSE_DIMENSIONS,
-  type UniverseDimension,
-  type UniverseNode,
-  type UniverseSubgraph,
+} from '@/lib/graph/universe-types';
+import type { SemanticSimilarityGraphEdge } from '@/lib/graph/types';
+import type {
+  UniverseDimension,
+  UniverseNeighborLayer,
+  UniverseNode,
+  UniverseSemanticState,
+  UniverseSubgraph,
 } from '@/lib/graph/universe-types';
 import { universeNodeDimension, universeNodeIcon } from '@/lib/graph/universe-visuals';
 import { connectedUniverseNodes, universeEndpointId } from '@/lib/graph/universe-geometry';
@@ -33,7 +38,7 @@ export function DimensionToggles() {
             aria-pressed={active}
             onClick={() => toggleDimension(dimension)}
             className={cn(
-              'rounded-full border px-2.5 py-1 text-[10px] font-semibold transition-opacity',
+              'rounded-full border px-2.5 py-1 text-xs font-semibold transition-opacity',
               active ? 'opacity-100' : 'opacity-40 hover:opacity-70',
             )}
             style={{ color: active ? color : 'var(--text-tertiary)', borderColor: active ? color : 'var(--border)' }}
@@ -42,6 +47,127 @@ export function DimensionToggles() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+const NEIGHBOR_LAYER_LABELS: Record<UniverseNeighborLayer, string> = {
+  explicit: 'Dependencies',
+  derived: 'Attributes',
+  semantic: 'Semantic',
+};
+
+function SemanticConnectionDetails({
+  edge,
+  graph,
+  nodeId,
+}: {
+  edge: SemanticSimilarityGraphEdge;
+  graph: UniverseSubgraph;
+  nodeId: string;
+}) {
+  const otherNodeId = universeEndpointId(edge.source) === nodeId
+    ? universeEndpointId(edge.target)
+    : universeEndpointId(edge.source);
+  const otherNode = graph.nodes.find((node) => node.id === otherNodeId);
+  const timestampDetails = [
+    edge.embedding.sourceUpdatedAt ? `source revised ${new Date(edge.embedding.sourceUpdatedAt).toLocaleDateString()}` : null,
+    edge.embedding.sourceEmbeddedAt ? `source embedded ${new Date(edge.embedding.sourceEmbeddedAt).toLocaleDateString()}` : null,
+    edge.embedding.targetUpdatedAt ? `neighbor revised ${new Date(edge.embedding.targetUpdatedAt).toLocaleDateString()}` : null,
+    edge.embedding.targetEmbeddedAt ? `neighbor embedded ${new Date(edge.embedding.targetEmbeddedAt).toLocaleDateString()}` : null,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <div className="mt-1 rounded-md bg-violet-500/10 px-2 py-1.5 text-xs text-violet-100">
+      <span className="font-semibold">
+        {Math.round(edge.score * 100)}% related{otherNode ? ` to ${otherNode.label}` : ''}.
+      </span>
+      {' '}{edge.explanation}
+      <span className="mt-1 block text-[var(--text-tertiary)]">
+        {edge.embedding.provider ?? 'Unknown provider'} / {edge.embedding.model ?? 'unknown model'}
+        {edge.embedding.indexId ? ` · index ${edge.embedding.indexId}` : ''}
+        {edge.embedding.projectionVersion !== undefined
+          ? ` · projection ${edge.embedding.projectionVersion}`
+          : ''}
+      </span>
+      {timestampDetails ? (
+        <span className="mt-1 block text-[var(--text-tertiary)]">{timestampDetails}</span>
+      ) : null}
+      <span className="mt-1 block font-medium text-violet-200">Transient suggestion · not saved</span>
+    </div>
+  );
+}
+
+export function NeighborLayerToggles({
+  semanticEnabled,
+}: {
+  semanticEnabled: boolean;
+}) {
+  const layers = useUniverseGraphStore((state) => state.neighborLayers);
+  const toggleLayer = useUniverseGraphStore((state) => state.toggleNeighborLayer);
+
+  return (
+    <div className="flex flex-wrap items-center gap-1" aria-label="Neighborhood layers">
+      {(['explicit', 'derived', 'semantic'] as const).map((layer) => {
+        const unavailable = layer === 'semantic' && !semanticEnabled;
+        return (
+          <button
+            key={layer}
+            type="button"
+            aria-pressed={layers.includes(layer)}
+            disabled={unavailable}
+            title={unavailable ? 'Semantic neighborhoods are disabled by the feature gate' : undefined}
+            onClick={() => toggleLayer(layer)}
+            className={cn(
+              'min-h-8 rounded-full border border-[var(--border)] px-2.5 text-xs font-semibold',
+              layers.includes(layer)
+                ? 'bg-[var(--surface-3)] text-[var(--text-primary)]'
+                : 'text-[var(--text-tertiary)] hover:bg-[var(--surface-2)]',
+              unavailable && 'cursor-not-allowed opacity-40',
+            )}
+          >
+            {layer === 'semantic' ? <Sparkles size={11} className="mr-1 inline" aria-hidden="true" /> : null}
+            {NEIGHBOR_LAYER_LABELS[layer]}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function SemanticNeighborhoodStatus({
+  outcomes,
+}: {
+  outcomes: Array<{ nodeId: string; status: UniverseSemanticState; note?: string }>;
+}) {
+  if (!outcomes.length) return null;
+  const priority: UniverseSemanticState[] = [
+    'denied',
+    'unavailable',
+    'incompatible',
+    'stale',
+    'missing',
+    'partial',
+    'available',
+    'not-requested',
+  ];
+  const outcome = [...outcomes].sort(
+    (left, right) => priority.indexOf(left.status) - priority.indexOf(right.status),
+  )[0];
+  return (
+    <div
+      role="status"
+      className={cn(
+        'absolute bottom-14 right-3 z-10 max-w-sm rounded-lg border px-3 py-2 text-xs shadow-lg',
+        outcome.status === 'available'
+          ? 'border-emerald-500/30 bg-emerald-950/90 text-emerald-100'
+          : outcome.status === 'partial'
+            ? 'border-amber-500/30 bg-amber-950/90 text-amber-100'
+            : 'border-slate-500/40 bg-slate-900/95 text-slate-200',
+      )}
+    >
+      <span className="font-semibold capitalize">Semantic {outcome.status.replace('-', ' ')}</span>
+      {outcome.note ? <span>: {outcome.note}</span> : null}
     </div>
   );
 }
@@ -92,7 +218,7 @@ export function NodeDetail({
         </span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold text-[var(--text-primary)]">{node.label}</h2>
-          <p className="mt-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+          <p className="mt-0.5 text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
             {node.kind === 'task'
               ? 'Task'
               : node.kind === 'project'
@@ -106,7 +232,7 @@ export function NodeDetail({
       </div>
       {node.kind !== 'task' ? (
         <div className="mt-5">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
             {connectedTasks.length} connected task{connectedTasks.length === 1 ? '' : 's'}
           </p>
           {connectedTasks.length > 8 ? (
@@ -153,6 +279,13 @@ export function TaskHoverCard({
   const attributes = connectedUniverseNodes(graph, node.id)
     .filter((candidate) => candidate.kind !== 'task')
     .slice(0, 8);
+  const semanticEdges = graph.edges
+    .filter((edge): edge is SemanticSimilarityGraphEdge => (
+      edge.type === 'semantic-similarity'
+      && (universeEndpointId(edge.source) === node.id
+        || universeEndpointId(edge.target) === node.id)
+    ))
+    .slice(0, 2);
   return (
     <div
       ref={tooltipRef}
@@ -160,17 +293,17 @@ export function TaskHoverCard({
       className="pointer-events-none absolute left-0 top-0 z-30 w-72 max-w-[calc(100%-16px)] rounded-lg border border-slate-600 bg-slate-800/95 p-3 text-left shadow-2xl backdrop-blur"
     >
       <p className="truncate text-xs font-semibold text-slate-50">{node.label}</p>
-      <p className="mt-1 text-[10px] capitalize text-slate-400">
+      <p className="mt-1 text-xs capitalize text-slate-400">
         {node.status.replaceAll('_', ' ')}
       </p>
       {attributes.length ? (
         <>
-          <p className="mt-2 text-[10px] text-slate-400">Connected to:</p>
+          <p className="mt-2 text-xs text-slate-400">Connected to:</p>
           <div className="mt-1 flex flex-wrap gap-1">
             {attributes.map((attribute) => (
               <span
                 key={attribute.id}
-                className="rounded-full border px-1.5 py-0.5 text-[10px]"
+                className="rounded-full border px-1.5 py-0.5 text-xs"
                 style={{ color: attribute.color, borderColor: attribute.color }}
               >
                 {universeNodeIcon(attribute)} {attribute.label}
@@ -179,7 +312,10 @@ export function TaskHoverCard({
           </div>
         </>
       ) : null}
-      <p className="mt-2 text-[10px] font-medium text-sky-400">Click to open task details</p>
+      {semanticEdges.map((edge) => (
+        <SemanticConnectionDetails key={edge.id} edge={edge} graph={graph} nodeId={node.id} />
+      ))}
+      <p className="mt-2 text-xs font-medium text-sky-400">Click to open task details</p>
     </div>
   );
 }
@@ -187,7 +323,7 @@ export function TaskHoverCard({
 export function GraphLegend() {
   const legendDimensions: UniverseDimension[] = ['priority', 'source', 'tags', 'status', 'project'];
   return (
-    <div className="absolute bottom-3 left-3 z-10 hidden max-w-[calc(100%-72px)] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]/90 px-2.5 py-2 text-[9px] text-[var(--text-tertiary)] shadow-lg backdrop-blur md:flex">
+    <div className="absolute bottom-3 left-3 z-10 hidden max-w-[calc(100%-72px)] items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]/90 px-2.5 py-2 text-xs text-[var(--text-tertiary)] shadow-lg backdrop-blur md:flex">
       <span className="flex items-center gap-1"><CircleDot size={11} /> Task</span>
       {legendDimensions.map((dimension) => (
         <span
@@ -233,7 +369,7 @@ export function SelectionToolbar({
   const [helpOpen, setHelpOpen] = useState(false);
   const selectRelatedDisabled = relatedCount === 0;
   const expandDisabled = expandableCount === 0 || expanding;
-  const actionClass = 'inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2.5 text-[10px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] aria-disabled:cursor-not-allowed aria-disabled:opacity-40';
+  const actionClass = 'inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-2.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] aria-disabled:cursor-not-allowed aria-disabled:opacity-40';
   const groupClass = 'flex items-center gap-1 rounded-md bg-[var(--surface-2)]/60 p-1';
   return (
     <div
@@ -242,7 +378,7 @@ export function SelectionToolbar({
       className="absolute left-1/2 top-3 z-40 flex max-w-[calc(100%-24px)] -translate-x-1/2 flex-wrap items-center justify-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface-0)]/95 p-1.5 shadow-xl backdrop-blur"
     >
       <div className={groupClass} role="group" aria-label="Selection">
-        <span className="px-1.5 text-[10px] font-semibold text-[var(--text-primary)]">
+        <span className="px-1.5 text-xs font-semibold text-[var(--text-primary)]">
           {selectionCount} selected
         </span>
         <button type="button" className={actionClass} onClick={onClearSelection}>
@@ -255,7 +391,7 @@ export function SelectionToolbar({
           : 'Adds visible direct neighbors to the selection without loading new graph data.'}
       </span>
       <div className={groupClass} role="group" aria-label="Grow graph">
-        <span className="px-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Grow</span>
+        <span className="px-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Grow</span>
         <button
           type="button"
           className={actionClass}
@@ -287,7 +423,7 @@ export function SelectionToolbar({
         </button>
       </div>
       <div className={groupClass} role="group" aria-label="Change view">
-        <span className="px-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">View</span>
+        <span className="px-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">View</span>
         <button
           type="button"
           className={cn(
@@ -362,10 +498,24 @@ export function AccessibleUniverseList({
                   className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-left text-xs hover:border-[var(--accent-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
                 >
                   <span className="block truncate font-medium">{task.label}</span>
-                  <span className="mt-0.5 block capitalize text-[10px] text-[var(--text-tertiary)]">
+                  <span className="mt-0.5 block capitalize text-xs text-[var(--text-tertiary)]">
                     {task.status.replaceAll('_', ' ')}
                   </span>
                 </button>
+                {graph.edges
+                  .filter((edge): edge is SemanticSimilarityGraphEdge => (
+                    edge.type === 'semantic-similarity'
+                    && (universeEndpointId(edge.source) === task.id
+                      || universeEndpointId(edge.target) === task.id)
+                  ))
+                  .map((edge) => (
+                    <SemanticConnectionDetails
+                      key={edge.id}
+                      edge={edge}
+                      graph={graph}
+                      nodeId={task.id}
+                    />
+                  ))}
               </li>
             ))}
           </ol>

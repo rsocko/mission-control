@@ -12,15 +12,12 @@ import {
   LoaderCircle,
   LocateFixed,
   Search,
-  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
-import { cn } from '@/lib/utils';
 import {
   UNIVERSE_DIMENSION_COLORS,
   type UniverseDimension,
@@ -62,10 +59,13 @@ import {
   AccessibleUniverseList,
   DimensionToggles,
   GraphLegend,
+  NeighborLayerToggles,
   NodeDetail,
   SelectionToolbar,
+  SemanticNeighborhoodStatus,
   TaskHoverCard,
 } from './UniverseGraphPresenters';
+import { UniverseSeedSearch } from './UniverseSeedSearch';
 import { useUniverseGraphData } from './useUniverseGraphData';
 
 const MAX_UNIVERSE_NODES = 500;
@@ -102,6 +102,7 @@ function useCanvasSize() {
 
 export default function UniverseGraph() {
   const dimensions = useUniverseGraphStore((state) => state.dimensions);
+  const neighborLayers = useUniverseGraphStore((state) => state.neighborLayers);
   const legacyFilters = useUniverseGraphStore((state) => state.legacyFilters);
   const clearLegacyFilters = useUniverseGraphStore((state) => state.clearLegacyFilters);
   const selectedNodeIds = useUniverseGraphStore((state) => state.selectedNodeIds);
@@ -112,6 +113,7 @@ export default function UniverseGraph() {
   const filterOptions = useUniverseFilterOptions();
   const { sidebarMode, setSidebarMode } = useSidebarExpanded();
   const [exploreAll, setExploreAll] = useState(false);
+  const [seedTaskIds, setSeedTaskIds] = useState<string[]>([]);
   const [overviewNodeLimit, setOverviewNodeLimit] = useState(INITIAL_OVERVIEW_NODES);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sceneSearch, setSceneSearch] = useState('');
@@ -134,7 +136,7 @@ export default function UniverseGraph() {
   const pointerViewportGestureRef = useRef(false);
   const { ref: canvasRef, width, height } = useCanvasSize();
   const hasFilters = taskFilters.activeFilterCount > 0;
-  const shouldLoad = exploreAll || hasFilters;
+  const shouldLoad = exploreAll || hasFilters || seedTaskIds.length > 0;
   const isProgressiveOverview = exploreAll && !hasFilters;
   const requestedNodeLimit = isProgressiveOverview ? overviewNodeLimit : MAX_UNIVERSE_NODES;
   const canonicalQuery = useMemo(
@@ -142,8 +144,9 @@ export default function UniverseGraph() {
       taskFilters.context,
       dimensions,
       requestedNodeLimit,
+      seedTaskIds,
     ).toString(),
-    [dimensions, requestedNodeLimit, taskFilters.context],
+    [dimensions, requestedNodeLimit, seedTaskIds, taskFilters.context],
   );
   const handleCanonicalLoad = useCallback(() => {
     hasInitialFitRef.current = false;
@@ -156,12 +159,14 @@ export default function UniverseGraph() {
     userOwnsViewportRef.current = false;
   }, [resetScene, setSelectedTaskId]);
   const {
-    graph,
+    graph: unfilteredGraph,
     loading,
     error,
     expanding,
     explorationMessage,
     explorationError,
+    semanticOutcomes,
+    nodeHops,
     expansionPinnedNodesRef,
     expandSelection,
     rememberPositions,
@@ -172,8 +177,38 @@ export default function UniverseGraph() {
     canonicalQuery,
     reloadKey,
     dimensions,
+    neighborLayers,
     onCanonicalLoad: handleCanonicalLoad,
   });
+  const graph = useMemo(() => {
+    if (!unfilteredGraph) return null;
+    const enabledProvenance = new Set(
+      neighborLayers.map((layer) => (
+        layer === 'semantic' ? 'embedding' : layer
+      )),
+    );
+    const edges = unfilteredGraph.edges.filter((edge) =>
+      enabledProvenance.has(edge.provenance));
+    const visibleNodeIds = new Set(
+      unfilteredGraph.nodes
+        .filter((node) => node.kind === 'task' && (nodeHops[node.id] ?? 0) === 0)
+        .map((node) => node.id),
+    );
+    for (const edge of edges) {
+      visibleNodeIds.add(universeEndpointId(edge.source));
+      visibleNodeIds.add(universeEndpointId(edge.target));
+    }
+    return {
+      ...unfilteredGraph,
+      nodes: unfilteredGraph.nodes.filter((node) => visibleNodeIds.has(node.id)),
+      edges,
+      pageInfo: {
+        ...unfilteredGraph.pageInfo,
+        returnedNodes: visibleNodeIds.size,
+        returnedEdges: edges.length,
+      },
+    };
+  }, [neighborLayers, nodeHops, unfilteredGraph]);
   const graphData = useMemo(() => ({
     nodes: graph?.nodes ?? [],
     links: graph?.edges ?? [],
@@ -440,7 +475,15 @@ export default function UniverseGraph() {
     });
     methods.zoom(transform.zoom, 300);
     methods.centerAt(transform.x, transform.y, 300);
-  }, [detailPanelWidth, graphViewportWidth, height, selectedNodeIds, width]);
+  }, [
+    detailPanelWidth,
+    graphViewportWidth,
+    height,
+    selectedNodeIds,
+    setExplorationMessage,
+    setSelectedTaskId,
+    width,
+  ]);
 
 
   return (
@@ -518,8 +561,9 @@ export default function UniverseGraph() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <DimensionToggles />
+            <NeighborLayerToggles semanticEnabled={graph?.capabilities?.semanticNeighbors ?? false} />
             <span className="hidden h-5 w-px bg-[var(--border)] lg:block" />
-            <div className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-[var(--text-tertiary)]">
+            <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-[var(--text-tertiary)]">
               <span className="rounded-full border border-[var(--border)] px-2 py-1 capitalize">{lod} detail</span>
               {sceneGraph ? <span>{sceneGraph.stats.taskCount} tasks · {sceneGraph.stats.attributeCount} attributes</span> : null}
             </div>
@@ -603,16 +647,16 @@ export default function UniverseGraph() {
         ) : null}
         {!shouldLoad ? (
           <div className="absolute inset-0 z-10 flex items-center justify-center p-6">
-            <div className="max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface-1)]/95 p-6 text-center shadow-2xl backdrop-blur">
-              <SlidersHorizontal size={28} className="mx-auto text-[var(--accent-400)]" />
-              <h2 className="mt-3 text-base font-semibold text-[var(--text-primary)]">Choose a task universe</h2>
-              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-                Filter tasks above, or explore all open tasks.
-              </p>
-              <Button variant="secondary" className="mt-4" onClick={() => setExploreAll(true)}>
-                Explore all tasks
-              </Button>
-            </div>
+            <UniverseSeedSearch
+              onExplore={(taskIds) => {
+                setSeedTaskIds(taskIds);
+                setExploreAll(false);
+              }}
+              onExploreAll={() => {
+                setSeedTaskIds([]);
+                setExploreAll(true);
+              }}
+            />
           </div>
         ) : null}
         {shouldLoad && loading ? (
@@ -629,7 +673,7 @@ export default function UniverseGraph() {
           </div>
         ) : null}
         {shouldLoad && graph?.truncated ? (
-          <div className="absolute bottom-14 left-3 z-10 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/90 px-3 py-2 text-[10px] text-amber-200">
+          <div className="absolute bottom-14 left-3 z-10 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-950/90 px-3 py-2 text-xs text-amber-200">
             <span>
               {isProgressiveOverview && overviewNodeLimit < MAX_UNIVERSE_NODES
                 ? `Showing an initial ${overviewNodeLimit}-node overview.`
@@ -683,6 +727,12 @@ export default function UniverseGraph() {
                 context.fill();
               }}
               linkColor={(link: LinkObject<UniverseNode, UniverseEdge>) => {
+                if (link.type === 'semantic-similarity') {
+                  const alpha = Math.round((0.25 + (link.score * 0.65)) * 255)
+                    .toString(16)
+                    .padStart(2, '0');
+                  return `#a78bfa${alpha}`;
+                }
                 const color = UNIVERSE_DIMENSION_COLORS[link.dimension as UniverseDimension] ?? '#334155';
                 const selected = selectedNodeIds.includes(universeEndpointId(link.source))
                   || selectedNodeIds.includes(universeEndpointId(link.target));
@@ -692,6 +742,7 @@ export default function UniverseGraph() {
                 return `${color}${selected ? 'cc' : hovered ? '80' : '24'}`;
               }}
               linkWidth={(link: LinkObject<UniverseNode, UniverseEdge>) => {
+                if (link.type === 'semantic-similarity') return 0.6 + link.score;
                 const selected = selectedNodeIds.includes(universeEndpointId(link.source))
                   || selectedNodeIds.includes(universeEndpointId(link.target));
                 if (selected) return 1.8;
@@ -700,6 +751,8 @@ export default function UniverseGraph() {
                 );
                 return hovered ? 1.1 : 0.45;
               }}
+              linkLineDash={(link: LinkObject<UniverseNode, UniverseEdge>) =>
+                link.type === 'semantic-similarity' ? [4, 4] : null}
               linkVisibility={(link: LinkObject<UniverseNode, UniverseEdge>) => {
                 const source = universeEndpointId(link.source);
                 const target = universeEndpointId(link.target);
@@ -764,6 +817,7 @@ export default function UniverseGraph() {
         {hoveredNode?.kind === 'task' && sceneGraph ? (
           <TaskHoverCard node={hoveredNode} graph={sceneGraph} tooltipRef={tooltipRef} />
         ) : null}
+        <SemanticNeighborhoodStatus outcomes={semanticOutcomes} />
         <UniverseFilterPanel
           open={filtersOpen}
           onClose={() => setFiltersOpen(false)}

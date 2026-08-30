@@ -44,6 +44,26 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         expect(query).toHaveBeenLastCalledWith('ROLLBACK');
         expect(release).toHaveBeenCalledOnce();
       });
+
+      it('pushes Universe visibility predicates before the task result limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('planning', {
+          type: 'tasks',
+          universeEligible: true,
+          excludeConnectorInstanceIds: ['deleted-connector'],
+          limit: 20,
+        });
+
+        const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain('t.parent_id IS NULL');
+        expect(sql).toContain("t.local_disposition = 'active'");
+        expect(sql).toContain('t.connector_type = ANY($6::text[])');
+        expect(sql).toContain('t.connector_instance_id = ANY($7::text[])');
+        expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $8'));
+        expect(params[6]).toEqual(['deleted-connector']);
+      });
     });
 
     it('clamps to a minimum of 1', () => {

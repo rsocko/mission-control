@@ -904,6 +904,7 @@ describe('PostgresSemanticIndexRepository', () => {
         queryEmbedding: new Float32Array([1, 0, 0]),
         limit: 5,
         entityTypes: ['task'],
+        includeEntityIds: ['near', 'far'],
         metadataFilters: [{
           keys: ['status'],
           match: 'any',
@@ -923,6 +924,10 @@ describe('PostgresSemanticIndexRepository', () => {
       const ann = mock.find(/WITH nearest AS MATERIALIZED/);
       expect(ann).toContain('a.embedding::halfvec(3)');
       expect(ann).toContain("a.index_id = 'idx-1'");
+      expect(ann).toContain('a.entity_id = ANY(');
+      expect(mock.params.find((values) =>
+        values.some((value) => Array.isArray(value) && value.includes('near'))))
+        .toContainEqual(['near', 'far']);
       expect(ann).toContain('LOWER(a.metadata ->>');
       expect(ann).toContain('v.document_version = d.version');
       expect(mock.find(/SET LOCAL enable_seqscan/)).toContain('off');
@@ -983,6 +988,67 @@ describe('PostgresSemanticIndexRepository', () => {
       ]);
       // Case-insensitive filters compare lower-cased values on both sides.
       expect(values[10]).toEqual(['done']);
+    });
+
+    it('pushes an eligibility allow-list before the compatibility scan ceiling', async () => {
+      mock = createMockPool([
+        { match: /WHERE status = 'active' LIMIT 1/, rows: [{ ...IDENTITY, status: 'active' }] },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5);
+      const response = await repo.queryVectors({
+        queryEmbedding: new Float32Array([1, 0, 0]),
+        limit: 5,
+        includeEntityIds: ['allowed-a', 'allowed-b'],
+        now: T1,
+      });
+
+      const scan = mock.find(/FROM semantic_vectors v INNER JOIN semantic_documents d/);
+      expect(scan).toContain('v.entity_id = ANY($3::text[])');
+      expect(scan?.indexOf('v.entity_id = ANY')).toBeLessThan(scan?.indexOf('LIMIT') ?? -1);
+      expect(mock.params.at(-1)?.[2]).toEqual(['allowed-a', 'allowed-b']);
+      expect(response.scan).toMatchObject({ candidatesScanned: 0, truncated: false });
+    });
+
+    it('binds deleted connector exclusions as one pre-limit array predicate', async () => {
+      mock = createMockPool([
+        { match: /WHERE status = 'active' LIMIT 1/, rows: [{ ...IDENTITY, status: 'active' }] },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5);
+      await repo.queryVectors({
+        queryEmbedding: new Float32Array([1, 0, 0]),
+        limit: 5,
+        excludeConnectorInstanceIds: Array.from(
+          { length: 40 },
+          (_, index) => `deleted-${index}`,
+        ),
+        now: T1,
+      });
+
+      const scan = mock.find(/FROM semantic_vectors v INNER JOIN semantic_documents d/);
+      expect(scan).toContain("d.metadata ->> 'connectorInstanceId' = ANY($3::text[])");
+      expect(mock.params.at(-1)?.[2]).toHaveLength(40);
+      expect(scan?.indexOf("'connectorInstanceId'")).toBeLessThan(scan?.indexOf('LIMIT') ?? -1);
+    });
+
+    it('treats an explicitly empty eligibility scope as no candidates', async () => {
+      mock = createMockPool([
+        { match: /WHERE status = 'active' LIMIT 1/, rows: [{ ...IDENTITY, status: 'active' }] },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool, 5);
+      const response = await repo.queryVectors({
+        queryEmbedding: new Float32Array([1, 0, 0]),
+        limit: 5,
+        includeEntityIds: [],
+        now: T1,
+      });
+
+      expect(response).toMatchObject({
+        identityId: 'idx-1',
+        results: [],
+        scan: { candidatesScanned: 0, truncated: false },
+      });
+      expect(mock.find(/FROM semantic_vectors v INNER JOIN semantic_documents d/)).toBeUndefined();
+      expect(mock.find(/SELECT to_regclass/)).toBeUndefined();
     });
 
     it('rejects metadata keys that are not plain identifiers', async () => {

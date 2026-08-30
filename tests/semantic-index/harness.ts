@@ -282,6 +282,7 @@ export function taskFixture(overrides: Partial<SemanticTaskSource> = {}): Semant
     effort: null,
     dueDate: null,
     connectorType: 'github-issues',
+    connectorInstanceId: 'connector-1',
     sourceListName: null,
     parentId: null,
     isChecklistItem: false,

@@ -5,20 +5,19 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Loader2, Plus, Trash2, Zap, Save,
   CheckCircle2, XCircle, Puzzle, Webhook as WebhookIcon, Send, ArrowDownToLine, Copy,
+  Activity, AlertTriangle, FlaskConical, Pause, Play,
 } from 'lucide-react';
-import {
-  Select,
-  SelectTrigger,
-  SelectContent,
-  SelectItem,
-  SelectValue,
-} from '@/components/ui/select';
 import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import { settingsLogger } from '@/lib/client-logger';
 import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
-import type { N8NConfigState, OutboundWebhookSubscription, InboundWebhookConfig } from './types';
+import type {
+  AlertmanagerIntegrationStatus,
+  N8NConfigState,
+  OutboundWebhookSubscription,
+  InboundWebhookConfig,
+} from './types';
 import { INTEGRATION_EVENT_OPTIONS } from './types';
 
 const INBOUND_ACTION_OPTIONS: Array<{ value: 'task' | 'alert' | 'auto'; label: string; desc: string }> = [
@@ -42,6 +41,7 @@ function IntegrationsSection() {
   const [apiKey, setApiKey] = useState('');
   const [webhooks, setWebhooks] = useState<OutboundWebhookSubscription[]>([]);
   const [inboundWebhooks, setInboundWebhooks] = useState<InboundWebhookConfig[]>([]);
+  const [alertmanager, setAlertmanager] = useState<AlertmanagerIntegrationStatus | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [showWebhookModal, setShowWebhookModal] = useState(false);
   const [editingWebhook, setEditingWebhook] = useState<OutboundWebhookSubscription | null>(null);
@@ -49,15 +49,23 @@ function IntegrationsSection() {
   const [showInboundModal, setShowInboundModal] = useState(false);
   const [editingInbound, setEditingInbound] = useState<InboundWebhookConfig | null>(null);
   const [inboundActionId, setInboundActionId] = useState<string | null>(null);
+  const [alertmanagerAction, setAlertmanagerAction] = useState<'control' | 'test' | null>(null);
+  const [alertmanagerConfirmation, setAlertmanagerConfirmation] = useState<'pause' | 'resume' | null>(null);
 
   const loadIntegrations = useCallback(async () => {
     try {
-      const [n8nRes, webhookRes, inboundRes] = await Promise.all([
+      const [n8nRes, webhookRes, inboundRes, alertmanagerRes] = await Promise.all([
         fetch('/api/integrations/n8n'),
         fetch('/api/integrations/webhooks'),
         fetch('/api/inbound-webhooks'),
+        fetch('/api/integrations/alertmanager'),
       ]);
-      const [n8nData, webhookData, inboundData] = await Promise.all([n8nRes.json(), webhookRes.json(), inboundRes.json()]);
+      const [n8nData, webhookData, inboundData, alertmanagerData] = await Promise.all([
+        n8nRes.json(),
+        webhookRes.json(),
+        inboundRes.json(),
+        alertmanagerRes.json(),
+      ]);
 
       setN8NConfig({
         baseUrl: n8nData.baseUrl || '',
@@ -69,6 +77,7 @@ function IntegrationsSection() {
       setBaseUrl(n8nData.baseUrl || '');
       setWebhooks(webhookData.webhooks || []);
       setInboundWebhooks(inboundData.webhooks || []);
+      setAlertmanager(alertmanagerRes.ok ? alertmanagerData : null);
     } catch (error) {
       settingsLogger.error('Failed to load integrations', { err: error });
     } finally {
@@ -207,6 +216,60 @@ function IntegrationsSection() {
     await loadIntegrations();
   }
 
+  async function handleAlertmanagerControl(paused: boolean) {
+    setAlertmanagerAction('control');
+    setStatusMessage(null);
+    try {
+      const response = await fetch('/api/integrations/alertmanager', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Failed to update Alertmanager intake');
+      setAlertmanagerConfirmation(null);
+      setStatusMessage({
+        tone: 'success',
+        text: paused
+          ? 'Alertmanager intake paused; authenticated deliveries will be acknowledged without projection'
+          : 'Alertmanager intake resumed',
+      });
+      await loadIntegrations();
+    } catch (error) {
+      setStatusMessage({
+        tone: 'error',
+        text: error instanceof Error ? error.message : 'Failed to update Alertmanager intake',
+      });
+    } finally {
+      setAlertmanagerAction(null);
+    }
+  }
+
+  async function handleAlertmanagerTest() {
+    setAlertmanagerAction('test');
+    setStatusMessage(null);
+    try {
+      const response = await fetch('/api/integrations/alertmanager/test', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Synthetic Alertmanager lifecycle test failed');
+      }
+      setStatusMessage({
+        tone: 'success',
+        text: 'Synthetic lifecycle passed: one fingerprint handled firing, duplicate, and resolved events',
+      });
+      await loadIntegrations();
+    } catch (error) {
+      setStatusMessage({
+        tone: 'error',
+        text: error instanceof Error ? error.message : 'Synthetic Alertmanager lifecycle test failed',
+      });
+      await loadIntegrations();
+    } finally {
+      setAlertmanagerAction(null);
+    }
+  }
+
   return (
     <>
       <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
@@ -313,8 +376,8 @@ function IntegrationsSection() {
                   <WebhookIcon size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Outbound Webhooks</h3>
-                  <p className="text-xs text-[var(--text-tertiary)]">Dispatch Mission Control events to n8n workflows or other listeners.</p>
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Webhook delivery</h3>
+                  <p className="text-xs text-[var(--text-tertiary)]">Operate system-managed intake and dispatch Mission Control events to external listeners.</p>
                 </div>
               </div>
             </div>
@@ -328,8 +391,161 @@ function IntegrationsSection() {
               className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
             >
               <Plus size={14} />
-              Add Webhook
+              Add outbound
             </motion.button>
+          </div>
+
+          {alertmanager && (
+            <div className="mt-4 border-y border-[var(--border)] py-4">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-2)] text-emerald-400">
+                    <Activity size={17} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="text-sm font-semibold text-[var(--text-primary)]">Alertmanager</h4>
+                      <span className="rounded-full border border-[var(--border)] bg-[var(--surface-0)] px-2 py-0.5 text-xs font-medium text-[var(--text-tertiary)]">
+                        System managed
+                      </span>
+                      <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${
+                        alertmanager.state === 'connected'
+                          ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-300'
+                          : alertmanager.state === 'degraded' || alertmanager.state === 'not_configured'
+                            ? 'border-red-800/40 bg-red-900/20 text-red-300'
+                            : alertmanager.state === 'paused'
+                              ? 'border-amber-800/40 bg-amber-900/20 text-amber-300'
+                              : 'border-blue-800/40 bg-blue-900/20 text-blue-300'
+                      }`}>
+                        {alertmanager.state === 'not_configured'
+                          ? 'Not configured'
+                          : alertmanager.state === 'awaiting_delivery'
+                            ? 'Awaiting first delivery'
+                            : alertmanager.state}
+                      </span>
+                    </div>
+                    <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--text-tertiary)]">
+                      Authenticated, fingerprint-aware incident intake. The deployment owns its bearer token; Mission Control never displays or rotates it.
+                    </p>
+                    <div className="mt-2 flex min-w-0 items-center gap-1.5">
+                      <code className="truncate text-xs text-[var(--text-secondary)]">{alertmanager.endpoint}</code>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(`${window.location.origin}${alertmanager.endpoint}`);
+                          setStatusMessage({ tone: 'success', text: 'Alertmanager endpoint copied to clipboard' });
+                        }}
+                        className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                        aria-label="Copy Alertmanager endpoint"
+                      >
+                        <Copy size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={handleAlertmanagerTest}
+                    disabled={!alertmanager.configured || alertmanager.paused || alertmanagerAction !== null}
+                    className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {alertmanagerAction === 'test'
+                      ? <Loader2 size={13} className="animate-spin" />
+                      : <FlaskConical size={13} />}
+                    Run lifecycle test
+                  </button>
+                  <button
+                    onClick={() => setAlertmanagerConfirmation(alertmanager.paused ? 'resume' : 'pause')}
+                    disabled={!alertmanager.configured || alertmanagerAction !== null}
+                    className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 ${
+                      alertmanager.paused
+                        ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-300 hover:bg-emerald-900/30'
+                        : 'border-amber-800/40 bg-amber-900/10 text-amber-300 hover:bg-amber-900/20'
+                    }`}
+                  >
+                    {alertmanager.paused ? <Play size={13} /> : <Pause size={13} />}
+                    {alertmanager.paused ? 'Resume intake' : 'Pause intake'}
+                  </button>
+                </div>
+              </div>
+
+              {alertmanagerConfirmation && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-800/30 bg-amber-900/10 px-3 py-3" role="alert">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-300" />
+                    <p className="max-w-3xl text-xs leading-5 text-amber-200">
+                      {alertmanagerConfirmation === 'pause'
+                        ? 'Pause intake? Valid authenticated deliveries will receive HTTP 202 and be counted as intentional drops, but no incidents will be projected.'
+                        : 'Resume intake? New authenticated deliveries will again update homelab incident projections.'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setAlertmanagerConfirmation(null)}
+                      disabled={alertmanagerAction !== null}
+                      className="min-h-9 rounded-lg px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handleAlertmanagerControl(alertmanagerConfirmation === 'pause')}
+                      disabled={alertmanagerAction !== null}
+                      className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 disabled:opacity-50"
+                    >
+                      {alertmanagerAction === 'control' && <Loader2 size={12} className="animate-spin" />}
+                      Confirm {alertmanagerConfirmation}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <dl className="mt-4 grid gap-px overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-4">
+                {[
+                  ['Last request', alertmanager.lastRequest?.occurredAt],
+                  ['Last authenticated', alertmanager.lastAuthenticatedReceipt?.occurredAt],
+                  ['Last projection', alertmanager.lastSuccessfulProjection?.occurredAt],
+                  ['Lifecycle test', alertmanager.lastSyntheticTest?.occurredAt],
+                ].map(([label, value]) => (
+                  <div key={label} className="bg-[var(--surface-0)] px-3 py-3">
+                    <dt className="text-xs font-medium uppercase tracking-[0.06em] text-[var(--text-muted)]">{label}</dt>
+                    <dd className="mt-1 text-xs tabular-nums text-[var(--text-secondary)]">
+                      {value ? new Date(value).toLocaleString() : 'Never'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[var(--text-tertiary)]">
+                <span><strong className="font-semibold tabular-nums text-[var(--text-secondary)]">{alertmanager.counts.requests}</strong> requests</span>
+                <span><strong className="font-semibold tabular-nums text-[var(--text-secondary)]">{alertmanager.counts.applied}</strong> projected events</span>
+                <span><strong className="font-semibold tabular-nums text-[var(--text-secondary)]">{alertmanager.counts.duplicateReceipts}</strong> duplicates</span>
+                <span><strong className="font-semibold tabular-nums text-[var(--text-secondary)]">{alertmanager.counts.intentionalDrops}</strong> paused drops</span>
+                <span><strong className={`font-semibold tabular-nums ${alertmanager.counts.failures ? 'text-red-300' : 'text-[var(--text-secondary)]'}`}>{alertmanager.counts.failures}</strong> failures</span>
+              </div>
+
+              {alertmanager.recentFailures.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold text-[var(--text-secondary)]">Recent delivery failures</p>
+                  <ul className="mt-2 divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
+                    {alertmanager.recentFailures.map(failure => (
+                      <li key={failure.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-xs">
+                        <span className="text-red-300">{failure.outcome.replaceAll('_', ' ')}</span>
+                        <span className="text-[var(--text-muted)]">
+                          HTTP {failure.httpStatus} · {new Date(failure.occurredAt).toLocaleString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="mt-4 flex items-center justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-semibold uppercase tracking-[0.06em] text-[var(--text-tertiary)]">Outbound subscriptions</h4>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">Mission Control events delivered to external systems.</p>
+            </div>
           </div>
 
           {loading ? (
@@ -447,8 +663,8 @@ function IntegrationsSection() {
                   <ArrowDownToLine size={18} />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Inbound Webhooks</h3>
-                  <p className="text-xs text-[var(--text-tertiary)]">Public endpoints for external systems to push tasks and notifications into Mission Control.</p>
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">Custom inbound endpoints</h3>
+                  <p className="text-xs text-[var(--text-tertiary)]">Generic payload mapping for n8n, IFTTT, Home Assistant, and other external systems.</p>
                 </div>
               </div>
             </div>
@@ -474,7 +690,7 @@ function IntegrationsSection() {
           ) : inboundWebhooks.length === 0 ? (
             <div className="mt-4 rounded-xl border border-dashed border-[var(--border)] bg-[var(--surface-0)] p-8 text-center">
               <ArrowDownToLine size={28} className="mx-auto text-[var(--text-muted)]" />
-              <p className="mt-3 text-sm text-[var(--text-secondary)]">No inbound webhook endpoints configured yet.</p>
+              <p className="mt-3 text-sm text-[var(--text-secondary)]">No custom inbound endpoints configured yet.</p>
               <p className="mt-1 text-xs text-[var(--text-muted)]">Create an endpoint to let n8n, IFTTT, Home Assistant, or any external system push data into Mission Control.</p>
             </div>
           ) : (

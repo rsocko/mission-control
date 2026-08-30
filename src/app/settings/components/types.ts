@@ -147,6 +147,51 @@ export interface InboundWebhookConfig {
   updatedAt: string;
 }
 
+export interface AlertmanagerOperationalEvent {
+  id: string;
+  kind: 'webhook_request' | 'operator_action' | 'synthetic_test';
+  outcome: string;
+  authenticated: boolean;
+  httpStatus: number;
+  accepted: number;
+  applied: number;
+  created: number;
+  updated: number;
+  stale: number;
+  duplicateReceipts: number;
+  detail: string | null;
+  occurredAt: string;
+}
+
+export interface AlertmanagerIntegrationStatus {
+  id: string;
+  name: string;
+  endpoint: string;
+  systemManaged: true;
+  configured: boolean;
+  connected: boolean;
+  enabled: boolean;
+  paused: boolean;
+  state: 'not_configured' | 'awaiting_delivery' | 'connected' | 'degraded' | 'paused';
+  controlUpdatedAt: string | null;
+  lastRequest: AlertmanagerOperationalEvent | null;
+  lastAuthenticatedReceipt: AlertmanagerOperationalEvent | null;
+  lastSuccessfulProjection: AlertmanagerOperationalEvent | null;
+  lastSyntheticTest: AlertmanagerOperationalEvent | null;
+  recentFailures: AlertmanagerOperationalEvent[];
+  counts: {
+    requests: number;
+    failures: number;
+    intentionalDrops: number;
+    accepted: number;
+    applied: number;
+    created: number;
+    updated: number;
+    stale: number;
+    duplicateReceipts: number;
+  };
+}
+
 export const INTEGRATION_EVENT_OPTIONS = [
   'task.created',
   'task.completed',

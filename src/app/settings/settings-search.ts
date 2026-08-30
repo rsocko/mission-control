@@ -56,6 +56,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'n8n', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['automation', 'workflow'] },
   { title: 'Outbound Webhooks', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['events', 'callback'] },
   { title: 'Inbound Webhooks', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['events', 'capture'] },
+  { title: 'Alertmanager', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['homelab', 'prometheus', 'incident', 'webhook'] },
   { title: 'Notification enrichment', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['re-enrichment', 'ai enrichment'] },
   { title: 'Push Notifications', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['alerts', 'browser'] },
   { title: 'Do Not Disturb', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['dnd', 'mute'] },

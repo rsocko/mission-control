@@ -339,6 +339,11 @@ for (const file of workflowFiles) {
       'PostgreSQL integration must run the repository pgvector benchmark',
     );
     assert.equal(
+      pgvectorBenchmark?.if,
+      "${{ !cancelled() && steps.postgres-integration-tests.outcome == 'success' }}",
+      'PostgreSQL benchmark must run after successful integration tests',
+    );
+    assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,
       1536,
       'CI must run the production-representative pgvector dimension',

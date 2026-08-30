@@ -15,6 +15,7 @@ import logger from '@/lib/logger';
 import { resolveGitHubCredentials, resolveRedditCredentials, resolveYouTubeCredentials } from './credentials';
 import { importAllGitHubStars, importAllRedditSaved, importAllYouTubePlaylists } from './importers';
 import { importAllDocumentIntelligenceActions } from './importers/document-intelligence-importer';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 const SETTINGS_KEY = 'triage_auto_sync';
 
@@ -102,6 +103,13 @@ export class TriageSyncScheduler {
    * Run an import for a specific source (called by cron or manually).
    */
   async runImport(sourceId: TriageSourceId): Promise<void> {
+    return withDatabaseOperation(
+      'worker-triage-import',
+      () => this.runImportWithAttribution(sourceId),
+    );
+  }
+
+  private async runImportWithAttribution(sourceId: TriageSourceId): Promise<void> {
     if (this.syncInProgress.has(sourceId)) {
       logger.warn({ sourceId }, 'Triage auto-sync already in progress, skipping');
       return;

@@ -2,17 +2,16 @@ import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { syncLogger } from '@/lib/logger';
 import type { SyncResult } from '@/types';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import {
   getSyncLeaseMs,
   getSyncJobRepository,
-  getSyncQueueMetrics,
   type SyncJob,
 } from './job-queue';
 import { setSyncEventPersistence } from './events';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';
 import { StaleGitHubIdentityContextError } from './github-identity-context';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 export type SyncJobExecutor = (
   connectorId: string,
@@ -83,8 +82,8 @@ export class SyncWorker {
         ? this.active.job
         : this.abandoned.get(event.connectorId)?.job;
       if (!activeJob) return;
-      void getSyncJobRepository()
-        .then((repository) => repository.persistEvent(activeJob.id, event))
+      void withDatabaseOperation('sync-job-events', () => getSyncJobRepository()
+        .then((repository) => repository.persistEvent(activeJob.id, event)))
         .catch((error) => {
           syncLogger.warn(
             { err: error, jobId: activeJob.id, connectorId: activeJob.connectorId },
@@ -94,8 +93,8 @@ export class SyncWorker {
     });
     const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
     const pruneOnce = () => {
-      void getSyncJobRepository()
-        .then((repository) => repository.prune(retentionDays))
+      void withDatabaseOperation('sync-job-finalize', () => getSyncJobRepository()
+        .then((repository) => repository.prune(retentionDays)))
         .catch((error) => {
           syncLogger.error({ err: error }, 'Sync worker could not prune completed jobs');
         });
@@ -116,10 +115,16 @@ export class SyncWorker {
   private async runLoop(): Promise<void> {
     const repository = await getSyncJobRepository();
     while (!this.stopping) {
-      const recoveredSchedules = await repository.enqueueDueSchedules();
-      const metrics = await repository.getMetrics();
-      this.lastKnownQueuedCount = metrics.queued;
-      setQueuedExpensiveOperations(metrics.queued);
+      const recoveredSchedules = await withDatabaseOperation(
+        'sync-queue-schedule',
+        () => repository.enqueueDueSchedules(),
+      );
+      const queuedCount = await withDatabaseOperation(
+        'sync-queue-count',
+        () => repository.countQueued(),
+      );
+      this.lastKnownQueuedCount = queuedCount;
+      setQueuedExpensiveOperations(queuedCount);
       if (recoveredSchedules.length > 0) {
         syncLogger.warn(
           {
@@ -129,10 +134,13 @@ export class SyncWorker {
           'Recovered overdue sync schedules',
         );
       }
-      const job = await repository.claimNext(
-        this.ownerId,
-        getSyncLeaseMs(),
-        new Set(this.abandoned.keys()),
+      const job = await withDatabaseOperation(
+        'sync-queue-claim',
+        () => repository.claimNext(
+          this.ownerId,
+          getSyncLeaseMs(),
+          new Set(this.abandoned.keys()),
+        ),
       );
       if (!job) {
         await this.delay(this.pollIntervalMs);
@@ -143,9 +151,12 @@ export class SyncWorker {
       this.active = { job, controller, promise };
       await this.waitForJob(job, controller, promise);
       if (this.active?.job.id === job.id) this.active = null;
-      const refreshedMetrics = await repository.getMetrics();
-      this.lastKnownQueuedCount = refreshedMetrics.queued;
-      setQueuedExpensiveOperations(refreshedMetrics.queued);
+      const refreshedQueuedCount = await withDatabaseOperation(
+        'sync-queue-count',
+        () => repository.countQueued(),
+      );
+      this.lastKnownQueuedCount = refreshedQueuedCount;
+      setQueuedExpensiveOperations(refreshedQueuedCount);
     }
   }
 
@@ -156,11 +167,17 @@ export class SyncWorker {
     const heartbeat = setInterval(() => {
       void (async () => {
         try {
-          if (await repository.isCancellationRequested(job.id, this.ownerId)) {
+          if (await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.isCancellationRequested(job.id, this.ownerId),
+          )) {
             controller.abort(new Error('Sync cancellation requested'));
             return;
           }
-          if (!(await repository.renewLease(job.id, this.ownerId, leaseMs))) {
+          if (!(await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.renewLease(job.id, this.ownerId, leaseMs),
+          ))) {
             controller.abort(new Error('Sync job lease ownership lost'));
           }
         } catch (error) {
@@ -194,41 +211,54 @@ export class SyncWorker {
     );
 
     try {
-      const result = await this.execute(job.connectorId, {
-        full: job.full,
-        signal: controller.signal,
-        jobId: job.id,
-        identityContext: job.identityMode === null || job.identityModeRevision === null
-          ? undefined
-          : Object.freeze({
-              connectorInstanceId: job.connectorId,
-              modeRevision: job.identityModeRevision,
-            }),
-      });
+      const result = await withDatabaseOperation('sync-job-execution', () =>
+        this.execute(job.connectorId, {
+          full: job.full,
+          signal: controller.signal,
+          jobId: job.id,
+          identityContext: job.identityMode === null || job.identityModeRevision === null
+            ? undefined
+            : Object.freeze({
+                connectorInstanceId: job.connectorId,
+                modeRevision: job.identityModeRevision,
+              }),
+        }));
       if (controller.signal.aborted) {
-        const cancelled = await repository.isCancellationRequested(job.id, this.ownerId);
-        await repository.fail(
+        const cancelled = await withDatabaseOperation(
+          'sync-job-lease',
+          () => repository.isCancellationRequested(job.id, this.ownerId),
+        );
+        await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,
           this.ownerId,
           controller.signal.reason instanceof Error
             ? controller.signal.reason.message
             : 'Sync cancelled',
           { retry: !cancelled, cancelled },
-        );
+        ));
       } else if (!result.success) {
-        await repository.linkSyncLog(job, result);
-        const status = await repository.fail(
+        await withDatabaseOperation(
+          'sync-job-finalize',
+          () => repository.linkSyncLog(job, result),
+        );
+        const status = await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,
           this.ownerId,
           result.errors.join('; ') || 'Connector sync failed',
-        );
+        ));
         syncLogger.warn(
           { jobId: job.id, connectorId: job.connectorId, status, attempt: job.attempt },
           'Sync worker job failed',
         );
       } else {
-        await repository.linkSyncLog(job, result);
-        await repository.complete(job.id, this.ownerId, result);
+        await withDatabaseOperation(
+          'sync-job-finalize',
+          () => repository.linkSyncLog(job, result),
+        );
+        await withDatabaseOperation(
+          'sync-job-finalize',
+          () => repository.complete(job.id, this.ownerId, result),
+        );
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
           'Sync worker job completed',
@@ -239,12 +269,20 @@ export class SyncWorker {
       try {
         const staleIdentityContext = error instanceof StaleGitHubIdentityContextError;
         const cancelled = !staleIdentityContext
-          && await repository.isCancellationRequested(job.id, this.ownerId);
-        await repository.fail(job, this.ownerId, message, {
-          retry: !staleIdentityContext && !cancelled,
-          cancelled,
-          terminal: staleIdentityContext,
-        });
+          && await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.isCancellationRequested(job.id, this.ownerId),
+          );
+        await withDatabaseOperation('sync-job-finalize', () => repository.fail(
+          job,
+          this.ownerId,
+          message,
+          {
+            retry: !staleIdentityContext && !cancelled,
+            cancelled,
+            terminal: staleIdentityContext,
+          },
+        ));
       } catch (recordError) {
         syncLogger.error(
           { err: recordError, jobId: job.id, connectorId: job.connectorId },
@@ -332,14 +370,8 @@ export class SyncWorker {
 
   hasPendingWork(): boolean {
     if (this.active !== null) return true;
-    // SQLite's queue metrics are a synchronous, always-fresh in-process
-    // query, so keep calling it directly (unchanged) rather than the
-    // async, backend-selected repository. PostgreSQL has no synchronous
-    // equivalent, so it falls back to the last value observed by the poll
-    // loop (`runLoop`), which is at most one `pollIntervalMs` stale.
-    if (resolveDatabaseBackend() === 'sqlite') {
-      return getSyncQueueMetrics().queued > 0;
-    }
+    // The backend-neutral queue count is refreshed every poll. Avoid running
+    // the full queue-health aggregate from this synchronous health check.
     return this.lastKnownQueuedCount > 0;
   }
 

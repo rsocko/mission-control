@@ -1,4 +1,5 @@
 import type { DatabaseTelemetrySnapshot } from './database';
+import { DATABASE_OPERATION_NAMES } from './database-operation-context';
 import type { RuntimeRole, RuntimeTelemetryRecord } from './runtime';
 
 type PrometheusDatabaseSnapshot = Pick<
@@ -44,6 +45,21 @@ const definitions: MetricDefinition[] = [
   {
     name: 'mission_control_sqlite_operation_failures',
     help: 'Failed SQLite operation samples retained in the rolling observation window.',
+    type: 'gauge',
+  },
+  {
+    name: 'mission_control_sqlite_attributed_operation_latency_milliseconds',
+    help: 'Rolling SQLite operation latency percentile by fixed application operation.',
+    type: 'gauge',
+  },
+  {
+    name: 'mission_control_sqlite_attributed_operation_samples',
+    help: 'SQLite operation samples retained by fixed application operation.',
+    type: 'gauge',
+  },
+  {
+    name: 'mission_control_sqlite_attributed_operation_failures',
+    help: 'Failed SQLite operation samples retained by fixed application operation.',
     type: 'gauge',
   },
   {
@@ -147,6 +163,35 @@ function operationSamples(
       sample(
         lines,
         'mission_control_sqlite_operation_latency_milliseconds',
+        value,
+        { ...baseLabels, quantile },
+      );
+    }
+  }
+  for (const operation of DATABASE_OPERATION_NAMES) {
+    const aggregate = database.operations.byAttribution?.[operation];
+    if (!aggregate) continue;
+    const baseLabels = { role, operation };
+    sample(
+      lines,
+      'mission_control_sqlite_attributed_operation_samples',
+      aggregate.count,
+      baseLabels,
+    );
+    sample(
+      lines,
+      'mission_control_sqlite_attributed_operation_failures',
+      aggregate.failureCount,
+      baseLabels,
+    );
+    for (const [quantile, value] of [
+      ['0.5', aggregate.p50Ms],
+      ['0.95', aggregate.p95Ms],
+      ['0.99', aggregate.p99Ms],
+    ] as const) {
+      sample(
+        lines,
+        'mission_control_sqlite_attributed_operation_latency_milliseconds',
         value,
         { ...baseLabels, quantile },
       );

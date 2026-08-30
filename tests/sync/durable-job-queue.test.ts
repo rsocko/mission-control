@@ -221,6 +221,24 @@ describe('durable sync job queue', () => {
     expect(queue.getSyncQueueMetrics().queued).toBe(1);
   });
 
+  it('counts queued jobs through the status index without scanning retained history', () => {
+    const queued = queue.enqueueSyncJob('github-1');
+    const claimed = queue.claimNextSyncJob('worker-a');
+    expect(claimed?.id).toBe(queued.id);
+    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
+    queue.enqueueSyncJob('github-2');
+
+    expect(queue.countQueuedSyncJobs()).toBe(1);
+    const plan = database.sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT COUNT(*) FROM sync_jobs INDEXED BY idx_sync_jobs_claim
+      WHERE status = 'queued'
+    `).all() as Array<{ detail: string }>;
+    expect(plan.some((step) =>
+      step.detail.includes('USING COVERING INDEX idx_sync_jobs_claim')
+    )).toBe(true);
+  });
+
   it('keeps the earliest availability when delayed work is deduplicated', () => {
     const delayed = queue.enqueueSyncJob('github-1', {
       availableAt: new Date('2099-01-01T00:10:00.000Z'),

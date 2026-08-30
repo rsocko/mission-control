@@ -85,6 +85,12 @@ PostgreSQL starts from a clean baseline migration matching the current
 application schema. The historical SQLite migration chain is not replayed
 against PostgreSQL.
 
+The synthetic persisted-state fixtures validate SQLite forward upgrades only.
+They do not copy rows into PostgreSQL. Mission Control currently has no
+executable SQLite-to-PostgreSQL copy/import command; implementing and rehearsing
+that maintenance-window path is a hard dependency of the production cutover in
+[#1155](https://github.com/rsocko/mission-control/issues/1155).
+
 ## Backup, restore, and rollback
 
 The PostgreSQL operator owns scheduled backups, retention, integrity checks, and

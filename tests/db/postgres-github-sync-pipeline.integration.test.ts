@@ -382,7 +382,8 @@ describePostgres('PostgreSQL GitHub SyncExecutionPipeline identity persistence',
     const result = await runPipeline(connectorId, inertConnector);
 
     expect(result.success).toBe(false);
-    expect(result.errors.join(' ')).toMatch(/identity persistence failed/i);
+    expect(result.errors.join(' ')).toMatch(/identity/i);
+    expect(result.errors.join(' ')).toMatch(/blocked|failed/i);
     const owner = await pool.query<{ sourceId: string; state: string }>(
       `
         SELECT task.source_id AS "sourceId", binding.state

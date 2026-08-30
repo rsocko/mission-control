@@ -38,15 +38,16 @@ gate.
 
 - Approve the architecture and entity projection contract.
 - Define a synthetic relevance evaluation set and keyword baseline.
-- Benchmark current semantic scan behavior at 10,000 and 100,000 entities.
-- Spike indexed vector retrieval for SQLite and PostgreSQL.
+- Retain the in-memory semantic scan baseline at 10,000 and 100,000 entities.
+- Gate PostgreSQL 17 plus pgvector 0.8.6 HNSW at 10,000 and 100,000 entities;
+  retain SQLite as an explicit bounded 5,000-candidate compatibility path.
 - Define provider/model/dimension compatibility and staged cutover.
 - Use the confirmed 90-day Houston-summary default and decide alert/event retention defaults.
 
 ### Exit gates
 
-- A vector repository choice meets the deployment and 100,000-entity performance
-  gate for each supported production backend, or the backend limitation is explicit.
+- PostgreSQL HNSW meets the repeatable 100,000-entity plan, recall, lifecycle, and
+  latency gates; SQLite's 5,000-candidate limitation remains explicit.
 - Baseline relevance, p50/p95 latency, memory, and index-build measurements exist.
 - No later issue depends on an unspecified vector or retention strategy.
 

@@ -48,6 +48,12 @@ describe('PostgreSQL persistence runtime', () => {
     expect(pool.query).toHaveBeenCalledWith('SELECT 1');
     expect(runPostgresMigrations).toHaveBeenCalledOnce();
     expect(backend.context.pool).toBe(pool);
+    expect(backend.context.vector).toEqual({
+      available: false,
+      mode: 'optional',
+      extensionVersion: null,
+      reason: 'extension-unavailable',
+    });
 
     await backend.shutdown();
     await backend.shutdown();
@@ -62,6 +68,7 @@ describe('PostgreSQL persistence runtime', () => {
     const failure = Object.assign(new Error('connection refused'), {
       code: 'ECONNREFUSED',
     });
+
     first.query.mockRejectedValueOnce(failure);
     const second = fakePool();
     vi.mocked(drizzle).mockReturnValue({ transaction: vi.fn() } as never);
@@ -79,6 +86,35 @@ describe('PostgreSQL persistence runtime', () => {
     await backend.initialize();
     expect(createPool).toHaveBeenCalledTimes(2);
     expect(backend.context.pool).toBe(second);
+  });
+
+  it('fails startup when indexed retrieval is required without pgvector', async () => {
+    const pool = fakePool();
+    const backend = new PostgresPersistenceBackend({
+      config,
+      vectorMode: 'required',
+      createPool: () => pool as never,
+    });
+
+    await expect(backend.initialize()).rejects.toThrow(
+      'PostgreSQL indexed vector retrieval is required',
+    );
+    expect(pool.end).toHaveBeenCalledOnce();
+  });
+
+  it('fails required indexed retrieval when schema initialization is disabled', async () => {
+    const pool = fakePool();
+    const backend = new PostgresPersistenceBackend({
+      config,
+      initializeSchema: false,
+      vectorMode: 'required',
+      createPool: () => pool as never,
+    });
+
+    await expect(backend.initialize()).rejects.toThrow(
+      'schema initialization is disabled',
+    );
+    expect(pool.end).toHaveBeenCalledOnce();
   });
 
   it('allows shutdown to complete when in-flight initialization fails', async () => {

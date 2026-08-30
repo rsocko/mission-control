@@ -584,6 +584,70 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     expect(filtered.results.map((result) => result.entityId)).toEqual(['p']);
   });
 
+  it('uses identity-scoped HNSW retrieval when pgvector is available', async () => {
+    if (!backend.context.vector.available) {
+      expect(backend.context.vector.reason).toBe('extension-unavailable');
+      return;
+    }
+    const indexed = new PostgresSemanticIndexRepository(
+      backend.context.pool,
+      100,
+      backend.context.vector,
+    );
+    const indexId = `semantic-${randomUUID()}`;
+    identityIds.add(indexId);
+    await indexed.createIdentity({
+      id: indexId,
+      provider: 'openai',
+      model: 'text-embedding-3-small',
+      dimensions: 3,
+      projectionVersion: 1,
+      now: T0,
+    });
+    for (const [entityId, status, embedding] of [
+      ['allowed-near', 'todo', [1, 0, 0]],
+      ['excluded-near', 'done', [0.99, 0.01, 0]],
+      ['allowed-far', 'todo', [0, 0, 1]],
+    ] as const) {
+      const document = (await indexed.upsertDocument(documentFor(indexId, {
+        id: `doc-${entityId}`,
+        entityId,
+        title: entityId,
+        metadata: { status },
+      }))).document!;
+      await indexed.upsertVector(vectorFor(indexId, document.id, {
+        id: `vec-${entityId}`,
+        entityId,
+        embedding: new Float32Array(embedding),
+      }));
+    }
+    await indexed.markIdentityReady(indexId, T0);
+    await indexed.activateIdentity(indexId, T0);
+
+    const response = await indexed.queryVectors({
+      queryEmbedding: new Float32Array([1, 0, 0]),
+      limit: 10,
+      metadataFilters: [{ keys: ['status'], match: 'any', values: ['todo'] }],
+      now: T1,
+    });
+    expect(response.scan).toMatchObject({
+      kind: 'postgres-hnsw',
+      extensionVersion: backend.context.vector.extensionVersion,
+      guaranteedScale: 100_000,
+    });
+    expect(response.results.map((result) => result.entityId)).toEqual([
+      'allowed-near',
+      'allowed-far',
+    ]);
+
+    expect(await indexed.deleteVector(indexId, 'task', 'allowed-near')).toBe(true);
+    expect((await indexed.queryVectors({
+      queryEmbedding: new Float32Array([1, 0, 0]),
+      limit: 10,
+      now: T1,
+    })).results.map((result) => result.entityId)).not.toContain('allowed-near');
+  });
+
   it('expires retained documents and removes their vector projections', async () => {
     const indexId = await createIdentity();
     const document = (await repository.upsertDocument(documentFor(indexId, {

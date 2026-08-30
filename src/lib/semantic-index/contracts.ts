@@ -703,12 +703,26 @@ export interface SemanticIdentityDescriptor {
  * readiness so a status consumer can tell "ready" from "ready, but recall is
  * only guaranteed up to N entities".
  */
-export interface SemanticScanCapability {
+export interface SemanticBoundedScanCapability {
   kind: 'bounded-in-process';
   candidateCeiling: number;
   guaranteesFullRecall: boolean;
   guaranteedScale: number;
 }
+
+export interface SemanticIndexedScanCapability {
+  kind: 'postgres-hnsw';
+  candidateCeiling: number;
+  guaranteesFullRecall: false;
+  /** Largest corpus validated by the deployed benchmark. */
+  guaranteedScale: number;
+  extensionVersion: string;
+  maxDimensions: number;
+}
+
+export type SemanticScanCapability =
+  | SemanticBoundedScanCapability
+  | SemanticIndexedScanCapability;
 
 export interface SemanticIndexReadiness {
   available: boolean;
@@ -766,7 +780,7 @@ export interface SemanticIndexMetrics {
  * `guaranteesFullRecall: false` and the scale they actually support, rather
  * than implying correct top-k at the 100,000-entity target.
  */
-export interface SemanticQueryScan {
+export interface SemanticBoundedQueryScan {
   kind: 'bounded-in-process';
   candidatesScanned: number;
   candidateCeiling: number;
@@ -776,6 +790,21 @@ export interface SemanticQueryScan {
   /** True when the corpus exceeded the ceiling, so recall is not guaranteed. */
   truncated: boolean;
 }
+
+export interface SemanticIndexedQueryScan {
+  kind: 'postgres-hnsw';
+  candidatesScanned: number;
+  candidateCeiling: number;
+  guaranteesFullRecall: false;
+  guaranteedScale: number;
+  truncated: boolean;
+  extensionVersion: string;
+  maxDimensions: number;
+}
+
+export type SemanticQueryScan =
+  | SemanticBoundedQueryScan
+  | SemanticIndexedQueryScan;
 
 /**
  * A portable predicate over projected document metadata.

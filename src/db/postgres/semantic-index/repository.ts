@@ -1,4 +1,11 @@
+import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
+import {
+  disabledPostgresVectorCapability,
+  POSTGRES_HNSW_MIN_CANDIDATES,
+  POSTGRES_HNSW_VALIDATED_SCALE,
+  type PostgresVectorCapability,
+} from '@/db/postgres/vector-support';
 import {
   SEMANTIC_ENTITY_TYPES,
   SEMANTIC_RETRYABLE_TERMINAL_RUN_STATUSES,
@@ -77,6 +84,8 @@ import {
 } from '@/lib/semantic-index/validation';
 
 type Client = Pool | PoolClient;
+const ANN_MAX_CANDIDATES = 1_000;
+const ANN_OVERSAMPLE_FACTOR = 10;
 
 async function query<T>(client: Client, text: string, params: unknown[] = []): Promise<T[]> {
   const result = await client.query(text, params);
@@ -349,20 +358,32 @@ function toNumber(value: string | number | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function annIndexName(indexId: string): string {
+  const digest = createHash('sha256').update(indexId).digest('hex').slice(0, 20);
+  return `idx_semantic_ann_${digest}`;
+}
+
+function quoteSqlLiteral(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
 /**
  * PostgreSQL-backed `SemanticIndexRepository`.
  *
  * Mirrors `SqliteSemanticIndexRepository` behaviour exactly, using per-operation
  * transactions plus `SELECT ... FOR UPDATE SKIP LOCKED` so concurrent workers
  * claim disjoint intents/runs without blocking each other or double-claiming.
- * Retrieval uses the same bounded in-process scan and honestly reports
- * `guaranteesFullRecall: false`; an indexed ANN implementation is a separate,
- * benchmarked decision (see the architecture's storage section).
+ * Retrieval uses an identity-scoped pgvector HNSW index when the runtime capability
+ * is available, and otherwise honestly reports the bounded in-process fallback.
  */
 export class PostgresSemanticIndexRepository implements SemanticIndexRepository {
+  private readonly knownAnnIndexes = new Set<string>();
+
   constructor(
     private readonly pool: Pool,
     private readonly scanLimit: number = getSemanticScanLimit(),
+    private readonly vectorCapability: PostgresVectorCapability =
+      disabledPostgresVectorCapability(),
   ) {}
 
   // ─── Internal helpers ───────────────────────────────────────────────
@@ -550,6 +571,152 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     }));
   }
 
+  private supportsAnnDimensions(dimensions: number): boolean {
+    return this.vectorCapability.available
+      && dimensions <= this.vectorCapability.maxDimensions;
+  }
+
+  private async ensureAnnIndex(
+    identity: Pick<SemanticIndexIdentity, 'id' | 'dimensions'>,
+  ): Promise<boolean> {
+    if (!this.supportsAnnDimensions(identity.dimensions)) {
+      if (this.vectorCapability.mode === 'required') {
+        throw new SemanticIndexValidationError(
+          'invalid-argument',
+          `Indexed PostgreSQL retrieval supports at most `
+          + `${this.vectorCapability.available ? this.vectorCapability.maxDimensions : 0} dimensions`,
+        );
+      }
+      return false;
+    }
+
+    const name = annIndexName(identity.id);
+    if (this.knownAnnIndexes.has(name)) return true;
+    const indexId = quoteSqlLiteral(identity.id);
+    const dimensions = identity.dimensions;
+    const client = await this.pool.connect();
+    let operationError: unknown;
+    let cleanupError: unknown;
+    try {
+      await client.query(
+        `SELECT pg_advisory_lock(hashtext($1), hashtext($2))`,
+        ['mission-control-semantic-ann', identity.id],
+      );
+      const [existing] = await query<{ valid: boolean }>(
+        client,
+        `
+          SELECT i.indisvalid AS valid
+          FROM pg_class c
+          INNER JOIN pg_index i ON i.indexrelid = c.oid
+          WHERE c.oid = to_regclass($1)
+        `,
+        [name],
+      );
+      if (existing && !existing.valid) {
+        await client.query(`DROP INDEX CONCURRENTLY "${name}"`);
+      }
+      if (!existing?.valid) {
+        await client.query(`
+          CREATE INDEX CONCURRENTLY "${name}"
+          ON semantic_vector_ann
+          USING hnsw ((embedding::halfvec(${dimensions})) halfvec_cosine_ops)
+          WITH (m = 16, ef_construction = 64)
+          WHERE index_id = ${indexId} AND dimensions = ${dimensions}
+        `);
+      }
+    } catch (error) {
+      operationError = error;
+    } finally {
+      try {
+        await client.query(
+          `SELECT pg_advisory_unlock(hashtext($1), hashtext($2))`,
+          ['mission-control-semantic-ann', identity.id],
+        );
+      } catch (error) {
+        cleanupError = error;
+      }
+      client.release(cleanupError instanceof Error ? cleanupError : undefined);
+    }
+    if (operationError && cleanupError) {
+      throw new AggregateError(
+        [operationError, cleanupError],
+        `PostgreSQL HNSW index creation and advisory-lock cleanup failed`,
+      );
+    }
+    if (operationError) throw operationError;
+    if (cleanupError) throw cleanupError;
+    this.knownAnnIndexes.add(name);
+    return true;
+  }
+
+  private async annIndexExists(
+    identity: Pick<SemanticIndexIdentity, 'id' | 'dimensions'>,
+  ): Promise<boolean> {
+    if (!this.supportsAnnDimensions(identity.dimensions)) return false;
+    const name = annIndexName(identity.id);
+    if (this.knownAnnIndexes.has(name)) return true;
+    const [row] = await query<{ present: boolean }>(
+      this.pool,
+      `
+        SELECT to_regclass($1) IS NOT NULL
+          AND COALESCE((
+            SELECT i.indisvalid
+            FROM pg_class c
+            INNER JOIN pg_index i ON i.indexrelid = c.oid
+            WHERE c.oid = to_regclass($1)
+          ), false) AS present
+      `,
+      [name],
+    );
+    if (row?.present) this.knownAnnIndexes.add(name);
+    return row?.present === true;
+  }
+
+  private async upsertAnnVector(
+    client: Client,
+    vectorId: string,
+    vector: SemanticVectorWrite,
+    document: {
+      metadata: unknown;
+      retainUntil: string | null;
+    },
+    serialized: string,
+  ): Promise<void> {
+    if (!this.supportsAnnDimensions(vector.dimensions)) return;
+    await execute(
+      client,
+      `
+        INSERT INTO semantic_vector_ann (
+          vector_id, index_id, document_id, entity_type, entity_id,
+          sensitivity, metadata, dimensions, embedding, source_revision,
+          source_updated_at, embedded_at, expires_at, retain_until
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9::vector, $10, $11, $12, $13, $14
+        )
+        ON CONFLICT (vector_id) DO UPDATE SET
+          index_id = EXCLUDED.index_id,
+          document_id = EXCLUDED.document_id,
+          entity_type = EXCLUDED.entity_type,
+          entity_id = EXCLUDED.entity_id,
+          sensitivity = EXCLUDED.sensitivity,
+          metadata = EXCLUDED.metadata,
+          dimensions = EXCLUDED.dimensions,
+          embedding = EXCLUDED.embedding,
+          source_revision = EXCLUDED.source_revision,
+          source_updated_at = EXCLUDED.source_updated_at,
+          embedded_at = EXCLUDED.embedded_at,
+          expires_at = EXCLUDED.expires_at,
+          retain_until = EXCLUDED.retain_until
+      `,
+      [
+        vectorId, vector.indexId, vector.documentId, vector.entityType, vector.entityId,
+        vector.sensitivity, JSON.stringify(document.metadata ?? {}), vector.dimensions,
+        serialized, vector.sourceRevision, vector.sourceUpdatedAt, vector.embeddedAt,
+        vector.expiresAt ?? null, document.retainUntil,
+      ],
+    );
+  }
+
   // ─── Identity lifecycle ─────────────────────────────────────────────
 
   async createIdentity(input: SemanticIndexIdentityInput): Promise<SemanticIndexIdentity> {
@@ -566,28 +733,53 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       );
     }
     const status = input.status ?? 'building';
-    const [row] = await query<SemanticIndexIdentity>(
-      this.pool,
-      `
-        INSERT INTO semantic_index_identities (
-          id, provider, model, dimensions, projection_version, status,
-          document_count, vector_count, created_at, updated_at,
-          ready_at, activated_at, retired_at, failure_reason
-        ) VALUES ($1, $2, $3, $4, $5, $6, 0, 0, $7, $7, $8, NULL, NULL, NULL)
-        RETURNING ${IDENTITY_COLUMNS}
-      `,
-      [
-        input.id,
-        input.provider,
-        input.model,
-        input.dimensions,
-        input.projectionVersion,
-        status,
-        input.now,
-        status === 'ready' ? input.now : null,
-      ],
-    );
-    return row;
+    if (status === 'ready' && this.vectorCapability.mode === 'required') {
+      if (!this.supportsAnnDimensions(input.dimensions)) {
+        throw new SemanticIndexValidationError(
+          'invalid-argument',
+          `Indexed PostgreSQL retrieval supports at most `
+          + `${this.vectorCapability.available ? this.vectorCapability.maxDimensions : 0} dimensions`,
+        );
+      }
+    }
+    const provisionIndex = status === 'ready' && this.supportsAnnDimensions(input.dimensions);
+    const persistedStatus = provisionIndex ? 'building' : status;
+    const created = await withTransaction(this.pool, async (client) => {
+      const [row] = await query<SemanticIndexIdentity>(
+        client,
+        `
+          INSERT INTO semantic_index_identities (
+            id, provider, model, dimensions, projection_version, status,
+            document_count, vector_count, created_at, updated_at,
+            ready_at, activated_at, retired_at, failure_reason
+          ) VALUES ($1, $2, $3, $4, $5, $6, 0, 0, $7, $7, $8, NULL, NULL, NULL)
+          RETURNING ${IDENTITY_COLUMNS}
+        `,
+        [
+          input.id,
+          input.provider,
+          input.model,
+          input.dimensions,
+          input.projectionVersion,
+          persistedStatus,
+          input.now,
+          persistedStatus === 'ready' ? input.now : null,
+        ],
+      );
+      return row;
+    });
+    if (!provisionIndex) return created;
+    await this.ensureAnnIndex(created);
+    const changed = await this.markIdentityReady(created.id, input.now);
+    if (!changed) {
+      throw new Error(`Semantic identity ${created.id} could not be marked ready after HNSW creation`);
+    }
+    return {
+      ...created,
+      status: 'ready',
+      readyAt: input.now,
+      updatedAt: input.now,
+    };
   }
 
   async getIdentity(id: string): Promise<SemanticIndexIdentity | null> {
@@ -621,6 +813,9 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
   }
 
   async markIdentityReady(id: string, now: string): Promise<boolean> {
+    const identity = await this.identityRow(this.pool, id);
+    if (!identity || identity.status !== 'building') return false;
+    await this.ensureAnnIndex(identity);
     const changed = await execute(
       this.pool,
       `
@@ -778,10 +973,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
 
   async cleanupIdentities(input: { before: string; now: string }): Promise<SemanticCleanupResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticCleanupResult> => {
-      const candidates = await query<{ id: string; eligibleAt: string }>(
+      const candidates = await query<{ id: string; dimensions: number; eligibleAt: string }>(
         client,
         `
-          SELECT id, COALESCE(retired_at, updated_at) AS "eligibleAt"
+          SELECT id, dimensions, COALESCE(retired_at, updated_at) AS "eligibleAt"
           FROM semantic_index_identities
           WHERE status IN ('retired', 'failed')
           FOR UPDATE
@@ -824,6 +1019,9 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           `DELETE FROM semantic_index_identities WHERE id = $1 AND status IN ('retired', 'failed')`,
           [candidate.id],
         );
+        const indexName = annIndexName(candidate.id);
+        await client.query(`DROP INDEX IF EXISTS "${indexName}"`);
+        this.knownAnnIndexes.delete(indexName);
       }
 
       return result;
@@ -925,6 +1123,13 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         ],
       );
 
+      if (this.vectorCapability.available) {
+        await execute(
+          client,
+          `DELETE FROM semantic_vector_ann WHERE document_id = $1`,
+          [existing.id],
+        );
+      }
       if (resurrecting) await this.adjustCounts(client, document.indexId, 1, 0, document.now);
       return { status: 'updated', document: hydrateDocument(updated) };
     });
@@ -1103,11 +1308,14 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         version: number;
         sourceRevision: string;
         deletedAt: string | null;
+        metadata: unknown;
+        retainUntil: string | null;
       }>(
         client,
         `
           SELECT id, entity_type AS "entityType", entity_id AS "entityId", version,
-                 source_revision AS "sourceRevision", deleted_at AS "deletedAt"
+                 source_revision AS "sourceRevision", deleted_at AS "deletedAt",
+                 metadata, retain_until AS "retainUntil"
           FROM semantic_documents
           WHERE id = $1 AND index_id = $2
           FOR UPDATE
@@ -1162,7 +1370,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           && existing.sensitivity === vector.sensitivity
           && existing.expiresAt === expiresAt
           && existing.embedding === serialized;
-        if (unchanged) return { status: 'unchanged' };
+        if (unchanged) {
+          await this.upsertAnnVector(client, existing.id, vector, document, serialized);
+          return { status: 'unchanged' };
+        }
 
         await execute(
           client,
@@ -1183,6 +1394,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
             vector.intentId, expiresAt, vector.now, existing.id,
           ],
         );
+        await this.upsertAnnVector(client, existing.id, vector, document, serialized);
         return { status: 'updated' };
       }
 
@@ -1206,6 +1418,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
           vector.intentId, expiresAt, vector.now,
         ],
       );
+      await this.upsertAnnVector(client, vector.id, vector, document, serialized);
       await this.adjustCounts(client, vector.indexId, 0, 1, vector.now);
       return { status: 'created' };
     });
@@ -1248,6 +1461,163 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     });
   }
 
+  private async queryVectorsIndexed(
+    request: SemanticQueryRequest,
+    identity: SemanticIndexIdentity,
+    now: string,
+    queryNorm: number,
+    limit: number,
+    minScore: number,
+  ): Promise<SemanticQueryResponse> {
+    if (!this.vectorCapability.available) {
+      throw new Error('Indexed vector query invoked without pgvector capability');
+    }
+    const dimensions = identity.dimensions;
+    const candidateCeiling = Math.min(
+      ANN_MAX_CANDIDATES,
+      Math.max(POSTGRES_HNSW_MIN_CANDIDATES, limit * ANN_OVERSAMPLE_FACTOR),
+    );
+    const metadataFilters = normalizeMetadataFilters(request.metadataFilters);
+    const params: unknown[] = [serializeEmbedding(request.queryEmbedding), now];
+    let where = `
+      a.index_id = ${quoteSqlLiteral(identity.id)}
+      AND a.dimensions = ${dimensions}
+      AND (a.expires_at IS NULL OR a.expires_at > $2)
+      AND (a.retain_until IS NULL OR a.retain_until > $2)
+    `;
+
+    if (request.entityTypes && request.entityTypes.length > 0) {
+      params.push(request.entityTypes);
+      where += ` AND a.entity_type = ANY($${params.length}::text[])`;
+    }
+    if (request.sensitivities && request.sensitivities.length > 0) {
+      params.push(request.sensitivities);
+      where += ` AND a.sensitivity = ANY($${params.length}::text[])`;
+    }
+    if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
+      params.push(request.excludeEntityIds);
+      where += ` AND NOT (a.entity_id = ANY($${params.length}::text[]))`;
+    }
+    for (const filter of metadataFilters) {
+      const clauses = filter.keys.map((key) => {
+        params.push(key);
+        const keyParam = params.length;
+        params.push(filter.values);
+        const valuesParam = params.length;
+        const accessor = filter.caseInsensitive
+          ? `LOWER(a.metadata ->> $${keyParam})`
+          : `a.metadata ->> $${keyParam}`;
+        return filter.match === 'any'
+          ? `${accessor} = ANY($${valuesParam}::text[])`
+          : `(${accessor} IS NULL OR NOT (${accessor} = ANY($${valuesParam}::text[])))`;
+      });
+      where += filter.match === 'any'
+        ? ` AND (${clauses.join(' OR ')})`
+        : ` AND (${clauses.join(' AND ')})`;
+    }
+    params.push(candidateCeiling);
+    const limitParam = params.length;
+
+    const rows = await withTransaction(this.pool, async (client) => {
+      await client.query(`SET LOCAL enable_seqscan = off`);
+      await client.query(`SET LOCAL enable_sort = off`);
+      await client.query(`SET LOCAL hnsw.ef_search = ${candidateCeiling}`);
+      await client.query(`SET LOCAL hnsw.iterative_scan = strict_order`);
+      await client.query(`SET LOCAL hnsw.max_scan_tuples = 20000`);
+      return query<{
+        id: string;
+        entityType: string;
+        entityId: string;
+        embedding: string;
+        norm: string;
+        dimensions: number;
+        projectionVersion: number;
+        sensitivity: string;
+        provider: string;
+        model: string;
+        sourceRevision: string;
+        sourceUpdatedAt: string;
+        embeddedAt: string;
+        title: string;
+        body: string;
+        metadata: unknown;
+      }>(
+        client,
+        `
+          WITH nearest AS MATERIALIZED (
+            SELECT a.vector_id,
+                   a.embedding::halfvec(${dimensions})
+                     <=> $1::halfvec(${dimensions}) AS distance
+            FROM semantic_vector_ann a
+            WHERE ${where}
+            ORDER BY a.embedding::halfvec(${dimensions})
+                     <=> $1::halfvec(${dimensions})
+            LIMIT $${limitParam}
+          )
+          SELECT v.id AS id, v.entity_type AS "entityType", v.entity_id AS "entityId",
+                 v.embedding AS embedding, v.norm AS norm, v.dimensions AS dimensions,
+                 v.projection_version AS "projectionVersion", v.sensitivity AS sensitivity,
+                 v.provider AS provider, v.model AS model,
+                 v.source_revision AS "sourceRevision", v.source_updated_at AS "sourceUpdatedAt",
+                 v.embedded_at AS "embeddedAt",
+                 d.title AS title, d.body AS body, d.metadata AS metadata
+          FROM nearest n
+          INNER JOIN semantic_vectors v ON v.id = n.vector_id
+          INNER JOIN semantic_documents d ON d.id = v.document_id
+          WHERE d.deleted_at IS NULL
+            AND v.document_version = d.version
+            AND v.source_revision = d.source_revision
+          ORDER BY n.distance ASC, v.id ASC
+        `,
+        params,
+      );
+    });
+
+    const scored: SemanticQueryResult[] = [];
+    for (const row of rows) {
+      if (row.dimensions !== identity.dimensions) continue;
+      if (row.projectionVersion !== identity.projectionVersion) continue;
+      const embedding = parseEmbedding(row.embedding);
+      if (!embedding || embedding.length !== identity.dimensions) continue;
+      const storedNorm = Number.parseFloat(row.norm);
+      if (!Number.isFinite(storedNorm) || storedNorm === 0) continue;
+      const score = cosineSimilarity(request.queryEmbedding, queryNorm, embedding, storedNorm);
+      if (score < minScore) continue;
+      scored.push({
+        id: row.id,
+        entityType: row.entityType as SemanticEntityType,
+        entityId: row.entityId,
+        score,
+        title: row.title,
+        body: row.body,
+        metadata: jsonOrDefault<SemanticQueryResult['metadata']>(row.metadata, {}),
+        sourceRevision: row.sourceRevision,
+        sourceUpdatedAt: row.sourceUpdatedAt,
+        embeddedAt: row.embeddedAt,
+        projectionVersion: row.projectionVersion,
+        sensitivity: row.sensitivity as SemanticSensitivity,
+        provider: row.provider,
+        model: row.model,
+      });
+    }
+    scored.sort(compareQueryResults);
+
+    return {
+      identityId: identity.id,
+      results: scored.slice(0, limit),
+      scan: {
+        kind: 'postgres-hnsw',
+        candidatesScanned: rows.length,
+        candidateCeiling,
+        guaranteesFullRecall: false,
+        guaranteedScale: POSTGRES_HNSW_VALIDATED_SCALE,
+        truncated: rows.length === candidateCeiling,
+        extensionVersion: this.vectorCapability.extensionVersion,
+        maxDimensions: this.vectorCapability.maxDimensions,
+      },
+    };
+  }
+
   async queryVectors(request: SemanticQueryRequest): Promise<SemanticQueryResponse> {
     const now = request.now ?? new Date().toISOString();
 
@@ -1286,6 +1656,21 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     const limit = Math.max(1, Math.min(Math.trunc(request.limit) || 1, 100));
     const minScore = request.minScore ?? 0;
     const metadataFilters = normalizeMetadataFilters(request.metadataFilters);
+    if (await this.annIndexExists(identity)) {
+      return this.queryVectorsIndexed(
+        request,
+        identity,
+        now,
+        queryNorm,
+        limit,
+        minScore,
+      );
+    }
+    if (this.vectorCapability.mode === 'required') {
+      throw new Error(
+        `PostgreSQL HNSW index for semantic identity ${identity.id} is unavailable`,
+      );
+    }
 
     const params: unknown[] = [identity.id, now];
     let sql = `
@@ -1300,6 +1685,8 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       INNER JOIN semantic_documents d ON d.id = v.document_id
       WHERE v.index_id = $1
         AND d.deleted_at IS NULL
+        AND v.document_version = d.version
+        AND v.source_revision = d.source_revision
         AND (v.expires_at IS NULL OR v.expires_at > $2)
         AND (d.retain_until IS NULL OR d.retain_until > $2)
     `;
@@ -2097,13 +2484,29 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     return progress;
   }
 
-  private scanCapability(): SemanticScanCapability {
+  private boundedScanCapability(): SemanticScanCapability {
     return {
       kind: 'bounded-in-process',
       candidateCeiling: this.scanLimit,
       guaranteesFullRecall: false,
       guaranteedScale: this.scanLimit,
     };
+  }
+
+  private async scanCapability(
+    identity?: Pick<SemanticIndexIdentity, 'id' | 'dimensions'> | null,
+  ): Promise<SemanticScanCapability> {
+    if (identity && await this.annIndexExists(identity) && this.vectorCapability.available) {
+      return {
+        kind: 'postgres-hnsw',
+        candidateCeiling: ANN_MAX_CANDIDATES,
+        guaranteesFullRecall: false,
+        guaranteedScale: POSTGRES_HNSW_VALIDATED_SCALE,
+        extensionVersion: this.vectorCapability.extensionVersion,
+        maxDimensions: this.vectorCapability.maxDimensions,
+      };
+    }
+    return this.boundedScanCapability();
   }
 
   async getReadiness(now?: string): Promise<SemanticIndexReadiness> {
@@ -2127,7 +2530,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         vectorCount: 0,
         readyIdentityIds: ready.map((identity) => identity.id),
         stagingIdentities: staging,
-        scan: this.scanCapability(),
+        scan: await this.scanCapability(),
         byEntityType: SEMANTIC_ENTITY_TYPES.map((entityType) => ({
           entityType,
           documents: 0,
@@ -2139,8 +2542,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       };
     }
 
+    const scan = await this.scanCapability(active);
     return {
-      available: active.vectorCount > 0,
+      available: active.vectorCount > 0
+        && (this.vectorCapability.mode !== 'required' || scan.kind === 'postgres-hnsw'),
       activeIdentityId: active.id,
       provider: active.provider,
       model: active.model,
@@ -2150,7 +2555,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       vectorCount: active.vectorCount,
       readyIdentityIds: ready.map((identity) => identity.id),
       stagingIdentities: staging,
-      scan: this.scanCapability(),
+      scan,
       byEntityType: await this.entityKindReadiness(this.pool, active.id, at),
     };
   }
@@ -2162,6 +2567,9 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
  * `PostgresPersistenceBackend#context.pool` from `@/db/postgres/runtime`),
  * without callers needing to know the concrete class.
  */
-export function createPostgresSemanticIndexRepository(pool: Pool): SemanticIndexRepository {
-  return new PostgresSemanticIndexRepository(pool);
+export function createPostgresSemanticIndexRepository(
+  pool: Pool,
+  vectorCapability: PostgresVectorCapability = disabledPostgresVectorCapability(),
+): SemanticIndexRepository {
+  return new PostgresSemanticIndexRepository(pool, getSemanticScanLimit(), vectorCapability);
 }

@@ -50,6 +50,8 @@ types.
 | Embedding route | Bifrost by default, resolving to Azure OpenAI |
 | Configuration | Embedding route/model independent from completion route/model |
 | Target scale | 100,000 indexed entities per installation |
+| PostgreSQL vector index | pgvector 0.8.6 HNSW on PostgreSQL 17 |
+| SQLite semantic scale | Explicitly bounded to 5,000 scanned candidates |
 | Semantic edges | Computed, scored, bounded overlays |
 | Canonical relationships | Persist only explicit or user-approved relationships |
 | Clusters | Transient computed groupings with an explicit save action |
@@ -96,10 +98,12 @@ Mission Control already has useful foundations:
 - semantic task neighbors exposed by the graph service; and
 - a graph contract that distinguishes explicit, derived, and embedding provenance.
 
-The current implementation remains task/notification-specific and scans a bounded
-candidate set in application memory. Provider configuration also treats one provider
-as the basis for both completion and embedding calls. Those constraints must be
-removed before adding more entity kinds or claiming 100,000-entity support.
+The compatibility implementation remains task/notification-specific and scans a
+bounded candidate set in application memory. PostgreSQL can claim 100,000-entity
+support only when its pgvector capability and matching dimension-specific HNSW index
+identity are ready; SQLite retains the bounded path. Provider configuration also
+treats one provider as the basis for both completion and embedding calls. Those
+remaining constraints must be removed before adding more entity kinds.
 
 ## Product Architecture
 
@@ -283,24 +287,29 @@ interface VectorRepository {
 }
 ```
 
-The current in-process scan remains a compatibility implementation for small local
-corpora, not the 100,000-entity target. The delivery phase must benchmark and select
-an indexed nearest-neighbor implementation per supported backend. PostgreSQL should
-use a vector extension and ANN index when available. SQLite should use an approved
-vector extension or a bounded sidecar/index implementation with deterministic
-fallback behavior.
+The in-process SQLite scan remains a compatibility implementation for small local
+corpora and has an explicit 5,000-candidate supported ceiling. Above that ceiling,
+keyword results remain available and semantic retrieval reports degraded/truncated
+readiness rather than silently scanning an unbounded corpus.
 
-The architecture does not commit to a specific extension before a spike verifies:
+PostgreSQL 17 uses pgvector 0.8.6 and a cosine HNSW index for the 100,000-entity
+target. HNSW was selected over IVFFlat because it provides a better speed/recall
+tradeoff without a training phase. Its higher memory consumption and build cost are
+accepted only while the benchmark gates table/index size, build/backfill, latency,
+recall, updates, deletes/expiry, and restore behavior.
 
-- Windows and production deployment compatibility;
-- dimensions and distance behavior for configured models;
-- filtering before or during candidate selection;
-- transactional update/delete behavior;
-- backup and migration behavior; and
-- p95 latency and memory limits at 100,000 entities.
+Extension creation is an operator/admin prerequisite. It is not part of the normal
+application migration role and must not be added to the baseline PostgreSQL
+migrations. Because pgvector index columns have a declared dimension, each runtime
+embedding dimension uses a separate vector migration/index identity. Optional mode
+may remain keyword-only when the extension or matching indexed identity is
+unavailable; required mode fails readiness. Retrieval telemetry distinguishes HNSW
+indexed scans from compatibility scans.
 
-If a backend cannot meet the gate, its UI must report the supported scale and
-degraded behavior rather than silently scanning an unbounded corpus.
+The repository-owned Compose override and CI service establish the integration
+contract without changing the existing SQLite-default Compose deployment. A
+production environment must separately prove the production dimension, host sizing,
+admin extension bootstrap, health/version assertion, and operator backup/restore.
 
 ## Universe Semantic Neighborhoods
 
@@ -442,8 +451,10 @@ Track without recording user content:
 
 These require measured spikes rather than architectural assumptions:
 
-1. SQLite vector index technology for the 100,000-entity gate.
-2. PostgreSQL vector extension/index parameters and deployment availability.
+1. Whether SQLite will remain bounded at 5,000 or gain a separately approved vector
+   index.
+2. Production HNSW parameter tuning by dimension and workload after representative
+   deployment measurements.
 3. The first deterministic cluster algorithm and resolution defaults.
 4. Whether project embeddings include sampled tasks or a maintained project summary.
 5. Retention defaults for sensitive alerts/events.

@@ -71,15 +71,21 @@ MC_BENCHMARK_POSTGRES_URL=postgresql://... \
 The default and required CI dimension is the production-representative 1536.
 Both local and CI runs use the same pgvector image, production repository,
 semantic tables, ANN projection, HNSW parameters, corpus sizes, filters, and gates.
+The harness also requires the production pool's 30-second default statement timeout;
+the repository's scoped provisioning override must therefore carry the 100,000-row
+concurrent HNSW build to completion. A separate fixture pool performs synthetic
+bulk-loading and exact-reference work that is not part of the application query path.
 
 ### Method
 
 `scripts/benchmark-postgres-vector.ts` creates only deterministic synthetic
 metadata and vectors. For both corpus sizes it:
 
-1. initializes the production migrations, creates a production semantic index
-   identity, bulk-backfills `semantic_documents`, `semantic_vectors`, and
-   `semantic_vector_ann`, and rebuilds that identity's production HNSW cosine index;
+1. initializes the production migrations, deterministically drops any valid or
+   invalid identity-specific HNSW index left by an interrupted run, creates a
+   production semantic index identity, bulk-backfills `semantic_documents`,
+   `semantic_vectors`, and `semantic_vector_ann`, and rebuilds that identity's
+   production HNSW cosine index;
 2. obtains full-precision `vector` cosine reference results with ANN, ordinary
    index, index-only, and bitmap scans disabled; HNSW candidate generation remains
    the production `halfvec` expression followed by full-precision repository rerank;
@@ -128,7 +134,11 @@ index without a sequential scan, and each corpus passes:
 - at the 10,000-row smoke profile, vector lookup p95 at most 400 ms and
  end-to-end repository p95 at most 450 ms, while reporting the same p50/p95
  measurements and preserving all recall, plan, filtering, and lifecycle gates;
-- measurable PostgreSQL container cgroup memory in CI;
+- at the 100,000-row profile, PostgreSQL container cgroup memory growth at most
+  4 GiB, production semantic table storage at most 2.5 GiB, and the
+  identity-specific HNSW index at most 512 MiB; the roughly 24-32% headroom over
+  the accepted run catches material regressions without gating on allocator and
+  page-cache noise;
 - backfill and HNSW build at most 900 seconds each;
 - one repository update at most 5 seconds, the 99-row batch update at most 60
  seconds, and delete/expiry at most 60 seconds; and

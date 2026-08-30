@@ -257,6 +257,19 @@ describe('ProjectPageContext', () => {
     );
 
     await screen.findByText('Context project');
+    // The provider's load effects can settle after the DOM text appears, so wait until the
+    // recorded context values reflect the loaded snapshot and stop changing before capturing.
+    // The assertion only passes when two consecutive retries observe identical counts.
+    let recordedCounts = [-1, -1];
+    await waitFor(() => {
+      const loaded = (dataValues.at(-1) as { loading?: boolean } | undefined)?.loading === false;
+      const counts = [dataValues.length, mutationValues.length];
+      const settled = loaded
+        && counts[0] === recordedCounts[0]
+        && counts[1] === recordedCounts[1];
+      recordedCounts = counts;
+      expect(settled).toBe(true);
+    });
     const dataValue = dataValues.at(-1);
     const mutationValue = mutationValues.at(-1);
 

@@ -60,7 +60,7 @@ export const HOUSTON_SUMMARY_PROJECTION_VERSION = 1;
  * The index-wide projection version. Must be >= every per-kind constant; the
  * assertion below fails the build the moment a kind is bumped in isolation.
  */
-export const SEMANTIC_PROJECTION_VERSION = 3;
+export const SEMANTIC_PROJECTION_VERSION = 4;
 
 const PER_KIND_PROJECTION_VERSIONS: Readonly<Record<SemanticSourceEntityType, number>> = {
   task: TASK_PROJECTION_VERSION,
@@ -133,6 +133,7 @@ export function projectTask(
   ]);
   const metadata = normalizeMetadata({
     connectorType: source.connectorType,
+    connectorInstanceId: source.connectorInstanceId,
     connectorTypes: normalizeKeywords(connectorTypes).join(','),
     status: source.status,
     statusReason: source.statusReason,

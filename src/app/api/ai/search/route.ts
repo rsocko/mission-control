@@ -1,5 +1,8 @@
 import { getSearchStatus, searchWithBranches } from '@/lib/search';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
+import { isNotNull } from 'drizzle-orm';
+import db from '@/db';
+import { connectorConfigs } from '@/db/schema';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -19,6 +22,7 @@ export async function GET(request: Request) {
   const source = searchParams.get('source')?.trim() || undefined;
   const status = searchParams.get('status')?.trim() || undefined;
   const excludeDone = searchParams.get('excludeDone') === 'true';
+  const universeEligible = searchParams.get('universeEligible') === 'true';
 
   if (!query) {
     return Response.json({ error: 'q parameter is required' }, { status: 400 });
@@ -48,6 +52,11 @@ export async function GET(request: Request) {
   }
 
   const startMs = performance.now();
+  const excludedConnectorInstanceIds = universeEligible
+    ? (await db.select({ id: connectorConfigs.id })
+        .from(connectorConfigs)
+        .where(isNotNull(connectorConfigs.deletedAt))).map((row) => row.id)
+    : [];
 
   const searchOptions = {
     type,
@@ -56,6 +65,10 @@ export async function GET(request: Request) {
     ...(source ? { source } : {}),
     ...(status ? { status } : {}),
     ...(excludeDone ? { excludeDone: true } : {}),
+    ...(universeEligible ? {
+      universeEligible: true,
+      excludeConnectorInstanceIds: excludedConnectorInstanceIds,
+    } : {}),
   };
   const [execution, statusResult] = await withRuntimeOperation({
     kind: 'semantic-search',

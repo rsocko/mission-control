@@ -17,6 +17,16 @@ export const UNIVERSE_DIMENSIONS = [
 ] as const;
 
 export type UniverseDimension = (typeof UNIVERSE_DIMENSIONS)[number];
+export type UniverseNeighborLayer = 'explicit' | 'derived' | 'semantic';
+export type UniverseSemanticState =
+  | 'not-requested'
+  | 'available'
+  | 'partial'
+  | 'missing'
+  | 'stale'
+  | 'incompatible'
+  | 'denied'
+  | 'unavailable';
 export type UniverseNodeKind = 'task' | 'tag' | 'property';
 export type UniverseLod = 'far' | 'medium' | 'close';
 
@@ -116,11 +126,15 @@ export interface UniverseSubgraph {
   facets: UniverseFacets;
   pageInfo: import('./types').GraphPageInfo;
   truncated: boolean;
+  capabilities?: {
+    semanticNeighbors: boolean;
+  };
 }
 
 export interface UniverseGraphFilters {
   dimensions: UniverseDimension[];
   taskQuery: URLSearchParams;
+  seedTaskIds?: string[];
   maxNodes?: number;
   maxEdges?: number;
 }

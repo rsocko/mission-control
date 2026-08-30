@@ -52,6 +52,22 @@ describe('FTS authoritative filters', () => {
         sourceId: 'local:123',
         title: 'Not a GitHub issue',
       },
+      {
+        ...makeTask('deleted-match', 'Project Alpha', 'todo'),
+        connectorInstanceId: 'deleted-connector',
+      },
+      {
+        ...makeTask('child-match', 'Project Alpha', 'todo'),
+        parentId: 'filtered-match',
+      },
+      {
+        ...makeTask('notification-match', 'Project Alpha', 'todo'),
+        connectorType: 'outlook-email',
+      },
+      {
+        ...makeTask('dismissed-match', 'Project Alpha', 'todo'),
+        localDisposition: 'dismissed',
+      },
     ]);
 
     searchFTS = fts.searchFTS;
@@ -67,6 +83,24 @@ describe('FTS authoritative filters', () => {
     });
 
     expect(results.map((result) => result.id)).toEqual(['filtered-match']);
+  });
+
+  it('applies Universe visibility before the result limit', async () => {
+    const results = await searchFTS('Quarterly planning', {
+      type: 'tasks',
+      source: 'Project Alpha',
+      universeEligible: true,
+      excludeConnectorInstanceIds: ['deleted-connector'],
+      limit: 50,
+    });
+
+    expect(results.map((result) => result.id)).not.toEqual(expect.arrayContaining([
+      'deleted-match',
+      'child-match',
+      'notification-match',
+      'dismissed-match',
+    ]));
+    expect(results.map((result) => result.id)).toContain('filtered-match');
   });
 
   it.each(['123', '#123'])('finds a GitHub issue by number with query %s', async (query) => {

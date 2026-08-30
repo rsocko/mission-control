@@ -59,6 +59,7 @@ export interface SemanticTaskSource {
   effort: number | null;
   dueDate: string | null;
   connectorType: string;
+  connectorInstanceId: string;
   sourceListName: string | null;
   parentId: string | null;
   isChecklistItem: boolean;

@@ -67,6 +67,9 @@ describe('semanticSearch over the durable index', () => {
         priority: 'high',
         sourceListName: 'Project Alpha',
         connectorType: 'github-issues',
+        connectorInstanceId: 'active-connector',
+        parentId: null,
+        localDisposition: 'active',
       },
       embedding: [1, 0.05, 0],
     });
@@ -80,6 +83,9 @@ describe('semanticSearch over the durable index', () => {
         priority: 'low',
         sourceListName: 'Home',
         connectorType: 'local',
+        connectorInstanceId: 'deleted-connector',
+        parentId: 'parent-task',
+        localDisposition: 'active',
       },
       embedding: [0, 0, 1],
     });
@@ -177,6 +183,20 @@ describe('semanticSearch over the durable index', () => {
     const excluded = await semantic.semanticSearch('chores', { excludeDone: true });
     expect(excluded.map((result) => result.id)).not.toContain('far');
     expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(2);
+  });
+
+  it('excludes non-root tasks from Universe semantic seed search before scoring', async () => {
+    await seedCorpus();
+    harness.embeddings.enqueueVector([0, 0, 1]);
+
+    const results = await semantic.semanticSearch('chores', {
+      type: 'tasks',
+      universeEligible: true,
+      excludeConnectorInstanceIds: [],
+    });
+
+    expect(results.map((result) => result.id)).not.toContain('far');
+    expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(1);
   });
 
   it('reads only the active identity, never a staged one', async () => {

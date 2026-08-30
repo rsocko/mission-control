@@ -76,9 +76,14 @@ export function parseFilteredSubgraphSearchParams(
     }
     taskQuery.append(key, value);
   }
+  const seedTaskIds = [...new Set(csv(searchParams, 'seedTaskIds'))];
+  if (seedTaskIds.length > 10) {
+    throw new GraphQueryValidationError('seedTaskIds supports at most 10 tasks');
+  }
   return {
     dimensions,
     taskQuery,
+    ...(seedTaskIds.length ? { seedTaskIds } : {}),
     maxNodes: optionalNumber(searchParams, 'maxNodes'),
     maxEdges: optionalNumber(searchParams, 'maxEdges'),
   };

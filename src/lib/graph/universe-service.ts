@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { count, desc, eq, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, inArray } from 'drizzle-orm';
 import db from '@/db';
 import {
   hubProjects,
@@ -19,12 +19,17 @@ import type {
 } from './universe-types';
 import { normalizeGraphBudgets } from './query';
 import { getCanonicalTaskFilterWhere } from '@/app/api/tasks/canonical-filter';
+import { isUniverseSemanticNeighborsEnabled } from './universe-semantic-config';
 
 export async function getUniverseSubgraph(
   filters: UniverseGraphFilters,
 ): Promise<UniverseSubgraph> {
   const { maxNodes, maxEdges } = normalizeGraphBudgets(filters);
   const { taskWhere } = await getCanonicalTaskFilterWhere(filters.taskQuery);
+  const boundedSeedIds = filters.seedTaskIds?.slice(0, 10);
+  const universeWhere = boundedSeedIds
+    ? and(taskWhere, inArray(tasks.id, boundedSeedIds))
+    : taskWhere;
 
   const [selectedTasks, totalRows] = await Promise.all([
     db.select({
@@ -38,10 +43,10 @@ export async function getUniverseSubgraph(
       sourceListName: tasks.sourceListName,
       effort: tasks.effort,
     }).from(tasks)
-      .where(taskWhere)
+      .where(universeWhere)
       .orderBy(desc(tasks.updatedAt))
       .limit(maxNodes + 1) as Promise<UniverseTaskRecord[]>,
-    db.select({ value: count() }).from(tasks).where(taskWhere),
+    db.select({ value: count() }).from(tasks).where(universeWhere),
   ]);
   const filteredTaskCount = Number(totalRows[0]?.value ?? 0);
 
@@ -85,6 +90,9 @@ export async function getUniverseSubgraph(
   });
   return {
     ...graph,
+    capabilities: {
+      semanticNeighbors: isUniverseSemanticNeighborsEnabled(),
+    },
     stats: {
       ...graph.stats,
       filteredTaskCount,

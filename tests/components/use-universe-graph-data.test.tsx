@@ -39,6 +39,7 @@ describe('useUniverseGraphData', () => {
       canonicalQuery: 'maxNodes=500',
       reloadKey: 0,
       dimensions: ['tags'],
+      neighborLayers: ['explicit', 'derived'],
       onCanonicalLoad,
       debounceMs: 0,
     }));
@@ -64,6 +65,7 @@ describe('useUniverseGraphData', () => {
         canonicalQuery: query,
         reloadKey: 0,
         dimensions: ['tags'],
+        neighborLayers: ['explicit', 'derived'],
         onCanonicalLoad: vi.fn(),
         debounceMs: 0,
       }),
@@ -100,6 +102,11 @@ describe('useUniverseGraphData', () => {
               truncationReasons: [],
             },
             truncated: false,
+            semantic: {
+              requested: true,
+              status: 'partial',
+              note: 'Candidate scan reached its bound.',
+            },
           },
         }),
       }));
@@ -108,6 +115,7 @@ describe('useUniverseGraphData', () => {
       canonicalQuery: 'maxNodes=500',
       reloadKey: 0,
       dimensions: ['tags'],
+      neighborLayers: ['semantic'],
       onCanonicalLoad: vi.fn(),
       debounceMs: 0,
     }));
@@ -119,6 +127,66 @@ describe('useUniverseGraphData', () => {
 
     expect(result.current.graph?.nodes.map((node) => node.id)).toEqual(['task:1', 'task:2']);
     expect(result.current.explorationMessage).toContain('Added 1 node');
+    expect(result.current.semanticOutcomes).toEqual([{
+      nodeId: 'task:1',
+      status: 'partial',
+      note: 'Candidate scan reached its bound.',
+    }]);
+    expect(fetch).toHaveBeenLastCalledWith(
+      expect.stringContaining('include=semantic'),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     expect(result.current.expanding).toBe(false);
+  });
+
+  it('stops expansion after two hops', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ graph: canonicalGraph() }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          graph: {
+            nodes: [{ id: 'task:2', entityId: '2', kind: 'task', label: 'Two', status: 'todo' }],
+            edges: [],
+            pageInfo: canonicalGraph().pageInfo,
+            truncated: false,
+          },
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          graph: {
+            nodes: [{ id: 'task:3', entityId: '3', kind: 'task', label: 'Three', status: 'todo' }],
+            edges: [],
+            pageInfo: canonicalGraph().pageInfo,
+            truncated: false,
+          },
+        }),
+      }));
+    const { result } = renderHook(() => useUniverseGraphData({
+      shouldLoad: true,
+      canonicalQuery: 'maxNodes=500',
+      reloadKey: 0,
+      dimensions: ['tags'],
+      neighborLayers: ['explicit'],
+      onCanonicalLoad: vi.fn(),
+      debounceMs: 0,
+    }));
+    await waitFor(() => expect(result.current.graph?.nodes).toHaveLength(1));
+
+    await act(async () => result.current.expandSelection([result.current.graph!.nodes[0]]));
+    await act(async () => result.current.expandSelection([
+      result.current.graph!.nodes.find((node) => node.id === 'task:2')!,
+    ]));
+    await act(async () => result.current.expandSelection([
+      result.current.graph!.nodes.find((node) => node.id === 'task:3')!,
+    ]));
+
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(result.current.explorationMessage).toContain('2-hop limit');
   });
 });

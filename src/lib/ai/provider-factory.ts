@@ -66,14 +66,17 @@ export function getAIRouteOutcome(
   context: AIRequestContext,
   response: { modelId: string; headers?: Record<string, string> },
   metadata?: BifrostRoutingMetadata,
+  configured?: { provider: string; model: string },
 ) {
   const config = getResolvedAIConfig();
-  const model = config.provider === 'bifrost' && !response.modelId.includes('/')
-    ? config.model
+  const configuredProvider = configured?.provider ?? config.provider;
+  const configuredModel = configured?.model ?? config.model;
+  const model = configuredProvider === 'bifrost' && !response.modelId.includes('/')
+    ? configuredModel
     : response.modelId;
   return resolveAIRouteOutcome(
     context,
-    config.provider,
+    configuredProvider,
     model,
     response.headers,
     metadata,

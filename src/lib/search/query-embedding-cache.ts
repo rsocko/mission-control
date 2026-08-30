@@ -2,6 +2,9 @@ export interface QueryEmbedding {
   embedding: number[];
   provider: string;
   model: string;
+  dimensions: number;
+  fallbackOccurred: boolean;
+  correlationId: string;
 }
 
 export interface QueryEmbeddingCacheMetrics {

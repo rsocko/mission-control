@@ -7,6 +7,7 @@ const queueMocks = vi.hoisted(() => ({
   completeSyncJob: vi.fn(),
   enqueueDueSyncSchedules: vi.fn(() => []),
   failSyncJob: vi.fn(() => 'failed'),
+  countQueuedSyncJobs: vi.fn(() => 0),
   getSyncLeaseMs: vi.fn(() => 30_000),
   getSyncQueueMetrics: vi.fn(() => ({
     queued: 0,
@@ -31,10 +32,6 @@ const eventMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('@/lib/sync/job-queue', () => ({
-  // Raw SQLite-only exports still used directly by SyncWorker (unchanged
-  // behavior; getSyncQueueMetrics powers the SQLite fast-path in
-  // hasPendingWork, getSyncLeaseMs is a pure config helper).
-  getSyncQueueMetrics: queueMocks.getSyncQueueMetrics,
   getSyncLeaseMs: queueMocks.getSyncLeaseMs,
   // Backend-selected repository (see @/db/runtime): all of SyncWorker's
   // queue/lease operations go through this in the current implementation.
@@ -44,6 +41,7 @@ vi.mock('@/lib/sync/job-queue', () => ({
   getSyncJobRepository: () => Promise.resolve({
     claimNext: queueMocks.claimNextSyncJob,
     complete: queueMocks.completeSyncJob,
+    countQueued: queueMocks.countQueuedSyncJobs,
     enqueueDueSchedules: queueMocks.enqueueDueSyncSchedules,
     fail: queueMocks.failSyncJob,
     getMetrics: queueMocks.getSyncQueueMetrics,
@@ -119,6 +117,7 @@ async function waitFor(assertion: () => void): Promise<void> {
 describe('sync worker runtime', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queueMocks.countQueuedSyncJobs.mockReturnValue(0);
     queueMocks.claimNextSyncJob.mockReturnValueOnce(job()).mockReturnValue(null);
   });
 
@@ -134,22 +133,19 @@ describe('sync worker runtime', () => {
 
   it('reports pending work from either the active execution or durable queue', async () => {
     queueMocks.claimNextSyncJob.mockReset();
-    queueMocks.getSyncQueueMetrics.mockReturnValueOnce({
-      queued: 1,
-      running: 0,
-      retrying: 0,
-      cancelled: 0,
-      oldestQueuedAgeMs: 0,
-      missedSchedules: 0,
-      oldestScheduleOverdueMs: 0,
-      overBudget: 0,
-      expiredLeases: 0,
-    });
+    queueMocks.claimNextSyncJob.mockReturnValue(null);
+    queueMocks.countQueuedSyncJobs.mockReturnValue(1);
     const { SyncWorker } = await import('@/lib/sync/worker');
     const worker = new SyncWorker(vi.fn(), { ownerId: 'worker-a', pollIntervalMs: 1 });
 
+    worker.start();
+    await waitFor(() => expect(queueMocks.countQueuedSyncJobs).toHaveBeenCalled());
     expect(worker.hasPendingWork()).toBe(true);
+    queueMocks.countQueuedSyncJobs.mockReturnValue(0);
+    await waitFor(() => expect(worker.hasPendingWork()).toBe(false));
     expect(worker.hasPendingWork()).toBe(false);
+    await worker.stop();
+    expect(queueMocks.getSyncQueueMetrics).not.toHaveBeenCalled();
   });
 
   it('records successful work only after the connector returns success', async () => {

@@ -4,6 +4,7 @@ import cron from 'node-cron';
 import type { ScheduledTask } from 'node-cron';
 import { runDueTaskReminders, type TaskReminderRunResult } from './task-reminders';
 import logger from '@/lib/logger';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 export class TaskReminderScheduler {
   private task: ScheduledTask | null = null;
@@ -16,7 +17,10 @@ export class TaskReminderScheduler {
     if (this.activeRun) return this.activeRun;
     const run = (async () => {
       try {
-        this.lastResult = await runDueTaskReminders();
+        this.lastResult = await withDatabaseOperation(
+          'worker-task-reminders',
+          () => runDueTaskReminders(),
+        );
         this.lastRun = new Date().toISOString();
         this.lastError = null;
       } catch (error) {

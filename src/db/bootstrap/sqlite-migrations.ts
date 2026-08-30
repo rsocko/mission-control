@@ -41,8 +41,12 @@ export function _runMigrationsIndividually(
     if (!fs.existsSync(sqlFile)) continue;
 
     const sql = fs.readFileSync(sqlFile, 'utf-8');
-    const hash = createHash('sha256').update(sql).digest('hex');
-    if (appliedHashes.has(hash)) continue;
+    const normalizedSql = sql.replace(/\r\n?/g, '\n');
+    const hash = createHash('sha256').update(normalizedSql).digest('hex');
+    const legacyWindowsHash = createHash('sha256')
+      .update(normalizedSql.replace(/\n/g, '\r\n'))
+      .digest('hex');
+    if (appliedHashes.has(hash) || appliedHashes.has(legacyWindowsHash)) continue;
 
     const statements = sql
       .split('--> statement-breakpoint')

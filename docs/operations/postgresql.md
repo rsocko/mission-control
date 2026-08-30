@@ -15,6 +15,15 @@ MC_POSTGRES_URL=postgres://mission_control:REDACTED@database.example/mission_con
 MC_POSTGRES_SSL_MODE=verify-full
 ```
 
+PostgreSQL is the approved production target and the application backend is
+implemented. This guide does not imply that a particular deployment has already
+cut over. Treat the homelab as SQLite-backed until the maintenance-window
+migration is completed through
+[#1155](https://github.com/rsocko/mission-control/issues/1155) and
+[homelab-config#574](https://github.com/rsocko/homelab-config/issues/574).
+The architectural status and compatibility posture are recorded in the
+[database scaling and migration strategy](../design/active/database-scaling-strategy.md).
+
 `MC_POSTGRES_URL` is a server-only secret. Store it in the deployment secret
 manager or the uncommitted `.env.local` used by the container deployment. Never
 put it in a `NEXT_PUBLIC_` variable, image layer, Compose command line, log
@@ -84,6 +93,12 @@ fails.
 PostgreSQL starts from a clean baseline migration matching the current
 application schema. The historical SQLite migration chain is not replayed
 against PostgreSQL.
+
+The synthetic persisted-state fixtures validate SQLite forward upgrades only.
+They do not copy rows into PostgreSQL. Mission Control currently has no
+executable SQLite-to-PostgreSQL copy/import command; implementing and rehearsing
+that maintenance-window path is a hard dependency of the production cutover in
+[#1155](https://github.com/rsocko/mission-control/issues/1155).
 
 ## Backup, restore, and rollback
 

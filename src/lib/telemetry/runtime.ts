@@ -501,6 +501,19 @@ function compatibilityMemory(metrics: Partial<RuntimeMetrics>): RuntimeMemoryVal
 
 export function normalizeRuntimeMetrics(parsed: Partial<RuntimeMetrics>): RuntimeMetrics {
   const memory = compatibilityMemory(parsed);
+  const database = parsed.database
+    ? {
+        ...parsed.database,
+        operations: {
+          ...parsed.database.operations,
+          byAttribution: parsed.database.operations.byAttribution ?? {},
+        },
+        slowOperations: parsed.database.slowOperations.map((operation) => ({
+          ...operation,
+          attribution: operation.attribution ?? 'unattributed',
+        })),
+      }
+    : undefined;
   const restartCount = parsed.container?.restartCount ?? null;
   const restartCountSource = parsed.container?.restartCountSource
     ?? (restartCount === null ? 'unavailable' : 'environment');
@@ -516,6 +529,7 @@ export function normalizeRuntimeMetrics(parsed: Partial<RuntimeMetrics>): Runtim
     schemaVersion: 2,
     buildSha: parsed.buildSha ?? null,
     runtimeMode: parsed.runtimeMode ?? 'unknown',
+    database,
     process: {
       pid: parsed.process?.pid ?? 0,
       uptimeSeconds: parsed.process?.uptimeSeconds ?? 0,

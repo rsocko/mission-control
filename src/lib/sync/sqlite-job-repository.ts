@@ -692,6 +692,15 @@ export function getLatestSyncJobEventId(): number {
   return row.id;
 }
 
+export function countQueuedSyncJobs(): number {
+  const row = sqlite.prepare(`
+    SELECT COUNT(*) AS count
+    FROM sync_jobs INDEXED BY idx_sync_jobs_claim
+    WHERE status = 'queued'
+  `).get() as { count: number };
+  return row.count;
+}
+
 export function getSyncQueueMetrics(now = new Date()): SyncQueueMetrics {
   const nowIso = now.toISOString();
   const missedBefore = new Date(
@@ -975,6 +984,7 @@ export const sqliteSyncJobRepository: SyncJobRepository = {
   persistEvent: async (...args) => persistSyncJobEvent(...args),
   getEventsAfter: async (...args) => getSyncJobEventsAfter(...args),
   getLatestEventId: async () => getLatestSyncJobEventId(),
+  countQueued: async () => countQueuedSyncJobs(),
   getMetrics: async (at) => getSyncQueueMetrics(at ? new Date(at) : undefined),
   registerSchedule: async (...args) => registerSyncSchedule(...args),
   markScheduleEnqueued: async (...args) => markSyncScheduleEnqueued(...args),

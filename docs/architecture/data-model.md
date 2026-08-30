@@ -2,16 +2,22 @@
 title: "Data Model"
 status: active
 created: 2026-06-15
-last_reviewed: 2026-08-05
+last_reviewed: 2026-08-29
 category: architecture
 related:
   - "[Architecture Overview](overview.md)"
   - "[Sync Engine](sync-engine.md)"
+  - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
 ---
 
 # Data Model — Detail Architecture
 
-> SQLite with Drizzle ORM (better-sqlite3 driver). Schema split into domain modules.
+> Backend-specific PostgreSQL and SQLite schemas behind shared persistence
+> contracts. Schema modules are split by domain.
+
+PostgreSQL is the approved production target and has a clean baseline schema and
+migration stream. SQLite remains the default compatibility backend, retains its
+historical migration chain, and is the documented homelab backend until cutover.
 
 ---
 
@@ -317,7 +323,14 @@ ownership.
 
 ## Migrations
 
-Managed with Drizzle Kit (SQLite dialect):
+Mission Control maintains separate migration streams:
+
+- `drizzle/postgres/` is the clean PostgreSQL baseline and subsequent
+  PostgreSQL migration history.
+- `drizzle/` retains the historical SQLite migration stream.
+
+Drizzle Kit commands must use the configuration for the intended backend.
+SQLite schema changes use:
 
 ```bash
 # Generate migration from schema changes
@@ -328,6 +341,11 @@ npx drizzle-kit migrate
 ```
 
 Config: `drizzle.config.ts` at project root.
+
+PostgreSQL config: `drizzle.postgres.config.ts` at project root. At runtime, the
+configured database initializer applies only the selected backend's migrations.
+PostgreSQL initialization uses an advisory lock; SQLite retains its existing
+single-initializer and compatibility migration behavior.
 
 At migration `0047_isolate_sync_worker`, its Drizzle snapshot represents all
 current tables (70 at that migration). The snapshot includes the four

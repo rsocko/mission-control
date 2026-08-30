@@ -21,6 +21,7 @@ export type {
 export {
   claimNextSyncJob,
   completeSyncJob,
+  countQueuedSyncJobs,
   countRemainingSyncJobs,
   enqueueDueSyncSchedules,
   enqueueSyncJob,

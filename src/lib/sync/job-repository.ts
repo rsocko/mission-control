@@ -129,6 +129,7 @@ export interface SyncJobRepository {
   persistEvent(jobId: string, event: SyncStreamEvent): Promise<void>;
   getEventsAfter(cursor: number, limit?: number): Promise<PersistedSyncEvent[]>;
   getLatestEventId(): Promise<number>;
+  countQueued(): Promise<number>;
   getMetrics(at?: string): Promise<SyncQueueMetrics>;
   registerSchedule(connectorId: string, intervalMinutes: number): Promise<void>;
   markScheduleEnqueued(connectorId: string): Promise<void>;

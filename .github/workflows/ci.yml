@@ -414,6 +414,43 @@ jobs:
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
+  persisted-state-compatibility:
+    name: Persisted-state compatibility
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+           node-version: 22
+
+      - name: Restore npm download cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+           path: ~/.npm
+           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+           restore-keys: |
+             npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test persisted-state compatibility
+        run: npm run test:persisted-state
+
   postgres-integration:
     name: PostgreSQL integration
     if: >-

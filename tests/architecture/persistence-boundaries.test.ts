@@ -25,11 +25,7 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/connectors/monarch-money/transaction-backfill.ts',
   'src/lib/external-agents/service.ts',
   'src/lib/external-identities/github-backfill.ts',
-  'src/lib/external-identities/github-write-fence.ts',
   'src/lib/external-identities/identity-status.ts',
-  'src/lib/external-identities/linked-source-identity.ts',
-  'src/lib/external-identities/stable-identity-runtime.ts',
-  'src/lib/external-identities/stable-lookup.ts',
   'src/lib/external-identities/write-cycle-reconciliation.ts',
   'src/lib/external-identities/write-outcome-resolution.ts',
   'src/lib/finance-insights/cutover-operator.ts',
@@ -47,7 +43,6 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/push/dispatcher.ts',
   'src/lib/search/semantic.ts',
   'src/lib/sync/control-state.ts',
-  'src/lib/sync/github-hierarchy-reconciliation.ts',
   'src/lib/sync/maintenance-lock.ts',
   'src/lib/sync/operator-control.ts',
   'src/lib/telemetry/runtime.ts',
@@ -65,6 +60,41 @@ const MIGRATED_CONNECTOR_EXECUTION_MODULES = [
   'src/lib/sync/retention-resolution.ts',
   'src/lib/sync/search-indexer.ts',
   'src/lib/sync/write-through-log.ts',
+] as const;
+
+/**
+ * Layer 3A: the normal GitHub queue-execution modules. They may only reach the
+ * database through `GitHubWorkerRepositories` (identity, write fence,
+ * dependencies, hierarchy, projects), so a PostgreSQL sync worker never loads a
+ * SQLite runtime or schema. Type-only `import type` from `@/db/schema` stays
+ * allowed because it is erased at build time.
+ */
+const MIGRATED_GITHUB_WORKER_MODULES = [
+  'src/lib/external-identities/github-write-fence.ts',
+  'src/lib/external-identities/linked-source-identity.ts',
+  'src/lib/external-identities/stable-identity-runtime.ts',
+  'src/lib/external-identities/stable-lookup.ts',
+  'src/lib/external-identities/worker-persistence.ts',
+  'src/lib/sync/github-hierarchy-reconciliation.ts',
+  'src/lib/sync/github-identity-context.ts',
+  'src/lib/sync/github-project-association-identity.ts',
+  'src/lib/sync/github-worker-persistence.ts',
+  'src/lib/sync/task-dependency-manager.ts',
+] as const;
+
+/**
+ * Surfaces Layer 3A deliberately leaves on SQLite-only legacy persistence.
+ * They must fail closed under PostgreSQL before any remote effect, and the
+ * migrated modules above must not import them at runtime.
+ */
+const LEGACY_GITHUB_OPERATOR_MODULES = [
+  'src/lib/connectors/github-issues/bulk-transfer-service.ts',
+  'src/lib/connectors/github-issues/repoint-service.ts',
+  'src/lib/external-identities/github-backfill.ts',
+  'src/lib/external-identities/identity-status.ts',
+  'src/lib/external-identities/task-transfer-reconciliation.ts',
+  'src/lib/external-identities/write-cycle-reconciliation.ts',
+  'src/lib/external-identities/write-outcome-resolution.ts',
 ] as const;
 
 function listTypeScriptFiles(directory: string): string[] {
@@ -153,6 +183,63 @@ describe('portable persistence dependency ratchet', () => {
     const violations = MIGRATED_CONNECTOR_EXECUTION_MODULES.flatMap((path) => {
       const source = readFileSync(join(process.cwd(), path), 'utf8');
       return /from\s+['"]@\/db(?:['"]|\/(?:index|schema)(?:['"/]))/.test(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps migrated GitHub worker modules behind the GitHub persistence ports', () => {
+    const violations = MIGRATED_GITHUB_WORKER_MODULES.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      const runtimeDatabaseImport = new RegExp(
+        String.raw`(?<!import type )(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]@/db(?:['"]|/(?:index|schema)['"])`,
+      );
+      return runtimeDatabaseImport.test(source)
+        || /from\s+['"]better-sqlite3['"]/.test(source)
+        || /from\s+['"]pg['"]/.test(source)
+        || importsRawSqliteHandle(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps GitHub operator surfaces out of the migrated worker modules', () => {
+    const legacySpecifiers = LEGACY_GITHUB_OPERATOR_MODULES.map((path) =>
+      path.replace(/^src\//, '@/').replace(/\.ts$/, ''));
+    const violations = MIGRATED_GITHUB_WORKER_MODULES.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      const offenders = legacySpecifiers.filter((specifier) => {
+        const bare = specifier.replace(/^@\/lib\/(?:external-identities|connectors\/github-issues)\//, '');
+        const runtimeImport = new RegExp(
+          String.raw`(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"](?:${
+            specifier.replace(/[/\\^$*+?.()|[\]{}]/g, '\\$&')
+          }|\./${bare})['"]`,
+        );
+        return runtimeImport.test(source);
+      });
+      return offenders.length > 0 ? [`${path} -> ${offenders.join(', ')}`] : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps every GitHub worker persistence port free of driver imports', () => {
+    const ports = [
+      'src/db/persistence/github-worker.ts',
+      'src/db/persistence/github-worker-errors.ts',
+      'src/db/persistence/github-identity.ts',
+      'src/db/persistence/github-dependencies.ts',
+      'src/db/persistence/github-hierarchy.ts',
+      'src/db/persistence/github-projects.ts',
+    ];
+    const violations = ports.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      return /from\s+['"](?:better-sqlite3|pg|drizzle-orm[^'"]*)['"]/.test(source)
+        || /(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]@\/db(?:['"]|\/index['"])/.test(source)
         ? [path]
         : [];
     });

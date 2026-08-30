@@ -1,5 +1,5 @@
 import { and, desc, eq } from 'drizzle-orm';
-import db, { runTransaction } from '@/db';
+import { runTransaction } from '@/db';
 import {
   githubIdentityBackfillItems,
   githubIdentityExceptionEvents,
@@ -12,7 +12,9 @@ import type {
 } from './stable-identity-types';
 import { GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE } from '@/db/schema';
 import type { GitHubIdentityExceptionProofType } from '@/db/schema';
+import type { GitHubIdentityExceptionSnapshot } from '@/db/persistence/github-identity';
 import type { ExternalIdentityTransaction } from './service';
+import { getGitHubIdentityRepository } from './worker-persistence';
 
 export type GitHubIdentityExceptionEvent =
   typeof githubIdentityExceptionEvents.$inferSelect;
@@ -234,31 +236,27 @@ function existingProofType(
   return event.action === 'accept' ? 'stage1_inaccessible' : null;
 }
 
-export function getLatestGitHubIdentityException(
+export async function getLatestGitHubIdentityException(
   connectorInstanceId: string,
   bindingType: GitHubIdentityExceptionRequest['bindingType'],
   localId: string,
-): GitHubIdentityExceptionEvent | null {
-  return db.select().from(githubIdentityExceptionEvents)
-    .where(and(
-      eq(githubIdentityExceptionEvents.connectorInstanceId, connectorInstanceId),
-      eq(githubIdentityExceptionEvents.bindingType, bindingType),
-      eq(githubIdentityExceptionEvents.localId, localId),
-      eq(githubIdentityExceptionEvents.category, 'terminal_inaccessible'),
-    ))
-    .orderBy(desc(githubIdentityExceptionEvents.id))
-    .limit(1)
-    .get() ?? null;
-}
-
-export function hasAcceptedGitHubTerminalInaccessibleException(
-  connectorInstanceId: string,
-  bindingType: GitHubIdentityExceptionRequest['bindingType'],
-  localId: string,
-): boolean {
-  return getLatestGitHubIdentityException(
+): Promise<GitHubIdentityExceptionSnapshot | null> {
+  const identity = await getGitHubIdentityRepository();
+  return identity.getLatestTerminalInaccessibleException({
     connectorInstanceId,
     bindingType,
     localId,
-  )?.action === 'accept';
+  });
+}
+
+export async function hasAcceptedGitHubTerminalInaccessibleException(
+  connectorInstanceId: string,
+  bindingType: GitHubIdentityExceptionRequest['bindingType'],
+  localId: string,
+): Promise<boolean> {
+  return (await getLatestGitHubIdentityException(
+    connectorInstanceId,
+    bindingType,
+    localId,
+  ))?.action === 'accept';
 }

@@ -12,6 +12,14 @@ import type { ExternalIdentityTransaction } from './service';
  * and no rollback to locator identity. The snapshot only carries the durable
  * identity epoch (`mode_revision`) that fences in-flight write cycles, write
  * leases, and queued sync jobs against a connector being re-provisioned.
+ *
+ * This read stays Drizzle-bound: it is a thin wrapper over the
+ * `*InTransaction` helper and is still called synchronously by SQLite-only
+ * legacy reconciliation modules (`repoint-service`, `bulk-transfer-service`,
+ * `identity-status`) that are out of scope for this migration layer. The
+ * backend-neutral equivalent is exposed on the persistence port as
+ * `GitHubIdentityPersistence.getModeSnapshot`, which the adapters and the
+ * migrated write-fence/runtime flows re-check inside their own transactions.
  */
 export function getGitHubIdentityModeSnapshot(
   connectorInstanceId: string,

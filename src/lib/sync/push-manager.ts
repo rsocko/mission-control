@@ -159,7 +159,7 @@ async function pushPendingChangesWithLease(
       if (!token) continue;
       const claimedTask = await loadClaimedTaskForPush(task.id, token);
       if (!claimedTask) continue;
-      if (hasSucceededGitHubWrite({
+      if (await hasSucceededGitHubWrite({
         connectorInstanceId: connectorId,
         taskId: claimedTask.id,
         operation,
@@ -250,7 +250,7 @@ async function pushPendingChangesWithLease(
   let writeCycleId: string | null = null;
   if (fencedGitHubPush) {
     try {
-      writeCycleId = beginGitHubWriteCycle({
+      writeCycleId = await beginGitHubWriteCycle({
         connectorInstanceId: connectorId,
         modeSnapshot: options!.identityMode!,
         jobId: options?.jobId,
@@ -378,7 +378,7 @@ async function pushPendingChangesWithLease(
             }),
           );
 
-          persistCreatedGitHubIdentity(
+          await persistCreatedGitHubIdentity(
             connectorId,
             task.id,
             created,
@@ -427,7 +427,7 @@ async function pushPendingChangesWithLease(
               }),
             );
 
-            persistCreatedGitHubIdentity(
+            await persistCreatedGitHubIdentity(
               connectorId,
               task.id,
               created,
@@ -761,7 +761,7 @@ async function pushPendingChangesWithLease(
   }
 
   if (writeCycleId) {
-    if (!finishGitHubWriteCycle(writeCycleId, cycleOutcome)) {
+    if (!(await finishGitHubWriteCycle(writeCycleId, cycleOutcome))) {
       syncLogger.error({
         connectorId,
         writeCycleId,
@@ -841,7 +841,7 @@ async function dispatchGitHubWrite<T>(
     throw new GitHubWriteFenceError('missing_frozen_identity_mode');
   }
 
-  const authorization = authorizeGitHubWrite({
+  const authorization = await authorizeGitHubWrite({
     connectorInstanceId: connectorId,
     taskId: task.id,
     operation,
@@ -869,37 +869,37 @@ async function dispatchGitHubWrite<T>(
     if (!preflight.runAuthorizedWrite) {
       throw new GitHubWriteFenceError('missing_authorized_write_wrapper');
     }
-    assertGitHubWriteCycleCurrent(authorization);
+    await assertGitHubWriteCycleCurrent(authorization);
     const observed = await preflight.preflightWriteRoute(authorization);
-    verifyGitHubWritePreflight(authorization, observed);
-    confirmGitHubWriteDispatch(authorization);
+    await verifyGitHubWritePreflight(authorization, observed);
+    await confirmGitHubWriteDispatch(authorization);
     dispatched = true;
     const result = await preflight.runAuthorizedWrite(authorization, dispatch);
-    finalizeGitHubWrite(authorization, 'succeeded', undefined, result);
+    await finalizeGitHubWrite(authorization, 'succeeded', undefined, result);
     cycle.applied++;
     return result;
   } catch (error) {
     if (dispatched) {
-      quarantineUnknownGitHubWrite(authorization, error);
+      await quarantineUnknownGitHubWrite(authorization, error);
     }
     if (error instanceof GitHubWriteFenceError) {
-      finalizeUndispatchedFence(authorization, error.code);
+      await finalizeUndispatchedFence(authorization, error.code);
       throw error;
     }
-    finalizeGitHubWrite(authorization, 'failed', 'definitive_remote_failure');
+    await finalizeGitHubWrite(authorization, 'failed', 'definitive_remote_failure');
     throw error;
   }
 }
 
-function persistCreatedGitHubIdentity(
+async function persistCreatedGitHubIdentity(
   connectorInstanceId: string,
   taskId: string,
   created: TaskItem,
   runtime?: GitHubStableIdentityRuntime,
-): void {
+): Promise<void> {
   if (!runtime || !created.externalIdentity) return;
   try {
-    runtime.assertCurrentMode();
+    await runtime.assertCurrentMode();
     persistExternalIdentityBatch([{
       target: {
         connectorInstanceId,
@@ -917,6 +917,9 @@ function persistCreatedGitHubIdentity(
   }
 }
 
-function finalizeUndispatchedFence(authorization: GitHubWriteAuthorization, code: string): void {
-  blockGitHubWrite(authorization.leaseId, authorization.token, code);
+async function finalizeUndispatchedFence(
+  authorization: GitHubWriteAuthorization,
+  code: string,
+): Promise<void> {
+  await blockGitHubWrite(authorization.leaseId, authorization.token, code);
 }

@@ -15,6 +15,8 @@ import type {
   ConnectorTaskRecord,
   ConnectorTaskUpdate,
   DeletionCandidateRecord,
+  DeletionIdentityState,
+  GitHubDeletionFenceRecord,
   PullTag,
   RetentionDetailRecord,
   SourceListRecord,
@@ -22,6 +24,7 @@ import type {
 import {
   UnsupportedConnectorExecutionError,
 } from '@/db/persistence/connector-execution';
+import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 
 type Client = Pool | PoolClient;
 
@@ -391,6 +394,84 @@ async function assertGenericTaskMutationSupported(
       'identity, dependency, or project relationship mutation',
     );
   }
+}
+
+type CapturedGitHubDeletionFence = Omit<GitHubDeletionFenceRecord, 'sourceId'>;
+
+/**
+ * Freezes the GitHub identity facts a deletion is authorized against: the
+ * durable identity epoch, the active task binding, and the current locator. The
+ * caller re-reads this inside the archival transaction so a concurrent repoint,
+ * rebind, or epoch bump turns the delete into a no-op.
+ */
+async function captureGitHubDeletionFence(
+  client: Client,
+  connectorId: string,
+  taskId: string,
+): Promise<CapturedGitHubDeletionFence> {
+  const [control] = await query<{ modeRevision: number | null }>(
+    client,
+    `
+      SELECT mode_revision AS "modeRevision"
+      FROM github_identity_controls
+      WHERE connector_instance_id = $1
+      LIMIT 1
+    `,
+    [connectorId],
+  );
+  const [row] = await query<{
+    issueEntityId: string | null;
+    hostKey: string | null;
+    bindingState: string | null;
+    bindingRevision: string | null;
+    repositoryEntityId: string | null;
+    locatorRevision: number | null;
+  }>(
+    client,
+    `
+      SELECT
+        entity.id AS "issueEntityId",
+        entity.host_key AS "hostKey",
+        binding.state AS "bindingState",
+        binding.verified_at AS "bindingRevision",
+        locator.repository_entity_id AS "repositoryEntityId",
+        locator.locator_revision AS "locatorRevision"
+      FROM external_entity_bindings AS binding
+      LEFT JOIN external_entities AS entity ON entity.id = binding.external_entity_id
+      LEFT JOIN external_entity_locators AS locator
+        ON locator.external_entity_id = entity.id
+        AND locator.valid_to IS NULL
+      WHERE binding.connector_instance_id = $1
+        AND binding.binding_type = 'task'
+        AND binding.local_id = $2
+      LIMIT 1
+    `,
+    [connectorId, taskId],
+  );
+  return {
+    identityMode: GITHUB_IDENTITY_MODE,
+    identityModeRevision: control?.modeRevision ?? 0,
+    issueEntityId: row?.issueEntityId ?? null,
+    repositoryEntityId: row?.repositoryEntityId ?? null,
+    hostKey: row?.hostKey ?? null,
+    locatorRevision: row?.locatorRevision ?? null,
+    bindingState: row?.bindingState ?? null,
+    bindingRevision: row?.bindingRevision ?? null,
+  };
+}
+
+function sameGitHubDeletionFence(
+  current: CapturedGitHubDeletionFence,
+  expected: GitHubDeletionFenceRecord,
+): boolean {
+  return current.identityMode === expected.identityMode
+    && current.identityModeRevision === expected.identityModeRevision
+    && current.issueEntityId === expected.issueEntityId
+    && current.repositoryEntityId === expected.repositoryEntityId
+    && current.hostKey === expected.hostKey
+    && current.locatorRevision === expected.locatorRevision
+    && current.bindingState === expected.bindingState
+    && current.bindingRevision === expected.bindingRevision;
 }
 
 async function deleteTaskRows(client: Client, taskId: string): Promise<void> {
@@ -1200,19 +1281,50 @@ export function createPostgresConnectorExecutionRepositories(
               [connectorId],
             )).map((row) => row.sourceId)
           : [];
-        if (options.includeLinkedSources) {
-          throw new UnsupportedConnectorExecutionError('GitHub linked-source identity');
-        }
+        const linkedSources = options.includeLinkedSources
+          ? await query<{
+              id: string;
+              taskId: string;
+              sourceId: string;
+              entityProvider: string | null;
+              entityHostKey: string | null;
+              entityType: string | null;
+              entityStableId: string | null;
+            }>(
+              pool,
+              `
+                SELECT
+                  linked.id,
+                  linked.task_id AS "taskId",
+                  linked.source_id AS "sourceId",
+                  entity.provider AS "entityProvider",
+                  entity.host_key AS "entityHostKey",
+                  entity.entity_type AS "entityType",
+                  entity.stable_id AS "entityStableId"
+                FROM task_linked_sources AS linked
+                LEFT JOIN task_linked_source_entities AS association
+                  ON association.linked_source_id = linked.id
+                LEFT JOIN external_entities AS entity
+                  ON entity.id = association.external_entity_id
+                WHERE linked.connector_instance_id = $1
+                  AND linked.connector_type = 'github-issues'
+              `,
+              [connectorId],
+            )
+          : [];
         return {
           tasks,
           tags,
           archivedRecurringDuplicateSourceIds,
-          linkedSources: [],
+          linkedSources,
         };
       },
 
-      async updateLinkedSourceLocator() {
-        throw new UnsupportedConnectorExecutionError('GitHub linked-source identity');
+      async updateLinkedSourceLocator(id, sourceId) {
+        await pool.query(
+          'UPDATE task_linked_sources SET source_id = $1 WHERE id = $2',
+          [sourceId, id],
+        );
       },
 
       async updateTaskSourceId(taskId, sourceId) {
@@ -1421,8 +1533,39 @@ export function createPostgresConnectorExecutionRepositories(
         );
       },
 
-      async listIdentityStates() {
-        throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion');
+      async listIdentityStates(connectorId) {
+        return query<DeletionIdentityState>(
+          pool,
+          `
+            SELECT
+              task.id AS "localId",
+              binding.external_entity_id AS "externalEntityId",
+              entity.stable_id AS "stableId",
+              binding.state AS "bindingState",
+              backfill.state AS "backfillState",
+              locator.locator_revision AS "locatorRevision",
+              locator.repository_entity_id AS "repositoryEntityId",
+              entity.host_key AS "hostKey",
+              binding.verified_at AS "bindingRevision"
+            FROM tasks AS task
+            LEFT JOIN external_entity_bindings AS binding
+              ON binding.connector_instance_id = task.connector_instance_id
+              AND binding.binding_type = 'task'
+              AND binding.local_id = task.id
+              AND binding.state <> 'retired'
+            LEFT JOIN external_entities AS entity
+              ON entity.id = binding.external_entity_id
+            LEFT JOIN external_entity_locators AS locator
+              ON locator.external_entity_id = entity.id
+              AND locator.valid_to IS NULL
+            LEFT JOIN github_identity_backfill_items AS backfill
+              ON backfill.connector_instance_id = task.connector_instance_id
+              AND backfill.binding_type = 'task'
+              AND backfill.local_id = task.id
+            WHERE task.connector_instance_id = $1
+          `,
+          [connectorId],
+        );
       },
 
       async clearCandidate(connectorId, sourceId) {
@@ -1533,9 +1676,6 @@ export function createPostgresConnectorExecutionRepositories(
       },
 
       async archiveAndDeleteTask(taskId, reason, expectedFence) {
-        if (expectedFence) {
-          throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion');
-        }
         return transaction(pool, async (client) => {
           const affected = await query<{ id: string }>(
             client,
@@ -1551,14 +1691,41 @@ export function createPostgresConnectorExecutionRepositories(
             `,
             [taskId],
           );
-          for (const row of affected) {
-            await assertGenericTaskMutationSupported(client, row.id);
+          if (!expectedFence) {
+            for (const row of affected) {
+              await assertGenericTaskMutationSupported(client, row.id);
+            }
           }
           const task = await getTask(client, taskId, true);
           if (!task) return null;
+          // Identity-backed deletion re-reads every frozen fence inside this
+          // transaction. A repoint, rebind, epoch bump, or locator move between
+          // detection and archival makes the delete a no-op rather than a
+          // silent data loss.
+          if (expectedFence) {
+            if (
+              task.connectorType !== 'github-issues'
+              || task.sourceId !== expectedFence.sourceId
+            ) return null;
+            const current = await captureGitHubDeletionFence(
+              client,
+              task.connectorInstanceId,
+              task.id,
+            );
+            if (!sameGitHubDeletionFence(current, expectedFence)) return null;
+          } else if (task.connectorType === 'github-issues') {
+            throw new UnsupportedConnectorExecutionError(
+              'unfenced GitHub identity-backed deletion',
+            );
+          }
           const tagRows = await query<{ tagId: string }>(
             client,
             'SELECT tag_id AS "tagId" FROM task_tags WHERE task_id = $1',
+            [taskId],
+          );
+          const projectRows = await query<{ projectId: string }>(
+            client,
+            'SELECT project_id AS "projectId" FROM task_projects WHERE task_id = $1',
             [taskId],
           );
           const [schedule] = await query<Record<string, unknown> & QueryResultRow>(
@@ -1566,19 +1733,56 @@ export function createPostgresConnectorExecutionRepositories(
             'SELECT * FROM task_schedules WHERE task_id = $1',
             [taskId],
           );
+          const dependencies = await query<Record<string, unknown> & QueryResultRow>(
+            client,
+            `
+              SELECT * FROM task_dependencies
+              WHERE task_id = $1 OR depends_on_task_id = $1
+            `,
+            [taskId],
+          );
+          const linkedSources = await query<Record<string, unknown> & QueryResultRow>(
+            client,
+            'SELECT * FROM task_linked_sources WHERE task_id = $1',
+            [taskId],
+          );
+          const linkedSourceEntities = linkedSources.length === 0
+            ? []
+            : await query<Record<string, unknown> & QueryResultRow>(
+                client,
+                `
+                  SELECT * FROM task_linked_source_entities
+                  WHERE linked_source_id = ANY($1::text[])
+                `,
+                [linkedSources.map((row) => row.id as string)],
+              );
           const attachments = await query<Record<string, unknown> & QueryResultRow>(
             client,
             'SELECT * FROM task_attachments WHERE task_id = $1',
             [taskId],
           );
+          const phaseItems = await query<Record<string, unknown> & QueryResultRow>(
+            client,
+            'SELECT * FROM project_phase_items WHERE task_id = $1',
+            [taskId],
+          );
           const snapshotId = randomUUID();
           const deletedAt = new Date().toISOString();
+          const githubFence = task.connectorType === 'github-issues'
+            ? await captureGitHubDeletionFence(client, task.connectorInstanceId, task.id)
+            : null;
           await client.query(
             `
               INSERT INTO sync_deletion_snapshots (
                 id, original_task_id, connector_id, source_id, task_title,
-                reason, task_data, relationship_data, deleted_at
-              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                reason, task_data, relationship_data, deleted_at,
+                identity_mode, identity_mode_revision, issue_entity_id,
+                repository_entity_id, host_key, locator_revision,
+                binding_state, binding_revision
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16, $17
+              )
             `,
             [
               snapshotId,
@@ -1590,15 +1794,23 @@ export function createPostgresConnectorExecutionRepositories(
               task,
               {
                 tagIds: tagRows.map((row) => row.tagId),
-                projectIds: [],
+                projectIds: projectRows.map((row) => row.projectId),
                 schedule: schedule ?? null,
-                dependencies: [],
-                linkedSources: [],
-                linkedSourceEntities: [],
+                dependencies,
+                linkedSources,
+                linkedSourceEntities,
                 attachments,
-                phaseItems: [],
+                phaseItems,
               },
               deletedAt,
+              githubFence?.identityMode ?? null,
+              githubFence?.identityModeRevision ?? null,
+              githubFence?.issueEntityId ?? null,
+              githubFence?.repositoryEntityId ?? null,
+              githubFence?.hostKey ?? null,
+              githubFence?.locatorRevision ?? null,
+              githubFence?.bindingState ?? null,
+              githubFence?.bindingRevision ?? null,
             ],
           );
           await deleteTaskRows(client, taskId);
@@ -2182,13 +2394,14 @@ export function createPostgresConnectorExecutionRepositories(
     },
 
     support: {
-      allowsLegacyWorkflow() {
-        return false;
+      allowsLegacyWorkflow(workflow) {
+        // Layer 3A migrated GitHub dependency generation, reconciliation, and
+        // resume/relationship polling behind `GitHubWorkerRepositories`, so the
+        // scheduler may start those pollers on PostgreSQL. Everything else
+        // listed here still reads or writes SQLite-only state.
+        return workflow === 'dependency-reconciliation';
       },
       assertConfigSupported(config: ConnectorConfig) {
-        if (config.type === 'github-issues') {
-          throw new UnsupportedConnectorExecutionError('GitHub identity, hierarchy, and project state');
-        }
         if (
           config.type === 'finance-manager'
           || config.type === 'microsoft-todo'
@@ -2196,21 +2409,22 @@ export function createPostgresConnectorExecutionRepositories(
         ) {
           throw new UnsupportedConnectorExecutionError('connector-owned state');
         }
-        if (config.capabilities.dependencyRead || config.capabilities.dependencyWrite) {
+        if (
+          config.type !== 'github-issues'
+          && (config.capabilities.dependencyRead || config.capabilities.dependencyWrite)
+        ) {
           throw new UnsupportedConnectorExecutionError('connector dependency state');
         }
       },
 
       assertConnectorSupported(connector) {
-        if (connector.type === 'github-issues') {
-          throw new UnsupportedConnectorExecutionError('GitHub identity, hierarchy, and project state');
-        }
         if (connector.type === 'microsoft-todo') {
           throw new UnsupportedConnectorExecutionError('Microsoft To Do hidden-list state');
         }
         if (connector.syncDomainData) {
           throw new UnsupportedConnectorExecutionError('connector-owned domain state');
         }
+        if (connector.type === 'github-issues') return;
         if (connector.dependencySnapshotStrategy) {
           throw new UnsupportedConnectorExecutionError('connector dependency state');
         }
@@ -2230,7 +2444,18 @@ export function createPostgresConnectorExecutionRepositories(
       },
 
       async listEnabledGitHubConfigs() {
-        throw new UnsupportedConnectorExecutionError('GitHub dependency polling');
+        return (await query<{ id: string; type: string; capabilities: unknown }>(
+          pool,
+          `
+            SELECT id, type, capabilities
+            FROM connector_configs
+            WHERE enabled = true AND deleted_at IS NULL AND type = 'github-issues'
+          `,
+        )).map((row) => ({
+          id: row.id,
+          type: row.type,
+          capabilities: objectValue(row.capabilities) as unknown as ConnectorConfig['capabilities'],
+        }));
       },
 
       async listConnectorTaskIdentities(connectorId) {
@@ -2249,10 +2474,6 @@ export function createPostgresConnectorExecutionRepositories(
         );
         return rows.filter((row) => !sourceIds || sourceIds.has(row.sourceId))
           .map((row) => row.id);
-      },
-
-      async syncLegacyGitHubProjects() {
-        throw new UnsupportedConnectorExecutionError('GitHub project state');
       },
     },
   };

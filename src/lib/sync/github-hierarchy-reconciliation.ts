@@ -1,22 +1,17 @@
 import 'server-only';
 
-import db, { runTransaction, sqlite } from '@/db';
-import { githubIdentityExceptionEvents, tasks } from '@/db/schema';
 import type { GitHubParentMetadata } from '@/lib/connectors/github-issues/issue-transformer';
-import {
-  getGitHubIdentityModeSnapshot,
-  getGitHubIdentityModeSnapshotInTransaction,
-  provenSupersededGitHubTaskIds,
-} from '@/lib/external-identities';
-import type {
-  GitHubStableIdentityRuntime,
-  GitHubIdentityModeSnapshot,
-  GitHubIdentityResolutionDecision,
-  GitHubStableIdentityCandidate,
-} from '@/lib/external-identities';
+import type { GitHubStableIdentityRuntime, GitHubStableIdentityCandidate } from '@/lib/external-identities/stable-identity-runtime';
+import type { GitHubIdentityResolutionDecision } from '@/lib/external-identities/stable-identity-types';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { TaskItem } from '@/types';
-import { and, desc, eq } from 'drizzle-orm';
+import type {
+  GitHubHierarchyExceptionEventRow,
+  GitHubHierarchyStableBindingRow,
+  GitHubHierarchyTaskIdentityRow,
+  GitHubHierarchyTaskRow,
+  GitHubHierarchyTaskUpdate,
+} from '@/db/persistence/github-hierarchy';
 import {
   buildGitHubNativeTaskPopulation,
   canonicalizeGitHubSourceId,
@@ -25,6 +20,7 @@ import {
   parseNativeGitHubTaskSourceId,
 } from './github-native-task';
 import type { GitHubNativeTaskPopulation } from './github-native-task';
+import { getGitHubHierarchyRepository } from './github-worker-persistence';
 
 export interface GitHubHierarchyObservation {
   childSourceId: string;
@@ -140,6 +136,7 @@ export async function reconcileGitHubTaskHierarchy(
   options: GitHubHierarchyReconciliationOptions = {},
 ): Promise<GitHubHierarchyReconciliationResult> {
   const identityRuntime = options.identityRuntime;
+  const repository = await getGitHubHierarchyRepository();
   const normalizedObservations = normalizeHierarchyObservations(
     observations,
     repositoryAliases,
@@ -154,13 +151,14 @@ export async function reconcileGitHubTaskHierarchy(
     frozenIdentityContext
     && !hierarchyIdentityContextMatches(
       frozenIdentityContext,
-      getGitHubIdentityModeSnapshot(connectorInstanceId),
+      await repository.getIdentityModeSnapshot(connectorInstanceId),
     )
   ) {
     identityRuntime.markBlocked('sub_issue_identity_context_changed');
     return { applied: false, updated: 0 };
   }
-  const localTasksBeforeApply = await dbTaskIdentityRows(connectorInstanceId);
+  const localTasksBeforeApply = await repository.listConnectorTaskIdentities(connectorInstanceId);
+  const stableBindings = await repository.listTaskStableBindings(connectorInstanceId);
   const nativeTasks = localTasksBeforeApply.filter((task) =>
     isConnectorNativeTask(task, 'github-issues', connectorInstanceId));
   const provisionalPopulation = buildGitHubNativeTaskPopulation(
@@ -173,7 +171,7 @@ export async function reconcileGitHubTaskHierarchy(
     repositoryAliases,
   );
   const provisionalTaskIdByStableIdentity = buildPopulationTaskIdByStableIdentity(
-    connectorInstanceId,
+    stableBindings,
     provisionalPopulation,
   );
   const observedEndpointTaskIds = observedHierarchyEndpointTaskIds(
@@ -186,13 +184,14 @@ export async function reconcileGitHubTaskHierarchy(
   const scopedNativeTasks = nativeTasks.filter((task) =>
     taskRepositoryIsConfigured(task.sourceId, configured, repositoryAliases)
     || observedEndpointTaskIds.has(task.id));
-  const acceptedTerminalTaskIds = acceptedTerminalInaccessibleTaskIds(
-    connectorInstanceId,
+  const acceptedTerminalTaskIds = latestAcceptedTerminalTaskIds(
+    await repository.listTerminalInaccessibleExceptions(connectorInstanceId),
   );
-  const supersededHistoricalTaskIds = provenSupersededGitHubTaskIds(
-    db,
-    connectorInstanceId,
-    observedEndpointTaskIds,
+  const supersededHistoricalTaskIds = new Set(
+    await repository.provenSupersededTaskIds(
+      connectorInstanceId,
+      [...observedEndpointTaskIds],
+    ),
   );
   const eligibleLocalTasks = scopedNativeTasks.filter((task) =>
     !supersededHistoricalTaskIds.has(task.id)
@@ -207,7 +206,7 @@ export async function reconcileGitHubTaskHierarchy(
     repositoryAliases,
   );
   const populationTaskIdByStableIdentity = buildPopulationTaskIdByStableIdentity(
-    connectorInstanceId,
+    stableBindings,
     population,
   );
   const populationObservations = new Map(
@@ -221,7 +220,7 @@ export async function reconcileGitHubTaskHierarchy(
   );
   let hierarchyIdentityDecisions = new Map<string, GitHubIdentityResolutionDecision>();
   if (identityRuntime && generationComplete) {
-    hierarchyIdentityDecisions = resolveGitHubHierarchyIdentity(
+    hierarchyIdentityDecisions = await resolveGitHubHierarchyIdentity(
       identityRuntime,
       populationObservations,
       configuredRepositories,
@@ -230,7 +229,7 @@ export async function reconcileGitHubTaskHierarchy(
       populationTaskIdByStableIdentity,
       new Set(population.memberByTaskId.keys()),
     );
-    identityRuntime.assertDecisionsCurrent(hierarchyIdentityDecisions.values());
+    await identityRuntime.assertDecisionsCurrent(hierarchyIdentityDecisions.values());
   }
   const observedTaskIds = new Set<string>();
   let populationComplete = true;
@@ -273,205 +272,178 @@ export async function reconcileGitHubTaskHierarchy(
     localIdentityBySource,
   );
 
-  const result = runTransaction((tx) => {
-    if (frozenIdentityContext) {
-      const current = getGitHubIdentityModeSnapshotInTransaction(
-        tx,
-        connectorInstanceId,
-      );
-      if (!hierarchyIdentityContextMatches(frozenIdentityContext, current)) {
-        return { applied: false, updated: 0, fenced: true };
-      }
-    }
-    const localTasks = tx.select({
-      id: tasks.id,
-      sourceId: tasks.sourceId,
-      connectorInstanceId: tasks.connectorInstanceId,
-      connectorType: tasks.connectorType,
-      isChecklistItem: tasks.isChecklistItem,
-      parentId: tasks.parentId,
-      depth: tasks.depth,
-      metadata: tasks.metadata,
-    }).from(tasks).where(eq(tasks.connectorInstanceId, connectorInstanceId)).all();
-    const currentAcceptedTerminalTaskIds = latestAcceptedTerminalTaskIds(
-      tx.select({
-        id: githubIdentityExceptionEvents.id,
-        localId: githubIdentityExceptionEvents.localId,
-        action: githubIdentityExceptionEvents.action,
-      }).from(githubIdentityExceptionEvents)
-        .where(and(
-          eq(githubIdentityExceptionEvents.connectorInstanceId, connectorInstanceId),
-          eq(githubIdentityExceptionEvents.bindingType, 'task'),
-          eq(githubIdentityExceptionEvents.category, 'terminal_inaccessible'),
-        ))
-        .orderBy(desc(githubIdentityExceptionEvents.id))
-        .all(),
-    );
-    const currentSupersededHistoricalTaskIds = provenSupersededGitHubTaskIds(
-      tx,
-      connectorInstanceId,
-      observedEndpointTaskIds,
-    );
-    const eligibleTasks = localTasks.filter((task) =>
-      isConnectorNativeTask(task, 'github-issues', connectorInstanceId)
-      && (
-        taskRepositoryIsConfigured(task.sourceId, configured, repositoryAliases)
-        || observedEndpointTaskIds.has(task.id)
-      )
-      && (
-        !currentAcceptedTerminalTaskIds.has(task.id)
-        || observedEndpointTaskIds.has(task.id)
-      )
-      && !currentSupersededHistoricalTaskIds.has(task.id));
-    const currentPopulation = buildGitHubNativeTaskPopulation(
-      eligibleTasks,
-      connectorInstanceId,
-      repositoryAliases,
-    );
-    if (
-      currentPopulation.count !== population.count
-      || currentPopulation.digest !== population.digest
-    ) {
-      return { applied: false, updated: 0, fenced: true };
-    }
-    const bySourceId = buildLocalIdentityBySource(eligibleTasks, repositoryAliases);
-    if (
-      relevantIdentityFingerprint
-      !== hierarchyIdentityFingerprint(populationObservations, bySourceId)
-    ) {
-      return { applied: false, updated: 0, fenced: true };
-    }
-    const byId = new Map(eligibleTasks.map((task) => [task.id, task]));
-    const desiredParentByChildId = new Map<string, string | null>();
-    const observationByChildId = new Map<string, GitHubParentMetadata | null>();
-
-    for (const observation of populationObservations.values()) {
-      const { childSourceId, parent } = observation;
-      const stableMode = Boolean(frozenIdentityContext);
-      const childDecision = hierarchyIdentityDecisions.get(
-        `sub_issue:${observation.childSourceId}:child`,
-      );
-      const child = stableMode
-        ? (
-            childDecision?.appliedSource === 'stable' && childDecision.selectedLocalId
-              ? byId.get(childDecision.selectedLocalId)
-              : undefined
-          )
-        : bySourceId.get(childSourceId.toLowerCase());
-      if (!child) continue;
-
-      const parentDecision = parent
-        ? hierarchyIdentityDecisions.get(`sub_issue:${observation.childSourceId}:parent`)
-        : undefined;
-      const parentTask = parent && configured.has(parent.repository.toLowerCase())
-        ? (
-            stableMode
-              ? (
-                  parentDecision?.appliedSource === 'stable'
-                    && parentDecision.selectedLocalId
-                    ? byId.get(parentDecision.selectedLocalId)
-                    : undefined
-                )
-              : bySourceId.get(parent.sourceId.toLowerCase())
-          )
-        : undefined;
-      const knownGoodParentId = child.parentId && byId.has(child.parentId)
-        ? child.parentId
-        : null;
-      desiredParentByChildId.set(
-        child.id,
-        parent === null
-          ? null
-          : parentTask && parentTask.id !== child.id
-            ? parentTask.id
-            : knownGoodParentId,
-      );
-      observationByChildId.set(child.id, parent);
-    }
-
-    for (const childId of desiredParentByChildId.keys()) {
-      const visited = new Set([childId]);
-      let ancestorId = desiredParentByChildId.get(childId) ?? null;
-      while (ancestorId) {
-        if (visited.has(ancestorId)) {
-          desiredParentByChildId.set(childId, null);
-          break;
-        }
-        visited.add(ancestorId);
-        const ancestor = byId.get(ancestorId);
-        ancestorId = desiredParentByChildId.has(ancestorId)
-          ? desiredParentByChildId.get(ancestorId) ?? null
-          : ancestor?.parentId ?? null;
-      }
-    }
-
-    const affectedTaskIds = new Set(desiredParentByChildId.keys());
-    let foundDescendant = true;
-    while (foundDescendant) {
-      foundDescendant = false;
-      for (const task of eligibleTasks) {
-        if (affectedTaskIds.has(task.id)) continue;
-        const parentId = desiredParentByChildId.has(task.id)
-          ? desiredParentByChildId.get(task.id) ?? null
-          : task.parentId;
-        if (parentId && affectedTaskIds.has(parentId)) {
-          affectedTaskIds.add(task.id);
-          foundDescendant = true;
-        }
-      }
-    }
-
-    const depthCache = new Map<string, number>();
-    const resolveDepth = (taskId: string, visiting = new Set<string>()): number => {
-      const cached = depthCache.get(taskId);
-      if (cached !== undefined) return cached;
-      if (visiting.has(taskId)) return 0;
-      const task = byId.get(taskId);
-      if (!task) return 0;
-
-      const nextVisiting = new Set(visiting).add(taskId);
-      const parentId = desiredParentByChildId.has(taskId)
-        ? desiredParentByChildId.get(taskId) ?? null
-        : task.parentId;
-      const depth = parentId ? resolveDepth(parentId, nextVisiting) + 1 : 0;
-      depthCache.set(taskId, depth);
-      return depth;
-    };
-
-    let updated = 0;
-    for (const childId of affectedTaskIds) {
-      const child = byId.get(childId);
-      if (!child) continue;
-      const parentId = desiredParentByChildId.has(childId)
-        ? desiredParentByChildId.get(childId) ?? null
-        : child.parentId;
-      const observed = observationByChildId.has(childId);
-      const parent = observed ? observationByChildId.get(childId) ?? null : undefined;
-      const existingMetadata = parseMetadata(child.metadata);
-      const metadataChanged = observed
-        && JSON.stringify(existingMetadata.githubParent) !== JSON.stringify(parent);
-      const depth = resolveDepth(childId);
+  const result = await repository.applyReconciliation({
+    connectorInstanceId,
+    observedEndpointTaskIds: [...observedEndpointTaskIds],
+    reconcile: (context) => {
       if (
-        child.parentId === parentId
-        && child.depth === depth
-        && !metadataChanged
+        frozenIdentityContext
+        && !hierarchyIdentityContextMatches(frozenIdentityContext, context.identitySnapshot)
       ) {
-        continue;
+        return { fenced: true };
       }
-      const update: Partial<typeof tasks.$inferInsert> = {
-        parentId,
-        depth,
-      };
-      if (metadataChanged) {
-        update.metadata = JSON.stringify({
-          ...existingMetadata,
-          githubParent: parent,
-        });
+      const localTasks = context.tasks;
+      const currentAcceptedTerminalTaskIds = latestAcceptedTerminalTaskIds(
+        context.exceptionEvents,
+      );
+      const currentSupersededHistoricalTaskIds = context.supersededHistoricalTaskIds;
+      const eligibleTasks = localTasks.filter((task) =>
+        isConnectorNativeTask(task, 'github-issues', connectorInstanceId)
+        && (
+          taskRepositoryIsConfigured(task.sourceId, configured, repositoryAliases)
+          || observedEndpointTaskIds.has(task.id)
+        )
+        && (
+          !currentAcceptedTerminalTaskIds.has(task.id)
+          || observedEndpointTaskIds.has(task.id)
+        )
+        && !currentSupersededHistoricalTaskIds.has(task.id));
+      const currentPopulation = buildGitHubNativeTaskPopulation(
+        eligibleTasks,
+        connectorInstanceId,
+        repositoryAliases,
+      );
+      if (
+        currentPopulation.count !== population.count
+        || currentPopulation.digest !== population.digest
+      ) {
+        return { fenced: true };
       }
-      updated += tx.update(tasks).set(update).where(eq(tasks.id, childId)).run().changes;
-    }
+      const bySourceId = buildLocalIdentityBySource(eligibleTasks, repositoryAliases);
+      if (
+        relevantIdentityFingerprint
+        !== hierarchyIdentityFingerprint(populationObservations, bySourceId)
+      ) {
+        return { fenced: true };
+      }
+      const byId = new Map<string, GitHubHierarchyTaskRow>(
+        eligibleTasks.map((task) => [task.id, task]),
+      );
+      const desiredParentByChildId = new Map<string, string | null>();
+      const observationByChildId = new Map<string, GitHubParentMetadata | null>();
 
-    return { applied: true, updated, fenced: false };
+      for (const observation of populationObservations.values()) {
+        const { childSourceId, parent } = observation;
+        const stableMode = Boolean(frozenIdentityContext);
+        const childDecision = hierarchyIdentityDecisions.get(
+          `sub_issue:${observation.childSourceId}:child`,
+        );
+        const child = stableMode
+          ? (
+              childDecision?.appliedSource === 'stable' && childDecision.selectedLocalId
+                ? byId.get(childDecision.selectedLocalId)
+                : undefined
+            )
+          : bySourceId.get(childSourceId.toLowerCase());
+        if (!child) continue;
+
+        const parentDecision = parent
+          ? hierarchyIdentityDecisions.get(`sub_issue:${observation.childSourceId}:parent`)
+          : undefined;
+        const parentTask = parent && configured.has(parent.repository.toLowerCase())
+          ? (
+              stableMode
+                ? (
+                    parentDecision?.appliedSource === 'stable'
+                      && parentDecision.selectedLocalId
+                      ? byId.get(parentDecision.selectedLocalId)
+                      : undefined
+                  )
+                : bySourceId.get(parent.sourceId.toLowerCase())
+            )
+          : undefined;
+        const knownGoodParentId = child.parentId && byId.has(child.parentId)
+          ? child.parentId
+          : null;
+        desiredParentByChildId.set(
+          child.id,
+          parent === null
+            ? null
+            : parentTask && parentTask.id !== child.id
+              ? parentTask.id
+              : knownGoodParentId,
+        );
+        observationByChildId.set(child.id, parent);
+      }
+
+      for (const childId of desiredParentByChildId.keys()) {
+        const visited = new Set([childId]);
+        let ancestorId = desiredParentByChildId.get(childId) ?? null;
+        while (ancestorId) {
+          if (visited.has(ancestorId)) {
+            desiredParentByChildId.set(childId, null);
+            break;
+          }
+          visited.add(ancestorId);
+          const ancestor = byId.get(ancestorId);
+          ancestorId = desiredParentByChildId.has(ancestorId)
+            ? desiredParentByChildId.get(ancestorId) ?? null
+            : ancestor?.parentId ?? null;
+        }
+      }
+
+      const affectedTaskIds = new Set(desiredParentByChildId.keys());
+      let foundDescendant = true;
+      while (foundDescendant) {
+        foundDescendant = false;
+        for (const task of eligibleTasks) {
+          if (affectedTaskIds.has(task.id)) continue;
+          const parentId = desiredParentByChildId.has(task.id)
+            ? desiredParentByChildId.get(task.id) ?? null
+            : task.parentId;
+          if (parentId && affectedTaskIds.has(parentId)) {
+            affectedTaskIds.add(task.id);
+            foundDescendant = true;
+          }
+        }
+      }
+
+      const depthCache = new Map<string, number>();
+      const resolveDepth = (taskId: string, visiting = new Set<string>()): number => {
+        const cached = depthCache.get(taskId);
+        if (cached !== undefined) return cached;
+        if (visiting.has(taskId)) return 0;
+        const task = byId.get(taskId);
+        if (!task) return 0;
+
+        const nextVisiting = new Set(visiting).add(taskId);
+        const parentId = desiredParentByChildId.has(taskId)
+          ? desiredParentByChildId.get(taskId) ?? null
+          : task.parentId;
+        const depth = parentId ? resolveDepth(parentId, nextVisiting) + 1 : 0;
+        depthCache.set(taskId, depth);
+        return depth;
+      };
+
+      const updates: GitHubHierarchyTaskUpdate[] = [];
+      for (const childId of affectedTaskIds) {
+        const child = byId.get(childId);
+        if (!child) continue;
+        const parentId = desiredParentByChildId.has(childId)
+          ? desiredParentByChildId.get(childId) ?? null
+          : child.parentId;
+        const observed = observationByChildId.has(childId);
+        const parent = observed ? observationByChildId.get(childId) ?? null : undefined;
+        const existingMetadata = parseMetadata(child.metadata);
+        const metadataChanged = observed
+          && JSON.stringify(existingMetadata.githubParent) !== JSON.stringify(parent);
+        const depth = resolveDepth(childId);
+        if (
+          child.parentId === parentId
+          && child.depth === depth
+          && !metadataChanged
+        ) {
+          continue;
+        }
+        const update: GitHubHierarchyTaskUpdate = { taskId: childId, parentId, depth };
+        if (metadataChanged) {
+          update.metadata = { ...existingMetadata, githubParent: parent };
+        }
+        updates.push(update);
+      }
+
+      return { fenced: false, updates };
+    },
   });
   if (result.fenced) {
     identityRuntime?.markBlocked('sub_issue_apply_context_changed');
@@ -510,24 +482,6 @@ function normalizeHierarchyObservations(
   }));
 }
 
-type GitHubHierarchyTaskIdentityRow = Pick<
-  typeof tasks.$inferSelect,
-  'id' | 'sourceId' | 'connectorInstanceId' | 'connectorType' | 'isChecklistItem' | 'metadata'
->;
-
-async function dbTaskIdentityRows(
-  connectorInstanceId: string,
-): Promise<GitHubHierarchyTaskIdentityRow[]> {
-  return db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    connectorInstanceId: tasks.connectorInstanceId,
-    connectorType: tasks.connectorType,
-    isChecklistItem: tasks.isChecklistItem,
-    metadata: tasks.metadata,
-  }).from(tasks).where(eq(tasks.connectorInstanceId, connectorInstanceId));
-}
-
 function buildLocalIdentityBySource<T extends GitHubHierarchyTaskIdentityRow>(
   localTasks: readonly T[],
   repositoryAliases: ReadonlyMap<string, string>,
@@ -542,30 +496,10 @@ function buildLocalIdentityBySource<T extends GitHubHierarchyTaskIdentityRow>(
 }
 
 function buildPopulationTaskIdByStableIdentity(
-  connectorInstanceId: string,
+  stableBindings: readonly GitHubHierarchyStableBindingRow[],
   population: GitHubNativeTaskPopulation,
 ): Map<string, string> {
-  const rows = sqlite.prepare(`
-    SELECT
-      binding.local_id AS localTaskId,
-      entity.provider,
-      entity.host_key AS hostKey,
-      entity.entity_type AS entityType,
-      entity.stable_id AS stableId
-    FROM external_entity_bindings AS binding
-    INNER JOIN external_entities AS entity
-      ON entity.id = binding.external_entity_id
-    WHERE binding.connector_instance_id = ?
-      AND binding.binding_type = 'task'
-      AND binding.state != 'retired'
-  `).all(connectorInstanceId) as Array<{
-    localTaskId: string;
-    provider: string;
-    hostKey: string;
-    entityType: string;
-    stableId: string;
-  }>;
-  return new Map(rows
+  return new Map(stableBindings
     .filter((row) => population.memberByTaskId.has(row.localTaskId))
     .map((row) => [
       stableIdentityLookupKey(row.provider, row.hostKey, row.entityType, row.stableId),
@@ -605,30 +539,8 @@ function observedHierarchyEndpointTaskIds(
   return observedTaskIds;
 }
 
-function acceptedTerminalInaccessibleTaskIds(
-  connectorInstanceId: string,
-): Set<string> {
-  const rows = sqlite.prepare(`
-      SELECT id, local_id AS localId, action
-      FROM github_identity_exception_events
-      WHERE connector_instance_id = ?
-        AND binding_type = 'task'
-        AND category = 'terminal_inaccessible'
-      ORDER BY id DESC
-  `).all(connectorInstanceId) as Array<{
-      id: number;
-      localId: string;
-      action: 'accept' | 'revoke';
-  }>;
-  return latestAcceptedTerminalTaskIds(rows);
-}
-
 function latestAcceptedTerminalTaskIds(
-  rows: ReadonlyArray<{
-      id: number;
-      localId: string;
-      action: 'accept' | 'revoke';
-  }>,
+  rows: readonly GitHubHierarchyExceptionEventRow[],
 ): Set<string> {
   const latestActionByTaskId = new Map<string, 'accept' | 'revoke'>();
   for (const row of rows) {
@@ -654,14 +566,14 @@ function taskRepositoryIsConfigured(
 }
 
 function hierarchyIdentityContextMatches(
-  frozen: GitHubIdentityModeSnapshot,
-  current: GitHubIdentityModeSnapshot,
+  frozen: { connectorInstanceId: string; modeRevision: number },
+  current: { connectorInstanceId: string; modeRevision: number },
 ): boolean {
   return frozen.connectorInstanceId === current.connectorInstanceId
     && frozen.modeRevision === current.modeRevision;
 }
 
-function resolveGitHubHierarchyIdentity(
+async function resolveGitHubHierarchyIdentity(
   runtime: GitHubStableIdentityRuntime,
   observations: ReadonlyMap<string, GitHubHierarchyObservation>,
   configuredRepositories: ReadonlySet<string>,
@@ -669,7 +581,7 @@ function resolveGitHubHierarchyIdentity(
   localBySourceId: ReadonlyMap<string, GitHubHierarchyTaskIdentityRow>,
   populationTaskIdByStableIdentity: ReadonlyMap<string, string>,
   populationTaskIds: ReadonlySet<string>,
-): Map<string, GitHubIdentityResolutionDecision> {
+): Promise<Map<string, GitHubIdentityResolutionDecision>> {
   const configured = configuredGitHubRepositories(
     configuredRepositories,
     repositoryAliases,
@@ -727,7 +639,7 @@ function resolveGitHubHierarchyIdentity(
       });
     }
   }
-  const decisions = runtime.resolveDeduplicatedBatch('sub_issue', 'task', candidates);
+  const decisions = await runtime.resolveDeduplicatedBatch('sub_issue', 'task', candidates);
   if (decisions.some((decision) =>
     decision.candidateKey.endsWith(':child') && !decision.selectedLocalId)) {
     runtime.markBlocked('sub_issue_child_unresolved');

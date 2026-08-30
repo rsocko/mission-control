@@ -537,32 +537,6 @@ export interface ConnectorExecutionSupport {
     connectorId: string,
     sourceIds?: ReadonlySet<string>,
   ): Promise<string[]>;
-  syncLegacyGitHubProjects(input: {
-    connectorId: string;
-    associations: readonly {
-      project: {
-        id: string;
-        number: number;
-        title: string;
-        shortDescription: string | null;
-        url: string;
-      };
-      taskSourceIds: readonly string[];
-    }[];
-    stableProjectTaskIds?: ReadonlyMap<number, ReadonlySet<string>>;
-    blockedStableProjects?: ReadonlySet<number>;
-    resolveIdentityDigest: (
-      project: {
-        id: string;
-        number: number;
-        title: string;
-        shortDescription: string | null;
-        url: string;
-      },
-      existingDigest?: string,
-    ) => string;
-    assertIdentityCurrent?: () => void;
-  }): Promise<void>;
 }
 
 export interface ConnectorExecutionRepositories {

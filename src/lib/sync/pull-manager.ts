@@ -329,7 +329,7 @@ export async function upsertTasks(
       });
       for (let index = 0; index < comparisonTasks.length; index += 500) {
         const chunk = comparisonTasks.slice(index, index + 500);
-        const decisions = identityRuntime.resolveBatch(
+        const decisions = await identityRuntime.resolveBatch(
           'task',
           'task',
           chunk.map((remoteTask) => {
@@ -377,7 +377,7 @@ export async function upsertTasks(
         })
       ));
       for (let index = 0; index < linkedCandidates.length; index += 500) {
-        const decisions = identityRuntime.resolveLinkedSourceBatch(
+        const decisions = await identityRuntime.resolveLinkedSourceBatch(
           linkedCandidates.slice(index, index + 500),
         );
         {
@@ -493,7 +493,7 @@ export async function upsertTasks(
           }
         }
 
-        identityRuntime?.assertDecisionsCurrent(
+        await identityRuntime?.assertDecisionsCurrent(
           batch.flatMap((task) => {
             const decision = identityDecisionBySourceId.get(task.sourceId);
             return decision ? [decision] : [];
@@ -561,7 +561,7 @@ export async function upsertTasks(
             // next sync cycle will reconcile.
             // Refs: #1692
             if (stableDecision?.outcome === 'locator_change') {
-              identityRuntime?.assertDecisionsCurrent([stableDecision]);
+              await identityRuntime?.assertDecisionsCurrent([stableDecision]);
               await pullPersistence.updateTaskSourceId(existing.id, remoteTask.sourceId);
               existingBySourceId.delete(existing.sourceId);
               const refreshed = { ...existing, sourceId: remoteTask.sourceId };
@@ -653,7 +653,7 @@ export async function upsertTasks(
 
       // ─── Execute bulk insert (single SQL statement for all new tasks) ───
       if (pendingInserts.length > 0) {
-        identityRuntime?.assertDecisionsCurrent(
+        await identityRuntime?.assertDecisionsCurrent(
           pendingInserts.flatMap(({ remoteTask }) => {
             const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
             return decision ? [decision] : [];
@@ -707,7 +707,7 @@ export async function upsertTasks(
       for (let ui = 0; ui < pendingUpdates.length; ui++) {
         const { existing, remoteTask } = pendingUpdates[ui];
         const decision = identityDecisionBySourceId.get(remoteTask.sourceId);
-        if (decision) identityRuntime?.assertDecisionsCurrent([decision]);
+        if (decision) await identityRuntime?.assertDecisionsCurrent([decision]);
         const resolvedName = (remoteTask.sourceListId && listNameMap.get(remoteTask.sourceListId)) || undefined;
         const indexedTask = await applyRemoteUpdate(existing, remoteTask, now, canSyncTags, resolvedName, caps);
         if (!indexedTask) continue;
@@ -768,7 +768,7 @@ export async function upsertTasks(
             });
           }
         }
-        persistGitHubLinkedSourceIdentityBatch(
+        await persistGitHubLinkedSourceIdentityBatch(
           connectorId,
           [...linkedIdentityWrites.values()],
           identityRuntime.modeSnapshot,
@@ -853,7 +853,7 @@ export async function upsertTasks(
         (linked) => !comparisonObservedLinkedSourceIds.has(linked.id),
       );
       for (let index = 0; index < unobservedLinkedSources.length; index += 500) {
-        identityRuntime.resolveLinkedSourceBatch(
+        await identityRuntime.resolveLinkedSourceBatch(
           unobservedLinkedSources.slice(index, index + 500).map((linked) => {
             const repository = githubRepositoryFromLegacySourceId(linked.sourceId);
             const repositoryState = repository

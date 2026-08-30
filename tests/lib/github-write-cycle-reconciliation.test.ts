@@ -138,7 +138,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     });
   });
 
-  it('quarantines every possible post-dispatch outcome and never makes it retryable', () => {
+  it('quarantines every possible post-dispatch outcome and never makes it retryable', async () => {
     const fixture = seedInterruptedCycle('post-dispatch-timeout', {
       observedRouteCount: 1,
       cycleObservedAt: '2026-08-10T14:00:00.000Z',
@@ -164,7 +164,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       reconciliationCode: 'possible_post_dispatch_outcome',
       unknownCount: 1,
     });
-    expect(identity.finishGitHubWriteCycle(fixture.cycleId, {
+    expect(await identity.finishGitHubWriteCycle(fixture.cycleId, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -439,15 +439,15 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     ]));
   });
 
-  it('keeps one active cycle and rejects an unrelated concurrent comparison owner', () => {
+  it('keeps one active cycle and rejects an unrelated concurrent comparison owner', async () => {
     const fixture = seedInterruptedCycle('single-active-invariant');
     const snapshot = identity.getGitHubIdentityModeSnapshot(fixture.connectorId);
-    const firstCycle = identity.beginGitHubWriteCycle({
+    const firstCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: fixture.connectorId,
       modeSnapshot: snapshot,
       pendingCandidateCount: 1,
     });
-    const secondCycle = identity.beginGitHubWriteCycle({
+    const secondCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: fixture.connectorId,
       modeSnapshot: snapshot,
       pendingCandidateCount: 1,
@@ -468,7 +468,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       FROM github_identity_write_cycles
       WHERE connector_instance_id = ? AND state = 'running'
     `).get(fixture.connectorId)).toEqual({ count: 1 });
-    expect(identity.finishGitHubWriteCycle(secondCycle, {
+    expect(await identity.finishGitHubWriteCycle(secondCycle, {
       observed: 0,
       applied: 0,
       blocked: 0,

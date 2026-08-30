@@ -85,9 +85,28 @@ async function main(): Promise<void> {
   syncScheduler.startNightlyFullSync();
   const { getWorkerPersistenceRepositories } = await import('@/lib/persistence/worker-runtime');
   const workerPersistence = await getWorkerPersistenceRepositories();
-  if (workerPersistence.execution.support.allowsLegacyWorkflow('dependency-reconciliation')) {
+  // The GitHub worker composition is registered atomically, so a present
+  // `github` member means every Layer 3A surface (identity/write fence,
+  // dependencies, hierarchy, projects) is available on the selected backend.
+  // Only then may the dependency resume and relationship pollers start.
+  const githubWorkerCompositionPresent = Boolean(
+    workerPersistence.github?.identity
+    && workerPersistence.github.writeFence
+    && workerPersistence.github.dependencies
+    && workerPersistence.github.hierarchy
+    && workerPersistence.github.projects,
+  );
+  if (
+    githubWorkerCompositionPresent
+    && workerPersistence.execution.support.allowsLegacyWorkflow('dependency-reconciliation')
+  ) {
     syncScheduler.startDependencyReconciliationResume();
     syncScheduler.startDependencyRelationshipPolling();
+  } else {
+    syncLogger.warn(
+      { githubWorkerCompositionPresent },
+      'Sync worker: dependency reconciliation resume and relationship polling are disabled',
+    );
   }
   syncScheduler.startWatchdog();
   await financeConnectionRecoveryScheduler.start();

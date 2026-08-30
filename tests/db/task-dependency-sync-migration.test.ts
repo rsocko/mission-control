@@ -139,7 +139,11 @@ describe('task dependency sync migration', () => {
     }));
     writeFileSync(
       join(folder, '0033_unexpected_failure.sql'),
-      'CREATE INDEX invalid_index ON existing_table(missing_column);',
+      [
+        'CREATE TABLE rolled_back_table (id text);',
+        '--> statement-breakpoint',
+        'CREATE INDEX invalid_index ON existing_table(missing_column);',
+      ].join('\n'),
     );
     writeFileSync(
       join(folder, '0034_must_not_run.sql'),
@@ -155,6 +159,9 @@ describe('task dependency sync migration', () => {
       ).get()).toEqual({ count: 0 });
       expect(sqlite.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'should_not_exist'",
+      ).get()).toBeUndefined();
+      expect(sqlite.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rolled_back_table'",
       ).get()).toBeUndefined();
     } finally {
       sqlite.close();

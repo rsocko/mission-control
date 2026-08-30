@@ -99,7 +99,13 @@ private key and token-encryption key in the deployment secret store.
 | `AI_BASE_URL` | `http://localhost:11434/v1` | API endpoint (Ollama default shown) |
 | `AI_MODEL` | `llama3.1:8b` | Model to use for completions |
 | `AI_SEMANTIC_SEARCH_ENABLED` | `false` | Opt in to meaning-based search enrichment. The saved AI setting takes precedence |
-| `AI_EMBEDDING_MODEL` | Auto | Embedding model (defaults: `nomic-embed-text` for Ollama, `ollama/nomic-embed-text:latest` for Bifrost, `text-embedding-3-small` otherwise) |
+| `AI_EMBEDDING_PROVIDER` | `bifrost` | Embedding route, independent from `AI_PROVIDER`. Existing installations without this setting continue to inherit `AI_PROVIDER` |
+| `AI_EMBEDDING_MODEL` | `azure/text-embedding-3-small` | Embedding model or deployment. Bifrost IDs must include a provider prefix |
+| `AI_EMBEDDING_BASE_URL` | Provider default | Optional embedding-only endpoint override |
+| `AI_EMBEDDING_API_KEY` | Provider default | Optional embedding-only credential override |
+| `MC_EMBEDDING_REQUEST_TIMEOUT_MS` | `20000` | Timeout for each embedding request attempt |
+| `MC_EMBEDDING_REQUEST_MAX_RETRIES` | `2` | Bounded retries for rate limits, server errors, and transport failures |
+| `MC_EMBEDDING_REQUEST_RETRY_BASE_MS` | `100` | Exponential retry backoff base |
 | `MC_QUERY_EMBEDDING_CACHE_MAX_ENTRIES` | `128` | Maximum successful interactive query vectors retained per process |
 | `MC_QUERY_EMBEDDING_CACHE_TTL_MS` | `300000` | TTL for process-local query vectors; identical in-flight requests are coalesced and failures are not cached |
 | `MC_SEMANTIC_CACHE_MAX_ENTRIES` | `2048` | Maximum number of parsed `Float32` embedding vectors retained by each process |
@@ -128,9 +134,12 @@ loads the gateway's model catalog from `/v1/models` and enforces sensitivity
 routing from the model's provider prefix.
 
 Semantic search is a separate, off-by-default feature under **Settings → AI
-Provider**. Its embedding model is independent from the completion model.
-Bifrost embedding IDs must be provider-qualified (for example,
-`ollama/nomic-embed-text:latest`). Entity embeddings remain durable in SQLite,
+Provider**. Its embedding route, endpoint, credential, and model are independent
+from completion settings. The recommended default routes through Bifrost to an
+Azure OpenAI embedding deployment using a provider-qualified ID such as
+`azure/text-embedding-3-small`. Entity embeddings remain durable in SQLite,
+record their resolved provider, model, dimensions, fallback result, and
+correlation identity, and become active only after an atomic staged rebuild,
 while query embeddings are kept only in a bounded in-memory cache and never
 written as query history. Interactive searches report `not-ready` until
 compatible entity embeddings exist; index maintenance runs separately and is
@@ -142,10 +151,11 @@ returned. Keyword filtering considers the best 50 FTS candidates; semantic
 filtering is applied in SQLite before the configured candidate limit is scored.
 :::
 
-Settings can also be changed at runtime. `GET /api/ai/provider` returns the
-redacted active configuration, `POST /api/ai/provider` saves provider and
-routing settings in SQLite, and `PUT /api/ai/provider` tests the active
-connection. Saved SQLite values take precedence over environment defaults.
+Settings can also be changed at runtime. `GET /api/ai/provider` returns redacted
+completion and embedding status, `POST /api/ai/provider` saves both routes and
+routing policy in SQLite, `PUT /api/ai/provider` tests completions, and
+`PUT /api/ai/provider?target=embedding` tests only the embedding route. Saved
+SQLite values take precedence over environment defaults.
 
 ## Connected Services
 

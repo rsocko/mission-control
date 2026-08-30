@@ -10,11 +10,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock the db/schema imports before importing semantic module
 vi.mock('@/db', () => {
-  const prepareFn = vi.fn().mockReturnValue({
+  const prepareFn = vi.fn((sql: string) => ({
     run: vi.fn(),
     all: vi.fn().mockReturnValue([]),
-    get: vi.fn().mockReturnValue({ count: 0 }),
-  });
+    get: vi.fn().mockReturnValue(
+      sql.includes('FROM search_embedding_index_state')
+        ? {
+            provider: 'ollama',
+            model: 'nomic-embed-text',
+            dimensions: 768,
+            configuredProvider: 'ollama',
+            configuredModel: 'nomic-embed-text',
+          }
+        : { count: 0 },
+    ),
+  }));
   const fakeDb = {
     select: vi.fn().mockReturnValue({ from: vi.fn().mockResolvedValue([]) }),
   };
@@ -92,7 +102,7 @@ describe('Semantic search — unit tests (mocked)', () => {
   });
 
   it('generateEmbedding returns [] on timeout/error', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('timeout'));
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('timeout'));
 
     const { generateEmbedding } = await import('@/lib/search/semantic');
     const result = await generateEmbedding('test');
@@ -107,7 +117,11 @@ describe('Semantic search — unit tests (mocked)', () => {
       baseUrl: 'http://localhost:11434/v1',
       apiKey: undefined,
       model: 'llama3.1:8b',
+      embeddingProvider: 'ollama',
       embeddingModel: 'nomic-embed-text',
+      embeddingBaseUrl: 'http://localhost:11434/v1',
+      embeddingApiKey: undefined,
+      embeddingConfigured: true,
       semanticSearchEnabled: false,
     });
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(

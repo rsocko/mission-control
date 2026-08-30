@@ -224,6 +224,10 @@ describe('AI sensitivity policy', () => {
       .toThrow(AIProviderEndpointValidationError);
     expect(() => validateProviderEndpoint('bifrost', 'http://10.0.0.8:8080/v1'))
       .toThrow(AIProviderEndpointValidationError);
+    expect(() => validateProviderEndpoint(
+      'bifrost',
+      'https://user:secret@bifrost.example/v1',
+    )).toThrow(/embedded credentials/);
   });
 
   it('never sends local-only content through a gateway', () => {

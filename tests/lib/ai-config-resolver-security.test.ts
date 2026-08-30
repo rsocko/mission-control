@@ -59,8 +59,55 @@ describe('AI provider credential resolution', () => {
     const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
     expect(getResolvedAIConfig()).toMatchObject({
       model: 'azure/gpt-4o-mini',
+      embeddingProvider: 'bifrost',
       embeddingModel: 'ollama/snowflake-arctic-embed',
       semanticSearchEnabled: false,
+    });
+  });
+
+  it('recommends Bifrost to Azure embeddings without changing completion defaults', async () => {
+    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
+
+    expect(getResolvedAIConfig()).toMatchObject({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+    });
+  });
+
+  it('resolves an explicitly independent embedding target and credential', async () => {
+    vi.stubEnv('AI_PROVIDER', 'ollama');
+    vi.stubEnv('AI_EMBEDDING_PROVIDER', 'bifrost');
+    vi.stubEnv('AI_EMBEDDING_MODEL', 'azure/embedding-deployment');
+    vi.stubEnv('AI_EMBEDDING_BASE_URL', 'https://bifrost.example/v1');
+    vi.stubEnv('AI_EMBEDDING_API_KEY', 'embedding-secret');
+
+    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
+
+    expect(getResolvedAIConfig()).toMatchObject({
+      provider: 'ollama',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/embedding-deployment',
+      embeddingBaseUrl: 'https://bifrost.example/v1',
+      embeddingApiKey: 'embedding-secret',
+      embeddingConfigured: true,
+    });
+  });
+
+  it('does not reuse the completion base URL for an independent embedding route', async () => {
+    vi.stubEnv('AI_PROVIDER', 'ollama');
+    vi.stubEnv('AI_BASE_URL', 'http://localhost:11434/v1');
+    vi.stubEnv('AI_EMBEDDING_PROVIDER', 'bifrost');
+    vi.stubEnv('BIFROST_BASE_URL', '');
+
+    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
+
+    expect(getResolvedAIConfig()).toMatchObject({
+      baseUrl: 'http://localhost:11434/v1',
+      embeddingProvider: 'bifrost',
+      embeddingBaseUrl: undefined,
+      embeddingConfigured: false,
     });
   });
 

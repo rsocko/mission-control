@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { fork, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SyncResult } from '@/types';
@@ -9,7 +10,7 @@ import { SqliteSyncRunRepository } from '@/db/persistence/sqlite-sync-run-reposi
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
 
-const testDirectory = mkdtempSync(join(process.cwd(), 'data', 'mc-sync-jobs-'));
+const testDirectory = mkdtempSync(join(tmpdir(), 'mc-sync-jobs-'));
 process.env.MC_DB_PATH = join(testDirectory, 'jobs.db');
 process.env.MC_SYNC_JOB_RETRY_BASE_MS = '1';
 

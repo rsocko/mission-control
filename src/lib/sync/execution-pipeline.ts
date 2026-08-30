@@ -72,6 +72,10 @@ import {
 } from './github-project-association-identity';
 import { evaluateRulesForTasks } from '@/lib/rules';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
+import {
+  withDatabaseOperation,
+  type DatabaseOperationName,
+} from '@/lib/telemetry/database-operation-context';
 
 type DependencyResumeTrigger = 'startup' | 'recurring' | 'retry' | 'manual';
 
@@ -87,6 +91,18 @@ const STALE_VERIFY_CONCURRENCY = 5;
 
 const DEFAULT_DEPENDENCY_SHUTDOWN_TIMEOUT_MS = 30_000;
 const MAX_DEPENDENCY_SHUTDOWN_TIMEOUT_MS = 60_000;
+
+const SYNC_PHASE_DATABASE_OPERATIONS: Readonly<Record<string, DatabaseOperationName>> = {
+  push: 'sync-phase-push',
+  'domain-data': 'sync-phase-domain-data',
+  'remote-fetch': 'sync-phase-remote-fetch',
+  'list-discovery': 'sync-phase-lists',
+  'task-upsert': 'sync-phase-tasks',
+  'dependency-targeted-reconciliation': 'sync-phase-dependencies',
+  'dependency-reconciliation': 'sync-phase-dependencies',
+  'dependency-reconciliation-resume': 'sync-phase-dependencies',
+  'project-reconciliation': 'sync-phase-projects',
+};
 
 function dependencyShutdownTimeoutMs(
   envName:
@@ -129,27 +145,30 @@ async function withSyncPhaseTiming<T>(
   operation: () => Promise<T>,
 ): Promise<T> {
   const startedAt = Date.now();
-  return withRuntimeOperation({
-    kind: 'sync',
-    name: 'sync-phase',
-    connectorId,
-    phase,
-  }, async () => {
-    try {
-      const result = await operation();
-      syncLogger.info(
-        { connectorId, phase, durationMs: Date.now() - startedAt, success: true },
-        'Sync phase completed',
-      );
-      return result;
-    } catch (error) {
-      syncLogger.warn(
-        { err: error, connectorId, phase, durationMs: Date.now() - startedAt, success: false },
-        'Sync phase failed',
-      );
-      throw error;
-    }
-  });
+  return withDatabaseOperation(
+    SYNC_PHASE_DATABASE_OPERATIONS[phase] ?? 'sync-job-execution',
+    () => withRuntimeOperation({
+      kind: 'sync',
+      name: 'sync-phase',
+      connectorId,
+      phase,
+    }, async () => {
+      try {
+        const result = await operation();
+        syncLogger.info(
+          { connectorId, phase, durationMs: Date.now() - startedAt, success: true },
+          'Sync phase completed',
+        );
+        return result;
+      } catch (error) {
+        syncLogger.warn(
+          { err: error, connectorId, phase, durationMs: Date.now() - startedAt, success: false },
+          'Sync phase failed',
+        );
+        throw error;
+      }
+    }),
+  );
 }
 
 /** Individual task-level action recorded during a sync for audit purposes */

@@ -26,6 +26,7 @@ function databaseSnapshot(): DatabaseTelemetrySnapshot {
       total: aggregate,
       byCategory: { transaction: aggregate },
       byOperation: { TRANSACTION: aggregate },
+      byAttribution: { 'sync-queue-claim': aggregate },
     },
     contention: {
       writerAcquisitionCount: 2,
@@ -54,6 +55,7 @@ function databaseSnapshot(): DatabaseTelemetrySnapshot {
     },
     slowOperations: [{
       operation: 'TRANSACTION',
+      attribution: 'sync-queue-claim',
       category: 'transaction',
       durationMs: 548,
       failed: false,
@@ -96,6 +98,15 @@ describe('Prometheus runtime metrics', () => {
       'mission_control_sqlite_operation_latency_milliseconds{role="worker",category="transaction",quantile="0.99"} 548',
     );
     expect(metrics).toContain(
+      'mission_control_sqlite_attributed_operation_latency_milliseconds{role="worker",operation="sync-queue-claim",quantile="0.99"} 548',
+    );
+    expect(metrics).toContain(
+      'mission_control_sqlite_attributed_operation_samples{role="worker",operation="sync-queue-claim"} 4',
+    );
+    expect(metrics.match(
+      /mission_control_sqlite_attributed_operation_samples\{role="worker",operation="sync-queue-claim"\} 4/g,
+    )).toHaveLength(1);
+    expect(metrics).toContain(
       'mission_control_sqlite_busy_failures{role="worker"} 1',
     );
     expect(metrics).toContain(
@@ -126,5 +137,21 @@ describe('Prometheus runtime metrics', () => {
     expect(metrics).not.toContain('mission_control_sqlite_wal_checkpoint_age_seconds{role="web"}');
     expect(metrics).not.toContain('mission_control_sqlite_wal_starved{role="web"}');
     expect(metrics).toContain('mission_control_sqlite_wal_available{role="web"} 0');
+  });
+
+  it('exports only allowlisted operation attribution labels', () => {
+    const database = databaseSnapshot();
+    Object.assign(database.operations.byAttribution, {
+      'private-connector-id': database.operations.total,
+    });
+
+    const metrics = formatRuntimePrometheusMetrics([{
+      role: 'worker',
+      heartbeatAt: '2026-08-26T02:39:50.000Z',
+      metrics: { database },
+    }]);
+
+    expect(metrics).toContain('operation="sync-queue-claim"');
+    expect(metrics).not.toContain('private-connector-id');
   });
 });

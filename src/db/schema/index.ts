@@ -124,8 +124,11 @@ export type {
   AiRunStatus,
 } from './ai-runs';
 
-// Homelab alert lifecycle receipts
-export { homelabAlertReceipts } from './homelab';
+// Homelab alert lifecycle receipts and integration telemetry
+export {
+  alertmanagerIntegrationEvents,
+  homelabAlertReceipts,
+} from './homelab';
 
 // Durable checkpoints and leases for bounded bulk maintenance agents
 export { maintenanceAgentRuns } from './maintenance-agents';
@@ -247,6 +250,23 @@ export {
   apnsRegistrations,
   nativePushRequests,
 } from './native';
+
+// Durable versioned semantic index: identities, documents, vectors, intents, runs
+export {
+  semanticIndexIdentities,
+  semanticDocuments,
+  semanticVectors,
+  semanticIntents,
+  semanticRuns,
+} from './semantic-index';
+export type {
+  SemanticIndexStatus,
+  SemanticSensitivity,
+  SemanticIntentKind,
+  SemanticIntentStatus,
+  SemanticRunKind,
+  SemanticRunStatus,
+} from './semantic-index';
 
 // Finance (re-exported from separate file)
 export {

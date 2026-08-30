@@ -125,6 +125,23 @@ CREATE TABLE "ai_runs" (
 	"expires_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "alertmanager_integration_events" (
+	"id" text PRIMARY KEY NOT NULL,
+	"integration" text NOT NULL,
+	"kind" text NOT NULL,
+	"outcome" text NOT NULL,
+	"authenticated" boolean DEFAULT false NOT NULL,
+	"http_status" integer NOT NULL,
+	"accepted" integer DEFAULT 0 NOT NULL,
+	"applied" integer DEFAULT 0 NOT NULL,
+	"created" integer DEFAULT 0 NOT NULL,
+	"updated" integer DEFAULT 0 NOT NULL,
+	"stale" integer DEFAULT 0 NOT NULL,
+	"duplicate_receipts" integer DEFAULT 0 NOT NULL,
+	"detail" text,
+	"occurred_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "apns_registrations" (
 	"id" text PRIMARY KEY NOT NULL,
 	"installation_id" text NOT NULL,
@@ -1866,6 +1883,116 @@ CREATE TABLE "scout_reconciliation_task_state" (
 	"updated_by" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "semantic_documents" (
+	"id" text PRIMARY KEY NOT NULL,
+	"index_id" text NOT NULL,
+	"entity_type" text NOT NULL,
+	"entity_id" text NOT NULL,
+	"version" integer DEFAULT 1 NOT NULL,
+	"title" text NOT NULL,
+	"body" text NOT NULL,
+	"keywords" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"metadata" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"source_revision" text NOT NULL,
+	"content_fingerprint" text NOT NULL,
+	"projection_version" integer NOT NULL,
+	"sensitivity" text NOT NULL,
+	"retain_until" text,
+	"source_updated_at" text NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	"deleted_at" text
+);
+--> statement-breakpoint
+CREATE TABLE "semantic_index_identities" (
+	"id" text PRIMARY KEY NOT NULL,
+	"provider" text NOT NULL,
+	"model" text NOT NULL,
+	"dimensions" integer NOT NULL,
+	"projection_version" integer NOT NULL,
+	"status" text NOT NULL,
+	"document_count" integer DEFAULT 0 NOT NULL,
+	"vector_count" integer DEFAULT 0 NOT NULL,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	"ready_at" text,
+	"activated_at" text,
+	"retired_at" text,
+	"failure_reason" text
+);
+--> statement-breakpoint
+CREATE TABLE "semantic_intents" (
+	"id" text PRIMARY KEY NOT NULL,
+	"idempotency_key" text NOT NULL,
+	"index_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"entity_type" text NOT NULL,
+	"entity_id" text NOT NULL,
+	"source_revision" text,
+	"content_fingerprint" text,
+	"projection_version" integer,
+	"requested_at" text NOT NULL,
+	"status" text NOT NULL,
+	"attempt" integer DEFAULT 0 NOT NULL,
+	"max_attempts" integer DEFAULT 5 NOT NULL,
+	"available_at" text NOT NULL,
+	"lease_owner" text,
+	"lease_expires_at" text,
+	"retry_after" text,
+	"last_error" text,
+	"outcome" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	"completed_at" text
+);
+--> statement-breakpoint
+CREATE TABLE "semantic_runs" (
+	"id" text PRIMARY KEY NOT NULL,
+	"index_id" text NOT NULL,
+	"kind" text NOT NULL,
+	"idempotency_key" text NOT NULL,
+	"status" text NOT NULL,
+	"checkpoint" text,
+	"processed_count" integer DEFAULT 0 NOT NULL,
+	"failed_count" integer DEFAULT 0 NOT NULL,
+	"skipped_count" integer DEFAULT 0 NOT NULL,
+	"attempt" integer DEFAULT 0 NOT NULL,
+	"max_attempts" integer DEFAULT 3 NOT NULL,
+	"available_at" text NOT NULL,
+	"lease_owner" text,
+	"lease_expires_at" text,
+	"error_message" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL,
+	"started_at" text,
+	"completed_at" text
+);
+--> statement-breakpoint
+CREATE TABLE "semantic_vectors" (
+	"id" text PRIMARY KEY NOT NULL,
+	"index_id" text NOT NULL,
+	"document_id" text NOT NULL,
+	"document_version" integer NOT NULL,
+	"entity_type" text NOT NULL,
+	"entity_id" text NOT NULL,
+	"source_revision" text NOT NULL,
+	"content_fingerprint" text NOT NULL,
+	"projection_version" integer NOT NULL,
+	"provider" text NOT NULL,
+	"model" text NOT NULL,
+	"dimensions" integer NOT NULL,
+	"sensitivity" text NOT NULL,
+	"embedding" text NOT NULL,
+	"norm" text NOT NULL,
+	"source_updated_at" text NOT NULL,
+	"embedded_at" text NOT NULL,
+	"index_run_id" text,
+	"intent_id" text,
+	"expires_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "smart_score_settings" (
 	"key" text PRIMARY KEY NOT NULL,
 	"value" jsonb NOT NULL,
@@ -2426,6 +2553,11 @@ ALTER TABLE "notification_writeback_jobs" ADD CONSTRAINT "notification_writeback
 ALTER TABLE "scout_reconciliation_evaluations" ADD CONSTRAINT "scout_reconciliation_evaluations_run_id_scout_reconciliation_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."scout_reconciliation_runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scout_reconciliation_suggestions" ADD CONSTRAINT "scout_reconciliation_suggestions_run_id_scout_reconciliation_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."scout_reconciliation_runs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "scout_reconciliation_suggestions" ADD CONSTRAINT "scout_reconciliation_suggestions_evaluation_id_scout_reconciliation_evaluations_id_fk" FOREIGN KEY ("evaluation_id") REFERENCES "public"."scout_reconciliation_evaluations"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "semantic_documents" ADD CONSTRAINT "semantic_documents_index_id_semantic_index_identities_id_fk" FOREIGN KEY ("index_id") REFERENCES "public"."semantic_index_identities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "semantic_intents" ADD CONSTRAINT "semantic_intents_index_id_semantic_index_identities_id_fk" FOREIGN KEY ("index_id") REFERENCES "public"."semantic_index_identities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "semantic_runs" ADD CONSTRAINT "semantic_runs_index_id_semantic_index_identities_id_fk" FOREIGN KEY ("index_id") REFERENCES "public"."semantic_index_identities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "semantic_vectors" ADD CONSTRAINT "semantic_vectors_index_id_semantic_index_identities_id_fk" FOREIGN KEY ("index_id") REFERENCES "public"."semantic_index_identities"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "semantic_vectors" ADD CONSTRAINT "semantic_vectors_document_id_semantic_documents_id_fk" FOREIGN KEY ("document_id") REFERENCES "public"."semantic_documents"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "source_lists" ADD CONSTRAINT "source_lists_group_id_list_groups_id_fk" FOREIGN KEY ("group_id") REFERENCES "public"."list_groups"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "sync_job_events" ADD CONSTRAINT "sync_job_events_job_id_sync_jobs_id_fk" FOREIGN KEY ("job_id") REFERENCES "public"."sync_jobs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_dependencies" ADD CONSTRAINT "task_dependencies_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -2465,6 +2597,8 @@ CREATE INDEX "idx_ai_runs_correlation" ON "ai_runs" USING btree ("correlation_id
 CREATE INDEX "idx_ai_runs_history" ON "ai_runs" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "idx_ai_runs_expiry" ON "ai_runs" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "idx_ai_runs_cleanup" ON "ai_runs" USING btree ("cleanup_status","updated_at");--> statement-breakpoint
+CREATE INDEX "idx_alertmanager_integration_events_history" ON "alertmanager_integration_events" USING btree ("integration","occurred_at");--> statement-breakpoint
+CREATE INDEX "idx_alertmanager_integration_events_outcome" ON "alertmanager_integration_events" USING btree ("integration","kind","outcome","occurred_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "apns_registrations_installation_target_idx" ON "apns_registrations" USING btree ("installation_id","environment","topic");--> statement-breakpoint
 CREATE INDEX "apns_registrations_token_target_idx" ON "apns_registrations" USING btree ("token_hash","environment","topic");--> statement-breakpoint
 CREATE INDEX "apns_registrations_active_idx" ON "apns_registrations" USING btree ("environment","topic","invalidated_at");--> statement-breakpoint
@@ -2651,6 +2785,28 @@ CREATE INDEX "idx_scout_reconciliation_run_scope_time" ON "scout_reconciliation_
 CREATE UNIQUE INDEX "idx_scout_reconciliation_pending_task" ON "scout_reconciliation_suggestions" USING btree ("task_id") WHERE "scout_reconciliation_suggestions"."status" = 'pending';--> statement-breakpoint
 CREATE INDEX "idx_scout_reconciliation_suggestion_status_time" ON "scout_reconciliation_suggestions" USING btree ("status","created_at");--> statement-breakpoint
 CREATE INDEX "idx_scout_reconciliation_suggestion_evidence" ON "scout_reconciliation_suggestions" USING btree ("task_id","evidence_hash");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_documents_entity" ON "semantic_documents" USING btree ("index_id","entity_type","entity_id");--> statement-breakpoint
+CREATE INDEX "idx_semantic_documents_kind" ON "semantic_documents" USING btree ("index_id","entity_type","source_updated_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_documents_retention" ON "semantic_documents" USING btree ("retain_until");--> statement-breakpoint
+CREATE INDEX "idx_semantic_documents_deleted" ON "semantic_documents" USING btree ("deleted_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_identities_active" ON "semantic_index_identities" USING btree ("status") WHERE "semantic_index_identities"."status" = 'active';--> statement-breakpoint
+CREATE INDEX "idx_semantic_identities_lifecycle" ON "semantic_index_identities" USING btree ("status","updated_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_identities_space" ON "semantic_index_identities" USING btree ("provider","model","dimensions","projection_version");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_intents_pending" ON "semantic_intents" USING btree ("idempotency_key") WHERE "semantic_intents"."status" = 'queued';--> statement-breakpoint
+CREATE INDEX "idx_semantic_intents_claim" ON "semantic_intents" USING btree ("index_id","status","available_at","requested_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_intents_lease" ON "semantic_intents" USING btree ("status","lease_expires_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_intents_entity" ON "semantic_intents" USING btree ("index_id","entity_type","entity_id");--> statement-breakpoint
+CREATE INDEX "idx_semantic_intents_history" ON "semantic_intents" USING btree ("status","completed_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_runs_idempotency" ON "semantic_runs" USING btree ("idempotency_key");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_runs_active" ON "semantic_runs" USING btree ("index_id","kind") WHERE "semantic_runs"."status" = 'running';--> statement-breakpoint
+CREATE INDEX "idx_semantic_runs_claim" ON "semantic_runs" USING btree ("status","available_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_runs_lease" ON "semantic_runs" USING btree ("status","lease_expires_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_runs_history" ON "semantic_runs" USING btree ("index_id","created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_semantic_vectors_entity" ON "semantic_vectors" USING btree ("index_id","entity_type","entity_id");--> statement-breakpoint
+CREATE INDEX "idx_semantic_vectors_scan" ON "semantic_vectors" USING btree ("index_id","entity_type","source_updated_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_vectors_document" ON "semantic_vectors" USING btree ("document_id","document_version");--> statement-breakpoint
+CREATE INDEX "idx_semantic_vectors_expiry" ON "semantic_vectors" USING btree ("index_id","expires_at");--> statement-breakpoint
+CREATE INDEX "idx_semantic_vectors_job" ON "semantic_vectors" USING btree ("index_run_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_sync_deletion_candidate_source" ON "sync_deletion_candidates" USING btree ("connector_id","source_id");--> statement-breakpoint
 CREATE INDEX "idx_sync_deletion_candidate_task" ON "sync_deletion_candidates" USING btree ("task_id");--> statement-breakpoint
 CREATE INDEX "idx_sync_deletion_candidate_fence" ON "sync_deletion_candidates" USING btree ("connector_id","identity_mode_revision","issue_entity_id");--> statement-breakpoint

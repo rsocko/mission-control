@@ -3,6 +3,10 @@ import db from '@/db';
 import { tags, taskTags, tasks } from '@/db/schema';
 import { eq, and, sql } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication';
 
 /**
  * GET /api/tags — List all tags with usage counts
@@ -166,6 +170,7 @@ export async function POST(request: Request) {
       createdAt: now,
     });
 
+    await publishSemanticEntityUpsert('tag', id);
     return NextResponse.json({ id, name, slug, type: 'hub', color: color || '#6b7280' }, { status: 201 });
   } catch (error) {
     return ApiErrors.internal('Failed to create tag', error);
@@ -194,6 +199,13 @@ export async function PATCH(request: Request) {
 
     await db.update(tags).set(updates).where(eq(tags.id, tagId));
 
+    const affectedTasks = await db.select({ taskId: taskTags.taskId })
+      .from(taskTags)
+      .where(eq(taskTags.tagId, tagId));
+    await Promise.all([
+      publishSemanticEntityUpsert('tag', tagId),
+      ...affectedTasks.map(({ taskId }) => publishSemanticEntityUpsert('task', taskId)),
+    ]);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to update tag', error);
@@ -220,9 +232,16 @@ export async function DELETE(request: Request) {
       return ApiErrors.forbidden('Cannot delete source tags — they are managed by the connector');
     }
 
+    const affectedTasks = await db.select({ taskId: taskTags.taskId })
+      .from(taskTags)
+      .where(eq(taskTags.tagId, tagId));
     await db.delete(taskTags).where(eq(taskTags.tagId, tagId));
     await db.delete(tags).where(eq(tags.id, tagId));
 
+    await Promise.all([
+      publishSemanticEntityDelete('tag', tagId),
+      ...affectedTasks.map(({ taskId }) => publishSemanticEntityUpsert('task', taskId)),
+    ]);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete tag', error);

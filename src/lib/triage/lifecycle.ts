@@ -9,6 +9,7 @@ import { SAMPLE_TRIAGE_ITEMS } from './seed-data';
 import { cleanupTriageItemStorage } from './capture-image-lifecycle';
 import logger from '@/lib/logger';
 import { resetSeedGuard } from './shared';
+import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication';
 
 /**
  * Update just the thumbnailUrl for an existing triage item.
@@ -34,6 +35,7 @@ export async function hardDeleteTriageItem(id: string): Promise<boolean> {
 
   await db.delete(triageItems).where(eq(triageItems.id, id));
   await cleanupTriageItemStorage(item.thumbnailUrl || item.sourceUrl);
+  await publishSemanticEntityDelete('triage-item', id);
   return true;
 }
 
@@ -51,6 +53,7 @@ export async function hardDeleteTriageItems(ids: string[]): Promise<number> {
 
   const result = await db.delete(triageItems).where(inArray(triageItems.id, ids));
   await Promise.all(items.map((item) => cleanupTriageItemStorage(item.thumbnailUrl || item.sourceUrl)));
+  await Promise.all(items.map((item) => publishSemanticEntityDelete('triage-item', item.id)));
   return result.changes;
 }
 
@@ -59,6 +62,9 @@ export async function clearTriageSampleData(): Promise<number> {
   const result = await db.delete(triageItems).where(
     or(...sampleIds.map((id) => eq(triageItems.id, id)))
   );
+  await Promise.all(sampleIds.map(
+    (id) => publishSemanticEntityDelete('triage-item', id),
+  ));
   // Reset seed guard so demo mode can re-seed if toggled back
   resetSeedGuard();
   return result.changes;
@@ -89,6 +95,9 @@ export async function purgeDismissedItems(retentionDays: number): Promise<number
   const ids = staleItems.map((i) => i.id);
   const result = await db.delete(triageItems).where(inArray(triageItems.id, ids));
   await Promise.all(staleItems.map((item) => cleanupTriageItemStorage(item.thumbnailUrl || item.sourceUrl)));
+  await Promise.all(staleItems.map(
+    (item) => publishSemanticEntityDelete('triage-item', item.id),
+  ));
   logger.info({ purged: result.changes, retentionDays }, 'Purged dismissed triage items');
   return result.changes;
 }

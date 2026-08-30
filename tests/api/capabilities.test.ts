@@ -22,6 +22,11 @@ const connectorMocks = vi.hoisted(() => ({
 const localTaskLifecycleMocks = vi.hoisted(() => ({
   deleteTaskLocally: vi.fn(),
 }));
+const searchMocks = vi.hoisted(() => ({
+  indexTaskSearch: vi.fn(async () => undefined),
+  publishTaskSemanticUpdate: vi.fn(async () => undefined),
+  removeTaskSearch: vi.fn(async () => undefined),
+}));
 let mockTagLinks: Array<{ tagId: string }> = [];
 let mockTags: Array<{ id: string; name: string }> = [];
 let mockPersistedUpdates: Record<string, unknown>[] = [];
@@ -128,6 +133,8 @@ vi.mock('@/lib/connectors', () => ({
 }));
 
 vi.mock('@/lib/tasks/local-task-lifecycle', () => localTaskLifecycleMocks);
+
+vi.mock('@/lib/search', () => searchMocks);
 
 vi.mock('@/lib/connectors/scout/reconciliation-service', () => ({
   suppressAutoCompletionAfterReopen: vi.fn(),
@@ -1011,6 +1018,8 @@ describe('DELETE /api/tasks/[id] — capability enforcement', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ success: true, action: 'deleted' });
     expect(localTaskLifecycleMocks.deleteTaskLocally).toHaveBeenCalledWith('task-1');
+    // The keyword index and the semantic document are both retired with it.
+    expect(searchMocks.removeTaskSearch).toHaveBeenCalledWith('task-1');
     expect(connectorMocks.getConnector).not.toHaveBeenCalled();
   });
 

@@ -33,7 +33,7 @@ import {
   type FieldPolicy,
 } from '@/lib/tasks/field-policy';
 import { isNotificationOnlyConnectorType } from '@/lib/connectors/task-source-profiles';
-import { indexTaskSearch } from '@/lib/search';
+import { indexTaskSearch, publishTaskSemanticUpdate, removeTaskSearch } from '@/lib/search';
 import { resolveTaskEditPolicy } from '@/lib/tasks/edit-policy';
 import {
   isMergeableTaskField,
@@ -682,6 +682,11 @@ export async function PATCH(
     if (input.title !== undefined || input.description !== undefined) {
       const [updatedTask] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
       if (updatedTask) await indexTaskSearch(updatedTask);
+    } else {
+      // The keyword index only tracks title/description, but the semantic
+      // projection also carries status, priority, tags, and list membership, so
+      // any accepted mutation still has to publish a re-index intent.
+      await publishTaskSemanticUpdate(id);
     }
     const completedNow = input.status === 'done'
       && currentTask.status !== 'done'
@@ -1060,6 +1065,7 @@ export async function DELETE(
         localDisposition: 'dismissed',
         updatedAt: now,
       }).where(eq(tasks.id, id));
+      await publishTaskSemanticUpdate(id);
       return NextResponse.json({
         success: true,
         action: 'dismissed',
@@ -1093,6 +1099,7 @@ export async function DELETE(
           updatedAt: now,
         }).where(eq(tasks.id, id)).run();
       });
+      await publishTaskSemanticUpdate(id);
       return NextResponse.json({
         success: true,
         action: 'cancelled',
@@ -1117,6 +1124,7 @@ export async function DELETE(
         statusReason: 'undo',
         updatedAt: new Date().toISOString(),
       }).where(eq(tasks.id, id));
+      await publishTaskSemanticUpdate(id);
 
       // Attempt immediate delete on source
       writeThroughDelete(task, caps?.delete !== false).catch((err) => {
@@ -1130,6 +1138,7 @@ export async function DELETE(
       });
     } else {
       deleteTaskLocally(id);
+      await removeTaskSearch(id);
     }
 
     return NextResponse.json({ success: true, action: 'deleted' });
@@ -1183,6 +1192,7 @@ async function writeThroughDelete(
     }
 
     deleteTaskLocally(task.id);
+    await removeTaskSearch(task.id);
   } catch (err) {
     logger.error({ err, taskId: task.id }, 'Write-through task delete failed');
     await db.update(tasks).set({

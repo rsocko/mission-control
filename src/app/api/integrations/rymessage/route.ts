@@ -3,7 +3,7 @@ import { notifications, notificationActions } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
-import { indexNotificationSearch } from '@/lib/search';
+import { indexNotificationSearch, removeNotificationSearch } from '@/lib/search';
 
 /**
  * RyMessage Inbound Webhook
@@ -251,6 +251,7 @@ export async function POST(request: Request) {
         if (existing) {
           await db.delete(notificationActions).where(eq(notificationActions.notificationId, existing.id));
           await db.delete(notifications).where(eq(notifications.id, existing.id));
+          await removeNotificationSearch(existing.id);
           return Response.json({ success: true, action: 'deleted', id: existing.id });
         }
 

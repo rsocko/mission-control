@@ -8,6 +8,7 @@ import { eq, inArray } from 'drizzle-orm';
 import type { TriageContentType, TriageItem } from '@/types';
 import { detectContentType as detectContentTypeFromRegistry } from './content-type-registry';
 import { mapRow } from './shared';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
 
 /**
  * Re-run content type detection on a single triage item using the current registry rules.
@@ -26,6 +27,7 @@ export async function reclassifyTriageItem(id: string): Promise<{ item: TriageIt
   }
 
   const [updated] = await db.select().from(triageItems).where(eq(triageItems.id, id));
+  if (changed) await publishSemanticEntityUpsert('triage-item', id);
   return { item: mapRow(updated), changed };
 }
 
@@ -38,6 +40,7 @@ export async function setTriageItemContentType(id: string, contentType: string):
 
   await db.update(triageItems).set({ contentType }).where(eq(triageItems.id, id));
   const [updated] = await db.select().from(triageItems).where(eq(triageItems.id, id));
+  await publishSemanticEntityUpsert('triage-item', id);
   return mapRow(updated);
 }
 
@@ -63,6 +66,9 @@ export async function reclassifyTriageItems(ids?: string[]): Promise<{ total: nu
     }
   }
 
+  await Promise.all(results.map(
+    (result) => publishSemanticEntityUpsert('triage-item', result.id),
+  ));
   return { total: rows.length, changed, results };
 }
 
@@ -72,5 +78,6 @@ export async function reclassifyTriageItems(ids?: string[]): Promise<{ total: nu
 export async function setTriageItemsContentType(ids: string[], contentType: string): Promise<number> {
   if (ids.length === 0) return 0;
   const result = await db.update(triageItems).set({ contentType }).where(inArray(triageItems.id, ids));
+  await Promise.all(ids.map((id) => publishSemanticEntityUpsert('triage-item', id)));
   return result.changes;
 }

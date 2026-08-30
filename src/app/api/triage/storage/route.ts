@@ -6,6 +6,7 @@ import { getThumbnailCacheStats, removeOrphanedThumbnails } from '@/lib/triage/t
 import { purgeDismissedItems } from '@/lib/triage/lifecycle';
 import { cleanupTriageItemStorage } from '@/lib/triage/capture-image-lifecycle';
 import logger from '@/lib/logger';
+import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication';
 
 /**
  * GET /api/triage/storage
@@ -145,6 +146,9 @@ export async function POST(request: Request) {
         const result = await db.delete(triageItems).where(statusFilter);
         await Promise.all(sourceItems.map(
           (item) => cleanupTriageItemStorage(item.thumbnailUrl || item.sourceUrl),
+        ));
+        await Promise.all(sourceItems.map(
+          (item) => publishSemanticEntityDelete('triage-item', item.id),
         ));
         return NextResponse.json({
           action: 'delete_by_source',

@@ -34,6 +34,7 @@ async function main(): Promise<void> {
     { WorkerHealthSnapshotScheduler },
     { taskReminderScheduler },
     { financeConnectionRecoveryScheduler },
+    { startSemanticIndexWorker, stopSemanticIndexWorker },
   ] = await Promise.all([
     import('@/lib/sync'),
     import('@/lib/sync/worker'),
@@ -44,6 +45,7 @@ async function main(): Promise<void> {
     import('@/lib/telemetry/health-snapshot'),
     import('@/lib/push/task-reminder-scheduler'),
     import('@/lib/connectors/monarch-money/recovery-scheduler'),
+    import('@/lib/semantic-index/runtime'),
   ]);
 
   assertSupportedWorkerReplicaCount();
@@ -94,6 +96,15 @@ async function main(): Promise<void> {
   } catch (error) {
     syncLogger.warn({ err: error }, 'Sync worker: triage auto-sync initialization failed');
   }
+
+  // The semantic index worker parks itself when semantic search is disabled or
+  // no embedding provider is configured, and `startSemanticIndexWorker` never
+  // throws, so it can never keep the sync worker from coming up.
+  const semanticIndexWorker = await startSemanticIndexWorker();
+  syncLogger.info(
+    { started: semanticIndexWorker !== null },
+    'Sync worker: semantic index worker initialization completed',
+  );
   healthSnapshotScheduler.start();
 
   let shutdownPromise: Promise<void> | null = null;
@@ -108,6 +119,7 @@ async function main(): Promise<void> {
         syncScheduler.stopAll(),
         worker.stop(),
         aiRunWorker.stop(),
+        stopSemanticIndexWorker(),
       ]);
       await stopRuntimeTelemetry(signal);
       const { shutdownRuntimeDatabase } = await import('@/db/runtime');

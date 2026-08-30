@@ -24,6 +24,13 @@ export interface SearchResult {
     snippet?: string;
   };
   metadata: Record<string, unknown>;
+  rankExplanation?: {
+    lexicalRank: number | null;
+    semanticRank: number | null;
+    fusedRank: number;
+    lexicalMatch: 'exact' | 'prefix' | 'lexical' | 'none';
+    semanticOnly: boolean;
+  };
 }
 
 export interface SearchableTaskRecord {

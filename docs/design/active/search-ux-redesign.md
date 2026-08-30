@@ -25,10 +25,12 @@ See the
 [database scaling and migration strategy](database-scaling-strategy.md) for
 backend and deployment status.
 
-Task and notification embeddings are already persisted in `search_embeddings`.
-Only a previously unseen query phrase must be embedded interactively. Repeated
-query vectors can be reused from a bounded, process-local LRU/TTL cache keyed by
-normalized query and resolved provider/model/policy identity.
+Task and notification embeddings are persisted by the durable semantic index
+(`semantic_documents`/`semantic_vectors`, issue #1664), maintained by the index
+worker rather than by the request path. Only a previously unseen query phrase
+must be embedded interactively. Repeated query vectors can be reused from a
+bounded, process-local LRU/TTL cache keyed by normalized query and the active
+index identity (its provider, model, dimensions, and projection version).
 
 ## Experience contract
 

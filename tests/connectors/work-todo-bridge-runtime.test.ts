@@ -155,7 +155,7 @@ describe('Work To Do bridge runtime', () => {
       fields: { title: 'Local revised title' },
     });
 
-    const acknowledgement = service.acknowledgeWorkTodoChanges({
+    const acknowledgement = await service.acknowledgeWorkTodoChanges({
       connectorInstanceId: 'work-todo',
       leaseId: firstLease.leaseId,
       processedAt: '2026-08-07T18:12:00.000Z',
@@ -254,7 +254,7 @@ describe('Work To Do bridge runtime', () => {
       updatedAt: '2026-08-07T18:21:00.000Z',
     });
 
-    const result = service.acknowledgeWorkTodoChanges({
+    const result = await service.acknowledgeWorkTodoChanges({
       connectorInstanceId: 'work-todo',
       leaseId: lease.leaseId,
       processedAt: '2026-08-07T18:22:00.000Z',

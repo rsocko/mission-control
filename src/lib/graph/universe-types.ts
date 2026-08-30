@@ -29,6 +29,36 @@ export type UniverseSemanticState =
   | 'unavailable';
 export type UniverseNodeKind = 'task' | 'tag' | 'property';
 export type UniverseLod = 'far' | 'medium' | 'close';
+export type UniverseClusterDestination = 'project' | 'tag';
+
+export interface UniverseClusterSettings {
+  algorithm: 'deterministic-threshold-components-v1';
+  resolution: number;
+  minimumSize: number;
+  outlierThreshold: number;
+  includeExplicitEdges: boolean;
+  seed: number;
+}
+
+export interface UniverseCluster {
+  id: string;
+  label: string;
+  explanation: string;
+  confidence: number;
+  color: string;
+  memberNodeIds: string[];
+  taskIds: string[];
+  representativeNodeIds: string[];
+  terms: string[];
+}
+
+export interface UniverseClusterProjection {
+  clusters: UniverseCluster[];
+  outlierNodeIds: string[];
+  membershipByNodeId: Record<string, string>;
+  fingerprint: string;
+  settings: UniverseClusterSettings;
+}
 
 export const DEFAULT_UNIVERSE_DIMENSIONS: UniverseDimension[] = [
   'priority',
@@ -128,6 +158,7 @@ export interface UniverseSubgraph {
   truncated: boolean;
   capabilities?: {
     semanticNeighbors: boolean;
+    clusters?: boolean;
   };
 }
 

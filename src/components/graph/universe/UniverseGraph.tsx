@@ -6,7 +6,7 @@ import ForceGraph2D, {
   type LinkObject,
   type NodeObject,
 } from 'react-force-graph-2d';
-import { forceCollide } from 'd3-force';
+import { forceCollide, forceX, forceY } from 'd3-force';
 import {
   ArrowLeft,
   LoaderCircle,
@@ -24,6 +24,7 @@ import {
   type UniverseEdge,
   type UniverseLod,
   type UniverseNode,
+  type UniverseSubgraph,
 } from '@/lib/graph/universe-types';
 import {
   universeCollisionRadius,
@@ -67,6 +68,18 @@ import {
 } from './UniverseGraphPresenters';
 import { UniverseSeedSearch } from './UniverseSeedSearch';
 import { useUniverseGraphData } from './useUniverseGraphData';
+import {
+  clusterUniverseGraph,
+  filterUniverseGraphToCluster,
+} from '@/lib/graph/universe-clusters';
+import { universeClusterHull } from '@/lib/graph/universe-cluster-geometry';
+import type { UniverseCluster } from '@/lib/graph/universe-types';
+import {
+  UniverseClusterControls,
+  UniverseClusterReviewPanel,
+  UniverseClusterSummary,
+  type UniverseClusterFilter,
+} from './UniverseClusters';
 
 const MAX_UNIVERSE_NODES = 500;
 const INITIAL_OVERVIEW_NODES = 180;
@@ -124,6 +137,9 @@ export default function UniverseGraph() {
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [lod, setLod] = useState<UniverseLod>('medium');
   const [resetFitRequest, setResetFitRequest] = useState(0);
+  const [clusterGrouping, setClusterGrouping] = useState(false);
+  const [clusterFilter, setClusterFilter] = useState<UniverseClusterFilter>('all');
+  const [reviewClusterId, setReviewClusterId] = useState<string | null>(null);
   const graphRef = useRef<ForceGraphMethods<
     NodeObject<UniverseNode>,
     LinkObject<UniverseNode, UniverseEdge>
@@ -213,6 +229,36 @@ export default function UniverseGraph() {
     nodes: graph?.nodes ?? [],
     links: graph?.edges ?? [],
   }), [graph]);
+  const clusterProjection = useMemo(
+    () => clusterGrouping && graph ? clusterUniverseGraph(graph) : null,
+    [clusterGrouping, graph],
+  );
+  const clusterByNodeId = useMemo(() => {
+    if (!clusterProjection) return new Map<string, UniverseCluster>();
+    return new Map(clusterProjection.clusters.flatMap((cluster) =>
+      cluster.memberNodeIds.map((nodeId) => [nodeId, cluster] as const)));
+  }, [clusterProjection]);
+  const clusteredNodes = useMemo(() => {
+    const result = new Map<string, UniverseNode[]>();
+    if (!clusterProjection || !graph) return result;
+    for (const node of graph.nodes) {
+      const clusterId = clusterProjection.membershipByNodeId[node.id];
+      if (!clusterId) continue;
+      result.set(clusterId, [...(result.get(clusterId) ?? []), node]);
+    }
+    return result;
+  }, [clusterProjection, graph]);
+  const reviewCluster = reviewClusterId
+    ? clusterProjection?.clusters.find((cluster) => cluster.id === reviewClusterId) ?? null
+    : null;
+  const effectiveClusterFilter = clusterProjection
+    && (
+      clusterFilter === 'all'
+      || clusterFilter === 'outliers'
+      || clusterProjection.clusters.some((cluster) => cluster.id === clusterFilter)
+    )
+    ? clusterFilter
+    : 'all';
 
   useEffect(() => {
     if (!legacyFilters) return;
@@ -233,15 +279,35 @@ export default function UniverseGraph() {
       forcesConfiguredRef.current = false;
       return;
     }
-    if (forcesConfiguredRef.current) return;
+    if (forcesConfiguredRef.current && !clusterGrouping) return;
     const collision = forceCollide<NodeObject<UniverseNode>>()
       .radius((node) => universeCollisionRadius(node))
       .strength(0.72)
       .iterations(2);
     graphRef.current?.d3Force('collision', collision);
+    const clusterIndex = new Map(
+      (clusterProjection?.clusters ?? []).map((cluster, index) => [cluster.id, index]),
+    );
+    const clusterCount = Math.max(clusterIndex.size, 1);
+    graphRef.current?.d3Force(
+      'cluster-x',
+      forceX<NodeObject<UniverseNode>>((node) => {
+        const clusterId = clusterProjection?.membershipByNodeId[node.id];
+        const index = clusterId ? clusterIndex.get(clusterId) ?? 0 : clusterCount;
+        return clusterId ? ((index % 3) - 1) * 140 : 0;
+      }).strength((node) => clusterProjection?.membershipByNodeId[node.id] ? 0.08 : 0),
+    );
+    graphRef.current?.d3Force(
+      'cluster-y',
+      forceY<NodeObject<UniverseNode>>((node) => {
+        const clusterId = clusterProjection?.membershipByNodeId[node.id];
+        const index = clusterId ? clusterIndex.get(clusterId) ?? 0 : clusterCount;
+        return clusterId ? (Math.floor(index / 3) - Math.floor(clusterCount / 6)) * 120 : 0;
+      }).strength((node) => clusterProjection?.membershipByNodeId[node.id] ? 0.08 : 0),
+    );
     graphRef.current?.d3ReheatSimulation();
     forcesConfiguredRef.current = true;
-  }, [graph]);
+  }, [clusterGrouping, clusterProjection, graph]);
 
   const selectedNodes = useMemo(
     () => graph?.nodes.filter((node) => selectedNodeIds.includes(node.id)) ?? [],
@@ -253,12 +319,23 @@ export default function UniverseGraph() {
     [graph, selectedNodeIds],
   );
   const sceneGraph = useMemo(() => {
-    if (!focusActive || !graph) return graph;
-    const hiddenNodeIds = graph.nodes
-      .filter((node) => !selectedNeighborhood.has(node.id))
-      .map((node) => node.id);
-    return visibleUniverseGraph(graph, hiddenNodeIds);
-  }, [focusActive, graph, selectedNeighborhood]);
+    if (!graph) return graph;
+    let visible: UniverseSubgraph = graph;
+    if (focusActive) {
+      const hiddenNodeIds = graph.nodes
+        .filter((node) => !selectedNeighborhood.has(node.id))
+        .map((node) => node.id);
+      visible = visibleUniverseGraph(graph, hiddenNodeIds) ?? graph;
+    }
+    if (!clusterProjection || effectiveClusterFilter === 'all') return visible;
+    const visibleClusterNodeIds = effectiveClusterFilter === 'outliers'
+      ? new Set(clusterProjection.outlierNodeIds)
+      : new Set(
+          clusterProjection.clusters.find((cluster) => cluster.id === effectiveClusterFilter)
+            ?.memberNodeIds ?? [],
+        );
+    return filterUniverseGraphToCluster(visible, visibleClusterNodeIds);
+  }, [clusterProjection, effectiveClusterFilter, focusActive, graph, selectedNeighborhood]);
   const visibleNodeIdSet = useMemo(
     () => new Set(sceneGraph?.nodes.map((node) => node.id) ?? []),
     [sceneGraph],
@@ -374,7 +451,9 @@ export default function UniverseGraph() {
       context.arc(node.x, node.y, radius, 0, Math.PI * 2);
       context.fillStyle = '#0f172a';
       context.fill();
-      context.strokeStyle = isSelected ? '#818cf8' : node.color;
+      context.strokeStyle = isSelected
+        ? '#818cf8'
+        : clusterByNodeId.get(node.id)?.color ?? node.color;
       context.lineWidth = (isSelected ? 2.8 : 1.3) / scale;
       context.stroke();
 
@@ -454,7 +533,35 @@ export default function UniverseGraph() {
       }
     }
     context.restore();
-  }, [emphasized, hoveredNodeId, lod, sceneMatches, selectedNodeIds]);
+  }, [clusterByNodeId, emphasized, hoveredNodeId, lod, sceneMatches, selectedNodeIds]);
+
+  const drawClusterHulls = useCallback((
+    context: CanvasRenderingContext2D,
+    scale: number,
+  ) => {
+    if (!clusterProjection) return;
+    for (const cluster of clusterProjection.clusters) {
+      const members = (clusteredNodes.get(cluster.id) ?? []).filter((node) =>
+        visibleNodeIdSet.has(node.id) && node.x !== undefined && node.y !== undefined);
+      const hull = universeClusterHull(
+        members.map((node) => ({ x: node.x!, y: node.y! })),
+        22 / scale,
+      );
+      if (!hull.length) continue;
+      context.save();
+      context.beginPath();
+      context.moveTo(hull[0].x, hull[0].y);
+      for (const point of hull.slice(1)) context.lineTo(point.x, point.y);
+      context.closePath();
+      context.fillStyle = `${cluster.color}12`;
+      context.strokeStyle = `${cluster.color}70`;
+      context.lineWidth = 1.2 / scale;
+      context.setLineDash([5 / scale, 4 / scale]);
+      context.fill();
+      context.stroke();
+      context.restore();
+    }
+  }, [clusterProjection, clusteredNodes, visibleNodeIdSet]);
 
   const fitSelection = useCallback(() => {
     if (!selectedNodeIds.length) return;
@@ -562,6 +669,19 @@ export default function UniverseGraph() {
           <div className="flex flex-wrap items-center gap-2">
             <DimensionToggles />
             <NeighborLayerToggles semanticEnabled={graph?.capabilities?.semanticNeighbors ?? false} />
+            <UniverseClusterControls
+              enabled={clusterGrouping}
+              available={graph?.capabilities?.clusters ?? false}
+              projection={clusterProjection}
+              filter={effectiveClusterFilter}
+              onToggle={() => {
+                setClusterGrouping((enabled) => !enabled);
+                setClusterFilter('all');
+                setReviewClusterId(null);
+                forcesConfiguredRef.current = false;
+              }}
+              onFilterChange={setClusterFilter}
+            />
             <span className="hidden h-5 w-px bg-[var(--border)] lg:block" />
             <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-[var(--text-tertiary)]">
               <span className="rounded-full border border-[var(--border)] px-2 py-1 capitalize">{lod} detail</span>
@@ -708,6 +828,7 @@ export default function UniverseGraph() {
               backgroundColor="#020617"
               nodeCanvasObjectMode={() => 'replace'}
               nodeCanvasObject={drawNode}
+              onRenderFramePre={drawClusterHulls}
               nodePointerAreaPaint={(node, color, context, scale) => {
                 if (node.x === undefined || node.y === undefined) return;
                 context.fillStyle = color;
@@ -818,6 +939,14 @@ export default function UniverseGraph() {
           <TaskHoverCard node={hoveredNode} graph={sceneGraph} tooltipRef={tooltipRef} />
         ) : null}
         <SemanticNeighborhoodStatus outcomes={semanticOutcomes} />
+        {clusterProjection && sceneGraph ? (
+          <UniverseClusterSummary
+            projection={clusterProjection}
+            graph={sceneGraph}
+            onFilter={setClusterFilter}
+            onSave={(cluster) => setReviewClusterId(cluster.id)}
+          />
+        ) : null}
         <UniverseFilterPanel
           open={filtersOpen}
           onClose={() => setFiltersOpen(false)}
@@ -851,6 +980,16 @@ export default function UniverseGraph() {
             <TaskDetailPanel taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} mode="panel" />
           </div>
         ) : null}
+        {reviewCluster && graph && clusterProjection ? (
+          <UniverseClusterReviewPanel
+            key={reviewCluster.id}
+            cluster={reviewCluster}
+            graph={graph}
+            projectionFingerprint={clusterProjection.fingerprint}
+            onClose={() => setReviewClusterId(null)}
+            onSaved={setExplorationMessage}
+          />
+        ) : null}
         {sceneGraph?.nodes.length ? (
           <button
             type="button"
@@ -876,6 +1015,7 @@ export default function UniverseGraph() {
         {sceneGraph?.nodes.length ? (
           <AccessibleUniverseList
             graph={sceneGraph}
+            clusterProjection={clusterProjection}
             selectedNodeIds={selectedNodeIds}
             onNodeSelect={(nodeId) => {
               setSelectedNodeIds([nodeId]);
@@ -889,6 +1029,8 @@ export default function UniverseGraph() {
               setSelectedTaskId(taskId);
               setDetailSuppressed(false);
             }}
+            onClusterSelect={setClusterFilter}
+            onClusterSave={(cluster) => setReviewClusterId(cluster.id)}
           />
         ) : null}
       </div>

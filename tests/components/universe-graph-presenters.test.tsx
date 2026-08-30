@@ -7,6 +7,7 @@ import {
 } from '@/components/graph/universe/UniverseGraphPresenters';
 import { useUniverseGraphStore } from '@/lib/stores/universeGraphStore';
 import type { UniverseSubgraph } from '@/lib/graph/universe-types';
+import { clusterUniverseGraph } from '@/lib/graph/universe-clusters';
 
 const graph: UniverseSubgraph = {
   nodes: [
@@ -98,5 +99,23 @@ describe('Universe graph presenters', () => {
     expect(onTaskActivate).toHaveBeenCalledWith('1', 'task:1');
     expect(screen.getAllByText(/82% related/)).not.toHaveLength(0);
     expect(screen.getAllByText(/openai \/ text-embedding-3-small/)).not.toHaveLength(0);
+  });
+
+  it('represents computed clusters in the accessible graph list as transient state', () => {
+    const projection = clusterUniverseGraph(graph, { resolution: 0.8 });
+    render(
+      <AccessibleUniverseList
+        graph={graph}
+        clusterProjection={projection}
+        selectedNodeIds={[]}
+        onNodeSelect={vi.fn()}
+        onTaskActivate={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Computed transient groups' }))
+      .toBeInTheDocument();
+    expect(screen.getByText(/Not saved domain state/)).toBeInTheDocument();
+    expect(screen.getByText(/seed 1666/)).toBeInTheDocument();
   });
 });

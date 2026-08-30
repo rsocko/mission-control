@@ -1,10 +1,8 @@
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
 import type { SyncAuditEntry } from './index';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { eq, and, or, like, not, inArray } from 'drizzle-orm';
-import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
+import type { ConnectorTaskRecord } from '@/db/persistence/connector-execution';
+import { resolvePersistedConnectorCapabilities } from '@/lib/connectors/resolved-capabilities';
 import { syncLogger } from '@/lib/logger';
 import { isDemoMode } from '@/lib/mode';
 import {
@@ -37,6 +35,7 @@ import {
   type GitHubStableIdentityRuntime,
   type GitHubWriteAuthorization,
 } from '@/lib/external-identities';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** Maximum number of push retries before marking a task as permanently failed */
 const MAX_PUSH_RETRIES = 5;
@@ -96,6 +95,9 @@ async function pushPendingChangesWithLease(
   taskIds?: string[],
   options?: PushPendingOptions,
 ): Promise<{ pushed: number; errors: string[] }> {
+  const repositories = await getWorkerPersistenceRepositories();
+  const execution = repositories.execution;
+  execution.support.assertConnectorSupported(connector);
   if (isDemoMode()) {
     return { pushed: 0, errors: [] };
   }
@@ -104,8 +106,16 @@ async function pushPendingChangesWithLease(
   const pushFailures: unknown[] = [];
   const audit = auditLog || [];
   let pushed = 0;
+  const persistence = execution.pushes;
 
-  const caps = await getConnectorCapabilities(connectorId);
+  const persistedConnector = await repositories.connectors.get(connectorId);
+  const caps = persistedConnector
+    ? resolvePersistedConnectorCapabilities({
+        type: persistedConnector.type,
+        capabilities: persistedConnector.capabilities,
+        settings: persistedConnector.settings,
+      })
+    : connector.capabilities ?? null;
   const canWrite = !caps || caps.write !== false;
   const canCreate = !caps || (
     caps.notificationOnly !== true
@@ -119,45 +129,23 @@ async function pushPendingChangesWithLease(
     return { pushed: 0, errors: [] };
   }
 
-  const pendingPredicate = and(
-    eq(tasks.connectorInstanceId, connectorId),
-    or(
-      eq(tasks.syncStatus, 'pending_push'),
-      eq(tasks.syncStatus, 'push_error'),
-      ...(fencedGitHubPush ? [eq(tasks.syncStatus, 'pushing')] : []),
-      like(tasks.sourceId, 'local:%'),
-      and(
-        eq(tasks.isChecklistItem, true),
-        eq(tasks.sourceId, tasks.id),
-        not(eq(tasks.syncStatus, 'push_failed')),
-      ),
-    ),
-  );
-
-  const pendingTasks = await db.select()
-    .from(tasks)
-    .where(
-      taskIds
-        ? and(pendingPredicate, inArray(tasks.id, taskIds))
-        : pendingPredicate,
-    );
+  const pendingTasks = await persistence.listCandidates({
+    connectorId,
+    taskIds,
+    includePushing: true,
+  });
   await Promise.all(pendingTasks
     .filter((task) => task.sourceId.startsWith('checklist:'))
-    .map((task) => db.update(tasks).set({
-      syncStatus: 'synced',
-      lastSyncedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, task.id))));
+    .map((task) => persistence.markSynced(task.id, new Date().toISOString())));
   const parentIds = [...new Set(pendingTasks
     .filter((task) => task.isChecklistItem && task.parentId)
     .map((task) => task.parentId!))];
   const parentTasks = parentIds.length === 0
     ? []
-    : await db.select({ id: tasks.id, sourceId: tasks.sourceId })
-      .from(tasks)
-      .where(inArray(tasks.id, parentIds));
+    : await persistence.listSourceIds(parentIds);
   const parentSourceIds = new Map(parentTasks.map((task) => [task.id, task.sourceId]));
   const pushLeaseTokens = new Map<string, string>();
-  const claimedTasksById = new Map<string, typeof tasks.$inferSelect>();
+  const claimedTasksById = new Map<string, ConnectorTaskRecord>();
   if (fencedGitHubPush) {
     for (const task of pendingTasks) {
       const operation = remoteDispatchOperation(
@@ -224,15 +212,13 @@ async function pushPendingChangesWithLease(
     }
     const claimedTasks = (await Promise.all([...pushLeaseTokens].map(
       async ([taskId, token]) => loadClaimedTaskForPush(taskId, token),
-    ))).filter((task): task is typeof tasks.$inferSelect => task !== null);
+    ))).filter((task): task is ConnectorTaskRecord => task !== null);
     const claimedParentIds = [...new Set(claimedTasks
       .filter((task) => task.isChecklistItem && task.parentId)
       .map((task) => task.parentId!))];
     const claimedParents = claimedParentIds.length === 0
       ? []
-      : await db.select({ id: tasks.id, sourceId: tasks.sourceId })
-        .from(tasks)
-        .where(inArray(tasks.id, claimedParentIds));
+      : await persistence.listSourceIds(claimedParentIds);
     const claimedParentSourceIds = new Map(
       claimedParents.map((task) => [task.id, task.sourceId]),
     );
@@ -325,6 +311,21 @@ async function pushPendingChangesWithLease(
       }
       task = claimedTask;
     }
+    if (
+      !pushLeaseToken
+      && remoteDispatchOperation(
+        task,
+        connector,
+        { canWrite, canCreate, canDelete },
+        parentSourceIds,
+      )
+    ) {
+      pushLeaseToken = await claimTaskForPush(task.id);
+      if (!pushLeaseToken) continue;
+      const claimedTask = await loadClaimedTaskForPush(task.id, pushLeaseToken);
+      if (!claimedTask) continue;
+      task = claimedTask;
+    }
     const isPendingCreate = task.sourceId.startsWith('local:')
       || (task.isChecklistItem && task.sourceId === task.id);
     // Yield every 5 tasks to keep healthchecks responsive
@@ -339,10 +340,7 @@ async function pushPendingChangesWithLease(
       // Legacy checklist items (body checkboxes) can't be pushed individually —
       // they're synced as part of the parent issue's description.
       if (task.sourceId.startsWith('checklist:')) {
-        await db.update(tasks).set({
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        }).where(eq(tasks.id, task.id));
+        await persistence.markSynced(task.id, new Date().toISOString());
         continue;
       }
 
@@ -393,6 +391,7 @@ async function pushPendingChangesWithLease(
             created.metadata,
             undefined,
             task.updatedAt,
+            task.sourceId,
           );
           if (!finalized) continue;
 
@@ -413,7 +412,7 @@ async function pushPendingChangesWithLease(
           continue;
         }
         if (connector.createSubTask) {
-          const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+          const [parentTask] = await persistence.listSourceIds([task.parentId]);
           if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
             pushLeaseToken ??= await claimTaskForPush(task.id);
             if (!pushLeaseToken) {
@@ -441,6 +440,7 @@ async function pushPendingChangesWithLease(
               created.metadata,
               undefined,
               task.updatedAt,
+              task.sourceId,
             );
             if (!finalized) continue;
 
@@ -455,10 +455,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
         }
       } else if (task.status === 'done' && task.isChecklistItem && task.parentId && connector.completeSubTask) {
@@ -466,7 +463,7 @@ async function pushPendingChangesWithLease(
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
           continue;
         }
-        const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+        const [parentTask] = await persistence.listSourceIds([task.parentId]);
         if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
           await dispatchGitHubWrite(
             connectorId, connector, task, pushLeaseToken, 'sub_issue', options, cycleOutcome,
@@ -478,10 +475,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked checklist item complete on remote' });
@@ -502,10 +496,7 @@ async function pushPendingChangesWithLease(
             task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
           )) continue;
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'synced',
-            lastSyncedAt: new Date().toISOString(),
-          }).where(eq(tasks.id, task.id));
+          await persistence.markSynced(task.id, new Date().toISOString());
         }
         pushed++;
         audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked complete on remote' });
@@ -523,10 +514,7 @@ async function pushPendingChangesWithLease(
             task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
           )) continue;
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'synced',
-            lastSyncedAt: new Date().toISOString(),
-          }).where(eq(tasks.id, task.id));
+          await persistence.markSynced(task.id, new Date().toISOString());
         }
         pushed++;
         audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Deleted on remote' });
@@ -535,7 +523,7 @@ async function pushPendingChangesWithLease(
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
           continue;
         }
-        const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+        const [parentTask] = await persistence.listSourceIds([task.parentId]);
         if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
           await dispatchGitHubWrite(
             connectorId, connector, task, pushLeaseToken, 'sub_issue', options, cycleOutcome,
@@ -550,10 +538,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Updated checklist item on remote' });
@@ -599,12 +584,10 @@ async function pushPendingChangesWithLease(
               task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
+            await persistence.markSynced(task.id, new Date().toISOString(), {
               status: remoteResult.status,
               completedAt: remoteResult.completedAt || new Date().toISOString(),
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            });
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: `Remote is ${remoteResult.status} — applied terminal status from remote` });
@@ -614,19 +597,13 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Updated on remote' });
         }
       } else {
-        await db.update(tasks).set({
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        }).where(eq(tasks.id, task.id));
+        await persistence.markSynced(task.id, new Date().toISOString());
       }
     } catch (err) {
       pushFailures.push(err);
@@ -755,10 +732,7 @@ async function pushPendingChangesWithLease(
             task.updatedAt,
           );
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'push_failed',
-            pushRetryCount: newRetryCount,
-          }).where(eq(tasks.id, task.id));
+          await persistence.markFailure(task.id, 'push_failed', newRetryCount);
         }
         syncLogger.warn({ taskId: task.id, title: task.title, retries: newRetryCount }, 'Push permanently failed after max retries');
       } else {
@@ -771,10 +745,7 @@ async function pushPendingChangesWithLease(
             task.updatedAt,
           );
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'push_error',
-            pushRetryCount: newRetryCount,
-          }).where(eq(tasks.id, task.id));
+          await persistence.markFailure(task.id, 'push_error', newRetryCount);
         }
       }
     } finally {
@@ -803,7 +774,7 @@ async function pushPendingChangesWithLease(
 }
 
 function remoteDispatchOperation(
-  task: typeof tasks.$inferSelect,
+  task: ConnectorTaskRecord,
   connector: IConnector,
   capabilities: { canWrite: boolean; canCreate: boolean; canDelete: boolean },
   parentSourceIds: ReadonlyMap<string, string>,
@@ -850,7 +821,7 @@ function releaseStatusFor(syncStatus: string | undefined): string {
 async function dispatchGitHubWrite<T>(
   connectorId: string,
   connector: IConnector,
-  task: typeof tasks.$inferSelect,
+  task: ConnectorTaskRecord,
   taskPushLeaseToken: string | null,
   operation: 'create' | 'update' | 'complete' | 'delete' | 'sub_issue',
   options: Parameters<typeof pushPendingChanges>[4],

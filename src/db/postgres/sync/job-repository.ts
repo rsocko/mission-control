@@ -633,9 +633,138 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     });
   }
 
+  async finalizeSuccess(job: SyncJob, owner: string, result: SyncResult): Promise<void> {
+    if (!result.syncRunId) {
+      throw new Error(`Sync job ${job.id} returned no exact sync-run identity`);
+    }
+    await withTransaction(this.pool, async (client) => {
+      const [ownedJob] = await query<{ connectorId: string; leaseExpiresAt: string }>(
+        client,
+        `
+          SELECT
+            connector_id AS "connectorId",
+            lease_expires_at AS "leaseExpiresAt"
+          FROM sync_jobs
+          WHERE id = $1 AND status = 'running' AND lease_owner = $2
+          FOR UPDATE
+        `,
+        [job.id, owner],
+      );
+      const now = new Date().toISOString();
+      const lockOwner = connectorSyncLeaseOwner(job.id, owner);
+      const ownsUnexpiredJob = ownedJob && ownedJob.leaseExpiresAt > now;
+      const [lease] = ownsUnexpiredJob
+        ? await query(
+            client,
+            `
+              SELECT 1 FROM connector_operation_leases
+              WHERE connector_id = $1 AND owner = $2 AND lease_expires_at > $3
+              FOR UPDATE
+            `,
+            [ownedJob.connectorId, lockOwner, now],
+          )
+        : [];
+      if (!ownsUnexpiredJob || !lease || ownedJob.connectorId !== job.connectorId) {
+        throw new Error(`Sync job ${job.id} ownership was lost before completion`);
+      }
+
+      const linked = await client.query(
+        `
+          UPDATE sync_log
+          SET job_id = $1,
+              success = true,
+              trigger = $2,
+              scheduled_for = $3,
+              started_at = $4,
+              attempt = $5,
+              max_attempts = $6,
+              identity_mode = $7,
+              identity_mode_revision = $8
+          WHERE id = $9
+            AND connector_id = $10
+            AND job_id IS NULL
+            AND synced_at = $11
+            AND success = false
+        `,
+        [
+          job.id,
+          job.source,
+          job.scheduledFor,
+          job.startedAt,
+          job.attempt,
+          job.maxAttempts,
+          job.identityMode,
+          job.identityModeRevision,
+          result.syncRunId,
+          job.connectorId,
+          result.syncedAt,
+        ],
+      );
+      if (linked.rowCount !== 1) {
+        throw new Error(`Sync job ${job.id} exact success log could not be linked`);
+      }
+
+      const completed = await client.query(
+        `
+          UPDATE sync_jobs
+          SET status = 'succeeded',
+              result = $1,
+              error = NULL,
+              completed_at = $2,
+              updated_at = $2,
+              lease_owner = NULL,
+              lease_expires_at = NULL
+          WHERE id = $3 AND status = 'running' AND lease_owner = $4
+        `,
+        [JSON.stringify(result), now, job.id, owner],
+      );
+      if (completed.rowCount !== 1) {
+        throw new Error(`Sync job ${job.id} ownership was lost before completion`);
+      }
+      const released = await client.query(
+        `DELETE FROM connector_operation_leases WHERE connector_id = $1 AND owner = $2`,
+        [job.connectorId, lockOwner],
+      );
+      if (released.rowCount !== 1) {
+        throw new Error(`Sync job ${job.id} connector lease was lost before completion`);
+      }
+    });
+  }
+
   async linkSyncLog(job: SyncJob, result: SyncResult): Promise<void> {
-    await this.pool.query(
-      `
+    const linked = result.syncRunId
+      ? await this.pool.query(
+          `
+            UPDATE sync_log
+            SET job_id = $1,
+                trigger = $2,
+                scheduled_for = $3,
+                started_at = $4,
+                attempt = $5,
+                max_attempts = $6,
+                identity_mode = $7,
+                identity_mode_revision = $8
+            WHERE id = $9
+              AND connector_id = $10
+              AND synced_at = $11
+              AND (job_id IS NULL OR job_id = $1)
+          `,
+          [
+            job.id,
+            job.source,
+            job.scheduledFor,
+            job.startedAt,
+            job.attempt,
+            job.maxAttempts,
+            job.identityMode,
+            job.identityModeRevision,
+            result.syncRunId,
+            job.connectorId,
+            result.syncedAt,
+          ],
+        )
+      : await this.pool.query(
+        `
         UPDATE sync_log
         SET job_id = $1,
             trigger = $2,
@@ -662,6 +791,9 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         result.syncedAt,
       ],
     );
+    if (result.syncRunId && linked.rowCount !== 1) {
+      throw new Error(`Sync job ${job.id} exact sync log could not be linked`);
+    }
   }
 
   async fail(

@@ -124,8 +124,52 @@ the same atomic nested-settings patch and successful-pull baseline contract.
 SQLite loads its worker adapters lazily on first access so importing a connector
 does not initialize the database. PostgreSQL has no compatibility fallback: its
 runtime must register the complete worker composition before access and before
-loading worker schedulers. Remaining connector task/list/notification execution
-stays explicitly unsupported until its workflow-specific ports are migrated.
+loading worker schedulers.
+
+Layer 2 adds the complete `ConnectorExecutionRepositories` composition to that
+worker registration. Its phase-oriented ports own:
+
+- source-list discovery, stale cleanup, display records, and folder assignment;
+- task push selection and fenced claim/heartbeat/complete/fail/release outcomes;
+- bounded pull task/tag batches, marker adoption, conditional remote updates,
+  parent correction, recurrence cleanup, and stale-status correction;
+- connector notification/action/delivery-occurrence ingestion plus
+  reconciliation and metadata updates;
+- two-observation deletion quarantine, snapshots/restores, and retention-detail
+  claim/renew/finalize compare-and-swap operations; and
+- atomic conflict application with its audit row.
+
+The managers prepare immutable commands and never receive a driver, Drizzle
+schema, or transaction handle. SQLite adapters use short immediate transactions;
+PostgreSQL adapters use async transactions and row locks. A remote operation
+always follows durable read/claim, remote side effect, then a conditional
+persistence outcome. Task-page indexing, notification dispatcher wakeups, AI
+enrichment, source reconciliation calls, and all connector traffic run outside
+adapter transactions.
+
+Successful durable jobs first write an unlinked, unsuccessful provisional
+sync-log row. One repository transaction then verifies both running job
+ownership and the active connector lease, publishes and links that exact
+sync-log ID, marks the job succeeded, and releases the connector lease. Any
+missing ownership, lease, or exact log rolls the operation back, so a stale
+worker cannot advance either the persisted or in-memory incremental baseline.
+Failure logs are linked by the same durable sync-run identity before the
+existing retry or terminal transition.
+
+PostgreSQL now supports the generic list/task push/task pull/notification path.
+GitHub identity and write fencing, dependency snapshots, GitHub hierarchy and
+project association persistence, Microsoft To Do hidden-list state, and
+connector-owned finance or Work To Do bridge state remain Layer 3+
+capabilities. The PostgreSQL execution guard rejects those configurations
+before connector construction or remote dispatch; deletion, restore, and
+retention adapters also reject a mutation when an unmigrated identity,
+dependency, or project relationship is present. SQLite continues to use its
+compatibility implementations for those legacy workflows.
+Generic PostgreSQL runs use the backend-selected keyword search repository
+after commit. SQLite-only semantic enrichment, project-rule/planning
+post-processing, the legacy outbound-event outbox, and the legacy notification
+dispatcher are not invoked from that path; their durable rows remain available
+for later backend-specific workers rather than falling back to SQLite.
 
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health

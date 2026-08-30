@@ -1,8 +1,4 @@
 import type { SyncAuditEntry } from './index';
-import db, { sqlite } from '@/db';
-import { syncDeletionCandidates, tasks } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
 import { syncLogger } from '@/lib/logger';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
@@ -11,6 +7,8 @@ import {
   type GitHubStableIdentityRuntime,
   type GitHubIdentityResolutionDecision,
 } from '@/lib/external-identities';
+import type { DeletionCandidateRecord } from '@/db/persistence/connector-execution';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** Subset of task fields needed by deletion detection */
 export interface DeletionDetectionTask {
@@ -68,29 +66,29 @@ export async function detectDeletions(
   if (remoteSourceIds.size === 0 && !identityOptions.identityRuntime) {
     return { removed: 0, localOnlyProtected: 0 };
   }
+  const execution = (await getWorkerPersistenceRepositories()).execution;
 
-  const localTasks = prefetchedLocalTasks ?? await db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    sourceListId: tasks.sourceListId,
-    syncStatus: tasks.syncStatus,
-    status: tasks.status,
-    title: tasks.title,
-    isChecklistItem: tasks.isChecklistItem,
-    parentId: tasks.parentId,
-  })
-    .from(tasks)
-    .where(eq(tasks.connectorInstanceId, connectorId))
-    .all();
-  const existingCandidates = db.select()
-    .from(syncDeletionCandidates)
-    .where(eq(syncDeletionCandidates.connectorId, connectorId))
-    .all();
+  const localTasks = prefetchedLocalTasks
+    ?? (await execution.pulls.listTasks(connectorId)).map((task) => ({
+      id: task.id,
+      sourceId: task.sourceId,
+      sourceListId: task.sourceListId,
+      syncStatus: task.syncStatus,
+      status: task.status,
+      title: task.title,
+      isChecklistItem: task.isChecklistItem,
+      parentId: task.parentId,
+      metadata: task.metadata,
+    }));
+  const existingCandidates = await execution.deletions.listCandidates(connectorId);
   const candidateBySourceId = new Map(existingCandidates.map(row => [row.sourceId, row]));
   const localTaskBySourceId = new Map(localTasks.map(row => [row.sourceId, row]));
   const inaccessibleSourceListIds = identityOptions.inaccessibleSourceListIds ?? new Set<string>();
   const identityStateByLocalId = identityOptions.identityRuntime
-    ? loadLocalIdentityStates(connectorId)
+    ? new Map(
+        (await execution.deletions.listIdentityStates(connectorId))
+          .map((row) => [row.localId, row]),
+      )
     : new Map<string, LocalIdentityState>();
   const stableDecisionByLocalId = new Map<string, GitHubIdentityResolutionDecision>();
 
@@ -196,8 +194,7 @@ export async function detectDeletions(
   for (let index = 0; index < existingCandidates.length; index++) {
     const candidate = existingCandidates[index];
     if (remoteSourceIds.has(candidate.sourceId) || !localTaskBySourceId.has(candidate.sourceId)) {
-      await db.delete(syncDeletionCandidates)
-        .where(eq(syncDeletionCandidates.id, candidate.id));
+      await execution.deletions.clearCandidate(connectorId, candidate.sourceId);
       candidateBySourceId.delete(candidate.sourceId);
     }
     if ((index + 1) % RETENTION_YIELD_INTERVAL === 0) {
@@ -303,7 +300,7 @@ export async function detectDeletions(
     if (local.sourceId.startsWith('local:')) {
       orphanedLocalOnly.push({ id: local.id, title: local.title, sourceId: local.sourceId });
       if (local.syncStatus !== 'pending_push' && local.syncStatus !== 'push_error') {
-        await db.update(tasks).set({ syncStatus: 'pending_push' }).where(eq(tasks.id, local.id));
+        await execution.deletions.markPendingPush(local.id);
         audit.push({ action: 'protected', taskTitle: local.title, taskSourceId: local.sourceId, taskId: local.id, reason: 'Local-only task escalated to pending_push for next cycle' });
       } else {
         audit.push({ action: 'protected', taskTitle: local.title, taskSourceId: local.sourceId, taskId: local.id, reason: 'Local-only task not yet pushed to remote' });
@@ -317,7 +314,7 @@ export async function detectDeletions(
     if (local.isChecklistItem && local.sourceId === local.id) {
       orphanedLocalOnly.push({ id: local.id, title: local.title, sourceId: local.sourceId });
       if (local.syncStatus !== 'pending_push' && local.syncStatus !== 'push_error') {
-        await db.update(tasks).set({ syncStatus: 'pending_push' }).where(eq(tasks.id, local.id));
+        await execution.deletions.markPendingPush(local.id);
         audit.push({ action: 'protected', taskTitle: local.title, taskSourceId: local.sourceId, taskId: local.id, reason: 'Locally-created subtask escalated to pending_push for next cycle' });
       } else {
         audit.push({ action: 'protected', taskTitle: local.title, taskSourceId: local.sourceId, taskId: local.id, reason: 'Locally-created task not yet pushed to remote' });
@@ -337,11 +334,11 @@ export async function detectDeletions(
     // SAFETY: Retain completed/cancelled tasks (with recurring exception)
     if (local.status === 'done' || local.status === 'cancelled') {
       if (isFullSync && local.status === 'done') {
-        const [taskRow] = await db.select({ metadata: tasks.metadata })
-          .from(tasks).where(eq(tasks.id, local.id));
         let meta: Record<string, unknown> = {};
         try {
-          meta = typeof taskRow?.metadata === 'string' ? JSON.parse(taskRow.metadata) : (taskRow?.metadata as Record<string, unknown>) || {};
+          meta = typeof local.metadata === 'string'
+            ? JSON.parse(local.metadata)
+            : (local.metadata as Record<string, unknown>) || {};
         } catch { /* ignore */ }
 
         if (meta.recurrence) {
@@ -426,49 +423,15 @@ function observedDeletionAction(
   return 'delete_candidate';
 }
 
-function loadLocalIdentityStates(connectorId: string): Map<string, LocalIdentityState> {
-  const rows = sqlite.prepare(`
-    SELECT
-      task.id AS localId,
-      binding.external_entity_id AS externalEntityId,
-      entity.stable_id AS stableId,
-      binding.state AS bindingState,
-      backfill.state AS backfillState,
-      locator.locator_revision AS locatorRevision,
-      locator.repository_entity_id AS repositoryEntityId,
-      entity.host_key AS hostKey,
-      binding.verified_at AS bindingRevision
-    FROM tasks AS task
-    LEFT JOIN external_entity_bindings AS binding
-      ON binding.connector_instance_id = task.connector_instance_id
-      AND binding.binding_type = 'task'
-      AND binding.local_id = task.id
-      AND binding.state != 'retired'
-    LEFT JOIN external_entities AS entity
-      ON entity.id = binding.external_entity_id
-    LEFT JOIN external_entity_locators AS locator
-      ON locator.external_entity_id = entity.id
-      AND locator.valid_to IS NULL
-    LEFT JOIN github_identity_backfill_items AS backfill
-      ON backfill.connector_instance_id = task.connector_instance_id
-      AND backfill.binding_type = 'task'
-      AND backfill.local_id = task.id
-    WHERE task.connector_instance_id = ?
-  `).all(connectorId) as LocalIdentityState[];
-  return new Map(rows.map((row) => [row.localId, row]));
-}
-
 async function clearCandidate(connectorId: string, sourceId: string): Promise<void> {
-  await db.delete(syncDeletionCandidates).where(and(
-    eq(syncDeletionCandidates.connectorId, connectorId),
-    eq(syncDeletionCandidates.sourceId, sourceId),
-  ));
+  const persistence = (await getWorkerPersistenceRepositories()).execution.deletions;
+  await persistence.clearCandidate(connectorId, sourceId);
 }
 
 async function quarantineOrArchive(
   connectorId: string,
   task: DeletionDetectionTask,
-  candidate: typeof syncDeletionCandidates.$inferSelect | undefined,
+  candidate: DeletionCandidateRecord | undefined,
   removalReason: string,
   audit: SyncAuditEntry[],
   identityState?: LocalIdentityState,
@@ -477,39 +440,25 @@ async function quarantineOrArchive(
 ): Promise<boolean> {
   const requiredMissingFullSyncs = 2;
   const now = new Date().toISOString();
-  if (!candidate) {
-    await db.insert(syncDeletionCandidates).values({
-      id: randomUUID(),
-      connectorId,
-      taskId: task.id,
-      sourceId: task.sourceId,
-      firstMissingAt: now,
-      lastMissingAt: now,
-      missingCount: 1,
-      identityMode: modeSnapshot?.effectiveMode,
-      identityModeRevision: modeSnapshot?.modeRevision,
-      issueEntityId: identityState?.externalEntityId,
-      repositoryEntityId: identityState?.repositoryEntityId,
-      hostKey: identityState?.hostKey,
-      locatorRevision: identityState?.locatorRevision,
-      bindingState: identityState?.bindingState,
-      bindingRevision: identityState?.bindingRevision,
-    }).onConflictDoUpdate({
-      target: [syncDeletionCandidates.connectorId, syncDeletionCandidates.sourceId],
-      set: {
-        taskId: task.id,
-        lastMissingAt: now,
-        missingCount: 1,
-        identityMode: modeSnapshot?.effectiveMode,
-        identityModeRevision: modeSnapshot?.modeRevision,
-        issueEntityId: identityState?.externalEntityId,
-        repositoryEntityId: identityState?.repositoryEntityId,
-        hostKey: identityState?.hostKey,
-        locatorRevision: identityState?.locatorRevision,
-        bindingState: identityState?.bindingState,
-        bindingRevision: identityState?.bindingRevision,
-      },
-    });
+  const persistence = (await getWorkerPersistenceRepositories()).execution.deletions;
+  const outcome = await persistence.observeMissing({
+    connectorId,
+    taskId: task.id,
+    sourceId: task.sourceId,
+    now,
+    expectedCandidateId: candidate?.id,
+    expectedFence: {
+      identityMode: modeSnapshot?.effectiveMode ?? null,
+      identityModeRevision: modeSnapshot?.modeRevision ?? null,
+      issueEntityId: identityState?.externalEntityId ?? null,
+      repositoryEntityId: identityState?.repositoryEntityId ?? null,
+      hostKey: identityState?.hostKey ?? null,
+      locatorRevision: identityState?.locatorRevision ?? null,
+      bindingState: identityState?.bindingState ?? null,
+      bindingRevision: identityState?.bindingRevision ?? null,
+    },
+  });
+  if (outcome === 'quarantined') {
     audit.push({
       action: 'protected',
       taskTitle: task.title,
@@ -519,17 +468,7 @@ async function quarantineOrArchive(
     });
     return false;
   }
-
-  if (
-    candidate.identityMode !== (modeSnapshot?.effectiveMode ?? null)
-    || candidate.identityModeRevision !== (modeSnapshot?.modeRevision ?? null)
-    || candidate.issueEntityId !== (identityState?.externalEntityId ?? null)
-    || candidate.repositoryEntityId !== (identityState?.repositoryEntityId ?? null)
-    || candidate.locatorRevision !== (identityState?.locatorRevision ?? null)
-    || candidate.bindingState !== (identityState?.bindingState ?? null)
-    || candidate.bindingRevision !== (identityState?.bindingRevision ?? null)
-  ) {
-    await db.delete(syncDeletionCandidates).where(eq(syncDeletionCandidates.id, candidate.id));
+  if (outcome === 'fence-reset') {
     audit.push({
       action: 'protected',
       taskTitle: task.title,
@@ -540,12 +479,8 @@ async function quarantineOrArchive(
     return false;
   }
 
-  const missingCount = candidate.missingCount + 1;
+  const missingCount = (candidate?.missingCount ?? 0) + 1;
   if (missingCount < requiredMissingFullSyncs) {
-    await db.update(syncDeletionCandidates).set({
-      lastMissingAt: now,
-      missingCount,
-    }).where(eq(syncDeletionCandidates.id, candidate.id));
     audit.push({
       action: 'protected',
       taskTitle: task.title,

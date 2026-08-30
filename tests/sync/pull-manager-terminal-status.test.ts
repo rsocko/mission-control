@@ -118,6 +118,98 @@ vi.mock('@/lib/sync/deletion-detector', () => ({
   detectDeletions: vi.fn(async () => ({ removed: 0, localOnlyProtected: 0 })),
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: {
+      get: vi.fn(async () => mockCapabilities
+        ? { capabilities: mockCapabilities }
+        : null),
+    },
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      pulls: {
+        loadSnapshot: vi.fn(async () => ({
+          tasks: [...mockExistingTasks],
+          tags: [],
+          archivedRecurringDuplicateSourceIds: [],
+          linkedSources: [],
+        })),
+        updateLinkedSourceLocator: vi.fn(async () => undefined),
+        updateTaskSourceId: vi.fn(async (taskId: string, sourceId: string) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === taskId,
+          ) as Record<string, unknown> | undefined;
+          if (task) task.sourceId = sourceId;
+          return Boolean(task);
+        }),
+        adoptLocalTask: vi.fn(async (input: {
+          taskId: string;
+          remoteSourceId: string;
+          hasLocalEdits: boolean;
+          now: string;
+        }) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (!task) return null;
+          Object.assign(task, {
+            sourceId: input.remoteSourceId,
+            syncStatus: input.hasLocalEdits ? 'pending_push' : 'synced',
+            lastSyncedAt: input.now,
+          });
+          return task;
+        }),
+        insertBatch: vi.fn(async (candidates: Array<{
+          task: Record<string, unknown>;
+        }>) => {
+          const insertedIds = new Set<string>();
+          for (const candidate of candidates) {
+            mockExistingTasks.push(candidate.task);
+            insertedIds.add(candidate.task.id as string);
+          }
+          return { insertedIds, records: candidates.map(({ task }) => task) };
+        }),
+        findBySourceIds: vi.fn(async (_connectorId: string, sourceIds: string[]) =>
+          mockExistingTasks.filter((candidate) =>
+            sourceIds.includes((candidate as { sourceId: string }).sourceId))),
+        applyRemoteUpdate: vi.fn(async (input: {
+          taskId: string;
+          expectedSyncStatus: string;
+          values: Record<string, unknown>;
+        }) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (!task || task.syncStatus !== input.expectedSyncStatus) return false;
+          Object.assign(task, input.values);
+          mockUpdateSets.push(input.values);
+          return true;
+        }),
+        replaceSourceTags: vi.fn(async () => undefined),
+        listChecklistItems: vi.fn(async () => mockExistingTasks
+          .filter((task) => (task as { isChecklistItem?: boolean }).isChecklistItem)
+          .map((task) => ({
+            id: (task as { id: string }).id,
+            sourceId: (task as { sourceId: string }).sourceId,
+            parentId: (task as { parentId?: string | null }).parentId ?? null,
+          }))),
+        correctParents: vi.fn(async (corrections: Array<{ taskId: string; parentId: string }>) => {
+          for (const correction of corrections) {
+            const task = mockExistingTasks.find(
+              (candidate) => (candidate as { id: string }).id === correction.taskId,
+            ) as Record<string, unknown> | undefined;
+            if (task) task.parentId = correction.parentId;
+          }
+        }),
+        listChildren: vi.fn(async (taskId: string) => mockExistingTasks
+          .filter((task) => (task as { parentId?: string }).parentId === taskId)
+          .map((task) => (task as { id: string }).id)),
+        listTasks: vi.fn(async () => [...mockExistingTasks]),
+      },
+    },
+  })),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
@@ -384,7 +476,7 @@ describe('pull-manager terminal status sync', () => {
     expect(result.updated).toBe(1);
     expect(mockUpdateSets).toContainEqual(expect.objectContaining({
       status: 'cancelled',
-      metadata: expect.stringContaining('"owlDisposition":"not_an_action"'),
+      metadata: expect.objectContaining({ owlDisposition: 'not_an_action' }),
     }));
     expect(detectDeletions).not.toHaveBeenCalled();
   });
@@ -518,7 +610,7 @@ describe('pull-manager terminal status sync', () => {
 
     expect(mockUpdateSets).toContainEqual(
       expect.objectContaining({
-        metadata: JSON.stringify({ recurrence: 'daily', graphId: 'remote-1' }),
+        metadata: { recurrence: 'daily', graphId: 'remote-1' },
       }),
     );
   });
@@ -529,7 +621,7 @@ describe('pull-manager terminal status sync', () => {
       sourceId: 'org/repo:42',
       title: 'Synthetic title',
       description: null,
-      metadata: JSON.stringify({ issueNumber: 42, nodeId: 'I_42' }),
+      metadata: { issueNumber: 42, nodeId: 'I_42' },
       lastSyncedAt: '2026-07-25T12:00:00Z',
     }));
 
@@ -556,12 +648,12 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets).toContainEqual(expect.objectContaining({
       title: 'Canonical title',
       description: 'Canonical body',
-      metadata: JSON.stringify({
+      metadata: {
         issueNumber: 42,
         nodeId: 'I_42',
         url: 'https://github.com/org/repo/issues/42',
         githubParent: null,
-      }),
+      },
     }));
   });
 

@@ -412,10 +412,12 @@ describe('core persistence runtime selection', () => {
         listLatestSuccessfulPulls: async () => [],
         append: async () => undefined,
       },
+      execution: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['execution'],
     };
     const replacementWorker = {
       connectors: replacement.repositories.connectors,
       syncRuns: selectedWorker.syncRuns,
+      execution: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['execution'],
     };
     try {
       registerWorkerPersistenceRepositories(selectedWorker);

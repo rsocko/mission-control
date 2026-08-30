@@ -113,6 +113,7 @@ export interface SyncJobRepository {
   renewLease(jobId: string, owner: string, leaseMs?: number): Promise<boolean>;
   isCancellationRequested(jobId: string, owner: string): Promise<boolean>;
   complete(jobId: string, owner: string, result: SyncResult): Promise<void>;
+  finalizeSuccess(job: SyncJob, owner: string, result: SyncResult): Promise<void>;
   linkSyncLog(job: SyncJob, result: SyncResult): Promise<void>;
   fail(
     job: SyncJob,

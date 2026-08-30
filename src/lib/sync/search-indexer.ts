@@ -1,4 +1,5 @@
 import { syncLogger } from '@/lib/logger';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 let searchModulePromise: Promise<typeof import('@/lib/search') | null> | undefined;
 
@@ -6,7 +7,13 @@ export function getSearchModule() {
   if (!searchModulePromise) {
     searchModulePromise = import('@/lib/search').catch(() => null);
   }
+
   return searchModulePromise;
+}
+
+async function allowsSemanticSearch(): Promise<boolean> {
+  return (await getWorkerPersistenceRepositories()).execution.support
+    .allowsLegacyWorkflow('semantic-search');
 }
 
 /**
@@ -14,6 +21,11 @@ export function getSearchModule() {
  * Ensures the first Ctrl+K search has no cold-start delay.
  */
 export async function warmUpSearchAfterSync() {
+  if (!(await allowsSemanticSearch())) {
+    const { warmUpFTS } = await import('@/lib/search/fts');
+    await warmUpFTS();
+    return;
+  }
   const search = await getSearchModule();
   await search?.warmUpSearch().catch((e) => {
     syncLogger.error({ err: e }, 'warmUpSearch failed');
@@ -32,6 +44,11 @@ export type SearchableTask = {
 };
 
 export async function indexTaskForSearch(task: SearchableTask) {
+  if (!(await allowsSemanticSearch())) {
+    const { indexTask } = await import('@/lib/search/fts');
+    await indexTask(task);
+    return;
+  }
   const search = await getSearchModule();
   await search?.indexTaskSearch(task).catch((e) => { syncLogger.error({ err: e, taskId: task.id }, 'indexTaskSearch failed'); });
 }
@@ -42,6 +59,17 @@ export async function indexTaskForSearch(task: SearchableTask) {
  */
 export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
   if (taskBatch.length === 0) return;
+  if (!(await allowsSemanticSearch())) {
+    const { indexTask } = await import('@/lib/search/fts');
+    for (const task of taskBatch) {
+      try {
+        await indexTask(task);
+      } catch (error) {
+        syncLogger.error({ err: error, taskId: task.id }, 'indexTaskSearch failed');
+      }
+    }
+    return;
+  }
   const search = await getSearchModule();
   if (!search) return;
 
@@ -65,6 +93,11 @@ export async function indexAlertForSearch(alert: {
   connectorType?: string | null;
   receivedAt?: string | null;
 }) {
+  if (!(await allowsSemanticSearch())) {
+    const { indexAlert } = await import('@/lib/search/fts');
+    await indexAlert(alert);
+    return;
+  }
   const search = await getSearchModule();
   await search?.indexAlertSearch(alert).catch((e) => { syncLogger.error({ err: e, alertId: alert.id }, 'indexAlertSearch failed'); });
 }

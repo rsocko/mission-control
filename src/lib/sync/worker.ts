@@ -228,6 +228,12 @@ export class SyncWorker {
           'sync-job-lease',
           () => repository.isCancellationRequested(job.id, this.ownerId),
         );
+        if (result.syncRunId) {
+          await withDatabaseOperation(
+            'sync-job-finalize',
+            () => repository.linkSyncLog(job, result),
+          );
+        }
         await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,
           this.ownerId,
@@ -253,11 +259,7 @@ export class SyncWorker {
       } else {
         await withDatabaseOperation(
           'sync-job-finalize',
-          () => repository.linkSyncLog(job, result),
-        );
-        await withDatabaseOperation(
-          'sync-job-finalize',
-          () => repository.complete(job.id, this.ownerId, result),
+          () => repository.finalizeSuccess(job, this.ownerId, result),
         );
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },

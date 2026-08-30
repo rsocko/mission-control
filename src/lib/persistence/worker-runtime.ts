@@ -23,17 +23,20 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
   WorkerPersistenceRepositories
 > {
   const [
-    { sqlite },
+    { default: db, sqlite },
     { sqliteCorePersistenceRepositories },
     { SqliteSyncRunRepository },
+    { createSqliteConnectorExecutionRepositories },
   ] = await Promise.all([
     import('@/db'),
     import('@/db/persistence/sqlite-core-repositories'),
     import('@/db/persistence/sqlite-sync-run-repository'),
+    import('@/db/persistence/sqlite-connector-execution-repositories'),
   ]);
   return {
     connectors: sqliteCorePersistenceRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),
+    execution: createSqliteConnectorExecutionRepositories(sqlite, db),
   };
 }
 

@@ -32,6 +32,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
 
   afterEach(async () => {
     for (const id of connectorIds) {
+      await backend.context.pool.query('DELETE FROM sync_log WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM sync_jobs WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_operation_leases WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_configs WHERE id = $1', [id]);
@@ -104,6 +105,136 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     expect(nextClaim?.id).toBe(nextJob.id);
     await repository.release(nextJob.id, 'worker-complete-2', 'test cleanup');
   });
+
+    it('atomically links the exact owned log while completing and releasing', async () => {
+      const connectorId = await createConnector();
+      const job = await repository.enqueue(connectorId);
+      const claimed = await repository.claimNext('worker-atomic-complete', 60_000);
+      const syncedAt = new Date().toISOString();
+      const syncRunId = `sync-${randomUUID()}`;
+      await backend.context.pool.query(
+        `
+          INSERT INTO sync_log (
+            id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+            tasks_pushed, local_only_protected, alerts_added, errors, details,
+            synced_at, job_id
+          ) VALUES ($1, $2, false, 0, 0, 0, 0, 0, 0, '[]', '[]', $3, NULL)
+        `,
+        [syncRunId, connectorId, syncedAt],
+      );
+      const result = {
+        connectorId,
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        notificationsAdded: 0,
+        errors: [],
+        syncedAt,
+        syncRunId,
+      };
+
+      await repository.finalizeSuccess(
+        claimed!,
+        'worker-atomic-complete',
+        result,
+      );
+
+      await expect(repository.get(job.id)).resolves.toMatchObject({
+        status: 'succeeded',
+        result: { syncRunId },
+      });
+      const linked = await backend.context.pool.query(
+        'SELECT success, job_id AS "jobId", trigger, attempt FROM sync_log WHERE id = $1',
+        [syncRunId],
+      );
+      expect(linked.rows[0]).toEqual({
+        success: true,
+        jobId: job.id,
+        trigger: 'api',
+        attempt: 1,
+      });
+    });
+
+    it('does not mutate the exact log when finalization ownership is lost', async () => {
+      const connectorId = await createConnector();
+      const job = await repository.enqueue(connectorId);
+      const claimed = await repository.claimNext('worker-owner', 60_000);
+      const syncedAt = new Date().toISOString();
+      const syncRunId = `sync-${randomUUID()}`;
+      await backend.context.pool.query(
+        `
+          INSERT INTO sync_log (
+            id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+            tasks_pushed, local_only_protected, alerts_added, errors, details,
+            synced_at, job_id
+          ) VALUES ($1, $2, false, 0, 0, 0, 0, 0, 0, '[]', '[]', $3, NULL)
+        `,
+        [syncRunId, connectorId, syncedAt],
+      );
+
+      await expect(repository.finalizeSuccess(claimed!, 'other-worker', {
+        connectorId,
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        notificationsAdded: 0,
+        errors: [],
+        syncedAt,
+        syncRunId,
+      })).rejects.toThrow(/ownership was lost/);
+      const log = await backend.context.pool.query(
+        'SELECT success, job_id AS "jobId", trigger, attempt FROM sync_log WHERE id = $1',
+        [syncRunId],
+      );
+      expect(log.rows[0]).toEqual({
+        success: false,
+        jobId: null,
+        trigger: null,
+        attempt: null,
+      });
+      await repository.release(job.id, 'worker-owner', 'test cleanup');
+    });
+
+    it('does not publish a provisional success after the job lease expires', async () => {
+      const connectorId = await createConnector();
+      const job = await repository.enqueue(connectorId);
+      const claimed = await repository.claimNext('worker-expired', 60_000);
+      const syncedAt = new Date().toISOString();
+      const syncRunId = `sync-${randomUUID()}`;
+      await backend.context.pool.query(
+        `
+          INSERT INTO sync_log (
+            id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+            tasks_pushed, local_only_protected, alerts_added, errors, details,
+            synced_at, job_id
+          ) VALUES ($1, $2, false, 0, 0, 0, 0, 0, 0, '[]', '[]', $3, NULL)
+        `,
+        [syncRunId, connectorId, syncedAt],
+      );
+      await backend.context.pool.query(
+        `UPDATE sync_jobs SET lease_expires_at = '2000-01-01T00:00:00.000Z' WHERE id = $1`,
+        [job.id],
+      );
+
+      await expect(repository.finalizeSuccess(claimed!, 'worker-expired', {
+        connectorId,
+        success: true,
+        tasksAdded: 0,
+        tasksUpdated: 0,
+        tasksRemoved: 0,
+        notificationsAdded: 0,
+        errors: [],
+        syncedAt,
+        syncRunId,
+      })).rejects.toThrow(/ownership was lost/);
+      const log = await backend.context.pool.query(
+        'SELECT success, job_id AS "jobId" FROM sync_log WHERE id = $1',
+        [syncRunId],
+      );
+      expect(log.rows[0]).toEqual({ success: false, jobId: null });
+    });
 
   it('requeues a failed job for retry and marks the retry available in the future', async () => {
     const connectorId = await createConnector();

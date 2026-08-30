@@ -17,6 +17,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
       listLatestSuccessfulPulls: vi.fn(async () => []),
       append: vi.fn(async () => undefined),
     },
+    execution: {} as WorkerPersistenceRepositories['execution'],
   };
 }
 
@@ -25,13 +26,14 @@ afterEach(() => {
   vi.doUnmock('@/db/runtime-backend');
   vi.doUnmock('@/db/persistence/sqlite-core-repositories');
   vi.doUnmock('@/db/persistence/sqlite-sync-run-repository');
+  vi.doUnmock('@/db/persistence/sqlite-connector-execution-repositories');
   vi.resetModules();
 });
 
 describe('worker persistence runtime', () => {
   it('does not evaluate SQLite adapters until SQLite persistence is accessed', async () => {
     const repositories = createWorkerRepositories();
-    const databaseModule = vi.fn(() => ({ sqlite: {} }));
+    const databaseModule = vi.fn(() => ({ default: {}, sqlite: {} }));
     const coreModule = vi.fn(() => ({
       sqliteCorePersistenceRepositories: {
         connectors: repositories.connectors,
@@ -43,18 +45,23 @@ describe('worker persistence runtime', () => {
         append = repositories.syncRuns.append;
       },
     }));
+    const executionModule = vi.fn(() => ({
+      createSqliteConnectorExecutionRepositories: () => repositories.execution,
+    }));
     vi.doMock('@/db/runtime-backend', () => ({
       resolveDatabaseBackend: () => 'sqlite',
     }));
     vi.doMock('@/db', databaseModule);
     vi.doMock('@/db/persistence/sqlite-core-repositories', coreModule);
     vi.doMock('@/db/persistence/sqlite-sync-run-repository', syncRunModule);
+    vi.doMock('@/db/persistence/sqlite-connector-execution-repositories', executionModule);
 
     const runtime = await import('@/lib/persistence/worker-runtime');
 
     expect(databaseModule).not.toHaveBeenCalled();
     expect(coreModule).not.toHaveBeenCalled();
     expect(syncRunModule).not.toHaveBeenCalled();
+    expect(executionModule).not.toHaveBeenCalled();
 
     const [first, second] = await Promise.all([
       runtime.getWorkerPersistenceRepositories(),
@@ -66,6 +73,7 @@ describe('worker persistence runtime', () => {
     expect(databaseModule).toHaveBeenCalledOnce();
     expect(coreModule).toHaveBeenCalledOnce();
     expect(syncRunModule).toHaveBeenCalledOnce();
+    expect(executionModule).toHaveBeenCalledOnce();
   });
 
   it('fails closed before PostgreSQL registration without evaluating SQLite', async () => {

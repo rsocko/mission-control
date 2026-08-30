@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import db from '@/db';
-import { syncLog } from '@/db/schema';
 import { syncLogger } from '@/lib/logger';
 import type { SyncAuditEntry } from './execution-pipeline';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export interface WriteThroughLogParams {
   connectorId: string;
@@ -22,7 +21,8 @@ export async function logWriteThrough(params: WriteThroughLogParams): Promise<vo
       taskSourceId: params.taskSourceId,
       reason: `Write-through: ${params.action}`,
     }];
-    await db.insert(syncLog).values({
+    const repositories = await getWorkerPersistenceRepositories();
+    await repositories.syncRuns.append({
       id: randomUUID(),
       connectorId: params.connectorId,
       success: true,
@@ -32,10 +32,13 @@ export async function logWriteThrough(params: WriteThroughLogParams): Promise<vo
       tasksPushed: 1,
       localOnlyProtected: 0,
       notificationsAdded: 0,
-      errors: [] as unknown as string,
-      details: details as unknown as string,
+      errors: [],
+      details,
       syncedAt: now,
       durationMs: 0,
+      jobId: null,
+      identityMode: null,
+      identityModeRevision: null,
     });
   } catch (err) {
     syncLogger.error({ err, ...params }, 'Failed to log write-through to sync_log');

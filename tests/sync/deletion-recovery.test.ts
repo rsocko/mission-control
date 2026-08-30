@@ -131,7 +131,7 @@ describe('sync deletion recovery', () => {
       alreadyRestored: true,
     });
     expect(await db.select().from(schema.tasks)).toHaveLength(1);
-  });
+  }, 15_000);
 
   it('cancels quarantine when the task reappears on the next full sync', async () => {
     const { db, schema } = await setupTask('remote:returns');

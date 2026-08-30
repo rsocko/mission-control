@@ -212,6 +212,29 @@ function createHarness() {
 describeCorePersistenceRepositoriesContract('SQLite', createHarness);
 
 describe('SQLite core repository compatibility behavior', () => {
+  it('reads legacy connector configuration with double-encoded JSON', async () => {
+    const harness = createHarness();
+    try {
+      await harness.repositories.connectors.upsert(coreConnectorFixture);
+      harness.sqlite.prepare(`
+        UPDATE connector_configs
+        SET capabilities = ?, credentials = ?, settings = ?, synced_lists = ?
+        WHERE id = ?
+      `).run(
+        JSON.stringify(JSON.stringify(coreConnectorFixture.capabilities)),
+        JSON.stringify(JSON.stringify(coreConnectorFixture.credentials)),
+        JSON.stringify(JSON.stringify(coreConnectorFixture.settings)),
+        JSON.stringify(JSON.stringify(coreConnectorFixture.syncedLists)),
+        coreConnectorFixture.id,
+      );
+
+      await expect(harness.repositories.connectors.get(coreConnectorFixture.id))
+        .resolves.toEqual(coreConnectorFixture);
+    } finally {
+      harness.close();
+    }
+  });
+
   it('operates against the production SQLite bootstrap schema', async () => {
     const sqlite = new Database(':memory:');
     try {

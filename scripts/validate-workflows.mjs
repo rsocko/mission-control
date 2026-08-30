@@ -175,6 +175,10 @@ for (const file of workflowFiles) {
   }
 
   if (file === 'ci.yml') {
+    assert.ok(
+      'workflow_dispatch' in workflow.on,
+      'ci.yml must expose a manual trigger for the pgvector benchmark',
+    );
     const changes = workflow.jobs?.changes;
     const impeccableWorker = workflow.jobs?.['impeccable-worker'];
     const impeccableResult = workflow.jobs?.impeccable;
@@ -337,6 +341,11 @@ for (const file of workflowFiles) {
       pgvectorBenchmark?.run,
       'npm run --silent benchmark:postgres-vector',
       'PostgreSQL integration must run the repository pgvector benchmark',
+    );
+    assert.equal(
+      pgvectorBenchmark?.if,
+      "github.event_name == 'workflow_dispatch'",
+      'The pgvector benchmark must run only when CI is manually dispatched',
     );
     assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,

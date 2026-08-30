@@ -33,11 +33,9 @@ vi.mock('@/db', () => {
           where: vi.fn((condition: unknown) => {
             // For sync_log hydration
             if (!fields) {
-              const rows = [] as unknown[] & {
-                limit: ReturnType<typeof vi.fn>;
-              };
-              rows.limit = vi.fn(async () => mockConnectorInstance
-                ? [{
+              const rows = Object.assign([] as unknown[], {
+                limit: vi.fn(async () => mockConnectorInstance
+                  ? [{
                     id: mockConnectorInstance.id,
                     type: mockConnectorInstance.type,
                     name: mockConnectorInstance.displayName,
@@ -48,8 +46,9 @@ vi.mock('@/db', () => {
                     credentials: '{}',
                     settings: '{}',
                     syncedLists: '[]',
-                  }]
-                : []);
+                    }]
+                  : []),
+              });
               return rows;
             }
             // Check if this is the in_progress task query
@@ -94,6 +93,30 @@ vi.mock('@/db/schema', () => ({
   hubProjects: {},
   taskProjects: {},
   tasks: { id: 'id', sourceId: 'source_id', connectorInstanceId: 'connector_instance_id', status: 'status', completedAt: 'completed_at', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', sourceListId: 'source_list_id' },
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: {
+      get: vi.fn(async () => mockConnectorInstance
+        ? {
+            id: mockConnectorInstance.id,
+            type: mockConnectorInstance.type,
+            name: mockConnectorInstance.displayName,
+            enabled: true,
+            syncMode: 'manual',
+            capabilities: mockConnectorInstance.capabilities ?? {},
+            credentials: {},
+            settings: {},
+            syncedLists: [],
+          }
+        : null),
+    },
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => [...mockSyncLogRows]),
+      append: vi.fn(async () => undefined),
+    },
+  }),
 }));
 
 vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({

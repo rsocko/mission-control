@@ -6,7 +6,7 @@ import type {
   DomainSyncResult,
   SyncResult,
 } from '@/types';
-import db, { runTransaction } from '@/db';
+import db from '@/db';
 import {
   getGitHubIdentityModeSnapshot,
   GitHubStableIdentityRuntime,
@@ -15,9 +15,9 @@ import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
 } from '@/lib/external-identities';
-import { syncLog, notifications as notificationsTable, notificationActions, connectorConfigs, sourceLists as sourceListsTable } from '@/db/schema';
+import { notifications as notificationsTable, notificationActions, connectorConfigs, sourceLists as sourceListsTable } from '@/db/schema';
 import { hubProjects, taskProjects, tasks as tasksTable } from '@/db/schema';
-import { eq, and, isNull, inArray, like, desc, sql } from 'drizzle-orm';
+import { eq, and, isNull, inArray, like, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { emitEvent } from '@/lib/events';
 import { syncEventBus } from './events';
@@ -76,6 +76,8 @@ import {
   withDatabaseOperation,
   type DatabaseOperationName,
 } from '@/lib/telemetry/database-operation-context';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { SyncRunRecord } from '@/db/persistence/worker-repositories';
 
 type DependencyResumeTrigger = 'startup' | 'recurring' | 'retry' | 'manual';
 
@@ -253,20 +255,8 @@ export class SyncExecutionPipeline {
     // Only hydrate from successful syncs — failed syncs should not advance the
     // `since` baseline, otherwise tasks updated during a failed sync window are
     // permanently missed until the next nightly full sync.
-    const rows = await db
-      .select({
-        connectorId: syncLog.connectorId,
-        syncedAt: syncLog.syncedAt,
-        tasksAdded: syncLog.tasksAdded,
-        tasksUpdated: syncLog.tasksUpdated,
-        tasksRemoved: syncLog.tasksRemoved,
-        notificationsAdded: syncLog.notificationsAdded,
-        success: syncLog.success,
-        durationMs: syncLog.durationMs,
-      })
-      .from(syncLog)
-      .orderBy(desc(syncLog.syncedAt))
-      .all();
+    const repositories = await getWorkerPersistenceRepositories();
+    const rows = await repositories.syncRuns.listLatestSuccessfulPulls();
 
     // Keep only the first (most recent) successful PULL sync row per connector.
     // Write-through entries (durationMs === 0) must be excluded — they only push
@@ -879,7 +869,7 @@ export class SyncExecutionPipeline {
           ? { datasetErrors: domainDataResult.datasetErrors }
           : {}),
       };
-      const syncLogEntry = {
+      const syncLogEntry: SyncRunRecord = {
         id: randomUUID(),
         connectorId,
         success: syncSucceeded,
@@ -889,16 +879,18 @@ export class SyncExecutionPipeline {
         tasksPushed: pushResult.pushed,
         localOnlyProtected,
         notificationsAdded,
-        errors: errors as unknown as string,
-        details: details as unknown as string,
+        errors,
+        details,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
+        // The durable queue linker owns job timing/retry metadata and matches
+        // unlinked rows by connector and sync timestamp.
+        jobId: null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
-      runTransaction((tx) => {
-        tx.insert(syncLog).values(syncLogEntry).run();
-      });
+      const workerPersistence = await getWorkerPersistenceRepositories();
+      await workerPersistence.syncRuns.append(syncLogEntry);
       identityRuntime?.complete(
         syncSucceeded ? 'succeeded' : 'failed',
         syncSucceeded ? undefined : 'task_identity_blocked',
@@ -995,7 +987,7 @@ export class SyncExecutionPipeline {
         syncedAt: new Date().toISOString(),
       };
 
-      const failureLog = {
+      const failureLog: SyncRunRecord = {
         id: randomUUID(),
         connectorId,
         success: false,
@@ -1005,25 +997,22 @@ export class SyncExecutionPipeline {
         tasksPushed: 0,
         localOnlyProtected: 0,
         notificationsAdded: 0,
-        errors: result.errors as unknown as string,
-        details: details as unknown as string,
+        errors: result.errors,
+        details,
         syncedAt: result.syncedAt,
         durationMs: Date.now() - startTime,
+        jobId: null,
         identityMode: identitySnapshot?.effectiveMode ?? null,
         identityModeRevision: identitySnapshot?.modeRevision ?? null,
       };
       try {
-        runTransaction((tx) => {
-          tx.insert(syncLog).values(failureLog).run();
-        });
+        const workerPersistence = await getWorkerPersistenceRepositories();
+        await workerPersistence.syncRuns.append(failureLog);
       } catch (finalizationError) {
         syncLogger.error(
           { err: finalizationError, connectorId },
           'Failed to finalize the sync log for a failed GitHub sync',
         );
-        await db.insert(syncLog).values(failureLog).catch((logError) => {
-          syncLogger.error({ err: logError, connectorId }, 'Failed to write error to sync_log');
-        });
       }
       identityRuntime?.complete(
         options?.signal?.aborted ? 'cancelled' : 'failed',
@@ -1067,32 +1056,25 @@ export class SyncExecutionPipeline {
    * Refresh a connector from persisted config before each sync.
    */
   async initializeConnectorFromDb(connectorId: string): Promise<IConnector | null> {
-    const [row] = await db.select().from(connectorConfigs).where(and(eq(connectorConfigs.id, connectorId), isNull(connectorConfigs.deletedAt))).limit(1);
-    if (!row) {
+    const workerPersistence = await getWorkerPersistenceRepositories();
+    const config = await workerPersistence.connectors.get(connectorId);
+    if (!config) {
       syncLogger.error({ connectorId }, 'No config row found in DB');
       return null;
     }
 
-    const credentials = (typeof row.credentials === 'string' ? JSON.parse(row.credentials) : row.credentials) || {};
-    const settings = (typeof row.settings === 'string' ? JSON.parse(row.settings) : row.settings) || {};
-    const capabilities = (typeof row.capabilities === 'string' ? JSON.parse(row.capabilities) : row.capabilities) || {};
-    const syncedLists = (typeof row.syncedLists === 'string' ? JSON.parse(row.syncedLists) : row.syncedLists) || [];
-
-    const config: ConnectorConfig = {
-      id: row.id,
-      type: row.type,
-      name: row.name,
-      enabled: row.enabled ?? true,
-      syncMode: (row.syncMode as ConnectorConfig['syncMode']) || 'poll',
-      pollIntervalMinutes: row.pollIntervalMinutes ?? 5,
-      capabilities: capabilities as ConnectorConfig['capabilities'],
-      credentials,
-      settings,
-      syncedLists,
+    const resolvedConfig: ConnectorConfig = {
+      ...config,
+      syncMode: config.syncMode || 'poll',
+      pollIntervalMinutes: config.pollIntervalMinutes ?? 5,
     };
 
-    syncLogger.info({ connectorId, type: row.type, hasCredentials: !!credentials?.accessToken }, 'Refreshing connector from DB');
-    return connectorRegistry.replaceConnector(config);
+    syncLogger.info({
+      connectorId,
+      type: config.type,
+      hasCredentials: !!config.credentials?.accessToken,
+    }, 'Refreshing connector from DB');
+    return connectorRegistry.replaceConnector(resolvedConfig);
   }
 
   // ─── Notifications upsert ──────────────────────────────────────────────────

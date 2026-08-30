@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SyncResult } from '@/types';
+import { SqliteSyncRunRepository } from '@/db/persistence/sqlite-sync-run-repository';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -709,17 +710,25 @@ describe('durable sync job queue', () => {
     });
   });
 
-  it('links durable job timing and trigger metadata to sync history', () => {
-    database.sqlite.prepare(`
-      INSERT INTO sync_log (
-        id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
-        tasks_pushed, local_only_protected, alerts_added, errors, details,
-        synced_at, duration_ms
-      ) VALUES (
-        'log-1', 'github-1', 1, 0, 0, 0, 0, 0, 0, '[]', '[]',
-        '2026-08-03T12:00:05.000Z', 5000
-      )
-    `).run();
+  it('links durable job timing and trigger metadata to a portable journal entry', async () => {
+    await new SqliteSyncRunRepository(database.sqlite).append({
+      id: 'log-1',
+      connectorId: 'github-1',
+      success: true,
+      tasksAdded: 0,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      tasksPushed: 0,
+      localOnlyProtected: 0,
+      notificationsAdded: 0,
+      errors: [],
+      details: [],
+      syncedAt: '2026-08-03T12:00:05.000Z',
+      durationMs: 5000,
+      jobId: null,
+      identityMode: null,
+      identityModeRevision: null,
+    });
     const queued = queue.enqueueSyncJob('github-1', {
       source: 'schedule',
       scheduledFor: new Date('2026-08-03T12:00:00.000Z'),

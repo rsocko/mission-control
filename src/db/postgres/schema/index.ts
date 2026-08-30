@@ -256,6 +256,23 @@ export {
   nativePushRequests,
 } from './native';
 
+// Durable versioned semantic index: identities, documents, vectors, intents, runs
+export {
+  semanticIndexIdentities,
+  semanticDocuments,
+  semanticVectors,
+  semanticIntents,
+  semanticRuns,
+} from './semantic-index';
+export type {
+  SemanticIndexStatus,
+  SemanticSensitivity,
+  SemanticIntentKind,
+  SemanticIntentStatus,
+  SemanticRunKind,
+  SemanticRunStatus,
+} from './semantic-index';
+
 // Finance (re-exported from separate file)
 export {
   financeTransactions,

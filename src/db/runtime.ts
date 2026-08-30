@@ -2,6 +2,8 @@ import type { CorePersistenceRepositories } from './persistence/core-repositorie
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
+import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
+import type { SemanticSourcePort } from '@/lib/semantic-index/source/contracts';
 import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
@@ -12,12 +14,16 @@ import { createPostgresCoreRepositories } from './postgres/repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
+import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
+import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
 
 const postgresBackend = new PostgresPersistenceBackend();
 let postgresRepositories: CorePersistenceRepositories | null = null;
 let postgresSyncJobRepository: SyncJobRepository | null = null;
 let postgresConnectorOperationLeaseRepository: ConnectorOperationLeaseRepository | null = null;
 let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
+let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
+let postgresSemanticSourcePort: SemanticSourcePort | null = null;
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
   if (!postgresRepositories) {
@@ -56,10 +62,11 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
 
 /**
  * Initializes the selected persistence backend. For PostgreSQL, this also
- * instantiates and registers the four portable-contract adapters
+ * instantiates and registers the portable-contract adapters
  * (`createPostgresCoreRepositories`, `createPostgresSyncJobRepository`,
  * `createPostgresConnectorOperationLeaseRepository`,
- * `createPostgresKeywordSearchRepository`) from the freshly-initialized
+ * `createPostgresKeywordSearchRepository`,
+ * `createPostgresSemanticIndexRepository`) from the freshly-initialized
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite initialization is untouched.
@@ -76,6 +83,8 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
+  postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool);
+  postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
 }
 
 export async function shutdownRuntimeDatabase(): Promise<void> {
@@ -85,6 +94,8 @@ export async function shutdownRuntimeDatabase(): Promise<void> {
     postgresSyncJobRepository = null;
     postgresConnectorOperationLeaseRepository = null;
     postgresKeywordSearchRepository = null;
+    postgresSemanticIndexRepository = null;
+    postgresSemanticSourcePort = null;
   }
 }
 
@@ -156,4 +167,33 @@ export function getPostgresKeywordSearchRepository(): KeywordSearchRepository {
     throw new Error('PostgreSQL keyword search repository has not been registered');
   }
   return postgresKeywordSearchRepository;
+}
+
+/**
+ * Explicit override hook (primarily for tests); see
+ * `registerPostgresCoreRepositories`.
+ */
+export function registerPostgresSemanticIndexRepository(
+  repository: SemanticIndexRepository,
+): void {
+  postgresSemanticIndexRepository = repository;
+}
+
+export function getPostgresSemanticIndexRepository(): SemanticIndexRepository {
+  if (!postgresSemanticIndexRepository) {
+    throw new Error('PostgreSQL semantic index repository has not been registered');
+  }
+  return postgresSemanticIndexRepository;
+}
+
+/** Explicit override hook (primarily for tests). */
+export function registerPostgresSemanticSourcePort(port: SemanticSourcePort): void {
+  postgresSemanticSourcePort = port;
+}
+
+export function getPostgresSemanticSourcePort(): SemanticSourcePort {
+  if (!postgresSemanticSourcePort) {
+    throw new Error('PostgreSQL semantic source port has not been registered');
+  }
+  return postgresSemanticSourcePort;
 }

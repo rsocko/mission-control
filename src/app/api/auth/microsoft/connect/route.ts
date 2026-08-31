@@ -7,7 +7,7 @@ import { eq } from 'drizzle-orm';
 const CONNECTOR_DEFAULTS: Record<string, { name: string; capabilities: object; scopes: string[] }> = {
   'microsoft-todo': {
     name: 'Microsoft Todo',
-    capabilities: { read: true, write: true, delete: true, sync: true, lists: true, subtasks: true, tags: false, tagWriteBack: false },
+    capabilities: { read: true, write: true, delete: true, sync: true, lists: true, subtasks: true, tags: true, tagWriteBack: true },
     scopes: ['Tasks.ReadWrite', 'Tasks.ReadWrite.Shared', 'offline_access', 'User.Read'],
   },
   'outlook-email': {

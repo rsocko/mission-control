@@ -97,6 +97,10 @@ vi.mock('@/lib/api-error', () => ({
   },
 }));
 
+vi.mock('@/lib/mode', () => ({
+  isDemoMode: () => false,
+}));
+
 vi.mock('crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('crypto')>();
   return {
@@ -228,6 +232,61 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
     expect(response.status).toBe(400);
     const data = await response.json();
     expect(data.error).toContain('tagId');
+  });
+
+  it('writes Microsoft To Do tag removal through despite legacy stored capabilities', async () => {
+    const removeTagFromTask = vi.fn().mockResolvedValue(undefined);
+    mockGetCapabilities.mockResolvedValue({
+      read: true,
+      write: true,
+      delete: true,
+      sync: true,
+      subtasks: true,
+      lists: true,
+      tags: true,
+      tagWriteBack: true,
+      taskSourceModel: 'remote-managed',
+      taskFieldProfile: {
+        tags: { authority: 'source', writeBack: 'direct' },
+      },
+    });
+    mockGetConnector.mockReturnValue({
+      type: 'microsoft-todo',
+      removeTagFromTask,
+    });
+    mockDb.select.mockImplementation((selection?: Record<string, unknown>) => {
+      if (selection?.sourceId) {
+        return chainable([{
+          connectorInstanceId: 'todo-1',
+          sourceId: 'list-1:task-1',
+          connectorType: 'microsoft-todo',
+        }]);
+      }
+      if (selection?.capabilities) {
+        return chainable([{
+          capabilities: { tags: false, tagWriteBack: false },
+        }]);
+      }
+      if (selection?.name) {
+        return chainable([{ name: 'needs-triage' }]);
+      }
+      return chainable([]);
+    });
+
+    const { DELETE } = await import('@/app/api/tasks/[id]/tags/route');
+    const response = await DELETE(new Request(`${BASE}/api/tasks/task-1/tags`, {
+      method: 'DELETE',
+      body: JSON.stringify({ tagId: 'tag-needs-triage' }),
+      headers: { 'Content-Type': 'application/json' },
+    }), { params: Promise.resolve({ id: 'task-1' }) });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(removeTagFromTask).toHaveBeenCalledWith(
+        'list-1:task-1',
+        'needs-triage',
+      );
+    });
   });
 
   it('persists Scout tags locally without invoking connector write-back', async () => {

@@ -85,6 +85,7 @@ export const MICROSOFT_TODO_FIELD_PROFILE = completeProfile({
   dueDate: SOURCE_DIRECT_FIELD,
   recurrence: SOURCE_DIRECT_FIELD,
   microStatus: SOURCE_DIRECT_FIELD,
+  tags: SOURCE_DIRECT_FIELD,
 });
 
 export const WORK_TODO_FIELD_PROFILE = completeProfile({

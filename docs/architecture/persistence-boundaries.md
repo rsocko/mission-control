@@ -8,6 +8,7 @@ related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
   - "[Ideation Workspace Persistence](./ideation-workspace-persistence.md)"
   - "[Issue #1159](https://github.com/rsocko/mission-control/issues/1159)"
+  - "[Issue #1680](https://github.com/rsocko/mission-control/issues/1680)"
 ---
 
 # Portable Persistence Boundaries
@@ -124,7 +125,9 @@ the same atomic nested-settings patch and successful-pull baseline contract.
 SQLite loads its worker adapters lazily on first access so importing a connector
 does not initialize the database. PostgreSQL has no compatibility fallback: its
 runtime must register the complete worker composition before access and before
-loading worker schedulers.
+loading worker schedulers. That composition now carries four members —
+`connectors`/`syncRuns`, `execution` (Layer 2), `github` (Layers 3A/3B), and
+`connectorState` (Layer 4) — and is registered atomically.
 
 Layer 2 adds the complete `ConnectorExecutionRepositories` composition to that
 worker registration. Its phase-oriented ports own:
@@ -251,12 +254,115 @@ reconciliation resume and relationship polling only when the whole GitHub
 composition is present and the execution support reports the
 `dependency-reconciliation` workflow as allowed.
 
+### Layer 4: non-finance connector-owned state
+
+Layer 4 adds a third worker-registered composition,
+`NonFinanceConnectorStateRepositories` (`src/db/persistence/work-todo.ts`),
+exposed as `WorkerPersistenceRepositories.connectorState`. It is constructed in
+the same atomic step as `ConnectorExecutionRepositories` and
+`GitHubWorkerRepositories`, so a backend either has every migrated connector
+surface or none.
+
+Its single member today is `workTodo`, the Microsoft To Do - Work Power Automate
+bridge. Its adapters are `createSqliteWorkTodoRepositories`
+(`src/db/persistence/sqlite-work-todo-repositories.ts`) and
+`createPostgresWorkTodoRepositories`
+(`src/db/postgres/repositories/work-todo-repositories.ts`). Both share the pure
+value derivations in `src/db/persistence/work-todo-values.ts`, so the two
+backends compute byte-identical persisted values.
+
+Six whole-operation commands replace the previous direct SQLite transaction
+workflow:
+
+- `ingest` — snapshot/delta acceptance, source-list upsert, source-ID dedupe,
+  source tags, checklist reconciliation, deletion cleanup, and the bridge
+  checkpoint;
+- `lease` — expired-lease reclaim, active-lease reuse, supersede-on-newer-edit,
+  bounded outbound-change enqueue, and the fenced lease claim;
+- `readPullState` — the backend-neutral pull state the service formats into the
+  unchanged standard/extended envelope;
+- `acknowledge` — fenced per-item settlement;
+- `readStatus` — the operator status projection; and
+- `resetDelta` — checkpoint reset.
+
+Transaction and effect ordering:
+
+- Each command owns exactly one transaction. SQLite uses a short immediate
+  (or deferred, for reads) transaction; PostgreSQL uses an explicit transaction
+  and locks the connector row, the bridge-state row, the touched task rows, and
+  the targeted outbound-change rows with `FOR UPDATE` before read-checking and
+  writing them.
+- Leases are taken in a deterministic bounded order (`created_at`, then
+  `idempotency_key`) and are capped by `WORK_TODO_MAX_CHANGE_BATCH`. Only an
+  expired lease is reclaimed; an active lease is returned unchanged so a retry
+  is idempotent.
+- Acknowledgement is fenced by connector, change status, lease ID, and the
+  frozen task version. A stale lease/ack epoch cannot settle, and a delayed
+  outcome can never regress a newer local edit — it is recorded as `stale` and
+  the change becomes `superseded`.
+- Checkpoints are conditionally monotonic. A replay carrying the same accepted
+  instant still refreshes the checkpoint, but a strictly older delayed envelope
+  keeps its idempotent task upserts while leaving the newer stored
+  `list_delta_link`, per-list task delta links, `last_ingest_at`, and
+  `last_ingest_mode` untouched. Instants are compared numerically, never by
+  string ordering.
+- No side effect runs inside a transaction. `ingest`/`acknowledge` return the
+  bounded committed searchable projections and removed task IDs, and
+  `src/lib/connectors/work-todo/service.ts` performs keyword/semantic index
+  maintenance through the backend-aware `@/lib/sync/search-indexer` helpers
+  *after* commit.
+- Errors are the typed `WorkTodoBridgeError` (`code` + `status`), so routes and
+  MCP tools keep their existing contract. Opaque delta links are returned only in
+  the pull envelope; status never exposes them and nothing logs a payload body,
+  delta link, credential, or SQL parameter.
+
+`microsoft-todo` is now fully portable too: hidden-list discovery reads through
+`execution.lists.list()` and the authenticated-user write uses the Layer 1
+connector-settings merge patch (`@/lib/connectors/shared/connector-config-store`).
+
+Reachability findings for the remaining non-finance connectors:
+
+- **Rymessage** is notification-only and owns no Mission Control table. Its
+  durable state is generic connector settings plus Layer 2 notification
+  dedupe/reconciliation, so Layer 4 enables and proves that existing portable
+  path instead of inventing a table. Its optional source-side SQLite reader in
+  `rymessage-client.ts` opens *RyMessage's own* database file: that is external
+  connector transport, not a Mission Control backend fallback, and no port
+  imports it.
+- **OWL** (`document-intelligence`) also owns no worker persistence table. Its
+  normal task, source-list, source-tag, and notification writes already use the
+  Layer 2 ports. Its scheduled triage importer is Layer 7 and its interactive
+  task-action service is not worker-reachable; both stay out of scope.
+- **Scout** is push-only (`capabilities.sync === false`), so production sync
+  workers never poll it. Its ingest, status sync, and reconciliation are
+  route/MCP workflows and its scheduled triage imports are Layer 7. No Scout
+  persistence rewrite is justified in Layer 4; the existing PostgreSQL Scout
+  schema is preserved and unassigned Scout workflows continue to fail closed.
+
+Schema-parity result: **no migration was required**. SQLite and PostgreSQL
+already define equivalent `work_todo_bridge_state`, `work_todo_list_delta_state`,
+and `work_todo_outbound_changes` tables — including the composite delta-state
+primary key, the `(connector_id, task_id, task_version)` uniqueness, the
+ready/lease index, and the task index — plus the task/list/tag/association tables
+the ingest and acknowledgement commands touch. SQLite JSON text versus
+PostgreSQL `jsonb`, and integer versus native booleans, are adapter mapping
+differences rather than schema gaps.
+
+The PostgreSQL execution guard therefore now allows `microsoft-todo`,
+`microsoft-todo-work`, Rymessage, and OWL. It still rejects `finance-manager`
+connector-owned state, non-GitHub connector dependency state, non-GitHub
+connector project state, and any connector exposing `syncDomainData`.
+
+Layers 5-8 remain excluded: Monarch/finance, reminders, recovery beyond Layer
+3B, the scheduled triage importer (#1681), deployment, and backend activation.
+
 Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
 closed under PostgreSQL *before* any remote effect: identity backfill and
 status, manual identity-exception mutation, unknown
-write-outcome resolution, interrupted write-cycle recovery, connector-owned
-state, Microsoft To Do hidden-list state, Monarch, reminders, triage, and
-semantic/project automation. Historical task-transfer succession filtering is
+write-outcome resolution, interrupted write-cycle recovery, Monarch, reminders,
+triage, and semantic/project automation. Connector-owned Work To Do bridge
+state and Microsoft To Do hidden-list state are no longer in that list —
+Layer 4 migrates both. Historical task-transfer succession filtering is
 portable: both hierarchy adapters recompute a JSON-order-independent proof
 digest and revalidate the immutable record against current task bindings and
 locators before excluding the superseded task. Legacy insertion-ordered SQLite
@@ -265,11 +371,10 @@ snapshots also remain unsupported on PostgreSQL; only identity-fenced deletion
 candidate quarantine, retention, and archival are enabled, and only when every
 frozen epoch/binding/locator/source and task fence still matches.
 
-The PostgreSQL execution guard continues to reject Microsoft To Do hidden-list
-state, connector-owned finance or Work To Do bridge state, and non-GitHub
-connector dependency or project state before connector construction or remote
-dispatch. SQLite continues to use its compatibility implementations for the
-remaining legacy workflows.
+The PostgreSQL execution guard continues to reject connector-owned finance
+state and non-GitHub connector dependency or project state before connector
+construction or remote dispatch. SQLite continues to use its compatibility
+implementations for the remaining legacy workflows.
 Generic PostgreSQL runs use the backend-selected keyword search repository
 after commit. SQLite-only semantic enrichment, project-rule/planning
 post-processing, the legacy outbound-event outbox, and the legacy notification

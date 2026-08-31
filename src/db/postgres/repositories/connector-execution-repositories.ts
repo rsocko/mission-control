@@ -2402,11 +2402,11 @@ export function createPostgresConnectorExecutionRepositories(
         return workflow === 'dependency-reconciliation';
       },
       assertConfigSupported(config: ConnectorConfig) {
-        if (
-          config.type === 'finance-manager'
-          || config.type === 'microsoft-todo'
-          || config.type === 'microsoft-todo-work'
-        ) {
+        // Layer 4 migrated Microsoft To Do hidden-list discovery and the whole
+        // Work To Do bridge (ingest/pull/lease/ack/status/reset) behind the
+        // portable execution and `connectorState.workTodo` ports, so both are
+        // now supported. Finance/Monarch state is still SQLite-only.
+        if (config.type === 'finance-manager') {
           throw new UnsupportedConnectorExecutionError('connector-owned state');
         }
         if (
@@ -2418,9 +2418,6 @@ export function createPostgresConnectorExecutionRepositories(
       },
 
       assertConnectorSupported(connector) {
-        if (connector.type === 'microsoft-todo') {
-          throw new UnsupportedConnectorExecutionError('Microsoft To Do hidden-list state');
-        }
         if (connector.syncDomainData) {
           throw new UnsupportedConnectorExecutionError('connector-owned domain state');
         }

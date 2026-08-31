@@ -289,7 +289,7 @@ describe('Work To Do bridge runtime', () => {
       updatedAt: '2026-08-07T18:00:00.000Z',
     });
 
-    const pullRequest = service.createWorkTodoPullRequest('work-todo');
+    const pullRequest = await service.createWorkTodoPullRequest('work-todo');
     const status = await service.getWorkTodoBridgeStatus('work-todo');
 
     expect(pullRequest).toMatchObject({

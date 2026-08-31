@@ -32,6 +32,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteGitHubHierarchyRepositories },
     { createSqliteGitHubProjectRepositories },
     { createSqliteGitHubRecoveryRepositories },
+    { createSqliteWorkTodoRepositories },
   ] = await Promise.all([
     import('@/db'),
     import('@/db/persistence/sqlite-core-repositories'),
@@ -42,6 +43,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-github-hierarchy-repositories'),
     import('@/db/persistence/sqlite-github-project-repositories'),
     import('@/db/persistence/sqlite-github-recovery-repositories'),
+    import('@/db/persistence/sqlite-work-todo-repositories'),
   ]);
   const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
   return {
@@ -55,6 +57,9 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
       hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
       projects: createSqliteGitHubProjectRepositories(sqlite, db),
       recovery: createSqliteGitHubRecoveryRepositories(sqlite, db),
+    },
+    connectorState: {
+      workTodo: createSqliteWorkTodoRepositories(sqlite, db),
     },
   };
 }

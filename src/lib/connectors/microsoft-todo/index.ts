@@ -15,9 +15,8 @@ import { compareRecurringOccurrencePriority } from '@/lib/sync/recurring-task-re
 import { MICROSOFT_TODO_TASK_AUTHORITY } from '../task-source-profiles';
 import { mergeAsyncStreams } from '../task-page-stream';
 import { isMicroStatusSyncEnabled, updateTagsWithMicroStatus } from '@/lib/micro-status';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { mergeConnectorSettings } from '../shared/connector-config-store';
 
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
@@ -97,13 +96,13 @@ export class MicrosoftTodoConnector implements IConnector {
             if (meRes.ok) {
               const me = await meRes.json();
               const currentSettings = (this.config.settings || {}) as Record<string, unknown>;
-              const updatedSettings = {
-                ...currentSettings,
-                authenticatedUser: me.userPrincipalName || me.mail || me.displayName,
-              };
-              await db.update(connectorConfigs)
-                .set({ settings: JSON.stringify(updatedSettings) })
-                .where(eq(connectorConfigs.id, this.config.id));
+              this.config.settings = await mergeConnectorSettings(
+                this.config.id,
+                currentSettings,
+                {
+                  authenticatedUser: me.userPrincipalName || me.mail || me.displayName,
+                },
+              ) as ConnectorConfig['settings'];
             }
           } catch { /* Non-critical */ }
         }
@@ -274,16 +273,11 @@ export class MicrosoftTodoConnector implements IConnector {
       yield page;
     }
 
-    // Hidden list tasks from DB
+    // Hidden list tasks: source lists Mission Control already knows about that
+    // the remote list enumeration did not return this run.
     try {
-      const { db, sourceLists: sourceListsTable } = await import('@/db/schema').then(async (schema) => {
-        const dbMod = await import('@/db');
-        return { db: dbMod.default, sourceLists: schema.sourceLists };
-      });
-      const { eq } = await import('drizzle-orm');
-      const localLists = await db.select({ sourceId: sourceListsTable.sourceId, name: sourceListsTable.name })
-        .from(sourceListsTable)
-        .where(eq(sourceListsTable.connectorInstanceId, this.id));
+      const execution = (await getWorkerPersistenceRepositories()).execution;
+      const localLists = await execution.lists.list(this.id);
 
       for (const local of localLists) {
         if (!fetchedListIds.has(local.sourceId)) {
@@ -306,7 +300,7 @@ export class MicrosoftTodoConnector implements IConnector {
         }
       }
     } catch (e) {
-      connectorLogger.warn({ err: e }, 'Hidden list database lookup failed');
+      connectorLogger.warn({ err: e }, 'Hidden list source-list lookup failed');
     }
 
     // Substrate hidden list tasks

@@ -118,6 +118,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  connectorState: new Proxy({} as WorkerPersistenceRepositories['connectorState'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().connectorState[
+        property as keyof WorkerPersistenceRepositories['connectorState']
+      ]
+    ),
+  }),
 };
 
 /**

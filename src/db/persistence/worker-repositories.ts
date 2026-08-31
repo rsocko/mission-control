@@ -1,6 +1,7 @@
 import type { ConnectorRepository } from './core-repositories';
 import type { ConnectorExecutionRepositories } from './connector-execution';
 import type { GitHubWorkerRepositories } from './github-worker';
+import type { NonFinanceConnectorStateRepositories } from './work-todo';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -34,4 +35,10 @@ export interface WorkerPersistenceRepositories {
   syncRuns: SyncRunRepository;
   execution: ConnectorExecutionRepositories;
   github: GitHubWorkerRepositories;
+  /**
+   * Layer 4: non-finance connector-owned state (currently the Work To Do
+   * bridge). Registered atomically with the rest of the composition so a
+   * backend either supports every migrated connector surface or none.
+   */
+  connectorState: NonFinanceConnectorStateRepositories;
 }

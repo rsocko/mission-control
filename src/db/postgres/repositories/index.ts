@@ -1,6 +1,9 @@
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
 import type { GitHubWorkerRepositories } from '@/db/persistence/github-worker';
+import type {
+  NonFinanceConnectorStateRepositories,
+} from '@/db/persistence/work-todo';
 import type { PostgresDatabase } from '../runtime';
 import { PostgresConnectorRepository } from './connector-repository';
 import { PostgresNotificationRepository } from './notification-repository';
@@ -15,6 +18,7 @@ import { createPostgresGitHubDependencyRepositories } from './github-dependency-
 import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
+import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -30,6 +34,7 @@ export { createPostgresGitHubDependencyRepositories } from './github-dependency-
 export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
+export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -70,6 +75,20 @@ export function createPostgresGitHubWorkerRepositories(
   };
 }
 
+/**
+ * Builds the Layer 4 non-finance connector-state composition atomically.
+ * Rymessage and OWL (`document-intelligence`) have no member here because they
+ * own no worker persistence table; their durable state is generic connector
+ * settings plus the Layer 2 list/task/tag/notification ports.
+ */
+export function createPostgresNonFinanceConnectorStateRepositories(
+  pool: Pool,
+): NonFinanceConnectorStateRepositories {
+  return {
+    workTodo: createPostgresWorkTodoRepositories(pool),
+  };
+}
+
 export function createPostgresWorkerPersistenceRepositories(
   db: PostgresDatabase,
   pool: Pool,
@@ -80,5 +99,6 @@ export function createPostgresWorkerPersistenceRepositories(
     syncRuns: new PostgresSyncRunRepository(db),
     execution: createPostgresConnectorExecutionRepositories(pool),
     github: createPostgresGitHubWorkerRepositories(pool),
+    connectorState: createPostgresNonFinanceConnectorStateRepositories(pool),
   };
 }

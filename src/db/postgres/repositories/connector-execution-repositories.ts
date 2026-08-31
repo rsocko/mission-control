@@ -25,6 +25,7 @@ import {
   shouldReopenForSourceActivity,
 } from '@/lib/notifications/lifecycle';
 import { getTimezone } from '@/lib/mode';
+import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import { getApnsConfiguration, isApnsConfigured } from '@/lib/push/apns-config';
 import type {
   ConnectorExecutionRepositories,
@@ -2680,10 +2681,8 @@ export function createPostgresConnectorExecutionRepositories(
         // Layer 4 migrated Microsoft To Do hidden-list discovery and the whole
         // Work To Do bridge (ingest/pull/lease/ack/status/reset) behind the
         // portable execution and `connectorState.workTodo` ports, so both are
-        // now supported. Finance/Monarch state is still SQLite-only.
-        if (config.type === 'finance-manager') {
-          throw new UnsupportedConnectorExecutionError('connector-owned state');
-        }
+        // now supported. Layer 5C also composes finance domain state behind
+        // FinanceWorkerPersistence without enabling unrelated legacy workflows.
         if (
           config.type !== 'github-issues'
           && (config.capabilities.dependencyRead || config.capabilities.dependencyWrite)
@@ -2693,7 +2692,10 @@ export function createPostgresConnectorExecutionRepositories(
       },
 
       assertConnectorSupported(connector) {
-        if (connector.syncDomainData) {
+        if (
+          connector.syncDomainData
+          && !normalizeFinanceProviderAlias(connector.type)
+        ) {
           throw new UnsupportedConnectorExecutionError('connector-owned domain state');
         }
         if (connector.type === 'github-issues') return;

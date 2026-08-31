@@ -38,12 +38,18 @@ export async function reconcileFinanceAttention(input: {
 }): Promise<FinanceAttentionRoutingResult> {
   const decisionAt = input.now ?? new Date();
   try {
-    const persistence = (await getWorkerPersistenceRepositories()).finance.attention.routing;
+    const repositories = await getWorkerPersistenceRepositories();
+    const persistence = repositories.finance.attention.routing;
     const { summary, hasPendingDelivery } = await persistence.reconcile({
       connectorId: input.connectorId,
       decisionAt,
     });
-    if (hasPendingDelivery) wakeNotificationDeliveryDispatcher();
+    if (
+      hasPendingDelivery
+      && repositories.execution.support.allowsLegacyWorkflow('notification-dispatcher')
+    ) {
+      wakeNotificationDeliveryDispatcher();
+    }
     return summary;
   } catch (error) {
     if (error instanceof FinanceAttentionRoutingError) throw error;

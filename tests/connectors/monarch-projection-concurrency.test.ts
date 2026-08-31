@@ -36,7 +36,7 @@ const controls = vi.hoisted(() => {
 });
 
 vi.mock('@/db', () => ({ default: {} }));
-vi.mock('@/lib/connectors/monarch-money/snapshot-sync', () => ({
+vi.mock('@/lib/connectors/monarch-money/snapshot-synchronizer', () => ({
   FinanceSnapshotSynchronizer: class {
     async sync() {
       if (controls.transactionFailure) throw new Error('Invented transaction failure');
@@ -46,7 +46,7 @@ vi.mock('@/lib/connectors/monarch-money/snapshot-sync', () => ({
   },
   updateFinanceCategory: vi.fn(),
 }));
-vi.mock('@/lib/connectors/monarch-money/dataset-sync', () => ({
+vi.mock('@/lib/connectors/monarch-money/dataset-synchronizer', () => ({
   FinanceDatasetSynchronizer: class {
     async sync() {
       controls.datasetCalls++;

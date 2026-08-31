@@ -32,8 +32,8 @@ import {
 } from './attribution-contract';
 import {
   createFinanceIdentityNamespace,
-  ensureFinanceIdentityNamespace,
 } from './identity';
+import { ensureFinanceIdentityNamespace } from './identity-sqlite';
 
 type ActorType = 'parent-admin' | 'service';
 type ExceptionStatus = 'open' | 'retry_requested' | 'resolved' | 'dismissed';

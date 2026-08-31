@@ -73,8 +73,18 @@ describe('PostgreSQL generic connector execution support', () => {
     }
   });
 
+  it.each(['finance', 'finance-manager', 'monarch-money'])(
+    'accepts Layer 5C finance domain execution for %s',
+    (type) => {
+      expect(() => support.assertConfigSupported(config({ type }))).not.toThrow();
+      expect(() => support.assertConnectorSupported({
+        type,
+        syncDomainData: () => undefined,
+      })).not.toThrow();
+    },
+  );
+
   it.each([
-    ['connector-owned finance', config({ type: 'finance-manager' })],
     ['dependency relationships', config({
       capabilities: {
         ...config().capabilities,

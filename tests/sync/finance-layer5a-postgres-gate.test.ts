@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  sqliteModuleEvaluations: 0,
   sqliteTouch: vi.fn(),
   snapshotSync: vi.fn(async () => ({
     itemsAdded: 2,
@@ -14,15 +15,33 @@ const mocks = vi.hoisted(() => ({
     status: 'fresh',
     datasetErrors: {},
   })),
-  historySync: vi.fn(async () => {
-    throw new Error('Layer 5B history must remain gated');
-  }),
-  publication: vi.fn(() => {
-    throw new Error('Layer 5B publication must remain gated');
-  }),
-  prune: vi.fn(() => {
-    throw new Error('Layer 5B occurrence cache must remain gated');
-  }),
+  historySync: vi.fn(async () => ({
+    generationId: 'synthetic-history-generation',
+    sourceAsOf: '2026-08-30T12:00:00.000Z',
+    itemCount: 1,
+    coverageStart: '2026-08-01',
+    coverageEnd: '2026-08-30',
+  })),
+  publication: vi.fn(async () => ({
+    status: 'published',
+    publicationId: 'synthetic-publication',
+  })),
+  ingestion: vi.fn(async () => ({
+    status: 'completed',
+    itemCount: 1,
+    notificationsProcessed: 1,
+    notificationsAdded: 1,
+  })),
+  prune: vi.fn(async () => 1),
+  attention: vi.fn(async () => ({
+    evaluated: 1,
+    notificationsCreated: 1,
+    taskPromoted: 0,
+    autoIncluded: 0,
+    deferred: 0,
+    settled: 0,
+    stalePreserved: 0,
+  })),
 }));
 
 vi.mock('@/db/runtime-backend', () => ({
@@ -30,6 +49,7 @@ vi.mock('@/db/runtime-backend', () => ({
 }));
 
 vi.mock('@/db', () => {
+  mocks.sqliteModuleEvaluations++;
   const forbidden = new Proxy({}, {
     get() {
       mocks.sqliteTouch();
@@ -39,14 +59,13 @@ vi.mock('@/db', () => {
   return { default: forbidden, db: forbidden, sqlite: forbidden };
 });
 
-vi.mock('@/lib/connectors/monarch-money/snapshot-sync', () => ({
+vi.mock('@/lib/connectors/monarch-money/snapshot-synchronizer', () => ({
   FinanceSnapshotSynchronizer: class {
     sync = mocks.snapshotSync;
   },
-  updateFinanceCategory: vi.fn(),
 }));
 
-vi.mock('@/lib/connectors/monarch-money/dataset-sync', () => ({
+vi.mock('@/lib/connectors/monarch-money/dataset-synchronizer', () => ({
   FinanceDatasetSynchronizer: class {
     sync = mocks.datasetSync;
   },
@@ -58,20 +77,25 @@ vi.mock('@/lib/connectors/monarch-money/finance-insight-history-sync', () => ({
   },
 }));
 
-vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
-  applyManualAttributionDecision: vi.fn(),
-}));
-
 vi.mock('@/lib/finance-insights/publication', () => ({
   captureFinanceInsightPublication: mocks.publication,
+}));
+
+vi.mock('@/lib/finance-insights/orchestrator', () => ({
+  findFinanceInsightContinuationPublicationId: vi.fn(),
+  runFinanceInsightIngestion: mocks.ingestion,
 }));
 
 vi.mock('@/lib/finance-insights/occurrence-cache', () => ({
   pruneFinanceInsightOccurrenceCache: mocks.prune,
 }));
 
-describe('Layer 5A PostgreSQL finance gate', () => {
-  it('returns after the portable core projection without entering Layer 5B', async () => {
+vi.mock('@/lib/finance/attention-routing', () => ({
+  reconcileFinanceAttention: mocks.attention,
+}));
+
+describe('Layer 5C PostgreSQL finance activation', () => {
+  it('runs the complete portable finance flow without evaluating SQLite', async () => {
     const { FinanceManagerConnector } = await import(
       '@/lib/connectors/monarch-money'
     );
@@ -103,12 +127,16 @@ describe('Layer 5A PostgreSQL finance gate', () => {
       itemsRemoved: 1,
       status: 'fresh',
       datasetErrors: {},
+      notificationsAdded: 2,
     });
     expect(mocks.snapshotSync).toHaveBeenCalledOnce();
     expect(mocks.datasetSync).toHaveBeenCalledOnce();
-    expect(mocks.historySync).not.toHaveBeenCalled();
-    expect(mocks.publication).not.toHaveBeenCalled();
-    expect(mocks.prune).not.toHaveBeenCalled();
+    expect(mocks.historySync).toHaveBeenCalledOnce();
+    expect(mocks.publication).toHaveBeenCalledOnce();
+    expect(mocks.ingestion).toHaveBeenCalledOnce();
+    expect(mocks.prune).toHaveBeenCalledOnce();
+    expect(mocks.attention).toHaveBeenCalledOnce();
+    expect(mocks.sqliteModuleEvaluations).toBe(0);
     expect(mocks.sqliteTouch).not.toHaveBeenCalled();
   });
 });

@@ -9,27 +9,17 @@ import type {
   DomainSyncContext,
   DomainSyncResult,
 } from '@/types';
-import db from '@/db';
-import {
-  financeTransactions,
-} from '@/db/schema';
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
 } from './client';
-import {
-  FinanceSnapshotSynchronizer,
-  updateFinanceCategory,
-} from './snapshot-sync';
-import { FinanceDatasetSynchronizer } from './dataset-sync';
+import { FinanceSnapshotSynchronizer } from './snapshot-synchronizer';
+import { FinanceDatasetSynchronizer } from './dataset-synchronizer';
 import { FinanceInsightHistorySynchronizer } from './finance-insight-history-sync';
-import { applyManualAttributionDecision } from './attribution-service';
 import { captureFinanceInsightPublication } from '@/lib/finance-insights/publication';
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
 import logger from '@/lib/logger';
 import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 export {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -138,14 +128,6 @@ export class FinanceManagerConnector implements IConnector {
         status: transactionError ? 'partial' : datasets.status,
         datasetErrors,
       };
-      // Layer 5A makes the core projection portable, but the insight/history,
-      // notification, attention, and mutation surfaces below remain Layer 5B.
-      // Normal PostgreSQL execution still fails closed in execution support;
-      // this second fence prevents a direct invocation from creating a split
-      // SQLite/PostgreSQL run.
-      if (resolveDatabaseBackend() === 'postgres') {
-        return result;
-      }
       if (result.status === 'fresh' && Object.keys(datasetErrors).length === 0) {
         try {
           await new FinanceInsightHistorySynchronizer(config).sync(context);
@@ -259,6 +241,15 @@ export class FinanceManagerConnector implements IConnector {
   // ─── Query ─────────────────────────────────────────────────────────────────
 
   async getTransactions(filters: TransactionFilters = {}) {
+    const [
+      { default: db },
+      { financeTransactions },
+      { eq, and, gte, lte, sql },
+    ] = await Promise.all([
+      import('@/db'),
+      import('@/db/schema'),
+      import('drizzle-orm'),
+    ]);
     const config = this.requireConfig();
     const conditions = [
       eq(financeTransactions.connectorInstanceId, config.id),
@@ -303,6 +294,7 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey?: string,
     signal?: AbortSignal,
   ): Promise<{ idempotencyKey: string; status: 'updated' }> {
+    const { updateFinanceCategory } = await import('./snapshot-sync');
     return updateFinanceCategory(
       this.requireConfig(),
       transactionId,
@@ -318,6 +310,7 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey: string,
     actorType: 'parent-admin' | 'service',
   ) {
+    const { applyManualAttributionDecision } = await import('./attribution-service');
     return applyManualAttributionDecision({
       connectorId: this.requireConfig().id,
       transactionId,

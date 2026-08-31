@@ -93,7 +93,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   }),
 }));
 
-vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
+vi.mock('@/lib/connectors/monarch-money/attribution-coordinator', () => ({
   FinanceAttributionCoordinator: class {
     attributePage = mocks.attributePage;
     finish = mocks.finishAttribution;

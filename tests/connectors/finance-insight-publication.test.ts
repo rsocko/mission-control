@@ -30,7 +30,7 @@ let replaceFinanceInsightOccurrenceCache:
 let readFinanceInsightOccurrenceCache:
   typeof import('@/lib/finance-insights/occurrence-cache')['readFinanceInsightOccurrenceCache'];
 let ensureFinanceIdentityNamespace:
-  typeof import('@/lib/connectors/monarch-money/identity')['ensureFinanceIdentityNamespace'];
+  typeof import('@/lib/connectors/monarch-money/identity-sqlite')['ensureFinanceIdentityNamespace'];
 let financeConnectorScopedReference:
   typeof import('@/lib/connectors/monarch-money/identity')['financeConnectorScopedReference'];
 
@@ -448,10 +448,12 @@ beforeAll(async () => {
     replaceFinanceInsightOccurrenceCache,
     readFinanceInsightOccurrenceCache,
   } = await import('@/lib/finance-insights/occurrence-cache'));
-  ({
-    ensureFinanceIdentityNamespace,
-    financeConnectorScopedReference,
-  } = await import('@/lib/connectors/monarch-money/identity'));
+  ({ ensureFinanceIdentityNamespace } = await import(
+    '@/lib/connectors/monarch-money/identity-sqlite'
+  ));
+  ({ financeConnectorScopedReference } = await import(
+    '@/lib/connectors/monarch-money/identity'
+  ));
 });
 
 beforeEach(clearProjection);

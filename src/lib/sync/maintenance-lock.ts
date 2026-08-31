@@ -1,4 +1,3 @@
-import { sqlite } from '@/db';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 export interface ConnectorMaintenanceLock {
@@ -8,37 +7,6 @@ export interface ConnectorMaintenanceLock {
   reason: string;
   acquiredAt: string;
   updatedAt: string;
-}
-
-/**
- * SQLite-only, synchronous lookup. Kept exactly as-is for existing callers
- * that depend on it running synchronously. New callers that must work under
- * either backend should use `assertConnectorMaintenanceUnlockedAsync` below.
- */
-export function getConnectorMaintenanceLock(
-  connectorInstanceId: string,
-): ConnectorMaintenanceLock | null {
-  const row = sqlite.prepare(`
-    SELECT
-      connector_instance_id AS connectorInstanceId,
-      operation_id AS operationId,
-      actor,
-      reason,
-      acquired_at AS acquiredAt,
-      updated_at AS updatedAt
-    FROM connector_maintenance_locks
-    WHERE connector_instance_id = ?
-  `).get(connectorInstanceId) as ConnectorMaintenanceLock | undefined;
-  return row ?? null;
-}
-
-export function assertConnectorMaintenanceUnlocked(connectorInstanceId: string): void {
-  const lock = getConnectorMaintenanceLock(connectorInstanceId);
-  if (lock) {
-    throw new Error(
-      `Connector is locked for maintenance by operation ${lock.operationId}`,
-    );
-  }
 }
 
 /**
@@ -63,5 +31,6 @@ export async function assertConnectorMaintenanceUnlockedAsync(
     }
     return;
   }
+  const { assertConnectorMaintenanceUnlocked } = await import('./sqlite-maintenance-lock');
   assertConnectorMaintenanceUnlocked(connectorInstanceId);
 }

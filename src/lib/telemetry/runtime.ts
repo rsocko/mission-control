@@ -9,11 +9,6 @@ import {
   PerformanceObserver,
   type PerformanceEntry,
 } from 'node:perf_hooks';
-import {
-  getDatabaseTelemetry,
-  sqlite,
-  withoutDatabaseObservation,
-} from '@/db';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import logger from '@/lib/logger';
 import {
@@ -189,6 +184,14 @@ interface TelemetryDatabase {
     run(...parameters: unknown[]): unknown;
     all(...parameters: unknown[]): unknown[];
   };
+}
+
+type SQLiteRuntime = typeof import('@/db');
+let sqliteRuntime: SQLiteRuntime | null = null;
+
+async function loadSQLiteRuntime(): Promise<SQLiteRuntime> {
+  sqliteRuntime ??= await import('@/db');
+  return sqliteRuntime;
 }
 
 const GLOBAL_KEY = '__mc_runtime_telemetry__';
@@ -1001,6 +1004,9 @@ export class RuntimeTelemetryMonitor {
    */
   sampleAndPersist(now?: number): Promise<RuntimeMetrics> {
     const pending = this.persistenceChain.then(async () => {
+      if (resolveDatabaseBackend() === 'sqlite') {
+        await loadSQLiteRuntime();
+      }
       const metrics = this.sample(now ?? performance.now());
       try {
         await this.persist(metrics);
@@ -1069,8 +1075,8 @@ export class RuntimeTelemetryMonitor {
       active: this.activeRequests,
       peakActive: this.peakActiveRequests,
     };
-    const database = resolveDatabaseBackend() === 'sqlite'
-      ? getDatabaseTelemetry()
+    const database = resolveDatabaseBackend() === 'sqlite' && sqliteRuntime
+      ? sqliteRuntime.getDatabaseTelemetry()
       : undefined;
     const eventLoopCorrelation = database
       ? {
@@ -1268,6 +1274,7 @@ export class RuntimeTelemetryMonitor {
       );
       return;
     }
+    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
     withoutDatabaseObservation(() => {
       const restartReason = process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced';
       sqlite.prepare(`
@@ -1306,6 +1313,7 @@ export class RuntimeTelemetryMonitor {
       );
       return;
     }
+    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
     withoutDatabaseObservation(() => maintainRuntimeTelemetryHistory(sqlite));
   }
 
@@ -1321,6 +1329,7 @@ export class RuntimeTelemetryMonitor {
       );
       return;
     }
+    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
     withoutDatabaseObservation(() => {
       sqlite.prepare(`
         UPDATE runtime_telemetry_instances
@@ -1362,6 +1371,7 @@ export class RuntimeTelemetryMonitor {
       }
       return;
     }
+    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
     withoutDatabaseObservation(() => {
       const serialized = JSON.stringify(metrics);
       sqlite.prepare(`
@@ -1473,6 +1483,7 @@ export async function getRuntimeTelemetry(): Promise<RuntimeTelemetryRecord[]> {
     ]);
     return getPostgresRuntimeTelemetry(getPostgresPersistenceBackend().context.pool);
   }
+  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
       SELECT role, instance_id AS instanceId, pid, started_at AS startedAt,
         heartbeat_at AS heartbeatAt, metrics
@@ -1519,6 +1530,7 @@ export async function getRuntimeTelemetryHistory(
       });
     }
 
+    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
     const roleFilter = hoursOrOptions.role ? 'AND role = ?' : '';
     const query = sqlite.prepare(`
       SELECT id, role, instanceId, pid, sampledAt, resolutionSeconds, metrics
@@ -1559,6 +1571,7 @@ export async function getRuntimeTelemetryHistory(
     });
   }
 
+  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
       SELECT id, role, instance_id AS instanceId, pid, sampled_at AS sampledAt,
         resolution_seconds AS resolutionSeconds, metrics
@@ -1584,6 +1597,7 @@ export async function getRuntimeTelemetryAlertHistory(
     ]);
     return getPostgresRuntimeTelemetryAlertHistory(getPostgresPersistenceBackend().context.pool, hours);
   }
+  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
   const boundedHours = Math.min(72, Math.max(1, hours));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`
@@ -1627,6 +1641,7 @@ export async function getRuntimeTelemetryInstances(hours = 72): Promise<RuntimeT
     ]);
     return getPostgresRuntimeTelemetryInstances(getPostgresPersistenceBackend().context.pool, hours);
   }
+  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
   const boundedHours = Math.min(72, Math.max(1, hours));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
   const rows = withoutDatabaseObservation(() => sqlite.prepare(`

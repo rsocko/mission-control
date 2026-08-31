@@ -1,5 +1,6 @@
 import type { FinanceAttributionPersistence } from './finance-attribution';
 import type { FinanceAttentionPersistence } from './finance-attention';
+import type { FinanceConnectionRecoveryPersistence } from './finance-recovery';
 import type { FinanceDatasetPersistence } from './finance-datasets';
 import type { FinanceInsightPersistence } from './finance-insights';
 import type { FinanceSnapshotPersistence } from './finance-snapshot';
@@ -33,4 +34,5 @@ export interface FinanceCorePersistence {
 export interface FinanceWorkerPersistence extends FinanceCorePersistence {
   readonly insights: FinanceInsightPersistence;
   readonly attention: FinanceAttentionPersistence;
+  readonly recovery: FinanceConnectionRecoveryPersistence;
 }

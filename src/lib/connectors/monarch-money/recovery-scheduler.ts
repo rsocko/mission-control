@@ -1,6 +1,5 @@
 import 'server-only';
 
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import logger from '@/lib/logger';
 import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
@@ -12,7 +11,6 @@ export class FinanceConnectionRecoveryScheduler {
 
   async start(): Promise<void> {
     if (this.timer) return;
-    if (resolveDatabaseBackend() === 'postgres') return;
     await this.run();
     this.timer = setInterval(() => void this.run(), MONITOR_INTERVAL_MS);
   }

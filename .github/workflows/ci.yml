@@ -515,6 +515,9 @@ jobs:
           test "$(psql --tuples-only --no-align --command \
             "SELECT extversion FROM pg_extension WHERE extname = 'vector'")" = "0.8.6"
 
+      - name: Build packaged sync worker
+        run: npm run build:worker
+
       - name: Locate pgvector service container
         shell: bash
         run: |

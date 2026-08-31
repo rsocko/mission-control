@@ -59,8 +59,12 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
     delete: (id) => requirePostgresRepositories().projects.delete(id),
   },
   connectors: {
+    listEnabled: () => requirePostgresRepositories().connectors.listEnabled(),
     get: (id) => requirePostgresRepositories().connectors.get(id),
     upsert: (connector) => requirePostgresRepositories().connectors.upsert(connector),
+    updateCredentials: (id, credentials, settings) => (
+      requirePostgresRepositories().connectors.updateCredentials(id, credentials, settings)
+    ),
     delete: (id) => requirePostgresRepositories().connectors.delete(id),
     mergeSettings: (id, currentSettings, patch) => (
       requirePostgresRepositories().connectors.mergeSettings(id, currentSettings, patch)

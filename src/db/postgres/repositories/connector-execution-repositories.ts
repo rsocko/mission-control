@@ -801,13 +801,14 @@ async function ingestNotification(
         level, level_rank, category, template_key, state, read_state,
         disposition, source_state, sync_state, source_resolved_at,
         last_source_activity_at, last_source_activity_key, last_source_synced_at,
-        is_actionable, primary_action_id, received_at, sort_at, related_task_id,
+        is_actionable, primary_action_id, received_at, sort_at, group_key,
+        dedupe_key, related_task_id,
         related_project_id, related_entity_type, related_entity_id,
         navigation_target, metadata, presentation
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
         $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30
+        $25, $26, $27, $28, $29, $30, $31, $32
       )
       ON CONFLICT(source_id) DO NOTHING
       RETURNING id
@@ -836,6 +837,8 @@ async function ingestNotification(
       input.primaryActionId,
       input.receivedAt,
       input.sortAt,
+      input.groupKey ?? null,
+      input.dedupeKey ?? null,
       input.relatedTaskId,
       input.relatedProjectId,
       input.relatedEntityType,
@@ -924,16 +927,18 @@ async function ingestNotification(
           last_source_activity_key = COALESCE($13, last_source_activity_key),
           last_source_synced_at = $11,
           sort_at = CASE WHEN $14 THEN COALESCE($12, $11) ELSE sort_at END,
-          related_task_id = $15,
-          related_project_id = $16,
-          related_entity_type = $17,
-          related_entity_id = $18,
-          navigation_target = $19,
-          metadata = $20,
-          presentation = $21,
-          is_actionable = $22,
-          primary_action_id = $23
-        WHERE id = $24
+          group_key = $15,
+          dedupe_key = $16,
+          related_task_id = $17,
+          related_project_id = $18,
+          related_entity_type = $19,
+          related_entity_id = $20,
+          navigation_target = $21,
+          metadata = $22,
+          presentation = $23,
+          is_actionable = $24,
+          primary_action_id = $25
+        WHERE id = $26
       `,
       [
         input.title,
@@ -954,6 +959,8 @@ async function ingestNotification(
         input.sourceActivityAt,
         input.sourceActivityKey,
         reopen,
+        input.groupKey ?? null,
+        input.dedupeKey ?? null,
         input.relatedTaskId,
         input.relatedProjectId,
         input.relatedEntityType,

@@ -364,7 +364,7 @@ the ingest and acknowledgement commands touch. SQLite JSON text versus
 PostgreSQL `jsonb`, and integer versus native booleans, are adapter mapping
 differences rather than schema gaps.
 
-### Layers 5A-5C: Monarch finance worker persistence
+### Layers 5-8: complete PostgreSQL worker persistence
 
 Layer 5A adds the atomic `FinanceWorkerPersistence` composition for Monarch
 identity, transaction snapshots, reference datasets, and attribution. Layer 5B
@@ -383,14 +383,22 @@ instead of driver rows. The API and Monarch orchestration modules now use these
 ports for the migrated operations; external connector traffic and dispatcher
 wakeups remain outside adapter transactions.
 
-Layer 5C activates the packaged finance worker on PostgreSQL. Its static
-execution graph uses portable snapshot, dataset, attribution, history,
-publication, notification-ingestion, occurrence, and attention modules.
-SQLite-only finance query/manual-mutation helpers are loaded lazily only by
-those explicit compatibility APIs. The SQLite connection-recovery monitor is
-also lazy and does not start on PostgreSQL. Runtime poison tests and a packaged
-artifact ratchet prevent the PostgreSQL finance path from evaluating `@/db`,
-SQLite drivers, schema modules, or raw SQLite adapters.
+Layer 5C activates the packaged finance worker on PostgreSQL. Its execution
+graph uses portable snapshot, dataset, attribution, history, publication,
+notification-ingestion, occurrence, and attention modules. Layer 6 ports the
+notification delivery dispatcher and task reminders, Layer 7 ports scheduled
+triage imports, and Layer 8 ports Monarch connection-outage recovery through a
+`FinanceWorkerPersistence.recovery` member. The recovery adapters preserve the
+existing episode fence, deterministic notification/task identities, bounded
+verification, escalation thresholds, and restart settlement semantics.
+
+The Layer 8 composition check is atomic: `core`, `syncRuns`, `execution`,
+`github`, `finance` (including `recovery`), `notificationDelivery`, `reminders`,
+and `triage` must all be registered before the PostgreSQL worker starts. Missing
+registration fails closed and cannot construct the SQLite composition. SQLite
+control state, maintenance locks, connector leases, FTS, database telemetry,
+connector configuration, and Microsoft token persistence are selected lazily
+or resolved through backend-neutral repositories.
 
 Schema-parity result: **no migration was required**. The existing finance
 history, projection, backfill, publication, occurrence, notification/action/
@@ -399,28 +407,37 @@ carry the required uniqueness, ordering, checkpoint, and fencing state on both
 backends. SQLite text JSON/timestamps and PostgreSQL native JSON/timestamps are
 adapter mapping differences.
 
-The exact PostgreSQL worker support matrix after Layer 5C is:
+The exact PostgreSQL worker support matrix after Layer 8 is:
 
 | Surface | PostgreSQL worker status |
 | --- | --- |
+| Startup, graceful shutdown, repository registration, and queue polling | Supported; registration is atomic and fail closed |
+| Connector execution, retries, stale claims/leases, cancellation, and restart recovery | Supported with durable claim-token and CAS fencing |
+| GitHub dependency/project execution and deletion candidate recovery | Supported through the GitHub worker repositories |
 | `finance`, `finance-manager`, or `monarch-money` with `syncDomainData` | Supported through the complete `FinanceWorkerPersistence` composition |
 | Non-finance connector exposing `syncDomainData` | Rejected before remote dispatch |
 | Non-GitHub dependency or project state | Rejected before remote dispatch |
-| Finance notification/action/outbox persistence | Supported and durable |
-| Notification delivery dispatcher and reminders (Layer 6) | Disabled; finance execution does not imply dispatcher support |
-| Monarch connection-outage recovery (Layer 8) | Disabled on PostgreSQL |
-| Scheduled triage importer (Layer 7) | Disabled on PostgreSQL |
+| Finance notification/action/outbox persistence and delivery wake | Supported and durable |
+| Notification delivery dispatcher and reminders (Layer 6) | Supported with durable claims, delivery attempts, and reminder leases |
+| Scheduled triage importer (Layer 7) | Supported with revision-fenced source leases |
+| Monarch connection-outage recovery (Layer 8) | Supported with episode fencing, bounded verification, escalation, and settlement |
+| Health snapshots, runtime telemetry, Houston retention, and cron scheduling | Supported without loading the SQLite singleton |
 
-`allowsLegacyWorkflow('notification-dispatcher')` remains false. Finance
-attention and ingestion may commit pending delivery rows, but wake the dispatcher
-only when that independent support gate is enabled. No PostgreSQL execution path
-falls back to SQLite.
+The final guard starts at the real packaged entry, `src/sync-worker.ts`. It
+walks the PostgreSQL source import graph, rejects eager Mission Control SQLite
+modules and drivers, asserts the exact legacy entry gates, and verifies every
+scheduler family is reachable. The bundle ratchet inspects
+`dist/sync-worker.cjs`, while the live PostgreSQL composition smoke poisons
+SQLite loading, executes representative queue/retry/recovery behavior, starts
+all registered schedulers, gracefully stops, restarts, and rechecks durable
+fences. These checks prove worker persistence parity; they do not assert web/API
+parity or production activation.
 
 Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
 closed under PostgreSQL *before* any remote effect: identity backfill and
 status, manual identity-exception mutation, unknown
-write-outcome resolution, interrupted write-cycle recovery, reminders, triage,
-and semantic/project automation. Connector-owned Work To Do bridge
+write-outcome resolution, interrupted write-cycle recovery, durable AI runs,
+semantic indexing, and project rule/planning automation. Connector-owned Work To Do bridge
 state and Microsoft To Do hidden-list state are no longer in that list —
 Layer 4 migrates both. Historical task-transfer succession filtering is
 portable: both hierarchy adapters recompute a JSON-order-independent proof
@@ -438,9 +455,9 @@ dispatch. SQLite continues to use its compatibility implementations for the
 remaining legacy workflows.
 Generic PostgreSQL runs use the backend-selected keyword search repository
 after commit. SQLite-only semantic enrichment, project-rule/planning
-post-processing, the legacy outbound-event outbox, and the legacy notification
-dispatcher are not invoked from that path; their durable rows remain available
-for later backend-specific workers rather than falling back to SQLite.
+post-processing, the legacy outbound-event outbox, and durable AI runs are not
+invoked from that path; their durable rows remain available for later
+backend-specific workers rather than falling back to SQLite.
 
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health

@@ -1,5 +1,4 @@
 import { generateText } from 'ai';
-import { getAIModel } from '@/lib/ai/provider-factory';
 import logger from '@/lib/logger';
 import type { TriageItem } from '@/types';
 
@@ -60,6 +59,7 @@ export async function extractMultipleActions(item: TriageItem): Promise<MultiAct
   const contentStr = buildContentString(item);
 
   try {
+    const { getAIModel } = await import('@/lib/ai/provider-factory');
     const route = getAIModel('triage-action-extraction', {
       sources: item.sourcePlatform ? [item.sourcePlatform] : [],
     });

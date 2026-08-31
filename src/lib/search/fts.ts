@@ -1,4 +1,3 @@
-import { sqliteKeywordSearchRepository } from './sqlite-fts-repository';
 import type { KeywordSearchRepository } from './repository';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
@@ -18,6 +17,7 @@ async function getKeywordSearchRepository(): Promise<KeywordSearchRepository> {
     const { getPostgresKeywordSearchRepository } = await import('@/db/runtime');
     return getPostgresKeywordSearchRepository();
   }
+  const { sqliteKeywordSearchRepository } = await import('./sqlite-fts-repository');
   return sqliteKeywordSearchRepository;
 }
 

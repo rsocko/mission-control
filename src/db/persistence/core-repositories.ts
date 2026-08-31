@@ -26,7 +26,14 @@ export interface ProjectRepository {
 
 export interface ConnectorRepository {
   get(id: string): Promise<ConnectorConfig | null>;
+  listEnabled(): Promise<ConnectorConfig[]>;
   upsert(connector: ConnectorConfig): Promise<ConnectorConfig>;
+  /** Updates credentials and atomically merges an optional authentication settings patch. */
+  updateCredentials(
+    id: string,
+    credentials: ConnectorConfig['credentials'],
+    settingsPatch?: Record<string, unknown>,
+  ): Promise<void>;
   /** Removes the connector from the active configuration set. */
   delete(id: string): Promise<boolean>;
   mergeSettings(

@@ -53,6 +53,14 @@ export class PostgresConnectorRepository implements ConnectorRepository {
     return row ? toConnectorConfig(row) : null;
   }
 
+  async listEnabled(): Promise<ConnectorConfig[]> {
+    const rows = await this.db
+      .select()
+      .from(connectorConfigs)
+      .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
+    return rows.map(toConnectorConfig);
+  }
+
   async upsert(connector: ConnectorConfig): Promise<ConnectorConfig> {
     const now = new Date().toISOString();
     const values = {
@@ -91,6 +99,41 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       })
       .returning();
     return toConnectorConfig(row);
+  }
+
+  async updateCredentials(
+    id: string,
+    credentials: ConnectorConfig['credentials'],
+    settingsPatch?: Record<string, unknown>,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    if (settingsPatch === undefined) {
+      const updated = await this.db
+        .update(connectorConfigs)
+        .set({ credentials, updatedAt: now })
+        .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
+        .returning({ id: connectorConfigs.id });
+      if (updated.length !== 1) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      return;
+    }
+    await this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .select({ settings: connectorConfigs.settings })
+        .from(connectorConfigs)
+        .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
+        .limit(1)
+        .for('update');
+      if (!row) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      const settings = mergeConnectorSettings(toSettings(row.settings), settingsPatch);
+      await tx
+          .update(connectorConfigs)
+          .set({ credentials, settings, updatedAt: now })
+          .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)));
+    });
   }
 
   async delete(id: string): Promise<boolean> {

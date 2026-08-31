@@ -1,19 +1,14 @@
 import { performance } from 'node:perf_hooks';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import db, { withoutDatabaseObservation } from '@/db';
-import { connectorConfigs, syncLog } from '@/db/schema';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
-import { getProviderInfo } from '@/lib/ai/provider-factory';
 import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features';
 import logger from '@/lib/logger';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { getDependencyRelationshipDegradation } from '@/lib/sync/dependency-health';
 import {
   getSyncJobRepository,
   type SyncQueueMetrics,
 } from '@/lib/sync/job-queue';
 import {
-  getDependencyReconciliationHealth,
   type DependencyReconciliationProgress,
 } from '@/lib/sync/task-dependency-manager';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
@@ -120,49 +115,57 @@ export async function buildMaterializedHealthSummary(
     dependencyHealth,
     workerProcesses,
     syncQueue,
-  } = await withoutDatabaseObservation(async () => {
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { collectPostgresHealthSnapshotData }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/health-snapshot-data'),
-      ]);
-      const {
-        configs,
-        latestSyncPerConnector,
-        latestSuccessfulSyncPerConnector,
-        dependencyHealth,
-      } = await collectPostgresHealthSnapshotData(
-        getPostgresPersistenceBackend().context.db,
-        { maxConnectors: MAX_CONNECTORS, shouldDefer },
-      );
-      return {
-        configs,
-        latestSyncPerConnector,
-        latestSuccessfulSyncPerConnector,
-        dependencyHealth,
-        workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
-        syncQueue: await (await getSyncJobRepository()).getMetrics(),
-      };
-    }
-
-    const configs = await db
-      .select()
-      .from(connectorConfigs)
-      .where(isNull(connectorConfigs.deletedAt))
-      .limit(MAX_CONNECTORS + 1);
-    if (configs.length > MAX_CONNECTORS) {
-      throw new Error(`Health snapshot connector limit of ${MAX_CONNECTORS} exceeded`);
-    }
-    ensureHealthSnapshotCanRun(shouldDefer);
-    const connectorIds = configs.map((config) => config.id);
-    let latestSyncPerConnector: Array<typeof syncLog.$inferSelect> = [];
-    let latestSuccessfulSyncPerConnector: Array<{
-      connectorId: string;
-      syncedAt: string;
-    }> = [];
-    let dependencyHealth = new Map<string, DependencyReconciliationProgress>();
-    if (connectorIds.length > 0) {
-      latestSyncPerConnector = await db
+  } = resolveDatabaseBackend() === 'postgres'
+    ? await (async () => {
+        const [
+          { getPostgresPersistenceBackend },
+          { collectPostgresHealthSnapshotData },
+        ] = await Promise.all([
+          import('@/db/runtime'),
+          import('@/db/postgres/health-snapshot-data'),
+        ]);
+        const snapshot = await collectPostgresHealthSnapshotData(
+          getPostgresPersistenceBackend().context.db,
+          { maxConnectors: MAX_CONNECTORS, shouldDefer },
+        );
+        return {
+          ...snapshot,
+          workerProcesses: (await getRuntimeTelemetry())
+            .filter((runtime) => runtime.role === 'worker'),
+          syncQueue: await (await getSyncJobRepository()).getMetrics(),
+        };
+      })()
+    : await (async () => {
+        const [
+          { default: db, withoutDatabaseObservation },
+          { connectorConfigs, syncLog },
+          { and, eq, inArray, isNull, sql },
+          { getDependencyReconciliationHealth },
+        ] = await Promise.all([
+          import('@/db'),
+          import('@/db/schema'),
+          import('drizzle-orm'),
+          import('@/lib/sync/task-dependency-manager'),
+        ]);
+        return withoutDatabaseObservation(async () => {
+          const configs = await db
+            .select()
+            .from(connectorConfigs)
+            .where(isNull(connectorConfigs.deletedAt))
+            .limit(MAX_CONNECTORS + 1);
+          if (configs.length > MAX_CONNECTORS) {
+            throw new Error(`Health snapshot connector limit of ${MAX_CONNECTORS} exceeded`);
+          }
+          ensureHealthSnapshotCanRun(shouldDefer);
+          const connectorIds = configs.map((config) => config.id);
+          let latestSyncPerConnector: Array<typeof syncLog.$inferSelect> = [];
+          let latestSuccessfulSyncPerConnector: Array<{
+            connectorId: string;
+            syncedAt: string;
+          }> = [];
+          let dependencyHealth = new Map<string, DependencyReconciliationProgress>();
+          if (connectorIds.length > 0) {
+            latestSyncPerConnector = await db
         .select()
         .from(syncLog)
         .where(and(
@@ -172,8 +175,8 @@ export async function buildMaterializedHealthSummary(
             sql`(SELECT id FROM sync_log AS sl WHERE sl.connector_id = ${syncLog.connectorId} ORDER BY sl.synced_at DESC LIMIT 1)`,
           ),
         ));
-      ensureHealthSnapshotCanRun(shouldDefer);
-      latestSuccessfulSyncPerConnector = await db
+            ensureHealthSnapshotCanRun(shouldDefer);
+            latestSuccessfulSyncPerConnector = await db
         .select({
           connectorId: syncLog.connectorId,
           syncedAt: sql<string>`max(${syncLog.syncedAt})`.as('synced_at'),
@@ -184,19 +187,21 @@ export async function buildMaterializedHealthSummary(
           eq(syncLog.success, true),
         ))
         .groupBy(syncLog.connectorId);
-      ensureHealthSnapshotCanRun(shouldDefer);
-      dependencyHealth = await getDependencyReconciliationHealth(connectorIds, shouldDefer);
-      ensureHealthSnapshotCanRun(shouldDefer);
-    }
-    return {
-      configs,
-      latestSyncPerConnector,
-      latestSuccessfulSyncPerConnector,
-      dependencyHealth,
-      workerProcesses: (await getRuntimeTelemetry()).filter((runtime) => runtime.role === 'worker'),
-      syncQueue: await (await getSyncJobRepository()).getMetrics(),
-    };
-  });
+            ensureHealthSnapshotCanRun(shouldDefer);
+            dependencyHealth = await getDependencyReconciliationHealth(connectorIds, shouldDefer);
+            ensureHealthSnapshotCanRun(shouldDefer);
+          }
+          return {
+            configs,
+            latestSyncPerConnector,
+            latestSuccessfulSyncPerConnector,
+            dependencyHealth,
+            workerProcesses: (await getRuntimeTelemetry())
+              .filter((runtime) => runtime.role === 'worker'),
+            syncQueue: await (await getSyncJobRepository()).getMetrics(),
+          };
+        });
+      })();
 
   const telemetryStaleMs = Math.max(
     30_000,
@@ -272,13 +277,30 @@ export async function buildMaterializedHealthSummary(
     };
   });
 
-  const aiInfo = getProviderInfo();
-  const aiConfigured = getResolvedAIConfig().configured;
+  const savedAIConfig = await getCorePersistenceRepositories().settings.get('ai_provider_config');
+  const aiSettings = savedAIConfig && typeof savedAIConfig === 'object' && !Array.isArray(savedAIConfig)
+    ? savedAIConfig
+    : {};
+  const aiProvider = typeof aiSettings.provider === 'string'
+    ? aiSettings.provider
+    : process.env.AI_PROVIDER || 'openai';
+  const aiModel = typeof aiSettings.model === 'string'
+    ? aiSettings.model
+    : process.env.AI_MODEL || 'gpt-4o-mini';
+  const aiBaseUrl = typeof aiSettings.baseUrl === 'string'
+    ? aiSettings.baseUrl
+    : process.env.AI_BASE_URL;
+  const hasAiApiKey = typeof aiSettings.apiKey === 'string'
+    ? aiSettings.apiKey.length > 0
+    : Boolean(process.env.OPENAI_API_KEY);
+  const aiConfigured = aiProvider === 'ollama'
+    ? true
+    : hasAiApiKey || Boolean(aiBaseUrl);
   const ai = aiConfigured
     ? {
         status: 'healthy' as const,
-        provider: aiInfo.provider,
-        model: aiInfo.model,
+        provider: aiProvider,
+        model: aiModel,
         message: 'Configured',
       }
     : { status: 'disabled' as const, message: 'No AI provider configured' };

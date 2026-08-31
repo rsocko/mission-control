@@ -1,6 +1,5 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { getAIModel } from '@/lib/ai/provider-factory';
 import { getSemanticSourcePort } from '@/lib/semantic-index/source/facade';
 import type { SemanticSourceRecord } from '@/lib/semantic-index/source/contracts';
 import type { HoustonMemoryEntityLink, HoustonMemoryEntityType } from './contracts';
@@ -106,6 +105,7 @@ export interface MinimizedHoustonSummary {
 export async function generateMinimizedHoustonSummary(
   input: z.infer<typeof houstonSummaryCaptureSchema>,
 ): Promise<MinimizedHoustonSummary> {
+  const { getAIModel } = await import('@/lib/ai/provider-factory');
   const route = getAIModel('houston-chat', { sensitivityOverride: 'restricted' });
   const { object } = await generateObject({
     model: route.model,

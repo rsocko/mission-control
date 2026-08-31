@@ -1,4 +1,5 @@
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import {
   HOUSTON_MEMORY_MAX_LIST_LIMIT,
   HOUSTON_MEMORY_SCOPE,
@@ -7,6 +8,8 @@ import {
 } from './contracts';
 
 async function publish(kind: 'upsert' | 'delete', id: string): Promise<void> {
+  // Semantic search remains an explicitly gated legacy workflow on PostgreSQL.
+  if (resolveDatabaseBackend() === 'postgres') return;
   const { publishSemanticDelete, publishSemanticUpsert } = await import(
     '@/lib/semantic-index/runtime'
   );

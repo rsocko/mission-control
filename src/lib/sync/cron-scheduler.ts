@@ -1,11 +1,8 @@
 import type { ScheduledTask } from 'node-cron';
 import cron from 'node-cron';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { and, eq, isNull } from 'drizzle-orm';
 import type { ConnectorConfig, SyncResult } from '@/types';
 import { syncLogger } from '@/lib/logger';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   getSyncJobRepository,
   isDurableSyncMode,
@@ -23,85 +20,12 @@ const STAGGER_DELAY_MS = 30_000;
 const WATCHDOG_INTERVAL_MS = 5 * 60 * 1000;
 const STALE_THRESHOLD_MS = 20 * 60 * 1000;
 
-function configFromRow(row: {
-  id: string;
-  type: string;
-  name: string;
-  enabled: boolean | null;
-  syncMode: string | null;
-  pollIntervalMinutes: number | null;
-  capabilities: unknown;
-  credentials: unknown;
-  settings: unknown;
-  syncedLists: unknown;
-}): ConnectorConfig {
-  return {
-    id: row.id,
-    type: row.type,
-    name: row.name,
-    enabled: row.enabled ?? true,
-    syncMode: (row.syncMode as ConnectorConfig['syncMode']) || 'poll',
-    pollIntervalMinutes: row.pollIntervalMinutes ?? 5,
-    capabilities: (typeof row.capabilities === 'string'
-      ? JSON.parse(row.capabilities)
-      : row.capabilities) as ConnectorConfig['capabilities'],
-    credentials: (typeof row.credentials === 'string'
-      ? JSON.parse(row.credentials)
-      : row.credentials) || {},
-    settings: (typeof row.settings === 'string'
-      ? JSON.parse(row.settings)
-      : row.settings) || {},
-    syncedLists: (typeof row.syncedLists === 'string'
-      ? JSON.parse(row.syncedLists)
-      : row.syncedLists) || [],
-  };
-}
-
-/**
- * Fetches a single connector's config. SQLite keeps its existing direct
- * `connector_configs` query; PostgreSQL uses the portable `ConnectorRepository`
- * contract (`get`), dynamically imported so SQLite-only callers never pull in
- * the PostgreSQL schema/driver graph.
- */
 async function fetchConnectorConfig(connectorId: string): Promise<ConnectorConfig | null> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresCoreRepositories } = await import('@/db/runtime');
-    return getPostgresCoreRepositories().connectors.get(connectorId);
-  }
-  const [row] = await db.select()
-    .from(connectorConfigs)
-    .where(eq(connectorConfigs.id, connectorId))
-    .limit(1);
-  if (!row || row.deletedAt) return null;
-  return configFromRow(row);
+  return (await getWorkerPersistenceRepositories()).connectors.get(connectorId);
 }
 
-/**
- * Lists every enabled, non-deleted connector's config. There is no portable
- * "list connectors" operation on the shared `ConnectorRepository` contract
- * (only get/upsert/delete by id), so PostgreSQL queries `connector_configs`
- * directly here (dynamically imported), matching the SQLite branch's
- * existing direct query rather than routing through a repository that
- * cannot express this yet.
- */
 async function listEnabledConnectorConfigs(): Promise<ConnectorConfig[]> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, pgSchema] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/schema'),
-    ]);
-    const rows = await getPostgresPersistenceBackend().context.db
-      .select()
-      .from(pgSchema.connectorConfigs)
-      .where(and(
-        eq(pgSchema.connectorConfigs.enabled, true),
-        isNull(pgSchema.connectorConfigs.deletedAt),
-      ));
-    return rows.map(configFromRow);
-  }
-  const rows = await db.select().from(connectorConfigs)
-    .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
-  return rows.map(configFromRow);
+  return (await getWorkerPersistenceRepositories()).connectors.listEnabled();
 }
 
 export class SyncCronScheduler {

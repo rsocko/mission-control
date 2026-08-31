@@ -154,7 +154,7 @@ export async function GET(
       if (connector.enabled) {
         try {
           bridge = await new MonarchBridgeClient(config).getHealth();
-          reconcileFinanceConnectionObservation({
+          await reconcileFinanceConnectionObservation({
             connectorId: id,
             observation: { kind: 'health', health: bridge },
           });
@@ -162,7 +162,7 @@ export async function GET(
           bridgeErrorCode = error instanceof MonarchBridgeError
             ? error.code
             : 'bridge_unavailable';
-          reconcileFinanceConnectionObservation({
+          await reconcileFinanceConnectionObservation({
             connectorId: id,
             observation: { kind: 'unavailable', errorCode: bridgeErrorCode },
           });
@@ -281,7 +281,7 @@ export async function GET(
           },
         },
         projection,
-        recovery: getFinanceConnectionRecoveryView(id),
+        recovery: await getFinanceConnectionRecoveryView(id),
       });
     }
 

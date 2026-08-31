@@ -18,8 +18,8 @@ import {
   enqueueSyncJobInCurrentTransaction,
   getSyncJob,
   registerSyncSchedule,
-  type SyncJob,
-} from './job-queue';
+} from './sqlite-job-repository';
+import type { SyncJob } from './job-repository';
 
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{15,159}$/;
 

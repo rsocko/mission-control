@@ -1,7 +1,6 @@
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import type { SyncJobRepository } from './job-repository';
 import type { SyncResult } from '@/types';
-import { enqueueSyncJobInCurrentTransaction as sqliteEnqueueSyncJobInCurrentTransaction } from './sqlite-job-repository';
 
 export type {
   EnqueueSyncJobOptions,
@@ -17,42 +16,6 @@ export type {
   SyncSchedule,
   SyncScheduleHealth,
 } from './job-repository';
-
-export {
-  claimNextSyncJob,
-  completeSyncJob,
-  countQueuedSyncJobs,
-  countRemainingSyncJobs,
-  enqueueDueSyncSchedules,
-  enqueueSyncJob,
-  failSyncJob,
-  finalizeSuccessfulSyncJob,
-  getActiveSyncJobConnectorIds,
-  getLatestDurableSyncResult,
-  getLatestSyncJobEventId,
-  getSyncDurationBudgetMs,
-  getSyncJob,
-  getSyncJobEventsAfter,
-  getSyncLeaseMs,
-  getSyncQueueMetrics,
-  getSyncScheduleHealth,
-  getSyncSchedules,
-  isDurableSyncMode,
-  isSyncJobCancellationRequested,
-  linkSyncLogToJob,
-  markSyncScheduleEnqueued,
-  persistSyncJobEvent,
-  pruneSyncJobs,
-  registerSyncSchedule,
-  releaseSyncJob,
-  renewSyncJobLease,
-  requestSyncJobCancellation,
-  sqliteSyncJobRepository,
-  unregisterSyncSchedule,
-} from './sqlite-job-repository';
-
-import { waitForSyncJob as sqliteWaitForSyncJob } from './sqlite-job-repository';
-import { sqliteSyncJobRepository } from './sqlite-job-repository';
 
 /**
  * Resolves the sync-job-queue adapter for the currently selected database
@@ -72,36 +35,25 @@ export async function getSyncJobRepository(): Promise<SyncJobRepository> {
     const { getPostgresSyncJobRepository } = await import('@/db/runtime');
     return getPostgresSyncJobRepository();
   }
+  const { sqliteSyncJobRepository } = await import('./sqlite-job-repository');
   return sqliteSyncJobRepository;
-}
-
-/**
- * SQLite-only: enqueues a sync job as part of an *ambient* `better-sqlite3`
- * transaction the caller is already inside (see `./sqlite-job-repository`
- * for the transaction-composition rationale). There is no portable
- * equivalent — PostgreSQL transactions are async and scoped to a specific
- * client/connection, so "the current transaction" cannot be threaded
- * through implicitly. Calling this under the PostgreSQL backend fails
- * clearly instead of silently touching SQLite (or the unrelated, wrong,
- * PostgreSQL connection pool). Callers that need a portable, standalone
- * enqueue should use `getSyncJobRepository().enqueue(...)` instead.
- */
-export function enqueueSyncJobInCurrentTransaction(
-  ...args: Parameters<typeof sqliteEnqueueSyncJobInCurrentTransaction>
-): ReturnType<typeof sqliteEnqueueSyncJobInCurrentTransaction> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    throw new Error(
-      'enqueueSyncJobInCurrentTransaction is SQLite-only: PostgreSQL has no portable contract '
-      + 'for enqueueing a sync job inside an ambient transaction. Use '
-      + 'getSyncJobRepository().enqueue(...) instead.',
-    );
-  }
-  return sqliteEnqueueSyncJobInCurrentTransaction(...args);
 }
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export function isDurableSyncMode(): boolean {
+  return process.env.MC_SYNC_EXECUTION_MODE === 'worker';
+}
+
+export function getSyncLeaseMs(): number {
+  return positiveInteger(process.env.MC_SYNC_JOB_LEASE_MS, 120_000);
+}
+
+export function getSyncDurationBudgetMs(): number {
+  return positiveInteger(process.env.MC_SYNC_DURATION_BUDGET_MS, 300_000);
 }
 
 function waitFailedResult(connectorId: string, error: string): SyncResult {
@@ -129,6 +81,7 @@ export async function waitForSyncJob(
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<SyncResult> {
   if (resolveDatabaseBackend() === 'sqlite') {
+    const { waitForSyncJob: sqliteWaitForSyncJob } = await import('./sqlite-job-repository');
     return sqliteWaitForSyncJob(job, options);
   }
 

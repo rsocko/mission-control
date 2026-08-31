@@ -34,11 +34,9 @@ async function main(): Promise<void> {
     { startRuntimeTelemetry, stopRuntimeTelemetry },
     { triageSyncScheduler },
     { publicRuntimeRelease },
-    { DurableAiRunStore, DurableAiRunWorker },
     { WorkerHealthSnapshotScheduler },
     { taskReminderScheduler },
     { financeConnectionRecoveryScheduler },
-    { startSemanticIndexWorker, stopSemanticIndexWorker },
     { houstonMemoryRetentionScheduler },
   ] = await Promise.all([
     import('@/lib/sync'),
@@ -46,13 +44,29 @@ async function main(): Promise<void> {
     import('@/lib/telemetry/runtime'),
     import('@/lib/triage/scheduler'),
     import('@/lib/runtime/release'),
-    import('@/lib/ai/durable-runs'),
     import('@/lib/telemetry/health-snapshot'),
     import('@/lib/push/task-reminder-scheduler'),
     import('@/lib/connectors/monarch-money/recovery-scheduler'),
-    import('@/lib/semantic-index/runtime'),
     import('@/lib/houston-memory/retention'),
   ]);
+
+  const { getWorkerPersistenceRepositories } = await import('@/lib/persistence/worker-runtime');
+  const workerPersistence = await getWorkerPersistenceRepositories();
+  const completeWorkerCompositionPresent = Boolean(
+    workerPersistence.connectors
+    && workerPersistence.syncRuns
+    && workerPersistence.execution
+    && workerPersistence.github
+    && workerPersistence.connectorState
+    && workerPersistence.notificationDelivery
+    && workerPersistence.reminders
+    && workerPersistence.triage
+    && workerPersistence.finance
+    && workerPersistence.finance.recovery,
+  );
+  if (!completeWorkerCompositionPresent) {
+    throw new Error('Selected worker persistence composition is incomplete');
+  }
 
   assertSupportedWorkerReplicaCount();
   syncLogger.info(
@@ -64,31 +78,35 @@ async function main(): Promise<void> {
   const worker = new SyncWorker((connectorId, options) =>
     syncScheduler.runSyncLocally(connectorId, options)
   );
-  const aiRunWorker = new DurableAiRunWorker(
-    new DurableAiRunStore(),
-    new Map(),
-    {
-      reportError: (error, operation, runId) => {
-        syncLogger.error(
-          { err: error, operation, runId },
-          'Durable AI worker operation failed',
-        );
+  let aiRunWorker: { start(): void; stop(): Promise<void> } | null = null;
+  if (process.env.MC_DATABASE_BACKEND !== 'postgres') {
+    const { DurableAiRunStore, DurableAiRunWorker } = await import('@/lib/ai/durable-runs');
+    aiRunWorker = new DurableAiRunWorker(
+      new DurableAiRunStore(),
+      new Map(),
+      {
+        reportError: (error, operation, runId) => {
+          syncLogger.error(
+            { err: error, operation, runId },
+            'Durable AI worker operation failed',
+          );
+        },
       },
-    },
-  );
+    );
+  } else {
+    syncLogger.warn('Sync worker: legacy durable AI run worker is disabled on PostgreSQL');
+  }
   const healthSnapshotScheduler = new WorkerHealthSnapshotScheduler(
     telemetry.instanceId,
     () => worker.hasPendingWork(),
   );
   worker.start();
-  aiRunWorker.start();
+  aiRunWorker?.start();
   await taskReminderScheduler.start();
   syncLogger.info('Sync worker: durable task reminder scheduler initialized');
 
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
-  const { getWorkerPersistenceRepositories } = await import('@/lib/persistence/worker-runtime');
-  const workerPersistence = await getWorkerPersistenceRepositories();
   // The GitHub worker composition is registered atomically, so a present
   // `github` member means every Layer 3A surface (identity/write fence,
   // dependencies, hierarchy, projects) is available on the selected backend.
@@ -122,10 +140,17 @@ async function main(): Promise<void> {
     syncLogger.warn({ err: error }, 'Sync worker: triage auto-sync initialization failed');
   }
 
-  // The semantic index worker parks itself when semantic search is disabled or
-  // no embedding provider is configured, and `startSemanticIndexWorker` never
-  // throws, so it can never keep the sync worker from coming up.
-  const semanticIndexWorker = await startSemanticIndexWorker();
+  let semanticIndexWorker: Awaited<
+    ReturnType<typeof import('@/lib/semantic-index/runtime')['startSemanticIndexWorker']>
+  > = null;
+  let stopSemanticIndexWorker = async (): Promise<void> => {};
+  if (workerPersistence.execution.support.allowsLegacyWorkflow('semantic-search')) {
+    const semanticRuntime = await import('@/lib/semantic-index/runtime');
+    semanticIndexWorker = await semanticRuntime.startSemanticIndexWorker();
+    stopSemanticIndexWorker = semanticRuntime.stopSemanticIndexWorker;
+  } else {
+    syncLogger.warn('Sync worker: semantic index worker is disabled for this persistence backend');
+  }
   houstonMemoryRetentionScheduler.start();
   syncLogger.info(
     { started: semanticIndexWorker !== null },
@@ -141,11 +166,12 @@ async function main(): Promise<void> {
       healthSnapshotScheduler.stop();
       taskReminderScheduler.stop();
       financeConnectionRecoveryScheduler.stop();
+      triageSyncScheduler.stopAll();
       houstonMemoryRetentionScheduler.stop();
       await Promise.all([
         syncScheduler.stopAll(),
         worker.stop(),
-        aiRunWorker.stop(),
+        aiRunWorker?.stop() ?? Promise.resolve(),
         stopSemanticIndexWorker(),
       ]);
       await stopRuntimeTelemetry(signal);

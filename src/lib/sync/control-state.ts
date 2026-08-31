@@ -1,60 +1,9 @@
 import 'server-only';
 
-import { sqlite } from '@/db';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import type { SyncJobSource } from './job-queue';
-import { ConnectorSyncControlError } from './control-state-error';
 
 export { ConnectorSyncControlError } from './control-state-error';
-
-/**
- * SQLite-only, synchronous checks. Kept exactly as-is: `sqlite-job-repository.ts`
- * depends on these running synchronously inside its own `better-sqlite3`
- * transactions. New callers that must work under either backend should use
- * `isConnectorSyncQuarantinedAsync`/`assertConnectorSyncEnqueueAllowedAsync`
- * below instead.
- */
-export function isConnectorSyncQuarantined(connectorId: string): boolean {
-  return sqlite.prepare(`
-    SELECT 1
-    FROM connector_sync_controls
-    WHERE connector_id = ? AND scheduler_state = 'quarantined'
-  `).get(connectorId) !== undefined;
-}
-
-export function assertConnectorSyncEnqueueAllowed(
-  connectorId: string,
-  source: SyncJobSource,
-  operatorCanaryRunId?: string,
-): void {
-  const control = sqlite.prepare(`
-    SELECT quarantine_id AS quarantineId
-    FROM connector_sync_controls
-    WHERE connector_id = ? AND scheduler_state = 'quarantined'
-  `).get(connectorId) as { quarantineId: string | null } | undefined;
-
-  if (!control) {
-    if (source === 'operator-canary') {
-      throw new ConnectorSyncControlError('operator_canary_authorization_invalid');
-    }
-    return;
-  }
-  if (source !== 'operator-canary' || !operatorCanaryRunId) {
-    throw new ConnectorSyncControlError('connector_sync_quarantined');
-  }
-  const authorized = sqlite.prepare(`
-    SELECT 1
-    FROM connector_sync_operator_runs
-    WHERE id = ?
-      AND connector_id = ?
-      AND quarantine_id IS ?
-      AND operation = 'canary'
-      AND job_id IS NULL
-  `).get(operatorCanaryRunId, connectorId, control.quarantineId);
-  if (!authorized) {
-    throw new ConnectorSyncControlError('operator_canary_authorization_invalid');
-  }
-}
 
 /**
  * Backend-selected, async equivalent of `isConnectorSyncQuarantined`. SQLite
@@ -74,6 +23,7 @@ export async function isConnectorSyncQuarantinedAsync(connectorId: string): Prom
       connectorId,
     );
   }
+  const { isConnectorSyncQuarantined } = await import('./sqlite-control-state');
   return isConnectorSyncQuarantined(connectorId);
 }
 
@@ -104,5 +54,6 @@ export async function assertConnectorSyncEnqueueAllowedAsync(
     );
     return;
   }
+  const { assertConnectorSyncEnqueueAllowed } = await import('./sqlite-control-state');
   assertConnectorSyncEnqueueAllowed(connectorId, source, operatorCanaryRunId);
 }

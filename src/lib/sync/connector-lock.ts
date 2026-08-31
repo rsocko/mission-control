@@ -8,9 +8,7 @@ import type {
 import {
   ConnectorOperationBusyError,
   getConnectorOperationLeaseMs,
-  runWithConnectorOperationLease as sqliteRunWithConnectorOperationLease,
-  sqliteConnectorOperationLeaseRepository,
-} from './sqlite-connector-operation-lease-repository';
+} from './connector-lock-values';
 
 export type {
   ConnectorOperationLeaseAcquireOutcome,
@@ -24,16 +22,10 @@ export type {
 } from './connector-operation-lease-repository';
 
 export {
-  acquireConnectorOperationLease,
   ConnectorOperationBusyError,
   connectorSyncLeaseOwner,
   getConnectorOperationLeaseMs,
-  hasConnectorSyncJobLease,
-  recoverExpiredSyncJobs,
-  releaseConnectorOperationLease,
-  renewConnectorOperationLease,
-  sqliteConnectorOperationLeaseRepository,
-} from './sqlite-connector-operation-lease-repository';
+} from './connector-lock-values';
 
 /**
  * Resolves the connector-operation-lease adapter for the currently selected
@@ -51,6 +43,9 @@ export async function getConnectorOperationLeaseRepository(): Promise<ConnectorO
     const { getPostgresConnectorOperationLeaseRepository } = await import('@/db/runtime');
     return getPostgresConnectorOperationLeaseRepository();
   }
+  const { sqliteConnectorOperationLeaseRepository } = await import(
+    './sqlite-connector-operation-lease-repository'
+  );
   return sqliteConnectorOperationLeaseRepository;
 }
 
@@ -144,5 +139,8 @@ export async function runWithConnectorOperationLease<T>(
       operation,
     );
   }
-  return sqliteRunWithConnectorOperationLease(connectorId, operationType, operation);
+  const { runWithConnectorOperationLease: runWithSQLiteConnectorOperationLease } = await import(
+    './sqlite-connector-operation-lease-repository'
+  );
+  return runWithSQLiteConnectorOperationLease(connectorId, operationType, operation);
 }

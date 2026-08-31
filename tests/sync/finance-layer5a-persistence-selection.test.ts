@@ -93,7 +93,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   }),
 }));
 
-vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
+vi.mock('@/lib/connectors/monarch-money/attribution-coordinator', () => ({
   FinanceAttributionCoordinator: class {
     attributePage = mocks.attributePage;
     finish = mocks.finishAttribution;
@@ -104,10 +104,6 @@ vi.mock('@/lib/finance-insights/publication', () => ({
   loadFinanceInsightProjectionFacts: vi.fn(() => {
     throw new Error('Layer 5B proof loader must not run');
   }),
-}));
-
-vi.mock('@/lib/finance-insights/canonical', () => ({
-  financeInsightDigestV1: vi.fn(),
 }));
 
 vi.mock('@/lib/connectors/monarch-money/client', () => {

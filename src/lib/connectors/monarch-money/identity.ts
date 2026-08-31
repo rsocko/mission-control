@@ -1,7 +1,6 @@
 import 'server-only';
 
 import { createHash, randomBytes } from 'node:crypto';
-import { sqlite } from '@/db';
 
 export const FINANCE_IDENTITY_NAMESPACE_CREDENTIAL = 'identityNamespace';
 
@@ -24,28 +23,6 @@ export function financeIdentityNamespaceFromCredentials(
   return typeof value === 'string' && identityNamespacePattern.test(value)
     ? value
     : null;
-}
-
-export function ensureFinanceIdentityNamespace(connectorId: string): string {
-  const candidate = createFinanceIdentityNamespace();
-  sqlite.prepare(`
-    UPDATE connector_configs
-    SET credentials = json_set(
-          COALESCE(credentials, '{}'),
-          '$.${FINANCE_IDENTITY_NAMESPACE_CREDENTIAL}',
-          ?
-        ),
-        updated_at = ?
-    WHERE id = ?
-      AND json_type(COALESCE(credentials, '{}'), '$.${FINANCE_IDENTITY_NAMESPACE_CREDENTIAL}') IS NULL
-  `).run(candidate, new Date().toISOString(), connectorId);
-  const row = sqlite.prepare(`
-    SELECT credentials FROM connector_configs WHERE id = ?
-  `).get(connectorId) as { credentials: string | null } | undefined;
-  if (!row) throw new Error('Finance connector identity state is unavailable');
-  const namespace = financeIdentityNamespaceFromCredentials(row.credentials);
-  if (!namespace) throw new Error('Finance connector identity state is invalid');
-  return namespace;
 }
 
 export function financeConnectorScopedReference(

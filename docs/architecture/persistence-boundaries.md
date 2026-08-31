@@ -127,7 +127,7 @@ does not initialize the database. PostgreSQL has no compatibility fallback: its
 runtime must register the complete worker composition before access and before
 loading worker schedulers. That composition now carries five members —
 `connectors`/`syncRuns`, `execution` (Layer 2), `github` (Layers 3A/3B),
-`connectorState` (Layer 4), and `finance` (Layers 5A/5B) — and is registered
+`connectorState` (Layer 4), and `finance` (Layers 5A-5C) — and is registered
 atomically.
 
 Layer 2 adds the complete `ConnectorExecutionRepositories` composition to that
@@ -364,7 +364,7 @@ the ingest and acknowledgement commands touch. SQLite JSON text versus
 PostgreSQL `jsonb`, and integer versus native booleans, are adapter mapping
 differences rather than schema gaps.
 
-### Layer 5A/5B: Monarch finance domain persistence
+### Layers 5A-5C: Monarch finance worker persistence
 
 Layer 5A adds the atomic `FinanceWorkerPersistence` composition for Monarch
 identity, transaction snapshots, reference datasets, and attribution. Layer 5B
@@ -383,6 +383,15 @@ instead of driver rows. The API and Monarch orchestration modules now use these
 ports for the migrated operations; external connector traffic and dispatcher
 wakeups remain outside adapter transactions.
 
+Layer 5C activates the packaged finance worker on PostgreSQL. Its static
+execution graph uses portable snapshot, dataset, attribution, history,
+publication, notification-ingestion, occurrence, and attention modules.
+SQLite-only finance query/manual-mutation helpers are loaded lazily only by
+those explicit compatibility APIs. The SQLite connection-recovery monitor is
+also lazy and does not start on PostgreSQL. Runtime poison tests and a packaged
+artifact ratchet prevent the PostgreSQL finance path from evaluating `@/db`,
+SQLite drivers, schema modules, or raw SQLite adapters.
+
 Schema-parity result: **no migration was required**. The existing finance
 history, projection, backfill, publication, occurrence, notification/action/
 outbox, attribution-exception, mutation-audit, task, and My Day tables already
@@ -390,27 +399,28 @@ carry the required uniqueness, ordering, checkpoint, and fencing state on both
 backends. SQLite text JSON/timestamps and PostgreSQL native JSON/timestamps are
 adapter mapping differences.
 
-Layer 5B deliberately does not activate PostgreSQL finance execution. The
-connector support gate still rejects `finance-manager` before construction or a
-remote effect. Packaged-worker reachability, backend activation/import, and the
-final removal of compatibility-only finance paths remain Layer 5C. Monarch
-connection-outage recovery also remains the separately planned Layer 8 worker
-slice.
+The exact PostgreSQL worker support matrix after Layer 5C is:
 
-The PostgreSQL execution guard therefore now allows `microsoft-todo`,
-`microsoft-todo-work`, Rymessage, and OWL. It still rejects `finance-manager`
-connector-owned state, non-GitHub connector dependency state, non-GitHub
-connector project state, and any connector exposing `syncDomainData`.
+| Surface | PostgreSQL worker status |
+| --- | --- |
+| `finance`, `finance-manager`, or `monarch-money` with `syncDomainData` | Supported through the complete `FinanceWorkerPersistence` composition |
+| Non-finance connector exposing `syncDomainData` | Rejected before remote dispatch |
+| Non-GitHub dependency or project state | Rejected before remote dispatch |
+| Finance notification/action/outbox persistence | Supported and durable |
+| Notification delivery dispatcher and reminders (Layer 6) | Disabled; finance execution does not imply dispatcher support |
+| Monarch connection-outage recovery (Layer 8) | Disabled on PostgreSQL |
+| Scheduled triage importer (Layer 7) | Disabled on PostgreSQL |
 
-Remaining Layer 5C and Layers 6-8 stay excluded: finance activation and final
-packaged-worker reachability, reminders, recovery beyond Layer 3B, the scheduled
-triage importer (#1681), deployment, and backend activation.
+`allowsLegacyWorkflow('notification-dispatcher')` remains false. Finance
+attention and ingestion may commit pending delivery rows, but wake the dispatcher
+only when that independent support gate is enabled. No PostgreSQL execution path
+falls back to SQLite.
 
 Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
 closed under PostgreSQL *before* any remote effect: identity backfill and
 status, manual identity-exception mutation, unknown
-write-outcome resolution, interrupted write-cycle recovery, Monarch, reminders,
-triage, and semantic/project automation. Connector-owned Work To Do bridge
+write-outcome resolution, interrupted write-cycle recovery, reminders, triage,
+and semantic/project automation. Connector-owned Work To Do bridge
 state and Microsoft To Do hidden-list state are no longer in that list —
 Layer 4 migrates both. Historical task-transfer succession filtering is
 portable: both hierarchy adapters recompute a JSON-order-independent proof
@@ -421,10 +431,11 @@ snapshots also remain unsupported on PostgreSQL; only identity-fenced deletion
 candidate quarantine, retention, and archival are enabled, and only when every
 frozen epoch/binding/locator/source and task fence still matches.
 
-The PostgreSQL execution guard continues to reject connector-owned finance
-state and non-GitHub connector dependency or project state before connector
-construction or remote dispatch. SQLite continues to use its compatibility
-implementations for the remaining legacy workflows.
+The PostgreSQL execution guard accepts only the registered finance aliases for
+connector-owned domain state. It continues to reject other connector-owned
+domain state and non-GitHub connector dependency or project state before remote
+dispatch. SQLite continues to use its compatibility implementations for the
+remaining legacy workflows.
 Generic PostgreSQL runs use the backend-selected keyword search repository
 after commit. SQLite-only semantic enrichment, project-rule/planning
 post-processing, the legacy outbound-event outbox, and the legacy notification
@@ -434,7 +445,9 @@ for later backend-specific workers rather than falling back to SQLite.
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health
 snapshots, and runtime telemetry. This is application capability, not evidence
-that a deployment has completed its data migration or cutover. See the
+that production selected PostgreSQL or that a deployment completed data import,
+migration, or cutover. Production remains SQLite until the separate cutover
+work is performed. See the
 [database scaling and migration strategy](../design/active/database-scaling-strategy.md).
 
 ## Domain migration sequence

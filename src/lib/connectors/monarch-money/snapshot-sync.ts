@@ -16,7 +16,7 @@ import {
 import {
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
 } from './constants';
-import { FinanceAttributionCoordinator } from './attribution-service';
+import { FinanceAttributionCoordinator } from './attribution-coordinator';
 
 const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_OVERLAP_DAYS = 7;

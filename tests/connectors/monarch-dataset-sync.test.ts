@@ -167,7 +167,19 @@ afterAll(() => {
 
 describe.sequential('FinanceDatasetSynchronizer', () => {
   it('publishes all normalized datasets without retaining account balances', async () => {
-    mockDatasets();
+    mockDatasets({
+      '/accounts': {
+        accounts: [{
+          id: 'account-1',
+          displayName: 'Invented checking',
+          type: 'checking',
+          mask: '1234',
+          institution: 'Invented bank',
+          currentBalance: 123,
+          isActive: true,
+        }],
+      },
+    });
     const result = await new FinanceDatasetSynchronizer(connector('dataset-a'), () => now)
       .sync({ full: true });
 
@@ -237,6 +249,12 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       ]),
     });
 
+    const generationsBeforeReplay = sqlite.prepare(`
+      SELECT dataset, current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-a'
+      ORDER BY dataset
+    `).all();
     mockDatasets();
     await expect(new FinanceDatasetSynchronizer(connector('dataset-a'), () => now)
       .sync({ full: true })).resolves.toMatchObject({
@@ -248,6 +266,12 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       SELECT count(DISTINCT generation_id) AS generations
       FROM finance_recurring_obligations WHERE connector_id = 'dataset-a'
     `).get()).toEqual({ generations: 1 });
+    expect(sqlite.prepare(`
+      SELECT dataset, current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-a'
+      ORDER BY dataset
+    `).all()).toEqual(generationsBeforeReplay);
   });
 
   it('soft-deactivates complete missing references and retains current plus previous snapshots', async () => {
@@ -377,6 +401,11 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
   });
 
   it('treats reordered mixed-case snapshot identifiers as an idempotent replay', async () => {
+    const tags = ['_x', '1', 'a', 'B'].map((id) => ({
+      id,
+      name: `Invented ${id}`,
+      isActive: true,
+    }));
     const recurring = ['_x', '1', 'a', 'B'].map((id) => ({
       id,
       merchant: `Invented ${id}`,
@@ -394,13 +423,20 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       percentUsed: 0,
     }));
     mockDatasets({
+      '/tags': { tags },
       '/recurring': { recurring },
       '/budgets': { budgets },
     });
     const synchronizer = new FinanceDatasetSynchronizer(connector('dataset-order'), () => now);
     await synchronizer.sync({ full: true });
+    const tagGeneration = sqlite.prepare(`
+      SELECT current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-order' AND dataset = 'tags'
+    `).get();
 
     mockDatasets({
+      '/tags': { tags: [...tags].reverse() },
       '/recurring': { recurring: [...recurring].reverse() },
       '/budgets': { budgets: [...budgets].reverse() },
     });
@@ -409,5 +445,10 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       itemsUpdated: 0,
       itemsRemoved: 0,
     });
+    expect(sqlite.prepare(`
+      SELECT current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-order' AND dataset = 'tags'
+    `).get()).toEqual(tagGeneration);
   });
 });

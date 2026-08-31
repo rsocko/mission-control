@@ -2,6 +2,7 @@ import { afterAll, describe, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresFinanceWorkerPersistence } from '@/db/postgres/repositories';
+import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import {
   BASE_TIME,
@@ -204,6 +205,139 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
 
 if (connectionString) {
   describeFinanceWorkerPersistenceContract('PostgreSQL', createHarness);
+
+  describe('PostgreSQL finance projection checkpoint proofs', () => {
+    it('persists canonical recurring proof state in the publication transaction', async () => {
+      const harness = await createHarness();
+      await harness.reset();
+      await harness.seedConnector();
+      await harness.repositories.identity.ensureNamespace({
+        connectorId: CONNECTOR_ID,
+        candidate: 'a'.repeat(64),
+        updatedAt: BASE_TIME,
+      });
+      await harness.repositories.datasets.recordAttempt({
+        connectorId: CONNECTOR_ID,
+        dataset: 'recurring',
+        attemptAt: BASE_TIME,
+        sourceLimit: 10_000,
+        schemaVersion: '1.0',
+        configVersion: 1,
+      });
+      await harness.repositories.datasets.publishRecurring({
+        connectorId: CONNECTOR_ID,
+        dataset: 'recurring',
+        attemptAt: BASE_TIME,
+        generationId: 'recurring-proof',
+        completedAt: BASE_TIME,
+        sourceAsOf: BASE_TIME,
+        freshUntil: '2026-08-31T12:00:00.000Z',
+        coverageStart: null,
+        coverageEnd: null,
+        sourceLimit: 10_000,
+        schemaVersion: '1.0',
+        configVersion: 1,
+        items: [{
+          id: 'recurring-proof-item',
+          merchant: 'Synthetic Merchant',
+          amount: -12.5,
+          frequency: 'monthly',
+          nextExpectedDate: null,
+          account: null,
+          category: null,
+        }],
+      });
+
+      const proof = await backend.context.pool.query<{
+        itemCount: number;
+        contentDigest: string;
+        bridgeContractVersion: string;
+      }>(
+        `SELECT insight_item_count AS "itemCount",
+                insight_content_digest AS "contentDigest",
+                insight_bridge_contract_version AS "bridgeContractVersion"
+         FROM finance_dataset_sync_state
+         WHERE connector_id = $1 AND dataset = 'recurring'`,
+        [CONNECTOR_ID],
+      );
+      expect(proof.rows[0]).toEqual({
+        itemCount: 1,
+        contentDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+      });
+    });
+
+    it('persists canonical transaction proof state with snapshot completion', async () => {
+      const harness = await createHarness();
+      await harness.reset();
+      await harness.seedConnector({ identityNamespace: 'a'.repeat(64) });
+      await harness.repositories.snapshots.start({
+        connectorId: CONNECTOR_ID,
+        generationId: 'snapshot-proof',
+        windowStart: '2026-08-01',
+        windowEnd: '2026-08-31',
+        mode: 'backfill',
+        attemptAt: BASE_TIME,
+      });
+      await harness.repositories.snapshots.upsertPage({
+        connectorId: CONNECTOR_ID,
+        generationId: 'snapshot-proof',
+        transactions: [{
+          id: 'transaction-proof',
+          date: '2026-08-15',
+          amount: -12.5,
+          merchant: { name: 'Synthetic Merchant', logoUrl: null },
+          category: null,
+          account: { id: 'account-1', displayName: 'Checking', mask: null },
+          isPending: false,
+          isRecurring: false,
+          notes: null,
+          tags: [],
+          tagReferences: [],
+        }],
+        provenance: { provider: 'demo', fetchedAt: BASE_TIME },
+        observedAt: BASE_TIME,
+      });
+      await harness.repositories.snapshots.complete({
+        connectorId: CONNECTOR_ID,
+        generationId: 'snapshot-proof',
+        windowStart: '2026-08-01',
+        windowEnd: '2026-08-31',
+        projectionStartDate: '2026-08-01',
+        sourceAsOf: BASE_TIME,
+        completedAt: BASE_TIME,
+        added: 1,
+        updated: 0,
+      });
+
+      const proof = await backend.context.pool.query<{
+        itemCount: number;
+        contentDigest: string;
+        projectionStartDate: string;
+        coverageStart: string;
+        coverageEnd: string;
+        bridgeContractVersion: string;
+      }>(
+        `SELECT last_successful_item_count AS "itemCount",
+                last_successful_content_digest AS "contentDigest",
+                last_successful_projection_start_date AS "projectionStartDate",
+                last_successful_projection_coverage_start AS "coverageStart",
+                last_successful_projection_coverage_end AS "coverageEnd",
+                last_successful_bridge_contract_version AS "bridgeContractVersion"
+         FROM finance_sync_state
+         WHERE connector_id = $1`,
+        [CONNECTOR_ID],
+      );
+      expect(proof.rows[0]).toEqual({
+        itemCount: 1,
+        contentDigest: expect.stringMatching(/^sha256:[a-f0-9]{64}$/),
+        projectionStartDate: '2026-08-01',
+        coverageStart: '2026-08-15',
+        coverageEnd: '2026-08-15',
+        bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+      });
+    });
+  });
 } else {
   describe('PostgreSQL finance worker persistence contract', () => {
     it.skip('requires MC_TEST_POSTGRES_URL to run', () => undefined);

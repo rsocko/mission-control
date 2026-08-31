@@ -368,7 +368,7 @@ export async function ingestFinanceInsightNotifications(input: {
   environment?: FinanceNotificationEnvironment;
 }): Promise<Array<{ id: string; created: boolean; pendingDelivery: boolean }>> {
   const now = input.now ?? new Date();
-  const { finance } = await getWorkerPersistenceRepositories();
+  const { execution, finance } = await getWorkerPersistenceRepositories();
   if (!await finance.insights.notifications.isDeliveryEnabled(input.connectorId)) return [];
   const activeConnectorId = await finance.insights.connectors.resolveSingleEnabledConnectorId(
     FINANCE_PROVIDER_ALIASES,
@@ -401,6 +401,11 @@ export async function ingestFinanceInsightNotifications(input: {
     reconcile: reconcileItems,
     ingest: notificationInputs.map(toFinanceInsightNotificationIngestItem),
   });
-  if (outcome.hasPendingDelivery) wakeNotificationDeliveryDispatcher();
+  if (
+    outcome.hasPendingDelivery
+    && execution.support.allowsLegacyWorkflow('notification-dispatcher')
+  ) {
+    wakeNotificationDeliveryDispatcher();
+  }
   return [...outcome.results];
 }

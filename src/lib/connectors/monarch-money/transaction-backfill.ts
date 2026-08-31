@@ -18,7 +18,7 @@ import {
 } from '@/lib/finance-insights/contract';
 import { resolveFinanceInsightCurrency } from '@/lib/finance-insights/settings';
 import type { ConnectorConfig } from '@/types';
-import { FinanceAttributionCoordinator } from './attribution-service';
+import { FinanceAttributionCoordinator } from './attribution-coordinator';
 import { MonarchBridgeClient, MonarchBridgeError } from './client';
 import {
   buildFinanceInsightHistoryWindows,

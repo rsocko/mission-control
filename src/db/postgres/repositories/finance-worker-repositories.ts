@@ -12,6 +12,7 @@ import {
 import {
   FinanceDatasetFenceError,
   type FinanceBudgetPublicationCommand,
+  type FinanceDataset,
   type FinanceDatasetPersistence,
   type FinanceDatasetPublicationMetadata,
   type FinanceDatasetPublishResult,
@@ -30,6 +31,9 @@ import {
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
   type FinanceCorePersistence,
 } from '@/db/persistence/finance-worker';
+import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
+import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
+import { readPostgresFinanceInsightProjectionFacts } from './finance-insights-repositories';
 
 type Client = Pool | PoolClient;
 
@@ -65,6 +69,35 @@ async function transaction<T>(
   } finally {
     client.release();
   }
+}
+
+async function readDatasetProjectionProof(
+  client: PoolClient,
+  connectorId: string,
+  dataset: FinanceDataset,
+): Promise<{
+  itemCount: number;
+  contentDigest: string;
+  bridgeContractVersion: string;
+} | null> {
+  const kind = dataset === 'accounts'
+    ? 'account'
+    : dataset === 'categories'
+      ? 'category'
+      : dataset === 'tags'
+        ? 'tag'
+        : dataset === 'recurring'
+          ? 'recurring'
+          : null;
+  if (!kind) return null;
+  const facts = (
+    await readPostgresFinanceInsightProjectionFacts(client, connectorId, '', kind, undefined)
+  )[kind];
+  return {
+    itemCount: facts.length,
+    contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
+    bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+  };
 }
 
 function localId(prefix: string, connectorId: string, upstreamId: string): string {
@@ -325,27 +358,43 @@ function createSnapshotPersistence(pool: Pool): FinanceSnapshotPersistence {
              )`,
           [command.completedAt, command.connectorId],
         );
+        const projectionFacts = (
+          await readPostgresFinanceInsightProjectionFacts(
+            client,
+            command.connectorId,
+            command.projectionStartDate,
+            'transaction',
+            undefined,
+          )
+        ).transaction;
+        const projectionDates = projectionFacts.map((fact) => fact.occurredOn).sort();
         const completed = await client.query(
           `UPDATE finance_sync_state
            SET status = 'succeeded', current_generation_id = NULL,
                current_window_start = NULL, current_window_end = NULL,
                last_successful_generation_id = $1,
                last_successful_source_as_of = $2, last_successful_sync_at = $3,
-               last_successful_item_count = NULL,
-               last_successful_content_digest = NULL,
-               last_successful_projection_start_date = NULL,
-               last_successful_projection_coverage_start = NULL,
-               last_successful_projection_coverage_end = NULL,
-               last_successful_bridge_contract_version = NULL,
-               last_successful_window_start = $4,
-               last_successful_window_end = $5, last_error_code = NULL,
-               last_error_message = NULL, last_added = $6, last_updated = $7,
-               last_deleted = $8, updated_at = $3
-           WHERE connector_id = $9 AND current_generation_id = $1`,
+               last_successful_item_count = $4,
+               last_successful_content_digest = $5,
+               last_successful_projection_start_date = $6,
+               last_successful_projection_coverage_start = $7,
+               last_successful_projection_coverage_end = $8,
+               last_successful_bridge_contract_version = $9,
+               last_successful_window_start = $10,
+               last_successful_window_end = $11, last_error_code = NULL,
+               last_error_message = NULL, last_added = $12, last_updated = $13,
+               last_deleted = $14, updated_at = $3
+           WHERE connector_id = $15 AND current_generation_id = $1`,
           [
             command.generationId,
             command.sourceAsOf,
             command.completedAt,
+            projectionFacts.length,
+            financeInsightDigestV1(projectionFacts as unknown as CanonicalJsonValue),
+            command.projectionStartDate,
+            projectionDates[0] ?? command.windowStart,
+            projectionDates.at(-1) ?? command.windowEnd,
+            MONARCH_BRIDGE_CONTRACT_VERSION,
             command.windowStart,
             command.windowEnd,
             command.added,
@@ -605,6 +654,11 @@ function createDatasetPersistence(pool: Pool): FinanceDatasetPersistence {
     generationId: string,
     count: number,
   ): Promise<void> {
+    const proof = await readDatasetProjectionProof(
+      client,
+      metadata.connectorId,
+      metadata.dataset,
+    );
     const result = await client.query(
       `UPDATE finance_dataset_sync_state
        SET last_attempt_outcome = 'succeeded', last_successful_at = $1,
@@ -612,10 +666,10 @@ function createDatasetPersistence(pool: Pool): FinanceDatasetPersistence {
            coverage_end = $5, previous_generation_id = $6,
            current_generation_id = $7, schema_version = $8,
            config_version = $9, published_item_count = $10,
-           insight_item_count = NULL, insight_content_digest = NULL,
-           insight_bridge_contract_version = NULL, source_limit = $11,
+           insight_item_count = $11, insight_content_digest = $12,
+           insight_bridge_contract_version = $13, source_limit = $14,
            last_error_code = NULL, updated_at = $1
-       WHERE connector_id = $12 AND dataset = $13 AND last_attempt_at = $14`,
+       WHERE connector_id = $15 AND dataset = $16 AND last_attempt_at = $17`,
       [
         metadata.completedAt,
         metadata.sourceAsOf,
@@ -629,6 +683,9 @@ function createDatasetPersistence(pool: Pool): FinanceDatasetPersistence {
         metadata.schemaVersion,
         metadata.configVersion,
         count,
+        proof?.itemCount ?? null,
+        proof?.contentDigest ?? null,
+        proof?.bridgeContractVersion ?? null,
         metadata.sourceLimit,
         metadata.connectorId,
         metadata.dataset,

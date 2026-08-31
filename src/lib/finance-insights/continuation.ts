@@ -1,7 +1,6 @@
 import 'server-only';
 
-import { getConnectorOperationLeaseRepository } from '@/lib/sync/connector-lock';
-import { getSyncJobRepository, type SyncJob } from '@/lib/sync/job-queue';
+import type { SyncJob } from '@/lib/sync/job-repository';
 
 const DEFAULT_CONTINUATION_DELAY_MS = 30_000;
 const MAX_CONTINUATION_DELAY_MS = 15 * 60_000;
@@ -22,6 +21,13 @@ export async function enqueueFinanceInsightContinuation(input: {
   environment?: Readonly<Record<string, string | undefined>>;
 }): Promise<SyncJob> {
   const now = input.now ?? new Date();
+  const [
+    { getConnectorOperationLeaseRepository },
+    { getSyncJobRepository },
+  ] = await Promise.all([
+    import('@/lib/sync/connector-lock'),
+    import('@/lib/sync/job-queue'),
+  ]);
   const hasLease = await (await getConnectorOperationLeaseRepository()).hasActiveSyncJobLease({
     connectorId: input.connectorId,
     jobId: input.jobId,

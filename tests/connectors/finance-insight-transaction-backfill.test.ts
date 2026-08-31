@@ -7,7 +7,7 @@ import type { ConnectorConfig } from '@/types';
 
 const attributionCoordinatorConstructor = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
+vi.mock('@/lib/connectors/monarch-money/attribution-coordinator', () => ({
   FinanceAttributionCoordinator: class {
     constructor(...args: unknown[]) {
       attributionCoordinatorConstructor(...args);

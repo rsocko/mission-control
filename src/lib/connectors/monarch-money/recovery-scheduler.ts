@@ -1,7 +1,7 @@
 import 'server-only';
 
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import logger from '@/lib/logger';
-import { probeAllFinanceConnections } from './connection-recovery';
 import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 
 const MONITOR_INTERVAL_MS = 5 * 60 * 1_000;
@@ -12,6 +12,7 @@ export class FinanceConnectionRecoveryScheduler {
 
   async start(): Promise<void> {
     if (this.timer) return;
+    if (resolveDatabaseBackend() === 'postgres') return;
     await this.run();
     this.timer = setInterval(() => void this.run(), MONITOR_INTERVAL_MS);
   }
@@ -25,6 +26,7 @@ export class FinanceConnectionRecoveryScheduler {
     if (this.running) return;
     this.running = true;
     try {
+      const { probeAllFinanceConnections } = await import('./connection-recovery');
       await withDatabaseOperation(
         'worker-finance-recovery',
         () => probeAllFinanceConnections(),

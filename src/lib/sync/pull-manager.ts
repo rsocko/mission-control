@@ -681,6 +681,7 @@ export async function upsertTasks(
           const inserted = persistedBatch.insertedIds.has(row.id);
 
           existingBySourceId.set(row.sourceId, persisted);
+          existingById.set(persisted.id, persisted);
           if (remoteTask.id) tempIdToDbId.set(remoteTask.id, persisted.id);
 
           if (inserted) {
@@ -936,7 +937,10 @@ export async function upsertTasks(
         alias.sourceId,
         alias.canonicalSourceId,
       ])),
-      { identityRuntime },
+      {
+        identityRuntime,
+        requireCompletePopulation: isFullSync === true,
+      },
     );
   }
 

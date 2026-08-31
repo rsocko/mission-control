@@ -11,6 +11,7 @@ type DbModule = typeof import('@/db');
 type SchemaModule = typeof import('@/db/schema');
 type IdentityModule = typeof import('@/lib/external-identities');
 type PullManagerModule = typeof import('@/lib/sync/pull-manager');
+type HierarchyModule = typeof import('@/lib/sync/github-hierarchy-reconciliation');
 
 const dbPath = join(tmpdir(), `mc-nodeid-permanent-${process.pid}.db`);
 const now = '2026-08-16T00:00:00.000Z';
@@ -18,6 +19,7 @@ let database: DbModule;
 let schema: SchemaModule;
 let identity: IdentityModule;
 let pullManager: PullManagerModule;
+let hierarchy: HierarchyModule;
 
 beforeAll(async () => {
   if (existsSync(dbPath)) rmSync(dbPath);
@@ -26,11 +28,12 @@ beforeAll(async () => {
   vi.doUnmock('drizzle-orm');
   vi.doUnmock('crypto');
   vi.resetModules();
-  [database, schema, identity, pullManager] = await Promise.all([
+  [database, schema, identity, pullManager, hierarchy] = await Promise.all([
     import('@/db'),
     import('@/db/schema'),
     import('@/lib/external-identities'),
     import('@/lib/sync/pull-manager'),
+    import('@/lib/sync/github-hierarchy-reconciliation'),
   ]);
   database.default.insert(schema.connectorConfigs).values({
     id: 'github-permanent',
@@ -119,11 +122,11 @@ afterAll(() => {
   if (existsSync(dbPath)) rmSync(dbPath);
 });
 
-function runtime() {
+function runtime(syncKind: 'full' | 'incremental' = 'full') {
   return new identity.GitHubStableIdentityRuntime({
     connectorInstanceId: 'github-permanent',
     modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-permanent'),
-    syncKind: 'full',
+    syncKind,
   });
 }
 
@@ -187,6 +190,76 @@ describe('permanent GitHub NodeID identity', () => {
         SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?
       `).get(table)).toBeUndefined();
     }
+  });
+
+  it('does not fail an incremental sync for a partial hierarchy population', async () => {
+    const scope = runtime('incremental');
+    const result = await hierarchy.reconcileGitHubTaskHierarchy(
+      'github-permanent',
+      new Map([
+        ['acme/app:1', {
+          childSourceId: 'acme/app:1',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_parent',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 1,
+          }),
+          parent: null,
+        }],
+        ['acme/app:2', {
+          childSourceId: 'acme/app:2',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_child',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 2,
+          }),
+          parent: null,
+        }],
+      ]),
+      new Set(['acme/app']),
+      true,
+      new Map(),
+      {
+        identityRuntime: scope,
+        requireCompletePopulation: false,
+      },
+    );
+
+    expect(result).toEqual({ applied: false, updated: 0 });
+    expect(scope.blockedReasonCodes).not.toContain('sub_issue_population_incomplete');
+  });
+
+  it('still blocks a full sync for a partial hierarchy population', async () => {
+    const scope = runtime('full');
+    await hierarchy.reconcileGitHubTaskHierarchy(
+      'github-permanent',
+      new Map([
+        ['acme/app:1', {
+          childSourceId: 'acme/app:1',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_parent',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 1,
+          }),
+          parent: null,
+        }],
+      ]),
+      new Set(['acme/app']),
+      true,
+      new Map(),
+      {
+        identityRuntime: scope,
+        requireCompletePopulation: true,
+      },
+    );
+
+    expect(scope.blockedReasonCodes).toContain('sub_issue_population_incomplete');
   });
 
   it('resolves a renamed locator by NodeID instead of the mutable source_id', async () => {

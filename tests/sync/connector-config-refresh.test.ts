@@ -637,7 +637,10 @@ describe('dependency reconciliation resume scheduling', () => {
       new Set(['acme/app']),
       true,
       new Map([['acme/app', 'acme/app']]),
-      { identityRuntime: expect.any(Object) },
+      {
+        identityRuntime: expect.any(Object),
+        requireCompletePopulation: true,
+      },
     );
     expect(mocks.reconcileDependencies).toHaveBeenCalledWith(
       connectorId,

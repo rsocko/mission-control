@@ -14,8 +14,10 @@ import type { ConnectorCapabilities, TaskItem } from '@/types';
 
 const mockExistingTasks: unknown[] = [];
 const mockUpdateSets: unknown[] = [];
+const mockIdentityWrites: unknown[] = [];
 let selectCallCount = 0;
 let mockCapabilities: ConnectorCapabilities | null = null;
+let mockConcurrentInsertRecord: Record<string, unknown> | null = null;
 
 type AwaitableTagRows = unknown[] & {
   where: ReturnType<typeof vi.fn>;
@@ -79,6 +81,13 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/sync/events', () => ({
   syncEventBus: { emitSyncEvent: vi.fn() },
+}));
+
+vi.mock('@/lib/external-identities/primary-identity', () => ({
+  persistGitHubPrimaryIdentityBatch: vi.fn(async (writes: unknown[]) => {
+    mockIdentityWrites.push(...writes);
+    return writes.map(() => ({ state: 'bound' }));
+  }),
 }));
 
 vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
@@ -162,6 +171,13 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
         insertBatch: vi.fn(async (candidates: Array<{
           task: Record<string, unknown>;
         }>) => {
+          if (mockConcurrentInsertRecord) {
+            mockExistingTasks.push(mockConcurrentInsertRecord);
+            return {
+              insertedIds: new Set<string>(),
+              records: [mockConcurrentInsertRecord],
+            };
+          }
           const insertedIds = new Set<string>();
           for (const candidate of candidates) {
             mockExistingTasks.push(candidate.task);
@@ -242,8 +258,10 @@ describe('pull-manager terminal status sync', () => {
     vi.clearAllMocks();
     mockExistingTasks.length = 0;
     mockUpdateSets.length = 0;
+    mockIdentityWrites.length = 0;
     selectCallCount = 0;
     mockCapabilities = null;
+    mockConcurrentInsertRecord = null;
   });
 
   function makeExistingTask(overrides: Record<string, unknown> = {}) {
@@ -684,5 +702,73 @@ describe('pull-manager terminal status sync', () => {
     ));
     expect(update).not.toHaveProperty('parentId');
     expect(update).not.toHaveProperty('depth');
+  });
+
+  it('persists identity after a concurrent task insert is reconciled', async () => {
+    const concurrentTask = makeExistingTask({
+      id: 'concurrent-task',
+      sourceId: 'org/repo:42',
+      status: 'todo',
+    });
+    mockConcurrentInsertRecord = concurrentTask;
+    const identityRuntime = {
+      modeSnapshot: {
+        connectorInstanceId: connectorId,
+        effectiveMode: 'stable',
+        modeRevision: 1,
+        capturedAt: '2026-08-30T00:00:00.000Z',
+      },
+      syncKind: 'incremental',
+      markNetworkPage: vi.fn(),
+      markBlocked: vi.fn(),
+      assertDecisionsCurrent: vi.fn(async () => {}),
+      resolveLinkedSourceBatch: vi.fn(async () => []),
+      resolveBatch: vi.fn(async () => [{
+        candidateKey: 'org/repo:42',
+        surface: 'task',
+        appliedSource: 'stable',
+        outcome: 'resolved',
+        selectedLocalId: 'concurrent-task',
+        selectedAction: 'update',
+      }]),
+    };
+
+    await expect(upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({
+        status: 'todo',
+        externalIdentity: {
+          entity: {
+            identity: {
+              provider: 'github',
+              hostKey: 'github.com',
+              entityType: 'issue',
+              stableId: 'I_42',
+            },
+            locator: {
+              owner: 'org',
+              repository: 'repo',
+              issueNumber: 42,
+            },
+            observationSource: 'graphql',
+            observedAt: '2026-08-30T00:00:00.000Z',
+          },
+        },
+      })],
+      false,
+      [],
+      undefined,
+      identityRuntime as unknown as import(
+        '@/lib/external-identities/stable-identity-runtime'
+      ).GitHubStableIdentityRuntime,
+    )).resolves.toMatchObject({ added: 0, updated: 1 });
+
+    expect(mockIdentityWrites).toContainEqual(expect.objectContaining({
+      target: expect.objectContaining({
+        localId: 'concurrent-task',
+        legacyIdentity: 'org/repo:42',
+      }),
+    }));
   });
 });

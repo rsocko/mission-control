@@ -2106,7 +2106,10 @@ export class SyncExecutionPipeline {
                 alias.sourceId,
                 alias.canonicalSourceId,
               ])),
-              { identityRuntime },
+              {
+                identityRuntime,
+                requireCompletePopulation: true,
+              },
             );
             const dependencyResult = await reconcileTaskDependencies(config.id, connector, {
               full: true,

@@ -19,6 +19,7 @@ import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -35,6 +36,7 @@ export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+export { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -89,6 +91,11 @@ export function createPostgresNonFinanceConnectorStateRepositories(
   };
 }
 
+/**
+ * Registers the whole worker composition in one value. Layer 5A finance is
+ * present here even though normal PostgreSQL finance execution remains
+ * intentionally rejected until the later finance layers are portable.
+ */
 export function createPostgresWorkerPersistenceRepositories(
   db: PostgresDatabase,
   pool: Pool,
@@ -100,5 +107,6 @@ export function createPostgresWorkerPersistenceRepositories(
     execution: createPostgresConnectorExecutionRepositories(pool),
     github: createPostgresGitHubWorkerRepositories(pool),
     connectorState: createPostgresNonFinanceConnectorStateRepositories(pool),
+    finance: createPostgresFinanceWorkerPersistence(pool),
   };
 }

@@ -2,8 +2,7 @@ import 'server-only';
 
 import { createHash, randomUUID } from 'node:crypto';
 import { sqlite } from '@/db';
-import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
-import { loadFinanceInsightProjectionFacts } from '@/lib/finance-insights/publication';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorConfig,
   DomainSyncContext,
@@ -15,7 +14,6 @@ import {
   type MonarchTransaction,
 } from './client';
 import {
-  MONARCH_BRIDGE_CONTRACT_VERSION,
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
 } from './constants';
 import { FinanceAttributionCoordinator } from './attribution-service';
@@ -175,6 +173,7 @@ export class FinanceSnapshotSynchronizer {
 
   async sync(context: DomainSyncContext): Promise<DomainSyncResult> {
     const connectorId = this.config.id;
+    const finance = (await getWorkerPersistenceRepositories()).finance;
     const settings = (this.config.settings ?? {}) as Record<string, unknown>;
     const backfillDays = boundedInteger(
       settings.backfillDays,
@@ -195,18 +194,11 @@ export class FinanceSnapshotSynchronizer {
       today,
       MONARCH_TRANSACTION_MAX_BACKFILL_DAYS - 1,
     );
-    const state = sqlite.prepare(`
-      SELECT last_successful_window_end AS lastSuccessfulWindowEnd
-      FROM finance_sync_state
-      WHERE connector_id = ?
-    `).get(connectorId) as { lastSuccessfulWindowEnd: string | null } | undefined;
-    const needsStableTagBackfill = sqlite.prepare(`
-      SELECT 1
-      FROM finance_transactions
-      WHERE connector_instance_id = ? AND lifecycle_status = 'active'
-        AND date >= ? AND tags <> '[]' AND tag_references = '[]'
-      LIMIT 1
-    `).get(connectorId, stableTagRecoveryStart) !== undefined;
+    const state = await finance.snapshots.readBasis(
+      connectorId,
+      stableTagRecoveryStart,
+    );
+    const needsStableTagBackfill = state.needsStableTagBackfill;
     const mode: SyncMode = context.full
       || !state?.lastSuccessfulWindowEnd
       || needsStableTagBackfill
@@ -222,31 +214,14 @@ export class FinanceSnapshotSynchronizer {
     const generationId = randomUUID();
     const attemptAt = now.toISOString();
 
-    sqlite.prepare(`
-      INSERT INTO finance_sync_state (
-        connector_id, status, current_generation_id, current_window_start,
-        current_window_end, last_mode, last_attempt_at, created_at, updated_at
-      ) VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(connector_id) DO UPDATE SET
-        status = 'running',
-        current_generation_id = excluded.current_generation_id,
-        current_window_start = excluded.current_window_start,
-        current_window_end = excluded.current_window_end,
-        last_mode = excluded.last_mode,
-        last_attempt_at = excluded.last_attempt_at,
-        last_error_code = NULL,
-        last_error_message = NULL,
-        updated_at = excluded.updated_at
-    `).run(
+    await finance.snapshots.start({
       connectorId,
       generationId,
       windowStart,
       windowEnd,
       mode,
       attemptAt,
-      attemptAt,
-      attemptAt,
-    );
+    });
 
     let added = 0;
     let updated = 0;
@@ -255,6 +230,8 @@ export class FinanceSnapshotSynchronizer {
     const seenCursors = new Set<string>();
     const attribution = new FinanceAttributionCoordinator(connectorId, {
       financeConfig: this.config,
+      persistence: finance,
+      generationId,
     });
     try {
       for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
@@ -276,13 +253,13 @@ export class FinanceSnapshotSynchronizer {
         ) {
           sourceAsOf = provenance.fetchedAt;
         }
-        const counts = upsertFinanceTransactionPage(
+        const counts = await finance.snapshots.upsertPage({
           connectorId,
           generationId,
-          page.transactions,
+          transactions: page.transactions,
           provenance,
-          new Date().toISOString(),
-        );
+          observedAt: new Date().toISOString(),
+        });
         added += counts.added;
         updated += counts.updated;
         await attribution.attributePage(
@@ -310,93 +287,30 @@ export class FinanceSnapshotSynchronizer {
         );
       }
       const completedAt = new Date().toISOString();
-      const removed = sqlite.transaction(() => {
-        const tombstones = sqlite.prepare(`
-          UPDATE finance_transactions
-          SET lifecycle_status = 'deleted', deleted_at = ?, synced_at = ?
-          WHERE connector_instance_id = ?
-            AND lifecycle_status = 'active'
-            AND date >= ? AND date <= ?
-            AND (last_seen_generation_id IS NULL OR last_seen_generation_id <> ?)
-        `).run(
-          completedAt,
-          completedAt,
-          connectorId,
-          windowStart,
-          windowEnd,
-          generationId,
-        ).changes;
-        sqlite.prepare(`
-          UPDATE finance_attribution_exceptions
-          SET status = 'dismissed', review_state = 'resolved',
-              resolution = 'dismissed', resolved_at = COALESCE(resolved_at, ?),
-              updated_at = ?
-          WHERE connector_id = ?
-            AND transaction_id IN (
-              SELECT id FROM finance_transactions
-              WHERE connector_instance_id = ? AND lifecycle_status = 'deleted'
-                AND deleted_at = ?
-            )
-        `).run(completedAt, completedAt, connectorId, connectorId, completedAt);
-        const insightFacts = loadFinanceInsightProjectionFacts(
-          connectorId,
-          stableTagRecoveryStart,
-          'transaction',
-        ).transaction;
-        const insightDates = insightFacts.map((fact) => fact.occurredOn).sort();
-        const insightCoverageStart = insightDates[0] ?? windowStart;
-        const insightCoverageEnd = insightDates.at(-1) ?? windowEnd;
-        const insightContentDigest = financeInsightDigestV1(
-          insightFacts as CanonicalJsonValue,
-        );
-        sqlite.prepare(`
-          UPDATE finance_sync_state
-          SET status = 'succeeded', current_generation_id = NULL,
-              current_window_start = NULL, current_window_end = NULL,
-              last_successful_generation_id = ?,
-              last_successful_source_as_of = ?, last_successful_sync_at = ?,
-              last_successful_item_count = ?,
-              last_successful_content_digest = ?,
-              last_successful_projection_start_date = ?,
-              last_successful_projection_coverage_start = ?,
-              last_successful_projection_coverage_end = ?,
-              last_successful_bridge_contract_version = ?,
-              last_successful_window_start = ?,
-              last_successful_window_end = ?, last_error_code = NULL,
-              last_error_message = NULL, last_added = ?, last_updated = ?,
-              last_deleted = ?, updated_at = ?
-          WHERE connector_id = ?
-        `).run(
-          generationId,
-          sourceAsOf,
-          completedAt,
-          insightFacts.length,
-          insightContentDigest,
-          stableTagRecoveryStart,
-          insightCoverageStart,
-          insightCoverageEnd,
-          MONARCH_BRIDGE_CONTRACT_VERSION,
-          windowStart,
-          windowEnd,
-          added,
-          updated,
-          tombstones,
-          completedAt,
-          connectorId,
-        );
-        return tombstones;
-      }).immediate();
-      attribution.finish(completedAt);
+      const { removed } = await finance.snapshots.complete({
+        connectorId,
+        generationId,
+        windowStart,
+        windowEnd,
+        projectionStartDate: stableTagRecoveryStart,
+        sourceAsOf,
+        completedAt,
+        added,
+        updated,
+      });
+      await attribution.finish(completedAt);
       return { itemsAdded: added, itemsUpdated: updated, itemsRemoved: removed };
     } catch (error) {
       const failure = errorDetails(error);
       const failedAt = new Date().toISOString();
-      sqlite.prepare(`
-        UPDATE finance_sync_state
-        SET status = 'failed', last_error_code = ?, last_error_message = ?, updated_at = ?
-        WHERE connector_id = ? AND current_generation_id = ?
-      `).run(failure.code, failure.message, failedAt, connectorId, generationId);
-      attribution.finish(failedAt);
+      await finance.snapshots.fail({
+        connectorId,
+        generationId,
+        failedAt,
+        errorCode: failure.code,
+        errorMessage: failure.message,
+      });
+      await attribution.finish(failedAt);
       throw error;
     }
   }

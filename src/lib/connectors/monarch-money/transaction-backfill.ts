@@ -705,10 +705,10 @@ async function captureWindow(input: {
       );
       return facts.length;
     }).immediate();
-    attribution.finish(completedAt);
+    await attribution.finish(completedAt);
     return { added, updated, itemCount };
   } catch (error) {
-    attribution.finish(new Date().toISOString());
+    await attribution.finish(new Date().toISOString());
     throw normalizedBackfillError(error);
   }
 }

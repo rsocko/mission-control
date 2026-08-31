@@ -1,17 +1,16 @@
 import 'server-only';
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { sqlite } from '@/db';
 import {
   FINANCE_DATASETS,
   type FinanceDataset,
   type FinanceFreshnessState,
-} from '@/db/finance-schema';
-import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
-import {
-  type SourceFactKindV1,
-} from '@/lib/finance-insights/contract';
-import { loadFinanceInsightProjectionFacts } from '@/lib/finance-insights/publication';
+  type FinanceDatasetPersistence,
+  type FinanceDatasetPublicationMetadata,
+  type FinanceReferenceDatasetItem,
+} from '@/db/persistence/finance-datasets';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorConfig,
   DomainSyncContext,
@@ -24,11 +23,8 @@ import {
   type MonarchAccount,
   type MonarchBudget,
   type MonarchCategory,
-  type MonarchCategoryGroup,
   type MonarchRecurringObligation,
-  type MonarchTag,
 } from './client';
-import { MONARCH_BRIDGE_CONTRACT_VERSION } from './constants';
 
 const DATASET_SCHEMA_VERSION = '1.0';
 const DATASET_CONFIG_VERSION = 1;
@@ -40,12 +36,6 @@ const DEFAULT_FRESHNESS_HOURS: Record<FinanceDataset, number> = {
   tags: 24,
   recurring: 6,
   budgets: 6,
-};
-const FINANCE_INSIGHT_KIND_BY_DATASET: Partial<Record<FinanceDataset, SourceFactKindV1>> = {
-  accounts: 'account',
-  categories: 'category',
-  tags: 'tag',
-  recurring: 'recurring',
 };
 
 type DatasetRunResult = {
@@ -85,25 +75,6 @@ type DatasetStateRow = {
   sourceAsOf: string | null;
   freshUntil: string | null;
 };
-
-type ReferenceDefinition<T> = {
-  table: 'finance_accounts' | 'finance_category_groups' | 'finance_categories' | 'finance_tags';
-  sourceIdColumn: string;
-  localPrefix: string;
-  values(item: T): readonly unknown[];
-  insertColumns: string;
-  insertPlaceholders: string;
-  updateAssignments: string;
-  comparable(item: T): string;
-};
-
-function stableValue(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
-}
-
-function localId(prefix: string, connectorId: string, upstreamId: string): string {
-  return `finance:${prefix}:${connectorId}:${upstreamId}`;
-}
 
 function failureDetails(error: unknown): { code: string; message: string } {
   if (error instanceof MonarchBridgeError) {
@@ -254,13 +225,8 @@ export class FinanceDatasetSynchronizer {
   }
 
   async sync(context: DomainSyncContext): Promise<DomainSyncResult> {
-    const existing = sqlite.prepare(`
-      SELECT dataset, last_attempt_outcome AS lastAttemptOutcome,
-             current_generation_id AS currentGenerationId,
-             source_as_of AS sourceAsOf, fresh_until AS freshUntil
-      FROM finance_dataset_sync_state
-      WHERE connector_id = ?
-    `).all(this.config.id) as DatasetStateRow[];
+    const persistence = (await getWorkerPersistenceRepositories()).finance.datasets;
+    const existing = await persistence.listState(this.config.id);
     const failed = new Set(
       existing
         .filter((state) => state.lastAttemptOutcome === 'failed')
@@ -282,18 +248,28 @@ export class FinanceDatasetSynchronizer {
           : new Error('Finance dataset sync cancelled');
       }
       try {
-        const result = await this.syncDataset(dataset, context.signal);
+        const result = await this.syncDataset(dataset, persistence, context.signal);
         itemsAdded += result.added;
         itemsUpdated += result.updated;
         itemsRemoved += result.removed;
       } catch (error) {
-        this.recordFailure(dataset, error);
         failures[dataset] = failureDetails(error).code;
         if (context.signal?.aborted) throw error;
       }
     }
 
-    const statuses = this.getStatuses(this.clock());
+    const finalState = await persistence.listState(this.config.id);
+    const stateByDataset = new Map(finalState.map((state) => [state.dataset, state]));
+    const statuses = FINANCE_DATASETS.map((dataset) => {
+      const state = stateByDataset.get(dataset);
+      return {
+        dataset,
+        state: financeDatasetFreshness(state, this.clock()),
+        warning: state?.lastAttemptOutcome === 'failed'
+          ? state.lastErrorCode
+          : null,
+      };
+    });
     return {
       itemsAdded,
       itemsUpdated,
@@ -303,582 +279,208 @@ export class FinanceDatasetSynchronizer {
     };
   }
 
-  private async syncDataset(dataset: FinanceDataset, signal?: AbortSignal): Promise<DatasetRunResult> {
+  private async syncDataset(
+    dataset: FinanceDataset,
+    persistence: FinanceDatasetPersistence,
+    signal?: AbortSignal,
+  ): Promise<DatasetRunResult> {
     const attemptAt = this.clock().toISOString();
-    this.recordAttempt(dataset, attemptAt);
-    switch (dataset) {
+    await persistence.recordAttempt({
+      connectorId: this.config.id,
+      dataset,
+      attemptAt,
+      sourceLimit: MONARCH_DATASET_LIMITS[dataset],
+      schemaVersion: DATASET_SCHEMA_VERSION,
+      configVersion: DATASET_CONFIG_VERSION,
+    });
+    try {
+      switch (dataset) {
       case 'accounts': {
         const response = await this.client.getAccounts(signal);
         return this.publishReference(
+          persistence,
           dataset,
           response.accounts,
           response.provenance.fetchedAt,
-          {
-            table: 'finance_accounts',
-            sourceIdColumn: 'upstream_account_id',
-            localPrefix: 'account',
-            values: (item) => [
-              item.displayName,
-              item.type,
-              item.institution,
-              item.mask,
-              item.isActive ? 1 : 0,
-              item.isActive ? 1 : 0,
-            ],
-            insertColumns: 'display_name, type, institution, mask, is_active, source_is_active',
-            insertPlaceholders: '?, ?, ?, ?, ?, ?',
-            updateAssignments: `display_name = excluded.display_name, type = excluded.type,
-              institution = excluded.institution, mask = excluded.mask,
-              is_active = excluded.is_active, source_is_active = excluded.source_is_active`,
-            comparable: (item) => stableValue({
-              displayName: item.displayName,
-              type: item.type,
-              institution: item.institution,
-              mask: item.mask,
-              isActive: item.isActive,
-            }),
-          },
+          attemptAt,
         );
       }
       case 'category-groups': {
         const response = await this.client.getCategoryGroups(signal);
         return this.publishReference(
+          persistence,
           dataset,
           response.categoryGroups,
           response.provenance.fetchedAt,
-          simpleReferenceDefinition('finance_category_groups', 'upstream_group_id', 'category-group'),
+          attemptAt,
         );
       }
       case 'categories': {
         const response = await this.client.getCategories(signal);
         return this.publishReference(
+          persistence,
           dataset,
           response.categories,
           response.provenance.fetchedAt,
-          {
-            table: 'finance_categories',
-            sourceIdColumn: 'upstream_category_id',
-            localPrefix: 'category',
-            values: (item) => [
-              item.name,
-              item.groupId,
-              item.group,
-              item.icon,
-              item.isActive ? 1 : 0,
-              item.isActive ? 1 : 0,
-            ],
-            insertColumns: 'name, upstream_group_id, group_name, icon, is_active, source_is_active',
-            insertPlaceholders: '?, ?, ?, ?, ?, ?',
-            updateAssignments: `name = excluded.name, upstream_group_id = excluded.upstream_group_id,
-              group_name = excluded.group_name, icon = excluded.icon,
-              is_active = excluded.is_active, source_is_active = excluded.source_is_active`,
-            comparable: (item) => stableValue(item),
-          },
+          attemptAt,
         );
       }
       case 'tags': {
         const response = await this.client.getTags(signal);
         return this.publishReference(
+          persistence,
           dataset,
           response.tags,
           response.provenance.fetchedAt,
-          simpleReferenceDefinition('finance_tags', 'upstream_tag_id', 'tag'),
+          attemptAt,
         );
       }
       case 'recurring': {
         const response = await this.client.getRecurring(signal);
         return this.publishRecurring(
+          persistence,
           response.recurring,
           response.provenance.fetchedAt,
+          attemptAt,
         );
       }
       case 'budgets': {
         const response = await this.client.getBudgets(signal);
         return this.publishBudgets(
+          persistence,
           response.budgets,
           response.periodStart,
           response.periodEnd,
           response.provenance.fetchedAt,
+          attemptAt,
         );
       }
+      }
+    } catch (error) {
+      const failedAt = this.clock().toISOString();
+      await persistence.recordFailure({
+        connectorId: this.config.id,
+        dataset,
+        attemptAt,
+        failedAt,
+        errorCode: failureDetails(error).code,
+        sourceLimit: MONARCH_DATASET_LIMITS[dataset],
+        schemaVersion: DATASET_SCHEMA_VERSION,
+        configVersion: DATASET_CONFIG_VERSION,
+      });
+      throw error;
     }
   }
 
-  private publishReference<T extends { id: string }>(
+  private async publishReference<T extends { id: string }>(
+    persistence: FinanceDatasetPersistence,
     dataset: FinanceDataset,
     items: T[],
     sourceAsOf: string,
-    definition: ReferenceDefinition<T>,
-  ): DatasetRunResult {
+    attemptAt: string,
+  ): Promise<DatasetRunResult> {
     assertCompleteCollection(items);
     const generationId = randomUUID();
     const now = this.clock();
     const sourceDate = validateSourceAsOf(sourceAsOf, now);
     const completedAt = this.clock().toISOString();
-    return sqlite.transaction(() => {
-      const existingRows = sqlite.prepare(`
-        SELECT *
-        FROM ${definition.table}
-        WHERE connector_id = ?
-      `).all(this.config.id) as Array<Record<string, unknown>>;
-      const existing = new Map(existingRows.map((row) => [
-        String(row[definition.sourceIdColumn]),
-        stableReferenceRow(dataset, row),
-      ]));
-      let added = 0;
-      let updated = 0;
-      const upsert = sqlite.prepare(`
-        INSERT INTO ${definition.table} (
-          id, connector_id, ${definition.sourceIdColumn}, ${definition.insertColumns},
-          last_seen_generation_id, first_seen_at, last_seen_at, deactivated_at
-        ) VALUES (?, ?, ?, ${definition.insertPlaceholders}, ?, ?, ?, NULL)
-        ON CONFLICT(connector_id, ${definition.sourceIdColumn}) DO UPDATE SET
-          ${definition.updateAssignments},
-          last_seen_generation_id = excluded.last_seen_generation_id,
-          last_seen_at = excluded.last_seen_at,
-          deactivated_at = CASE WHEN excluded.is_active = 1 THEN NULL ELSE COALESCE(${definition.table}.deactivated_at, excluded.last_seen_at) END
-      `);
-      for (const item of items) {
-        const next = definition.comparable(item);
-        const previous = existing.get(item.id);
-        if (previous === undefined) added++;
-        else if (previous !== next) updated++;
-        upsert.run(
-          localId(definition.localPrefix, this.config.id, item.id),
-          this.config.id,
-          item.id,
-          ...definition.values(item),
-          generationId,
-          completedAt,
-          completedAt,
-        );
-      }
-      const removed = sqlite.prepare(`
-        UPDATE ${definition.table}
-        SET is_active = 0, deactivated_at = COALESCE(deactivated_at, ?)
-        WHERE connector_id = ? AND is_active = 1 AND last_seen_generation_id <> ?
-      `).run(completedAt, this.config.id, generationId).changes;
-      this.recordSuccess(
+    return persistence.publishReference({
+      ...this.publicationMetadata(
         dataset,
+        attemptAt,
         generationId,
         sourceDate,
         completedAt,
-        items.length,
         null,
         null,
-      );
-      return { added, updated, removed, count: items.length };
-    }).immediate();
+      ),
+      dataset: dataset as 'accounts' | 'category-groups' | 'categories' | 'tags',
+      items: items as unknown as FinanceReferenceDatasetItem[],
+    });
   }
 
-  private publishRecurring(
+  private async publishRecurring(
+    persistence: FinanceDatasetPersistence,
     items: MonarchRecurringObligation[],
     sourceAsOf: string,
-  ): DatasetRunResult {
+    attemptAt: string,
+  ): Promise<DatasetRunResult> {
     assertCompleteCollection(items);
     const sourceDate = validateSourceAsOf(sourceAsOf, this.clock());
     const completedAt = this.clock().toISOString();
-    const current = this.currentGeneration('recurring');
-    const nextFingerprint = stableValue(items
-      .map((item) => recurringComparable(item))
-      .sort(binaryIdCompare));
-    const currentFingerprint = stableValue((sqlite.prepare(`
-      SELECT upstream_recurring_id AS id, merchant, amount, frequency,
-             next_expected_date AS nextExpectedDate,
-             upstream_account_id AS accountId, account_name AS accountName,
-             upstream_category_id AS categoryId, category_name AS categoryName
-      FROM finance_recurring_obligations
-      WHERE connector_id = ? AND is_current = 1
-    `).all(this.config.id) as Array<{ id: string }>).sort(binaryIdCompare));
-    if (current.currentGenerationId && currentFingerprint === nextFingerprint) {
-      this.recordSuccess(
+    const generationId = randomUUID();
+    return persistence.publishRecurring({
+      ...this.publicationMetadata(
         'recurring',
-        current.currentGenerationId,
+        attemptAt,
+        generationId,
         sourceDate,
         completedAt,
-        items.length,
         null,
         null,
-      );
-      return { added: 0, updated: 0, removed: 0, count: items.length };
-    }
-    const generationId = randomUUID();
-    return sqlite.transaction(() => {
-      const previousCount = currentSnapshotCount('finance_recurring_obligations', this.config.id);
-      const insert = sqlite.prepare(`
-        INSERT INTO finance_recurring_obligations (
-          id, connector_id, generation_id, upstream_recurring_id, merchant,
-          amount, frequency, next_expected_date, upstream_account_id, account_name,
-          upstream_category_id, category_name, is_current, source_as_of, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      `);
-      for (const item of items) {
-        insert.run(
-          localId('recurring', this.config.id, `${generationId}:${item.id}`),
-          this.config.id,
-          generationId,
-          item.id,
-          item.merchant,
-          item.amount,
-          item.frequency,
-          item.nextExpectedDate,
-          item.account?.id ?? null,
-          item.account?.displayName ?? null,
-          item.category?.id ?? null,
-          item.category?.name ?? null,
-          sourceAsOf,
-          completedAt,
-        );
-      }
-      rotateSnapshots(
-        'finance_recurring_obligations',
-        this.config.id,
-        generationId,
-        current.currentGenerationId,
-      );
-      this.recordSuccess('recurring', generationId, sourceDate, completedAt, items.length, null, null);
-      return {
-        added: items.length,
-        updated: 0,
-        removed: Math.max(0, previousCount - items.length),
-        count: items.length,
-      };
-    }).immediate();
+      ),
+      dataset: 'recurring',
+      items,
+    });
   }
 
-  private publishBudgets(
+  private async publishBudgets(
+    persistence: FinanceDatasetPersistence,
     items: MonarchBudget[],
     periodStart: string,
     periodEnd: string,
     sourceAsOf: string,
-  ): DatasetRunResult {
+    attemptAt: string,
+  ): Promise<DatasetRunResult> {
     assertCompleteCollection(items.map((item) => ({ id: item.category.id })));
     assertFullCalendarMonth(periodStart, periodEnd);
     const sourceDate = validateSourceAsOf(sourceAsOf, this.clock());
     const completedAt = this.clock().toISOString();
-    const current = this.currentGeneration('budgets');
-    const nextFingerprint = stableValue(items
-      .map((item) => budgetComparable(item, periodStart, periodEnd))
-      .sort(binaryIdCompare));
-    const currentFingerprint = stableValue((sqlite.prepare(`
-      SELECT upstream_category_id AS id, category_name AS categoryName,
-             period_start AS periodStart, period_end AS periodEnd,
-             budgeted, spent, remaining, percent_used AS percentUsed
-      FROM finance_budget_snapshots
-      WHERE connector_id = ? AND is_current = 1
-    `).all(this.config.id) as Array<{ id: string }>).sort(binaryIdCompare));
-    if (current.currentGenerationId && currentFingerprint === nextFingerprint) {
-      this.recordSuccess(
-        'budgets',
-        current.currentGenerationId,
-        sourceDate,
-        completedAt,
-        items.length,
-        periodStart,
-        periodEnd,
-      );
-      return { added: 0, updated: 0, removed: 0, count: items.length };
-    }
     const generationId = randomUUID();
-    return sqlite.transaction(() => {
-      const previousCount = currentSnapshotCount('finance_budget_snapshots', this.config.id);
-      const insert = sqlite.prepare(`
-        INSERT INTO finance_budget_snapshots (
-          id, connector_id, generation_id, period_start, period_end,
-          upstream_category_id, category_name, budgeted, spent, remaining,
-          percent_used, is_current, source_as_of, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-      `);
-      for (const item of items) {
-        insert.run(
-          localId('budget', this.config.id, `${generationId}:${periodStart}:${item.category.id}`),
-          this.config.id,
-          generationId,
-          periodStart,
-          periodEnd,
-          item.category.id,
-          item.category.name,
-          item.budgeted,
-          item.spent,
-          item.remaining,
-          item.percentUsed,
-          sourceAsOf,
-          completedAt,
-        );
-      }
-      rotateSnapshots(
-        'finance_budget_snapshots',
-        this.config.id,
-        generationId,
-        current.currentGenerationId,
-      );
-      this.recordSuccess(
+    return persistence.publishBudgets({
+      ...this.publicationMetadata(
         'budgets',
+        attemptAt,
         generationId,
         sourceDate,
         completedAt,
-        items.length,
         periodStart,
         periodEnd,
-      );
-      return {
-        added: items.length,
-        updated: 0,
-        removed: Math.max(0, previousCount - items.length),
-        count: items.length,
-      };
-    }).immediate();
+      ),
+      dataset: 'budgets',
+      periodStart,
+      periodEnd,
+      items,
+    });
   }
 
-  private recordAttempt(dataset: FinanceDataset, attemptAt: string): void {
-    sqlite.prepare(`
-      INSERT INTO finance_dataset_sync_state (
-        connector_id, dataset, last_attempt_at, source_limit,
-        schema_version, config_version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(connector_id, dataset) DO UPDATE SET
-        last_attempt_at = excluded.last_attempt_at,
-        updated_at = excluded.updated_at
-    `).run(
-      this.config.id,
-      dataset,
-      attemptAt,
-      MONARCH_DATASET_LIMITS[dataset],
-      DATASET_SCHEMA_VERSION,
-      DATASET_CONFIG_VERSION,
-      attemptAt,
-      attemptAt,
-    );
-  }
-
-  private recordSuccess(
+  private publicationMetadata(
     dataset: FinanceDataset,
+    attemptAt: string,
     generationId: string,
     sourceAsOf: Date,
     completedAt: string,
-    count: number,
     coverageStart: string | null,
     coverageEnd: string | null,
-  ): void {
-    const current = sqlite.prepare(`
-      SELECT current_generation_id AS generationId,
-             previous_generation_id AS previousGenerationId
-      FROM finance_dataset_sync_state
-      WHERE connector_id = ? AND dataset = ?
-    `).get(this.config.id, dataset) as {
-      generationId: string | null;
-      previousGenerationId: string | null;
-    } | undefined;
-    const freshUntil = new Date(
-      sourceAsOf.getTime() + freshnessHours(this.config, dataset) * 3_600_000,
-    ).toISOString();
-    const insightKind = FINANCE_INSIGHT_KIND_BY_DATASET[dataset];
-    const insightFacts = insightKind
-      ? loadFinanceInsightProjectionFacts(this.config.id, '0000-01-01', insightKind)[insightKind]
-      : null;
-    const insightItemCount = insightFacts?.length ?? null;
-    const insightContentDigest = insightFacts
-      ? financeInsightDigestV1(insightFacts as CanonicalJsonValue)
-      : null;
-    sqlite.prepare(`
-      UPDATE finance_dataset_sync_state
-      SET last_attempt_outcome = 'succeeded', last_successful_at = ?,
-          source_as_of = ?, fresh_until = ?, coverage_start = ?, coverage_end = ?,
-          previous_generation_id = ?, current_generation_id = ?,
-          schema_version = ?, config_version = ?, published_item_count = ?,
-          insight_item_count = ?, insight_content_digest = ?,
-          insight_bridge_contract_version = ?,
-          source_limit = ?, last_error_code = NULL, updated_at = ?
-      WHERE connector_id = ? AND dataset = ?
-    `).run(
+  ): FinanceDatasetPublicationMetadata {
+    return {
+      connectorId: this.config.id,
+      dataset,
+      attemptAt,
+      generationId,
       completedAt,
-      sourceAsOf.toISOString(),
-      freshUntil,
+      sourceAsOf: sourceAsOf.toISOString(),
+      freshUntil: new Date(
+        sourceAsOf.getTime() + freshnessHours(this.config, dataset) * 3_600_000,
+      ).toISOString(),
       coverageStart,
       coverageEnd,
-      current?.generationId === generationId
-        ? current.previousGenerationId
-        : current?.generationId ?? null,
-      generationId,
-      DATASET_SCHEMA_VERSION,
-      DATASET_CONFIG_VERSION,
-      count,
-      insightItemCount,
-      insightContentDigest,
-      insightKind ? MONARCH_BRIDGE_CONTRACT_VERSION : null,
-      MONARCH_DATASET_LIMITS[dataset],
-      completedAt,
-      this.config.id,
-      dataset,
-    );
-  }
-
-  private recordFailure(dataset: FinanceDataset, error: unknown): void {
-    const failedAt = this.clock().toISOString();
-    const failure = failureDetails(error);
-    sqlite.prepare(`
-      INSERT INTO finance_dataset_sync_state (
-        connector_id, dataset, last_attempt_at, last_attempt_outcome,
-        source_limit, schema_version, config_version, last_error_code,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(connector_id, dataset) DO UPDATE SET
-        last_attempt_at = excluded.last_attempt_at,
-        last_attempt_outcome = 'failed',
-        last_error_code = excluded.last_error_code,
-        updated_at = excluded.updated_at
-    `).run(
-      this.config.id,
-      dataset,
-      failedAt,
-      MONARCH_DATASET_LIMITS[dataset],
-      DATASET_SCHEMA_VERSION,
-      DATASET_CONFIG_VERSION,
-      failure.code,
-      failedAt,
-      failedAt,
-    );
-  }
-
-  private currentGeneration(dataset: FinanceDataset): {
-    currentGenerationId: string | null;
-    previousGenerationId: string | null;
-  } {
-    return (sqlite.prepare(`
-      SELECT current_generation_id AS currentGenerationId,
-             previous_generation_id AS previousGenerationId
-      FROM finance_dataset_sync_state
-      WHERE connector_id = ? AND dataset = ?
-    `).get(this.config.id, dataset) as {
-      currentGenerationId: string | null;
-      previousGenerationId: string | null;
-    } | undefined) ?? {
-      currentGenerationId: null,
-      previousGenerationId: null,
+      sourceLimit: MONARCH_DATASET_LIMITS[dataset],
+      schemaVersion: DATASET_SCHEMA_VERSION,
+      configVersion: DATASET_CONFIG_VERSION,
     };
   }
 
-  private getStatuses(now: Date): DatasetStatus[] {
-    const rows = sqlite.prepare(`
-      SELECT dataset, last_attempt_outcome AS lastAttemptOutcome,
-             current_generation_id AS currentGenerationId,
-             source_as_of AS sourceAsOf, fresh_until AS freshUntil,
-             last_error_code AS lastErrorCode
-      FROM finance_dataset_sync_state
-      WHERE connector_id = ?
-    `).all(this.config.id) as Array<DatasetStateRow & { lastErrorCode: string | null }>;
-    const byDataset = new Map(rows.map((row) => [row.dataset, row]));
-    return FINANCE_DATASETS.map((dataset) => {
-      const row = byDataset.get(dataset);
-      return {
-        dataset,
-        state: financeDatasetFreshness(row, now),
-        warning: row?.lastAttemptOutcome === 'failed' ? row.lastErrorCode : null,
-      };
-    });
-  }
-}
-
-function simpleReferenceDefinition<T extends MonarchCategoryGroup | MonarchTag>(
-  table: 'finance_category_groups' | 'finance_tags',
-  sourceIdColumn: 'upstream_group_id' | 'upstream_tag_id',
-  localPrefix: string,
-): ReferenceDefinition<T> {
-  return {
-    table,
-    sourceIdColumn,
-    localPrefix,
-    values: (item) => [item.name, item.isActive ? 1 : 0, item.isActive ? 1 : 0],
-    insertColumns: 'name, is_active, source_is_active',
-    insertPlaceholders: '?, ?, ?',
-    updateAssignments: `name = excluded.name, is_active = excluded.is_active,
-      source_is_active = excluded.source_is_active`,
-    comparable: (item) => stableValue(item),
-  };
-}
-
-function recurringComparable(item: MonarchRecurringObligation) {
-  return {
-    id: item.id,
-    merchant: item.merchant,
-    amount: item.amount,
-    frequency: item.frequency,
-    nextExpectedDate: item.nextExpectedDate,
-    accountId: item.account?.id ?? null,
-    accountName: item.account?.displayName ?? null,
-    categoryId: item.category?.id ?? null,
-    categoryName: item.category?.name ?? null,
-  };
-}
-
-function budgetComparable(item: MonarchBudget, periodStart: string, periodEnd: string) {
-  return {
-    id: item.category.id,
-    categoryName: item.category.name,
-    periodStart,
-    periodEnd,
-    budgeted: item.budgeted,
-    spent: item.spent,
-    remaining: item.remaining,
-    percentUsed: item.percentUsed,
-  };
-}
-
-function binaryIdCompare(left: { id: string }, right: { id: string }): number {
-  return Buffer.compare(Buffer.from(left.id, 'utf8'), Buffer.from(right.id, 'utf8'));
-}
-
-function stableReferenceRow(dataset: FinanceDataset, row: Record<string, unknown>): string {
-  switch (dataset) {
-    case 'accounts':
-      return stableValue({
-        displayName: row.display_name,
-        type: row.type,
-        institution: row.institution,
-        mask: row.mask,
-        isActive: row.source_is_active === 1,
-      });
-    case 'categories':
-      return stableValue({
-        id: row.upstream_category_id,
-        name: row.name,
-        groupId: row.upstream_group_id,
-        group: row.group_name,
-        icon: row.icon,
-        isActive: row.source_is_active === 1,
-      });
-    default:
-      return stableValue({
-        id: dataset === 'category-groups'
-          ? row.upstream_group_id
-          : row.upstream_tag_id,
-        name: row.name,
-        isActive: row.source_is_active === 1,
-      });
-  }
-}
-
-function currentSnapshotCount(table: string, connectorId: string): number {
-  return (sqlite.prepare(`
-    SELECT count(*) AS count FROM ${table}
-    WHERE connector_id = ? AND is_current = 1
-  `).get(connectorId) as { count: number }).count;
-}
-
-function rotateSnapshots(
-  table: 'finance_recurring_obligations' | 'finance_budget_snapshots',
-  connectorId: string,
-  generationId: string,
-  previousGenerationId: string | null,
-): void {
-  sqlite.prepare(`
-    UPDATE ${table} SET is_current = 0
-    WHERE connector_id = ? AND generation_id <> ?
-  `).run(connectorId, generationId);
-  sqlite.prepare(`
-    DELETE FROM ${table}
-    WHERE connector_id = ? AND generation_id NOT IN (?, ?)
-  `).run(connectorId, generationId, previousGenerationId ?? generationId);
 }
 
 function assertFullCalendarMonth(periodStart: string, periodEnd: string): void {

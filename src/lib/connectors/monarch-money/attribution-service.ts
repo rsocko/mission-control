@@ -9,6 +9,8 @@ import {
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import type { MonarchTransaction } from './client';
 import type { ConnectorConfig } from '@/types';
+import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
+import { FINANCE_ATTRIBUTION_WRITE_MAX } from '@/db/persistence/finance-attribution';
 import {
   createAttributionRequests,
   createAttributionAccountRef,
@@ -27,7 +29,10 @@ import {
   type AttributionBatchResult,
   type ManualDecision,
 } from './attribution-contract';
-import { ensureFinanceIdentityNamespace } from './identity';
+import {
+  createFinanceIdentityNamespace,
+  ensureFinanceIdentityNamespace,
+} from './identity';
 
 type ActorType = 'parent-admin' | 'service';
 type ExceptionStatus = 'open' | 'retry_requested' | 'resolved' | 'dismissed';
@@ -69,6 +74,8 @@ interface CoordinatorDependencies {
   config?: TyrionAttributionConfig;
   client?: TyrionAttributionClient;
   financeConfig?: Pick<ConnectorConfig, 'credentials' | 'settings'>;
+  persistence?: FinanceWorkerPersistence;
+  generationId?: string;
 }
 
 function localTransactionId(connectorId: string, upstreamTransactionId: string): string {
@@ -169,8 +176,8 @@ function prepareItems(
   connectorId: string,
   transactions: MonarchTransaction[],
   observedAt: string,
+  rows: Map<string, PersistedAttributionRow>,
 ): PreparedAttributionItem[] {
-  const rows = currentRows(connectorId, transactions);
   return transactions.map((transaction) => {
     const row = rows.get(transaction.id);
     if (!row) {
@@ -592,12 +599,19 @@ export class FinanceAttributionCoordinator {
   private attempted = false;
   private succeeded = false;
   private readonly financeConfig: Pick<ConnectorConfig, 'credentials' | 'settings'>;
+  private readonly persistence: FinanceWorkerPersistence | null;
+  private readonly generationId: string | null;
 
   constructor(
     private readonly connectorId: string,
     dependencies: CoordinatorDependencies = {},
   ) {
     this.financeConfig = dependencies.financeConfig ?? { credentials: {}, settings: {} };
+    this.persistence = dependencies.persistence ?? null;
+    this.generationId = dependencies.generationId ?? null;
+    if (this.persistence && !this.generationId) {
+      throw new Error('Finance attribution persistence requires a snapshot generation');
+    }
     if (dependencies.config) {
       this.config = dependencies.config;
       this.policyFence = dependencies.config.expectedPolicyVersion;
@@ -615,10 +629,14 @@ export class FinanceAttributionCoordinator {
     signal?: AbortSignal,
   ): Promise<void> {
     if (transactions.length === 0) return;
-    const rows = currentRows(this.connectorId, transactions);
-    if (this.terminalFailure) {
-      persistUnavailable(
+    const rows = this.persistence
+      ? await this.persistence.attribution.readRows(
         this.connectorId,
+        transactions.map((transaction) => transaction.id),
+      )
+      : currentRows(this.connectorId, transactions);
+    if (this.terminalFailure) {
+      await this.persistUnavailable(
         transactions.map((transaction) => {
           const row = rows.get(transaction.id);
           return {
@@ -638,7 +656,13 @@ export class FinanceAttributionCoordinator {
     let prepared: PreparedAttributionItem[];
     try {
       if (!this.config) {
-        const identityNamespace = ensureFinanceIdentityNamespace(this.connectorId);
+        const identityNamespace = this.persistence
+          ? await this.persistence.identity.ensureNamespace({
+            connectorId: this.connectorId,
+            candidate: createFinanceIdentityNamespace(),
+            updatedAt: new Date().toISOString(),
+          })
+          : ensureFinanceIdentityNamespace(this.connectorId);
         this.config = resolveTyrionAttributionConfig({
           credentials: {
             ...(this.financeConfig.credentials ?? {}),
@@ -655,12 +679,12 @@ export class FinanceAttributionCoordinator {
         this.connectorId,
         transactions,
         observedAt,
+        rows,
       );
     } catch (error) {
       this.attempted = true;
       this.terminalFailure = sanitizedFailure(error);
-      persistUnavailable(
-        this.connectorId,
+      await this.persistUnavailable(
         transactions.map((transaction) => {
           const row = rows.get(transaction.id);
           return {
@@ -690,19 +714,40 @@ export class FinanceAttributionCoordinator {
       this.attempted = true;
       try {
         const response = await this.client.attribute(request, signal);
-        applyResults(
-          this.connectorId,
-          batch,
-          response.results,
-          new Date().toISOString(),
-        );
+        const appliedAt = new Date().toISOString();
+        if (this.persistence) {
+          await this.persistence.attribution.applyResults({
+            connectorId: this.connectorId,
+            generationId: this.generationId!,
+            now: appliedAt,
+            provenance: TYRION_ATTRIBUTION_PROVENANCE,
+            items: batch.map((item, index) => ({
+              transactionId: item.transactionId,
+              sourceFingerprint: item.sourceFingerprint,
+              sourceRef: item.item.sourceRef,
+              stateSnapshot: item.stateSnapshot,
+              hasManualDecision: item.manualDecision !== null,
+              manualResultMatches: manualResultMatches(
+                item.manualDecision,
+                response.results[index],
+              ),
+              result: response.results[index],
+            })),
+          });
+        } else {
+          applyResults(
+            this.connectorId,
+            batch,
+            response.results,
+            appliedAt,
+          );
+        }
         this.succeeded = true;
         offset += request.items.length;
       } catch (error) {
         if (signal?.aborted) throw error;
         this.terminalFailure = sanitizedFailure(error);
-        persistUnavailable(
-          this.connectorId,
+        await this.persistUnavailable(
           prepared.slice(offset).map((entry) => ({
             transactionId: entry.transactionId,
             sourceFingerprint: entry.sourceFingerprint,
@@ -717,7 +762,39 @@ export class FinanceAttributionCoordinator {
     }
   }
 
-  finish(now: string): void {
+  private async persistUnavailable(
+    items: Array<{
+      transactionId: string;
+      sourceFingerprint: string;
+      sourceRef: string | null;
+      stateSnapshot: AttributionStateSnapshot;
+    }>,
+    failure: AttributionFailure,
+    now: string,
+  ): Promise<void> {
+    if (!this.persistence) {
+      persistUnavailable(this.connectorId, items, failure, now);
+      return;
+    }
+    for (let offset = 0; offset < items.length; offset += FINANCE_ATTRIBUTION_WRITE_MAX) {
+      await this.persistence.attribution.persistUnavailable({
+        connectorId: this.connectorId,
+        generationId: this.generationId!,
+        now,
+        items: items.slice(offset, offset + FINANCE_ATTRIBUTION_WRITE_MAX),
+        failure: {
+          code: failure.code,
+          retryable: failure.retryable,
+          reason: failureReason(failure.code),
+          explanation: failureExplanation(failure.code),
+        },
+        contractVersion: TYRION_ATTRIBUTION_CONTRACT_VERSION,
+        provenance: TYRION_ATTRIBUTION_PROVENANCE,
+      });
+    }
+  }
+
+  async finish(now: string): Promise<void> {
     if (!this.attempted) return;
     const unavailableCodes = new Set([
       'attribution_not_configured',
@@ -733,6 +810,19 @@ export class FinanceAttributionCoordinator {
     const status = this.terminalFailure
       ? unavailableCodes.has(this.terminalFailure.code) ? 'unavailable' : 'degraded'
       : 'healthy';
+    if (this.persistence && this.generationId) {
+      await this.persistence.attribution.finish({
+        connectorId: this.connectorId,
+        generationId: this.generationId,
+        attemptedAt: now,
+        succeeded: this.succeeded,
+        terminalFailureCode: this.terminalFailure?.code ?? null,
+        status,
+        policyVersion: this.policyFence,
+        engineVersion: TYRION_ATTRIBUTION_ENGINE_VERSION,
+      });
+      return;
+    }
     sqlite.prepare(`
       UPDATE finance_sync_state
       SET attribution_status = ?,

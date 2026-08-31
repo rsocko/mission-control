@@ -1,8 +1,8 @@
 import 'server-only';
 
-import { sqlite } from '@/db';
 import type { ConnectorConfig } from '@/types';
 import logger from '@/lib/logger';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { financeInsightDigestV1, type CanonicalJsonValue } from './canonical';
 import {
   FINANCE_INSIGHT_FACT_KINDS,
@@ -33,7 +33,6 @@ import {
   FINANCE_INSIGHT_OCCURRENCE_CACHE_LIMIT,
   replaceFinanceInsightOccurrenceCache,
 } from './occurrence-cache';
-import { isFinanceInsightDeliveryEnabled } from './cutover';
 import { ingestFinanceInsightNotifications } from './notification-ingestion';
 import { FINANCE_PROVIDER_ALIASES } from './provider';
 
@@ -85,37 +84,23 @@ export function isFinanceInsightShadowIngestEnabled(
   return environment.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED?.trim().toLowerCase() === 'true';
 }
 
-export function findFinanceInsightContinuationPublicationId(
+export async function findFinanceInsightContinuationPublicationId(
   connectorId: string,
-): string | null {
-  const pending = sqlite.prepare(`
-    SELECT publication_id AS publicationId
-    FROM finance_insight_publication_delivery
-    WHERE connector_id = ?
-      AND (
-        evaluation_state IN ('queued', 'evaluating')
-        OR last_error_retryable = 1
-      )
-    ORDER BY source_sequence DESC
-    LIMIT 1
-  `).get(connectorId) as { publicationId: string } | undefined;
-  return pending?.publicationId ?? null;
+): Promise<string | null> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  return finance.insights.delivery.findContinuationPublicationId(connectorId);
 }
 
 function stableIdentifier(prefix: string, value: CanonicalJsonValue): string {
   return `${prefix}:${financeInsightDigestV1(value).replace('sha256:', '')}`;
 }
 
-function assertSingleFinanceConnector(connectorId: string): void {
-  const placeholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
-  const rows = sqlite.prepare(`
-    SELECT id FROM connector_configs
-    WHERE enabled = 1 AND deleted_at IS NULL
-      AND type IN (${placeholders})
-    ORDER BY id
-    LIMIT 2
-  `).all(...FINANCE_PROVIDER_ALIASES) as Array<{ id: string }>;
-  if (rows.length !== 1 || rows[0].id !== connectorId) {
+async function assertSingleFinanceConnector(connectorId: string): Promise<void> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  const resolved = await finance.insights.connectors.resolveSingleEnabledConnectorId(
+    FINANCE_PROVIDER_ALIASES,
+  );
+  if (resolved !== connectorId) {
     throw new TyrionFinanceInsightError(
       'finance_insight_connector_unavailable',
       'Finance insight connector is unavailable',
@@ -124,36 +109,19 @@ function assertSingleFinanceConnector(connectorId: string): void {
   }
 }
 
-function ensureDeliveryState(
+async function ensureDeliveryState(
   connectorId: string,
   publicationId: string,
   sourceSequence: number,
   now: string,
-): DeliveryState {
-  sqlite.prepare(`
-    INSERT INTO finance_insight_publication_delivery (
-      publication_id, connector_id, source_sequence, stage, next_batch_ordinal,
-      last_error_retryable, created_at, updated_at
-    ) VALUES (?, ?, ?, 'captured', 0, 0, ?, ?)
-    ON CONFLICT(publication_id) DO NOTHING
-  `).run(publicationId, connectorId, sourceSequence, now, now);
-  const state = sqlite.prepare(`
-    SELECT stage, next_batch_ordinal AS nextBatchOrdinal,
-           detector_set_version AS detectorSetVersion,
-           policy_version AS policyVersion,
-           evaluation_sequence AS evaluationSequence
-    FROM finance_insight_publication_delivery
-    WHERE publication_id = ? AND connector_id = ? AND source_sequence = ?
-  `).get(publicationId, connectorId, sourceSequence) as DeliveryState | undefined;
-  if (!state) {
-    throw new TyrionFinanceInsightError(
-      'source_generation_conflict',
-      'Finance insight source generation conflicts with prior input',
-      false,
-      409,
-    );
-  }
-  return state;
+): Promise<DeliveryState> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  return finance.insights.delivery.ensureState({
+    connectorId,
+    publicationId,
+    sourceSequence,
+    now,
+  });
 }
 
 function validateSourceResult(
@@ -182,17 +150,19 @@ function orderedBatches(batches: readonly SourceFactBatchV1[]): SourceFactBatchV
   ));
 }
 
-function recordFailure(
+async function recordFailure(
   publicationId: string,
   code: string,
   retryable: boolean,
   now: string,
-): void {
-  sqlite.prepare(`
-    UPDATE finance_insight_publication_delivery
-    SET last_attempt_at = ?, last_error_code = ?, last_error_retryable = ?, updated_at = ?
-    WHERE publication_id = ?
-  `).run(now, code, retryable ? 1 : 0, now, publicationId);
+): Promise<void> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  await finance.insights.delivery.recordFailure({
+    publicationId,
+    code,
+    retryable,
+    now,
+  });
 }
 
 async function refreshOccurrences(input: {
@@ -285,7 +255,7 @@ async function refreshOccurrences(input: {
       false,
     );
   }
-  replaceFinanceInsightOccurrenceCache({
+  await replaceFinanceInsightOccurrenceCache({
     connectorId: input.connectorId,
     sourceGeneration: input.sourceGeneration,
     sourceSequence: input.sourceSequence,
@@ -295,7 +265,7 @@ async function refreshOccurrences(input: {
   });
   let notificationsProcessed = 0;
   let notificationsAdded = 0;
-  if (input.alertCapable && isFinanceInsightDeliveryEnabled(input.connectorId)) {
+  if (input.alertCapable) {
     const notificationResults = await ingestFinanceInsightNotifications({
       connectorId: input.connectorId,
       items,
@@ -324,8 +294,9 @@ export async function runFinanceInsightIngestion(input: {
   const nowIso = now.toISOString();
   let publicationId = input.publicationId ?? null;
   try {
-    assertSingleFinanceConnector(input.config.id);
-    const publication = loadFinanceInsightPublication(
+    const { finance } = await getWorkerPersistenceRepositories();
+    await assertSingleFinanceConnector(input.config.id);
+    const publication = await loadFinanceInsightPublication(
       input.config.id,
       input.publicationId,
       input.clock,
@@ -341,7 +312,7 @@ export async function runFinanceInsightIngestion(input: {
     const client = input.client ?? new TyrionFinanceInsightClient(
       resolveTyrionFinanceInsightConfig(input.config, input.environment),
     );
-    let delivery = ensureDeliveryState(
+    let delivery = await ensureDeliveryState(
       input.config.id,
       publicationId,
       publication.createRequest.sourceSequence,
@@ -364,12 +335,10 @@ export async function runFinanceInsightIngestion(input: {
     let detectorSetVersion = sourceResult.detectorSetVersion;
     let policyVersion = sourceResult.policyVersion;
     if (sourceResult.state === 'staging') {
-      sqlite.prepare(`
-        UPDATE finance_insight_publication_delivery
-        SET stage = 'staging', last_attempt_at = ?, last_error_code = NULL,
-            last_error_retryable = 0, updated_at = ?
-        WHERE publication_id = ?
-      `).run(nowIso, nowIso, publicationId);
+      await finance.insights.delivery.markStaging({
+        publicationId,
+        now: nowIso,
+      });
       const batches = orderedBatches(publication.batches);
       for (let ordinal = delivery.nextBatchOrdinal; ordinal < batches.length; ordinal++) {
         const batch = batches[ordinal];
@@ -387,12 +356,11 @@ export async function runFinanceInsightIngestion(input: {
             409,
           );
         }
-        sqlite.prepare(`
-          UPDATE finance_insight_publication_delivery
-          SET stage = 'uploading', next_batch_ordinal = ?,
-              last_successful_at = ?, updated_at = ?
-          WHERE publication_id = ?
-        `).run(ordinal + 1, nowIso, nowIso, publicationId);
+        await finance.insights.delivery.advanceBatch({
+          publicationId,
+          nextBatchOrdinal: ordinal + 1,
+          now: nowIso,
+        });
       }
       const committed = await client.commitSourceGeneration(
         publication.commitRequest,
@@ -409,21 +377,19 @@ export async function runFinanceInsightIngestion(input: {
       }
       detectorSetVersion = committed.detectorSetVersion;
       policyVersion = committed.policyVersion;
-      sqlite.prepare(`
-        UPDATE finance_insight_publication_delivery
-        SET stage = 'committed', detector_set_version = ?, policy_version = ?,
-            last_successful_at = ?, last_error_code = NULL,
-            last_error_retryable = 0, updated_at = ?
-        WHERE publication_id = ?
-      `).run(detectorSetVersion, policyVersion, nowIso, nowIso, publicationId);
+      await finance.insights.delivery.markCommitted({
+        publicationId,
+        detectorSetVersion,
+        policyVersion,
+        now: nowIso,
+      });
     } else {
-      sqlite.prepare(`
-        UPDATE finance_insight_publication_delivery
-        SET stage = 'committed', detector_set_version = ?, policy_version = ?,
-            last_successful_at = ?, last_error_code = NULL,
-            last_error_retryable = 0, updated_at = ?
-        WHERE publication_id = ?
-      `).run(detectorSetVersion, policyVersion, nowIso, nowIso, publicationId);
+      await finance.insights.delivery.markCommitted({
+        publicationId,
+        detectorSetVersion: detectorSetVersion!,
+        policyVersion: policyVersion!,
+        now: nowIso,
+      });
     }
     if (!detectorSetVersion || !policyVersion) {
       throw new TyrionFinanceInsightError(
@@ -432,7 +398,7 @@ export async function runFinanceInsightIngestion(input: {
         false,
       );
     }
-    delivery = ensureDeliveryState(
+    delivery = await ensureDeliveryState(
       input.config.id,
       publicationId,
       publication.createRequest.sourceSequence,
@@ -467,14 +433,13 @@ export async function runFinanceInsightIngestion(input: {
         409,
       );
     }
-    const maximumEvaluation = sqlite.prepare(`
-      SELECT MAX(evaluation_sequence) AS sequence
-      FROM finance_insight_publication_delivery
-      WHERE connector_id = ? AND publication_id <> ?
-    `).get(input.config.id, publicationId) as { sequence: number | null };
+    const maximumEvaluation = await finance.insights.delivery.readMaxEvaluationSequence({
+      connectorId: input.config.id,
+      excludingPublicationId: publicationId,
+    });
     if (
-      maximumEvaluation.sequence !== null
-      && evaluation.evaluationSequence <= maximumEvaluation.sequence
+      maximumEvaluation !== null
+      && evaluation.evaluationSequence <= maximumEvaluation
     ) {
       throw new TyrionFinanceInsightError(
         'stale_evaluation',
@@ -497,41 +462,28 @@ export async function runFinanceInsightIngestion(input: {
     if (evaluation.state === 'failed' || evaluation.state === 'unavailable') {
       const code = `finance_insight_evaluation_${evaluation.state}`;
       const retryable = evaluation.state === 'unavailable';
-      sqlite.prepare(`
-        UPDATE finance_insight_publication_delivery
-        SET stage = 'evaluation-requested', evaluation_sequence = ?,
-            evaluation_state = ?, evaluation_idempotency_key = ?,
-            last_attempt_at = ?, last_error_code = ?,
-            last_error_retryable = ?, updated_at = ?
-        WHERE publication_id = ?
-      `).run(
-        evaluation.evaluationSequence,
-        evaluation.state,
-        evaluationRequest.idempotencyKey,
-        nowIso,
-        code,
-        retryable ? 1 : 0,
-        nowIso,
+      await finance.insights.delivery.recordEvaluationOutcome({
         publicationId,
-      );
+        evaluationSequence: evaluation.evaluationSequence,
+        evaluationState: evaluation.state,
+        evaluationIdempotencyKey: evaluationRequest.idempotencyKey,
+        now: nowIso,
+        succeeded: false,
+        errorCode: code,
+        retryable,
+      });
       return { status: 'failed', code, retryable };
     }
-    sqlite.prepare(`
-      UPDATE finance_insight_publication_delivery
-      SET stage = 'evaluation-requested', evaluation_sequence = ?,
-          evaluation_state = ?, evaluation_idempotency_key = ?,
-          last_attempt_at = ?, last_successful_at = ?, last_error_code = NULL,
-          last_error_retryable = 0, updated_at = ?
-      WHERE publication_id = ?
-    `).run(
-      evaluation.evaluationSequence,
-      evaluation.state,
-      evaluationRequest.idempotencyKey,
-      nowIso,
-      nowIso,
-      nowIso,
+    await finance.insights.delivery.recordEvaluationOutcome({
       publicationId,
-    );
+      evaluationSequence: evaluation.evaluationSequence,
+      evaluationState: evaluation.state,
+      evaluationIdempotencyKey: evaluationRequest.idempotencyKey,
+      now: nowIso,
+      succeeded: true,
+      errorCode: null,
+      retryable: false,
+    });
     if (evaluation.state === 'queued' || evaluation.state === 'evaluating') {
       return { status: 'pending', evaluationState: evaluation.state };
     }
@@ -559,7 +511,7 @@ export async function runFinanceInsightIngestion(input: {
       );
     if (publicationId) {
       try {
-        recordFailure(publicationId, normalized.code, normalized.retryable, nowIso);
+        await recordFailure(publicationId, normalized.code, normalized.retryable, nowIso);
       } catch {
         logger.warn(
           { code: 'finance_insight_delivery_state_unavailable' },

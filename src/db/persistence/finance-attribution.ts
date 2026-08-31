@@ -73,6 +73,7 @@ export interface FinanceAttributionFailure {
 export interface FinanceAttributionFinishCommand {
   connectorId: string;
   generationId: string;
+  fenceMode?: FinanceAttributionFenceMode;
   attemptedAt: string;
   succeeded: boolean;
   terminalFailureCode: string | null;
@@ -80,6 +81,8 @@ export interface FinanceAttributionFinishCommand {
   policyVersion: number | null;
   engineVersion: string;
 }
+
+export type FinanceAttributionFenceMode = 'snapshot' | 'row-generation';
 
 export class FinanceAttributionFenceError extends Error {
   readonly code = 'finance_attribution_generation_stale';
@@ -98,6 +101,7 @@ export interface FinanceAttributionPersistence {
   applyResults(input: {
     connectorId: string;
     generationId: string;
+    fenceMode?: FinanceAttributionFenceMode;
     now: string;
     items: readonly FinanceAttributionApplyItem[];
     provenance: string;
@@ -105,6 +109,7 @@ export interface FinanceAttributionPersistence {
   persistUnavailable(input: {
     connectorId: string;
     generationId: string;
+    fenceMode?: FinanceAttributionFenceMode;
     now: string;
     items: readonly FinanceAttributionUnavailableItem[];
     failure: FinanceAttributionFailure;

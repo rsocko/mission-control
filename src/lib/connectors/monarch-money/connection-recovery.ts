@@ -18,7 +18,7 @@ import {
   createNotificationsInTransaction,
   wakeNotificationDeliveryDispatcher,
 } from '@/lib/notifications/service';
-import { syncFinanceProviderPresentation } from '@/lib/finance-insights/notification-ingestion';
+import { syncFinanceProviderPresentation } from '@/db/persistence/sqlite-finance-insight-notification-lifecycle';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import { resolveTyrionReconnectUrl } from '@/lib/finance/tyrion-reconnect';
 import { isConnectorSyncQuarantinedAsync } from '@/lib/sync/control-state';

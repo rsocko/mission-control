@@ -31,7 +31,7 @@ import {
 } from './finance-snapshot';
 import {
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
-  type FinanceWorkerPersistence,
+  type FinanceCorePersistence,
 } from './finance-worker';
 
 type SqliteDatabase = Database.Database;
@@ -1094,6 +1094,36 @@ function createAttributionPersistence(
     );
   }
 
+  function assertAttributionFence(input: {
+    connectorId: string;
+    generationId: string;
+    fenceMode?: 'snapshot' | 'row-generation';
+    items: ReadonlyArray<{ transactionId: string }>;
+  }): void {
+    if (input.fenceMode === 'row-generation') {
+      if (input.items.length === 0) return;
+      const placeholders = input.items.map(() => '?').join(', ');
+      const row = sqlite.prepare(`
+        SELECT COUNT(DISTINCT id) AS count
+        FROM finance_transactions
+        WHERE connector_instance_id = ?
+          AND last_seen_generation_id = ?
+          AND id IN (${placeholders})
+      `).get(
+        input.connectorId,
+        input.generationId,
+        ...input.items.map((item) => item.transactionId),
+      ) as { count: number };
+      if (row.count !== input.items.length) throw new FinanceAttributionFenceError();
+      return;
+    }
+    const fence = sqlite.prepare(`
+      SELECT 1 FROM finance_sync_state
+      WHERE connector_id = ? AND status = 'running' AND current_generation_id = ?
+    `).get(input.connectorId, input.generationId);
+    if (!fence) throw new FinanceAttributionFenceError();
+  }
+
   return {
     async readRows(connectorId, upstreamTransactionIds) {
       assertBatch(
@@ -1126,11 +1156,7 @@ function createAttributionPersistence(
         'Finance attribution result write',
       );
       sqlite.transaction(() => {
-        const fence = sqlite.prepare(`
-          SELECT 1 FROM finance_sync_state
-          WHERE connector_id = ? AND status = 'running' AND current_generation_id = ?
-        `).get(input.connectorId, input.generationId);
-        if (!fence) throw new FinanceAttributionFenceError();
+        assertAttributionFence(input);
         const updateAutomated = sqlite.prepare(`
           UPDATE finance_transactions
           SET assigned_kid_id = ?, kid_assignment_method = ?,
@@ -1290,11 +1316,7 @@ function createAttributionPersistence(
         'Finance attribution unavailable write',
       );
       sqlite.transaction(() => {
-        const fence = sqlite.prepare(`
-          SELECT 1 FROM finance_sync_state
-          WHERE connector_id = ? AND status = 'running' AND current_generation_id = ?
-        `).get(input.connectorId, input.generationId);
-        if (!fence) throw new FinanceAttributionFenceError();
+        assertAttributionFence(input);
         const update = sqlite.prepare(`
           UPDATE finance_transactions
           SET attribution_source_ref = COALESCE(?, attribution_source_ref),
@@ -1348,6 +1370,12 @@ function createAttributionPersistence(
     },
 
     async finish(command) {
+      const fenceClause = command.fenceMode === 'row-generation'
+        ? ''
+        : `AND (
+             current_generation_id = ?
+             OR (current_generation_id IS NULL AND last_successful_generation_id = ?)
+           )`;
       const result = sqlite.prepare(`
         UPDATE finance_sync_state
         SET attribution_status = ?,
@@ -1360,10 +1388,7 @@ function createAttributionPersistence(
               ELSE attribution_engine_version END,
             updated_at = ?
         WHERE connector_id = ?
-          AND (
-            current_generation_id = ?
-            OR (current_generation_id IS NULL AND last_successful_generation_id = ?)
-          )
+          ${fenceClause}
       `).run(
         command.status,
         command.attemptedAt,
@@ -1375,8 +1400,9 @@ function createAttributionPersistence(
         command.engineVersion,
         command.attemptedAt,
         command.connectorId,
-        command.generationId,
-        command.generationId,
+        ...(command.fenceMode === 'row-generation'
+          ? []
+          : [command.generationId, command.generationId]),
       );
       return { recorded: result.changes === 1 };
     },
@@ -1386,7 +1412,7 @@ function createAttributionPersistence(
 export function createSqliteFinanceWorkerPersistence(
   sqlite: SqliteDatabase,
   options: SqliteFinanceAdapterOptions = {},
-): FinanceWorkerPersistence {
+): FinanceCorePersistence {
   const idFactory = options.idFactory ?? randomUUID;
   return {
     identity: {

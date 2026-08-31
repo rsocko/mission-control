@@ -235,6 +235,38 @@ describe.sequential('finance insight transaction history projection', () => {
     `).get(connector.id)).toEqual({ count: 0 });
   });
 
+  it('cancels between bounded page writes and removes the abandoned attempt', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      controller.abort(new Error('invented cancellation'));
+      return bridgePage([]);
+    }));
+
+    const synchronizer = new FinanceInsightHistorySynchronizer(connector, () => baseNow);
+    await expect(synchronizer.sync({ full: false, signal: controller.signal }))
+      .rejects
+      .toThrow('invented cancellation');
+
+    expect(sqlite.prepare(`
+      SELECT status, current_attempt_id AS currentAttemptId
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(connector.id)).toEqual({
+      status: 'failed',
+      currentAttemptId: null,
+    });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM finance_insight_transaction_projection_facts
+      WHERE connector_id = ?
+    `).get(connector.id)).toEqual({ count: 0 });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM finance_insight_transaction_projection_windows
+      WHERE connector_id = ?
+    `).get(connector.id)).toEqual({ count: 0 });
+  });
+
   it('cannot recreate history after permanent connector deletion during an in-flight fetch', async () => {
     let deleted = false;
     vi.stubGlobal('fetch', vi.fn(async () => {

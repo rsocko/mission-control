@@ -38,14 +38,15 @@ export async function POST(
   }
   try {
     const connectorId = (await params).id;
-    return NextResponse.json(repairAttributionNotConfiguredAttention({
+    const result = await repairAttributionNotConfiguredAttention({
       connectorId,
       mode: body.data.mode,
       actorType,
       idempotencyKey: request.headers.get('idempotency-key'),
       dryRunId: body.data.mode === 'apply' ? body.data.dryRunId : undefined,
       confirmation: body.data.mode === 'apply' ? body.data.confirmation : undefined,
-    }));
+    });
+    return NextResponse.json(result);
   } catch (error) {
     if (error instanceof FinanceAttentionRepairError) {
       return NextResponse.json(

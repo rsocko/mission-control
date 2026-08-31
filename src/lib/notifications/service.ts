@@ -23,6 +23,7 @@ import type {
 } from '@/types';
 import { getTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
+import { wakeNotificationDeliveryDispatcher } from './dispatcher-wake';
 import { getNotificationLevelRank, normalizeNotificationLevel } from './levels';
 import { isQuietHour } from './quiet-hours';
 import { getApnsConfiguration, isApnsConfigured } from '@/lib/push/apns-config';
@@ -36,6 +37,8 @@ import {
   needsAttention,
   shouldReopenForSourceActivity,
 } from './lifecycle';
+
+export { wakeNotificationDeliveryDispatcher } from './dispatcher-wake';
 
 export const PUSH_DELIVERY_SETTING_KEY = 'push_delivery_enabled';
 export const DEFAULT_GLOBAL_PUSHES_PER_HOUR = 100;
@@ -721,22 +724,6 @@ export function createNotificationsInTransaction(
 ): CreateNotificationResult[] {
   const context = createContext(transaction, options);
   return inputs.map(input => createOneInTransaction(transaction, input, context));
-}
-
-let dispatcherWakeScheduled = false;
-
-export function wakeNotificationDeliveryDispatcher(): void {
-  if (dispatcherWakeScheduled) return;
-  dispatcherWakeScheduled = true;
-  queueMicrotask(async () => {
-    dispatcherWakeScheduled = false;
-    try {
-      const { dispatchNotificationDeliveries } = await import('@/lib/push/dispatcher');
-      await dispatchNotificationDeliveries();
-    } catch (error) {
-      logger.error({ err: error }, 'Push delivery dispatcher failed');
-    }
-  });
 }
 
 export async function createNotifications(

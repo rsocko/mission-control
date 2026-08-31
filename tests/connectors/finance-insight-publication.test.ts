@@ -66,11 +66,11 @@ function connector(id: string, type = 'finance-manager'): ConnectorConfig {
   };
 }
 
-function seedProjection(
+async function seedProjection(
   connectorId: string,
   generationSuffix = 'one',
   now = baseNow,
-): void {
+): Promise<void> {
   const timestamp = now.toISOString();
   const freshUntil = new Date(now.getTime() + 24 * 60 * 60 * 1_000).toISOString();
   sqlite.prepare(`
@@ -161,7 +161,7 @@ function seedProjection(
     recurringRef: null,
     tagRefs: ['tag-one'],
   }, `transaction-generation-${generationSuffix}`);
-  refreshProjectionProof(connectorId);
+  await refreshProjectionProof(connectorId);
 }
 
 function insertHistoryFact(
@@ -200,7 +200,7 @@ function insertHistoryFact(
   );
 }
 
-function refreshProjectionProof(connectorId: string): void {
+async function refreshProjectionProof(connectorId: string): Promise<void> {
   const state = sqlite.prepare(`
     SELECT successful_generation_id AS generationId, source_as_of AS sourceAsOf,
            coverage_end AS coverageEnd
@@ -210,7 +210,7 @@ function refreshProjectionProof(connectorId: string): void {
     sourceAsOf: string;
     coverageEnd: string;
   };
-  const facts = loadFinanceInsightPublicationProjectionFacts(connectorId, state.generationId);
+  const facts = await loadFinanceInsightPublicationProjectionFacts(connectorId, state.generationId);
   const windows = buildFinanceInsightHistoryWindows(state.coverageEnd).map((window) => {
     const windowFacts = facts.transaction.filter(
       (fact) => fact.occurredOn >= window.start && fact.occurredOn <= window.end,
@@ -463,8 +463,8 @@ afterAll(() => {
 });
 
 describe.sequential('finance insight composite publication', () => {
-  it('atomically captures the exact five-kind generation and emits bounded M2 DTOs', () => {
-    seedProjection('finance-a');
+  it('atomically captures the exact five-kind generation and emits bounded M2 DTOs', async () => {
+    await seedProjection('finance-a');
     for (let index = 2; index <= 251; index++) {
       insertHistoryFact('finance-a', {
         sourceRef: `transaction-${index}`,
@@ -479,15 +479,15 @@ describe.sequential('finance insight composite publication', () => {
       });
 
     }
-    refreshProjectionProof('finance-a');
-    const result = captureFinanceInsightPublication(
+    await refreshProjectionProof('finance-a');
+    const result = await captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
     );
     expect(result).toMatchObject({ status: 'captured', sourceSequence: 1 });
 
-    const publication = loadFinanceInsightPublication('finance-a', undefined, () => baseNow);
+    const publication = await loadFinanceInsightPublication('finance-a', undefined, () => baseNow);
     expect(publication?.createRequest).toMatchObject({
       connectorRef: 'finance-a',
       sourceSequence: 1,
@@ -517,21 +517,22 @@ describe.sequential('finance insight composite publication', () => {
     `).get()).toEqual({ count: 255 });
   });
 
-  it('rounds finite Bridge amounts to minor units without aborting publication', () => {
-    seedProjection('finance-fractional');
+
+  it('rounds finite Bridge amounts to minor units without aborting publication', async () => {
+    await seedProjection('finance-fractional');
     sqlite.prepare(`
       UPDATE finance_recurring_obligations
       SET amount = 1.001
       WHERE connector_id = ?
     `).run('finance-fractional');
-    refreshProjectionProof('finance-fractional');
+    await refreshProjectionProof('finance-fractional');
 
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-fractional'),
       completeResult,
       () => baseNow,
-    )).toMatchObject({ status: 'captured' });
-    const publication = loadFinanceInsightPublication(
+    )).resolves.toMatchObject({ status: 'captured' });
+    const publication = await loadFinanceInsightPublication(
       'finance-fractional',
       undefined,
       () => baseNow,
@@ -544,14 +545,14 @@ describe.sequential('finance insight composite publication', () => {
       });
   });
 
-  it('is idempotent, monotonic, connector-isolated, and retains only three generations', () => {
-    seedProjection('finance-a');
-    const first = captureFinanceInsightPublication(
+  it('is idempotent, monotonic, connector-isolated, and retains only three generations', async () => {
+    await seedProjection('finance-a');
+    const first = await captureFinanceInsightPublication(
       connector('finance-a', 'monarch-money'),
       completeResult,
       () => baseNow,
     );
-    const replay = captureFinanceInsightPublication(
+    const replay = await captureFinanceInsightPublication(
       connector('finance-a', 'finance'),
       completeResult,
       () => baseNow,
@@ -562,8 +563,8 @@ describe.sequential('finance insight composite publication', () => {
       sourceSequence: 1,
     });
 
-    seedProjection('finance-b');
-    const other = captureFinanceInsightPublication(
+    await seedProjection('finance-b');
+    const other = await captureFinanceInsightPublication(
       connector('finance-b'),
       completeResult,
       () => baseNow,
@@ -581,8 +582,8 @@ describe.sequential('finance insight composite publication', () => {
         at.toISOString(),
         at.toISOString(),
       );
-      refreshProjectionProof('finance-a');
-      const next = captureFinanceInsightPublication(
+      await refreshProjectionProof('finance-a');
+      const next = await captureFinanceInsightPublication(
         connector('finance-a'),
         completeResult,
         () => at,
@@ -601,16 +602,16 @@ describe.sequential('finance insight composite publication', () => {
     `).get()).toEqual({ providerType: 'finance-manager' });
   });
 
-  it('includes contract-significant currency in publication identity', () => {
-    seedProjection('finance-a');
-    const first = captureFinanceInsightPublication(
+  it('includes contract-significant currency in publication identity', async () => {
+    await seedProjection('finance-a');
+    const first = await captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
     );
     const euroConfig = connector('finance-a');
     euroConfig.settings = { ...euroConfig.settings, householdCurrency: 'EUR' };
-    const second = captureFinanceInsightPublication(
+    const second = await captureFinanceInsightPublication(
       euroConfig,
       completeResult,
       () => new Date(baseNow.getTime() + 60_000),
@@ -618,12 +619,12 @@ describe.sequential('finance insight composite publication', () => {
 
     expect(first).toMatchObject({ status: 'captured', sourceSequence: 1 });
     expect(second).toMatchObject({ status: 'captured', sourceSequence: 2 });
-    const firstPublication = loadFinanceInsightPublication(
+    const firstPublication = await loadFinanceInsightPublication(
       'finance-a',
       'publicationId' in first ? first.publicationId : '',
       () => new Date(baseNow.getTime() + 60_000),
     );
-    const secondPublication = loadFinanceInsightPublication(
+    const secondPublication = await loadFinanceInsightPublication(
       'finance-a',
       undefined,
       () => new Date(baseNow.getTime() + 60_000),
@@ -635,75 +636,75 @@ describe.sequential('finance insight composite publication', () => {
       .not.toBe(firstPublication?.commitRequest.idempotencyKey);
   });
 
-  it('requires an exact persisted ISO 4217 household currency without environment fallback', () => {
-    seedProjection('finance-a');
+  it('requires an exact persisted ISO 4217 household currency without environment fallback', async () => {
+    await seedProjection('finance-a');
     process.env.FINANCE_INSIGHTS_CURRENCY = 'EUR';
     try {
       const missing = connector('finance-a');
       missing.settings = {};
-      expect(captureFinanceInsightPublication(
+      await expect(captureFinanceInsightPublication(
         missing,
         completeResult,
         () => baseNow,
-      )).toEqual({ status: 'refused', code: 'household_currency_unavailable' });
+      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
 
       const malformed = connector('finance-a');
       malformed.settings = { householdCurrency: 'usd' };
-      expect(captureFinanceInsightPublication(
+      await expect(captureFinanceInsightPublication(
         malformed,
         completeResult,
         () => baseNow,
-      )).toEqual({ status: 'refused', code: 'household_currency_unavailable' });
+      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
 
       const unknown = connector('finance-a');
       unknown.settings = { householdCurrency: 'ZZZ' };
-      expect(captureFinanceInsightPublication(
+      await expect(captureFinanceInsightPublication(
         unknown,
         completeResult,
         () => baseNow,
-      )).toEqual({ status: 'refused', code: 'household_currency_unavailable' });
+      )).resolves.toEqual({ status: 'refused', code: 'household_currency_unavailable' });
     } finally {
       delete process.env.FINANCE_INSIGHTS_CURRENCY;
     }
   });
 
-  it('uses Bridge provenance, not local completion time, for transaction freshness', () => {
-    seedProjection('finance-a');
+  it('uses Bridge provenance, not local completion time, for transaction freshness', async () => {
+    await seedProjection('finance-a');
     sqlite.prepare(`
       UPDATE finance_insight_transaction_projection_state
       SET source_as_of = ?
       WHERE connector_id = 'finance-a'
     `).run(new Date(baseNow.getTime() - 49 * 60 * 60 * 1_000).toISOString());
-    refreshProjectionProof('finance-a');
+    await refreshProjectionProof('finance-a');
 
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'transaction_projection_unavailable' });
+    )).resolves.toEqual({ status: 'refused', code: 'transaction_projection_unavailable' });
   });
 
-  it('refuses mutable rows, invalid coverage, and unacceptable constituent skew', () => {
-    seedProjection('finance-a');
+  it('refuses mutable rows, invalid coverage, and unacceptable constituent skew', async () => {
+    await seedProjection('finance-a');
     const changedFact = {
-      ...(loadFinanceInsightPublicationProjectionFacts(
+      ...((await loadFinanceInsightPublicationProjectionFacts(
         'finance-a',
         projectionGenerationId('finance-a'),
-      ).transaction[0]!),
+      )).transaction[0]!),
       merchantName: 'Changed after successful sync',
     };
     sqlite.prepare(`
       UPDATE finance_insight_transaction_projection_facts SET payload = ?
       WHERE connector_id = 'finance-a'
     `).run(JSON.stringify(changedFact));
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'transaction_projection_changed' });
+    )).resolves.toEqual({ status: 'refused', code: 'transaction_projection_changed' });
 
     clearProjection();
-    seedProjection('finance-a');
+    await seedProjection('finance-a');
     sqlite.prepare(`
       UPDATE finance_insight_transaction_projection_windows
       SET coverage_start = '2026-08-02'
@@ -723,26 +724,26 @@ describe.sequential('finance insight composite publication', () => {
         ORDER BY window_index
       `).all() as CanonicalJsonValue,
     ));
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'transaction_projection_coverage_invalid' });
+    )).resolves.toEqual({ status: 'refused', code: 'transaction_projection_coverage_invalid' });
 
     clearProjection();
-    seedProjection('finance-a');
+    await seedProjection('finance-a');
     sqlite.prepare(`
       DELETE FROM finance_insight_transaction_projection_windows
       WHERE connector_id = 'finance-a' AND window_index = 12
     `).run();
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'transaction_projection_coverage_invalid' });
+    )).resolves.toEqual({ status: 'refused', code: 'transaction_projection_coverage_invalid' });
 
     clearProjection();
-    seedProjection('finance-a');
+    await seedProjection('finance-a');
     sqlite.prepare(`
       UPDATE finance_dataset_sync_state
       SET source_as_of = ?, fresh_until = ?
@@ -751,86 +752,86 @@ describe.sequential('finance insight composite publication', () => {
       new Date(baseNow.getTime() - 49 * 60 * 60 * 1_000).toISOString(),
       new Date(baseNow.getTime() + 60 * 60 * 1_000).toISOString(),
     );
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'constituent_freshness_skew' });
+    )).resolves.toEqual({ status: 'refused', code: 'constituent_freshness_skew' });
 
     clearProjection();
-    seedProjection('finance-a');
+    await seedProjection('finance-a');
     sqlite.prepare(`
       UPDATE finance_categories SET name = 'Changed after successful sync'
       WHERE connector_id = 'finance-a'
     `).run();
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'categories_projection_changed' });
+    )).resolves.toEqual({ status: 'refused', code: 'categories_projection_changed' });
   });
 
-  it('refuses partial, stale, and failed constituent states without replacing the cache', () => {
-    seedProjection('finance-a');
-    const captured = captureFinanceInsightPublication(
+  it('refuses partial, stale, and failed constituent states without replacing the cache', async () => {
+    await seedProjection('finance-a');
+    const captured = await captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
     );
     const publicationId = 'publicationId' in captured ? captured.publicationId : '';
 
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       { ...completeResult, status: 'partial', datasetErrors: { recurring: 'upstream_timeout' } },
       () => new Date(baseNow.getTime() + 60_000),
-    )).toEqual({ status: 'refused', code: 'partial_projection' });
+    )).resolves.toEqual({ status: 'refused', code: 'partial_projection' });
 
     sqlite.prepare(`
       UPDATE finance_dataset_sync_state
       SET last_attempt_outcome = 'failed'
       WHERE connector_id = 'finance-a' AND dataset = 'recurring'
     `).run();
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => new Date(baseNow.getTime() + 120_000),
-    )).toEqual({ status: 'refused', code: 'recurring_projection_unavailable' });
+    )).resolves.toEqual({ status: 'refused', code: 'recurring_projection_unavailable' });
     expect(sqlite.prepare(`
       SELECT latest_publication_id AS publicationId
       FROM finance_insight_publication_state WHERE connector_id = 'finance-a'
     `).get()).toEqual({ publicationId });
 
-    const fallback = loadFinanceInsightPublication(
+    const fallback = await loadFinanceInsightPublication(
       'finance-a',
       undefined,
       () => new Date(baseNow.getTime() + 3 * 24 * 60 * 60 * 1_000),
     );
     expect(fallback).toMatchObject({ cacheState: 'stale-fallback', alertCapable: false });
-    expect(loadFinanceInsightPublication(
+    await expect(loadFinanceInsightPublication(
       'finance-a',
       undefined,
       () => new Date(baseNow.getTime() + 8 * 24 * 60 * 60 * 1_000),
-    )).toBeNull();
+    )).resolves.toBeNull();
   });
 
-  it('refuses T1-invalid projected facts before publication state can advance', () => {
-    seedProjection('finance-a');
+  it('refuses T1-invalid projected facts before publication state can advance', async () => {
+    await seedProjection('finance-a');
     const invalidFact = {
-      ...loadFinanceInsightPublicationProjectionFacts(
+      ...(await loadFinanceInsightPublicationProjectionFacts(
         'finance-a',
         projectionGenerationId('finance-a'),
-      ).transaction[0]!,
+      )).transaction[0]!,
       tagRefs: Array.from({ length: 51 }, (_, index) => `tag-${index}`),
     };
     sqlite.prepare(`
       UPDATE finance_insight_transaction_projection_facts SET payload = ?
       WHERE connector_id = 'finance-a'
     `).run(JSON.stringify(invalidFact));
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toEqual({ status: 'refused', code: 'invalid_projection_fact' });
+    )).resolves.toEqual({ status: 'refused', code: 'invalid_projection_fact' });
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS count FROM finance_insight_publications
     `).get()).toEqual({ count: 0 });
@@ -840,8 +841,8 @@ describe.sequential('finance insight composite publication', () => {
     `).get()).toEqual({ sourceSequence: 0, outcome: 'refused' });
   });
 
-  it('isolates the exact insight history generation from operational transaction rows', () => {
-    seedProjection('finance-a');
+  it('isolates the exact insight history generation from operational transaction rows', async () => {
+    await seedProjection('finance-a');
     sqlite.prepare(`
       INSERT INTO finance_transactions (
         id, connector_instance_id, upstream_transaction_id, date, amount,
@@ -854,13 +855,14 @@ describe.sequential('finance insight composite publication', () => {
         'legacy-generation', '2025-08-10T12:00:00.000Z'
       )
     `).run();
-    const captured = captureFinanceInsightPublication(
+    const captured = await captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
     );
     expect(captured).toMatchObject({ status: 'captured', sourceSequence: 1 });
-    expect(loadFinanceInsightPublication('finance-a', undefined, () => baseNow)?.batches
+    const publication = await loadFinanceInsightPublication('finance-a', undefined, () => baseNow);
+    expect(publication?.batches
       .filter((batch) => batch.kind === 'transaction')
       .flatMap((batch) => batch.kind === 'transaction' ? batch.facts : [])
       .map((fact) => fact.sourceRef)).toEqual([
@@ -868,8 +870,8 @@ describe.sequential('finance insight composite publication', () => {
       ]);
   });
 
-  it('partitions valid fact batches by both item count and T1 request bytes', () => {
-    seedProjection('finance-a');
+  it('partitions valid fact batches by both item count and T1 request bytes', async () => {
+    await seedProjection('finance-a');
     const tagRefs = ['tag-one'];
     const insertTag = sqlite.prepare(`
       INSERT INTO finance_tags (
@@ -896,14 +898,14 @@ describe.sequential('finance insight composite publication', () => {
         tagRefs,
       });
     }
-    refreshProjectionProof('finance-a');
+    await refreshProjectionProof('finance-a');
 
-    expect(captureFinanceInsightPublication(
+    await expect(captureFinanceInsightPublication(
       connector('finance-a'),
       completeResult,
       () => baseNow,
-    )).toMatchObject({ status: 'captured' });
-    const publication = loadFinanceInsightPublication('finance-a', undefined, () => baseNow);
+    )).resolves.toMatchObject({ status: 'captured' });
+    const publication = await loadFinanceInsightPublication('finance-a', undefined, () => baseNow);
     const transactionBatches = publication!.batches
       .filter((batch) => batch.kind === 'transaction');
     expect(transactionBatches.length).toBeGreaterThan(1);
@@ -918,8 +920,8 @@ describe.sequential('finance insight composite publication', () => {
 });
 
 describe.sequential('finance insight occurrence cache foundation', () => {
-  it('enforces connector identity, count, summary age, and purge age', () => {
-    replaceFinanceInsightOccurrenceCache({
+  it('enforces connector identity, count, summary age, and purge age', async () => {
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -927,18 +929,18 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       items: [summary('finance-a')],
       now: baseNow,
     });
-    expect(readFinanceInsightOccurrenceCache(
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 24 * 60 * 60 * 1_000),
-    )).toMatchObject({ state: 'available', alertCapable: true });
-    expect(readFinanceInsightOccurrenceCache(
+    )).resolves.toMatchObject({ state: 'available', alertCapable: true });
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 49 * 60 * 60 * 1_000),
-    )).toMatchObject({ state: 'available', alertCapable: false });
-    expect(readFinanceInsightOccurrenceCache(
+    )).resolves.toMatchObject({ state: 'available', alertCapable: false });
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 8 * 24 * 60 * 60 * 1_000),
-    )).toMatchObject({
+    )).resolves.toMatchObject({
       state: 'metadata-only',
       alertCapable: false,
       items: [{ occurrenceId: summary('finance-a').occurrenceId }],
@@ -958,10 +960,10 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       headline: 'Invented large transaction',
     });
     expect(retained.summaryPayload).not.toBeNull();
-    expect(readFinanceInsightOccurrenceCache(
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 31 * 24 * 60 * 60 * 1_000),
-    )).toMatchObject({
+    )).resolves.toMatchObject({
       state: 'metadata-only',
       alertCapable: false,
     });
@@ -975,10 +977,10 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       headline: '',
       targets: '[]',
     });
-    expect(readFinanceInsightOccurrenceCache(
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 91 * 24 * 60 * 60 * 1_000),
-    )).toEqual({
+    )).resolves.toEqual({
       state: 'unavailable',
       alertCapable: false,
       sourceGeneration: null,
@@ -988,26 +990,26 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       SELECT COUNT(*) AS count FROM finance_insight_occurrences
       WHERE connector_id = 'finance-a'
     `).get()).toEqual({ count: 0 });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: Array.from({ length: 501 }, () => summary('finance-a')),
       now: baseNow,
-    })).toThrow('row limit');
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('row limit');
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-b',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: [summary('finance-a')],
       now: baseNow,
-    })).toThrow('identity is invalid');
+    })).rejects.toThrow('identity is invalid');
   });
 
-  it('never marks partial or stale summaries as alert-capable', () => {
-    replaceFinanceInsightOccurrenceCache({
+  it('never marks partial or stale summaries as alert-capable', async () => {
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1026,17 +1028,17 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       })],
       now: baseNow,
     });
-    expect(readFinanceInsightOccurrenceCache('finance-a', baseNow))
-      .toMatchObject({ state: 'available', alertCapable: false });
+    await expect(readFinanceInsightOccurrenceCache('finance-a', baseNow))
+      .resolves.toMatchObject({ state: 'available', alertCapable: false });
   });
 
-  it('preserves resolved identities as bounded metadata tombstones across generations', () => {
+  it('preserves resolved identities as bounded metadata tombstones across generations', async () => {
     const resolved = summary('finance-a', {
       sourceLifecycle: 'resolved',
       resolutionReason: 'source_unavailable',
       resolvedAt: '2026-08-10T12:01:01.000Z',
     });
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1044,7 +1046,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       items: [resolved],
       now: baseNow,
     });
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-two',
       sourceSequence: 2,
@@ -1053,10 +1055,10 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       now: new Date('2026-08-11T12:00:00.000Z'),
     });
 
-    expect(readFinanceInsightOccurrenceCache(
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date('2026-08-12T12:00:00.000Z'),
-    )).toMatchObject({ state: 'available', items: [] });
+    )).resolves.toMatchObject({ state: 'available', items: [] });
     expect(sqlite.prepare(`
       SELECT source_generation AS sourceGeneration, source_lifecycle AS lifecycle,
              summary_payload AS summaryPayload, entity_label AS entityLabel
@@ -1067,10 +1069,10 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       summaryPayload: null,
       entityLabel: '',
     });
-    expect(readFinanceInsightOccurrenceCache(
+    await expect(readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date('2026-11-12T12:00:00.000Z'),
-    )).toEqual({
+    )).resolves.toEqual({
       state: 'unavailable',
       alertCapable: false,
       sourceGeneration: null,
@@ -1078,7 +1080,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
     });
   });
 
-  it('moves omitted terminal rows out of current membership for the same generation', () => {
+  it('moves omitted terminal rows out of current membership for the same generation', async () => {
     const first = resolvedSummary(
       'finance-a',
       'publication-one',
@@ -1091,7 +1093,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       '2026-08-10T12:00:00.000Z',
       2,
     );
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1099,7 +1101,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       items: [first, second],
       now: baseNow,
     });
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1108,7 +1110,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       now: new Date(baseNow.getTime() + 60_000),
     });
 
-    expect(readFinanceInsightOccurrenceCache('finance-a', baseNow)).toMatchObject({
+    await expect(readFinanceInsightOccurrenceCache('finance-a', baseNow)).resolves.toMatchObject({
       state: 'available',
       items: [{ occurrenceId: second.occurrenceId }],
     });
@@ -1124,9 +1126,9 @@ describe.sequential('finance insight occurrence cache foundation', () => {
     ]);
   });
 
-  it('renews payload retention on an identical successful refresh', () => {
+  it('renews payload retention on an identical successful refresh', async () => {
     const item = summary('finance-a');
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1134,7 +1136,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       items: [item],
       now: baseNow,
     });
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1143,7 +1145,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       now: new Date(baseNow.getTime() + 29 * 24 * 60 * 60 * 1_000),
     });
 
-    readFinanceInsightOccurrenceCache(
+    await readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 31 * 24 * 60 * 60 * 1_000),
     );
@@ -1155,13 +1157,13 @@ describe.sequential('finance insight occurrence cache foundation', () => {
     });
   });
 
-  it('evicts oldest resolved tombstones above the per-connector limit', () => {
+  it('evicts oldest resolved tombstones above the per-connector limit', async () => {
     for (let generation = 1; generation <= 4; generation++) {
       const sourceGeneration = `publication-${generation}`;
       const sourceAsOf = new Date(
         baseNow.getTime() + (generation - 1) * 24 * 60 * 60 * 1_000,
       ).toISOString();
-      replaceFinanceInsightOccurrenceCache({
+      await replaceFinanceInsightOccurrenceCache({
         connectorId: 'finance-a',
         sourceGeneration,
         sourceSequence: generation,
@@ -1192,8 +1194,8 @@ describe.sequential('finance insight occurrence cache foundation', () => {
     ]);
   });
 
-  it('rejects stale/conflicting generations and delivery revision regressions', () => {
-    replaceFinanceInsightOccurrenceCache({
+  it('rejects stale/conflicting generations and delivery revision regressions', async () => {
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 2,
@@ -1212,23 +1214,23 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         sourceAsOf: '2026-08-10T12:00:30.000Z',
       },
     });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 2,
       sourceAsOf: '2026-08-10T12:00:30.000Z',
       items: [reaged],
       now: new Date('2026-08-10T12:00:30.000Z'),
-    })).toThrow('identity is immutable');
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('identity is immutable');
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 3,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: [summary('finance-a', { deliveryRevision: 2 })],
       now: baseNow,
-    })).toThrow('identity is immutable');
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('identity is immutable');
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-conflict',
       sourceSequence: 2,
@@ -1241,7 +1243,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         },
       })],
       now: baseNow,
-    })).toThrow('generation conflicts');
+    })).rejects.toThrow('generation conflicts');
 
     const older = summary('finance-a', {
       provenance: {
@@ -1254,26 +1256,26 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         sourceAsOf: '2026-08-09T12:00:00.000Z',
       },
     });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-older',
       sourceSequence: 1,
       sourceAsOf: '2026-08-09T12:00:00.000Z',
       items: [older],
       now: baseNow,
-    })).toThrow('generation is stale');
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('generation is stale');
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 2,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: [summary('finance-a', { deliveryRevision: 1 })],
       now: baseNow,
-    })).toThrow('revision is stale');
+    })).rejects.toThrow('revision is stale');
   });
 
-  it('preserves immutable material revisions and bounds resolved tombstones', () => {
-    replaceFinanceInsightOccurrenceCache({
+  it('preserves immutable material revisions and bounds resolved tombstones', async () => {
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1286,7 +1288,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       SET revision_digest = '', source_generation = '', source_sequence = 0
       WHERE connector_id = 'finance-a'
     `).run();
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1295,8 +1297,8 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         headline: 'Invented conflicting migration replay',
       })],
       now: baseNow,
-    })).toThrow('revision conflicts');
-    replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('revision conflicts');
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1308,7 +1310,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       SELECT source_generation AS generation, source_sequence AS sequence
       FROM finance_insight_occurrences WHERE connector_id = 'finance-a'
     `).get()).toEqual({ generation: 'publication-one', sequence: 1 });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1317,8 +1319,8 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         observedValue: { currency: 'USD', amountMinor: -9999 },
       })],
       now: baseNow,
-    })).toThrow('revision conflicts');
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    })).rejects.toThrow('revision conflicts');
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
@@ -1327,7 +1329,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         headline: 'Invented revised material headline',
       })],
       now: baseNow,
-    })).toThrow('revision conflicts');
+    })).rejects.toThrow('revision conflicts');
 
     const resolved = summary('finance-a', {
       sourceLifecycle: 'resolved',
@@ -1335,28 +1337,28 @@ describe.sequential('finance insight occurrence cache foundation', () => {
       updatedAt: '2026-08-10T12:02:00.000Z',
       resolvedAt: '2026-08-10T12:02:00.000Z',
     });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: [resolved],
       now: new Date('2026-08-10T12:02:00.000Z'),
-    })).not.toThrow();
+    })).resolves.not.toThrow();
     expect(sqlite.prepare(`
       SELECT source_lifecycle AS lifecycle, delivery_revision AS revision,
              is_tombstone AS isTombstone
       FROM finance_insight_occurrences
       WHERE connector_id = 'finance-a'
     `).get()).toEqual({ lifecycle: 'resolved', revision: 1, isTombstone: 0 });
-    expect(() => replaceFinanceInsightOccurrenceCache({
+    await expect(replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-one',
       sourceSequence: 1,
       sourceAsOf: '2026-08-10T12:00:00.000Z',
       items: [summary('finance-a')],
       now: new Date('2026-08-10T12:03:00.000Z'),
-    })).toThrow('revision is stale');
+    })).rejects.toThrow('revision is stale');
 
     const insertTombstone = sqlite.prepare(`
       INSERT INTO finance_insight_occurrences (
@@ -1385,7 +1387,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         resolved.occurrenceId,
       );
     }
-    replaceFinanceInsightOccurrenceCache({
+    await replaceFinanceInsightOccurrenceCache({
       connectorId: 'finance-a',
       sourceGeneration: 'publication-two',
       sourceSequence: 2,
@@ -1403,7 +1405,7 @@ describe.sequential('finance insight occurrence cache foundation', () => {
         AND occurrence_id = 'occurrence-extra-0'
     `).get()).toBeUndefined();
 
-    readFinanceInsightOccurrenceCache(
+    await readFinanceInsightOccurrenceCache(
       'finance-a',
       new Date(baseNow.getTime() + 91 * 24 * 60 * 60 * 1_000),
     );

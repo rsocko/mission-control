@@ -33,6 +33,19 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
       snapshots: {},
       datasets: {},
       attribution: {},
+      insights: {
+        connectors: {},
+        projection: {},
+        backfill: {},
+        publication: {},
+        delivery: {},
+        occurrenceCache: {},
+        notifications: {},
+      },
+      attention: {
+        routing: {},
+        repair: {},
+      },
     } as WorkerPersistenceRepositories['finance'],
   };
 }
@@ -49,7 +62,10 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-github-project-repositories');
   vi.doUnmock('@/db/persistence/sqlite-work-todo-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
-  vi.doUnmock('@/lib/finance-insights/publication');
+  vi.doUnmock('@/db/persistence/sqlite-finance-insights-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-finance-attention-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-finance-insight-notification-lifecycle');
+  vi.doUnmock('@/db/persistence/sqlite-finance-insight-projection-facts');
   vi.doUnmock('@/lib/finance-insights/canonical');
   vi.doUnmock('@/lib/connectors/monarch-money/constants');
   vi.resetModules();
@@ -94,7 +110,19 @@ describe('worker persistence runtime', () => {
     const financeModule = vi.fn(() => ({
       createSqliteFinanceWorkerPersistence: () => repositories.finance,
     }));
-    const publicationModule = vi.fn(() => ({
+    const financeInsightsModule = vi.fn(() => ({
+      createSqliteFinanceInsightPersistence: () => repositories.finance.insights,
+    }));
+    const financeAttentionModule = vi.fn(() => ({
+      createSqliteFinanceAttentionRoutingPersistence: () => repositories.finance.attention.routing,
+      createSqliteFinanceAttentionRepairPersistence: () => repositories.finance.attention.repair,
+    }));
+    const financeNotificationModule = vi.fn(() => ({
+      createSqliteFinanceInsightNotificationLifecyclePersistence: () => (
+        repositories.finance.insights.notifications
+      ),
+    }));
+    const projectionFactsModule = vi.fn(() => ({
       loadFinanceInsightProjectionFacts: vi.fn(),
     }));
     const canonicalModule = vi.fn(() => ({
@@ -116,7 +144,22 @@ describe('worker persistence runtime', () => {
     vi.doMock('@/db/persistence/sqlite-github-project-repositories', githubProjectModule);
     vi.doMock('@/db/persistence/sqlite-work-todo-repositories', workTodoModule);
     vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
-    vi.doMock('@/lib/finance-insights/publication', publicationModule);
+    vi.doMock(
+      '@/db/persistence/sqlite-finance-insights-repositories',
+      financeInsightsModule,
+    );
+    vi.doMock(
+      '@/db/persistence/sqlite-finance-attention-repositories',
+      financeAttentionModule,
+    );
+    vi.doMock(
+      '@/db/persistence/sqlite-finance-insight-notification-lifecycle',
+      financeNotificationModule,
+    );
+    vi.doMock(
+      '@/db/persistence/sqlite-finance-insight-projection-facts',
+      projectionFactsModule,
+    );
     vi.doMock('@/lib/finance-insights/canonical', canonicalModule);
     vi.doMock('@/lib/connectors/monarch-money/constants', constantsModule);
 
@@ -132,7 +175,10 @@ describe('worker persistence runtime', () => {
     expect(githubProjectModule).not.toHaveBeenCalled();
     expect(workTodoModule).not.toHaveBeenCalled();
     expect(financeModule).not.toHaveBeenCalled();
-    expect(publicationModule).not.toHaveBeenCalled();
+    expect(financeInsightsModule).not.toHaveBeenCalled();
+    expect(financeAttentionModule).not.toHaveBeenCalled();
+    expect(financeNotificationModule).not.toHaveBeenCalled();
+    expect(projectionFactsModule).not.toHaveBeenCalled();
 
     const [first, second] = await Promise.all([
       runtime.getWorkerPersistenceRepositories(),
@@ -147,7 +193,21 @@ describe('worker persistence runtime', () => {
     expect(first.github.hierarchy).toBe(repositories.github.hierarchy);
     expect(first.github.projects).toBe(repositories.github.projects);
     expect(first.connectorState.workTodo).toBe(repositories.connectorState.workTodo);
-    expect(first.finance).toBe(repositories.finance);
+    expect(first.finance.identity).toBe(repositories.finance.identity);
+    expect(first.finance.snapshots).toBe(repositories.finance.snapshots);
+    expect(first.finance.datasets).toBe(repositories.finance.datasets);
+    expect(first.finance.attribution).toBe(repositories.finance.attribution);
+    expect(first.finance.insights.connectors).toBe(repositories.finance.insights.connectors);
+    expect(first.finance.insights.projection).toBe(repositories.finance.insights.projection);
+    expect(first.finance.insights.backfill).toBe(repositories.finance.insights.backfill);
+    expect(first.finance.insights.publication).toBe(repositories.finance.insights.publication);
+    expect(first.finance.insights.delivery).toBe(repositories.finance.insights.delivery);
+    expect(first.finance.insights.occurrenceCache).toBe(
+      repositories.finance.insights.occurrenceCache,
+    );
+    expect(first.finance.insights.notifications).toBe(repositories.finance.insights.notifications);
+    expect(first.finance.attention.routing).toBe(repositories.finance.attention.routing);
+    expect(first.finance.attention.repair).toBe(repositories.finance.attention.repair);
     expect(databaseModule).toHaveBeenCalledOnce();
     expect(coreModule).toHaveBeenCalledOnce();
     expect(syncRunModule).toHaveBeenCalledOnce();
@@ -158,7 +218,10 @@ describe('worker persistence runtime', () => {
     expect(githubProjectModule).toHaveBeenCalledOnce();
     expect(workTodoModule).toHaveBeenCalledOnce();
     expect(financeModule).toHaveBeenCalledOnce();
-    expect(publicationModule).toHaveBeenCalledOnce();
+    expect(financeInsightsModule).toHaveBeenCalledOnce();
+    expect(financeAttentionModule).toHaveBeenCalledOnce();
+    expect(financeNotificationModule).toHaveBeenCalledOnce();
+    expect(projectionFactsModule).toHaveBeenCalledOnce();
   });
 
   it('fails closed before PostgreSQL registration without evaluating SQLite', async () => {

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   reconcileRecovery: vi.fn(),
   getRecoveryView: vi.fn(),
   select: vi.fn(),
+  listEnabledConnectorIds: vi.fn(),
 }));
 
 function chainable<T>(terminal: T) {
@@ -51,6 +52,17 @@ vi.mock('@/lib/sync', () => ({
   },
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: { get: mocks.getPersistedConfig },
+    finance: {
+      insights: {
+        connectors: { listEnabledConnectorIds: mocks.listEnabledConnectorIds },
+      },
+    },
+  })),
+}));
+
 vi.mock('@/lib/connectors/monarch-money/transaction-backfill', () => ({
   FinanceInsightBackfillError: class FinanceInsightBackfillError extends Error {},
   runFinanceInsightTransactionBackfill: mocks.runBackfill,
@@ -82,7 +94,9 @@ describe('finance connector routes', () => {
     mocks.getPersistedConfig.mockResolvedValue({
       id: 'persisted-finance',
       type: 'finance-manager',
+      enabled: true,
     });
+    mocks.listEnabledConnectorIds.mockResolvedValue(['persisted-finance']);
     mocks.getDatasetHealth.mockReturnValue({
       aggregate: 'fresh',
       datasets: [],

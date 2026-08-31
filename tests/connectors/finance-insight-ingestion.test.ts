@@ -56,7 +56,9 @@ let isMaterialRecurringIncrease:
 let selectFinanceInsightNotificationInputs:
   typeof import('@/lib/finance-insights/notification-ingestion')['selectFinanceInsightNotificationInputs'];
 let syncFinanceProviderPresentation:
-  typeof import('@/lib/finance-insights/notification-ingestion')['syncFinanceProviderPresentation'];
+  typeof import(
+    '@/db/persistence/sqlite-finance-insight-notification-lifecycle'
+  )['syncFinanceProviderPresentation'];
 
 function connector(id = connectorId): ConnectorConfig {
   return {
@@ -403,8 +405,10 @@ beforeAll(async () => {
     getFinanceMonthlyDigestSchedule,
     isMaterialRecurringIncrease,
     selectFinanceInsightNotificationInputs,
-    syncFinanceProviderPresentation,
   } = await import('@/lib/finance-insights/notification-ingestion'));
+  ({ syncFinanceProviderPresentation } = await import(
+    '@/db/persistence/sqlite-finance-insight-notification-lifecycle'
+  ));
 });
 
 beforeEach(clearDatabase);

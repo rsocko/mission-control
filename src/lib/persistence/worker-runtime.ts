@@ -35,6 +35,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteGitHubRecoveryRepositories },
     { createSqliteWorkTodoRepositories },
     { createSqliteNotificationDeliveryRepository },
+    { createSqliteTaskReminderRepository },
     { createSqliteFinanceWorkerPersistence },
     { createSqliteFinanceInsightPersistence },
     {
@@ -57,6 +58,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-github-recovery-repositories'),
     import('@/db/persistence/sqlite-work-todo-repositories'),
     import('@/db/persistence/sqlite-notification-delivery-repository'),
+    import('@/db/persistence/sqlite-task-reminder-repository'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
     import('@/db/persistence/sqlite-finance-insights-repositories'),
     import('@/db/persistence/sqlite-finance-attention-repositories'),
@@ -137,6 +139,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
       workTodo: createSqliteWorkTodoRepositories(sqlite, db),
     },
     notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite),
+    reminders: createSqliteTaskReminderRepository(sqlite),
     finance,
   };
 }

@@ -13,13 +13,17 @@ export class TaskReminderScheduler {
   private lastResult: TaskReminderRunResult | null = null;
   private lastError: string | null = null;
 
+  constructor(
+    private readonly runReminders: typeof runDueTaskReminders = runDueTaskReminders,
+  ) {}
+
   private runOnce(): Promise<void> {
     if (this.activeRun) return this.activeRun;
     const run = (async () => {
       try {
         this.lastResult = await withDatabaseOperation(
           'worker-task-reminders',
-          () => runDueTaskReminders(),
+          () => this.runReminders(),
         );
         this.lastRun = new Date().toISOString();
         this.lastError = null;

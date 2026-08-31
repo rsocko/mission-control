@@ -75,6 +75,9 @@ const mocks = vi.hoisted(() => {
         notificationDelivery: {
           getNextWakeAt: vi.fn(async () => null),
         } as unknown as WorkerPersistenceRepositories['notificationDelivery'],
+        reminders: {
+          cancelInvalidated: vi.fn(async () => 0),
+        } as unknown as WorkerPersistenceRepositories['reminders'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);
@@ -139,11 +142,16 @@ describe('PostgreSQL runtime core repository registration', () => {
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
+    await registeredWorkerComposition.reminders.cancelInvalidated({
+      now: new Date(),
+      limit: 1,
+    });
     expect(mocks.repositories[0].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[0].reminders.cancelInvalidated).toHaveBeenCalledOnce();
 
     await shutdownRuntimeDatabase();
     await initializeRuntimeDatabase();
@@ -154,10 +162,15 @@ describe('PostgreSQL runtime core repository registration', () => {
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
+    await registeredWorkerComposition.reminders.cancelInvalidated({
+      now: new Date(),
+      limit: 1,
+    });
     expect(mocks.repositories[1].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[1].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[1].reminders.cancelInvalidated).toHaveBeenCalledOnce();
   });
 });

@@ -13,6 +13,9 @@ import { pushPreferences, connectorConfigs } from '@/db/schema';
 import { eq, and, isNull } from 'drizzle-orm';
 import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
+import { isQuietHour } from './quiet-hours-window';
+
+export { isQuietHour } from './quiet-hours-window';
 
 /** Get the current hour (0-23) in the user's configured timezone. */
 function getCurrentHourInUserTz(): number {
@@ -77,15 +80,6 @@ export async function getPreferences(): Promise<PushPrefs> {
  * Check if the given hour falls within the quiet-hours window.
  * Handles windows that wrap around midnight (e.g., 22:00–07:00).
  */
-export function isQuietHour(hour: number, quietStart: number | null, quietEnd: number | null): boolean {
-  if (quietStart === null || quietEnd === null) return false;
-  if (quietStart <= quietEnd) {
-    return hour >= quietStart && hour < quietEnd;
-  }
-  // Wraps around midnight (e.g., 22:00 - 07:00)
-  return hour >= quietStart || hour < quietEnd;
-}
-
 /**
  * Check if any calendar connector reports a busy block at the current time.
  * Returns true if the user is currently in a calendar event (busy).

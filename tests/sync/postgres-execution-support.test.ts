@@ -47,11 +47,11 @@ describe('PostgreSQL generic connector execution support', () => {
     })).not.toThrow();
   });
 
-  it('enables only the dependency reconciliation legacy workflow', () => {
+  it('enables only the portable dependency and notification workflows', () => {
     expect(support.allowsLegacyWorkflow('dependency-reconciliation')).toBe(true);
+    expect(support.allowsLegacyWorkflow('notification-dispatcher')).toBe(true);
     for (const workflow of [
       'event-outbox',
-      'notification-dispatcher',
       'notification-enrichment',
       'planning-signals',
       'project-automation',

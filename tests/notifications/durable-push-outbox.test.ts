@@ -859,8 +859,8 @@ describe('leased Web Push dispatcher', () => {
   it('uses compare-and-set claims so only one dispatcher owns an active event', async () => {
     const event = (await createPending()).deliveryEvent!;
 
-    const first = dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
-    const concurrent = dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
+    const first = await dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
+    const concurrent = await dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
 
     expect(first?.id).toBe(event.id);
     expect(concurrent).toBeNull();
@@ -872,13 +872,13 @@ describe('leased Web Push dispatcher', () => {
 
   it('recovers a stale lease after restart without reclaiming a live lease', async () => {
     const event = (await createPending()).deliveryEvent!;
-    dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
+    await dispatcher.claimNotificationDelivery(BASE_TIME, 60_000);
 
-    expect(dispatcher.claimNotificationDelivery(
+    await expect(dispatcher.claimNotificationDelivery(
       new Date(BASE_TIME.getTime() + 59_999),
       60_000,
-    )).toBeNull();
-    const recovered = dispatcher.claimNotificationDelivery(
+    )).resolves.toBeNull();
+    const recovered = await dispatcher.claimNotificationDelivery(
       new Date(BASE_TIME.getTime() + 60_000),
       60_000,
     );
@@ -889,9 +889,9 @@ describe('leased Web Push dispatcher', () => {
 
   it('fails an exhausted stale lease without sending another attempt', async () => {
     const event = (await createPending()).deliveryEvent!;
-    dispatcher.claimNotificationDelivery(BASE_TIME, 60_000, 1);
+    await dispatcher.claimNotificationDelivery(BASE_TIME, 60_000, 1);
 
-    const exhausted = dispatcher.claimNotificationDelivery(
+    const exhausted = await dispatcher.claimNotificationDelivery(
       new Date(BASE_TIME.getTime() + 60_000),
       60_000,
       1,
@@ -911,6 +911,7 @@ describe('leased Web Push dispatcher', () => {
       now: () => BASE_TIME,
       sender: vi.fn().mockResolvedValue(delivered),
     });
+
     expect(getEvent(sentEvent.id)).toMatchObject({
       status: 'sent',
       subscriptionsAttempted: 1,
@@ -939,6 +940,22 @@ describe('leased Web Push dispatcher', () => {
       subscriptionsFailed: 1,
       lastError: 'partial_delivery_failure',
     });
+  });
+
+  it('honors the configured batch bound', async () => {
+    await createPending();
+    await createPending();
+    const send = vi.fn().mockResolvedValue(delivered);
+
+    expect(await dispatcher.dispatchNotificationDeliveries({
+      now: () => BASE_TIME,
+      sender: send,
+      batchSize: 1,
+    })).toBe(1);
+    expect(send).toHaveBeenCalledOnce();
+    expect(db.select().from(schema.notificationDeliveryEvents).all().filter(
+      event => event.channel === 'web_push' && event.status === 'pending',
+    )).toHaveLength(1);
   });
 
   it('retries transient failures across dispatcher restarts with bounded backoff', async () => {
@@ -998,10 +1015,10 @@ describe('leased Web Push dispatcher', () => {
       payloadSnapshot: 'not-an-object',
     }).where(eq(schema.notificationDeliveryEvents.id, malformed.id)).run();
 
-    const claims = [
+    const claims = (await Promise.all([
       dispatcher.claimNotificationDelivery(BASE_TIME),
       dispatcher.claimNotificationDelivery(BASE_TIME),
-    ].filter(claim => claim !== null);
+    ])).filter(claim => claim !== null);
 
     expect(getEvent(malformed.id)).toMatchObject({
       status: 'failed',

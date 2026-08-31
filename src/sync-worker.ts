@@ -23,6 +23,10 @@ async function main(): Promise<void> {
   });
   const { initializeDatabaseWithRetry } = await import('@/db/startup');
   await initializeDatabaseWithRetry();
+  const { wakeNotificationDeliveryDispatcher } = await import(
+    '@/lib/notifications/dispatcher-wake'
+  );
+  wakeNotificationDeliveryDispatcher();
 
   const [
     { syncScheduler },

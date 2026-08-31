@@ -125,6 +125,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  notificationDelivery: new Proxy({} as WorkerPersistenceRepositories['notificationDelivery'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().notificationDelivery[
+        property as keyof WorkerPersistenceRepositories['notificationDelivery']
+      ]
+    ),
+  }),
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[

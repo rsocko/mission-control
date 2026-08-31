@@ -2671,11 +2671,10 @@ export function createPostgresConnectorExecutionRepositories(
 
     support: {
       allowsLegacyWorkflow(workflow) {
-        // Layer 3A migrated GitHub dependency generation, reconciliation, and
-        // resume/relationship polling behind `GitHubWorkerRepositories`, so the
-        // scheduler may start those pollers on PostgreSQL. Everything else
-        // listed here still reads or writes SQLite-only state.
-        return workflow === 'dependency-reconciliation';
+        // Layer 3A migrated GitHub dependency reconciliation, and Layer 6A
+        // migrated notification delivery including both default senders.
+        return workflow === 'dependency-reconciliation'
+          || workflow === 'notification-dispatcher';
       },
       assertConfigSupported(config: ConnectorConfig) {
         // Layer 4 migrated Microsoft To Do hidden-list discovery and the whole

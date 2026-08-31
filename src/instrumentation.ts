@@ -44,6 +44,10 @@ export async function register() {
     return;
   }
 
+  const { wakeNotificationDeliveryDispatcher } = await import(
+    '@/lib/notifications/dispatcher-wake'
+  );
+  wakeNotificationDeliveryDispatcher();
   const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
   await startRuntimeTelemetry('web');
   const {

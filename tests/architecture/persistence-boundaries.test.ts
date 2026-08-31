@@ -289,6 +289,7 @@ describe('portable persistence dependency ratchet', () => {
     const ports = [
       'src/db/persistence/work-todo.ts',
       'src/db/persistence/work-todo-values.ts',
+      'src/db/persistence/task-deletion.ts',
     ];
     const violations = ports.flatMap((path) => {
       const source = readFileSync(join(process.cwd(), path), 'utf8');
@@ -299,6 +300,80 @@ describe('portable persistence dependency ratchet', () => {
     });
 
     expect(violations).toEqual([]);
+  });
+
+  /**
+   * Task deletion has one canonical cleanup per backend. The core task
+   * repository, connector execution, and the Work To Do bridge must all reuse
+   * it, otherwise a deleted task leaves planning, audit, provenance, or
+   * notification references behind on whichever path drifted.
+   */
+  describe('canonical task deletion cleanup', () => {
+    const SQLITE_DELETION_CONSUMERS = [
+      'src/db/persistence/sqlite-core-repositories.ts',
+      'src/db/persistence/sqlite-connector-execution-repositories.ts',
+      'src/db/persistence/sqlite-work-todo-repositories.ts',
+    ] as const;
+
+    const POSTGRES_DELETION_CONSUMERS = [
+      'src/db/postgres/repositories/task-repository.ts',
+      'src/db/postgres/repositories/connector-execution-repositories.ts',
+      'src/db/postgres/repositories/work-todo-repositories.ts',
+    ] as const;
+
+    /**
+     * Tables that only ever appear in deletion cleanup — a `DELETE ... WHERE
+     * task_id` for one of these outside the shared helpers is a drifting copy.
+     */
+    const DELETION_ONLY_TABLES = [
+      'my_day_items',
+      'my_day_exclusions',
+      'focus_items',
+      'weekly_one_thing',
+      'priority_sync_log',
+      'task_triage_log',
+      'quick_sort_operations',
+      'task_linked_sources',
+      'task_attachments',
+      'project_phase_items',
+      'sync_deletion_candidates',
+    ] as const;
+
+    it('covers every canonical association in the shared table list', () => {
+      const shared = readFileSync(
+        join(process.cwd(), 'src/db/persistence/task-deletion.ts'),
+        'utf8',
+      );
+      for (const table of [...DELETION_ONLY_TABLES, 'task_tags', 'task_projects',
+        'task_schedules', 'task_field_states', 'project_auto_include_exclusions']) {
+        expect(shared).toContain(`'${table}'`);
+      }
+    });
+
+    it('routes both backends through the shared cleanup helpers', () => {
+      for (const path of SQLITE_DELETION_CONSUMERS) {
+        const source = readFileSync(join(process.cwd(), path), 'utf8');
+        expect(source).toMatch(/from\s+['"]\.\/sqlite-task-deletion['"]/);
+      }
+      for (const path of POSTGRES_DELETION_CONSUMERS) {
+        const source = readFileSync(join(process.cwd(), path), 'utf8');
+        expect(source).toMatch(/from\s+['"]\.\/task-deletion['"]/);
+      }
+    });
+
+    it('keeps duplicated per-table deletion lists out of the consumers', () => {
+      const violations = [...SQLITE_DELETION_CONSUMERS, ...POSTGRES_DELETION_CONSUMERS]
+        .flatMap((path) => {
+          const source = readFileSync(join(process.cwd(), path), 'utf8');
+          return DELETION_ONLY_TABLES
+            .filter((table) => new RegExp(
+              String.raw`DELETE FROM ${table}\s+WHERE task_id`,
+            ).test(source))
+            .map((table) => `${path} -> ${table}`);
+        });
+
+      expect(violations).toEqual([]);
+    });
   });
 
   /**

@@ -28,6 +28,9 @@ import {
   mergeConnectorSettings,
   patchConnectorSettingsState,
 } from './connector-settings';
+import {
+  cleanupTaskAssociations,
+} from './sqlite-task-deletion';
 
 type SqliteDatabase = Database.Database;
 
@@ -366,29 +369,7 @@ export class SqliteTaskRepository implements TaskRepository {
           )
         WHERE id IN (SELECT id FROM descendants)
       `).run(id, id, id);
-      this.database.prepare('DELETE FROM task_tags WHERE task_id = ?').run(id);
-      this.database.prepare(
-        'DELETE FROM project_auto_include_exclusions WHERE task_id = ?',
-      ).run(id);
-      this.database.prepare('DELETE FROM task_projects WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM task_schedules WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM my_day_items WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM my_day_exclusions WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM focus_items WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM weekly_one_thing WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM priority_sync_log WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM task_triage_log WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM quick_sort_operations WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM task_linked_sources WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM task_attachments WHERE task_id = ?').run(id);
-      this.database.prepare('DELETE FROM project_phase_items WHERE task_id = ?').run(id);
-      this.database.prepare(
-        'UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ?',
-      ).run(id);
-      this.database.prepare(`
-        DELETE FROM task_dependencies
-        WHERE task_id = ? OR depends_on_task_id = ?
-      `).run(id, id);
+      cleanupTaskAssociations(this.database, id);
       return this.database.prepare('DELETE FROM tasks WHERE id = ?').run(id).changes === 1;
     });
     return remove.immediate();

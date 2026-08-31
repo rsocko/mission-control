@@ -300,12 +300,27 @@ Transaction and effect ordering:
   frozen task version. A stale lease/ack epoch cannot settle, and a delayed
   outcome can never regress a newer local edit — it is recorded as `stale` and
   the change becomes `superseded`.
-- Checkpoints are conditionally monotonic. A replay carrying the same accepted
-  instant still refreshes the checkpoint, but a strictly older delayed envelope
-  keeps its idempotent task upserts while leaving the newer stored
+- Checkpoints are monotonic and fail closed. A replay carrying the same accepted
+  instant is still applied idempotently and refreshes the checkpoint, but a
+  strictly older envelope is rejected with `STALE_INGEST_ENVELOPE` (409)
+  immediately after the bridge-state row is read (PostgreSQL: locked with
+  `FOR UPDATE`) and *before* any task, list, tag, checklist, or removal
+  mutation. A delayed delivery therefore cannot resurrect superseded data,
+  re-apply a removal the newer envelope settled, or regress the stored
   `list_delta_link`, per-list task delta links, `last_ingest_at`, and
-  `last_ingest_mode` untouched. Instants are compared numerically, never by
-  string ordering.
+  `last_ingest_mode`. Instants are compared numerically, never by string
+  ordering.
+- Task removal reuses the canonical cleanup shared with the core task
+  repository and connector execution
+  (`src/db/persistence/task-deletion.ts` defines the association tables;
+  `src/db/persistence/sqlite-task-deletion.ts` and
+  `src/db/postgres/repositories/task-deletion.ts` are the two backend helpers).
+  A removed Work To Do task and every descendant clear tags, projects,
+  schedules, field states, My Day/exclusions, focus, weekly one-thing,
+  priority/triage/quick-sort audit rows, linked sources, attachments, phase
+  items, deletion candidates, and dependencies, and null
+  `notifications.related_task_id` rather than deleting the notification. The
+  descendant walk stays cycle-guarded and depth-first.
 - No side effect runs inside a transaction. `ingest`/`acknowledge` return the
   bounded committed searchable projections and removed task IDs, and
   `src/lib/connectors/work-todo/service.ts` performs keyword/semantic index

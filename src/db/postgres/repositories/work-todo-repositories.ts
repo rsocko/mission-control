@@ -6,6 +6,7 @@ import {
   WORK_TODO_MAX_LEASE_SECONDS,
   WORK_TODO_MIN_LEASE_SECONDS,
   WorkTodoBridgeError,
+  staleWorkTodoIngestError,
   type WorkTodoAckCommand,
   type WorkTodoAckResult,
   type WorkTodoBridgePersistence,
@@ -37,6 +38,7 @@ import {
   workTodoSourceTagNames,
   type WorkTodoRemoteTaskInput,
 } from '@/db/persistence/work-todo-values';
+import { deleteTasksWithCanonicalCleanup } from './task-deletion';
 
 type Client = Pool | PoolClient;
 
@@ -132,18 +134,6 @@ const OUTBOUND_CHANGE_COLUMNS = `
   attempt_count AS "attemptCount"
 `;
 
-const TASK_DELETION_TABLES = [
-  'task_tags',
-  'project_auto_include_exclusions',
-  'task_projects',
-  'task_schedules',
-  'task_field_states',
-  'my_day_items',
-  'focus_items',
-  'project_phase_items',
-  'task_attachments',
-] as const;
-
 /** Keeps the post-write searchable projection read off an unbounded IN list. */
 const SEARCH_READ_BATCH = 200;
 
@@ -155,10 +145,10 @@ const SEARCH_READ_BATCH = 200;
  * and written, so a concurrent ingest, lease, or acknowledgement cannot
  * interleave: leases are taken in a deterministic bounded order, only expired
  * leases are reclaimed, acknowledgements are fenced by connector + status +
- * lease ID + task version, and a delayed delta can never regress a newer
- * accepted checkpoint. No connector traffic or search indexing happens inside a
- * transaction — the command returns the committed task IDs the service must
- * index or remove after commit.
+ * lease ID + task version, and a delayed envelope is rejected as
+ * `STALE_INGEST_ENVELOPE` before it mutates anything. No connector traffic or
+ * search indexing happens inside a transaction — the command returns the
+ * committed task IDs the service must index or remove after commit.
  */
 export function createPostgresWorkTodoRepositories(
   pool: Pool,
@@ -190,8 +180,10 @@ export function createPostgresWorkTodoRepositories(
 
   /**
    * Deletes a task and its descendants depth-first inside the caller's
-   * transaction. The traversal is cycle-guarded and bounded by the recursive
-   * descendant set, so a corrupt parent cycle cannot loop forever.
+   * transaction, applying the canonical cleanup shared with the core task
+   * repository and connector execution. The traversal is cycle-guarded and
+   * bounded by the recursive descendant set, so a corrupt parent cycle cannot
+   * loop forever, and children are removed before their parents.
    */
   async function removeTask(
     client: Client,
@@ -214,15 +206,7 @@ export function createPostgresWorkTodoRepositories(
       [taskId],
     );
     const ids = descendants.length > 0 ? descendants.map((row) => row.id) : [taskId];
-    for (const table of TASK_DELETION_TABLES) {
-      await client.query(`DELETE FROM ${table} WHERE task_id = ANY($1::text[])`, [ids]);
-    }
-    await client.query(
-      `DELETE FROM task_dependencies
-       WHERE task_id = ANY($1::text[]) OR depends_on_task_id = ANY($1::text[])`,
-      [ids],
-    );
-    await client.query('DELETE FROM tasks WHERE id = ANY($1::text[])', [ids]);
+    await deleteTasksWithCanonicalCleanup(client, ids);
     // Collected rather than published inline: search index removal must happen
     // after the authoritative transaction commits, never inside it.
     for (const id of ids) removedIds.add(id);
@@ -309,12 +293,21 @@ export function createPostgresWorkTodoRepositories(
             409,
           );
         }
-        // A delayed or replayed envelope still applies its idempotent task
-        // upserts, but must never regress a strictly newer accepted checkpoint.
-        const advancesCheckpoint = isWorkTodoCheckpointAdvance(
+        // A strictly older envelope is rejected here — after the connector and
+        // bridge-state rows are locked with `FOR UPDATE` and before any task,
+        // list, tag, checklist, or removal mutation — so a delayed delivery can
+        // neither resurrect superseded data nor regress the accepted
+        // checkpoint. A replay carrying the accepted instant is still applied
+        // idempotently.
+        if (!isWorkTodoCheckpointAdvance(
           existingState?.lastIngestAt ?? null,
           payload.syncTimestamp,
-        );
+        )) {
+          throw staleWorkTodoIngestError(
+            existingState?.lastIngestAt ?? null,
+            payload.syncTimestamp,
+          );
+        }
 
         for (const list of payload.lists) {
           if ('removed' in list && list.removed) {
@@ -593,7 +586,7 @@ export function createPostgresWorkTodoRepositories(
             }
           }
 
-          if (payload.schemaVersion === '1.1' && 'taskDeltaLink' in list && advancesCheckpoint) {
+          if (payload.schemaVersion === '1.1' && 'taskDeltaLink' in list) {
             await client.query(
               `INSERT INTO work_todo_list_delta_state (
                  connector_id, list_source_id, delta_link, updated_at
@@ -664,14 +657,10 @@ export function createPostgresWorkTodoRepositories(
              created_at, updated_at
            ) VALUES ($1, $2, $3, $4, false, $5, $6, NULL, $7, $7)
            ON CONFLICT (connector_id) DO UPDATE SET
-             list_delta_link = CASE WHEN $8::boolean THEN EXCLUDED.list_delta_link
-                                    ELSE work_todo_bridge_state.list_delta_link END,
-             reset_required = CASE WHEN $8::boolean THEN false
-                                   ELSE work_todo_bridge_state.reset_required END,
-             last_ingest_at = CASE WHEN $8::boolean THEN EXCLUDED.last_ingest_at
-                                   ELSE work_todo_bridge_state.last_ingest_at END,
-             last_ingest_mode = CASE WHEN $8::boolean THEN EXCLUDED.last_ingest_mode
-                                     ELSE work_todo_bridge_state.last_ingest_mode END,
+             list_delta_link = EXCLUDED.list_delta_link,
+             reset_required = false,
+             last_ingest_at = EXCLUDED.last_ingest_at,
+             last_ingest_mode = EXCLUDED.last_ingest_mode,
              last_error = NULL,
              updated_at = EXCLUDED.updated_at`,
           [
@@ -682,7 +671,6 @@ export function createPostgresWorkTodoRepositories(
             payload.syncTimestamp,
             mode,
             now,
-            advancesCheckpoint,
           ],
         );
 

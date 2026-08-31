@@ -25,6 +25,7 @@ import {
   UnsupportedConnectorExecutionError,
 } from '@/db/persistence/connector-execution';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import { cleanupTaskAssociations } from './task-deletion';
 
 type Client = Pool | PoolClient;
 
@@ -475,31 +476,7 @@ function sameGitHubDeletionFence(
 }
 
 async function deleteTaskRows(client: Client, taskId: string): Promise<void> {
-  const simpleTables = [
-    'task_tags',
-    'project_auto_include_exclusions',
-    'task_projects',
-    'task_schedules',
-    'my_day_items',
-    'my_day_exclusions',
-    'focus_items',
-    'weekly_one_thing',
-    'priority_sync_log',
-    'task_triage_log',
-    'quick_sort_operations',
-    'task_linked_sources',
-    'task_attachments',
-    'project_phase_items',
-  ];
-  for (const table of simpleTables) {
-    await client.query(`DELETE FROM ${table} WHERE task_id = $1`, [taskId]);
-  }
-  await client.query(
-    'DELETE FROM task_dependencies WHERE task_id = $1 OR depends_on_task_id = $1',
-    [taskId],
-  );
-  await client.query('UPDATE notifications SET related_task_id = NULL WHERE related_task_id = $1', [taskId]);
-  await client.query('DELETE FROM sync_deletion_candidates WHERE task_id = $1', [taskId]);
+  await cleanupTaskAssociations(client, [taskId]);
   await client.query(
     `
       WITH RECURSIVE descendants(id, depth, path) AS (

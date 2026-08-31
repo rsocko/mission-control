@@ -29,6 +29,7 @@ import { captureFinanceInsightPublication } from '@/lib/finance-insights/publica
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
 import logger from '@/lib/logger';
 import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 export {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -137,6 +138,14 @@ export class FinanceManagerConnector implements IConnector {
         status: transactionError ? 'partial' : datasets.status,
         datasetErrors,
       };
+      // Layer 5A makes the core projection portable, but the insight/history,
+      // notification, attention, and mutation surfaces below remain Layer 5B.
+      // Normal PostgreSQL execution still fails closed in execution support;
+      // this second fence prevents a direct invocation from creating a split
+      // SQLite/PostgreSQL run.
+      if (resolveDatabaseBackend() === 'postgres') {
+        return result;
+      }
       if (result.status === 'fresh' && Object.keys(datasetErrors).length === 0) {
         try {
           await new FinanceInsightHistorySynchronizer(config).sync(context);

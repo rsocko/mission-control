@@ -125,6 +125,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().finance[
+        property as keyof WorkerPersistenceRepositories['finance']
+      ]
+    ),
+  }),
 };
 
 /**
@@ -132,8 +139,9 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * instantiates and registers the portable-contract adapters
  * (`createPostgresCoreRepositories`, `createPostgresSyncJobRepository`,
  * `createPostgresConnectorOperationLeaseRepository`, the worker persistence
- * composition — which now includes the atomic
- * `createPostgresGitHubWorkerRepositories` GitHub composition —
+ * composition — which includes the atomic
+ * `createPostgresGitHubWorkerRepositories` GitHub and Layer 5A finance
+ * compositions —
  * `createPostgresKeywordSearchRepository`,
  * `createPostgresSemanticIndexRepository`, and
  * `createPostgresSemanticSourcePort`) from the freshly-initialized

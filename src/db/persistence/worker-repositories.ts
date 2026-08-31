@@ -2,6 +2,7 @@ import type { ConnectorRepository } from './core-repositories';
 import type { ConnectorExecutionRepositories } from './connector-execution';
 import type { GitHubWorkerRepositories } from './github-worker';
 import type { NonFinanceConnectorStateRepositories } from './work-todo';
+import type { FinanceWorkerPersistence } from './finance-worker';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -41,4 +42,9 @@ export interface WorkerPersistenceRepositories {
    * backend either supports every migrated connector surface or none.
    */
   connectorState: NonFinanceConnectorStateRepositories;
+  /**
+   * Layer 5A: the atomic core finance worker projection (identity, transaction
+   * snapshots, reference datasets, and automated attribution).
+   */
+  finance: FinanceWorkerPersistence;
 }

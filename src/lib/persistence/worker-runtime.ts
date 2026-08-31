@@ -33,6 +33,10 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteGitHubProjectRepositories },
     { createSqliteGitHubRecoveryRepositories },
     { createSqliteWorkTodoRepositories },
+    { createSqliteFinanceWorkerPersistence },
+    { loadFinanceInsightProjectionFacts },
+    { financeInsightDigestV1 },
+    { MONARCH_BRIDGE_CONTRACT_VERSION },
   ] = await Promise.all([
     import('@/db'),
     import('@/db/persistence/sqlite-core-repositories'),
@@ -44,8 +48,54 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-github-project-repositories'),
     import('@/db/persistence/sqlite-github-recovery-repositories'),
     import('@/db/persistence/sqlite-work-todo-repositories'),
+    import('@/db/persistence/sqlite-finance-worker-repositories'),
+    import('@/lib/finance-insights/publication'),
+    import('@/lib/finance-insights/canonical'),
+    import('@/lib/connectors/monarch-money/constants'),
   ]);
   const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
+  const finance = createSqliteFinanceWorkerPersistence(sqlite, {
+    projectionProofs: {
+      snapshot: ({ connectorId, projectionStartDate, windowStart, windowEnd }) => {
+        const facts = loadFinanceInsightProjectionFacts(
+          connectorId,
+          projectionStartDate,
+          'transaction',
+        ).transaction;
+        const dates = facts.map((fact) => fact.occurredOn).sort();
+        return {
+          itemCount: facts.length,
+          contentDigest: financeInsightDigestV1(facts),
+          projectionStartDate,
+          coverageStart: dates[0] ?? windowStart,
+          coverageEnd: dates.at(-1) ?? windowEnd,
+          bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+        };
+      },
+      dataset: (connectorId, dataset) => {
+        const kind = dataset === 'accounts'
+          ? 'account'
+          : dataset === 'categories'
+            ? 'category'
+            : dataset === 'tags'
+              ? 'tag'
+              : dataset === 'recurring'
+                ? 'recurring'
+                : null;
+        if (!kind) return null;
+        const facts = loadFinanceInsightProjectionFacts(
+          connectorId,
+          '0000-01-01',
+          kind,
+        )[kind];
+        return {
+          itemCount: facts.length,
+          contentDigest: financeInsightDigestV1(facts),
+          bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+        };
+      },
+    },
+  });
   return {
     connectors: sqliteCorePersistenceRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),
@@ -61,6 +111,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     connectorState: {
       workTodo: createSqliteWorkTodoRepositories(sqlite, db),
     },
+    finance,
   };
 }
 

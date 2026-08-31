@@ -28,6 +28,12 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
     connectorState: {
       workTodo: {},
     } as WorkerPersistenceRepositories['connectorState'],
+    finance: {
+      identity: {},
+      snapshots: {},
+      datasets: {},
+      attribution: {},
+    } as WorkerPersistenceRepositories['finance'],
   };
 }
 
@@ -42,6 +48,10 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-github-hierarchy-repositories');
   vi.doUnmock('@/db/persistence/sqlite-github-project-repositories');
   vi.doUnmock('@/db/persistence/sqlite-work-todo-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
+  vi.doUnmock('@/lib/finance-insights/publication');
+  vi.doUnmock('@/lib/finance-insights/canonical');
+  vi.doUnmock('@/lib/connectors/monarch-money/constants');
   vi.resetModules();
 });
 
@@ -81,6 +91,18 @@ describe('worker persistence runtime', () => {
     const workTodoModule = vi.fn(() => ({
       createSqliteWorkTodoRepositories: () => repositories.connectorState.workTodo,
     }));
+    const financeModule = vi.fn(() => ({
+      createSqliteFinanceWorkerPersistence: () => repositories.finance,
+    }));
+    const publicationModule = vi.fn(() => ({
+      loadFinanceInsightProjectionFacts: vi.fn(),
+    }));
+    const canonicalModule = vi.fn(() => ({
+      financeInsightDigestV1: vi.fn(),
+    }));
+    const constantsModule = vi.fn(() => ({
+      MONARCH_BRIDGE_CONTRACT_VERSION: 'bridge-v1',
+    }));
     vi.doMock('@/db/runtime-backend', () => ({
       resolveDatabaseBackend: () => 'sqlite',
     }));
@@ -93,6 +115,10 @@ describe('worker persistence runtime', () => {
     vi.doMock('@/db/persistence/sqlite-github-hierarchy-repositories', githubHierarchyModule);
     vi.doMock('@/db/persistence/sqlite-github-project-repositories', githubProjectModule);
     vi.doMock('@/db/persistence/sqlite-work-todo-repositories', workTodoModule);
+    vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
+    vi.doMock('@/lib/finance-insights/publication', publicationModule);
+    vi.doMock('@/lib/finance-insights/canonical', canonicalModule);
+    vi.doMock('@/lib/connectors/monarch-money/constants', constantsModule);
 
     const runtime = await import('@/lib/persistence/worker-runtime');
 
@@ -105,6 +131,8 @@ describe('worker persistence runtime', () => {
     expect(githubHierarchyModule).not.toHaveBeenCalled();
     expect(githubProjectModule).not.toHaveBeenCalled();
     expect(workTodoModule).not.toHaveBeenCalled();
+    expect(financeModule).not.toHaveBeenCalled();
+    expect(publicationModule).not.toHaveBeenCalled();
 
     const [first, second] = await Promise.all([
       runtime.getWorkerPersistenceRepositories(),
@@ -119,6 +147,7 @@ describe('worker persistence runtime', () => {
     expect(first.github.hierarchy).toBe(repositories.github.hierarchy);
     expect(first.github.projects).toBe(repositories.github.projects);
     expect(first.connectorState.workTodo).toBe(repositories.connectorState.workTodo);
+    expect(first.finance).toBe(repositories.finance);
     expect(databaseModule).toHaveBeenCalledOnce();
     expect(coreModule).toHaveBeenCalledOnce();
     expect(syncRunModule).toHaveBeenCalledOnce();
@@ -128,6 +157,8 @@ describe('worker persistence runtime', () => {
     expect(githubHierarchyModule).toHaveBeenCalledOnce();
     expect(githubProjectModule).toHaveBeenCalledOnce();
     expect(workTodoModule).toHaveBeenCalledOnce();
+    expect(financeModule).toHaveBeenCalledOnce();
+    expect(publicationModule).toHaveBeenCalledOnce();
   });
 
   it('fails closed before PostgreSQL registration without evaluating SQLite', async () => {

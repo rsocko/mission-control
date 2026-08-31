@@ -110,81 +110,85 @@ class PostgresTriageCaptureRepository implements TriageCaptureRepository {
     items: readonly TriageItem[],
   ): Promise<readonly TriageCaptureOutcome[]> {
     assertValidTriageCaptureBatch(items);
-    return this.db.transaction(async (tx) => {
-      if (items.length === 0) return [];
-      await tx.execute(sql`
-        SELECT pg_advisory_xact_lock(
-          hashtext('mission-control:triage-capture')
-        )
-      `);
-      const outcomes: TriageCaptureOutcome[] = [];
-      for (const item of items) {
-        const [sourceMatch] = await tx
-          .select()
-          .from(triageItems)
-          .where(and(
-            eq(triageItems.sourcePlatform, item.sourcePlatform),
-            eq(triageItems.sourceId, item.sourceId),
-          ))
-          .limit(1);
-        if (sourceMatch) {
-          outcomes.push({
-            status: 'skipped',
-            reason: 'source-replay',
-            item: mapTriageItem(sourceMatch),
-          });
-          continue;
-        }
-
-        if (item.canonicalUrl !== undefined) {
-          const [canonicalMatch] = await tx
+    try {
+      return await this.db.transaction(async (tx) => {
+        if (items.length === 0) return [];
+        await tx.execute(sql`
+          SELECT pg_advisory_xact_lock(
+            hashtext('mission-control:triage-capture')
+          )
+        `);
+        const outcomes: TriageCaptureOutcome[] = [];
+        for (const item of items) {
+          const [sourceMatch] = await tx
             .select()
             .from(triageItems)
-            .where(eq(triageItems.canonicalUrl, item.canonicalUrl))
+            .where(and(
+              eq(triageItems.sourcePlatform, item.sourcePlatform),
+              eq(triageItems.sourceId, item.sourceId),
+            ))
             .limit(1);
-          if (canonicalMatch) {
+          if (sourceMatch) {
             outcomes.push({
               status: 'skipped',
-              reason: 'canonical-duplicate',
-              item: mapTriageItem(canonicalMatch),
+              reason: 'source-replay',
+              item: mapTriageItem(sourceMatch),
             });
             continue;
           }
-        }
 
-        const [persisted] = await tx
-          .insert(triageItems)
-          .values({
-            id: item.id,
-            sourcePlatform: item.sourcePlatform,
-            sourceId: item.sourceId,
-            sourceUrl: item.sourceUrl,
-            canonicalUrl: item.canonicalUrl ?? null,
-            title: item.title,
-            description: item.description ?? null,
-            thumbnailUrl: item.thumbnailUrl ?? null,
-            contentType: item.contentType,
-            capturedAt: item.capturedAt,
-            ingestedAt: item.ingestedAt,
-            status: item.status,
-            snoozedUntil: item.snoozedUntil ?? null,
-            aiSummary: item.aiSummary ?? null,
-            aiCategories: [...item.aiCategories],
-            aiSuggestedActions: [...item.aiSuggestedActions],
-            aiRelevanceScore: item.aiRelevanceScore,
-            aiUrgency: item.aiUrgency,
-            rawMetadata: item.rawMetadata,
-            actionsTaken: [...item.actionsTaken],
-            sourceOrder: item.sourceOrder ?? null,
-          })
-          .returning();
-        if (!persisted) {
-          throw new Error('Failed to persist triage capture');
+          if (item.canonicalUrl !== undefined) {
+            const [canonicalMatch] = await tx
+              .select()
+              .from(triageItems)
+              .where(eq(triageItems.canonicalUrl, item.canonicalUrl))
+              .limit(1);
+            if (canonicalMatch) {
+              outcomes.push({
+                status: 'skipped',
+                reason: 'canonical-duplicate',
+                item: mapTriageItem(canonicalMatch),
+              });
+              continue;
+            }
+          }
+
+          const [persisted] = await tx
+            .insert(triageItems)
+            .values({
+              id: item.id,
+              sourcePlatform: item.sourcePlatform,
+              sourceId: item.sourceId,
+              sourceUrl: item.sourceUrl,
+              canonicalUrl: item.canonicalUrl ?? null,
+              title: item.title,
+              description: item.description ?? null,
+              thumbnailUrl: item.thumbnailUrl ?? null,
+              contentType: item.contentType,
+              capturedAt: item.capturedAt,
+              ingestedAt: item.ingestedAt,
+              status: item.status,
+              snoozedUntil: item.snoozedUntil ?? null,
+              aiSummary: item.aiSummary ?? null,
+              aiCategories: [...item.aiCategories],
+              aiSuggestedActions: [...item.aiSuggestedActions],
+              aiRelevanceScore: item.aiRelevanceScore,
+              aiUrgency: item.aiUrgency,
+              rawMetadata: item.rawMetadata,
+              actionsTaken: [...item.actionsTaken],
+              sourceOrder: item.sourceOrder ?? null,
+            })
+            .returning();
+          if (!persisted) {
+            throw new Error('Failed to persist triage capture');
+          }
+          outcomes.push({ status: 'imported', item: mapTriageItem(persisted) });
         }
-        outcomes.push({ status: 'imported', item: mapTriageItem(persisted) });
-      }
-      return outcomes;
-    });
+        return outcomes;
+      });
+    } catch {
+      throw new Error('Triage capture persistence failed');
+    }
   }
 
   async enrich(

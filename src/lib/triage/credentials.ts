@@ -1,6 +1,5 @@
-import db from '@/db';
-import { appSettings, connectorConfigs } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getTriagePersistenceRepositories } from './persistence';
 
 const SETTINGS_KEY = 'triage_source_credentials';
 
@@ -50,36 +49,16 @@ export interface ResolvedYouTubeCredentials {
  * 3. GITHUB_PAT environment variable
  */
 export async function resolveGitHubCredentials(): Promise<ResolvedGitHubCredentials | null> {
-  // 1. Check triage-specific settings
-  try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const stored = row?.value as StoredCredentials | undefined;
-    if (stored?.github?.pat) {
-      return { token: stored.github.pat, username: stored.github.username, source: 'triage-settings' };
-    }
-  } catch {
-    // table may not exist yet
+  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  if (stored?.github?.pat) {
+    return { token: stored.github.pat, username: stored.github.username, source: 'triage-settings' };
   }
 
-  // 2. Check existing github-issues connector
-  try {
-    const connectors = await db
-      .select({ credentials: connectorConfigs.credentials })
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.type, 'github-issues'), isNull(connectorConfigs.deletedAt)))
-      .limit(1);
-
-    const creds = connectors[0]?.credentials as { token?: string } | undefined;
-    if (creds?.token) {
-      return { token: creds.token, source: 'connector' };
-    }
-  } catch {
-    // table may not exist yet
+  const connectorToken = await getTriagePersistenceRepositories()
+    .githubCredentialFallback
+    .findActiveGitHubToken();
+  if (connectorToken) {
+    return { token: connectorToken, source: 'connector' };
   }
 
   // 3. Fall back to env var
@@ -95,24 +74,14 @@ export async function resolveGitHubCredentials(): Promise<ResolvedGitHubCredenti
  * Resolves Reddit credentials from DB settings first, then falls back to env vars.
  */
 export async function resolveRedditCredentials(): Promise<ResolvedRedditCredentials | null> {
-  try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const stored = row?.value as StoredCredentials | undefined;
-    if (stored?.reddit?.clientId && stored?.reddit?.clientSecret && stored?.reddit?.refreshToken) {
-      return {
-        clientId: stored.reddit.clientId,
-        clientSecret: stored.reddit.clientSecret,
-        refreshToken: stored.reddit.refreshToken,
-        username: stored.reddit.username,
-      };
-    }
-  } catch {
-    // DB may not have the table yet, fall through to env
+  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  if (stored?.reddit?.clientId && stored?.reddit?.clientSecret && stored?.reddit?.refreshToken) {
+    return {
+      clientId: stored.reddit.clientId,
+      clientSecret: stored.reddit.clientSecret,
+      refreshToken: stored.reddit.refreshToken,
+      username: stored.reddit.username,
+    };
   }
 
   const clientId = process.env.REDDIT_CLIENT_ID;
@@ -139,31 +108,21 @@ export async function resolveRedditCredentials(): Promise<ResolvedRedditCredenti
 export async function resolveYouTubeCredentials(): Promise<ResolvedYouTubeCredentials | null> {
   const defaultPlaylistIds = ['WL', 'LL'];
 
-  try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
+  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  if (stored?.youtube?.clientId && stored?.youtube?.clientSecret && stored?.youtube?.refreshToken) {
+    const enabledPlaylistIds = stored.youtube.playlists?.filter((p) => p.enabled).map((p) => p.id);
+    const playlistIds = enabledPlaylistIds?.length
+      ? enabledPlaylistIds
+      : stored.youtube.playlistIds?.length
+        ? stored.youtube.playlistIds
+        : defaultPlaylistIds;
 
-    const stored = row?.value as StoredCredentials | undefined;
-    if (stored?.youtube?.clientId && stored?.youtube?.clientSecret && stored?.youtube?.refreshToken) {
-      const enabledPlaylistIds = stored.youtube.playlists?.filter((p) => p.enabled).map((p) => p.id);
-      const playlistIds = enabledPlaylistIds?.length
-        ? enabledPlaylistIds
-        : stored.youtube.playlistIds?.length
-          ? stored.youtube.playlistIds
-          : defaultPlaylistIds;
-
-      return {
-        clientId: stored.youtube.clientId,
-        clientSecret: stored.youtube.clientSecret,
-        refreshToken: stored.youtube.refreshToken,
-        playlistIds,
-      };
-    }
-  } catch {
-    // DB may not have the table yet, fall through to env
+    return {
+      clientId: stored.youtube.clientId,
+      clientSecret: stored.youtube.clientSecret,
+      refreshToken: stored.youtube.refreshToken,
+      playlistIds,
+    };
   }
 
   const clientId = process.env.MC_YOUTUBE_CLIENT_ID;
@@ -215,23 +174,12 @@ export async function resolveModelCatalogCredentials(): Promise<ResolvedModelCat
  * 2. Environment variables (MC_KARAKEEP_URL / KARAKEEP_URL and MC_KARAKEEP_API_KEY)
  */
 export async function resolveKarakeepCredentials(): Promise<ResolvedKarakeepCredentials | null> {
-  // 1. Check triage-specific settings (DB-backed, configured via UI)
-  try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const stored = row?.value as StoredCredentials | undefined;
-    if (stored?.karakeep?.url && stored?.karakeep?.apiKey) {
-      return {
-        url: stored.karakeep.url.replace(/\/+$/, ''),
-        apiKey: stored.karakeep.apiKey,
-      };
-    }
-  } catch {
-    // table may not exist yet
+  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  if (stored?.karakeep?.url && stored?.karakeep?.apiKey) {
+    return {
+      url: stored.karakeep.url.replace(/\/+$/, ''),
+      apiKey: stored.karakeep.apiKey,
+    };
   }
 
   // 2. Fall back to env vars

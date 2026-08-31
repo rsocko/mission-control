@@ -28,6 +28,7 @@ import {
 import { createPostgresFinanceInsightNotificationLifecyclePersistence } from './finance-insight-notification-lifecycle-repositories';
 import { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 import { createPostgresTaskReminderRepository } from './task-reminder-repository';
+import { createPostgresTriagePersistenceRepositories } from './triage-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -55,6 +56,7 @@ export {
 } from './finance-insight-notification-lifecycle-repositories';
 export { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 export { createPostgresTaskReminderRepository } from './task-reminder-repository';
+export { createPostgresTriagePersistenceRepositories } from './triage-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -128,6 +130,7 @@ export function createPostgresWorkerPersistenceRepositories(
     connectorState: createPostgresNonFinanceConnectorStateRepositories(pool),
     notificationDelivery: createPostgresNotificationDeliveryRepository(pool),
     reminders: createPostgresTaskReminderRepository(pool),
+    triage: createPostgresTriagePersistenceRepositories(db),
     finance: {
       ...financeCore,
       insights: {

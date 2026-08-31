@@ -15,6 +15,13 @@ const REQUIRED_FINANCE_WORKER_TOKENS = [
   'allowsLegacyWorkflow("notification-dispatcher")',
 ];
 
+const REQUIRED_TRIAGE_WORKER_TOKENS = [
+  'TriageSyncScheduler',
+  'createPostgresTriagePersistenceRepositories',
+  'MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE',
+  'Triage auto-sync completed',
+];
+
 export function assertSyncWorkerArtifact(source) {
   if (source.includes(RETIRED_FINANCE_BACKLOG_CODE)) {
     throw new Error(
@@ -25,6 +32,14 @@ export function assertSyncWorkerArtifact(source) {
   if (missing.length > 0) {
     throw new Error(
       `Sync worker bundle omitted required finance activation markers:\n${missing.join('\n')}`,
+    );
+  }
+  const missingTriage = REQUIRED_TRIAGE_WORKER_TOKENS.filter(
+    (token) => !source.includes(token),
+  );
+  if (missingTriage.length > 0) {
+    throw new Error(
+      `Sync worker bundle omitted required triage activation markers:\n${missingTriage.join('\n')}`,
     );
   }
   if (

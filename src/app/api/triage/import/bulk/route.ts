@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
 import {
-  ingestTriageImport,
   ingestTriageImports,
   type TriageImportInput,
-  type TriageImportResult,
-} from '@/lib/triage/capture';
+} from '@/lib/triage/import-capture';
 import { isValidTriageSource } from '@/lib/triage/query';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { cacheThumbnail } from '@/lib/triage/thumbnail-cache';
@@ -105,26 +103,11 @@ async function importBulk(request: Request) {
       validInputs.push(input);
     }
 
-    const importResults: Array<TriageImportResult | null> = [];
-    try {
-      importResults.push(...await ingestTriageImports(validInputs));
-    } catch (error) {
-      logger.warn({ err: error }, 'Batched triage import failed; retrying items individually');
-      for (const input of validInputs) {
-        try {
-          importResults.push(await ingestTriageImport(input));
-        } catch (itemError) {
-          skipped += 1;
-          errors.push(itemError instanceof Error ? itemError.message : 'Unknown ingest error');
-          importResults.push(null);
-        }
-      }
-    }
+    const importResults = await ingestTriageImports(validInputs);
 
     for (let index = 0; index < importResults.length; index += 1) {
       const result = importResults[index];
       const input = validInputs[index];
-      if (!result) continue;
       if (result.status === 'imported') {
         imported += 1;
       } else if (refreshThumbnails && input.thumbnailUrl) {

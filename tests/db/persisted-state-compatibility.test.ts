@@ -171,6 +171,7 @@ function assertCoreInvariants(
     'reminder_relative',
     'recurrence_generated_from_task_id',
   ]));
+  expect(columnNames(sqlite, 'triage_sync_state')).toContain('revision');
   expect(sqlite.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
   expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
 }

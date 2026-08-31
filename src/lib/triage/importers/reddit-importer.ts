@@ -2,9 +2,17 @@
  * Reddit Saved importer for triage queue.
  */
 import type { TriageSourcePlatform } from '@/types';
-import { ingestTriageImport } from '../capture';
-import { fetchWithRateLimit, IMPORT_USER_AGENT, MAX_PAGES } from './base-importer';
-import { upsertSyncState } from '../sync-state';
+import { ingestTriageImports, type TriageImportInput } from '../import-capture';
+import {
+  completeFullSyncResult,
+  createFullSyncResult,
+  fetchWithRateLimit,
+  IMPORT_USER_AGENT,
+  MAX_PAGES,
+  remoteResponseError,
+  safeRemoteError,
+} from './base-importer';
+import { getSyncState, recordSyncRun } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 
 async function getRedditAccessToken(input: {
@@ -27,12 +35,12 @@ async function getRedditAccessToken(input: {
   });
 
   if (!tokenResponse.ok) {
-    throw new Error(`Reddit token exchange failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
+    throw remoteResponseError('Reddit token exchange', tokenResponse);
   }
 
   const token = await tokenResponse.json() as { access_token?: string };
   if (!token.access_token) {
-    throw new Error('Reddit token exchange did not return access_token');
+    throw new Error('Reddit token exchange returned malformed data');
   }
   return token.access_token;
 }
@@ -45,10 +53,10 @@ async function resolveRedditUsername(accessToken: string) {
     },
   });
   if (!response.ok) {
-    throw new Error(`Failed to resolve Reddit username: ${response.status} ${response.statusText}`);
+    throw remoteResponseError('Reddit profile request', response);
   }
   const me = await response.json() as { name?: string };
-  if (!me.name) throw new Error('Reddit profile response missing username');
+  if (!me.name) throw new Error('Reddit profile response returned malformed data');
   return me.name;
 }
 
@@ -303,7 +311,7 @@ export async function importRedditSaved(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`Reddit saved import failed: ${response.status} ${response.statusText}`);
+    throw remoteResponseError('Reddit saved import', response);
   }
 
   const payload = await response.json() as {
@@ -321,6 +329,7 @@ export async function importRedditSaved(input: {
     nextCursor: payload.data?.after ?? null,
   };
 
+  const imports: TriageImportInput[] = [];
   for (let i = 0; i < children.length; i++) {
     const child = children[i];
     const mapped = mapRedditChildToImport(child);
@@ -332,12 +341,12 @@ export async function importRedditSaved(input: {
 
     // sourceOrder: lower = more recently saved (API returns newest first)
     const sourceOrder = (input.startIndex ?? 0) + i;
-    const result = await ingestTriageImport({ ...mapped, sourceOrder });
-    if (result.status === 'imported') {
-      summary.imported += 1;
-    } else {
-      summary.skipped += 1;
-    }
+    imports.push({ ...mapped, sourceOrder });
+  }
+
+  const outcomes = await ingestTriageImports(imports);
+  for (const outcome of outcomes) {
+    summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
   }
 
   return summary;
@@ -351,7 +360,8 @@ export async function importAllRedditSaved(input: {
   incremental?: boolean;
 }): Promise<FullSyncResult> {
   const startTime = Date.now();
-  const result: FullSyncResult = { imported: 0, skipped: 0, errors: [], pagesProcessed: 0, durationMs: 0, lastCursor: null };
+  const state = await getSyncState('reddit-saved');
+  const result = createFullSyncResult();
 
   let after: string | undefined;
   let pageCount = 0;
@@ -361,15 +371,21 @@ export async function importAllRedditSaved(input: {
   let consecutiveSkips = 0;
 
   while (pageCount < MAX_PAGES) {
-    const summary = await importRedditSaved({
-      clientId: input.clientId,
-      clientSecret: input.clientSecret,
-      refreshToken: input.refreshToken,
-      username: input.username,
-      limit: 100,
-      after,
-      startIndex: itemIndex,
-    });
+    let summary: TriageImportSummary;
+    try {
+      summary = await importRedditSaved({
+        clientId: input.clientId,
+        clientSecret: input.clientSecret,
+        refreshToken: input.refreshToken,
+        username: input.username,
+        limit: 100,
+        after,
+        startIndex: itemIndex,
+      });
+    } catch (error) {
+      result.errors.push(safeRemoteError('Reddit saved import', error));
+      break;
+    }
 
     itemIndex += summary.imported + summary.skipped;
 
@@ -391,15 +407,15 @@ export async function importAllRedditSaved(input: {
     result.lastCursor = summary.nextCursor;
   }
 
-  result.durationMs = Date.now() - startTime;
-
-  await upsertSyncState('reddit-saved', {
+  completeFullSyncResult(result, startTime);
+  const persisted = await recordSyncRun('reddit-saved', state?.revision ?? 0, {
     lastCursor: result.lastCursor,
     imported: result.imported,
     skipped: result.skipped,
     errors: result.errors.slice(0, 20),
     durationMs: result.durationMs,
   });
+  if (persisted.status === 'stale') result.outcome = 'stale';
 
   return result;
 }

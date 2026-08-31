@@ -9,13 +9,18 @@
  * - Simple lock to prevent concurrent runs
  */
 import logger from '@/lib/logger';
-import { triageSyncScheduler, type TriageSourceId } from './scheduler';
-import { getAllSyncStates, type TriageSyncStateRecord } from './sync-state';
+import {
+  triageSyncScheduler,
+  type ScheduledTriageImportResult,
+  type TriageSourceId,
+} from './scheduler';
+import { getAllSyncStates } from './sync-state';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface SourceSyncResult {
   sourceId: TriageSourceId;
+  outcome: ScheduledTriageImportResult['outcome'];
   success: boolean;
   imported: number;
   skipped: number;
@@ -177,26 +182,27 @@ export async function runAllDueSyncs(): Promise<AggregateSyncResult> {
     for (const sourceId of dueSources) {
       const sourceStart = Date.now();
       try {
-        await triageSyncScheduler.runImport(sourceId);
-
-        // Fetch updated sync state to get import counts
-        const syncStates = await getAllSyncStates();
-        const state = syncStates.find((s) => s.id === sourceId);
-
-        recordSuccess(sourceId);
+        const result = await triageSyncScheduler.runImport(sourceId);
+        if (result.outcome === 'success') recordSuccess(sourceId);
+        else recordFailure(sourceId);
         results.push({
           sourceId,
-          success: true,
-          imported: state?.lastRunImported ?? 0,
-          skipped: state?.lastRunSkipped ?? 0,
-          errors: [],
-          durationMs: Date.now() - sourceStart,
+          outcome: result.outcome,
+          success: result.outcome === 'success',
+          imported: result.imported,
+          skipped: result.skipped,
+          errors: result.errors,
+          durationMs: result.durationMs,
+          ...(result.outcome === 'success'
+            ? {}
+            : { backoffUntil: getHealthState(sourceId).backoffUntil ?? undefined }),
         });
       } catch (err) {
         recordFailure(sourceId);
         const errorMsg = err instanceof Error ? err.message : String(err);
         results.push({
           sourceId,
+          outcome: 'failure',
           success: false,
           imported: 0,
           skipped: 0,

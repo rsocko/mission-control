@@ -31,6 +31,15 @@ export async function POST(request: Request) {
         username,
         incremental: mode === 'incremental',
       });
+      if (result.outcome === 'failure') {
+        throw new Error('Reddit saved full import failed');
+      }
+      if (result.outcome === 'stale') {
+        return NextResponse.json(
+          { error: 'Reddit saved import state changed concurrently' },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ result, mode });
     }
 

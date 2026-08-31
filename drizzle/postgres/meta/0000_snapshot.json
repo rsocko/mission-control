@@ -21352,6 +21352,13 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
       "indexes": {},

@@ -16,31 +16,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockRun = vi.fn();
 
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(() => []),
-        })),
-      })),
-    })),
-    insert: vi.fn(() => ({
-      values: vi.fn(),
-    })),
-    run: mockRun,
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  triageSyncState: { id: 'id' },
-  triageItems: {
-    id: 'id',
-    sourcePlatform: 'source_platform',
-    sourceId: 'source_id',
-    sourceUrl: 'source_url',
-    canonicalUrl: 'canonical_url',
-  },
+vi.mock('@/lib/triage/sync-state', () => ({
+  upsertSyncState: mockRun,
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -56,7 +33,7 @@ vi.mock('@/lib/mode', () => ({
 }));
 
 const mockIngest = vi.fn();
-vi.mock('@/lib/triage/capture', () => ({
+vi.mock('@/lib/triage/import-capture', () => ({
   ingestTriageImport: mockIngest,
 }));
 
@@ -149,8 +126,6 @@ describe('importTwitterArchive', () => {
   beforeEach(async () => {
     vi.resetModules();
     mockIngest.mockReset();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-
     const mod = await import('@/lib/triage/importers/twitter-archive-importer');
     importTwitterArchive = mod.importTwitterArchive;
   });
@@ -259,8 +234,6 @@ describe('importAllTwitterArchive', () => {
     vi.resetModules();
     mockIngest.mockReset();
     mockRun.mockReset();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-
     const mod = await import('@/lib/triage/importers/twitter-archive-importer');
     importAllTwitterArchive = mod.importAllTwitterArchive;
   });

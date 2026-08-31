@@ -90,65 +90,56 @@ async function getDeliveryState(
   apns: { environment: string; topic: string } | null,
   rule: TaskReminderPushRule | null,
 ): Promise<TaskReminderDeliveryState> {
-  const [
-    setting,
-    preferences,
-    webSubscriptions,
-    apnsRegistrations,
-    globalCount,
-    ruleCount,
-  ] = await Promise.all([
-    client.query<{ value: unknown }>(
-      `SELECT value FROM app_settings WHERE key = 'push_delivery_enabled'`,
-    ),
-    client.query<{
-      do_not_disturb: boolean;
-      quiet_start: number | null;
-      quiet_end: number | null;
-    }>(`
-      SELECT do_not_disturb, quiet_start, quiet_end
-      FROM push_preferences WHERE id = 'default'
-    `),
-    client.query(`SELECT 1 FROM push_subscriptions WHERE platform = 'web' LIMIT 1`),
-    apns
-      ? client.query(
-          `
-            SELECT 1 FROM apns_registrations
-            WHERE invalidated_at IS NULL AND environment = $1 AND topic = $2
-            LIMIT 1
-          `,
-          [apns.environment, apns.topic],
-        )
-      : Promise.resolve({ rowCount: 0 }),
-    client.query<{ count: string }>(
-      `
-        SELECT COUNT(DISTINCT notification_id) AS count
-        FROM notification_delivery_events
-        WHERE created_at >= $1 AND status = ANY($2::text[])
-      `,
-      [
-        new Date(now.getTime() - 60 * 60 * 1_000).toISOString(),
-        ACTIVE_DELIVERY_STATUSES,
-      ],
-    ),
-    client.query<{ count: string }>(
-      `
-        SELECT COUNT(DISTINCT delivery.notification_id) AS count
-        FROM notification_delivery_events delivery
-        INNER JOIN notifications notification ON notification.id = delivery.notification_id
-        WHERE delivery.created_at >= $1
-          AND delivery.status = ANY($2::text[])
-          AND notification.connector_instance_id = $3
-          ${rule?.templateKey === '*' ? '' : 'AND notification.template_key = $4'}
-      `,
-      [
-        new Date(now.getTime() - 60 * 60 * 1_000).toISOString(),
-        ACTIVE_DELIVERY_STATUSES,
-        TASK_REMINDER_CONNECTOR_ID,
-        ...(rule?.templateKey === '*' ? [] : [TASK_REMINDER_TEMPLATE_KEY]),
-      ],
-    ),
-  ]);
+  const setting = await client.query<{ value: unknown }>(
+    `SELECT value FROM app_settings WHERE key = 'push_delivery_enabled'`,
+  );
+  const preferences = await client.query<{
+    do_not_disturb: boolean;
+    quiet_start: number | null;
+    quiet_end: number | null;
+  }>(`
+    SELECT do_not_disturb, quiet_start, quiet_end
+    FROM push_preferences WHERE id = 'default'
+  `);
+  const webSubscriptions = await client.query(
+    `SELECT 1 FROM push_subscriptions WHERE platform = 'web' LIMIT 1`,
+  );
+  const apnsRegistrations = apns
+    ? await client.query(
+        `
+          SELECT 1 FROM apns_registrations
+          WHERE invalidated_at IS NULL AND environment = $1 AND topic = $2
+          LIMIT 1
+        `,
+        [apns.environment, apns.topic],
+      )
+    : { rowCount: 0 };
+  const since = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
+  const globalCount = await client.query<{ count: string }>(
+    `
+      SELECT COUNT(DISTINCT notification_id) AS count
+      FROM notification_delivery_events
+      WHERE created_at >= $1 AND status = ANY($2::text[])
+    `,
+    [since, ACTIVE_DELIVERY_STATUSES],
+  );
+  const ruleCount = await client.query<{ count: string }>(
+    `
+      SELECT COUNT(DISTINCT delivery.notification_id) AS count
+      FROM notification_delivery_events delivery
+      INNER JOIN notifications notification ON notification.id = delivery.notification_id
+      WHERE delivery.created_at >= $1
+        AND delivery.status = ANY($2::text[])
+        AND notification.connector_instance_id = $3
+        ${rule?.templateKey === '*' ? '' : 'AND notification.template_key = $4'}
+    `,
+    [
+      since,
+      ACTIVE_DELIVERY_STATUSES,
+      TASK_REMINDER_CONNECTOR_ID,
+      ...(rule?.templateKey === '*' ? [] : [TASK_REMINDER_TEMPLATE_KEY]),
+    ],
+  );
   const preference = preferences.rows[0];
   return {
     channelEnabled: setting.rows[0] ? parseBooleanSetting(setting.rows[0].value) : true,
@@ -326,14 +317,14 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
                       occurrence.state = 'failed'
                       AND (
                         occurrence.next_attempt_at IS NULL
-                        OR occurrence.next_attempt_at <= $1::text
+                        OR occurrence.next_attempt_at <= $4
                       )
                     )
                     OR (
                       occurrence.state = 'processing'
                       AND (
                         occurrence.lease_expires_at IS NULL
-                        OR occurrence.lease_expires_at <= $1::text
+                        OR occurrence.lease_expires_at <= $4
                       )
                     )
                   )
@@ -350,7 +341,12 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             FOR UPDATE OF task SKIP LOCKED
             LIMIT 1
           `,
-          [nowIso, TASK_REMINDER_OFFSET_TIMESTAMP_PATTERN, input.maxAttempts],
+          [
+            nowIso,
+            TASK_REMINDER_OFFSET_TIMESTAMP_PATTERN,
+            input.maxAttempts,
+            nowIso,
+          ],
         );
         const selected = candidate.rows[0];
         if (!selected) {

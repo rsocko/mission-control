@@ -417,7 +417,7 @@ async function executeWithWorker(connectorId: string): Promise<SyncResult> {
   const repository = await getSyncJobRepository();
   const job = await repository.enqueue(connectorId, {
     full: true,
-    source: 'operator-canary',
+    source: 'api',
     maxAttempts: 1,
     durationBudgetMs: 120_000,
   });
@@ -512,7 +512,7 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     const repository = await getSyncJobRepository();
     const queued = await repository.enqueue(connectorId, {
       full: true,
-      source: 'operator-canary',
+      source: 'api',
       maxAttempts: 2,
       durationBudgetMs: 120_000,
     });

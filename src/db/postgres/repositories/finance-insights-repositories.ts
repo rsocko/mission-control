@@ -417,7 +417,13 @@ function createProjectionPersistence(pool: Pool): FinanceInsightProjectionPersis
       onlyKind?: FinanceInsightOperationalFactKind,
       transactionEnd?: string,
     ) {
-      return readLiveProjectionFacts(pool, connectorId, transactionStart, onlyKind, transactionEnd);
+      return readPostgresFinanceInsightProjectionFacts(
+        pool,
+        connectorId,
+        transactionStart,
+        onlyKind,
+        transactionEnd,
+      );
     },
   };
 }
@@ -493,7 +499,7 @@ function bySourceRef<T extends { sourceRef: string }>(left: T, right: T): number
   return left.sourceRef < right.sourceRef ? -1 : left.sourceRef > right.sourceRef ? 1 : 0;
 }
 
-async function readLiveProjectionFacts(
+export async function readPostgresFinanceInsightProjectionFacts(
   pool: Client,
   connectorId: string,
   transactionStart: string,
@@ -630,7 +636,13 @@ async function readLiveTransactionFacts(
   windowEnd: string,
 ): Promise<LiveTransactionFact[]> {
   return (
-    await readLiveProjectionFacts(pool, connectorId, windowStart, 'transaction', windowEnd)
+    await readPostgresFinanceInsightProjectionFacts(
+      pool,
+      connectorId,
+      windowStart,
+      'transaction',
+      windowEnd,
+    )
   ).transaction;
 }
 

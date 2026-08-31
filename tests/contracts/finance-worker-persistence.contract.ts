@@ -134,7 +134,7 @@ export function describeFinanceWorkerPersistenceContract(
     beforeEach(async () => {
       harness ??= await createHarness();
       await harness.reset();
-      await harness.seedConnector();
+      await harness.seedConnector({ identityNamespace: 'a'.repeat(64) });
     });
 
     it('atomically installs one identity namespace and rejects invalid stored state', async () => {

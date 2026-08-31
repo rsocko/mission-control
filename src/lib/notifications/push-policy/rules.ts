@@ -10,8 +10,9 @@ import type {
   PushPreview,
 } from './catalog';
 import { isPreviewSafeForType, isPushPreview } from './catalog';
+import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from './constants';
 
-export const MAX_NOTIFICATION_PUSHES_PER_HOUR = 1_000;
+export { MAX_NOTIFICATION_PUSHES_PER_HOUR } from './constants';
 
 export type NotificationPushRule = typeof notificationPushRules.$inferSelect;
 

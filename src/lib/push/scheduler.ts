@@ -17,7 +17,6 @@ import cron from 'node-cron';
 import type { ScheduledTask } from 'node-cron';
 import { triggerMorningNotification, triggerTriageNudge, triggerCarryForwardReminder } from './triggers';
 import { getPreferences } from '@/lib/notifications/quiet-hours';
-import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications';
 import { getTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
 import db from '@/db';
@@ -82,10 +81,8 @@ export class PushNotificationScheduler {
 
   private async _start(): Promise<void> {
     if (this.running) return;
-
     const prefs = await getPreferences();
     const tz = getTimezone();
-    wakeNotificationDeliveryDispatcher();
 
     // Morning notification — runs daily at the configured hour
     const morningCron = `0 ${prefs.morningHour} * * *`;

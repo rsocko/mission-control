@@ -1,5 +1,5 @@
 {
-  "id": "56f6f350-42e8-4ccc-bcef-9a1aaf5733ef",
+  "id": "5e385309-350c-4974-b2eb-ef5ede63de0e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -12859,6 +12859,12 @@
         },
         "lease_expires_at": {
           "name": "lease_expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_token": {
+          "name": "claim_token",
           "type": "text",
           "primaryKey": false,
           "notNull": false

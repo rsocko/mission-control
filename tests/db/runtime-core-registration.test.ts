@@ -72,6 +72,9 @@ const mocks = vi.hoisted(() => {
         execution: {} as WorkerPersistenceRepositories['execution'],
         github: {} as WorkerPersistenceRepositories['github'],
         connectorState: {} as WorkerPersistenceRepositories['connectorState'],
+        notificationDelivery: {
+          getNextWakeAt: vi.fn(async () => null),
+        } as unknown as WorkerPersistenceRepositories['notificationDelivery'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);
@@ -135,8 +138,11 @@ describe('PostgreSQL runtime core repository registration', () => {
     const registeredWorkerComposition = mocks.registerWorker.mock.calls[0][0];
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
+    await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
     expect(mocks.repositories[0].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
+      .toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[0].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
 
     await shutdownRuntimeDatabase();
@@ -147,8 +153,11 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
+    await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
     expect(mocks.repositories[1].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[1].syncRuns.listLatestSuccessfulPulls)
+      .toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[1].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
   });
 });

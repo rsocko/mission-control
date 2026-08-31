@@ -3,18 +3,9 @@ import 'server-only';
 import { sqlite } from '@/db';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import type { SyncJobSource } from './job-queue';
+import { ConnectorSyncControlError } from './control-state-error';
 
-export class ConnectorSyncControlError extends Error {
-  constructor(
-    readonly code:
-      | 'connector_sync_quarantined'
-      | 'operator_canary_authorization_invalid',
-    readonly status = 409,
-  ) {
-    super(code);
-    this.name = 'ConnectorSyncControlError';
-  }
-}
+export { ConnectorSyncControlError } from './control-state-error';
 
 /**
  * SQLite-only, synchronous checks. Kept exactly as-is: `sqlite-job-repository.ts`

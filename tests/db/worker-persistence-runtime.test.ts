@@ -28,6 +28,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
     connectorState: {
       workTodo: {},
     } as WorkerPersistenceRepositories['connectorState'],
+    notificationDelivery: {} as WorkerPersistenceRepositories['notificationDelivery'],
     finance: {
       identity: {},
       snapshots: {},
@@ -61,6 +62,7 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-github-hierarchy-repositories');
   vi.doUnmock('@/db/persistence/sqlite-github-project-repositories');
   vi.doUnmock('@/db/persistence/sqlite-work-todo-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-notification-delivery-repository');
   vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-insights-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-attention-repositories');
@@ -107,6 +109,9 @@ describe('worker persistence runtime', () => {
     const workTodoModule = vi.fn(() => ({
       createSqliteWorkTodoRepositories: () => repositories.connectorState.workTodo,
     }));
+    const notificationDeliveryModule = vi.fn(() => ({
+      createSqliteNotificationDeliveryRepository: () => repositories.notificationDelivery,
+    }));
     const financeModule = vi.fn(() => ({
       createSqliteFinanceWorkerPersistence: () => repositories.finance,
     }));
@@ -143,6 +148,10 @@ describe('worker persistence runtime', () => {
     vi.doMock('@/db/persistence/sqlite-github-hierarchy-repositories', githubHierarchyModule);
     vi.doMock('@/db/persistence/sqlite-github-project-repositories', githubProjectModule);
     vi.doMock('@/db/persistence/sqlite-work-todo-repositories', workTodoModule);
+    vi.doMock(
+      '@/db/persistence/sqlite-notification-delivery-repository',
+      notificationDeliveryModule,
+    );
     vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
     vi.doMock(
       '@/db/persistence/sqlite-finance-insights-repositories',
@@ -174,6 +183,7 @@ describe('worker persistence runtime', () => {
     expect(githubHierarchyModule).not.toHaveBeenCalled();
     expect(githubProjectModule).not.toHaveBeenCalled();
     expect(workTodoModule).not.toHaveBeenCalled();
+    expect(notificationDeliveryModule).not.toHaveBeenCalled();
     expect(financeModule).not.toHaveBeenCalled();
     expect(financeInsightsModule).not.toHaveBeenCalled();
     expect(financeAttentionModule).not.toHaveBeenCalled();
@@ -193,6 +203,7 @@ describe('worker persistence runtime', () => {
     expect(first.github.hierarchy).toBe(repositories.github.hierarchy);
     expect(first.github.projects).toBe(repositories.github.projects);
     expect(first.connectorState.workTodo).toBe(repositories.connectorState.workTodo);
+    expect(first.notificationDelivery).toBe(repositories.notificationDelivery);
     expect(first.finance.identity).toBe(repositories.finance.identity);
     expect(first.finance.snapshots).toBe(repositories.finance.snapshots);
     expect(first.finance.datasets).toBe(repositories.finance.datasets);
@@ -217,6 +228,7 @@ describe('worker persistence runtime', () => {
     expect(githubHierarchyModule).toHaveBeenCalledOnce();
     expect(githubProjectModule).toHaveBeenCalledOnce();
     expect(workTodoModule).toHaveBeenCalledOnce();
+    expect(notificationDeliveryModule).toHaveBeenCalledOnce();
     expect(financeModule).toHaveBeenCalledOnce();
     expect(financeInsightsModule).toHaveBeenCalledOnce();
     expect(financeAttentionModule).toHaveBeenCalledOnce();

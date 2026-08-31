@@ -24,9 +24,9 @@ import {
   type NotificationPushRuleValues,
 } from './policy';
 import {
-  MAX_NOTIFICATION_PUSHES_PER_HOUR,
   type NotificationPushRule,
 } from './rules';
+import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from './constants';
 import {
   financeNotificationCatalogKey,
   HOMELAB_NOTIFICATION_TYPES,

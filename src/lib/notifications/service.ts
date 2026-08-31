@@ -37,14 +37,23 @@ import {
   needsAttention,
   shouldReopenForSourceActivity,
 } from './lifecycle';
+import {
+  normalizeInternalNavigationTarget,
+  type MissionControlPushPayload,
+  type NotificationDeliveryChannel,
+} from './push-payload';
 
 export { wakeNotificationDeliveryDispatcher } from './dispatcher-wake';
+export {
+  normalizeInternalNavigationTarget,
+  type MissionControlPushPayload,
+  type NotificationDeliveryChannel,
+} from './push-payload';
 
 export const PUSH_DELIVERY_SETTING_KEY = 'push_delivery_enabled';
 export const DEFAULT_GLOBAL_PUSHES_PER_HOUR = 100;
 
 const ACTIVE_RATE_LIMIT_STATUSES = ['pending', 'sending', 'sent', 'partial'] as const;
-const INTERNAL_ORIGIN = 'https://mission-control.invalid';
 
 type NotificationDatabase = BetterSQLite3Database<typeof schema>;
 type NotificationRow = typeof notifications.$inferSelect;
@@ -59,8 +68,6 @@ export type NotificationDeliveryStatus =
   | 'failed'
   | 'suppressed';
 
-export type NotificationDeliveryChannel = 'web_push' | 'apns';
-
 export type NotificationSuppressionReason =
   | 'channel_disabled'
   | 'channel_unconfigured'
@@ -73,15 +80,6 @@ export type NotificationSuppressionReason =
   | 'connector_deleted'
   | 'connector_disabled'
   | 'not_attention_eligible';
-
-export interface MissionControlPushPayload {
-  notificationId: string;
-  title: string;
-  body?: string;
-  tag: string;
-  url: string;
-  kind?: 'task_reminder';
-}
 
 export interface CreateNotificationInput {
   id?: string;
@@ -154,19 +152,6 @@ function requireText(value: string, field: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${field} is required`);
   return normalized;
-}
-
-export function normalizeInternalNavigationTarget(target: string | null | undefined): string | null {
-  if (target === null || target === undefined || !target.trim()) return null;
-  const value = target.trim();
-  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) {
-    throw new Error('navigationTarget must be an internal application path');
-  }
-  const url = new URL(value, INTERNAL_ORIGIN);
-  if (url.origin !== INTERNAL_ORIGIN || !url.pathname.startsWith('/')) {
-    throw new Error('navigationTarget must be an internal application path');
-  }
-  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export function redactPushText(value: string, maxLength: number): string {

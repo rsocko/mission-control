@@ -150,7 +150,7 @@ describe('Layer 5C finance persistence boundary', () => {
     expect(graph).not.toContain('src/lib/connectors/monarch-money/dataset-sync.ts');
   });
 
-  it('activates only finance domain execution and keeps delivery separately gated', () => {
+  it('keeps finance domain execution active alongside portable notification delivery', () => {
     const connector = source('src/lib/connectors/monarch-money/index.ts');
     const support = source(
       'src/db/postgres/repositories/connector-execution-repositories.ts',
@@ -171,7 +171,7 @@ describe('Layer 5C finance persistence boundary', () => {
       "throw new UnsupportedConnectorExecutionError('connector-owned domain state')",
     );
     expect(support).toContain("return workflow === 'dependency-reconciliation'");
-    expect(support).not.toContain("workflow === 'notification-dispatcher'");
+    expect(support).toContain("workflow === 'notification-dispatcher'");
     expect(backfill.indexOf('repositories.execution.support.assertConfigSupported(input.config)'))
       .toBeGreaterThan(0);
     expect(backfill.indexOf('repositories.execution.support.assertConfigSupported(input.config)'))

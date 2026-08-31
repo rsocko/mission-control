@@ -26,6 +26,7 @@ import {
   createPostgresFinanceAttentionRoutingPersistence,
 } from './finance-attention-repositories';
 import { createPostgresFinanceInsightNotificationLifecyclePersistence } from './finance-insight-notification-lifecycle-repositories';
+import { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -51,6 +52,7 @@ export {
 export {
   createPostgresFinanceInsightNotificationLifecyclePersistence,
 } from './finance-insight-notification-lifecycle-repositories';
+export { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -122,6 +124,7 @@ export function createPostgresWorkerPersistenceRepositories(
     execution: createPostgresConnectorExecutionRepositories(pool),
     github: createPostgresGitHubWorkerRepositories(pool),
     connectorState: createPostgresNonFinanceConnectorStateRepositories(pool),
+    notificationDelivery: createPostgresNotificationDeliveryRepository(pool),
     finance: {
       ...financeCore,
       insights: {

@@ -1219,6 +1219,22 @@ CREATE TABLE "homelab_alert_receipts" (
 	"applied" boolean DEFAULT true NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "houston_conversation_memories" (
+	"id" text PRIMARY KEY NOT NULL,
+	"authorization_scope" text NOT NULL,
+	"title" text NOT NULL,
+	"summary" text NOT NULL,
+	"decisions" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"commitments" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"topics" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"linked_entities" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"sensitivity" text NOT NULL,
+	"retain_until" text NOT NULL,
+	"excluded_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "houston_finance_action_audit" (
 	"id" text PRIMARY KEY NOT NULL,
 	"correlation_id" text NOT NULL,
@@ -1477,6 +1493,7 @@ CREATE TABLE "notification_delivery_events" (
 	"attempt_count" integer DEFAULT 0 NOT NULL,
 	"next_attempt_at" text,
 	"lease_expires_at" text,
+	"claim_token" text,
 	"subscriptions_attempted" integer DEFAULT 0 NOT NULL,
 	"subscriptions_sent" integer DEFAULT 0 NOT NULL,
 	"subscriptions_failed" integer DEFAULT 0 NOT NULL,
@@ -2723,6 +2740,9 @@ CREATE INDEX "idx_graph_workspaces_library" ON "graph_workspaces" USING btree ("
 CREATE UNIQUE INDEX "idx_homelab_alert_receipts_event" ON "homelab_alert_receipts" USING btree ("integration","source","event_id");--> statement-breakpoint
 CREATE INDEX "idx_homelab_alert_receipts_incident" ON "homelab_alert_receipts" USING btree ("integration","source","fingerprint","occurred_at");--> statement-breakpoint
 CREATE INDEX "idx_homelab_alert_receipts_received" ON "homelab_alert_receipts" USING btree ("last_received_at");--> statement-breakpoint
+CREATE INDEX "idx_houston_memories_scope_updated" ON "houston_conversation_memories" USING btree ("authorization_scope","updated_at");--> statement-breakpoint
+CREATE INDEX "idx_houston_memories_retention" ON "houston_conversation_memories" USING btree ("retain_until");--> statement-breakpoint
+CREATE INDEX "idx_houston_memories_excluded" ON "houston_conversation_memories" USING btree ("excluded_at");--> statement-breakpoint
 CREATE INDEX "idx_houston_finance_action_call" ON "houston_finance_action_audit" USING btree ("call_hash","created_at");--> statement-breakpoint
 CREATE INDEX "idx_houston_finance_action_correlation" ON "houston_finance_action_audit" USING btree ("correlation_id","created_at");--> statement-breakpoint
 CREATE INDEX "idx_houston_finance_pending_expiry" ON "houston_finance_pending_approvals" USING btree ("expires_at");--> statement-breakpoint
@@ -2866,23 +2886,3 @@ CREATE INDEX "idx_work_todo_list_delta_connector" ON "work_todo_list_delta_state
 CREATE UNIQUE INDEX "idx_work_todo_change_task_version" ON "work_todo_outbound_changes" USING btree ("connector_id","task_id","task_version");--> statement-breakpoint
 CREATE INDEX "idx_work_todo_change_ready" ON "work_todo_outbound_changes" USING btree ("connector_id","status","lease_expires_at","created_at");--> statement-breakpoint
 CREATE INDEX "idx_work_todo_change_task" ON "work_todo_outbound_changes" USING btree ("task_id");
---> statement-breakpoint
-CREATE TABLE "houston_conversation_memories" (
-	"id" text PRIMARY KEY NOT NULL,
-	"authorization_scope" text NOT NULL,
-	"title" text NOT NULL,
-	"summary" text NOT NULL,
-	"decisions" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"commitments" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"topics" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"linked_entities" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"sensitivity" text NOT NULL,
-	"retain_until" text NOT NULL,
-	"excluded_at" text,
-	"created_at" text NOT NULL,
-	"updated_at" text NOT NULL
-);
---> statement-breakpoint
-CREATE INDEX "idx_houston_memories_scope_updated" ON "houston_conversation_memories" USING btree ("authorization_scope","updated_at");--> statement-breakpoint
-CREATE INDEX "idx_houston_memories_retention" ON "houston_conversation_memories" USING btree ("retain_until");--> statement-breakpoint
-CREATE INDEX "idx_houston_memories_excluded" ON "houston_conversation_memories" USING btree ("excluded_at");

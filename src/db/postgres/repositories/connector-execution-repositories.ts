@@ -17,7 +17,7 @@ import {
   type NotificationPushRuleValues,
   type ResolvedNotificationPushPolicy,
 } from '@/lib/notifications/push-policy/policy';
-import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from '@/lib/notifications/push-policy/rules';
+import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from '@/lib/notifications/push-policy/constants';
 import { redactPushText } from '@/lib/notifications/push-text';
 import {
   legacyStateFromLifecycle,

@@ -1,0 +1,1 @@
+export const MAX_NOTIFICATION_PUSHES_PER_HOUR = 1_000;

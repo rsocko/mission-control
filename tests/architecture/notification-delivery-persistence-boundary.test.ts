@@ -25,9 +25,18 @@ describe('notification delivery persistence boundary', () => {
     const source = read(
       'src/db/postgres/repositories/notification-delivery-repository.ts',
     );
+    const execution = read(
+      'src/db/postgres/repositories/connector-execution-repositories.ts',
+    );
     expect(source).not.toMatch(/from\s+['"]better-sqlite3['"]/);
     expect(source).not.toMatch(/from\s+['"][^'"]*sqlite[^'"]*['"]/);
     expect(source).not.toMatch(/from\s+['"]@\/db(?:['"]|\/index['"])/);
+    expect(execution).toContain(
+      "from '@/lib/notifications/push-policy/constants'",
+    );
+    expect(execution).not.toContain(
+      "from '@/lib/notifications/push-policy/rules'",
+    );
   });
 
   it('loads the SQLite adapter lazily and registers both backends atomically', () => {

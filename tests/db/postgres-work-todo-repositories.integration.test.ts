@@ -487,7 +487,7 @@ if (connectionString) {
       const outcomes = await Promise.allSettled([
         harness.repositories.ingest({
           payload: delta({
-            syncTimestamp: '2026-08-07T20:00:00.000Z',
+            syncTimestamp: '2026-08-07T20:00:00.0009Z',
             title: 'Newest title',
             token: 'newest',
           }),
@@ -496,7 +496,7 @@ if (connectionString) {
         }),
         harness.repositories.ingest({
           payload: delta({
-            syncTimestamp: '2026-08-07T19:00:00.000Z',
+            syncTimestamp: '2026-08-07T20:00:00.0001Z',
             title: 'Older title',
             token: 'older',
           }),
@@ -524,14 +524,14 @@ if (connectionString) {
       expect(tasks).toHaveLength(1);
       expect(tasks[0].title).toBe('Newest title');
       expect(state).toMatchObject({
-        lastIngestAt: '2026-08-07T20:00:00.000Z',
+        lastIngestAt: '2026-08-07T20:00:00.0009Z',
         listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=newest',
       });
 
       // A later replay of the older envelope is always rejected.
       await expect(harness.repositories.ingest({
         payload: delta({
-          syncTimestamp: '2026-08-07T19:00:00.000Z',
+          syncTimestamp: '2026-08-07T20:00:00.0001Z',
           title: 'Older title',
           token: 'older',
         }),
@@ -539,7 +539,7 @@ if (connectionString) {
         timezone: 'UTC',
       })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
       expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
-        lastIngestAt: '2026-08-07T20:00:00.000Z',
+        lastIngestAt: '2026-08-07T20:00:00.0009Z',
         listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=newest',
       });
     });

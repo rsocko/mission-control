@@ -1,4 +1,8 @@
 import type { WorkTodoAck, WorkTodoIngest } from '@/lib/connectors/work-todo/contracts';
+import {
+  parseWorkTodoRfc3339Instant,
+  parseWorkTodoSyncTimestamp,
+} from '@/lib/connectors/work-todo/rfc3339';
 
 /**
  * Layer 4 port for Microsoft To Do - Work ("Work To Do") connector-owned state.
@@ -46,6 +50,33 @@ export class WorkTodoBridgeError extends Error {
  */
 export const WORK_TODO_STALE_INGEST_CODE = 'STALE_INGEST_ENVELOPE';
 export const WORK_TODO_STALE_INGEST_STATUS = 409;
+
+function compareWorkTodoFractions(left: string, right: string): number {
+  const width = Math.max(left.length, right.length);
+  const normalizedLeft = left.padEnd(width, '0');
+  const normalizedRight = right.padEnd(width, '0');
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft > normalizedRight ? 1 : -1;
+}
+
+/**
+ * Checkpoint monotonicity guard using the full RFC3339 fractional precision.
+ * Equal instants remain replayable even when represented with another offset.
+ */
+export function isWorkTodoCheckpointAdvance(
+  storedLastIngestAt: string | null,
+  incomingSyncTimestamp: string,
+): boolean {
+  const incoming = parseWorkTodoSyncTimestamp(incomingSyncTimestamp);
+  if (!incoming) return false;
+  if (!storedLastIngestAt) return true;
+  const stored = parseWorkTodoRfc3339Instant(storedLastIngestAt);
+  if (!stored) return false;
+  if (incoming.epochSecond !== stored.epochSecond) {
+    return incoming.epochSecond > stored.epochSecond;
+  }
+  return compareWorkTodoFractions(incoming.fraction, stored.fraction) >= 0;
+}
 
 /** Builds the identical stale-envelope rejection on either backend. */
 export function staleWorkTodoIngestError(

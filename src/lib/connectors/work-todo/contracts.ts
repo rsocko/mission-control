@@ -1,4 +1,19 @@
 import { z } from 'zod';
+import {
+  WORK_TODO_RFC3339_PATTERN,
+  WORK_TODO_SYNC_TIMESTAMP_MAX_LENGTH,
+  parseWorkTodoSyncTimestamp,
+} from './rfc3339';
+
+export const workTodoSyncTimestampSchema = z.string()
+  .max(WORK_TODO_SYNC_TIMESTAMP_MAX_LENGTH)
+  .refine(
+  (value) => parseWorkTodoSyncTimestamp(value) !== null,
+  'Invalid RFC3339 timestamp',
+).meta({
+  format: 'date-time',
+  pattern: WORK_TODO_RFC3339_PATTERN.source,
+});
 
 const dateTimeValueSchema = z.object({
   dateTime: z.string().min(1).max(64),
@@ -27,7 +42,7 @@ const baseTaskSchema = z.object({
 export const standardPullResponseSchema = z.object({
   schemaVersion: z.literal('1.0'),
   connectorInstanceId: z.string().min(1).max(100),
-  syncTimestamp: z.string().datetime({ offset: true }),
+  syncTimestamp: workTodoSyncTimestampSchema,
   isFullSnapshot: z.literal(true),
   lists: z.array(z.object({
     id: z.string().min(1).max(500),
@@ -73,7 +88,7 @@ const removedTaskSchema = z.object({
 export const extendedPullResponseSchema = z.object({
   schemaVersion: z.literal('1.1'),
   connectorInstanceId: z.string().min(1).max(100),
-  syncTimestamp: z.string().datetime({ offset: true }),
+  syncTimestamp: workTodoSyncTimestampSchema,
   syncMode: z.literal('delta'),
   reset: z.boolean(),
   complete: z.literal(true),

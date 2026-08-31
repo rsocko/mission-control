@@ -1,6 +1,7 @@
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
 import type { CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import { registerTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 let selectedWorkerPersistenceRepositories: WorkerPersistenceRepositories | null = null;
 let sqliteWorkerPersistencePromise: Promise<WorkerPersistenceRepositories> | null = null;
@@ -16,6 +17,7 @@ export function registerWorkerPersistenceRepositories(
   ) {
     throw new Error('Worker persistence repositories are already selected');
   }
+  registerTriagePersistenceRepositories(repositories.triage);
   selectedWorkerPersistenceRepositories = repositories;
   workerPersistenceRegistered = true;
 }
@@ -36,6 +38,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteWorkTodoRepositories },
     { createSqliteNotificationDeliveryRepository },
     { createSqliteTaskReminderRepository },
+    { createSqliteTriagePersistenceRepositories },
     { createSqliteFinanceWorkerPersistence },
     { createSqliteFinanceInsightPersistence },
     {
@@ -59,6 +62,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-work-todo-repositories'),
     import('@/db/persistence/sqlite-notification-delivery-repository'),
     import('@/db/persistence/sqlite-task-reminder-repository'),
+    import('@/db/persistence/sqlite-triage-repositories'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
     import('@/db/persistence/sqlite-finance-insights-repositories'),
     import('@/db/persistence/sqlite-finance-attention-repositories'),
@@ -140,6 +144,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     },
     notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite),
     reminders: createSqliteTaskReminderRepository(sqlite),
+    triage: createSqliteTriagePersistenceRepositories(sqlite),
     finance,
   };
 }
@@ -158,6 +163,7 @@ export async function getWorkerPersistenceRepositories(): Promise<
   }
   sqliteWorkerPersistencePromise ??= createSqliteWorkerPersistenceRepositories()
     .then((repositories) => {
+      registerTriagePersistenceRepositories(repositories.triage);
       selectedWorkerPersistenceRepositories = repositories;
       return repositories;
     });

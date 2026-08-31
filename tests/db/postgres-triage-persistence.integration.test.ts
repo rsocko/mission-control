@@ -26,11 +26,6 @@ describePostgres('PostgreSQL triage persistence integration', () => {
     });
     await backend.initialize();
 
-    // Layer 7 migration metadata is intentionally deferred until the stack rebase.
-    await backend.context.pool.query(`
-      ALTER TABLE triage_sync_state
-      ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 0
-    `);
     const connectorIds = new Set<string>();
 
     return {

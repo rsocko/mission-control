@@ -2450,7 +2450,8 @@ CREATE TABLE "triage_sync_state" (
 	"last_run_imported" integer DEFAULT 0 NOT NULL,
 	"last_run_skipped" integer DEFAULT 0 NOT NULL,
 	"last_run_errors" jsonb DEFAULT '[]'::jsonb NOT NULL,
-	"last_run_duration_ms" integer
+	"last_run_duration_ms" integer,
+	"revision" integer DEFAULT 0 NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "weekly_one_thing" (

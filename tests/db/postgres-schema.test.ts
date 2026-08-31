@@ -223,6 +223,9 @@ describe('PostgreSQL schema', () => {
     expect(sql).toContain('"id" serial PRIMARY KEY NOT NULL');
     expect(sql).toContain('"metadata" jsonb');
     expect(sql).toContain('"is_checklist_item" boolean');
+    expect(sql).toMatch(
+      /CREATE TABLE "triage_sync_state" \([\s\S]*"revision" integer DEFAULT 0 NOT NULL/,
+    );
     expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
     expect(sql).toContain('USING gin ("search_vector")');
     expect(sql).not.toContain('AUTOINCREMENT');

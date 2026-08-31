@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
           set: vi.fn(async () => undefined),
           delete: vi.fn(async () => false),
         },
+        houstonMemories: {} as CorePersistenceRepositories['houstonMemories'],
       };
       repositories.push(repository);
       return repository;
@@ -78,6 +79,11 @@ const mocks = vi.hoisted(() => {
         reminders: {
           cancelInvalidated: vi.fn(async () => 0),
         } as unknown as WorkerPersistenceRepositories['reminders'],
+        triage: {
+          syncState: {
+            getAll: vi.fn(async () => []),
+          },
+        } as unknown as WorkerPersistenceRepositories['triage'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);
@@ -146,12 +152,14 @@ describe('PostgreSQL runtime core repository registration', () => {
       now: new Date(),
       limit: 1,
     });
+    await registeredWorkerComposition.triage.syncState.getAll();
     expect(mocks.repositories[0].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].reminders.cancelInvalidated).toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[0].triage.syncState.getAll).toHaveBeenCalledOnce();
 
     await shutdownRuntimeDatabase();
     await initializeRuntimeDatabase();
@@ -166,11 +174,13 @@ describe('PostgreSQL runtime core repository registration', () => {
       now: new Date(),
       limit: 1,
     });
+    await registeredWorkerComposition.triage.syncState.getAll();
     expect(mocks.repositories[1].tasks.get).toHaveBeenCalledWith('task-1');
     expect(mocks.workerRepositories[1].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].notificationDelivery.getNextWakeAt)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].reminders.cancelInvalidated).toHaveBeenCalledOnce();
+    expect(mocks.workerRepositories[1].triage.syncState.getAll).toHaveBeenCalledOnce();
   });
 });

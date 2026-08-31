@@ -9,6 +9,7 @@ import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
 import {
+  getWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
 import { PostgresPersistenceBackend } from './postgres/runtime';
@@ -139,6 +140,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  triage: new Proxy({} as WorkerPersistenceRepositories['triage'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().triage[
+        property as keyof WorkerPersistenceRepositories['triage']
+      ]
+    ),
+  }),
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[
@@ -174,6 +182,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
     ]);
     initializeDatabase();
     registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
+    await getWorkerPersistenceRepositories();
     return;
   }
   await postgresBackend.initialize();

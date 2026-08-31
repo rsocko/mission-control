@@ -38,6 +38,29 @@ export class WorkTodoBridgeError extends Error {
   }
 }
 
+/**
+ * Stable code for an ingest envelope that is strictly older than the accepted
+ * checkpoint. Both adapters raise it before any mutation, so a delayed Power
+ * Automate delivery can never resurrect superseded tasks, lists, tags, or
+ * checklist items, nor re-apply a removal the newer envelope already settled.
+ */
+export const WORK_TODO_STALE_INGEST_CODE = 'STALE_INGEST_ENVELOPE';
+export const WORK_TODO_STALE_INGEST_STATUS = 409;
+
+/** Builds the identical stale-envelope rejection on either backend. */
+export function staleWorkTodoIngestError(
+  acceptedIngestAt: string | null,
+  envelopeSyncTimestamp: string,
+): WorkTodoBridgeError {
+  return new WorkTodoBridgeError(
+    WORK_TODO_STALE_INGEST_CODE,
+    `Ingest envelope ${envelopeSyncTimestamp} is older than the accepted checkpoint ${
+      acceptedIngestAt ?? 'none'
+    }`,
+    WORK_TODO_STALE_INGEST_STATUS,
+  );
+}
+
 export interface WorkTodoIngestCommand {
   /** Already-validated Power Automate envelope. */
   payload: WorkTodoIngest;

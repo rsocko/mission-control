@@ -12,6 +12,7 @@ import {
   archiveAndDeleteTask as archiveAndDeleteTaskSqlite,
   restoreDeletionSnapshot as restoreDeletionSnapshotSqlite,
 } from './sqlite-deletion-recovery';
+import { deleteTaskTreeWithCanonicalCleanup } from './sqlite-task-deletion';
 import type {
   ConnectorExecutionRepositories,
   ConnectorNotificationCommand,
@@ -302,38 +303,7 @@ function convertTaskTreeToLocal(
 
 function deleteTaskTree(database: SqliteDatabase, taskId: string): void {
     immediate(database, () => {
-      const remove = (id: string): void => {
-        const children = database.prepare('SELECT id FROM tasks WHERE parent_id = ?')
-          .all(id) as Array<{ id: string }>;
-        for (const child of children) remove(child.id);
-        for (const table of [
-          'task_tags',
-          'project_auto_include_exclusions',
-          'task_projects',
-          'task_schedules',
-          'my_day_items',
-          'my_day_exclusions',
-          'focus_items',
-          'weekly_one_thing',
-          'priority_sync_log',
-          'task_triage_log',
-          'quick_sort_operations',
-          'task_linked_sources',
-          'task_attachments',
-          'project_phase_items',
-        ]) {
-          database.prepare(`DELETE FROM ${table} WHERE task_id = ?`).run(id);
-        }
-        database.prepare(`
-          DELETE FROM task_dependencies
-          WHERE task_id = ? OR depends_on_task_id = ?
-        `).run(id, id);
-        database.prepare(`
-          UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ?
-        `).run(id);
-        database.prepare('DELETE FROM tasks WHERE id = ?').run(id);
-      };
-      remove(taskId);
+      deleteTaskTreeWithCanonicalCleanup(database, taskId, new Set());
     });
 }
 

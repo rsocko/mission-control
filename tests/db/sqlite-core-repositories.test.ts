@@ -67,6 +67,7 @@ function createHarness() {
       project_id TEXT NOT NULL
     );
     CREATE TABLE task_schedules (task_id TEXT NOT NULL);
+    CREATE TABLE task_field_states (task_id TEXT NOT NULL);
     CREATE TABLE my_day_items (task_id TEXT NOT NULL);
     CREATE TABLE my_day_exclusions (task_id TEXT NOT NULL);
     CREATE TABLE focus_items (task_id TEXT NOT NULL);
@@ -76,6 +77,7 @@ function createHarness() {
     CREATE TABLE quick_sort_operations (task_id TEXT NOT NULL);
     CREATE TABLE task_linked_sources (task_id TEXT NOT NULL);
     CREATE TABLE task_attachments (task_id TEXT NOT NULL);
+    CREATE TABLE sync_deletion_candidates (task_id TEXT NOT NULL);
     CREATE TABLE task_dependencies (
       task_id TEXT NOT NULL,
       depends_on_task_id TEXT NOT NULL
@@ -273,6 +275,7 @@ describe('SQLite core repository compatibility behavior', () => {
       });
       const dependentTables = [
         'task_schedules',
+        'task_field_states',
         'my_day_items',
         'my_day_exclusions',
         'focus_items',
@@ -282,6 +285,7 @@ describe('SQLite core repository compatibility behavior', () => {
         'quick_sort_operations',
         'task_linked_sources',
         'task_attachments',
+        'sync_deletion_candidates',
       ];
       for (const table of dependentTables) {
         harness.sqlite.prepare(`INSERT INTO ${table} (task_id) VALUES (?)`)

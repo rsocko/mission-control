@@ -4,6 +4,9 @@ import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
 import { createPostgresWorkTodoRepositories } from '@/db/postgres/repositories';
 import {
   describeWorkTodoRepositoriesContract,
+  isJsonSeedValue,
+  taskAssociationSeedRows,
+  CANONICAL_TASK_ASSOCIATION_TABLES,
   type WorkTodoHarness,
 } from '../contracts/work-todo-repositories.contract';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
@@ -39,12 +42,15 @@ async function cleanupContractRows(): Promise<void> {
   await pool.query('DELETE FROM work_todo_outbound_changes WHERE connector_id = $1', [CONNECTOR]);
   await pool.query('DELETE FROM work_todo_list_delta_state WHERE connector_id = $1', [CONNECTOR]);
   await pool.query('DELETE FROM work_todo_bridge_state WHERE connector_id = $1', [CONNECTOR]);
-  await pool.query(
-    `DELETE FROM task_tags WHERE task_id IN (
-       SELECT id FROM tasks WHERE connector_instance_id = $1
-     )`,
-    [CONNECTOR],
-  );
+  for (const table of CANONICAL_TASK_ASSOCIATION_TABLES) {
+    await pool.query(
+      `DELETE FROM ${table} WHERE task_id IN (
+         SELECT id FROM tasks WHERE connector_instance_id = $1
+       )`,
+      [CONNECTOR],
+    );
+  }
+  await pool.query('DELETE FROM notifications WHERE connector_instance_id = $1', [CONNECTOR]);
   await pool.query('DELETE FROM tasks WHERE connector_instance_id = $1', [CONNECTOR]);
   await pool.query(`DELETE FROM tags WHERE id LIKE $1`, [`${CONNECTOR}:tag:%`]);
   await pool.query('DELETE FROM source_lists WHERE connector_instance_id = $1', [CONNECTOR]);
@@ -54,6 +60,7 @@ async function cleanupContractRows(): Promise<void> {
 function createHarness(): WorkTodoHarness {
   const pool = backend.context.pool;
   const repositories = createPostgresWorkTodoRepositories(pool);
+  let seedVariant = 0;
 
   async function setConnector(input: {
     id: string;
@@ -222,6 +229,53 @@ function createHarness(): WorkTodoHarness {
        WHERE task_tags.task_id = $1 ORDER BY tags.slug`,
       [taskId],
     )).rows.map((row) => row.slug),
+    seedTaskAssociations: async (taskId) => {
+      const variant = seedVariant++;
+      for (const row of taskAssociationSeedRows(taskId, variant)) {
+        const columns = Object.keys(row.values);
+        const values: unknown[] = [];
+        const placeholders = columns.map((column) => {
+          const value = row.values[column];
+          if (isJsonSeedValue(value)) {
+            values.push(JSON.stringify(value.__json));
+            return `$${values.length}::jsonb`;
+          }
+          values.push(value);
+          return `$${values.length}`;
+        });
+        await pool.query(
+          `INSERT INTO ${row.table} (${columns.map((column) => `"${column}"`).join(', ')})
+           VALUES (${placeholders.join(', ')})`,
+          values,
+        );
+      }
+    },
+    residualTaskAssociations: async (taskId) => {
+      const residual: string[] = [];
+      for (const table of CANONICAL_TASK_ASSOCIATION_TABLES) {
+        const clause = table === 'task_dependencies'
+          ? 'task_id = $1 OR depends_on_task_id = $1'
+          : 'task_id = $1';
+        const { rows } = await pool.query<{ total: string }>(
+          `SELECT COUNT(*) AS total FROM ${table} WHERE ${clause}`,
+          [taskId],
+        );
+        if (Number(rows[0]?.total ?? 0) > 0) residual.push(table);
+      }
+      const { rows: notificationRows } = await pool.query<{ total: string }>(
+        'SELECT COUNT(*) AS total FROM notifications WHERE related_task_id = $1',
+        [taskId],
+      );
+      if (Number(notificationRows[0]?.total ?? 0) > 0) residual.push('notifications');
+      return residual;
+    },
+    getNotification: async (id) => (await pool.query<{
+      id: string;
+      relatedTaskId: string | null;
+    }>(
+      'SELECT id, related_task_id AS "relatedTaskId" FROM notifications WHERE id = $1',
+      [id],
+    )).rows[0] ?? null,
     close: () => undefined,
   };
 }
@@ -386,6 +440,108 @@ if (connectionString) {
       ]);
 
       expect(await harness.listTasks(CONNECTOR)).toHaveLength(1);
+    });
+
+    it('serializes a concurrent newer and older ingest without regressing', async () => {
+      await initialize();
+      const harness = createHarness();
+      await harness.reset();
+      await harness.seedBridgeState({
+        connectorId: CONNECTOR,
+        transport: 'power-automate-graph',
+        capabilityProfile: 'extended-v1',
+      });
+
+      function delta(input: { syncTimestamp: string; title: string; token: string }) {
+        return {
+          schemaVersion: '1.1' as const,
+          connectorInstanceId: CONNECTOR,
+          syncTimestamp: input.syncTimestamp,
+          syncMode: 'delta' as const,
+          reset: false,
+          complete: true as const,
+          listDeltaLink: `https://graph.example/lists/delta?$deltatoken=${input.token}`,
+          lists: [{
+            id: 'list-1',
+            removed: false as const,
+            displayName: 'Tasks',
+            taskDeltaLink: `https://graph.example/tasks/delta?$deltatoken=${input.token}`,
+            tasks: [{
+              id: 'task-1',
+              removed: false as const,
+              title: input.title,
+              status: 'notStarted' as const,
+              importance: 'normal' as const,
+              body: { content: 'body', contentType: 'text' as const },
+              createdDateTime: '2026-08-07T17:00:00.000Z',
+              lastModifiedDateTime: '2026-08-07T18:55:00.000Z',
+              completedDateTime: null,
+              dueDateTime: null,
+              isReminderOn: false,
+              reminderDateTime: null,
+            }],
+          }],
+        };
+      }
+
+      const outcomes = await Promise.allSettled([
+        harness.repositories.ingest({
+          payload: delta({
+            syncTimestamp: '2026-08-07T20:00:00.000Z',
+            title: 'Newest title',
+            token: 'newest',
+          }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: 'UTC',
+        }),
+        harness.repositories.ingest({
+          payload: delta({
+            syncTimestamp: '2026-08-07T19:00:00.000Z',
+            title: 'Older title',
+            token: 'older',
+          }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: 'UTC',
+        }),
+      ]);
+
+      // Whichever envelope commits second may legitimately be the older one; the
+      // `FOR UPDATE` fence then rejects it before it mutates anything.
+      const rejected = outcomes.filter((outcome) => outcome.status === 'rejected');
+      expect(rejected.length).toBeLessThanOrEqual(1);
+      for (const outcome of rejected) {
+        expect(outcome.reason).toMatchObject({
+          code: 'STALE_INGEST_ENVELOPE',
+          status: 409,
+        });
+      }
+
+      const state = await harness.getBridgeState(CONNECTOR);
+      const tasks = await harness.listTasks(CONNECTOR);
+      // Either order of commit ends on the newer envelope: if the newer one
+      // commits first the older is rejected outright, and if the older commits
+      // first the newer one still supersedes it.
+      expect(tasks).toHaveLength(1);
+      expect(tasks[0].title).toBe('Newest title');
+      expect(state).toMatchObject({
+        lastIngestAt: '2026-08-07T20:00:00.000Z',
+        listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=newest',
+      });
+
+      // A later replay of the older envelope is always rejected.
+      await expect(harness.repositories.ingest({
+        payload: delta({
+          syncTimestamp: '2026-08-07T19:00:00.000Z',
+          title: 'Older title',
+          token: 'older',
+        }),
+        now: '2026-08-07T20:10:00.000Z',
+        timezone: 'UTC',
+      })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+      expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
+        lastIngestAt: '2026-08-07T20:00:00.000Z',
+        listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=newest',
+      });
     });
   });
 } else {

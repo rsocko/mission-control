@@ -4,9 +4,11 @@ import { dirname, join } from 'node:path';
 import { afterAll, vi } from 'vitest';
 import {
   describeWorkTodoRepositoriesContract,
+  isJsonSeedValue,
+  taskAssociationSeedRows,
+  CANONICAL_TASK_ASSOCIATION_TABLES,
   type WorkTodoHarness,
 } from '../contracts/work-todo-repositories.contract';
-
 vi.unmock('drizzle-orm');
 
 const previousPath = process.env.MC_DB_PATH;
@@ -50,6 +52,7 @@ function parseJson(value: unknown): Record<string, unknown> {
 describeWorkTodoRepositoriesContract('SQLite', async (): Promise<WorkTodoHarness> => {
   const context = await contextPromise;
   const sqlite = context.database.sqlite;
+  let seedVariant = 0;
 
   function setConnector(input: {
     id: string;
@@ -84,7 +87,8 @@ describeWorkTodoRepositoriesContract('SQLite', async (): Promise<WorkTodoHarness
         DELETE FROM work_todo_outbound_changes;
         DELETE FROM work_todo_list_delta_state;
         DELETE FROM work_todo_bridge_state;
-        DELETE FROM task_tags;
+        ${CANONICAL_TASK_ASSOCIATION_TABLES.map((table) => `DELETE FROM ${table};`).join('\n        ')}
+        DELETE FROM notifications;
         DELETE FROM tags;
         DELETE FROM tasks;
         DELETE FROM source_lists;
@@ -234,6 +238,48 @@ describeWorkTodoRepositoriesContract('SQLite', async (): Promise<WorkTodoHarness
       INNER JOIN tags ON tags.id = task_tags.tag_id
       WHERE task_tags.task_id = ? ORDER BY tags.slug
     `).all(taskId) as Array<{ slug: string }>).map((row) => row.slug),
+    seedTaskAssociations: async (taskId) => {
+      const variant = seedVariant++;
+      for (const row of taskAssociationSeedRows(taskId, variant)) {
+        const columns = Object.keys(row.values);
+        const values = columns.map((column) => {
+          const value = row.values[column];
+          if (isJsonSeedValue(value)) return JSON.stringify(value.__json);
+          if (typeof value === 'boolean') return value ? 1 : 0;
+          return value;
+        });
+        sqlite.prepare(`
+          INSERT INTO ${row.table} (${columns.map((column) => `"${column}"`).join(', ')})
+          VALUES (${columns.map(() => '?').join(', ')})
+        `).run(...values);
+      }
+    },
+    residualTaskAssociations: async (taskId) => {
+      const residual = CANONICAL_TASK_ASSOCIATION_TABLES.filter((table) => {
+        const clause = table === 'task_dependencies'
+          ? 'task_id = ? OR depends_on_task_id = ?'
+          : 'task_id = ?';
+        const parameters = table === 'task_dependencies' ? [taskId, taskId] : [taskId];
+        const row = sqlite.prepare(
+          `SELECT COUNT(*) AS total FROM ${table} WHERE ${clause}`,
+        ).get(...parameters) as { total: number };
+        return Number(row.total) > 0;
+      });
+      const notifications = sqlite.prepare(
+        'SELECT COUNT(*) AS total FROM notifications WHERE related_task_id = ?',
+      ).get(taskId) as { total: number };
+      return Number(notifications.total) > 0
+        ? [...residual, 'notifications']
+        : [...residual];
+    },
+    getNotification: async (id) => {
+      const row = sqlite.prepare(
+        'SELECT id, related_task_id AS relatedTaskId FROM notifications WHERE id = ?',
+      ).get(id) as { id: string; relatedTaskId: string | null } | undefined;
+      return row
+        ? { id: row.id, relatedTaskId: row.relatedTaskId ?? null }
+        : null;
+    },
     close: () => {},
   };
 });

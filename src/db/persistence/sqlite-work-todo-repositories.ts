@@ -5,17 +5,8 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
 import {
   connectorConfigs,
-  focusItems,
-  myDayItems,
-  projectAutoIncludeExclusions,
-  projectPhaseItems,
   sourceLists,
   tags,
-  taskAttachments,
-  taskDependencies,
-  taskFieldStates,
-  taskProjects,
-  taskSchedules,
   taskTags,
   tasks,
   workTodoBridgeState,
@@ -28,6 +19,7 @@ import {
   WORK_TODO_MAX_LEASE_SECONDS,
   WORK_TODO_MIN_LEASE_SECONDS,
   WorkTodoBridgeError,
+  staleWorkTodoIngestError,
   type WorkTodoAckCommand,
   type WorkTodoAckResult,
   type WorkTodoBridgePersistence,
@@ -41,6 +33,7 @@ import {
   type WorkTodoResetResult,
   type WorkTodoSearchableTask,
 } from './work-todo';
+import { deleteTaskTreeWithCanonicalCleanup } from './sqlite-task-deletion';
 import {
   WORK_TODO_CONNECTOR_TYPE,
   buildWorkTodoChecklistMetadata,
@@ -79,13 +72,14 @@ function clampLeaseSeconds(leaseSeconds: number | undefined): number {
 /**
  * SQLite adapter for the Work To Do bridge port.
  *
- * Every command owns one immediate (or deferred, for reads) transaction. Search
- * indexing, connector traffic, and logging stay with the application service:
- * this adapter only returns the bounded committed task IDs that still need
- * post-commit index maintenance.
+ * Every command owns one immediate (or deferred, for reads) transaction, and a
+ * delayed envelope is rejected as `STALE_INGEST_ENVELOPE` before it mutates
+ * anything. Search indexing, connector traffic, and logging stay with the
+ * application service: this adapter only returns the bounded committed task IDs
+ * that still need post-commit index maintenance.
  */
 export function createSqliteWorkTodoRepositories(
-  _sqlite: SqliteDatabase,
+  sqliteHandle: SqliteDatabase,
   db: SqliteDrizzle,
 ): WorkTodoBridgePersistence {
   function assertConnector(tx: SqliteTransaction, connectorId: string) {
@@ -104,40 +98,18 @@ export function createSqliteWorkTodoRepositories(
     return connector;
   }
 
-  function removeTask(
-    tx: SqliteTransaction,
-    taskId: string,
-    removedIds: Set<string>,
-    visited: Set<string> = new Set(),
-  ): void {
-    // Cycle-guarded: a corrupt parent cycle must not recurse forever.
-    if (visited.has(taskId)) return;
-    visited.add(taskId);
-    const children = tx.select({ id: tasks.id }).from(tasks)
-      .where(eq(tasks.parentId, taskId)).all();
-    for (const child of children) {
-      if (child.id === taskId) continue;
-      removeTask(tx, child.id, removedIds, visited);
-    }
-    tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
-    tx.delete(projectAutoIncludeExclusions)
-      .where(eq(projectAutoIncludeExclusions.taskId, taskId))
-      .run();
-    tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId)).run();
-    tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId)).run();
-    tx.delete(taskFieldStates).where(eq(taskFieldStates.taskId, taskId)).run();
-    tx.delete(myDayItems).where(eq(myDayItems.taskId, taskId)).run();
-    tx.delete(focusItems).where(eq(focusItems.taskId, taskId)).run();
-    tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId)).run();
-    tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
-    tx.delete(taskDependencies).where(or(
-      eq(taskDependencies.taskId, taskId),
-      eq(taskDependencies.dependsOnTaskId, taskId),
-    )).run();
-    tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+  /**
+   * Deletes a task and its descendants using the canonical cleanup shared with
+   * the core task repository and connector execution, so a Work To Do removal
+   * cannot leave planning, audit, provenance, or notification references
+   * behind. It must only be called from inside one of this adapter's write
+   * transactions: better-sqlite3 runs every statement on the single open
+   * connection, so the raw handle joins the caller's transaction.
+   */
+  function removeTask(taskId: string, removedIds: Set<string>): void {
     // Collected rather than published inline: search index removal must happen
     // after the authoritative transaction commits, never inside it.
-    removedIds.add(taskId);
+    deleteTaskTreeWithCanonicalCleanup(sqliteHandle, taskId, removedIds);
   }
 
   return {
@@ -177,12 +149,21 @@ export function createSqliteWorkTodoRepositories(
             409,
           );
         }
-        // A delayed or replayed envelope still applies its idempotent task
-        // upserts, but must never regress a strictly newer accepted checkpoint.
-        const advancesCheckpoint = isWorkTodoCheckpointAdvance(
+        // A strictly older envelope is rejected here — after the bridge-state
+        // row is read under the write transaction and before any task, list,
+        // tag, checklist, or removal mutation — so a delayed delivery can
+        // neither resurrect superseded data nor regress the accepted
+        // checkpoint. A replay carrying the accepted instant is still applied
+        // idempotently.
+        if (!isWorkTodoCheckpointAdvance(
           existingState?.lastIngestAt ?? null,
           payload.syncTimestamp,
-        );
+        )) {
+          throw staleWorkTodoIngestError(
+            existingState?.lastIngestAt ?? null,
+            payload.syncTimestamp,
+          );
+        }
 
         for (const list of payload.lists) {
           if ('removed' in list && list.removed) {
@@ -197,7 +178,7 @@ export function createSqliteWorkTodoRepositories(
               if (task.syncStatus === 'pending_push') {
                 protectedPending++;
               } else {
-                removeTask(tx, task.id, removedTaskIds);
+                removeTask(task.id, removedTaskIds);
                 removed++;
               }
             }
@@ -252,7 +233,7 @@ export function createSqliteWorkTodoRepositories(
               if (existing.syncStatus === 'pending_push') {
                 protectedPending++;
               } else {
-                removeTask(tx, existing.id, removedTaskIds);
+                removeTask(existing.id, removedTaskIds);
                 removed++;
               }
               continue;
@@ -379,14 +360,14 @@ export function createSqliteWorkTodoRepositories(
               for (const child of existingChildren) {
                 if (!observedChecklistIds.has(child.sourceId)
                   && child.syncStatus !== 'pending_push') {
-                  removeTask(tx, child.id, removedTaskIds);
+                  removeTask(child.id, removedTaskIds);
                   removed++;
                 }
               }
             }
           }
 
-          if (payload.schemaVersion === '1.1' && 'taskDeltaLink' in list && advancesCheckpoint) {
+          if (payload.schemaVersion === '1.1' && 'taskDeltaLink' in list) {
             tx.insert(workTodoListDeltaState).values({
               connectorId: payload.connectorInstanceId,
               listSourceId: list.id,
@@ -414,7 +395,7 @@ export function createSqliteWorkTodoRepositories(
               if (task.syncStatus === 'pending_push') {
                 protectedPending++;
               } else {
-                removeTask(tx, task.id, removedTaskIds);
+                removeTask(task.id, removedTaskIds);
                 removed++;
               }
             }
@@ -446,16 +427,14 @@ export function createSqliteWorkTodoRepositories(
           updatedAt: now,
         }).onConflictDoUpdate({
           target: workTodoBridgeState.connectorId,
-          set: advancesCheckpoint
-            ? {
-                listDeltaLink: isStandard ? null : payload.listDeltaLink,
-                resetRequired: false,
-                lastIngestAt: payload.syncTimestamp,
-                lastIngestMode: isStandard ? 'snapshot' : 'delta',
-                lastError: null,
-                updatedAt: now,
-              }
-            : { lastError: null, updatedAt: now },
+          set: {
+            listDeltaLink: isStandard ? null : payload.listDeltaLink,
+            resetRequired: false,
+            lastIngestAt: payload.syncTimestamp,
+            lastIngestMode: isStandard ? 'snapshot' : 'delta',
+            lastError: null,
+            updatedAt: now,
+          },
         }).run();
 
         // Read the committed searchable projection inside the same transaction
@@ -739,7 +718,7 @@ export function createSqliteWorkTodoRepositories(
             }).from(tasks).where(eq(tasks.id, change.taskId)).get();
             if (currentTask?.updatedAt === change.taskVersion) {
               if (change.operation === 'delete') {
-                removeTask(tx, change.taskId, removedTaskIds);
+                removeTask(change.taskId, removedTaskIds);
               } else {
                 const metadata = { ...parseWorkTodoJsonObject(currentTask.metadata) };
                 delete metadata.workTodoDirtyFields;

@@ -2,6 +2,259 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type {
   WorkTodoBridgePersistence,
 } from '@/db/persistence/work-todo';
+import {
+  TASK_ASSOCIATION_TABLES,
+  TASK_DEPENDENCY_TABLE,
+  TASK_NOTIFICATION_TABLE,
+} from '@/db/persistence/task-deletion';
+
+/** Marks a seed value that must be written to a JSON/JSONB column. */
+export interface JsonSeedValue {
+  __json: Record<string, unknown>;
+}
+
+export interface TaskAssociationSeedRow {
+  table: string;
+  values: Record<string, string | number | boolean | null | JsonSeedValue>;
+}
+
+export function isJsonSeedValue(value: unknown): value is JsonSeedValue {
+  return typeof value === 'object' && value !== null && '__json' in value;
+}
+
+/**
+ * One row per canonical task association, plus the notification whose
+ * `related_task_id` must be nulled rather than deleted. Both harnesses write
+ * exactly this set, so the SQLite and PostgreSQL deletion regressions cover the
+ * same rows.
+ */
+export function taskAssociationSeedRows(
+  taskId: string,
+  variant = 0,
+): TaskAssociationSeedRow[] {
+  const at = '2026-08-07T12:00:00.000Z';
+  const day = `2026-08-${String(7 + (variant % 20)).padStart(2, '0')}`;
+  return [
+    { table: 'task_tags', values: { task_id: taskId, tag_id: `tag:${taskId}` } },
+    {
+      table: 'project_auto_include_exclusions',
+      values: { project_id: `project:${taskId}`, task_id: taskId, excluded_at: at },
+    },
+    { table: 'task_projects', values: { task_id: taskId, project_id: `project:${taskId}` } },
+    {
+      table: 'task_schedules',
+      values: {
+        task_id: taskId,
+        scheduled_date: '2026-08-07',
+        scheduled_time: null,
+        estimated_duration: null,
+        is_time_blocked: false,
+        recurrence: null,
+        recurrence_mode: 'schedule',
+      },
+    },
+    {
+      table: 'task_field_states',
+      values: {
+        task_id: taskId,
+        field_name: 'title',
+        source_value: 'Remote title',
+        locally_overridden: false,
+        updated_at: at,
+      },
+    },
+    {
+      table: 'my_day_items',
+      values: {
+        id: `my-day:${taskId}`,
+        task_id: taskId,
+        date: day,
+        added_at: at,
+        is_auto_included: false,
+        order: 0,
+      },
+    },
+    {
+      table: 'my_day_exclusions',
+      values: {
+        id: `my-day-exclusion:${taskId}`,
+        task_id: taskId,
+        date: day,
+        removed_at: at,
+      },
+    },
+    {
+      table: 'focus_items',
+      values: {
+        id: `focus:${taskId}`,
+        task_id: taskId,
+        scope: 'today',
+        date: day,
+        slot: (variant % 3) + 1,
+        added_at: at,
+        is_ai_suggested: false,
+      },
+    },
+    {
+      table: 'weekly_one_thing',
+      values: {
+        id: `weekly:${taskId}`,
+        task_id: taskId,
+        week_monday: `2026-08-${String(3 + (variant % 20)).padStart(2, '0')}`,
+        is_manual_override: false,
+        completed_at: null,
+        created_at: at,
+      },
+    },
+    {
+      table: 'priority_sync_log',
+      values: {
+        id: `priority:${taskId}`,
+        task_id: taskId,
+        connector_type: 'microsoft-todo-work',
+        connector_instance_id: CONNECTOR,
+        previous_priority: 'none',
+        new_priority: 'high',
+        direction: 'inbound',
+        write_back_triggered: false,
+        note: null,
+        timestamp: at,
+      },
+    },
+    {
+      table: 'task_triage_log',
+      values: {
+        id: `triage:${taskId}`,
+        task_id: taskId,
+        operation_id: null,
+        mode: 'no_priority',
+        action: 'applied',
+        triaged_at: at,
+        reversed_at: null,
+      },
+    },
+    {
+      table: 'quick_sort_operations',
+      values: {
+        id: `quick-sort:${taskId}`,
+        task_id: taskId,
+        mode: 'no_priority',
+        action: 'applied',
+        label: 'High',
+        context_key: 'context',
+        queue_index: 0,
+        before_snapshot: { __json: {} },
+        after_snapshot: { __json: {} },
+        state: 'applied',
+        ai_accepted: false,
+        created_at: at,
+        undone_at: null,
+      },
+    },
+    {
+      table: 'task_linked_sources',
+      values: {
+        id: `linked:${taskId}`,
+        task_id: taskId,
+        connector_type: 'microsoft-todo-work',
+        connector_instance_id: CONNECTOR,
+        source_id: `linked-source:${taskId}`,
+        title: 'Linked',
+        linked_at: at,
+        match_confidence: null,
+        metadata: { __json: {} },
+      },
+    },
+    {
+      table: 'task_attachments',
+      values: {
+        id: `attachment:${taskId}`,
+        task_id: taskId,
+        name: 'note.txt',
+        content_type: 'text/plain',
+        size: 4,
+        content_base64: null,
+        source_attachment_id: null,
+        created_at: at,
+      },
+    },
+    {
+      table: 'project_phase_items',
+      values: {
+        id: `phase-item:${taskId}`,
+        phase_id: `phase:${taskId}`,
+        task_id: taskId,
+        sort_order: 0,
+        estimated_effort_hours: null,
+        is_proposed: false,
+        proposal_type: null,
+        created_at: at,
+      },
+    },
+    {
+      table: 'sync_deletion_candidates',
+      values: {
+        id: `deletion-candidate:${taskId}`,
+        connector_id: CONNECTOR,
+        task_id: taskId,
+        source_id: `deletion-source:${taskId}`,
+        first_missing_at: at,
+        last_missing_at: at,
+        missing_count: 1,
+      },
+    },
+    {
+      // Self-referential so the seed needs no second task while still covering
+      // both `task_id` and `depends_on_task_id`.
+      table: TASK_DEPENDENCY_TABLE,
+      values: {
+        id: `dependency:${taskId}`,
+        task_id: taskId,
+        depends_on_task_id: taskId,
+        type: 'blocks',
+        connector_instance_id: null,
+        sync_status: 'local',
+        created_at: at,
+      },
+    },
+    {
+      table: TASK_NOTIFICATION_TABLE,
+      values: {
+        id: notificationIdForTask(taskId),
+        source_id: `notification-source:${taskId}`,
+        connector_type: 'microsoft-todo-work',
+        connector_instance_id: CONNECTOR,
+        title: 'Work To Do notification',
+        level: 'fyi',
+        level_rank: 3,
+        category: 'system',
+        state: 'unread',
+        read_state: 'unread',
+        disposition: 'inbox',
+        source_state: 'active',
+        sync_state: 'synced',
+        is_actionable: false,
+        received_at: at,
+        sort_at: at,
+        reconcile_attempts: 0,
+        metadata: { __json: {} },
+        presentation: { __json: {} },
+        related_task_id: taskId,
+      },
+    },
+  ];
+}
+
+/** Deterministic notification ID the deletion regressions assert survives. */
+export function notificationIdForTask(taskId: string): string {
+  return `notification:${taskId}`;
+}
+
+/** Every table a canonical deletion must leave empty for the task. */
+export const CANONICAL_TASK_ASSOCIATION_TABLES: readonly string[] = [
+  ...TASK_ASSOCIATION_TABLES,
+  TASK_DEPENDENCY_TABLE,
+];
 
 export interface WorkTodoTaskSnapshot {
   id: string;
@@ -86,6 +339,12 @@ export interface WorkTodoHarness {
   getBridgeState(connectorId: string): Promise<WorkTodoBridgeStateSnapshot | null>;
   listSourceListIds(connectorId: string): Promise<string[]>;
   listTaskTagSlugs(taskId: string): Promise<string[]>;
+  /** Writes one row per canonical task association plus a notification. */
+  seedTaskAssociations(taskId: string): Promise<void>;
+  /** Canonical association tables that still hold rows for the task. */
+  residualTaskAssociations(taskId: string): Promise<string[]>;
+  /** Reads the seeded notification so tests can prove it survives, nulled. */
+  getNotification(id: string): Promise<{ id: string; relatedTaskId: string | null } | null>;
   close(): Promise<void> | void;
 }
 
@@ -349,6 +608,24 @@ export function describeWorkTodoRepositoriesContract(
         expect(await harness.listSourceListIds(CONNECTOR)).toEqual([]);
       });
 
+      it('rejects an older snapshot instead of removing the newer tasks', async () => {
+        await ingestSnapshot({ syncTimestamp: '2026-08-07T19:00:00.000Z' });
+        const emptied = snapshotPayload({ syncTimestamp: '2026-08-07T18:00:00.000Z' });
+        emptied.lists = [];
+
+        await expect(repositories.ingest({
+          payload: emptied,
+          now: '2026-08-07T19:30:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+
+        expect(await harness.listTasks(CONNECTOR)).toHaveLength(1);
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual(['list-1']);
+        expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
+          lastIngestAt: '2026-08-07T19:00:00.000Z',
+        });
+      });
+
       it('protects a pending local edit from remote values and from removal', async () => {
         await ingestSnapshot();
         const [task] = await harness.listTasks(CONNECTOR);
@@ -419,18 +696,19 @@ export function describeWorkTodoRepositoriesContract(
         }]);
       });
 
-      it('never lets a delayed delta regress a newer accepted checkpoint', async () => {
+      it('rejects a delayed delta instead of regressing a newer checkpoint', async () => {
         await repositories.ingest({
           payload: deltaPayload({
             syncTimestamp: '2026-08-07T20:00:00.000Z',
             listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=newest',
             taskDeltaLink: 'https://graph.example/tasks/delta?$deltatoken=newest',
+            title: 'Newest title',
           }),
           now: '2026-08-07T20:00:00.000Z',
           timezone: TIMEZONE,
         });
 
-        await repositories.ingest({
+        await expect(repositories.ingest({
           payload: deltaPayload({
             syncTimestamp: '2026-08-07T19:00:00.000Z',
             listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=stale',
@@ -439,7 +717,7 @@ export function describeWorkTodoRepositoriesContract(
           }),
           now: '2026-08-07T20:05:00.000Z',
           timezone: TIMEZONE,
-        });
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
 
         const state = await harness.getBridgeState(CONNECTOR);
         const pull = await repositories.readPullState(CONNECTOR);
@@ -450,8 +728,58 @@ export function describeWorkTodoRepositoriesContract(
         });
         expect(pull.taskDeltaLinks[0].deltaLink)
           .toBe('https://graph.example/tasks/delta?$deltatoken=newest');
-        // The replayed envelope still applied its idempotent task upsert.
-        expect((await harness.listTasks(CONNECTOR))[0].title).toBe('Replayed title');
+        // The rejected envelope applied no task mutation at all.
+        expect((await harness.listTasks(CONNECTOR))[0].title).toBe('Newest title');
+      });
+
+      it('never lets a delayed delta remove a task the newer envelope kept', async () => {
+        await repositories.ingest({
+          payload: deltaPayload({
+            syncTimestamp: '2026-08-07T20:00:00.000Z',
+            title: 'Newest title',
+          }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+        const removal = deltaPayload({ syncTimestamp: '2026-08-07T19:00:00.000Z' });
+        removal.lists[0].tasks = [{
+          id: 'task-1',
+          removed: true,
+        }] as unknown as typeof removal.lists[0]['tasks'];
+
+        await expect(repositories.ingest({
+          payload: removal,
+          now: '2026-08-07T20:05:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+
+        const tasks = await harness.listTasks(CONNECTOR);
+        expect(tasks).toHaveLength(1);
+        expect(tasks[0].title).toBe('Newest title');
+      });
+
+      it('never lets a delayed delta remove a list the newer envelope kept', async () => {
+        await repositories.ingest({
+          payload: deltaPayload({ syncTimestamp: '2026-08-07T20:00:00.000Z' }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+        const removal = deltaPayload({ syncTimestamp: '2026-08-07T19:00:00.000Z' });
+        removal.lists = [{
+          id: 'list-1',
+          removed: true,
+        }] as unknown as typeof removal.lists;
+
+        await expect(repositories.ingest({
+          payload: removal,
+          now: '2026-08-07T20:05:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual(['list-1']);
+        expect(await harness.listTasks(CONNECTOR)).toHaveLength(1);
+        expect((await repositories.readPullState(CONNECTOR)).taskDeltaLinks)
+          .toHaveLength(1);
       });
 
       it('accepts a replay carrying the same accepted instant', async () => {
@@ -518,6 +846,131 @@ export function describeWorkTodoRepositoriesContract(
           code: 'BRIDGE_NOT_CONFIGURED',
           status: 409,
         });
+      });
+    });
+
+    describe('canonical task deletion cleanup', () => {
+      function checklistDelta(overrides: {
+        syncTimestamp: string;
+        removed?: boolean;
+      }) {
+        const payload = deltaPayload({ syncTimestamp: overrides.syncTimestamp });
+        payload.lists[0].tasks[0] = {
+          ...payload.lists[0].tasks[0],
+          ...(overrides.removed ? { removed: true as const } : {}),
+          checklistItems: [{
+            id: 'item-a',
+            displayName: 'Checklist item',
+            isChecked: false,
+          }],
+        } as unknown as typeof payload.lists[0]['tasks'][0];
+        return payload;
+      }
+
+      it('clears every canonical association when a snapshot drops the task', async () => {
+        await ingestSnapshot();
+        const [task] = await harness.listTasks(CONNECTOR);
+        await harness.seedTaskAssociations(task.id);
+        expect((await harness.residualTaskAssociations(task.id)).sort())
+          .toEqual([...CANONICAL_TASK_ASSOCIATION_TABLES, TASK_NOTIFICATION_TABLE].sort());
+
+        const emptied = snapshotPayload({ syncTimestamp: '2026-08-07T19:00:00.000Z' });
+        emptied.lists = [];
+        const result = await repositories.ingest({
+          payload: emptied,
+          now: '2026-08-07T19:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+
+        expect(result.removed).toBe(1);
+        expect(await harness.listTasks(CONNECTOR)).toEqual([]);
+        expect(await harness.residualTaskAssociations(task.id)).toEqual([]);
+        // The notification survives with its task reference nulled, never deleted.
+        expect(await harness.getNotification(notificationIdForTask(task.id))).toEqual({
+          id: notificationIdForTask(task.id),
+          relatedTaskId: null,
+        });
+      });
+
+      it('applies the same cleanup to descendants of a removed task', async () => {
+        await harness.seedBridgeState({
+          connectorId: CONNECTOR,
+          transport: 'power-automate-graph',
+          capabilityProfile: 'extended-v1',
+        });
+        await repositories.ingest({
+          payload: checklistDelta({ syncTimestamp: '2026-08-07T19:00:00.000Z' }),
+          now: '2026-08-07T19:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+        const seeded = await harness.listTasks(CONNECTOR);
+        expect(seeded).toHaveLength(2);
+        const parent = seeded.find((task) => task.parentId === null)!;
+        const child = seeded.find((task) => task.parentId === parent.id)!;
+        await harness.seedTaskAssociations(parent.id);
+        await harness.seedTaskAssociations(child.id);
+
+        const result = await repositories.ingest({
+          payload: checklistDelta({
+            syncTimestamp: '2026-08-07T20:00:00.000Z',
+            removed: true,
+          }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+
+        expect(result.removedTaskIds).toEqual(
+          expect.arrayContaining([parent.id, child.id]),
+        );
+        expect(await harness.listTasks(CONNECTOR)).toEqual([]);
+        expect(await harness.residualTaskAssociations(parent.id)).toEqual([]);
+        expect(await harness.residualTaskAssociations(child.id)).toEqual([]);
+        expect(await harness.getNotification(notificationIdForTask(child.id))).toEqual({
+          id: notificationIdForTask(child.id),
+          relatedTaskId: null,
+        });
+      });
+      it('rolls a removal back with the rest of a failed ingest', async () => {
+        await harness.seedBridgeState({
+          connectorId: CONNECTOR,
+          transport: 'power-automate-graph',
+          capabilityProfile: 'extended-v1',
+        });
+        await repositories.ingest({
+          payload: checklistDelta({ syncTimestamp: '2026-08-07T19:00:00.000Z' }),
+          now: '2026-08-07T19:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+        const [parent] = await harness.listTasks(CONNECTOR);
+        await harness.seedTaskAssociations(parent.id);
+
+        const failing = deltaPayload({ syncTimestamp: '2026-08-07T20:00:00.000Z' });
+        failing.lists = [
+          { id: 'list-1', removed: true },
+          {
+            ...failing.lists[0],
+            id: 'list-2',
+            tasks: [{
+              ...failing.lists[0].tasks[0],
+              id: 'task-2',
+              isReminderOn: true,
+              reminderDateTime: { dateTime: 'not-a-datetime+00:00', timeZone: 'UTC' },
+            }],
+          },
+        ] as unknown as typeof failing.lists;
+
+        await expect(repositories.ingest({
+          payload: failing,
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toThrow();
+
+        // The removal and its association cleanup were rolled back with the
+        // rest of the failed envelope.
+        expect(await harness.listTasks(CONNECTOR)).toHaveLength(2);
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual(['list-1']);
+        expect((await harness.residualTaskAssociations(parent.id)).sort())
+          .toEqual([...CANONICAL_TASK_ASSOCIATION_TABLES, TASK_NOTIFICATION_TABLE].sort());
       });
     });
 

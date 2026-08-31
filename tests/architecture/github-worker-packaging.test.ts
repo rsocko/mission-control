@@ -22,6 +22,7 @@ const POSTGRES_GITHUB_ADAPTERS = [
   'src/db/postgres/repositories/github-recovery-repositories.ts',
   'src/db/postgres/repositories/github-recovery-support.ts',
   'src/db/postgres/repositories/connector-execution-repositories.ts',
+  'src/db/postgres/repositories/task-deletion.ts',
   'src/db/postgres/repositories/work-todo-repositories.ts',
   'src/db/postgres/repositories/index.ts',
 ];
@@ -32,6 +33,7 @@ const SQLITE_GITHUB_ADAPTERS = [
   'src/db/persistence/sqlite-github-hierarchy-repositories.ts',
   'src/db/persistence/sqlite-github-project-repositories.ts',
   'src/db/persistence/sqlite-github-recovery-repositories.ts',
+  'src/db/persistence/sqlite-task-deletion.ts',
   'src/db/persistence/sqlite-work-todo-repositories.ts',
 ];
 

@@ -1,27 +1,14 @@
-import { eq, or, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import type { Tag, TaskItem } from '@/types';
 import type { TaskRepository } from '@/db/persistence/core-repositories';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import {
-  focusItems,
-  myDayExclusions,
-  myDayItems,
-  notifications,
-  prioritySyncLog,
-  projectAutoIncludeExclusions,
-  projectPhaseItems,
-  quickSortLog,
-  quickSortOperations,
   tags,
-  taskAttachments,
-  taskDependencies,
-  taskLinkedSources,
   taskProjects,
-  taskSchedules,
   tasks,
   taskTags,
-  weeklyOneThing,
 } from '../schema';
+import { cleanupTaskAssociationsInTransaction } from './task-deletion';
 
 type TaskRow = typeof tasks.$inferSelect;
 
@@ -348,25 +335,7 @@ export class PostgresTaskRepository implements TaskRepository {
   async delete(id: string): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       await detachTaskDescendants(tx, id);
-
-      await tx.delete(taskTags).where(eq(taskTags.taskId, id));
-      await tx.delete(projectAutoIncludeExclusions).where(eq(projectAutoIncludeExclusions.taskId, id));
-      await tx.delete(taskProjects).where(eq(taskProjects.taskId, id));
-      await tx.delete(taskSchedules).where(eq(taskSchedules.taskId, id));
-      await tx.delete(myDayItems).where(eq(myDayItems.taskId, id));
-      await tx.delete(myDayExclusions).where(eq(myDayExclusions.taskId, id));
-      await tx.delete(focusItems).where(eq(focusItems.taskId, id));
-      await tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, id));
-      await tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, id));
-      await tx.delete(quickSortLog).where(eq(quickSortLog.taskId, id));
-      await tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, id));
-      await tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, id));
-      await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, id));
-      await tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, id));
-      await tx.update(notifications).set({ relatedTaskId: null }).where(eq(notifications.relatedTaskId, id));
-      await tx.delete(taskDependencies).where(
-        or(eq(taskDependencies.taskId, id), eq(taskDependencies.dependsOnTaskId, id)),
-      );
+      await cleanupTaskAssociationsInTransaction(tx, id);
 
       const deleted = await tx
         .delete(tasks)

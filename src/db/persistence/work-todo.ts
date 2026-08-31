@@ -47,6 +47,84 @@ export class WorkTodoBridgeError extends Error {
 export const WORK_TODO_STALE_INGEST_CODE = 'STALE_INGEST_ENVELOPE';
 export const WORK_TODO_STALE_INGEST_STATUS = 409;
 
+interface WorkTodoRfc3339Instant {
+  epochSecond: number;
+  fraction: string;
+}
+
+const WORK_TODO_RFC3339_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-]\d{2}:\d{2})$/;
+
+function parseWorkTodoRfc3339Instant(value: string): WorkTodoRfc3339Instant | null {
+  const match = WORK_TODO_RFC3339_PATTERN.exec(value);
+  if (!match) return null;
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = '', zone] =
+    match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  if (hour > 23 || minute > 59 || second > 59) return null;
+
+  const local = new Date(0);
+  local.setUTCFullYear(year, month - 1, day);
+  local.setUTCHours(hour, minute, second, 0);
+  if (
+    local.getUTCFullYear() !== year
+    || local.getUTCMonth() !== month - 1
+    || local.getUTCDate() !== day
+    || local.getUTCHours() !== hour
+    || local.getUTCMinutes() !== minute
+    || local.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+
+  let offsetSeconds = 0;
+  if (zone !== 'Z') {
+    const offsetHour = Number(zone.slice(1, 3));
+    const offsetMinute = Number(zone.slice(4, 6));
+    if (offsetHour > 23 || offsetMinute > 59) return null;
+    offsetSeconds = (offsetHour * 60 + offsetMinute) * 60;
+    if (zone[0] === '-') offsetSeconds *= -1;
+  }
+
+  return {
+    epochSecond: local.getTime() / 1_000 - offsetSeconds,
+    fraction: fraction.replace(/0+$/, ''),
+  };
+}
+
+function compareWorkTodoFractions(left: string, right: string): number {
+  const width = Math.max(left.length, right.length);
+  const normalizedLeft = left.padEnd(width, '0');
+  const normalizedRight = right.padEnd(width, '0');
+  if (normalizedLeft === normalizedRight) return 0;
+  return normalizedLeft > normalizedRight ? 1 : -1;
+}
+
+/**
+ * Checkpoint monotonicity guard using the full RFC3339 fractional precision.
+ * Equal instants remain replayable even when represented with another offset.
+ */
+export function isWorkTodoCheckpointAdvance(
+  storedLastIngestAt: string | null,
+  incomingSyncTimestamp: string,
+): boolean {
+  if (!storedLastIngestAt) return true;
+  const stored = parseWorkTodoRfc3339Instant(storedLastIngestAt);
+  const incoming = parseWorkTodoRfc3339Instant(incomingSyncTimestamp);
+  if (!stored) return true;
+  if (!incoming) return false;
+  if (incoming.epochSecond !== stored.epochSecond) {
+    return incoming.epochSecond > stored.epochSecond;
+  }
+  return compareWorkTodoFractions(incoming.fraction, stored.fraction) >= 0;
+}
+
 /** Builds the identical stale-envelope rejection on either backend. */
 export function staleWorkTodoIngestError(
   acceptedIngestAt: string | null,

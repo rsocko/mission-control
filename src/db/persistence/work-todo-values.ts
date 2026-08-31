@@ -298,23 +298,3 @@ export function parseWorkTodoJsonObject(value: unknown): Record<string, unknown>
     return {};
   }
 }
-
-/**
- * Checkpoint monotonicity guard. A replayed envelope carrying the same accepted
- * instant still refreshes the checkpoint (idempotent replay), but a strictly
- * older, delayed envelope may never regress a newer stored checkpoint. Instants
- * are compared numerically so an offset-bearing ISO-8601 timestamp is not
- * mis-ordered by string comparison; an unparseable stored value is treated as
- * absent so a corrupt row cannot permanently block the bridge.
- */
-export function isWorkTodoCheckpointAdvance(
-  storedLastIngestAt: string | null,
-  incomingSyncTimestamp: string,
-): boolean {
-  if (!storedLastIngestAt) return true;
-  const stored = Date.parse(storedLastIngestAt);
-  const incoming = Date.parse(incomingSyncTimestamp);
-  if (!Number.isFinite(stored)) return true;
-  if (!Number.isFinite(incoming)) return false;
-  return incoming >= stored;
-}

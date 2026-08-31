@@ -352,7 +352,7 @@ async function seedConnector(connectorId: string): Promise<void> {
         identityNamespace: IDENTITY_NAMESPACE,
       }),
       JSON.stringify({
-        bridgeUrl: 'http://synthetic-finance-provider.test',
+        bridgeUrl: 'https://synthetic-finance-provider.test',
         maxRetries: 0,
         householdCurrency: 'USD',
       }),

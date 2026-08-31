@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { triageSyncScheduler } from '@/lib/triage/scheduler';
-import type { TriageAutoSyncConfig, TriageSourceId } from '@/lib/triage/scheduler';
+import type { TriageAutoSyncConfigUpdate, TriageSourceId } from '@/lib/triage/scheduler';
 import logger from '@/lib/logger';
 
 /**
@@ -24,7 +24,7 @@ export async function GET() {
  */
 export async function PUT(request: Request) {
   try {
-    const body = (await request.json()) as Partial<TriageAutoSyncConfig>;
+    const body = (await request.json()) as TriageAutoSyncConfigUpdate;
 
     // Validate interval values
     if (body.sources) {

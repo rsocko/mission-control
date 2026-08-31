@@ -5,9 +5,17 @@
  * playlists) into the triage queue, extracting embedded links from video
  * descriptions along the way.
  */
-import { ingestTriageImport } from '../capture';
-import { fetchWithRateLimit, IMPORT_USER_AGENT, MAX_PAGES } from './base-importer';
-import { upsertSyncState } from '../sync-state';
+import { ingestTriageImports, type TriageImportInput } from '../import-capture';
+import {
+  completeFullSyncResult,
+  createFullSyncResult,
+  fetchWithRateLimit,
+  IMPORT_USER_AGENT,
+  MAX_PAGES,
+  remoteResponseError,
+  safeRemoteError,
+} from './base-importer';
+import { getSyncState, recordSyncRun } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
@@ -91,7 +99,7 @@ export async function getYouTubeAccessToken(input: {
   });
 
   if (!tokenResponse.ok) {
-    throw new Error(`YouTube token exchange failed: ${tokenResponse.status} ${tokenResponse.statusText}`);
+    throw remoteResponseError('YouTube token exchange', tokenResponse);
   }
 
   const token = await tokenResponse.json() as { access_token?: string };
@@ -183,7 +191,7 @@ export async function importYouTubePlaylist(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`YouTube playlist import failed (${input.playlistId}): ${response.status} ${response.statusText}`);
+    throw remoteResponseError('YouTube playlist import', response, input.playlistId);
   }
 
   const payload = await response.json() as YouTubePlaylistItemsResponse;
@@ -196,6 +204,7 @@ export async function importYouTubePlaylist(input: {
     nextCursor: payload.nextPageToken ?? null,
   };
 
+  const imports: TriageImportInput[] = [];
   for (const item of items) {
     const mapped = mapPlaylistItemToImport(item, input.playlistId);
     if (!mapped) {
@@ -204,12 +213,12 @@ export async function importYouTubePlaylist(input: {
       continue;
     }
 
-    const result = await ingestTriageImport(mapped);
-    if (result.status === 'imported') {
-      summary.imported += 1;
-    } else {
-      summary.skipped += 1;
-    }
+    imports.push(mapped);
+  }
+
+  const outcomes = await ingestTriageImports(imports);
+  for (const outcome of outcomes) {
+    summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
   }
 
   return summary;
@@ -225,7 +234,9 @@ export async function importAllYouTubePlaylist(input: {
   incremental?: boolean;
 }): Promise<FullSyncResult> {
   const startTime = Date.now();
-  const result: FullSyncResult = { imported: 0, skipped: 0, errors: [], pagesProcessed: 0, durationMs: 0, lastCursor: null };
+  const sourceId = `youtube-${input.playlistId}`;
+  const state = await getSyncState(sourceId);
+  const result = createFullSyncResult();
 
   let pageToken: string | undefined;
   let pageCount = 0;
@@ -234,12 +245,18 @@ export async function importAllYouTubePlaylist(input: {
   let consecutiveSkips = 0;
 
   while (pageCount < MAX_PAGES) {
-    const summary = await importYouTubePlaylist({
-      accessToken: input.accessToken,
-      playlistId: input.playlistId,
-      maxResults: 50,
-      pageToken,
-    });
+    let summary: TriageImportSummary;
+    try {
+      summary = await importYouTubePlaylist({
+        accessToken: input.accessToken,
+        playlistId: input.playlistId,
+        maxResults: 50,
+        pageToken,
+      });
+    } catch (error) {
+      result.errors.push(safeRemoteError('YouTube playlist import', error));
+      break;
+    }
 
     pageCount += 1;
     result.pagesProcessed += 1;
@@ -259,15 +276,15 @@ export async function importAllYouTubePlaylist(input: {
     result.lastCursor = summary.nextCursor;
   }
 
-  result.durationMs = Date.now() - startTime;
-
-  await upsertSyncState(`youtube-${input.playlistId}`, {
+  completeFullSyncResult(result, startTime);
+  const persisted = await recordSyncRun(sourceId, state?.revision ?? 0, {
     lastCursor: result.lastCursor,
     imported: result.imported,
     skipped: result.skipped,
     errors: result.errors.slice(0, 20),
     durationMs: result.durationMs,
   });
+  if (persisted.status === 'stale') result.outcome = 'stale';
 
   return result;
 }
@@ -285,31 +302,50 @@ export async function importAllYouTubePlaylists(input: {
   incremental?: boolean;
 }): Promise<FullSyncResult> {
   const startTime = Date.now();
-  const accessToken = await getYouTubeAccessToken({
-    clientId: input.clientId,
-    clientSecret: input.clientSecret,
-    refreshToken: input.refreshToken,
-  });
-
-  const aggregate: FullSyncResult = { imported: 0, skipped: 0, errors: [], pagesProcessed: 0, durationMs: 0, lastCursor: null };
+  const aggregateState = await getSyncState('youtube');
+  const aggregate = createFullSyncResult();
   const playlistIds = input.playlistIds.length ? input.playlistIds : [YOUTUBE_WATCH_LATER_PLAYLIST_ID, YOUTUBE_LIKED_VIDEOS_PLAYLIST_ID];
-
-  for (const playlistId of playlistIds) {
-    try {
-      const result = await importAllYouTubePlaylist({
-        accessToken,
-        playlistId,
-        incremental: input.incremental,
-      });
-      aggregate.imported += result.imported;
-      aggregate.skipped += result.skipped;
-      aggregate.pagesProcessed += result.pagesProcessed;
-      aggregate.errors.push(...result.errors);
-    } catch (error) {
-      aggregate.errors.push(`Failed to import playlist ${playlistId}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+  let accessToken: string;
+  try {
+    accessToken = await getYouTubeAccessToken({
+      clientId: input.clientId,
+      clientSecret: input.clientSecret,
+      refreshToken: input.refreshToken,
+    });
+  } catch (error) {
+    aggregate.errors.push(safeRemoteError('YouTube token exchange', error));
+    completeFullSyncResult(aggregate, startTime);
+    const persisted = await recordSyncRun('youtube', aggregateState?.revision ?? 0, {
+      lastCursor: null,
+      imported: 0,
+      skipped: 0,
+      errors: aggregate.errors,
+      durationMs: aggregate.durationMs,
+    });
+    if (persisted.status === 'stale') aggregate.outcome = 'stale';
+    return aggregate;
   }
 
-  aggregate.durationMs = Date.now() - startTime;
+  for (const playlistId of playlistIds) {
+    const result = await importAllYouTubePlaylist({
+      accessToken,
+      playlistId,
+      incremental: input.incremental,
+    });
+    aggregate.imported += result.imported;
+    aggregate.skipped += result.skipped;
+    aggregate.pagesProcessed += result.pagesProcessed;
+    aggregate.errors.push(...result.errors.map((error) => `Playlist ${playlistId}: ${error}`));
+  }
+
+  completeFullSyncResult(aggregate, startTime);
+  const persisted = await recordSyncRun('youtube', aggregateState?.revision ?? 0, {
+    lastCursor: null,
+    imported: aggregate.imported,
+    skipped: aggregate.skipped,
+    errors: aggregate.errors.slice(0, 20),
+    durationMs: aggregate.durationMs,
+  });
+  if (persisted.status === 'stale') aggregate.outcome = 'stale';
   return aggregate;
 }

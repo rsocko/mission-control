@@ -1,9 +1,17 @@
 /**
  * GitHub Stars importer for triage queue.
  */
-import { ingestTriageImport } from '../capture';
-import { fetchWithRateLimit, IMPORT_USER_AGENT, MAX_PAGES } from './base-importer';
-import { upsertSyncState } from '../sync-state';
+import { ingestTriageImports, type TriageImportInput } from '../import-capture';
+import {
+  completeFullSyncResult,
+  createFullSyncResult,
+  fetchWithRateLimit,
+  IMPORT_USER_AGENT,
+  MAX_PAGES,
+  remoteResponseError,
+  safeRemoteError,
+} from './base-importer';
+import { getSyncState, recordSyncRun } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 
 function parseGitHubNextCursor(linkHeader: string | null): string | null {
@@ -59,7 +67,7 @@ export async function importGitHubStars(input: {
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub stars import failed: ${response.status} ${response.statusText}`);
+    throw remoteResponseError('GitHub stars import', response);
   }
 
   const rows = (await response.json()) as Array<GitHubStarRepo | GitHubStarWithTimestamp>;
@@ -70,6 +78,7 @@ export async function importGitHubStars(input: {
     nextCursor: parseGitHubNextCursor(response.headers.get('link')),
   };
 
+  const imports: TriageImportInput[] = [];
   for (const row of rows) {
     const withTimestamp = row as GitHubStarWithTimestamp;
     const repo = withTimestamp.repo || (row as GitHubStarRepo);
@@ -79,7 +88,7 @@ export async function importGitHubStars(input: {
       continue;
     }
 
-    const result = await ingestTriageImport({
+    imports.push({
       sourcePlatform: 'github',
       sourceId: `github:star:${repo.full_name.toLowerCase()}`,
       sourceUrl: repo.html_url,
@@ -98,12 +107,11 @@ export async function importGitHubStars(input: {
         starredAt: withTimestamp.starred_at || null,
       },
     });
+  }
 
-    if (result.status === 'imported') {
-      summary.imported += 1;
-    } else {
-      summary.skipped += 1;
-    }
+  const outcomes = await ingestTriageImports(imports);
+  for (const outcome of outcomes) {
+    summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
   }
 
   return summary;
@@ -115,19 +123,26 @@ export async function importAllGitHubStars(input: {
   incremental?: boolean;
 }): Promise<FullSyncResult> {
   const startTime = Date.now();
-  const result: FullSyncResult = { imported: 0, skipped: 0, errors: [], pagesProcessed: 0, durationMs: 0, lastCursor: null };
+  const state = await getSyncState('github-stars');
+  const result = createFullSyncResult();
 
   let page = 1;
   const CONSECUTIVE_SKIP_THRESHOLD = 20;
   let consecutiveSkips = 0;
 
   while (page <= MAX_PAGES) {
-    const summary = await importGitHubStars({
-      token: input.token,
-      username: input.username,
-      perPage: 100,
-      page,
-    });
+    let summary: TriageImportSummary;
+    try {
+      summary = await importGitHubStars({
+        token: input.token,
+        username: input.username,
+        perPage: 100,
+        page,
+      });
+    } catch (error) {
+      result.errors.push(safeRemoteError('GitHub stars import', error));
+      break;
+    }
 
     result.pagesProcessed += 1;
     result.imported += summary.imported;
@@ -146,15 +161,15 @@ export async function importAllGitHubStars(input: {
     page = Number(summary.nextCursor);
   }
 
-  result.durationMs = Date.now() - startTime;
-
-  await upsertSyncState('github-stars', {
+  completeFullSyncResult(result, startTime);
+  const persisted = await recordSyncRun('github-stars', state?.revision ?? 0, {
     lastCursor: result.lastCursor,
     imported: result.imported,
     skipped: result.skipped,
     errors: result.errors.slice(0, 20),
     durationMs: result.durationMs,
   });
+  if (persisted.status === 'stale') result.outcome = 'stale';
 
   return result;
 }

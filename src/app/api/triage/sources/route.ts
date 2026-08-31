@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings, connectorConfigs } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import logger from '@/lib/logger';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
+import type { PersistenceJson } from '@/db/persistence/contracts';
 
 const SETTINGS_KEY = 'triage_source_credentials';
 
@@ -58,27 +58,13 @@ function normalizeCredentials(value: unknown): TriageSourceCredentials {
 
 export async function GET() {
   try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const creds = normalizeCredentials(row?.value);
+    const value = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY);
+    const creds = normalizeCredentials(value);
 
     // Check if a github-issues connector already provides a token
-    let githubConnectedViaConnector = false;
-    try {
-      const connectors = await db
-        .select({ credentials: connectorConfigs.credentials })
-        .from(connectorConfigs)
-        .where(and(eq(connectorConfigs.type, 'github-issues'), isNull(connectorConfigs.deletedAt)))
-        .limit(1);
-      const connectorCreds = connectors[0]?.credentials as { token?: string } | undefined;
-      githubConnectedViaConnector = !!connectorCreds?.token;
-    } catch {
-      // table may not exist
-    }
+    const githubConnectedViaConnector = !!await getTriagePersistenceRepositories()
+      .githubCredentialFallback
+      .findActiveGitHubToken();
 
     const githubConfiguredDirectly = !!creds.github.pat;
     const githubConfiguredViaEnv = !!process.env.GITHUB_PAT;
@@ -126,13 +112,8 @@ export async function POST(request: Request) {
     };
 
     // Load existing
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const existing = normalizeCredentials(row?.value);
+    const settings = getCorePersistenceRepositories().settings;
+    const existing = normalizeCredentials(await settings.get(SETTINGS_KEY));
     const credentials = body.credentials || {};
 
     if (body.source === 'github') {
@@ -190,14 +171,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid source' }, { status: 400 });
     }
 
-    const now = new Date().toISOString();
-    await db
-      .insert(appSettings)
-      .values({ key: SETTINGS_KEY, value: existing, updatedAt: now })
-      .onConflictDoUpdate({
-        target: appSettings.key,
-        set: { value: existing, updatedAt: now },
-      });
+    await settings.set(SETTINGS_KEY, existing as unknown as PersistenceJson);
 
     return NextResponse.json({ success: true, source: body.source });
   } catch (error) {
@@ -210,13 +184,8 @@ export async function DELETE(request: Request) {
   try {
     const body = await request.json() as { source: 'github' | 'reddit' | 'youtube' | 'karakeep' };
 
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY))
-      .limit(1);
-
-    const existing = normalizeCredentials(row?.value);
+    const settings = getCorePersistenceRepositories().settings;
+    const existing = normalizeCredentials(await settings.get(SETTINGS_KEY));
 
     if (body.source === 'github') {
       existing.github = { pat: '', username: '' };
@@ -231,14 +200,7 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Invalid source' }, { status: 400 });
     }
 
-    const now = new Date().toISOString();
-    await db
-      .insert(appSettings)
-      .values({ key: SETTINGS_KEY, value: existing, updatedAt: now })
-      .onConflictDoUpdate({
-        target: appSettings.key,
-        set: { value: existing, updatedAt: now },
-      });
+    await settings.set(SETTINGS_KEY, existing as unknown as PersistenceJson);
 
     return NextResponse.json({ success: true, source: body.source });
   } catch (error) {

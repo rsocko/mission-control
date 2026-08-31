@@ -5,9 +5,9 @@
  * captured items.
  */
 import { randomUUID } from 'crypto';
-import db, { runTransaction } from '@/db';
+import db from '@/db';
 import { triageItems } from '@/db/schema';
-import { and, eq, inArray, or } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import type { TriageContentType, TriageItem, TriageSourcePlatform } from '@/types';
 import { resolveEmbed } from './embed-resolver';
 import type { EmbedMetadata } from './embed-resolver';
@@ -18,6 +18,12 @@ import { parseDescriptionLinks } from './importers/youtube-importer';
 import { detectContentType as detectContentTypeFromRegistry } from './content-type-registry';
 import { ensureSeedData, mapRow, safeJsonObject } from './shared';
 import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
+export {
+  ingestTriageImport,
+  ingestTriageImports,
+  type TriageImportInput,
+  type TriageImportResult,
+} from './import-capture';
 
 export interface TriageCaptureInput {
   url: string;
@@ -50,23 +56,6 @@ export interface TriageImageCaptureInput {
   originalName?: string;
   requestId?: string;
 }
-
-export interface TriageImportInput {
-  sourcePlatform: TriageSourcePlatform;
-  sourceId: string;
-  sourceUrl: string;
-  canonicalUrl?: string;
-  title: string;
-  description?: string;
-  thumbnailUrl?: string;
-  capturedAt?: string;
-  sourceOrder?: number;
-  rawMetadata?: Record<string, unknown>;
-}
-
-export type TriageImportResult =
-  | { status: 'imported'; item: TriageItem }
-  | { status: 'skipped'; reason: string; item?: TriageItem };
 
 /**
  * Resolve embed metadata for a triage item asynchronously (fire-and-forget).
@@ -415,235 +404,4 @@ export async function createTriageTextCapture(input: TriageTextCaptureInput) {
   const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
   await publishSemanticEntityUpsert('triage-item', id);
   return mapRow(created);
-}
-
-function triageImportSourceKey(input: { sourcePlatform: string; sourceId: string }) {
-  return JSON.stringify([input.sourcePlatform, input.sourceId]);
-}
-
-export async function ingestTriageImports(
-  inputs: readonly TriageImportInput[],
-): Promise<TriageImportResult[]> {
-  await ensureSeedData();
-
-  if (inputs.length === 0) return [];
-
-  const results: Array<TriageImportResult | undefined> = new Array(inputs.length);
-  const prepared = inputs.flatMap((input, index) => {
-    if (!input.sourceId?.trim()) {
-      results[index] = { status: 'skipped', reason: 'Missing source ID' };
-      return [];
-    }
-
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(input.sourceUrl);
-    } catch {
-      results[index] = { status: 'skipped', reason: 'Invalid source URL' };
-      return [];
-    }
-
-    return [{
-      index,
-      input,
-      parsedUrl,
-      canonicalUrl: input.canonicalUrl || input.sourceUrl,
-    }];
-  });
-
-  if (prepared.length === 0) {
-    return results.map((result) => result!);
-  }
-
-  const sourceConditions = prepared.map(({ input }) => and(
-    eq(triageItems.sourcePlatform, input.sourcePlatform),
-    eq(triageItems.sourceId, input.sourceId),
-  ));
-  const canonicalUrls = [...new Set(prepared.map(({ canonicalUrl }) => canonicalUrl))];
-  const [existingSourceRows, existingCanonicalRows] = await Promise.all([
-    db.select().from(triageItems).where(or(...sourceConditions)),
-    db.select().from(triageItems).where(inArray(triageItems.canonicalUrl, canonicalUrls)),
-  ]);
-  const existingBySource = new Map(
-    existingSourceRows.map((row) => [triageImportSourceKey(row), row]),
-  );
-  const existingByCanonical = new Map(
-    existingCanonicalRows.map((row) => [row.canonicalUrl, row]),
-  );
-
-  const seenSources = new Map<string, number>();
-  const seenCanonicalUrls = new Map<string, number>();
-  const duplicatesWithinBatch = new Map<number, {
-    originalIndex: number;
-    reason: string;
-  }>();
-  const candidates = prepared.filter(({ index, input, canonicalUrl }) => {
-    const sourceKey = triageImportSourceKey(input);
-    const existingSource = existingBySource.get(sourceKey);
-    if (existingSource) {
-      results[index] = {
-        status: 'skipped',
-        reason: 'Already ingested for this source item',
-        item: mapRow(existingSource),
-      };
-      return false;
-    }
-
-    const existingCanonical = existingByCanonical.get(canonicalUrl);
-    if (existingCanonical) {
-      results[index] = {
-        status: 'skipped',
-        reason: 'Already ingested for canonical URL',
-        item: mapRow(existingCanonical),
-      };
-      return false;
-    }
-
-    const sourceDuplicate = seenSources.get(sourceKey);
-    if (sourceDuplicate !== undefined) {
-      duplicatesWithinBatch.set(index, {
-        originalIndex: sourceDuplicate,
-        reason: 'Already ingested for this source item',
-      });
-      return false;
-    }
-
-    const canonicalDuplicate = seenCanonicalUrls.get(canonicalUrl);
-    if (canonicalDuplicate !== undefined) {
-      duplicatesWithinBatch.set(index, {
-        originalIndex: canonicalDuplicate,
-        reason: 'Already ingested for canonical URL',
-      });
-      return false;
-    }
-
-    seenSources.set(sourceKey, index);
-    seenCanonicalUrls.set(canonicalUrl, index);
-    return true;
-  });
-
-  const buildInsert = async (candidate: typeof candidates[number]) => {
-    const { input, parsedUrl, canonicalUrl } = candidate;
-    const title = input.title?.trim() || parsedUrl.hostname.replace('www.', '');
-    const contentType = await detectContentTypeFromRegistry(
-      canonicalUrl,
-      title,
-      input.description,
-    ) as TriageContentType;
-    const ai = buildSuggestedActions({
-      sourcePlatform: input.sourcePlatform,
-      contentType,
-      title,
-      description: input.description,
-      url: canonicalUrl,
-      rawMetadata: input.rawMetadata,
-    });
-    const now = new Date().toISOString();
-
-    return {
-      candidate,
-      row: {
-        id: randomUUID(),
-        sourcePlatform: input.sourcePlatform,
-        sourceId: input.sourceId,
-        sourceUrl: input.sourceUrl,
-        canonicalUrl,
-        title,
-        description: input.description,
-        thumbnailUrl: input.thumbnailUrl,
-        contentType,
-        capturedAt: input.capturedAt || now,
-        ingestedAt: now,
-        status: 'pending',
-        aiSummary: ai.summary,
-        aiCategories: ai.categories,
-        aiSuggestedActions: ai.actions,
-        aiRelevanceScore: ai.score,
-        aiUrgency: ai.urgency,
-        rawMetadata: input.rawMetadata || {},
-        sourceOrder: input.sourceOrder ?? null,
-        actionsTaken: [],
-      } satisfies typeof triageItems.$inferInsert,
-    };
-  };
-
-  const inserts: Awaited<ReturnType<typeof buildInsert>>[] = [];
-  if (candidates.length > 0) {
-    inserts.push(await buildInsert(candidates[0]));
-    inserts.push(...await Promise.all(candidates.slice(1).map(buildInsert)));
-  }
-
-  if (inserts.length > 0) {
-    const { createdRows, conflictRows } = runTransaction((tx) => {
-      const inserted = tx
-        .insert(triageItems)
-        .values(inserts.map(({ row }) => row))
-        .onConflictDoNothing()
-        .returning()
-        .all();
-      const insertedIds = new Set(inserted.map((row) => row.id));
-      const conflicted = inserts.filter(({ row }) => !insertedIds.has(row.id));
-      const conflicts = conflicted.length > 0
-        ? tx.select().from(triageItems).where(or(...conflicted.map(({ candidate }) => and(
-          eq(triageItems.sourcePlatform, candidate.input.sourcePlatform),
-          eq(triageItems.sourceId, candidate.input.sourceId),
-        )))).all()
-        : [];
-      const conflictSourceKeys = new Set(
-        conflicts.map((row) => triageImportSourceKey(row)),
-      );
-      const unresolved = conflicted.find(
-        ({ candidate }) => !conflictSourceKeys.has(triageImportSourceKey(candidate.input)),
-      );
-      if (unresolved) {
-        throw new Error(`Triage import conflict could not be resolved for ${unresolved.candidate.input.sourceId}`);
-      }
-      return { createdRows: inserted, conflictRows: conflicts };
-    });
-    const createdById = new Map(createdRows.map((row) => [row.id, row]));
-    const conflictsBySource = new Map(
-      conflictRows.map((row) => [triageImportSourceKey(row), row]),
-    );
-
-    for (const { candidate, row } of inserts) {
-      const created = createdById.get(row.id);
-      if (created) {
-        const item = mapRow(created);
-        results[candidate.index] = { status: 'imported', item };
-        resolveEmbedAsync(created.id, candidate.canonicalUrl);
-        continue;
-      }
-
-      const conflict = conflictsBySource.get(triageImportSourceKey(candidate.input));
-      results[candidate.index] = {
-        status: 'skipped',
-        reason: 'Already ingested for this source item',
-        ...(conflict ? { item: mapRow(conflict) } : {}),
-      };
-    }
-    await Promise.all(
-      createdRows.map((row) => publishSemanticEntityUpsert('triage-item', row.id)),
-    );
-  }
-
-  for (const [index, duplicate] of duplicatesWithinBatch) {
-    const original = results[duplicate.originalIndex];
-    results[index] = {
-      status: 'skipped',
-      reason: duplicate.reason,
-      ...(original?.item ? { item: original.item } : {}),
-    };
-  }
-
-  return results.map((result, index) => {
-    if (!result) throw new Error(`Missing triage import result at index ${index}`);
-    return result;
-  });
-}
-
-export async function ingestTriageImport(
-  input: TriageImportInput,
-): Promise<TriageImportResult> {
-  const [result] = await ingestTriageImports([input]);
-  return result;
 }

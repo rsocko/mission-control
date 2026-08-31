@@ -63,6 +63,7 @@ export const triageContentTypes = pgTable('triage_content_types', {
 
 export const triageSyncState = pgTable('triage_sync_state', {
   id: text('id').primaryKey(), // e.g. 'github-stars', 'reddit-saved'
+  revision: integer('revision').notNull().default(0),
   lastCursor: text('last_cursor'),
   lastSyncedAt: text('last_synced_at'),
   totalImported: integer('total_imported').notNull().default(0),

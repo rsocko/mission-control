@@ -27,6 +27,15 @@ export async function POST(request: Request) {
         ...settings,
         incremental: mode === 'incremental',
       });
+      if (result.outcome === 'failure') {
+        throw new Error('OWL document action full import failed');
+      }
+      if (result.outcome === 'stale') {
+        return NextResponse.json(
+          { error: 'OWL document action import state changed concurrently' },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ result, mode });
     }
 

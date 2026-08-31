@@ -55,8 +55,16 @@ vi.mock('@/lib/mode', () => ({
 
 // We mock the triage capture module so ingestTriageImport is controllable
 const mockIngest = vi.fn();
-vi.mock('@/lib/triage/capture', () => ({
-  ingestTriageImport: mockIngest,
+const mockBatchIngest = vi.fn();
+vi.mock('@/lib/triage/import-capture', () => ({
+  ingestTriageImports: mockBatchIngest,
+}));
+
+const mockGetSyncState = vi.fn();
+const mockRecordSyncRun = vi.fn();
+vi.mock('@/lib/triage/sync-state', () => ({
+  getSyncState: mockGetSyncState,
+  recordSyncRun: mockRecordSyncRun,
 }));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -99,11 +107,12 @@ describe('importGitHubStars', () => {
     vi.resetModules();
     global.fetch = vi.fn();
     mockIngest.mockReset();
-
-    // Re-mock the ingest at the module level
-    vi.doMock('@/lib/triage', () => ({
-      ingestTriageImport: mockIngest,
-    }));
+    mockBatchIngest.mockImplementation(async (inputs: unknown[]) =>
+      Promise.all(inputs.map((input) => mockIngest(input))));
+    mockGetSyncState.mockReset();
+    mockRecordSyncRun.mockReset();
+    mockGetSyncState.mockResolvedValue(null);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const mod = await import('@/lib/triage/importers');
     importGitHubStars = mod.importGitHubStars;
@@ -133,6 +142,8 @@ describe('importGitHubStars', () => {
     const headers = fetchCall[1].headers;
     expect(headers.Accept).toBe('application/vnd.github.star+json');
     expect(headers.Authorization).toContain('Bearer');
+    expect(mockBatchIngest).toHaveBeenCalledTimes(1);
+    expect(mockBatchIngest.mock.calls[0][0]).toHaveLength(2);
   });
 
   it('should use username endpoint when username is provided', async () => {
@@ -206,11 +217,13 @@ describe('importAllGitHubStars', () => {
     vi.resetModules();
     global.fetch = vi.fn();
     mockIngest.mockReset();
+    mockBatchIngest.mockImplementation(async (inputs: unknown[]) =>
+      Promise.all(inputs.map((input) => mockIngest(input))));
     mockRun.mockReset();
-
-    vi.doMock('@/lib/triage', () => ({
-      ingestTriageImport: mockIngest,
-    }));
+    mockGetSyncState.mockReset();
+    mockRecordSyncRun.mockReset();
+    mockGetSyncState.mockResolvedValue(null);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const mod = await import('@/lib/triage/importers');
     importAllGitHubStars = mod.importAllGitHubStars;
@@ -256,7 +269,17 @@ describe('importAllGitHubStars', () => {
 
     await importAllGitHubStars({ token: 'ghp_test' });
 
-    expect(mockRun).toHaveBeenCalled();
+    expect(mockRecordSyncRun).toHaveBeenCalled();
+  });
+
+  it('reports a stale cursor fence without retrying persistence', async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(makeStarResponse([]));
+    mockRecordSyncRun.mockResolvedValueOnce({ status: 'stale', currentRevision: 2 });
+
+    const result = await importAllGitHubStars({ token: 'synthetic-token' });
+
+    expect(result.outcome).toBe('stale');
+    expect(mockRecordSyncRun).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -269,11 +292,13 @@ describe('rate limit handling', () => {
     vi.resetModules();
     global.fetch = vi.fn();
     mockIngest.mockReset();
+    mockBatchIngest.mockImplementation(async (inputs: unknown[]) =>
+      Promise.all(inputs.map((input) => mockIngest(input))));
+    mockGetSyncState.mockReset();
+    mockRecordSyncRun.mockReset();
+    mockGetSyncState.mockResolvedValue(null);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
     vi.useFakeTimers({ shouldAdvanceTime: true });
-
-    vi.doMock('@/lib/triage', () => ({
-      ingestTriageImport: mockIngest,
-    }));
 
     const mod = await import('@/lib/triage/importers');
     importGitHubStars = mod.importGitHubStars;
@@ -333,6 +358,7 @@ describe('POST /api/triage/import/github-stars', () => {
 
   it('should call importAllGitHubStars for full mode', async () => {
     const mockFullImport = vi.fn().mockResolvedValue({
+      outcome: 'success',
       imported: 10,
       skipped: 2,
       pagesProcessed: 3,
@@ -368,6 +394,46 @@ describe('POST /api/triage/import/github-stars', () => {
     expect(mockFullImport).toHaveBeenCalledWith(
       expect.objectContaining({ token: 'ghp_test', incremental: false }),
     );
+  });
+
+  it.each([
+    ['failure', 500],
+    ['stale', 409],
+  ] as const)('returns a non-success status for a %s full-import outcome', async (
+    outcome,
+    status,
+  ) => {
+    vi.doMock('@/lib/triage/credentials', () => ({
+      resolveGitHubCredentials: vi.fn().mockResolvedValue({
+        token: 'synthetic-token',
+        source: 'env',
+      }),
+    }));
+    vi.doMock('@/lib/triage/importers', () => ({
+      importGitHubStars: vi.fn(),
+      importAllGitHubStars: vi.fn().mockResolvedValue({
+        outcome,
+        imported: 0,
+        skipped: 0,
+        pagesProcessed: 0,
+        durationMs: 1,
+        errors: ['synthetic remote failure'],
+        lastCursor: null,
+      }),
+    }));
+
+    const { POST } = await import('@/app/api/triage/import/github-stars/route');
+    const response = await POST(new Request(
+      'http://localhost/api/triage/import/github-stars',
+      {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'full' }),
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ));
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toHaveProperty('error');
   });
 
   it('should call importGitHubStars for single mode', async () => {

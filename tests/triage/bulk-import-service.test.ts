@@ -10,12 +10,20 @@ vi.mock('@/lib/triage/embed-resolver', () => ({
 }));
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let ingestTriageImports: typeof import('@/lib/triage').ingestTriageImports;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
   ({ ingestTriageImports } = await import('@/lib/triage'));
 }, 30_000);
 

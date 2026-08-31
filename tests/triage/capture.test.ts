@@ -25,9 +25,11 @@ vi.mock('@/lib/triage/embed-resolver', () => ({
 const mockDetectContentType = vi.fn().mockResolvedValue('article');
 vi.mock('@/lib/triage/content-type-registry', () => ({
   detectContentType: mockDetectContentType,
+  detectContentTypeSync: vi.fn(() => 'article'),
 }));
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let detectSourcePlatform: typeof import('@/lib/triage/capture').detectSourcePlatform;
 let createTriageCapture: typeof import('@/lib/triage/capture').createTriageCapture;
@@ -35,8 +37,15 @@ let createTriageTextCapture: typeof import('@/lib/triage/capture').createTriageT
 let ingestTriageImport: typeof import('@/lib/triage/capture').ingestTriageImport;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
   ({
     detectSourcePlatform,
     createTriageCapture,

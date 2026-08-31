@@ -23,9 +23,13 @@ describe('Work To Do checkpoint ordering', () => {
       '2026-08-07T20:00:00.1Z',
       '2026-08-07T16:00:00.100000000-04:00',
     )).toBe(true);
+    expect(isWorkTodoCheckpointAdvance(
+      '2026-08-07T20:00Z',
+      '2026-08-07T16:00:00.000000000-04:00',
+    )).toBe(true);
   });
 
-  it('fails closed for a malformed incoming timestamp but recovers a corrupt stored value', () => {
+  it('fails closed for malformed incoming and stored timestamps', () => {
     expect(isWorkTodoCheckpointAdvance(
       '2026-08-07T20:00:00.0009Z',
       '2026-08-07T20:00:00.not-a-fractionZ',
@@ -33,18 +37,30 @@ describe('Work To Do checkpoint ordering', () => {
     expect(isWorkTodoCheckpointAdvance(
       'not-a-timestamp',
       '2026-08-07T20:00:00.0001Z',
-    )).toBe(true);
+    )).toBe(false);
+    expect(isWorkTodoCheckpointAdvance(
+      null,
+      'not-a-timestamp',
+    )).toBe(false);
   });
 
-  it('keeps the ingest contract open to greater-than-millisecond precision', () => {
-    const parsed = workTodoIngestSchema.safeParse({
-      schemaVersion: '1.0',
-      connectorInstanceId: 'work-todo',
-      syncTimestamp: '2026-08-07T20:00:00.123456789Z',
-      isFullSnapshot: true,
-      lists: [],
-    });
+  it('orders every timestamp precision accepted by the ingest contract', () => {
+    for (const syncTimestamp of [
+      '2026-08-07T20:00Z',
+      '2026-08-07T20:00:00Z',
+      '2026-08-07T20:00:00.123456789Z',
+      '2026-08-07T16:00-04:00',
+    ]) {
+      const parsed = workTodoIngestSchema.safeParse({
+        schemaVersion: '1.0',
+        connectorInstanceId: 'work-todo',
+        syncTimestamp,
+        isFullSnapshot: true,
+        lists: [],
+      });
 
-    expect(parsed.success).toBe(true);
+      expect(parsed.success).toBe(true);
+      expect(isWorkTodoCheckpointAdvance(null, syncTimestamp)).toBe(true);
+    }
   });
 });

@@ -626,6 +626,55 @@ export function describeWorkTodoRepositoriesContract(
         });
       });
 
+      it('orders an omitted-seconds snapshot checkpoint before a stale removal', async () => {
+        await ingestSnapshot({ syncTimestamp: '2026-08-07T20:00Z' });
+        const emptied = snapshotPayload({
+          syncTimestamp: '2026-08-07T19:59:59.999999999Z',
+        });
+        emptied.lists = [];
+
+        await expect(repositories.ingest({
+          payload: emptied,
+          now: '2026-08-07T20:05:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+
+        expect(await harness.listTasks(CONNECTOR)).toHaveLength(1);
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual(['list-1']);
+        expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
+          lastIngestAt: '2026-08-07T20:00Z',
+        });
+      });
+
+      it('rejects malformed incoming and stored snapshot checkpoints without mutation', async () => {
+        await expect(repositories.ingest({
+          payload: snapshotPayload({ syncTimestamp: 'not-a-timestamp' }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+        expect(await harness.listTasks(CONNECTOR)).toEqual([]);
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual([]);
+
+        await harness.seedBridgeState({
+          connectorId: CONNECTOR,
+          transport: 'power-automate-standard',
+          capabilityProfile: 'standard-v1',
+          lastIngestAt: 'not-a-timestamp',
+          lastIngestMode: 'snapshot',
+        });
+        await expect(repositories.ingest({
+          payload: snapshotPayload({ syncTimestamp: '2026-08-07T20:00Z' }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+
+        expect(await harness.listTasks(CONNECTOR)).toEqual([]);
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual([]);
+        expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
+          lastIngestAt: 'not-a-timestamp',
+        });
+      });
+
       it('protects a pending local edit from remote values and from removal', async () => {
         await ingestSnapshot();
         const [task] = await harness.listTasks(CONNECTOR);
@@ -760,6 +809,56 @@ export function describeWorkTodoRepositoriesContract(
           .toBe('https://graph.example/tasks/delta?$deltatoken=newer');
         expect((await harness.listTasks(CONNECTOR))[0].title)
           .toBe('Sub-millisecond newer title');
+      });
+
+      it('fences stale delta upserts and removals after an omitted-seconds checkpoint', async () => {
+        await repositories.ingest({
+          payload: deltaPayload({
+            syncTimestamp: '2026-08-07T20:00Z',
+            listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=current',
+            taskDeltaLink: 'https://graph.example/tasks/delta?$deltatoken=current',
+            title: 'Current title',
+          }),
+          now: '2026-08-07T20:00:00.000Z',
+          timezone: TIMEZONE,
+        });
+
+        const staleUpsert = deltaPayload({
+          syncTimestamp: '2026-08-07T19:59:59.999999999Z',
+          listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=stale-upsert',
+          title: 'Stale title',
+        });
+        const staleTaskRemoval = deltaPayload({
+          syncTimestamp: '2026-08-07T19:59:59.999999999Z',
+        });
+        staleTaskRemoval.lists[0].tasks = [{
+          id: 'task-1',
+          removed: true,
+        }] as unknown as typeof staleTaskRemoval.lists[0]['tasks'];
+        const staleListRemoval = deltaPayload({
+          syncTimestamp: '2026-08-07T19:59:59.999999999Z',
+        });
+        staleListRemoval.lists = [{
+          id: 'list-1',
+          removed: true,
+        }] as unknown as typeof staleListRemoval.lists;
+
+        for (const payload of [staleUpsert, staleTaskRemoval, staleListRemoval]) {
+          await expect(repositories.ingest({
+            payload,
+            now: '2026-08-07T20:05:00.000Z',
+            timezone: TIMEZONE,
+          })).rejects.toMatchObject({ code: 'STALE_INGEST_ENVELOPE', status: 409 });
+        }
+
+        expect((await harness.listTasks(CONNECTOR))[0].title).toBe('Current title');
+        expect(await harness.listSourceListIds(CONNECTOR)).toEqual(['list-1']);
+        expect(await harness.getBridgeState(CONNECTOR)).toMatchObject({
+          lastIngestAt: '2026-08-07T20:00Z',
+          listDeltaLink: 'https://graph.example/lists/delta?$deltatoken=current',
+        });
+        expect((await repositories.readPullState(CONNECTOR)).taskDeltaLinks[0].deltaLink)
+          .toBe('https://graph.example/tasks/delta?$deltatoken=current');
       });
 
       it('never lets a delayed delta remove a task the newer envelope kept', async () => {

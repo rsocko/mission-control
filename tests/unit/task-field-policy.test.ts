@@ -155,6 +155,22 @@ describe('resolveTaskFieldPolicy', () => {
     expect(resolveTaskFieldPolicy(task, caps, 'snoozedUntil').mutation).toBe('blocked');
   });
 
+  it('writes Microsoft To Do tag changes through to title hashtags', () => {
+    const task = {
+      sourceId: 'list-1:task-1',
+      connectorType: 'microsoft-todo',
+      connectorEnabled: true,
+    };
+
+    expect(resolveTaskFieldPolicy(task, capabilities({
+      write: true,
+      taskSourceModel: 'remote-managed',
+    }), 'tags')).toMatchObject({
+      mutation: 'write-through',
+      inbound: 'source-wins',
+    });
+  });
+
   it('blocks notification-only mutations except local planning horizon', () => {
     const caps = capabilities({
       notificationOnly: true,

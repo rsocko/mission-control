@@ -16,6 +16,8 @@ export const CAPABILITY_DEFAULTS: Record<string, Partial<ConnectorCapabilities>>
     taskMove: true,
     microStatusSync: true,
     microStatusWriteBack: true,
+    tags: true,
+    tagWriteBack: true,
     tagScope: 'global',
     ...MICROSOFT_TODO_TASK_AUTHORITY,
   },
@@ -52,12 +54,21 @@ export function resolvePersistedConnectorCapabilities(input: {
   capabilities: ConnectorCapabilities;
   settings: Record<string, unknown>;
 }): ConnectorCapabilities {
+  const capabilities = {
+    ...(CAPABILITY_DEFAULTS[input.type] ?? {}),
+    ...input.capabilities,
+  } as ConnectorCapabilities;
+
+  // Early Microsoft To Do OAuth records persisted these as false even though
+  // tags are represented by writable hashtags in the task title.
+  if (input.type === 'microsoft-todo') {
+    capabilities.tags = true;
+    capabilities.tagWriteBack = true;
+  }
+
   return resolveConnectorCapabilities(
     input.type,
-    {
-      ...(CAPABILITY_DEFAULTS[input.type] ?? {}),
-      ...input.capabilities,
-    } as ConnectorCapabilities,
+    capabilities,
     input.settings,
   );
 }

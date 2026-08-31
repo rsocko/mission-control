@@ -173,7 +173,6 @@ export async function POST(
         tagPolicy.mutation === 'write-through'
         && newTagIds.length
         && task.connectorInstanceId
-        && connectorCaps.tagWriteBack
       ) {
           // Fire-and-forget write-back
           (async () => {
@@ -263,36 +262,28 @@ export async function DELETE(
     // Wrapped so write-back failures never mask the successful DB delete.
     try {
       if (tagPolicy.mutation === 'write-through' && task.connectorInstanceId) {
-        const [connectorRow] = await db.select({ capabilities: connectorConfigs.capabilities })
-          .from(connectorConfigs).where(eq(connectorConfigs.id, task.connectorInstanceId)).limit(1);
-        const caps = connectorRow
-          ? (typeof connectorRow.capabilities === 'string' ? JSON.parse(connectorRow.capabilities) : connectorRow.capabilities) as Record<string, unknown>
-          : {};
+        // Fire-and-forget write-back
+        (async () => {
+          try {
+            let connector = connectorRegistry.getConnector(task.connectorInstanceId!) ?? null;
+            if (!connector) connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId!);
+            if (!connector?.removeTagFromTask) return;
 
-        if (caps.tagWriteBack) {
-          // Fire-and-forget write-back
-          (async () => {
-            try {
-              let connector = connectorRegistry.getConnector(task.connectorInstanceId!) ?? null;
-              if (!connector) connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId!);
-              if (!connector?.removeTagFromTask) return;
-
-              // Resolve tag name
-              const [tagRow] = await db.select({ name: tags.name }).from(tags).where(eq(tags.id, tagId)).limit(1);
-              if (tagRow) {
-                await executeFencedGitHubTaskMutation({
-                  connectorInstanceId: task.connectorInstanceId!,
-                  taskId: id,
-                  operation: 'label',
-                  connector,
-                  write: () => connector.removeTagFromTask!(task.sourceId, tagRow.name),
-                });
-              }
-            } catch (err) {
-              logger.error({ err, taskId: id }, 'Tag removal write-back failed');
+            // Resolve tag name
+            const [tagRow] = await db.select({ name: tags.name }).from(tags).where(eq(tags.id, tagId)).limit(1);
+            if (tagRow) {
+              await executeFencedGitHubTaskMutation({
+                connectorInstanceId: task.connectorInstanceId!,
+                taskId: id,
+                operation: 'label',
+                connector,
+                write: () => connector.removeTagFromTask!(task.sourceId, tagRow.name),
+              });
             }
-          })();
-        }
+          } catch (err) {
+            logger.error({ err, taskId: id }, 'Tag removal write-back failed');
+          }
+        })();
       }
     } catch (writeBackErr) {
       logger.error({ err: writeBackErr, taskId: id }, 'Tag removal write-back setup failed (tag still removed locally)');

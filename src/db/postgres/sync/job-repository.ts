@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
-import { ConnectorSyncControlError } from '@/lib/sync/control-state';
+import { ConnectorSyncControlError } from '@/lib/sync/control-state-error';
 import type { SyncStreamEvent } from '@/lib/sync/events';
 import type {
   EnqueueSyncJobOptions,

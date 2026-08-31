@@ -37,6 +37,9 @@ describe('notification delivery persistence boundary', () => {
     expect(execution).not.toContain(
       "from '@/lib/notifications/push-policy/rules'",
     );
+    const jobs = read('src/db/postgres/sync/job-repository.ts');
+    expect(jobs).toContain("from '@/lib/sync/control-state-error'");
+    expect(jobs).not.toContain("from '@/lib/sync/control-state'");
   });
 
   it('loads the SQLite adapter lazily and registers both backends atomically', () => {

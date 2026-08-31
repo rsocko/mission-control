@@ -41,6 +41,7 @@ export interface GitHubHierarchyReconciliationResult {
 
 export interface GitHubHierarchyReconciliationOptions {
   identityRuntime?: GitHubStableIdentityRuntime;
+  requireCompletePopulation?: boolean;
 }
 
 function isGitHubParentMetadata(value: unknown): value is GitHubParentMetadata {
@@ -261,7 +262,7 @@ export async function reconcileGitHubTaskHierarchy(
     && observedTaskIds.size === populationObservations.size
     && observedTaskIds.size === population.count
     && observedPopulationDigest === population.digest;
-  if (!populationComplete) {
+  if (!populationComplete && options.requireCompletePopulation) {
     identityRuntime?.markBlocked('sub_issue_population_incomplete');
   }
   if (!generationComplete || !populationComplete || populationObservations.size === 0) {

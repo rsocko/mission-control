@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { isWorkTodoCheckpointAdvance } from '@/db/persistence/work-todo';
-import { workTodoIngestSchema } from '@/lib/connectors/work-todo/contracts';
+import {
+  workTodoIngestSchema,
+  workTodoSyncTimestampSchema,
+} from '@/lib/connectors/work-todo/contracts';
 
 describe('Work To Do checkpoint ordering', () => {
   it('orders arbitrary RFC3339 fractional precision without truncation', () => {
@@ -16,6 +20,12 @@ describe('Work To Do checkpoint ordering', () => {
       '2026-08-07T20:00:00.12345678901234567890Z',
       '2026-08-07T20:00:00.12345678901234567891Z',
     )).toBe(true);
+    const startedAt = performance.now();
+    expect(isWorkTodoCheckpointAdvance(
+      `2026-08-07T20:00:00.${'0'.repeat(100_000)}1Z`,
+      '2026-08-07T20:00:01Z',
+    )).toBe(true);
+    expect(performance.now() - startedAt).toBeLessThan(1_000);
   });
 
   it('treats offset and fractional representations of one instant as equal', () => {
@@ -62,5 +72,15 @@ describe('Work To Do checkpoint ordering', () => {
       expect(parsed.success).toBe(true);
       expect(isWorkTodoCheckpointAdvance(null, syncTimestamp)).toBe(true);
     }
+
+    expect(z.toJSONSchema(workTodoSyncTimestampSchema)).toMatchObject({
+      type: 'string',
+      format: 'date-time',
+      maxLength: 64,
+      pattern: expect.any(String),
+    });
+    expect(workTodoSyncTimestampSchema.safeParse(
+      `2026-08-07T20:00:00.${'1'.repeat(64)}Z`,
+    ).success).toBe(false);
   });
 });

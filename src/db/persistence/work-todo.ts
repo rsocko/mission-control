@@ -1,5 +1,8 @@
 import type { WorkTodoAck, WorkTodoIngest } from '@/lib/connectors/work-todo/contracts';
-import { parseWorkTodoRfc3339Instant } from '@/lib/connectors/work-todo/rfc3339';
+import {
+  parseWorkTodoRfc3339Instant,
+  parseWorkTodoSyncTimestamp,
+} from '@/lib/connectors/work-todo/rfc3339';
 
 /**
  * Layer 4 port for Microsoft To Do - Work ("Work To Do") connector-owned state.
@@ -64,7 +67,7 @@ export function isWorkTodoCheckpointAdvance(
   storedLastIngestAt: string | null,
   incomingSyncTimestamp: string,
 ): boolean {
-  const incoming = parseWorkTodoRfc3339Instant(incomingSyncTimestamp);
+  const incoming = parseWorkTodoSyncTimestamp(incomingSyncTimestamp);
   if (!incoming) return false;
   if (!storedLastIngestAt) return true;
   const stored = parseWorkTodoRfc3339Instant(storedLastIngestAt);

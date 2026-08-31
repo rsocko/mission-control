@@ -3,7 +3,9 @@ export interface WorkTodoRfc3339Instant {
   fraction: string;
 }
 
-const WORK_TODO_RFC3339_PATTERN =
+export const WORK_TODO_SYNC_TIMESTAMP_MAX_LENGTH = 64;
+
+export const WORK_TODO_RFC3339_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
@@ -49,8 +51,21 @@ export function parseWorkTodoRfc3339Instant(
     if (zone[0] === '-') offsetSeconds *= -1;
   }
 
+  let fractionEnd = fraction.length;
+  while (fractionEnd > 0 && fraction.charCodeAt(fractionEnd - 1) === 48) {
+    fractionEnd -= 1;
+  }
+
   return {
     epochSecond: local.getTime() / 1_000 - offsetSeconds,
-    fraction: fraction.replace(/0+$/, ''),
+    fraction: fraction.slice(0, fractionEnd),
   };
+}
+
+/** Validates an inbound checkpoint while legacy stored rows remain orderable. */
+export function parseWorkTodoSyncTimestamp(
+  value: string,
+): WorkTodoRfc3339Instant | null {
+  if (value.length > WORK_TODO_SYNC_TIMESTAMP_MAX_LENGTH) return null;
+  return parseWorkTodoRfc3339Instant(value);
 }

@@ -25,6 +25,9 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
       hierarchy: {},
       projects: {},
     } as WorkerPersistenceRepositories['github'],
+    connectorState: {
+      workTodo: {},
+    } as WorkerPersistenceRepositories['connectorState'],
   };
 }
 
@@ -38,6 +41,7 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-github-dependency-repositories');
   vi.doUnmock('@/db/persistence/sqlite-github-hierarchy-repositories');
   vi.doUnmock('@/db/persistence/sqlite-github-project-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-work-todo-repositories');
   vi.resetModules();
 });
 
@@ -74,6 +78,9 @@ describe('worker persistence runtime', () => {
     const githubProjectModule = vi.fn(() => ({
       createSqliteGitHubProjectRepositories: () => repositories.github.projects,
     }));
+    const workTodoModule = vi.fn(() => ({
+      createSqliteWorkTodoRepositories: () => repositories.connectorState.workTodo,
+    }));
     vi.doMock('@/db/runtime-backend', () => ({
       resolveDatabaseBackend: () => 'sqlite',
     }));
@@ -85,6 +92,7 @@ describe('worker persistence runtime', () => {
     vi.doMock('@/db/persistence/sqlite-github-dependency-repositories', githubDependencyModule);
     vi.doMock('@/db/persistence/sqlite-github-hierarchy-repositories', githubHierarchyModule);
     vi.doMock('@/db/persistence/sqlite-github-project-repositories', githubProjectModule);
+    vi.doMock('@/db/persistence/sqlite-work-todo-repositories', workTodoModule);
 
     const runtime = await import('@/lib/persistence/worker-runtime');
 
@@ -96,6 +104,7 @@ describe('worker persistence runtime', () => {
     expect(githubDependencyModule).not.toHaveBeenCalled();
     expect(githubHierarchyModule).not.toHaveBeenCalled();
     expect(githubProjectModule).not.toHaveBeenCalled();
+    expect(workTodoModule).not.toHaveBeenCalled();
 
     const [first, second] = await Promise.all([
       runtime.getWorkerPersistenceRepositories(),
@@ -109,6 +118,7 @@ describe('worker persistence runtime', () => {
     expect(first.github.dependencies).toBe(repositories.github.dependencies);
     expect(first.github.hierarchy).toBe(repositories.github.hierarchy);
     expect(first.github.projects).toBe(repositories.github.projects);
+    expect(first.connectorState.workTodo).toBe(repositories.connectorState.workTodo);
     expect(databaseModule).toHaveBeenCalledOnce();
     expect(coreModule).toHaveBeenCalledOnce();
     expect(syncRunModule).toHaveBeenCalledOnce();
@@ -117,6 +127,7 @@ describe('worker persistence runtime', () => {
     expect(githubDependencyModule).toHaveBeenCalledOnce();
     expect(githubHierarchyModule).toHaveBeenCalledOnce();
     expect(githubProjectModule).toHaveBeenCalledOnce();
+    expect(workTodoModule).toHaveBeenCalledOnce();
   });
 
   it('fails closed before PostgreSQL registration without evaluating SQLite', async () => {

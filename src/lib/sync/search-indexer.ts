@@ -82,6 +82,22 @@ export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
   }
 }
 
+/**
+ * Removes a deleted task from the selected keyword index, and from the
+ * semantic projection only when that workflow is supported by the backend.
+ */
+export async function removeTaskFromSearch(taskId: string) {
+  if (!(await allowsSemanticSearch())) {
+    const { removeTaskFromIndex } = await import('@/lib/search/fts');
+    await removeTaskFromIndex(taskId);
+    return;
+  }
+  const search = await getSearchModule();
+  await search?.removeTaskSearch(taskId).catch((e) => {
+    syncLogger.error({ err: e, taskId }, 'removeTaskSearch failed');
+  });
+}
+
 export async function indexAlertForSearch(alert: {
   id: string;
   title: string;

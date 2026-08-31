@@ -437,12 +437,14 @@ describe('core persistence runtime selection', () => {
       },
       execution: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['execution'],
       github: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['github'],
+      connectorState: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['connectorState'],
     };
     const replacementWorker = {
       connectors: replacement.repositories.connectors,
       syncRuns: selectedWorker.syncRuns,
       execution: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['execution'],
       github: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['github'],
+      connectorState: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['connectorState'],
     };
     try {
       registerWorkerPersistenceRepositories(selectedWorker);

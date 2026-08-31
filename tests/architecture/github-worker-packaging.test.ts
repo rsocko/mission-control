@@ -22,6 +22,7 @@ const POSTGRES_GITHUB_ADAPTERS = [
   'src/db/postgres/repositories/github-recovery-repositories.ts',
   'src/db/postgres/repositories/github-recovery-support.ts',
   'src/db/postgres/repositories/connector-execution-repositories.ts',
+  'src/db/postgres/repositories/work-todo-repositories.ts',
   'src/db/postgres/repositories/index.ts',
 ];
 
@@ -31,6 +32,7 @@ const SQLITE_GITHUB_ADAPTERS = [
   'src/db/persistence/sqlite-github-hierarchy-repositories.ts',
   'src/db/persistence/sqlite-github-project-repositories.ts',
   'src/db/persistence/sqlite-github-recovery-repositories.ts',
+  'src/db/persistence/sqlite-work-todo-repositories.ts',
 ];
 
 function read(path: string): string {
@@ -74,7 +76,7 @@ describe('sync worker persistence packaging reachability', () => {
       if (path.startsWith('src/db/')) return [];
       if (path === 'src/lib/persistence/worker-runtime.ts') return [];
       const source = readFileSync(absolute, 'utf8');
-      return /(?:^|\n)import\s+[^;]*?from\s+['"]@\/db\/persistence\/sqlite-github-[^'"]+['"]/
+      return /(?:^|\n)import\s+[^;]*?from\s+['"]@\/db\/persistence\/sqlite-(?:github-|work-todo)[^'"]+['"]/
         .test(source)
         ? [path]
         : [];
@@ -91,6 +93,7 @@ describe('sync worker persistence packaging reachability', () => {
       'sqlite-github-hierarchy-repositories',
       'sqlite-github-project-repositories',
       'sqlite-github-recovery-repositories',
+      'sqlite-work-todo-repositories',
     ]) {
       expect(runtime).toContain(`import('@/db/persistence/${adapter}')`);
       expect(runtime).not.toMatch(
@@ -109,5 +112,19 @@ describe('sync worker persistence packaging reachability', () => {
     const worker = read('src/sync-worker.ts');
     expect(worker).toContain('githubWorkerCompositionPresent');
     expect(worker).toMatch(/startDependencyReconciliationResume\(\)/);
+  });
+
+  it('registers the Layer 4 connector-state composition atomically for PostgreSQL', () => {
+    const index = read('src/db/postgres/repositories/index.ts');
+    expect(index).toContain(
+      'export function createPostgresNonFinanceConnectorStateRepositories',
+    );
+    expect(index).toContain(
+      'connectorState: createPostgresNonFinanceConnectorStateRepositories(pool)',
+    );
+    expect(index).toContain('workTodo: createPostgresWorkTodoRepositories(pool)');
+
+    const runtime = read('src/lib/persistence/worker-runtime.ts');
+    expect(runtime).toContain('workTodo: createSqliteWorkTodoRepositories(sqlite, db)');
   });
 });

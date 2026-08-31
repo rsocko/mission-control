@@ -100,6 +100,20 @@ const LEGACY_GITHUB_OPERATOR_MODULES = [
   'src/lib/external-identities/write-outcome-resolution.ts',
 ] as const;
 
+/**
+ * Layer 4: the non-finance connector-state modules. The whole Work To Do bridge
+ * plus Microsoft To Do's hidden-list discovery and authenticated-user settings
+ * write must reach the database only through the worker persistence
+ * composition, so a PostgreSQL runtime never loads a SQLite adapter or schema.
+ */
+const MIGRATED_CONNECTOR_STATE_MODULES = [
+  'src/lib/connectors/work-todo/service.ts',
+  'src/lib/connectors/work-todo/index.ts',
+  'src/lib/connectors/microsoft-todo/index.ts',
+  'src/lib/connectors/rymessage/index.ts',
+  'src/lib/connectors/document-intelligence/index.ts',
+] as const;
+
 function listTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -251,5 +265,62 @@ describe('portable persistence dependency ratchet', () => {
     });
 
     expect(violations).toEqual([]);
+  });
+
+  it('keeps migrated connector-state modules behind the persistence ports', () => {
+    const violations = MIGRATED_CONNECTOR_STATE_MODULES.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      const runtimeDatabaseImport = new RegExp(
+        String.raw`(?<!import type )(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]@/db(?:['"]|/(?:index|schema)['"])`,
+      );
+      const dynamicDatabaseImport = /import\(\s*['"]@\/db(?:\/(?:index|schema))?['"]\s*\)/;
+      return runtimeDatabaseImport.test(source)
+        || dynamicDatabaseImport.test(source)
+        || /from\s+['"]pg['"]/.test(source)
+        || importsRawSqliteHandle(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps the Layer 4 connector-state ports free of driver imports', () => {
+    const ports = [
+      'src/db/persistence/work-todo.ts',
+      'src/db/persistence/work-todo-values.ts',
+    ];
+    const violations = ports.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      return /from\s+['"](?:better-sqlite3|pg|drizzle-orm[^'"]*)['"]/.test(source)
+        || /(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]@\/db(?:['"]|\/(?:index|schema)['"])/.test(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  /**
+   * The optional Rymessage source-side SQLite reader is an *external* connector
+   * transport (it opens RyMessage's own database file); it is never Mission
+   * Control persistence, and nothing in the ports may import it.
+   */
+  it('keeps the external Rymessage SQLite transport out of Mission Control persistence', () => {
+    const client = readFileSync(
+      join(process.cwd(), 'src/lib/connectors/rymessage/rymessage-client.ts'),
+      'utf8',
+    );
+    expect(client).toMatch(/import\(\s*'better-sqlite3'\s*\)/);
+    expect(importsRawSqliteHandle(client)).toBe(false);
+    expect(client).not.toMatch(/from\s+['"]@\/db(?:['"]|\/)/);
+
+    const importers = sourceFiles.filter((path) => {
+      const name = repoPath(path);
+      if (name === 'src/lib/connectors/rymessage/rymessage-client.ts') return false;
+      return /from\s+['"][^'"]*rymessage-client['"]/
+        .test(readFileSync(path, 'utf8'));
+    }).map(repoPath);
+    expect(importers).toEqual(['src/lib/connectors/rymessage/index.ts']);
   });
 });

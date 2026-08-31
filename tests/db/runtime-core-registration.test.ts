@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => {
         },
         execution: {} as WorkerPersistenceRepositories['execution'],
         github: {} as WorkerPersistenceRepositories['github'],
+        connectorState: {} as WorkerPersistenceRepositories['connectorState'],
       };
       workerRepositories.push(repository);
       return repository;

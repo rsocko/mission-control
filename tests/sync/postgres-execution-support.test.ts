@@ -61,10 +61,20 @@ describe('PostgreSQL generic connector execution support', () => {
     }
   });
 
+  it('accepts the Layer 4 non-finance connectors once their state is composed', () => {
+    for (const type of [
+      'microsoft-todo',
+      'microsoft-todo-work',
+      'rymessage',
+      'document-intelligence',
+    ]) {
+      expect(() => support.assertConfigSupported(config({ type }))).not.toThrow();
+      expect(() => support.assertConnectorSupported({ type })).not.toThrow();
+    }
+  });
+
   it.each([
     ['connector-owned finance', config({ type: 'finance-manager' })],
-    ['Microsoft To Do hidden-list state', config({ type: 'microsoft-todo' })],
-    ['connector-owned Work To Do bridge', config({ type: 'microsoft-todo-work' })],
     ['dependency relationships', config({
       capabilities: {
         ...config().capabilities,
@@ -78,7 +88,6 @@ describe('PostgreSQL generic connector execution support', () => {
 
   it.each([
     ['domain state', { type: 'custom-rest', syncDomainData: () => undefined }],
-    ['Microsoft To Do hidden-list state', { type: 'microsoft-todo' }],
     ['dependency state', { type: 'custom-rest', dependencySnapshotStrategy: 'task-stream' }],
     ['project state', { type: 'custom-rest', fetchProjectAssociations: () => undefined }],
   ])('rejects connector-owned %s before remote dispatch', (_label, connector) => {

@@ -476,6 +476,10 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       notificationCount: string;
       deliveryCount: string;
       insightDeliveryCount: string;
+      projectionStatus: string | null;
+      projectionError: string | null;
+      publicationOutcome: string | null;
+      publicationError: string | null;
       successfulRuns: string;
     }>(
       `SELECT
@@ -491,6 +495,14 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
           )) AS "deliveryCount",
          (SELECT count(*) FROM finance_insight_publication_delivery
           WHERE connector_id = $1 AND stage = 'evaluation-requested') AS "insightDeliveryCount",
+         (SELECT status FROM finance_insight_transaction_projection_state
+          WHERE connector_id = $1) AS "projectionStatus",
+         (SELECT last_error_code FROM finance_insight_transaction_projection_state
+          WHERE connector_id = $1) AS "projectionError",
+         (SELECT last_capture_outcome FROM finance_insight_publication_state
+          WHERE connector_id = $1) AS "publicationOutcome",
+         (SELECT last_error_code FROM finance_insight_publication_state
+          WHERE connector_id = $1) AS "publicationError",
          (SELECT count(*) FROM sync_log
           WHERE connector_id = $1 AND success = true) AS "successfulRuns"`,
       [connectorId],
@@ -500,6 +512,10 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       publicationCount: '1',
       notificationCount: '1',
       insightDeliveryCount: '1',
+      projectionStatus: 'succeeded',
+      projectionError: null,
+      publicationOutcome: 'idempotent',
+      publicationError: null,
       successfulRuns: '2',
     });
     expect(Number(state.rows[0].deliveryCount)).toBeGreaterThan(0);

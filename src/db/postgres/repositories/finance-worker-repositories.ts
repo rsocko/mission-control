@@ -28,7 +28,7 @@ import {
 } from '@/db/persistence/finance-snapshot';
 import {
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
-  type FinanceWorkerPersistence,
+  type FinanceCorePersistence,
 } from '@/db/persistence/finance-worker';
 
 type Client = Pool | PoolClient;
@@ -1177,6 +1177,46 @@ function createAttributionPersistence(
     );
   }
 
+  async function assertAttributionFence(
+    client: PoolClient,
+    input: {
+      connectorId: string;
+      generationId: string;
+      fenceMode?: 'snapshot' | 'row-generation';
+      items: ReadonlyArray<{ transactionId: string }>;
+    },
+  ): Promise<void> {
+    if (input.fenceMode === 'row-generation') {
+      if (input.items.length === 0) return;
+      const rows = await query<{ id: string }>(
+        client,
+        `SELECT id FROM finance_transactions
+         WHERE connector_instance_id = $1
+           AND last_seen_generation_id = $2
+           AND id = ANY($3::text[])
+         FOR UPDATE`,
+        [
+          input.connectorId,
+          input.generationId,
+          input.items.map((item) => item.transactionId),
+        ],
+      );
+      if (new Set(rows.map((row) => row.id)).size !== input.items.length) {
+        throw new FinanceAttributionFenceError();
+      }
+      return;
+    }
+    const fence = await query<{ present: number }>(
+      client,
+      `SELECT 1 AS present FROM finance_sync_state
+       WHERE connector_id = $1 AND status = 'running'
+         AND current_generation_id = $2
+       FOR UPDATE`,
+      [input.connectorId, input.generationId],
+    );
+    if (fence.length === 0) throw new FinanceAttributionFenceError();
+  }
+
   return {
     async readRows(connectorId, upstreamTransactionIds) {
       assertBatch(
@@ -1209,15 +1249,7 @@ function createAttributionPersistence(
         'Finance attribution result write',
       );
       await transaction(pool, async (client) => {
-        const fence = await query<{ present: number }>(
-          client,
-          `SELECT 1 AS present FROM finance_sync_state
-           WHERE connector_id = $1 AND status = 'running'
-             AND current_generation_id = $2
-           FOR UPDATE`,
-          [input.connectorId, input.generationId],
-        );
-        if (fence.length === 0) throw new FinanceAttributionFenceError();
+        await assertAttributionFence(client, input);
         for (const item of input.items) {
           const result = item.result;
           if (!item.manualResultMatches) {
@@ -1374,15 +1406,7 @@ function createAttributionPersistence(
         'Finance attribution unavailable write',
       );
       await transaction(pool, async (client) => {
-        const fence = await query<{ present: number }>(
-          client,
-          `SELECT 1 AS present FROM finance_sync_state
-           WHERE connector_id = $1 AND status = 'running'
-             AND current_generation_id = $2
-           FOR UPDATE`,
-          [input.connectorId, input.generationId],
-        );
-        if (fence.length === 0) throw new FinanceAttributionFenceError();
+        await assertAttributionFence(client, input);
         for (const item of input.items) {
           const manual = item.stateSnapshot.kidAssignmentMethod === 'manual';
           const current = await query<{ present: number }>(
@@ -1451,6 +1475,12 @@ function createAttributionPersistence(
     },
 
     async finish(command) {
+      const fenceClause = command.fenceMode === 'row-generation'
+        ? ''
+        : `AND (
+             current_generation_id = $9
+             OR (current_generation_id IS NULL AND last_successful_generation_id = $9)
+           )`;
       const result = await pool.query(
         `UPDATE finance_sync_state
          SET attribution_status = $1,
@@ -1463,10 +1493,7 @@ function createAttributionPersistence(
                ELSE attribution_engine_version END,
              updated_at = $2
          WHERE connector_id = $8
-           AND (
-             current_generation_id = $9
-             OR (current_generation_id IS NULL AND last_successful_generation_id = $9)
-           )`,
+           ${fenceClause}`,
         [
           command.status,
           command.attemptedAt,
@@ -1476,7 +1503,7 @@ function createAttributionPersistence(
           command.succeeded,
           command.engineVersion,
           command.connectorId,
-          command.generationId,
+          ...(command.fenceMode === 'row-generation' ? [] : [command.generationId]),
         ],
       );
       return { recorded: result.rowCount === 1 };
@@ -1487,7 +1514,7 @@ function createAttributionPersistence(
 export function createPostgresFinanceWorkerPersistence(
   pool: Pool,
   options: PostgresFinanceAdapterOptions = {},
-): FinanceWorkerPersistence {
+): FinanceCorePersistence {
   const idFactory = options.idFactory ?? randomUUID;
   return {
     identity: {

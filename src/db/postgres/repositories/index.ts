@@ -20,6 +20,12 @@ import { createPostgresGitHubProjectRepositories } from './github-project-reposi
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
+import { createPostgresFinanceInsightPersistence } from './finance-insights-repositories';
+import {
+  createPostgresFinanceAttentionRepairPersistence,
+  createPostgresFinanceAttentionRoutingPersistence,
+} from './finance-attention-repositories';
+import { createPostgresFinanceInsightNotificationLifecyclePersistence } from './finance-insight-notification-lifecycle-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -37,6 +43,14 @@ export { createPostgresGitHubProjectRepositories } from './github-project-reposi
 export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 export { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
+export { createPostgresFinanceInsightPersistence } from './finance-insights-repositories';
+export {
+  createPostgresFinanceAttentionRepairPersistence,
+  createPostgresFinanceAttentionRoutingPersistence,
+} from './finance-attention-repositories';
+export {
+  createPostgresFinanceInsightNotificationLifecyclePersistence,
+} from './finance-insight-notification-lifecycle-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -101,12 +115,23 @@ export function createPostgresWorkerPersistenceRepositories(
   pool: Pool,
   core: CorePersistenceRepositories,
 ): WorkerPersistenceRepositories {
+  const financeCore = createPostgresFinanceWorkerPersistence(pool);
   return {
     connectors: core.connectors,
     syncRuns: new PostgresSyncRunRepository(db),
     execution: createPostgresConnectorExecutionRepositories(pool),
     github: createPostgresGitHubWorkerRepositories(pool),
     connectorState: createPostgresNonFinanceConnectorStateRepositories(pool),
-    finance: createPostgresFinanceWorkerPersistence(pool),
+    finance: {
+      ...financeCore,
+      insights: {
+        ...createPostgresFinanceInsightPersistence(pool),
+        notifications: createPostgresFinanceInsightNotificationLifecyclePersistence(pool),
+      },
+      attention: {
+        routing: createPostgresFinanceAttentionRoutingPersistence(pool),
+        repair: createPostgresFinanceAttentionRepairPersistence(pool),
+      },
+    },
   };
 }

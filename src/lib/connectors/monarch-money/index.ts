@@ -153,7 +153,7 @@ export class FinanceManagerConnector implements IConnector {
           if (context.signal?.aborted) throw error;
         }
       }
-      const publication = captureFinanceInsightPublication(config, result);
+      const publication = await captureFinanceInsightPublication(config, result);
       let insightNotificationsAdded = 0;
       try {
         const {
@@ -162,7 +162,7 @@ export class FinanceManagerConnector implements IConnector {
         } = await import('@/lib/finance-insights/orchestrator');
         const insightPublicationId = 'publicationId' in publication
           ? publication.publicationId
-          : findFinanceInsightContinuationPublicationId(config.id);
+          : await findFinanceInsightContinuationPublicationId(config.id);
         if (insightPublicationId) {
           const insightResult = await runFinanceInsightIngestion({
             config,
@@ -199,7 +199,7 @@ export class FinanceManagerConnector implements IConnector {
           'Finance insight shadow ingestion failed',
         );
       }
-      pruneFinanceInsightOccurrenceCache();
+      await pruneFinanceInsightOccurrenceCache();
       const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
       logger.info(

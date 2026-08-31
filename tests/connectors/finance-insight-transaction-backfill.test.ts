@@ -5,8 +5,14 @@ import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorConfig } from '@/types';
 
+const attributionCoordinatorConstructor = vi.hoisted(() => vi.fn());
+
 vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
   FinanceAttributionCoordinator: class {
+    constructor(...args: unknown[]) {
+      attributionCoordinatorConstructor(...args);
+    }
+
     async attributePage(): Promise<void> {}
     finish(): void {}
   },
@@ -93,6 +99,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  attributionCoordinatorConstructor.mockClear();
   for (const table of [
     'finance_insight_transaction_window_proofs',
     'finance_insight_transaction_backfill_plans',
@@ -173,6 +180,18 @@ describe.sequential('Finance insight transaction backfill', () => {
       coverageStart: '2021-02-01',
       coverageEnd: '2024-02-29',
     });
+    expect(attributionCoordinatorConstructor).toHaveBeenCalledWith(
+      config.id,
+      expect.objectContaining({
+        financeConfig: config,
+        persistence: expect.objectContaining({
+          attribution: expect.any(Object),
+          identity: expect.any(Object),
+        }),
+        fenceMode: 'row-generation',
+        generationId: expect.any(String),
+      }),
+    );
     await expect(runFinanceInsightTransactionBackfill({
       config,
       idempotencyKey: 'invented-backfill-key',

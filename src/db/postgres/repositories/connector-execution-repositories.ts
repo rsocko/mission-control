@@ -1,14 +1,31 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
-import type { ConnectorConfig } from '@/types';
+import type { ConnectorConfig, NotificationLevel } from '@/types';
 import {
   getNotificationLevelRank,
+  isNotificationLevel,
+  notificationMeetsMinimumLevel,
   normalizeNotificationLevel,
 } from '@/lib/notifications/levels';
 import {
+  FINANCE_NOTIFICATION_TYPES,
+  financeNotificationCatalogKey,
+} from '@/lib/notifications/push-policy/catalogs';
+import { isPushPreview } from '@/lib/notifications/push-policy/catalog';
+import {
+  resolveNotificationPushPolicy,
+  type NotificationPushRuleValues,
+  type ResolvedNotificationPushPolicy,
+} from '@/lib/notifications/push-policy/policy';
+import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from '@/lib/notifications/push-policy/rules';
+import { redactPushText } from '@/lib/notifications/push-text';
+import {
   legacyStateFromLifecycle,
+  needsAttention,
   shouldReopenForSourceActivity,
 } from '@/lib/notifications/lifecycle';
+import { getTimezone } from '@/lib/mode';
+import { getApnsConfiguration, isApnsConfigured } from '@/lib/push/apns-config';
 import type {
   ConnectorExecutionRepositories,
   ConnectorNotificationCommand,
@@ -566,15 +583,206 @@ async function notificationDeliveryState(
       ? { status: 'pending', reason: null }
       : { status: 'suppressed', reason: 'no_subscription' };
   }
-  if (!process.env.APNS_KEY_ID || !process.env.APNS_TEAM_ID) {
+  if (!isApnsConfigured()) {
     return { status: 'suppressed', reason: 'channel_unconfigured' };
   }
-  const [registration] = await query(client, `
-    SELECT 1 FROM apns_registrations WHERE invalidated_at IS NULL LIMIT 1
-  `);
+  const configuration = getApnsConfiguration();
+  const [registration] = await query(
+    client,
+    `SELECT 1 FROM apns_registrations
+     WHERE invalidated_at IS NULL AND environment = $1 AND topic = $2
+     LIMIT 1`,
+    [configuration.environment, configuration.topic],
+  );
   return registration
     ? { status: 'pending', reason: null }
     : { status: 'suppressed', reason: 'no_subscription' };
+}
+
+interface PostgresNotificationPushRule {
+      id: string;
+      templateKey: string;
+      enabled: boolean;
+      minLevel: string;
+      preview: string;
+      maxPerHour: number | null;
+    }
+
+    function postgresPushRule(
+      rule: PostgresNotificationPushRule | undefined,
+      policyTemplateKey: string,
+    ): NotificationPushRuleValues | null {
+      if (!rule) return null;
+      if (!isNotificationLevel(rule.minLevel) || !isPushPreview(rule.preview)) {
+        throw new Error(`Stored notification push rule "${rule.id}" is invalid`);
+      }
+      if (
+        rule.maxPerHour !== null
+        && (
+          !Number.isInteger(rule.maxPerHour)
+          || rule.maxPerHour < 1
+          || rule.maxPerHour > MAX_NOTIFICATION_PUSHES_PER_HOUR
+        )
+      ) {
+        throw new Error(`Stored notification push rule "${rule.id}" has an invalid rate limit`);
+      }
+      return {
+        templateKey: rule.templateKey === '*' ? '*' : policyTemplateKey,
+        enabled: rule.enabled,
+        minLevel: rule.minLevel,
+        preview: rule.preview,
+        maxPerHour: rule.maxPerHour,
+      };
+    }
+
+    async function resolvePostgresFinancePushPolicy(
+      client: PoolClient,
+      input: ConnectorNotificationCommand['input'],
+      level: NotificationLevel,
+    ): Promise<ResolvedNotificationPushPolicy> {
+      const policyTemplateKey = financeNotificationCatalogKey(input.templateKey ?? '');
+      const rules = await query<PostgresNotificationPushRule>(
+        client,
+        `SELECT id, template_key AS "templateKey", enabled, min_level AS "minLevel",
+                preview, max_per_hour AS "maxPerHour"
+         FROM notification_push_rules
+         WHERE connector_instance_id = $1
+           AND template_key IN ($2, $3, '*')
+         ORDER BY CASE
+           WHEN template_key = $2 THEN 0
+           WHEN template_key = $3 THEN 1
+           ELSE 2
+         END`,
+        [input.connectorInstanceId, input.templateKey, policyTemplateKey],
+      );
+      const exact = rules.find((rule) => rule.templateKey !== '*');
+      const wildcard = rules.find((rule) => rule.templateKey === '*');
+      const connectorRows = await query<{ enabled: boolean; deletedAt: string | null }>(
+        client,
+        `SELECT enabled, deleted_at AS "deletedAt"
+         FROM connector_configs WHERE id = $1`,
+        [input.connectorInstanceId],
+      );
+      const connector = connectorRows[0];
+      return resolveNotificationPushPolicy({
+        templateKey: policyTemplateKey,
+        level,
+        catalog: FINANCE_NOTIFICATION_TYPES,
+        exactRule: postgresPushRule(exact, policyTemplateKey),
+        wildcardRule: postgresPushRule(wildcard, policyTemplateKey),
+        connectorDeleted: !connector || connector.deletedAt !== null,
+        connectorDisabled: connector ? !connector.enabled : false,
+      });
+    }
+
+    function postgresBooleanSetting(value: unknown): boolean {
+      if (typeof value === 'boolean') return value;
+      return value !== null
+        && typeof value === 'object'
+        && !Array.isArray(value)
+        && (value as Record<string, unknown>).enabled === true;
+    }
+
+    function currentHour(now: Date, timezone: string): number {
+      return Number.parseInt(new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        hour: 'numeric',
+        hourCycle: 'h23',
+      }).format(now), 10);
+    }
+
+    function quietHour(hour: number, start: number | null, end: number | null): boolean {
+      if (start === null || end === null) return false;
+      return start <= end
+        ? hour >= start && hour < end
+        : hour >= start || hour < end;
+    }
+
+    async function financeDeliverySuppression(
+      client: PoolClient,
+      notification: {
+        id: string;
+        connectorInstanceId: string;
+        templateKey: string | null;
+        state: string;
+        disposition: string;
+        sourceState: string;
+        readState: string;
+        level: NotificationLevel;
+      },
+      policy: ResolvedNotificationPushPolicy,
+      channel: 'web_push' | 'apns',
+      now: Date,
+    ): Promise<{ reason: string | null; gates: Record<string, boolean> }> {
+      const [setting] = await query<{ value: unknown }>(
+        client,
+        `SELECT value FROM app_settings WHERE key = 'push_delivery_enabled'`,
+      );
+      const channelEnabled = setting ? postgresBooleanSetting(setting.value) : true;
+      const [preferences] = await query<{
+        doNotDisturb: boolean;
+        quietStart: number | null;
+        quietEnd: number | null;
+      }>(
+        client,
+        `SELECT do_not_disturb AS "doNotDisturb", quiet_start AS "quietStart",
+                quiet_end AS "quietEnd"
+         FROM push_preferences WHERE id = 'default'`,
+      );
+      const dnd = preferences?.doNotDisturb ?? false;
+      const quietHours = preferences
+        ? quietHour(currentHour(now, getTimezone()), preferences.quietStart, preferences.quietEnd)
+        : false;
+      const availability = await notificationDeliveryState(client, channel);
+      const channelConfigured = availability.reason !== 'channel_unconfigured';
+      const hasSubscriptions = availability.reason !== 'no_subscription';
+      const gates = { channelEnabled, channelConfigured, dnd, quietHours, hasSubscriptions };
+      if (!needsAttention(notification, now)) return { reason: 'not_attention_eligible', gates };
+      if (!channelEnabled) return { reason: 'channel_disabled', gates };
+      if (!channelConfigured) return { reason: 'channel_unconfigured', gates };
+      if (dnd) return { reason: 'dnd', gates };
+      if (quietHours) return { reason: 'quiet_hours', gates };
+      if (!policy.enabled) return { reason: 'rule_disabled', gates };
+      if (!policy.shouldPush) return { reason: 'below_minimum_level', gates };
+      if (!hasSubscriptions) return { reason: 'no_subscription', gates };
+
+      const since = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
+      const [globalCount] = await query<{ count: string }>(
+        client,
+        `SELECT COUNT(DISTINCT notification_id) AS count
+         FROM notification_delivery_events
+         WHERE created_at >= $1 AND status IN ('pending', 'sending', 'sent', 'partial')`,
+        [since],
+      );
+      const configuredLimit = Number.parseInt(process.env.PUSH_GLOBAL_MAX_PER_HOUR ?? '', 10);
+      const globalLimit = Number.isInteger(configuredLimit) && configuredLimit > 0
+        ? configuredLimit
+        : 100;
+      if (Number(globalCount?.count ?? 0) >= globalLimit) {
+        return { reason: 'rate_limited', gates };
+      }
+      if (policy.maxPerHour !== null) {
+        const templatePredicate = policy.sourceDetail === 'wildcard'
+          ? ''
+          : 'AND notification.template_key = $3';
+        const params: unknown[] = [since, notification.connectorInstanceId];
+        if (policy.sourceDetail !== 'wildcard') params.push(notification.templateKey ?? '');
+        const [ruleCount] = await query<{ count: string }>(
+          client,
+          `SELECT COUNT(DISTINCT delivery.notification_id) AS count
+           FROM notification_delivery_events delivery
+           INNER JOIN notifications notification ON notification.id = delivery.notification_id
+           WHERE delivery.created_at >= $1
+             AND delivery.status IN ('pending', 'sending', 'sent', 'partial')
+             AND notification.connector_instance_id = $2
+             ${templatePredicate}`,
+          params,
+        );
+        if (Number(ruleCount?.count ?? 0) >= policy.maxPerHour) {
+          return { reason: 'rate_limited', gates };
+        }
+      }
+      return { reason: null, gates };
 }
 
 async function ingestNotification(
@@ -674,6 +882,8 @@ async function ingestNotification(
       `Notification source identity "${input.sourceId}" belongs to a different connector instance`,
     );
   }
+  let currentDisposition = stored.disposition;
+  let currentReadState = stored.readState;
   if (!created) {
     const reopen = shouldReopenForSourceActivity(
       {
@@ -690,6 +900,8 @@ async function ingestNotification(
     );
     const disposition = reopen ? 'inbox' : stored.disposition;
     const readState = reopen ? input.readState : stored.readState;
+    currentDisposition = disposition;
+    currentReadState = readState;
     await client.query(
       `
         UPDATE notifications SET
@@ -788,11 +1000,23 @@ async function ingestNotification(
   const systemDeliveryType = input.connectorType === 'system'
     && input.connectorInstanceId === 'push-triggers'
     && input.templateKey === 'task_reminder';
-  const [storedRule] = input.templateKey
-    ? await query<{ enabled: boolean }>(
+  if (input.connectorType === 'finance-manager') {
+    await client.query(
+      'SELECT pg_advisory_xact_lock(hashtext($1))',
+      ['notification-delivery-policy:finance'],
+    );
+  }
+  const financePolicy = input.connectorType === 'finance-manager'
+    ? await resolvePostgresFinancePushPolicy(client, input, normalized.level)
+    : null;
+  if (financePolicy && !financePolicy.eligible) {
+    return { id: stored.id, created, pendingDelivery: false };
+  }
+  const [storedRule] = !financePolicy && input.templateKey
+    ? await query<{ enabled: boolean; minLevel: string }>(
         client,
         `
-          SELECT enabled
+          SELECT enabled, min_level AS "minLevel"
           FROM notification_push_rules
           WHERE connector_instance_id = $1
             AND template_key IN ($2, '*')
@@ -801,17 +1025,76 @@ async function ingestNotification(
         `,
         [input.connectorInstanceId, input.templateKey],
       )
-    : [];
-  if (!systemDeliveryType && !storedRule) {
+    : [undefined];
+  if (!systemDeliveryType && !storedRule && !financePolicy) {
     return { id: stored.id, created, pendingDelivery: false };
   }
-  let pendingDelivery = false;
+  const lifecycle = {
+    id: stored.id,
+    connectorInstanceId: input.connectorInstanceId,
+    templateKey: input.templateKey,
+    state: legacyStateFromLifecycle({
+      readState: currentReadState as Parameters<typeof legacyStateFromLifecycle>[0]['readState'],
+      disposition: currentDisposition as Parameters<typeof legacyStateFromLifecycle>[0]['disposition'],
+      sourceState: input.sourceState,
+    }),
+    disposition: currentDisposition,
+    sourceState: input.sourceState,
+    readState: currentReadState,
+    level: normalized.level,
+  };
+  const deliveries: Array<{
+    channel: 'web_push' | 'apns';
+    status: 'pending' | 'suppressed';
+    reason: string | null;
+    gates?: Record<string, boolean>;
+  }> = [];
   for (const channel of ['web_push', 'apns'] as const) {
-    const delivery = storedRule?.enabled === false
-      ? { status: 'suppressed' as const, reason: 'rule_disabled' }
-      : await notificationDeliveryState(client, channel);
-    pendingDelivery ||= delivery.status === 'pending';
-    await client.query(
+    if (financePolicy) {
+      const suppression = await financeDeliverySuppression(
+        client,
+        lifecycle,
+        financePolicy,
+        channel,
+        new Date(now),
+      );
+      deliveries.push({
+        channel,
+        status: suppression.reason ? 'suppressed' : 'pending',
+        reason: suppression.reason,
+        gates: suppression.gates,
+      });
+      continue;
+    }
+    if (storedRule?.enabled === false) {
+      deliveries.push({ channel, status: 'suppressed', reason: 'rule_disabled' });
+      continue;
+    }
+    if (
+      storedRule
+      && !notificationMeetsMinimumLevel(
+        normalized.level,
+        normalizeNotificationLevel(storedRule.minLevel).level,
+      )
+    ) {
+      deliveries.push({ channel, status: 'suppressed', reason: 'below_minimum_level' });
+      continue;
+    }
+    const delivery = await notificationDeliveryState(client, channel);
+    deliveries.push({ channel, ...delivery });
+  }
+  let pendingDelivery = false;
+  for (const delivery of deliveries) {
+    const payload = {
+      notificationId: stored.id,
+      title: redactPushText(input.title, 160),
+      tag: `mc:${stored.id}`,
+      url: input.navigationTarget ?? `/notifications?id=${encodeURIComponent(stored.id)}`,
+      ...(financePolicy?.preview === 'title_and_body' && input.body
+        ? { body: redactPushText(input.body, 512) }
+        : {}),
+    };
+    const insertedDelivery = await client.query(
       `
         INSERT INTO notification_delivery_events (
           id, notification_id, channel, dedupe_key, status, suppression_reason,
@@ -822,34 +1105,49 @@ async function ingestNotification(
           $1, $2, $3, $4, $5, $6, $7, $8, 0, $9, 0, 0, 0, $10
         )
         ON CONFLICT(dedupe_key) DO NOTHING
+        RETURNING id
       `,
       [
         randomUUID(),
         stored.id,
-        channel,
-        `${channel}:${stored.id}:${input.occurrenceKey}`,
+        delivery.channel,
+        `${delivery.channel}:${stored.id}:${input.occurrenceKey}`,
         delivery.status,
         delivery.reason,
         {
           version: 1,
-          channel,
+          channel: delivery.channel,
           connectorType: input.connectorType,
           connectorInstanceId: input.connectorInstanceId,
+          templateKey: input.templateKey,
+          ...(financePolicy
+            ? {
+                source: financePolicy.source,
+                sourceDetail: financePolicy.sourceDetail,
+                minLevel: financePolicy.minLevel,
+                preview: financePolicy.preview,
+                maxPerHour: financePolicy.maxPerHour,
+                gates: delivery.gates,
+              }
+            : {}),
           decision: delivery.status,
           suppressionReason: delivery.reason,
         },
-        {
-          notificationId: stored.id,
-          title: input.title.slice(0, 160),
-          tag: `mc:${stored.id}`,
-          url: input.navigationTarget ?? `/notifications?id=${encodeURIComponent(stored.id)}`,
-        },
+        payload,
         delivery.status === 'pending' ? now : null,
         now,
       ],
     );
+    pendingDelivery ||= insertedDelivery.rowCount === 1 && delivery.status === 'pending';
   }
   return { id: stored.id, created, pendingDelivery };
+}
+
+export function ingestPostgresConnectorNotificationInTransaction(
+  client: PoolClient,
+  command: ConnectorNotificationCommand,
+): Promise<{ id: string; created: boolean; pendingDelivery: boolean }> {
+  return ingestNotification(client, command);
 }
 
 export function createPostgresConnectorExecutionRepositories(

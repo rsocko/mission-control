@@ -1,43 +1,45 @@
 import 'server-only';
 
-import { and, eq } from 'drizzle-orm';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
-import { runTransaction, sqlite } from '@/db';
-import { notificationActions, notifications } from '@/db/schema';
-import { buildMonarchExternalTargetLink } from '@/lib/finance/external-targets';
 import { getTimezone } from '@/lib/mode';
-import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-  type CreateNotificationResult,
-  wakeNotificationDeliveryDispatcher,
-} from '@/lib/notifications/service';
-import {
-  materializeNotificationActions,
-  registerDefaultNotificationProviders,
-  resolveNotificationProvider,
-} from '@/lib/notifications/providers';
-import type { InboundNotification } from '@/types';
+import type { CreateNotificationInput } from '@/lib/notifications/service';
+import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
+import type {
+  ConnectorNotificationInput,
+} from '@/db/persistence/connector-execution';
+import type {
+  FinanceInsightNotificationIngestItem,
+} from '@/db/persistence/finance-insights';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { financeInsightDigestV1, type CanonicalJsonValue } from './canonical';
 import type {
-  ExternalTargetV1,
   InsightOccurrenceSummaryV1,
 } from './contract';
 import {
   financeInsightDetailTarget,
   financeInsightPeriodTarget,
 } from './navigation';
+import {
+  FINANCE_MONTHLY_DIGEST_GATE,
+  gateEnabled,
+  isFinanceInsightAlertEligible,
+  isOccurrenceNotificationEligible,
+  notificationMetadata,
+  primaryMonarchTarget,
+  type FinanceNotificationEnvironment,
+} from './notification-shared';
 import { FINANCE_PROVIDER_ALIASES } from './provider';
 
-const MAX_FRESH_AGE_MS = 48 * 60 * 60 * 1_000;
+export {
+  FINANCE_IMMEDIATE_NOTIFICATION_GATE,
+  FINANCE_MONTHLY_DIGEST_GATE,
+  isFinanceInsightAlertEligible,
+  isImmediateLargeTransactionEligible,
+  isImmediateRecurringIncreaseEligible,
+  isMaterialRecurringIncrease,
+} from './notification-shared';
+
 const MAX_DIGEST_MOVERS = 10;
-
-export const FINANCE_IMMEDIATE_NOTIFICATION_GATE =
-  'TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED';
-export const FINANCE_MONTHLY_DIGEST_GATE =
-  'TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED';
-
-type FinanceNotificationEnvironment = Readonly<Record<string, string | undefined>>;
 
 export interface FinanceMonthlyDigestSchedule {
   period: { start: string; end: string };
@@ -51,13 +53,6 @@ interface FinanceDigestMover {
   kind: 'categoryVariance' | 'merchantVariance';
   absoluteDeltaMinor: number | null;
   percentageDeltaBasisPoints: number | null;
-}
-
-function gateEnabled(
-  name: string,
-  environment: FinanceNotificationEnvironment,
-): boolean {
-  return environment[name]?.trim().toLowerCase() === 'true';
 }
 
 function calendarDate(year: number, monthIndex: number, day: number): string {
@@ -125,77 +120,6 @@ function notificationLevel(
   if (severity === 'high') return 'action_needed';
   if (severity === 'medium') return 'heads_up';
   return 'fyi';
-}
-
-function primaryMonarchTarget(
-  item: InsightOccurrenceSummaryV1,
-): ExternalTargetV1 | null {
-  return item.targets.find((target) => (
-    target.system === 'monarch' && buildMonarchExternalTargetLink(target) !== null
-  )) ?? null;
-}
-
-export function isFinanceInsightAlertEligible(
-  item: InsightOccurrenceSummaryV1,
-  now = new Date(),
-): boolean {
-  const sourceAsOf = item.freshness.sourceAsOf === null
-    ? Number.NaN
-    : Date.parse(item.freshness.sourceAsOf);
-  return item.analysisState === 'qualified'
-    && item.sourceLifecycle === 'open'
-    && item.freshness.state === 'fresh'
-    && item.provenance.completeness === 'complete'
-    && Number.isFinite(sourceAsOf)
-    && sourceAsOf <= now.getTime()
-    && now.getTime() - sourceAsOf <= MAX_FRESH_AGE_MS
-    && primaryMonarchTarget(item) !== null;
-}
-
-export function isMaterialRecurringIncrease(
-  item: InsightOccurrenceSummaryV1,
-): boolean {
-  return item.kind === 'recurringAmountChange'
-    && !item.reasonCodes.includes('recurring_decrease_analysis_only')
-    && item.absoluteDelta !== null
-    && item.absoluteDelta.amountMinor > 0;
-}
-
-export function isImmediateLargeTransactionEligible(
-  item: InsightOccurrenceSummaryV1,
-  environment: FinanceNotificationEnvironment = process.env,
-): boolean {
-  return item.kind === 'largeTransaction'
-    && item.confidence !== 'low'
-    && gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE, environment);
-}
-
-export function isImmediateRecurringIncreaseEligible(
-  item: InsightOccurrenceSummaryV1,
-  environment: FinanceNotificationEnvironment = process.env,
-): boolean {
-  return isMaterialRecurringIncrease(item)
-    && gateEnabled(FINANCE_IMMEDIATE_NOTIFICATION_GATE, environment);
-}
-
-function notificationMetadata(item: InsightOccurrenceSummaryV1) {
-  return {
-    notificationType: item.kind,
-    insightId: item.insightId,
-    occurrenceId: item.occurrenceId,
-    deliveryRevision: item.deliveryRevision,
-    sourceLifecycle: item.sourceLifecycle,
-    confidence: item.confidence,
-    baselineSufficiency: item.baselineSufficiency,
-    freshnessState: item.freshness.state,
-    entityDisplayName: item.entity.displayName,
-    observationPeriod: item.observationPeriod,
-    observedAmountMinor: item.observedValue?.amountMinor ?? null,
-    absoluteDeltaMinor: item.absoluteDelta?.amountMinor ?? null,
-    percentageDeltaBasisPoints: item.percentageDeltaBasisPoints,
-    currency: item.currency,
-    primaryTarget: primaryMonarchTarget(item),
-  };
 }
 
 export function buildFinanceInsightNotificationInput(
@@ -355,77 +279,6 @@ export function buildFinanceMonthlyDigestInput(input: {
   };
 }
 
-function isImmediateNotificationEligible(
-  item: InsightOccurrenceSummaryV1,
-  now: Date,
-  environment: FinanceNotificationEnvironment,
-): boolean {
-  return isFinanceInsightAlertEligible(item, now)
-    && (
-      isImmediateLargeTransactionEligible(item, environment)
-      || isImmediateRecurringIncreaseEligible(item, environment)
-    );
-}
-
-function isOccurrenceNotificationEligible(
-  item: InsightOccurrenceSummaryV1,
-  now: Date,
-  environment: FinanceNotificationEnvironment,
-): boolean {
-  return isImmediateNotificationEligible(item, now, environment);
-}
-
-export function reconcileFinanceInsightNotificationLifecycle(
-  transaction: Parameters<typeof createNotificationsInTransaction>[0],
-  connectorId: string,
-  items: readonly InsightOccurrenceSummaryV1[],
-  now: Date,
-  environment: FinanceNotificationEnvironment = process.env,
-): void {
-  const nowIso = now.toISOString();
-  for (const item of items) {
-    if (
-      item.sourceLifecycle === 'open'
-      && isOccurrenceNotificationEligible(item, now, environment)
-    ) {
-      continue;
-    }
-
-    const sourceId = financeInsightNotificationSourceId(connectorId, item.occurrenceId);
-    const existing = transaction.select({
-      id: notifications.id,
-      disposition: notifications.disposition,
-      sourceResolvedAt: notifications.sourceResolvedAt,
-    }).from(notifications).where(and(
-      eq(notifications.sourceId, sourceId),
-      eq(notifications.connectorType, 'finance-manager'),
-      eq(notifications.connectorInstanceId, connectorId),
-    )).get();
-    if (!existing) continue;
-
-    const state = existing.disposition === 'dismissed'
-      ? 'dismissed'
-      : existing.disposition === 'handled'
-        ? 'archived'
-        : 'resolved';
-    transaction.update(notifications).set({
-      state,
-      sourceState: 'resolved',
-      sourceResolvedAt: existing.sourceResolvedAt ?? item.resolvedAt ?? nowIso,
-      lastSourceActivityAt: item.updatedAt,
-      lastSourceActivityKey: `${item.occurrenceId}:${item.deliveryRevision}`,
-      lastSourceSyncedAt: nowIso,
-      isActionable: false,
-      primaryActionId: null,
-      metadata: notificationMetadata(item),
-    }).where(eq(notifications.id, existing.id)).run();
-    transaction.delete(notificationActions).where(and(
-      eq(notificationActions.notificationId, existing.id),
-      eq(notificationActions.createdBy, 'connector'),
-    )).run();
-  }
-}
-
 export function selectFinanceInsightNotificationInputs(
   connectorId: string,
   items: readonly InsightOccurrenceSummaryV1[],
@@ -452,81 +305,59 @@ export function selectFinanceInsightNotificationInputs(
   return digest ? [...occurrenceInputs, digest] : occurrenceInputs;
 }
 
-function connectorSelectionResolved(connectorId: string): boolean {
-  const placeholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
-  const rows = sqlite.prepare(`
-    SELECT id FROM connector_configs
-    WHERE enabled = 1 AND deleted_at IS NULL
-      AND type IN (${placeholders})
-    ORDER BY id
-  `).all(...FINANCE_PROVIDER_ALIASES) as Array<{ id: string }>;
-  return rows.length === 1 && rows[0]!.id === connectorId;
-}
-
-function providerNotification(
-  result: CreateNotificationResult,
-): InboundNotification {
-  const notification = result.notification;
+/**
+ * Converts a finance-built `CreateNotificationInput` into the portable
+ * `ConnectorNotificationInput` shape accepted by
+ * `FinanceInsightPersistence.notifications.runLifecycle`, matching how the
+ * generic (already-migrated) connector notification path represents
+ * notifications on both backends. `groupKey`/`dedupeKey` are not part of
+ * `ConnectorNotificationInput` (matching the existing generic
+ * connector-notification adapters, which have no equivalent fields either);
+ * they travel alongside it as `FinanceInsightNotificationIngestItem.groupKey`/
+ * `.dedupeKey` instead, see `toFinanceInsightNotificationIngestItem` below.
+ */
+function toConnectorNotificationInput(input: CreateNotificationInput): ConnectorNotificationInput {
+  const receivedAt = input.receivedAt ?? new Date().toISOString();
   return {
-    id: notification.id,
-    sourceId: notification.sourceId,
-    connectorType: notification.connectorType,
-    connectorInstanceId: notification.connectorInstanceId,
-    title: notification.title,
-    body: notification.body ?? undefined,
-    level: notification.level as InboundNotification['level'],
-    category: notification.category,
-    isRead: notification.readState === 'read',
-    isActionable: notification.isActionable,
-    receivedAt: notification.receivedAt,
-    hubProjectIds: [],
-    tags: [],
-    metadata: notification.metadata as Record<string, unknown>,
+    id: input.id ?? crypto.randomUUID(),
+    sourceId: input.sourceId,
+    connectorType: input.connectorType,
+    connectorInstanceId: input.connectorInstanceId,
+    title: input.title,
+    body: input.body ?? null,
+    level: input.level ?? 'fyi',
+    category: input.category ?? 'finance',
+    templateKey: input.templateKey ?? null,
+    readState: input.readState ?? 'unread',
+    disposition: input.disposition,
+    sourceState: input.sourceState ?? 'active',
+    syncState: input.syncState,
+    sourceActivityAt: input.sourceActivityAt ?? null,
+    sourceActivityKey: input.sourceActivityKey ?? null,
+    reopenPolicy: input.reopenPolicy ?? 'handled_and_dismissed',
+    occurrenceKey: input.occurrenceKey ?? 'initial',
+    isActionable: input.isActionable ?? false,
+    primaryActionId: input.primaryActionId ?? null,
+    receivedAt,
+    sortAt: input.sortAt ?? receivedAt,
+    relatedTaskId: input.relatedTaskId ?? null,
+    relatedProjectId: input.relatedProjectId ?? null,
+    relatedEntityType: input.relatedEntityType ?? null,
+    relatedEntityId: input.relatedEntityId ?? null,
+    navigationTarget: input.navigationTarget ?? null,
+    metadata: input.metadata ?? {},
+    presentation: input.presentation ?? {},
   };
 }
 
-export function syncFinanceProviderPresentation(
-  transaction: Parameters<typeof createNotificationsInTransaction>[0],
-  results: readonly CreateNotificationResult[],
-): void {
-  registerDefaultNotificationProviders();
-  for (const result of results) {
-    const resolved = resolveNotificationProvider(providerNotification(result));
-    if (!resolved) continue;
-    const active = result.notification.sourceState === 'active';
-    const drafts = active
-      ? (resolved.presentation.actions ?? []).filter((action) => action.actionType !== 'create_task')
-      : [];
-    const actionRecords = materializeNotificationActions(
-      result.notification.id,
-      drafts,
-      (() => {
-        let index = 0;
-        return () => `${result.notification.id}:finance-action:${index++}`;
-      })(),
-    );
-    transaction.delete(notificationActions).where(and(
-      eq(notificationActions.notificationId, result.notification.id),
-      eq(notificationActions.createdBy, 'connector'),
-    )).run();
-    if (actionRecords.length > 0) {
-      transaction.insert(notificationActions).values(actionRecords).run();
-    }
-    transaction.update(notifications).set({
-      title: resolved.presentation.title ?? result.notification.title,
-      body: resolved.presentation.body ?? result.notification.body,
-      presentation: {
-        ...(result.notification.presentation !== null
-          && typeof result.notification.presentation === 'object'
-          && !Array.isArray(result.notification.presentation)
-          ? result.notification.presentation
-          : {}),
-        ...(resolved.presentation.presentation ?? {}),
-      },
-      isActionable: active && (resolved.presentation.isActionable ?? actionRecords.length > 0),
-      primaryActionId: actionRecords.find((action) => action.isPrimary)?.id ?? null,
-    }).where(eq(notifications.id, result.notification.id)).run();
-  }
+function toFinanceInsightNotificationIngestItem(
+  input: CreateNotificationInput,
+): FinanceInsightNotificationIngestItem {
+  return {
+    input: toConnectorNotificationInput(input),
+    groupKey: input.groupKey ?? null,
+    dedupeKey: input.dedupeKey ?? null,
+  };
 }
 
 export async function ingestFinanceInsightNotifications(input: {
@@ -535,40 +366,41 @@ export async function ingestFinanceInsightNotifications(input: {
   now?: Date;
   timezone?: string;
   environment?: FinanceNotificationEnvironment;
-}): Promise<CreateNotificationResult[]> {
+}): Promise<Array<{ id: string; created: boolean; pendingDelivery: boolean }>> {
   const now = input.now ?? new Date();
-  const result = runTransaction((transaction) => {
-    const gate = sqlite.prepare(`
-      SELECT delivery_enabled AS deliveryEnabled
-      FROM finance_insight_cutovers
-      WHERE connector_id = ?
-    `).get(input.connectorId) as { deliveryEnabled: number } | undefined;
-    if (gate?.deliveryEnabled !== 1 || !connectorSelectionResolved(input.connectorId)) {
-      return { created: [] as CreateNotificationResult[], hasPendingDelivery: false };
-    }
-    reconcileFinanceInsightNotificationLifecycle(
-      transaction,
-      input.connectorId,
-      input.items,
-      now,
-      input.environment,
-    );
-    const created = createNotificationsInTransaction(
-      transaction,
-      selectFinanceInsightNotificationInputs(input.connectorId, input.items, now, {
-        environment: input.environment,
-        timezone: input.timezone,
-      }),
-      { now, timezone: input.timezone, wakeDispatcher: false },
-    );
-    syncFinanceProviderPresentation(transaction, created);
-    return {
-      created,
-      hasPendingDelivery: created.some((entry) => (
-        entry.deliveryEvents.some((event) => event.status === 'pending')
-      )),
-    };
+  const { finance } = await getWorkerPersistenceRepositories();
+  if (!await finance.insights.notifications.isDeliveryEnabled(input.connectorId)) return [];
+  const activeConnectorId = await finance.insights.connectors.resolveSingleEnabledConnectorId(
+    FINANCE_PROVIDER_ALIASES,
+  );
+  if (activeConnectorId !== input.connectorId) return [];
+
+  const environment = input.environment ?? process.env;
+  const notificationInputs = selectFinanceInsightNotificationInputs(
+    input.connectorId,
+    input.items,
+    now,
+    { environment: input.environment, timezone: input.timezone },
+  );
+  const reconcileItems = input.items
+    .filter((item) => !(
+      item.sourceLifecycle === 'open'
+      && isOccurrenceNotificationEligible(item, now, environment)
+    ))
+    .map((item) => ({
+      sourceId: financeInsightNotificationSourceId(input.connectorId, item.occurrenceId),
+      lastSourceActivityAt: item.updatedAt,
+      lastSourceActivityKey: `${item.occurrenceId}:${item.deliveryRevision}`,
+      sourceResolvedAt: item.resolvedAt ?? null,
+      metadata: notificationMetadata(item),
+    }));
+
+  const outcome = await finance.insights.notifications.runLifecycle({
+    connectorId: input.connectorId,
+    now: now.toISOString(),
+    reconcile: reconcileItems,
+    ingest: notificationInputs.map(toFinanceInsightNotificationIngestItem),
   });
-  if (result.hasPendingDelivery) wakeNotificationDeliveryDispatcher();
-  return result.created;
+  if (outcome.hasPendingDelivery) wakeNotificationDeliveryDispatcher();
+  return [...outcome.results];
 }

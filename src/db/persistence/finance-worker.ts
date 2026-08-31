@@ -1,5 +1,7 @@
 import type { FinanceAttributionPersistence } from './finance-attribution';
+import type { FinanceAttentionPersistence } from './finance-attention';
 import type { FinanceDatasetPersistence } from './finance-datasets';
+import type { FinanceInsightPersistence } from './finance-insights';
 import type { FinanceSnapshotPersistence } from './finance-snapshot';
 
 export const FINANCE_IDENTITY_NAMESPACE_CREDENTIAL = 'identityNamespace';
@@ -16,14 +18,19 @@ export interface FinanceIdentityPersistence {
   }): Promise<string>;
 }
 
-/**
- * Layer 5A worker composition. It is registered atomically: a backend either
- * supplies identity, snapshots, datasets, and automated attribution together,
- * or none of the finance sync path is reachable.
- */
-export interface FinanceWorkerPersistence {
+export interface FinanceCorePersistence {
   readonly identity: FinanceIdentityPersistence;
   readonly snapshots: FinanceSnapshotPersistence;
   readonly datasets: FinanceDatasetPersistence;
   readonly attribution: FinanceAttributionPersistence;
+}
+
+/**
+ * Finance worker composition. It is registered atomically: a backend either
+ * supplies every migrated Layer 5A/5B member or none of the finance path is
+ * reachable.
+ */
+export interface FinanceWorkerPersistence extends FinanceCorePersistence {
+  readonly insights: FinanceInsightPersistence;
+  readonly attention: FinanceAttentionPersistence;
 }

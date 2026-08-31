@@ -1,4 +1,5 @@
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
+import type { CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 let selectedWorkerPersistenceRepositories: WorkerPersistenceRepositories | null = null;
@@ -34,6 +35,12 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteGitHubRecoveryRepositories },
     { createSqliteWorkTodoRepositories },
     { createSqliteFinanceWorkerPersistence },
+    { createSqliteFinanceInsightPersistence },
+    {
+      createSqliteFinanceAttentionRepairPersistence,
+      createSqliteFinanceAttentionRoutingPersistence,
+    },
+    { createSqliteFinanceInsightNotificationLifecyclePersistence },
     { loadFinanceInsightProjectionFacts },
     { financeInsightDigestV1 },
     { MONARCH_BRIDGE_CONTRACT_VERSION },
@@ -49,15 +56,19 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-github-recovery-repositories'),
     import('@/db/persistence/sqlite-work-todo-repositories'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
-    import('@/lib/finance-insights/publication'),
+    import('@/db/persistence/sqlite-finance-insights-repositories'),
+    import('@/db/persistence/sqlite-finance-attention-repositories'),
+    import('@/db/persistence/sqlite-finance-insight-notification-lifecycle'),
+    import('@/db/persistence/sqlite-finance-insight-projection-facts'),
     import('@/lib/finance-insights/canonical'),
     import('@/lib/connectors/monarch-money/constants'),
   ]);
   const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
-  const finance = createSqliteFinanceWorkerPersistence(sqlite, {
+  const financeCore = createSqliteFinanceWorkerPersistence(sqlite, {
     projectionProofs: {
       snapshot: ({ connectorId, projectionStartDate, windowStart, windowEnd }) => {
         const facts = loadFinanceInsightProjectionFacts(
+          sqlite,
           connectorId,
           projectionStartDate,
           'transaction',
@@ -65,7 +76,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
         const dates = facts.map((fact) => fact.occurredOn).sort();
         return {
           itemCount: facts.length,
-          contentDigest: financeInsightDigestV1(facts),
+          contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
           projectionStartDate,
           coverageStart: dates[0] ?? windowStart,
           coverageEnd: dates.at(-1) ?? windowEnd,
@@ -84,18 +95,30 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
                 : null;
         if (!kind) return null;
         const facts = loadFinanceInsightProjectionFacts(
+          sqlite,
           connectorId,
           '0000-01-01',
           kind,
         )[kind];
         return {
           itemCount: facts.length,
-          contentDigest: financeInsightDigestV1(facts),
+          contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
           bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
         };
       },
     },
   });
+  const finance = {
+    ...financeCore,
+    insights: {
+      ...createSqliteFinanceInsightPersistence(sqlite),
+      notifications: createSqliteFinanceInsightNotificationLifecyclePersistence({ sqlite, db }),
+    },
+    attention: {
+      routing: createSqliteFinanceAttentionRoutingPersistence({ sqlite, db }),
+      repair: createSqliteFinanceAttentionRepairPersistence(sqlite),
+    },
+  };
   return {
     connectors: sqliteCorePersistenceRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),

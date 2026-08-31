@@ -1,12 +1,21 @@
 import 'server-only';
 
-import { sqlite } from '@/db';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
+import {
+  FinanceInsightBackfillDeliveryEnabledError,
+  FinanceInsightBackfillPlanUnavailableError,
+  FinanceInsightBackfillProjectionConflictError,
+  FinanceInsightBackfillTooLargeError,
+  FinanceInsightBackfillWindowIncompleteError,
+  type FinanceInsightBackfillPlan,
+  type FinanceInsightBackfillWindowProof,
+  type FinanceInsightPersistence,
+} from '@/db/persistence/finance-insights';
 import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import {
   FINANCE_INSIGHT_ITEM_LIMITS,
-  transactionSourceFactSchema,
 } from '@/lib/finance-insights/contract';
-import { loadFinanceInsightProjectionFacts } from '@/lib/finance-insights/publication';
 import { resolveFinanceInsightCurrency } from '@/lib/finance-insights/settings';
 import type { ConnectorConfig } from '@/types';
 import { FinanceAttributionCoordinator } from './attribution-service';
@@ -20,7 +29,7 @@ import {
   MONARCH_BRIDGE_CONTRACT_VERSION,
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
 } from './constants';
-import { upsertFinanceTransactionPage } from './snapshot-sync';
+import { createFinanceIdentityNamespace } from './identity';
 
 export const FINANCE_INSIGHT_TRANSACTION_HISTORY_MAX_MONTHS = 37;
 export const FINANCE_INSIGHT_BACKFILL_MAX_WINDOWS_PER_RUN = 4;
@@ -32,32 +41,6 @@ export interface FinanceInsightBackfillWindow {
   start: string;
   end: string;
 }
-
-type BackfillPlanRow = {
-  id: string;
-  connectorId: string;
-  idempotencyKey: string;
-  horizonMonths: number;
-  coverageStart: string;
-  coverageEnd: string;
-  currency: string;
-  bridgeContractVersion: string;
-  windowCount: number;
-  nextWindowOrdinal: number;
-  status: 'running' | 'completed';
-};
-
-type WindowProofRow = {
-  windowOrdinal: number;
-  generationRef: string;
-  windowStart: string;
-  windowEnd: string;
-  sourceAsOf: string;
-  itemCount: number;
-  contentDigest: string;
-  currency: string;
-  bridgeContractVersion: string;
-};
 
 export class FinanceInsightBackfillError extends Error {
   constructor(
@@ -140,106 +123,80 @@ function resolveBackfillCurrency(config: ConnectorConfig): string {
   return currency;
 }
 
-function assertDeliveryDisabled(connectorId: string): void {
-  const row = sqlite.prepare(`
-    SELECT delivery_enabled AS deliveryEnabled
-    FROM finance_insight_cutovers WHERE connector_id = ?
-  `).get(connectorId) as { deliveryEnabled: number } | undefined;
-  if (row?.deliveryEnabled === 1) {
-    throw new FinanceInsightBackfillError('finance_insight_backfill_delivery_enabled', 409);
+function normalizedBackfillError(error: unknown): FinanceInsightBackfillError {
+  if (error instanceof FinanceInsightBackfillError) return error;
+  if (
+    error instanceof FinanceInsightBackfillDeliveryEnabledError
+    || error instanceof FinanceInsightBackfillWindowIncompleteError
+    || error instanceof FinanceInsightBackfillTooLargeError
+    || error instanceof FinanceInsightBackfillPlanUnavailableError
+    || error instanceof FinanceInsightBackfillProjectionConflictError
+  ) {
+    return new FinanceInsightBackfillError(error.code, 409);
+  }
+  if (error instanceof MonarchBridgeError) {
+    return new FinanceInsightBackfillError(error.code, error.status ?? 502);
+  }
+  return new FinanceInsightBackfillError('finance_insight_backfill_failed', 500);
+}
+
+async function assertDeliveryDisabled(
+  finance: FinanceInsightPersistence,
+  connectorId: string,
+): Promise<void> {
+  try {
+    await finance.backfill.assertDeliveryDisabled(connectorId);
+  } catch (error) {
+    throw normalizedBackfillError(error);
   }
 }
 
-function loadPlan(connectorId: string, idempotencyKey: string): BackfillPlanRow | undefined {
-  return sqlite.prepare(`
-    SELECT id, connector_id AS connectorId, idempotency_key AS idempotencyKey,
-           horizon_months AS horizonMonths, coverage_start AS coverageStart,
-           coverage_end AS coverageEnd, currency,
-           bridge_contract_version AS bridgeContractVersion,
-           window_count AS windowCount, next_window_ordinal AS nextWindowOrdinal,
-           status
-    FROM finance_insight_transaction_backfill_plans
-    WHERE connector_id = ? AND idempotency_key = ?
-  `).get(connectorId, idempotencyKey) as BackfillPlanRow | undefined;
-}
-
-function createOrLoadPlan(input: {
-  connectorId: string;
-  idempotencyKey: string;
-  horizonMonths: number;
-  currency: string;
-  coverageEnd: string;
-  now: string;
-}): BackfillPlanRow {
-  return sqlite.transaction(() => {
-    assertDeliveryDisabled(input.connectorId);
-    const existing = loadPlan(input.connectorId, input.idempotencyKey);
-    if (existing) {
-      if (
-        existing.horizonMonths !== input.horizonMonths
-        || existing.currency !== input.currency
-        || existing.bridgeContractVersion !== MONARCH_BRIDGE_CONTRACT_VERSION
-      ) {
-        throw new FinanceInsightBackfillError('finance_insight_backfill_idempotency_conflict', 409);
-      }
-      return existing;
-    }
-    const windows = planFinanceInsightBackfillWindows(input.coverageEnd, input.horizonMonths);
-    const coverageStart = windows[0]!.start;
-    const identity = {
+async function createOrLoadPlan(
+  finance: FinanceInsightPersistence,
+  input: {
+    connectorId: string;
+    idempotencyKey: string;
+    horizonMonths: number;
+    currency: string;
+    coverageEnd: string;
+    now: string;
+  },
+): Promise<FinanceInsightBackfillPlan> {
+  const windows = planFinanceInsightBackfillWindows(input.coverageEnd, input.horizonMonths);
+  const coverageStart = windows[0]!.start;
+  let plan: FinanceInsightBackfillPlan;
+  try {
+    plan = await finance.backfill.createPlan({
       connectorId: input.connectorId,
       idempotencyKey: input.idempotencyKey,
       horizonMonths: input.horizonMonths,
+      currency: input.currency,
       coverageStart,
       coverageEnd: input.coverageEnd,
-      currency: input.currency,
       bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
-    };
-    const id = `finance-insight-backfill-v1:${
-      financeInsightDigestV1(identity as CanonicalJsonValue).replace('sha256:', '')
-    }`;
-    sqlite.prepare(`
-      INSERT INTO finance_insight_transaction_backfill_plans (
-        id, connector_id, idempotency_key, horizon_months, coverage_start,
-        coverage_end, currency, bridge_contract_version, window_count,
-        next_window_ordinal, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'running', ?, ?)
-    `).run(
-      id,
-      input.connectorId,
-      input.idempotencyKey,
-      input.horizonMonths,
-      coverageStart,
-      input.coverageEnd,
-      input.currency,
-      MONARCH_BRIDGE_CONTRACT_VERSION,
-      windows.length,
-      input.now,
-      input.now,
-    );
-    return loadPlan(input.connectorId, input.idempotencyKey)!;
-  }).immediate();
+      windowCount: windows.length,
+      now: input.now,
+    });
+  } catch (error) {
+    throw normalizedBackfillError(error);
+  }
+  if (
+    plan.horizonMonths !== input.horizonMonths
+    || plan.currency !== input.currency
+    || plan.bridgeContractVersion !== MONARCH_BRIDGE_CONTRACT_VERSION
+  ) {
+    throw new FinanceInsightBackfillError('finance_insight_backfill_idempotency_conflict', 409);
+  }
+  return plan;
 }
 
-function loadProofs(planId: string): WindowProofRow[] {
-  return sqlite.prepare(`
-    SELECT window_ordinal AS windowOrdinal, generation_ref AS generationRef,
-           window_start AS windowStart, window_end AS windowEnd,
-           source_as_of AS sourceAsOf, item_count AS itemCount,
-           content_digest AS contentDigest, currency,
-           bridge_contract_version AS bridgeContractVersion
-    FROM finance_insight_transaction_window_proofs
-    WHERE plan_id = ?
-    ORDER BY window_ordinal
-  `).all(planId) as WindowProofRow[];
-}
-
-function verifyProof(
+async function verifyProof(
+  finance: FinanceInsightPersistence,
   connectorId: string,
-  proof: WindowProofRow,
+  proof: FinanceInsightBackfillWindowProof,
   expected: FinanceInsightBackfillWindow,
   currency: string,
-): void {
+): Promise<void> {
   if (
     proof.windowOrdinal !== expected.ordinal
     || proof.windowStart !== expected.start
@@ -249,15 +206,15 @@ function verifyProof(
   ) {
     throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
   }
-  const facts = loadFinanceInsightProjectionFacts(
+  const facts = (await finance.projection.readOperationalProjectionFacts(
     connectorId,
     expected.start,
     'transaction',
     expected.end,
-  ).transaction;
+  )).transaction;
   if (
     facts.length !== proof.itemCount
-    || financeInsightDigestV1(facts as CanonicalJsonValue) !== proof.contentDigest
+    || financeInsightDigestV1(facts as unknown as CanonicalJsonValue) !== proof.contentDigest
   ) {
     throw new FinanceInsightBackfillError('finance_insight_backfill_window_changed', 409);
   }
@@ -286,13 +243,14 @@ type ProjectionWindowProof = {
   digest: string;
 };
 
-function promoteCompletedPlan(
+async function promoteCompletedPlan(
+  finance: FinanceInsightPersistence,
   connectorId: string,
-  plan: BackfillPlanRow,
+  plan: FinanceInsightBackfillPlan,
   completedAt: Date,
-): void {
+): Promise<void> {
   if (plan.horizonMonths !== FINANCE_INSIGHT_HISTORY_MONTHS) return;
-  const operationalProofs = loadProofs(plan.id);
+  const operationalProofs = await finance.backfill.loadWindowProofs(plan.id);
   const operationalWindows = planFinanceInsightBackfillWindows(
     plan.coverageEnd,
     plan.horizonMonths,
@@ -304,14 +262,14 @@ function promoteCompletedPlan(
     throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
   }
   for (const [index, proof] of operationalProofs.entries()) {
-    verifyProof(connectorId, proof, operationalWindows[index]!, plan.currency);
+    await verifyProof(finance, connectorId, proof, operationalWindows[index]!, plan.currency);
   }
-  const facts = loadFinanceInsightProjectionFacts(
+  const facts = (await finance.projection.readOperationalProjectionFacts(
     connectorId,
     plan.coverageStart,
     'transaction',
     plan.coverageEnd,
-  ).transaction;
+  )).transaction;
   if (facts.length > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
     throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
   }
@@ -333,7 +291,7 @@ function promoteCompletedPlan(
       ...window,
       sourceAsOf,
       itemCount: windowFacts.length,
-      digest: financeInsightDigestV1(windowFacts as CanonicalJsonValue),
+      digest: financeInsightDigestV1(windowFacts as unknown as CanonicalJsonValue),
     };
   });
   const completedTime = completedAt.getTime();
@@ -346,7 +304,7 @@ function promoteCompletedPlan(
   const sourceAsOf = windowProofs[
     sourceTimes.indexOf(Math.min(...sourceTimes))
   ]!.sourceAsOf;
-  const contentDigest = financeInsightDigestV1(facts as CanonicalJsonValue);
+  const contentDigest = financeInsightDigestV1(facts as unknown as CanonicalJsonValue);
   const windowsDigest = financeInsightDigestV1(windowProofs as CanonicalJsonValue);
   const generationId = financeInsightHistoryGenerationRef({
     connectorRef: connectorId,
@@ -361,158 +319,27 @@ function promoteCompletedPlan(
   });
   const completedAtValue = completedAt.toISOString();
 
-  sqlite.transaction(() => {
-    assertDeliveryDisabled(connectorId);
-    const current = loadPlan(connectorId, plan.idempotencyKey);
-    if (!current || current.status !== 'completed') {
-      throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
-    }
-    const existingState = sqlite.prepare(`
-      SELECT successful_generation_id AS generationId,
-             source_as_of AS sourceAsOf, item_count AS itemCount,
-             content_digest AS contentDigest, coverage_start AS coverageStart,
-             coverage_end AS coverageEnd, window_count AS windowCount,
-             windows_digest AS windowsDigest,
-             bridge_contract_version AS bridgeContractVersion
-      FROM finance_insight_transaction_projection_state
-      WHERE connector_id = ? AND status = 'succeeded'
-    `).get(connectorId) as {
-      generationId: string;
-      sourceAsOf: string;
-      itemCount: number;
-      contentDigest: string;
-      coverageStart: string;
-      coverageEnd: string;
-      windowCount: number;
-      windowsDigest: string;
-      bridgeContractVersion: string;
-    } | undefined;
-    if (existingState?.generationId === generationId) {
-      const storedFacts = (sqlite.prepare(`
-        SELECT payload FROM finance_insight_transaction_projection_facts
-        WHERE connector_id = ? AND generation_id = ?
-        ORDER BY source_ref
-      `).all(connectorId, generationId) as Array<{ payload: string }>).map((row) => (
-        transactionSourceFactSchema.parse(JSON.parse(row.payload))
-      ));
-      const storedWindows = sqlite.prepare(`
-        SELECT window_index AS "index", coverage_start AS start,
-               coverage_end AS end, source_as_of AS sourceAsOf,
-               item_count AS itemCount, content_digest AS digest
-        FROM finance_insight_transaction_projection_windows
-        WHERE connector_id = ? AND generation_id = ?
-        ORDER BY window_index
-      `).all(connectorId, generationId) as ProjectionWindowProof[];
-      if (
-        existingState.sourceAsOf !== sourceAsOf
-        || existingState.itemCount !== facts.length
-        || existingState.contentDigest !== contentDigest
-        || existingState.coverageStart !== plan.coverageStart
-        || existingState.coverageEnd !== plan.coverageEnd
-        || existingState.windowCount !== windowProofs.length
-        || existingState.windowsDigest !== windowsDigest
-        || existingState.bridgeContractVersion !== MONARCH_BRIDGE_CONTRACT_VERSION
-        || financeInsightDigestV1(storedFacts as CanonicalJsonValue) !== contentDigest
-        || financeInsightDigestV1(storedWindows as CanonicalJsonValue) !== windowsDigest
-      ) {
-        throw new FinanceInsightBackfillError(
-          'finance_insight_backfill_projection_changed',
-          409,
-        );
-      }
-      return;
-    }
-    sqlite.prepare(`
-      DELETE FROM finance_insight_transaction_projection_facts
-      WHERE connector_id = ? AND generation_id = ?
-    `).run(connectorId, generationId);
-    sqlite.prepare(`
-      DELETE FROM finance_insight_transaction_projection_windows
-      WHERE connector_id = ? AND generation_id = ?
-    `).run(connectorId, generationId);
-    const insertFact = sqlite.prepare(`
-      INSERT INTO finance_insight_transaction_projection_facts (
-        connector_id, generation_id, source_ref, occurred_on, payload
-      ) VALUES (?, ?, ?, ?, ?)
-    `);
-    for (const fact of facts) {
-      insertFact.run(
-        connectorId,
-        generationId,
-        fact.sourceRef,
-        fact.occurredOn,
-        JSON.stringify(fact),
-      );
-    }
-    const insertWindow = sqlite.prepare(`
-      INSERT INTO finance_insight_transaction_projection_windows (
-        connector_id, generation_id, window_index, coverage_start,
-        coverage_end, source_as_of, item_count, content_digest
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    for (const proof of windowProofs) {
-      insertWindow.run(
-        connectorId,
-        generationId,
-        proof.index,
-        proof.start,
-        proof.end,
-        proof.sourceAsOf,
-        proof.itemCount,
-        proof.digest,
-      );
-    }
-    sqlite.prepare(`
-      INSERT INTO finance_insight_transaction_projection_state (
-        connector_id, status, current_attempt_id, last_attempt_at,
-        last_successful_at, successful_generation_id, source_as_of,
-        item_count, content_digest, coverage_start, coverage_end,
-        window_count, windows_digest, bridge_contract_version,
-        last_error_code, created_at, updated_at
-      ) VALUES (
-        ?, 'succeeded', NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?
-      )
-      ON CONFLICT(connector_id) DO UPDATE SET
-        status = 'succeeded',
-        current_attempt_id = NULL,
-        last_attempt_at = excluded.last_attempt_at,
-        last_successful_at = excluded.last_successful_at,
-        successful_generation_id = excluded.successful_generation_id,
-        source_as_of = excluded.source_as_of,
-        item_count = excluded.item_count,
-        content_digest = excluded.content_digest,
-        coverage_start = excluded.coverage_start,
-        coverage_end = excluded.coverage_end,
-        window_count = excluded.window_count,
-        windows_digest = excluded.windows_digest,
-        bridge_contract_version = excluded.bridge_contract_version,
-        last_error_code = NULL,
-        updated_at = excluded.updated_at
-    `).run(
+  try {
+    await finance.backfill.promoteCompletedPlan({
       connectorId,
-      completedAtValue,
-      completedAtValue,
+      planId: plan.id,
+      idempotencyKey: plan.idempotencyKey,
       generationId,
       sourceAsOf,
-      facts.length,
+      itemCount: facts.length,
       contentDigest,
-      plan.coverageStart,
-      plan.coverageEnd,
-      windowProofs.length,
+      coverageStart: plan.coverageStart,
+      coverageEnd: plan.coverageEnd,
+      windowCount: windowProofs.length,
       windowsDigest,
-      MONARCH_BRIDGE_CONTRACT_VERSION,
-      completedAtValue,
-      completedAtValue,
-    );
-    sqlite.prepare(`
-      DELETE FROM finance_insight_transaction_projection_facts
-      WHERE connector_id = ? AND generation_id <> ?
-    `).run(connectorId, generationId);
-    sqlite.prepare(`
-      DELETE FROM finance_insight_transaction_projection_windows
-      WHERE connector_id = ? AND generation_id <> ?
-    `).run(connectorId, generationId);
-  }).immediate();
+      bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+      completedAt: completedAtValue,
+      facts,
+      windows: windowProofs,
+    });
+  } catch (error) {
+    throw normalizedBackfillError(error);
+  }
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -521,38 +348,25 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-function normalizedBackfillError(error: unknown): FinanceInsightBackfillError {
-  if (error instanceof FinanceInsightBackfillError) return error;
-  if (error instanceof MonarchBridgeError) {
-    return new FinanceInsightBackfillError(error.code, error.status ?? 502);
-  }
-  return new FinanceInsightBackfillError('finance_insight_backfill_failed', 500);
-}
-
 async function captureWindow(input: {
+  finance: FinanceWorkerPersistence;
   config: ConnectorConfig;
-  plan: BackfillPlanRow;
+  plan: FinanceInsightBackfillPlan;
   window: FinanceInsightBackfillWindow;
   signal?: AbortSignal;
 }): Promise<{ added: number; updated: number; itemCount: number }> {
   const connectorId = input.config.id;
   const generationRef = stableWindowGeneration(input.plan.id, input.window);
+  const insights = input.finance.insights;
   const client = new MonarchBridgeClient(input.config);
   const attribution = new FinanceAttributionCoordinator(connectorId, {
     financeConfig: input.config,
+    persistence: input.finance,
+    generationId: generationRef,
+    fenceMode: 'row-generation',
   });
   const seenIds = new Set<string>();
   const seenCursors = new Set<string>();
-  const findPriorWindowTransaction = sqlite.prepare(`
-    SELECT date
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND upstream_transaction_id = ?
-      AND last_seen_generation_id IN (
-        SELECT generation_ref
-        FROM finance_insight_transaction_window_proofs
-        WHERE plan_id = ?
-      )
-  `);
   let cursor: string | undefined;
   let expectedTotal: number | null = null;
   let sourceAsOf: string | null = null;
@@ -580,18 +394,18 @@ async function captureWindow(input: {
         throw new FinanceInsightBackfillError('finance_insight_backfill_page_conflict', 409);
       }
       for (const transaction of page.transactions) {
-        const priorWindow = findPriorWindowTransaction.get(
+        const priorWindowDate = await insights.backfill.findPriorWindowTransactionDate(
           connectorId,
-          transaction.id,
           input.plan.id,
-        ) as { date: string } | undefined;
+          transaction.id,
+        );
         if (
           transaction.date < input.window.start
           || transaction.date > input.window.end
           || seenIds.has(transaction.id)
           || (
-            priorWindow !== undefined
-            && (priorWindow.date < input.window.start || priorWindow.date > input.window.end)
+            priorWindowDate !== null
+            && (priorWindowDate < input.window.start || priorWindowDate > input.window.end)
           )
         ) {
           throw new FinanceInsightBackfillError('finance_insight_backfill_page_conflict', 409);
@@ -608,13 +422,13 @@ async function captureWindow(input: {
       if (sourceAsOf === null || Date.parse(fetchedAt) < Date.parse(sourceAsOf)) {
         sourceAsOf = fetchedAt;
       }
-      const counts = upsertFinanceTransactionPage(
+      const counts = await insights.backfill.upsertTransactionPage({
         connectorId,
         generationRef,
-        page.transactions,
-        { ...page.provenance, fetchedAt },
-        new Date().toISOString(),
-      );
+        transactions: page.transactions,
+        provenance: { ...page.provenance, fetchedAt },
+        now: new Date().toISOString(),
+      });
       added += counts.added;
       updated += counts.updated;
       await attribution.attributePage(page.transactions, fetchedAt, input.signal);
@@ -636,75 +450,27 @@ async function captureWindow(input: {
     }
     throwIfAborted(input.signal);
     const completedAt = new Date().toISOString();
-    const itemCount = sqlite.transaction(() => {
-      assertDeliveryDisabled(connectorId);
-      sqlite.prepare(`
-        UPDATE finance_transactions
-        SET lifecycle_status = 'deleted', deleted_at = ?, synced_at = ?
-        WHERE connector_instance_id = ?
-          AND lifecycle_status = 'active'
-          AND date >= ? AND date <= ?
-          AND (last_seen_generation_id IS NULL OR last_seen_generation_id <> ?)
-      `).run(
-        completedAt,
-        completedAt,
+    let itemCount: number;
+    try {
+      const result = await insights.backfill.recordWindowCapture({
         connectorId,
-        input.window.start,
-        input.window.end,
+        planId: input.plan.id,
+        windowOrdinal: input.window.ordinal,
+        planWindowCount: input.plan.windowCount,
+        windowStart: input.window.start,
+        windowEnd: input.window.end,
         generationRef,
-      );
-      const facts = loadFinanceInsightProjectionFacts(
-        connectorId,
-        input.window.start,
-        'transaction',
-        input.window.end,
-      ).transaction;
-      if (facts.length !== seenIds.size) {
-        throw new FinanceInsightBackfillError('finance_insight_backfill_window_incomplete', 409);
-      }
-      const previousCount = sqlite.prepare(`
-        SELECT COALESCE(SUM(item_count), 0) AS itemCount
-        FROM finance_insight_transaction_window_proofs WHERE plan_id = ?
-      `).get(input.plan.id) as { itemCount: number };
-      if (previousCount.itemCount + facts.length > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
-        throw new FinanceInsightBackfillError('transaction_generation_too_large', 409);
-      }
-      sqlite.prepare(`
-        INSERT INTO finance_insight_transaction_window_proofs (
-          plan_id, connector_id, window_ordinal, generation_ref, window_start,
-          window_end, source_as_of, item_count, content_digest, currency,
-          bridge_contract_version, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        input.plan.id,
-        connectorId,
-        input.window.ordinal,
-        generationRef,
-        input.window.start,
-        input.window.end,
         sourceAsOf,
-        facts.length,
-        financeInsightDigestV1(facts as CanonicalJsonValue),
-        input.plan.currency,
-        MONARCH_BRIDGE_CONTRACT_VERSION,
+        currency: input.plan.currency,
+        bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
         completedAt,
-      );
-      const nextOrdinal = input.window.ordinal + 1;
-      const completed = nextOrdinal === input.plan.windowCount;
-      sqlite.prepare(`
-        UPDATE finance_insight_transaction_backfill_plans
-        SET next_window_ordinal = ?, status = ?, last_error_code = NULL,
-            completed_at = ?, updated_at = ?
-        WHERE id = ?
-      `).run(
-        nextOrdinal,
-        completed ? 'completed' : 'running',
-        completed ? completedAt : null,
-        completedAt,
-        input.plan.id,
-      );
-      return facts.length;
-    }).immediate();
+        expectedItemCount: seenIds.size,
+        maxTotalItemCount: FINANCE_INSIGHT_ITEM_LIMITS.transaction,
+      });
+      itemCount = result.itemCount;
+    } catch (error) {
+      throw normalizedBackfillError(error);
+    }
     await attribution.finish(completedAt);
     return { added, updated, itemCount };
   } catch (error) {
@@ -745,7 +511,16 @@ export async function runFinanceInsightTransactionBackfill(input: {
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
   const currency = resolveBackfillCurrency(input.config);
-  const plan = createOrLoadPlan({
+  const repositories = await getWorkerPersistenceRepositories();
+  repositories.execution.support.assertConfigSupported(input.config);
+  const { finance } = repositories;
+  await finance.identity.ensureNamespace({
+    connectorId: input.config.id,
+    candidate: createFinanceIdentityNamespace(),
+    updatedAt: startedAt.toISOString(),
+  });
+  const financeInsights = finance.insights;
+  const plan = await createOrLoadPlan(financeInsights, {
     connectorId: input.config.id,
     idempotencyKey,
     horizonMonths,
@@ -754,14 +529,14 @@ export async function runFinanceInsightTransactionBackfill(input: {
     now: startedAt.toISOString(),
   });
   const windows = planFinanceInsightBackfillWindows(plan.coverageEnd, plan.horizonMonths);
-  const existingProofs = loadProofs(plan.id);
+  const existingProofs = await financeInsights.backfill.loadWindowProofs(plan.id);
   let totalItemCount = 0;
   for (const [index, proof] of existingProofs.entries()) {
     const expected = windows[index];
     if (!expected || proof.windowOrdinal !== index) {
       throw new FinanceInsightBackfillError('finance_insight_backfill_window_conflict', 409);
     }
-    verifyProof(input.config.id, proof, expected, currency);
+    await verifyProof(financeInsights, input.config.id, proof, expected, currency);
     totalItemCount += proof.itemCount;
   }
   if (totalItemCount > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
@@ -771,8 +546,9 @@ export async function runFinanceInsightTransactionBackfill(input: {
   let remaining = maxWindows;
   try {
     while (completedWindows < windows.length && remaining > 0) {
-      assertDeliveryDisabled(input.config.id);
+      await assertDeliveryDisabled(financeInsights, input.config.id);
       const result = await captureWindow({
+        finance,
         config: input.config,
         plan,
         window: windows[completedWindows]!,
@@ -783,7 +559,7 @@ export async function runFinanceInsightTransactionBackfill(input: {
       remaining--;
     }
     if (completedWindows === windows.length) {
-      promoteCompletedPlan(input.config.id, {
+      await promoteCompletedPlan(financeInsights, input.config.id, {
         ...plan,
         status: 'completed',
         nextWindowOrdinal: completedWindows,
@@ -791,10 +567,7 @@ export async function runFinanceInsightTransactionBackfill(input: {
     }
   } catch (error) {
     const normalized = normalizedBackfillError(error);
-    sqlite.prepare(`
-      UPDATE finance_insight_transaction_backfill_plans
-      SET last_error_code = ?, updated_at = ? WHERE id = ?
-    `).run(normalized.code, new Date().toISOString(), plan.id);
+    await financeInsights.backfill.recordPlanFailure(plan.id, normalized.code, new Date().toISOString());
     throw normalized;
   }
   return {

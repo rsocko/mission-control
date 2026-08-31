@@ -10,6 +10,7 @@ import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import type { MonarchTransaction } from './client';
 import type { ConnectorConfig } from '@/types';
 import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
+import type { FinanceAttributionFenceMode } from '@/db/persistence/finance-attribution';
 import { FINANCE_ATTRIBUTION_WRITE_MAX } from '@/db/persistence/finance-attribution';
 import {
   createAttributionRequests,
@@ -76,6 +77,7 @@ interface CoordinatorDependencies {
   financeConfig?: Pick<ConnectorConfig, 'credentials' | 'settings'>;
   persistence?: FinanceWorkerPersistence;
   generationId?: string;
+  fenceMode?: FinanceAttributionFenceMode;
 }
 
 function localTransactionId(connectorId: string, upstreamTransactionId: string): string {
@@ -601,6 +603,7 @@ export class FinanceAttributionCoordinator {
   private readonly financeConfig: Pick<ConnectorConfig, 'credentials' | 'settings'>;
   private readonly persistence: FinanceWorkerPersistence | null;
   private readonly generationId: string | null;
+  private readonly fenceMode: FinanceAttributionFenceMode;
 
   constructor(
     private readonly connectorId: string,
@@ -609,6 +612,7 @@ export class FinanceAttributionCoordinator {
     this.financeConfig = dependencies.financeConfig ?? { credentials: {}, settings: {} };
     this.persistence = dependencies.persistence ?? null;
     this.generationId = dependencies.generationId ?? null;
+    this.fenceMode = dependencies.fenceMode ?? 'snapshot';
     if (this.persistence && !this.generationId) {
       throw new Error('Finance attribution persistence requires a snapshot generation');
     }
@@ -719,6 +723,7 @@ export class FinanceAttributionCoordinator {
           await this.persistence.attribution.applyResults({
             connectorId: this.connectorId,
             generationId: this.generationId!,
+            fenceMode: this.fenceMode,
             now: appliedAt,
             provenance: TYRION_ATTRIBUTION_PROVENANCE,
             items: batch.map((item, index) => ({
@@ -780,6 +785,7 @@ export class FinanceAttributionCoordinator {
       await this.persistence.attribution.persistUnavailable({
         connectorId: this.connectorId,
         generationId: this.generationId!,
+        fenceMode: this.fenceMode,
         now,
         items: items.slice(offset, offset + FINANCE_ATTRIBUTION_WRITE_MAX),
         failure: {
@@ -814,6 +820,7 @@ export class FinanceAttributionCoordinator {
       await this.persistence.attribution.finish({
         connectorId: this.connectorId,
         generationId: this.generationId,
+        fenceMode: this.fenceMode,
         attemptedAt: now,
         succeeded: this.succeeded,
         terminalFailureCode: this.terminalFailure?.code ?? null,

@@ -108,7 +108,7 @@ describe.sequential('finance insight durable continuation', () => {
     expect(queue.getSyncQueueMetrics().queued).toBe(0);
   });
 
-  it('selects the newest persisted pending or retryable evaluation', () => {
+  it('selects the newest persisted pending or retryable evaluation', async () => {
     const now = new Date().toISOString();
     const insertPublication = database.sqlite.prepare(`
       INSERT INTO finance_insight_publications (
@@ -148,15 +148,17 @@ describe.sequential('finance insight durable continuation', () => {
     insertDelivery.run('queued-publication', 2, 'queued', 0, now, now);
     insertDelivery.run('retryable-publication', 3, null, 1, now, now);
 
-    expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+    await expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+      .resolves
       .toBe('retryable-publication');
     database.sqlite.prepare(`
       UPDATE finance_insight_publication_delivery
       SET last_error_retryable = 0
       WHERE publication_id = 'retryable-publication'
     `).run();
-    expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+    await expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+      .resolves
       .toBe('queued-publication');
-    expect(findFinanceInsightContinuationPublicationId('other-connector')).toBeNull();
+    await expect(findFinanceInsightContinuationPublicationId('other-connector')).resolves.toBeNull();
   });
 });

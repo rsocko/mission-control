@@ -2,13 +2,13 @@ import 'server-only';
 
 import { sqlite, runTransaction } from '@/db';
 import { createNotificationsInTransaction, wakeNotificationDeliveryDispatcher } from '@/lib/notifications/service';
-import { insightOccurrenceSummarySchema, type InsightOccurrenceSummaryV1 } from './contract';
-import { FINANCE_PROVIDER_ALIASES } from './provider';
 import {
   reconcileFinanceInsightNotificationLifecycle,
-  selectFinanceInsightNotificationInputs,
   syncFinanceProviderPresentation,
-} from './notification-ingestion';
+} from '@/db/persistence/sqlite-finance-insight-notification-lifecycle';
+import { insightOccurrenceSummarySchema, type InsightOccurrenceSummaryV1 } from './contract';
+import { FINANCE_PROVIDER_ALIASES } from './provider';
+import { selectFinanceInsightNotificationInputs } from './notification-ingestion';
 
 const financeTypePlaceholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
 

@@ -125,9 +125,10 @@ the same atomic nested-settings patch and successful-pull baseline contract.
 SQLite loads its worker adapters lazily on first access so importing a connector
 does not initialize the database. PostgreSQL has no compatibility fallback: its
 runtime must register the complete worker composition before access and before
-loading worker schedulers. That composition now carries four members —
-`connectors`/`syncRuns`, `execution` (Layer 2), `github` (Layers 3A/3B), and
-`connectorState` (Layer 4) — and is registered atomically.
+loading worker schedulers. That composition now carries five members —
+`connectors`/`syncRuns`, `execution` (Layer 2), `github` (Layers 3A/3B),
+`connectorState` (Layer 4), and `finance` (Layers 5A/5B) — and is registered
+atomically.
 
 Layer 2 adds the complete `ConnectorExecutionRepositories` composition to that
 worker registration. Its phase-oriented ports own:
@@ -363,13 +364,47 @@ the ingest and acknowledgement commands touch. SQLite JSON text versus
 PostgreSQL `jsonb`, and integer versus native booleans, are adapter mapping
 differences rather than schema gaps.
 
+### Layer 5A/5B: Monarch finance domain persistence
+
+Layer 5A adds the atomic `FinanceWorkerPersistence` composition for Monarch
+identity, transaction snapshots, reference datasets, and attribution. Layer 5B
+extends that same composition rather than registering a second finance runtime:
+
+- `insights` owns history projection attempts and proof promotion, transaction
+  backfill plans, publication and delivery checkpoints, the occurrence cache,
+  and finance notification ingestion/outbox writes; and
+- `attention` owns the bounded attention projection, deterministic routing and
+  promotion, plus dry-run/apply recovery with digest and delivery fences.
+
+Both members expose asynchronous, driver-free operations. Their SQLite and
+PostgreSQL adapters own every transaction, keep bulk work bounded, preserve
+monotonic checkpoints and idempotency keys, and return identifiers or digests
+instead of driver rows. The API and Monarch orchestration modules now use these
+ports for the migrated operations; external connector traffic and dispatcher
+wakeups remain outside adapter transactions.
+
+Schema-parity result: **no migration was required**. The existing finance
+history, projection, backfill, publication, occurrence, notification/action/
+outbox, attribution-exception, mutation-audit, task, and My Day tables already
+carry the required uniqueness, ordering, checkpoint, and fencing state on both
+backends. SQLite text JSON/timestamps and PostgreSQL native JSON/timestamps are
+adapter mapping differences.
+
+Layer 5B deliberately does not activate PostgreSQL finance execution. The
+connector support gate still rejects `finance-manager` before construction or a
+remote effect. Packaged-worker reachability, backend activation/import, and the
+final removal of compatibility-only finance paths remain Layer 5C. Monarch
+connection-outage recovery also remains the separately planned Layer 8 worker
+slice.
+
 The PostgreSQL execution guard therefore now allows `microsoft-todo`,
 `microsoft-todo-work`, Rymessage, and OWL. It still rejects `finance-manager`
 connector-owned state, non-GitHub connector dependency state, non-GitHub
 connector project state, and any connector exposing `syncDomainData`.
 
-Layers 5-8 remain excluded: Monarch/finance, reminders, recovery beyond Layer
-3B, the scheduled triage importer (#1681), deployment, and backend activation.
+Remaining Layer 5C and Layers 6-8 stay excluded: finance activation and final
+packaged-worker reachability, reminders, recovery beyond Layer 3B, the scheduled
+triage importer (#1681), deployment, and backend activation.
 
 Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
 closed under PostgreSQL *before* any remote effect: identity backfill and

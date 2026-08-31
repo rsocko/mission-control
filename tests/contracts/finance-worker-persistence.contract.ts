@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { FinanceWorkerPersistence } from '@/db/persistence/finance-worker';
+import type { FinanceCorePersistence } from '@/db/persistence/finance-worker';
 import type {
   FinanceAttributionRow,
   FinanceAttributionStateSnapshot,
@@ -12,7 +12,7 @@ const WINDOW_START = '2026-08-01';
 const WINDOW_END = '2026-08-30';
 
 export interface FinanceWorkerContractHarness {
-  repositories: FinanceWorkerPersistence;
+  repositories: FinanceCorePersistence;
   reset(): Promise<void>;
   seedConnector(credentials?: unknown): Promise<void>;
   credentials(): Promise<Record<string, unknown>>;
@@ -591,6 +591,61 @@ export function describeFinanceWorkerPersistenceContract(
         policyVersion: 7,
         engineVersion: '2.0.0',
       })).resolves.toEqual({ recorded: false });
+    });
+
+    it('fences backfill attribution against the transaction row generation', async () => {
+      const generationId = 'backfill-row-generation';
+      await harness.repositories.snapshots.start(startInput(generationId));
+      await harness.repositories.snapshots.upsertPage(pageInput(
+        generationId,
+        [snapshotTransaction('backfill-attribution')],
+      ));
+      await harness.repositories.snapshots.complete(completeInput(generationId));
+      const row = (await harness.repositories.attribution.readRows(
+        CONNECTOR_ID,
+        ['backfill-attribution'],
+      )).get('backfill-attribution')!;
+      const command = {
+        connectorId: CONNECTOR_ID,
+        generationId,
+        fenceMode: 'row-generation' as const,
+        now: '2026-08-30T12:34:00.000Z',
+        contractVersion: '2.0',
+        provenance: 'contract-test',
+        failure: {
+          code: 'policy_unavailable',
+          retryable: true,
+          reason: 'policy-unavailable',
+          explanation: 'Policy unavailable',
+        },
+        items: [{
+          transactionId: row.id,
+          sourceFingerprint: row.sourceFingerprint,
+          sourceRef: null,
+          stateSnapshot: attributionSnapshot(row),
+        }],
+      };
+
+      await expect(harness.repositories.attribution.persistUnavailable(command))
+        .resolves.toBeUndefined();
+      expect(await harness.transaction('backfill-attribution')).toMatchObject({
+        attributionStatus: 'unavailable',
+      });
+      await expect(harness.repositories.attribution.persistUnavailable({
+        ...command,
+        generationId: 'superseded-backfill-row-generation',
+      })).rejects.toThrow();
+      await expect(harness.repositories.attribution.finish({
+        connectorId: CONNECTOR_ID,
+        generationId,
+        fenceMode: 'row-generation',
+        attemptedAt: '2026-08-30T12:35:00.000Z',
+        succeeded: false,
+        terminalFailureCode: 'policy_unavailable',
+        status: 'unavailable',
+        policyVersion: null,
+        engineVersion: '2.0.0',
+      })).resolves.toEqual({ recorded: true });
     });
 
     it('deduplicates unavailable exceptions and enforces bounded batches', async () => {

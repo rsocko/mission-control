@@ -106,10 +106,6 @@ vi.mock('@/lib/finance-insights/publication', () => ({
   }),
 }));
 
-vi.mock('@/lib/finance-insights/canonical', () => ({
-  financeInsightDigestV1: vi.fn(),
-}));
-
 vi.mock('@/lib/connectors/monarch-money/client', () => {
   class MonarchBridgeError extends Error {
     constructor(

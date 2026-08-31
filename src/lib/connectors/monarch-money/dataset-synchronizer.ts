@@ -7,6 +7,7 @@ import {
   type FinanceFreshnessState,
   type FinanceDatasetPersistence,
   type FinanceDatasetPublicationMetadata,
+  type FinanceReferenceDataset,
   type FinanceReferenceDatasetItem,
 } from '@/db/persistence/finance-datasets';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
@@ -22,6 +23,7 @@ import {
   type MonarchBudget,
   type MonarchRecurringObligation,
 } from './client';
+import { financeReferenceDatasetGenerationRef } from './dataset-generation';
 
 const DATASET_SCHEMA_VERSION = '1.0';
 const DATASET_CONFIG_VERSION = 1;
@@ -283,16 +285,23 @@ export class FinanceDatasetSynchronizer {
 
   private async publishReference<T extends { id: string }>(
     persistence: FinanceDatasetPersistence,
-    dataset: FinanceDataset,
+    dataset: FinanceReferenceDataset,
     items: T[],
     sourceAsOf: string,
     attemptAt: string,
   ): Promise<DatasetRunResult> {
     assertCompleteCollection(items);
-    const generationId = randomUUID();
     const now = this.clock();
     const sourceDate = validateSourceAsOf(sourceAsOf, now);
     const completedAt = this.clock().toISOString();
+    const generationId = financeReferenceDatasetGenerationRef({
+      connectorId: this.config.id,
+      dataset,
+      sourceAsOf: sourceDate.toISOString(),
+      schemaVersion: DATASET_SCHEMA_VERSION,
+      configVersion: DATASET_CONFIG_VERSION,
+      items: items as unknown as FinanceReferenceDatasetItem[],
+    });
     return persistence.publishReference({
       ...this.publicationMetadata(
         dataset,

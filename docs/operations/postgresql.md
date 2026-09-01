@@ -211,6 +211,38 @@ executable SQLite-to-PostgreSQL copy/import command; implementing and rehearsing
 that maintenance-window path is a hard dependency of the production cutover in
 [#1155](https://github.com/rsocko/mission-control/issues/1155).
 
+## Cutover readiness evidence
+
+PostgreSQL worker persistence parity is complete, but that does not activate
+PostgreSQL in production or prove that existing SQLite data can be moved safely.
+The production deployment remains SQLite-backed until the SQLite-to-PostgreSQL
+import tooling tracked by
+[#1681](https://github.com/rsocko/mission-control/issues/1681), the homelab
+deployment work, and the explicit #1155 maintenance-window gate all complete.
+
+The #1681 import rehearsal must leave a durable, redacted evidence package before
+operators plan cutover. The exact command names and output paths are intentionally
+left to #1681, but the package must cover:
+
+| Evidence area | Required signal |
+| --- | --- |
+| Writer stop and quiescence | Web/API writers, sync worker, scheduled triage, reminders, notification writeback, finance workers, and durable queue consumers are stopped or fenced; there are no unexpected active sync jobs, connector operation leases, maintenance locks, or WAL/checkpoint risks. |
+| Source backup | The final SQLite database, WAL/SHM handling, size, checksum, creation time, integrity check result, and protected retention location are recorded. |
+| Target readiness | PostgreSQL target identity is redacted but environment-classified; the target is freshly provisioned or backed up before import; backup/restore tool versions are recorded when used. |
+| Schema and migrations | SQLite source schema/migration markers are known; PostgreSQL has the expected `drizzle.__drizzle_migrations` baseline including `0000_handy_orphan`; optional vector state has `drizzle.__drizzle_vector_migrations`, pgvector `0.8.6`, and required indexes when semantic vector retrieval is enabled. |
+| Counts and invariants | Coarse counts and referential checks cover tasks, projects, task associations, connector state, sync queues/logs/events/leases, notifications/actions/delivery/writebacks, triage state, AI/durable runs, GitHub identity/external identities, finance/Monarch/insight state, search/semantic tables, settings, runtime telemetry, and health snapshots. |
+| Search rebuild | Task and notification search projections are rebuilt or verified, representative task/notification queries succeed through the PostgreSQL search adapter, and any required semantic/vector indexes are verified. |
+| Queue and worker smoke | PostgreSQL web and worker start fail-closed with matching backend configuration; a queue claim/lease/finalize path succeeds; representative connector pull/push, dependency/list/project reconciliation, notification finalization, search warm-up, triage, reminders, and finance/Monarch scheduled flows are smoked as applicable. |
+| Observability | Health endpoints, Prometheus metrics, Loki logs, PostgreSQL pool state, lock/slow-statement checks, migration state, backup freshness, and worker heartbeat/runtime telemetry show healthy PostgreSQL-backed operation without leaking secrets. |
+| Rollback criteria | The evidence distinguishes pre-activation rollback, early post-activation rollback before meaningful PostgreSQL writes, and the blocked state after PostgreSQL-only writes unless a tested reverse-copy path exists. |
+| Activation gate | The rehearsal ends with an explicit non-activating verdict, for example `ready_for_cutover_planning: true|false`; it never flips production configuration. |
+
+Use the
+[cutover readiness runbook input](./postgresql-cutover-readiness.md) as the
+checklist for #1681 evidence review and later maintenance-window planning. Do
+not run it against production until the importer shape, homelab change, backup
+procedure, rollback window, and operator approval are all finalized.
+
 ## Backup, restore, and rollback
 
 The PostgreSQL operator owns scheduled backups, retention, integrity checks, and

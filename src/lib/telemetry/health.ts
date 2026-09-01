@@ -1,4 +1,4 @@
-import type { SyncQueueMetrics } from '@/lib/sync/job-queue';
+import type { SyncQueueMetrics } from '@/lib/sync/job-repository';
 import type {
   RuntimeTelemetryInstance,
   RuntimeTelemetryRecord,

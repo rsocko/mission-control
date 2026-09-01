@@ -10,10 +10,8 @@ import type { ScheduledTask } from 'node-cron';
 import cron from 'node-cron';
 import logger from '@/lib/logger';
 import { resolveGitHubCredentials, resolveRedditCredentials, resolveYouTubeCredentials } from './credentials';
-import { importAllGitHubStars, importAllRedditSaved, importAllYouTubePlaylists } from './importers';
-import { importAllDocumentIntelligenceActions } from './importers/document-intelligence-importer';
 import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { FullSyncResult } from './importers/base-importer';
 import type { PersistenceJson } from '@/db/persistence/contracts';
 
@@ -86,12 +84,14 @@ export interface ScheduledTriageImportResult {
  */
 export class TriageSyncScheduler {
   private jobs = new Map<string, ScheduledTriageJob>();
-  private syncInProgress = new Set<string>();
+  private activeRuns = new Map<TriageSourceId, Promise<ScheduledTriageImportResult>>();
+  private stopping = false;
 
   /**
    * Load config from DB and schedule all enabled sources.
    */
   async initialize(): Promise<void> {
+    this.stopping = false;
     const config = await this.getConfig();
     for (const [sourceId, sourceConfig] of Object.entries(config.sources)) {
       if (sourceConfig.enabled) {
@@ -153,16 +153,10 @@ export class TriageSyncScheduler {
    * Run an import for a specific source (called by cron or manually).
    */
   async runImport(sourceId: TriageSourceId): Promise<ScheduledTriageImportResult> {
-    return withDatabaseOperation(
-      'worker-triage-import',
-      () => this.runImportWithAttribution(sourceId),
-    );
-  }
-
-  private async runImportWithAttribution(
-    sourceId: TriageSourceId,
-  ): Promise<ScheduledTriageImportResult> {
-    if (this.syncInProgress.has(sourceId)) {
+    if (this.stopping) {
+      throw new Error('Triage auto-sync scheduler is stopping');
+    }
+    if (this.activeRuns.has(sourceId)) {
       logger.warn({ sourceId }, 'Triage auto-sync already in progress, skipping');
       return {
         sourceId,
@@ -173,68 +167,84 @@ export class TriageSyncScheduler {
         durationMs: 0,
       };
     }
-
-    this.syncInProgress.add(sourceId);
-    const startedAt = Date.now();
+    const run = withDatabaseOperation(
+      'worker-triage-import',
+      () => this.runImportWithAttribution(sourceId),
+    );
+    this.activeRuns.set(sourceId, run);
     try {
-      if (sourceId === 'github-stars') {
-        const creds = await resolveGitHubCredentials();
-        if (!creds) {
-          logger.warn({ sourceId }, 'Triage auto-sync: no GitHub credentials configured');
-          return this.missingConfigResult(sourceId, startedAt);
-        }
-        const result = await importAllGitHubStars({
-          token: creds.token,
-          username: creds.username,
-          incremental: true,
-        });
-        return this.scheduledResult(sourceId, result);
-      }
-      if (sourceId === 'reddit-saved') {
-        const creds = await resolveRedditCredentials();
-        if (!creds) {
-          logger.warn({ sourceId }, 'Triage auto-sync: no Reddit credentials configured');
-          return this.missingConfigResult(sourceId, startedAt);
-        }
-        const result = await importAllRedditSaved({
-          clientId: creds.clientId,
-          clientSecret: creds.clientSecret,
-          refreshToken: creds.refreshToken,
-          username: creds.username,
-          incremental: true,
-        });
-        return this.scheduledResult(sourceId, result);
-      }
-      if (sourceId === 'youtube') {
-        const creds = await resolveYouTubeCredentials();
-        if (!creds) {
-          logger.warn({ sourceId }, 'Triage auto-sync: no YouTube credentials configured');
-          return this.missingConfigResult(sourceId, startedAt);
-        }
-        const result = await importAllYouTubePlaylists({
-          clientId: creds.clientId,
-          clientSecret: creds.clientSecret,
-          refreshToken: creds.refreshToken,
-          playlistIds: creds.playlistIds,
-          incremental: true,
-        });
-        return this.scheduledResult(sourceId, result);
-      }
-      if (sourceId === 'document-intelligence') {
-        const result = await importAllDocumentIntelligenceActions({ incremental: true });
-        return this.scheduledResult(sourceId, result);
-      }
-      throw new Error('Unsupported triage source');
+      return await run;
     } finally {
-      this.syncInProgress.delete(sourceId);
+      if (this.activeRuns.get(sourceId) === run) this.activeRuns.delete(sourceId);
     }
+  }
+
+  private async runImportWithAttribution(
+    sourceId: TriageSourceId,
+  ): Promise<ScheduledTriageImportResult> {
+    const startedAt = Date.now();
+    if (sourceId === 'github-stars') {
+      const creds = await resolveGitHubCredentials();
+      if (!creds) {
+        logger.warn({ sourceId }, 'Triage auto-sync: no GitHub credentials configured');
+        return this.missingConfigResult(sourceId, startedAt);
+      }
+      const { importAllGitHubStars } = await import('./importers/github-importer');
+      const result = await importAllGitHubStars({
+        token: creds.token,
+        username: creds.username,
+        incremental: true,
+      });
+      return this.scheduledResult(sourceId, result);
+    }
+    if (sourceId === 'reddit-saved') {
+      const creds = await resolveRedditCredentials();
+      if (!creds) {
+        logger.warn({ sourceId }, 'Triage auto-sync: no Reddit credentials configured');
+        return this.missingConfigResult(sourceId, startedAt);
+      }
+      const { importAllRedditSaved } = await import('./importers/reddit-importer');
+      const result = await importAllRedditSaved({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+        username: creds.username,
+        incremental: true,
+      });
+      return this.scheduledResult(sourceId, result);
+    }
+    if (sourceId === 'youtube') {
+      const creds = await resolveYouTubeCredentials();
+      if (!creds) {
+        logger.warn({ sourceId }, 'Triage auto-sync: no YouTube credentials configured');
+        return this.missingConfigResult(sourceId, startedAt);
+      }
+      const { importAllYouTubePlaylists } = await import('./importers/youtube-importer');
+      const result = await importAllYouTubePlaylists({
+        clientId: creds.clientId,
+        clientSecret: creds.clientSecret,
+        refreshToken: creds.refreshToken,
+        playlistIds: creds.playlistIds,
+        incremental: true,
+      });
+      return this.scheduledResult(sourceId, result);
+    }
+    if (sourceId === 'document-intelligence') {
+      const { importAllDocumentIntelligenceActions } = await import(
+        './importers/document-intelligence-importer'
+      );
+      const result = await importAllDocumentIntelligenceActions({ incremental: true });
+      return this.scheduledResult(sourceId, result);
+    }
+    throw new Error('Unsupported triage source');
   }
 
   /**
    * Read the persisted config (or return defaults).
    */
   async getConfig(): Promise<TriageAutoSyncConfig> {
-    const value = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY);
+    const repositories = await getCorePersistenceRepositoriesForBackend();
+    const value = await repositories.settings.get(SETTINGS_KEY);
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const stored = value as Partial<TriageAutoSyncConfig>;
       return {
@@ -275,7 +285,8 @@ export class TriageSyncScheduler {
       },
     };
 
-    await getCorePersistenceRepositories().settings.set(
+    const repositories = await getCorePersistenceRepositoriesForBackend();
+    await repositories.settings.set(
       SETTINGS_KEY,
       serializeConfig(merged),
     );
@@ -299,18 +310,20 @@ export class TriageSyncScheduler {
     return Array.from(this.jobs.values()).map((job) => ({
       sourceId: job.sourceId,
       intervalMinutes: job.intervalMinutes,
-      isRunning: this.syncInProgress.has(job.sourceId),
+      isRunning: this.activeRuns.has(job.sourceId),
     }));
   }
 
   /**
    * Stop all scheduled jobs.
    */
-  stopAll(): void {
+  async stopAll(): Promise<void> {
+    this.stopping = true;
     for (const job of this.jobs.values()) {
       job.task.stop();
     }
     this.jobs.clear();
+    await Promise.allSettled(this.activeRuns.values());
   }
 
   private missingConfigResult(

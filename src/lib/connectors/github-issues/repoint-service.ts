@@ -35,7 +35,7 @@ import {
   repositoryEvidenceFromRest,
 } from './identity';
 import { parseSourceId, refreshGitHubIssueMetadata } from './issue-transformer';
-import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
+import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock-runtime';
 
 export { inspectGitHubRepointBackup } from './backup-verifier';
 

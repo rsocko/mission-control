@@ -57,18 +57,19 @@ describe('native Share Sheet credential authentication', () => {
       revokedAt: null,
     });
     const wrong = `mc_share_v1.${credentialId}.${'b'.repeat(43)}`;
-    await expect(authenticateNativeShareCredential(`Bearer ${wrong}`)).resolves.toEqual({
+    const now = new Date('2026-08-01');
+    await expect(authenticateNativeShareCredential(`Bearer ${wrong}`, now)).resolves.toEqual({
       status: 'unauthorized',
     });
 
     rows[0].revokedAt = '2026-08-01T00:00:00.000Z';
-    await expect(authenticateNativeShareCredential(`Bearer ${token}`)).resolves.toEqual({
+    await expect(authenticateNativeShareCredential(`Bearer ${token}`, now)).resolves.toEqual({
       status: 'unauthorized',
     });
 
     rows[0].revokedAt = null;
     rows[0].scope = 'push:register';
-    await expect(authenticateNativeShareCredential(`Bearer ${token}`)).resolves.toEqual({
+    await expect(authenticateNativeShareCredential(`Bearer ${token}`, now)).resolves.toEqual({
       status: 'forbidden',
     });
   });

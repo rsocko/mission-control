@@ -185,6 +185,40 @@ export function describeCorePersistenceRepositoriesContract(
       });
     });
 
+    it('updates connector authentication state without overwriting unrelated fields', async () => {
+      const connector = {
+        ...coreConnectorFixture,
+        name: 'Concurrent connector state',
+        enabled: false,
+        syncedLists: ['list-concurrent'],
+      };
+      await harness.repositories.connectors.upsert(connector);
+
+      await harness.repositories.connectors.updateCredentials(
+        connector.id,
+        { token: 'rotated' },
+      );
+      await expect(harness.repositories.connectors.get(connector.id)).resolves.toEqual({
+        ...connector,
+        credentials: { token: 'rotated' },
+      });
+
+      await harness.repositories.connectors.updateCredentials(
+        connector.id,
+        { token: 'reauthorized' },
+        { accountType: 'work', tenantId: 'tenant-1' },
+      );
+      await expect(harness.repositories.connectors.get(connector.id)).resolves.toEqual({
+        ...connector,
+        credentials: { token: 'reauthorized' },
+        settings: {
+          nested: { portable: true },
+          accountType: 'work',
+          tenantId: 'tenant-1',
+        },
+      });
+    });
+
     it('merges connector settings and atomically patches nested state', async () => {
       await harness.repositories.connectors.upsert(coreConnectorFixture);
 

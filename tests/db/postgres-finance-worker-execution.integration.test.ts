@@ -1,4 +1,8 @@
 import { randomUUID } from 'node:crypto';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   afterAll,
   afterEach,
@@ -16,9 +20,13 @@ import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
 vi.unmock('drizzle-orm');
 
-const sqliteTouch = vi.hoisted(() => vi.fn());
+const { sqliteEvaluation, sqliteTouch } = vi.hoisted(() => ({
+  sqliteEvaluation: vi.fn(),
+  sqliteTouch: vi.fn(),
+}));
 
 vi.mock('@/db', () => {
+  sqliteEvaluation();
   const rejectSqliteAccess = () => {
     sqliteTouch();
     throw new Error('SQLite must not be touched by PostgreSQL finance execution');
@@ -62,9 +70,41 @@ let pool: Pool;
 let shutdownRuntimeDatabase: (() => Promise<void>) | undefined;
 let SyncExecutionPipeline: typeof import('@/lib/sync')['SyncExecutionPipeline'];
 let SyncWorker: typeof import('@/lib/sync/worker')['SyncWorker'];
-let getSyncJobRepository: typeof import('@/lib/sync/job-queue')['getSyncJobRepository'];
-let waitForSyncJob: typeof import('@/lib/sync/job-queue')['waitForSyncJob'];
+let getSyncJobRepository: typeof import('@/lib/sync/job-runtime')['getSyncJobRepository'];
+let waitForSyncJob: typeof import('@/lib/sync/job-runtime')['waitForSyncJob'];
 const connectorIds = new Set<string>();
+
+async function waitFor(
+  assertion: () => Promise<void>,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  throw new Error('Timed out waiting for packaged PostgreSQL worker', { cause: lastError });
+}
+
+function waitForExit(child: ChildProcess, timeoutMs = 30_000): Promise<number | null> {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error('Packaged PostgreSQL worker did not stop')),
+      timeoutMs,
+    );
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve(code);
+    });
+  });
+}
 
 function restoreEnvironment(name: string, value: string | undefined): void {
   if (value === undefined) delete process.env[name];
@@ -362,6 +402,16 @@ async function seedConnector(connectorId: string): Promise<void> {
 }
 
 async function cleanupConnector(connectorId: string): Promise<void> {
+  const recoverySourcePattern = `finance-connection:${connectorId}:%`;
+  await pool.query(
+    `DELETE FROM my_day_items WHERE task_id IN (
+       SELECT id FROM tasks WHERE source_id LIKE $1
+     )`,
+    [recoverySourcePattern],
+  );
+  await pool.query('DELETE FROM tasks WHERE source_id LIKE $1', [recoverySourcePattern]);
+  await pool.query('DELETE FROM notifications WHERE connector_instance_id = $1', [connectorId]);
+  await pool.query('DELETE FROM finance_connection_outages WHERE connector_id = $1', [connectorId]);
   for (const table of ['notification_delivery_events', 'notification_actions']) {
     await pool.query(
       `DELETE FROM ${table} WHERE notification_id IN (
@@ -445,10 +495,11 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     shutdownRuntimeDatabase = runtime.shutdownRuntimeDatabase;
     ({ SyncExecutionPipeline } = await import('@/lib/sync'));
     ({ SyncWorker } = await import('@/lib/sync/worker'));
-    ({ getSyncJobRepository, waitForSyncJob } = await import('@/lib/sync/job-queue'));
+    ({ getSyncJobRepository, waitForSyncJob } = await import('@/lib/sync/job-runtime'));
   }, 120_000);
 
   beforeEach(() => {
+    sqliteEvaluation.mockClear();
     sqliteTouch.mockClear();
     installSyntheticFinanceProvider();
   });
@@ -521,6 +572,250 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     expect(Number(state.rows[0].deliveryCount)).toBeGreaterThan(0);
     expect(sqliteTouch).not.toHaveBeenCalled();
   }, 180_000);
+
+  it('starts every registered scheduler family with the complete PostgreSQL composition', async () => {
+    const { getWorkerPersistenceRepositories } = await import('@/lib/persistence/worker-runtime');
+    const { taskReminderScheduler } = await import('@/lib/push/task-reminder-scheduler');
+    const { financeConnectionRecoveryScheduler } = await import(
+      '@/lib/connectors/monarch-money/recovery-scheduler'
+    );
+    const { triageSyncScheduler } = await import('@/lib/triage/scheduler');
+    const { houstonMemoryRetentionScheduler } = await import('@/lib/houston-memory/retention');
+    const { generateWorkerHealthSnapshot } = await import('@/lib/telemetry/health-snapshot');
+    const repositories = await getWorkerPersistenceRepositories();
+
+    expect(repositories).toMatchObject({
+      connectors: expect.anything(),
+      syncRuns: expect.anything(),
+      execution: expect.anything(),
+      github: expect.anything(),
+      connectorState: expect.anything(),
+      notificationDelivery: expect.anything(),
+      reminders: expect.anything(),
+      triage: expect.anything(),
+      finance: expect.anything(),
+    });
+    expect(repositories.finance.recovery).toBeDefined();
+
+    await taskReminderScheduler.start();
+    await triageSyncScheduler.initialize();
+    await financeConnectionRecoveryScheduler.start();
+    houstonMemoryRetentionScheduler.start();
+    await generateWorkerHealthSnapshot(`postgres-final-worker-${randomUUID()}`);
+
+    await Promise.all([
+      taskReminderScheduler.stop(),
+      financeConnectionRecoveryScheduler.stop(),
+      triageSyncScheduler.stopAll(),
+      houstonMemoryRetentionScheduler.stop(),
+    ]);
+    expect(sqliteEvaluation).not.toHaveBeenCalled();
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  }, 120_000);
+
+  it('starts, restarts, and gracefully stops the packaged worker without loading SQLite', async () => {
+    const runtimeRoot = await mkdtemp(join(tmpdir(), 'mc-postgres-worker-'));
+    const instancePath = join(runtimeRoot, 'worker-instance');
+    const sqlitePath = join(runtimeRoot, 'poison.db');
+    const poisonPath = join(runtimeRoot, 'poison-sqlite.cjs');
+    await writeFile(poisonPath, `
+      const Module = require('node:module');
+      const load = Module._load;
+      Module._load = function(request, parent, isMain) {
+        if (request === 'better-sqlite3' || request.includes('sqlite-')) {
+          throw new Error('Packaged PostgreSQL worker evaluated SQLite: ' + request);
+        }
+        return load.call(this, request, parent, isMain);
+      };
+    `);
+
+    const runWorker = async () => {
+      const output: Buffer[] = [];
+      const child = spawn(process.execPath, [
+        '--require',
+        poisonPath,
+        'dist/sync-worker.cjs',
+      ], {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          MC_DATABASE_BACKEND: 'postgres',
+          MC_POSTGRES_URL: connectionString!,
+          MC_POSTGRES_SSL_MODE: process.env.MC_POSTGRES_SSL_MODE,
+          MC_DB_PATH: sqlitePath,
+          MC_WORKER_INSTANCE_FILE: instancePath,
+          MC_TELEMETRY_INTERVAL_MS: '100',
+          MC_DEPLOYMENT_REVISION: 'postgres-final-worker-smoke',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout?.on('data', (chunk: Buffer) => output.push(chunk));
+      child.stderr?.on('data', (chunk: Buffer) => output.push(chunk));
+      try {
+        await waitFor(async () => {
+          const logs = Buffer.concat(output).toString();
+          if (child.exitCode !== null) {
+            throw new Error(logs || `Worker exited with code ${child.exitCode}`);
+          }
+          const instanceId = (await readFile(instancePath, 'utf8')).trim();
+          if (!instanceId || !logs.includes('triage auto-sync scheduler initialized')) {
+            throw new Error(logs || 'Worker startup is incomplete');
+          }
+        }, 60_000);
+        child.kill('SIGTERM');
+        const exitCode = await waitForExit(child);
+        if (exitCode !== 0) {
+          throw new Error(Buffer.concat(output).toString());
+        }
+        await expect(stat(instancePath)).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally {
+        if (child.exitCode === null) {
+          child.kill('SIGKILL');
+          await waitForExit(child).catch(() => undefined);
+        }
+      }
+    };
+
+    try {
+      await runWorker();
+      await runWorker();
+      await expect(stat(sqlitePath)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(runtimeRoot, { recursive: true, force: true });
+    }
+  }, 180_000);
+
+  it('recovers and fences a durable finance outage episode idempotently', async () => {
+    const connectorId = `finance-recovery-${randomUUID()}`;
+    await seedConnector(connectorId);
+    const { finance } = await (
+      await import('@/lib/persistence/worker-runtime')
+    ).getWorkerPersistenceRepositories();
+    const startedAt = new Date('2026-01-01T00:00:00.000Z');
+    const unavailable = { kind: 'unavailable' as const, errorCode: 'synthetic_unavailable' };
+
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: unavailable,
+      now: startedAt,
+    });
+    const escalated = await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: unavailable,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000),
+    });
+    const episode = await finance.recovery.getActiveEpisode(connectorId);
+
+    expect(escalated).toMatchObject({
+      status: 'degraded',
+      notificationCreated: true,
+      taskCreated: true,
+    });
+    expect(episode).not.toBeNull();
+    const healthy = {
+      kind: 'health' as const,
+      health: {
+        status: 'ok',
+        mode: 'live',
+        reachable: true,
+        authenticated: true,
+        authState: 'connected' as const,
+      },
+    };
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: healthy,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 1),
+    });
+    await expect(finance.recovery.recordBoundedSyncSuccess({
+      connectorId,
+      episodeId: 'stale-episode',
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 2),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.recordBoundedSyncSuccess({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 3),
+    })).resolves.toBe(true);
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: unavailable,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 4),
+    });
+    await expect(finance.recovery.recordBoundedSyncFailure({
+      connectorId,
+      episodeId: episode!.episodeId,
+      errorCode: 'stale_bounded_failure',
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 5),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 6),
+    })).resolves.toBe(false);
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: healthy,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 7),
+    });
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 8),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.recordBoundedSyncFailure({
+      connectorId,
+      episodeId: episode!.episodeId,
+      errorCode: 'bounded_sync_failed',
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 9),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 10),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.recordBoundedSyncSuccess({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 11),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 12),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 13),
+    })).resolves.toBe(false);
+
+    const state = await pool.query<{
+      outageStatus: string;
+      notificationState: string;
+      taskStatus: string;
+      myDayCount: string;
+    }>(`
+      SELECT
+        (SELECT status FROM finance_connection_outages WHERE connector_id = $1)
+          AS "outageStatus",
+        (SELECT state FROM notifications WHERE connector_instance_id = $1 LIMIT 1)
+          AS "notificationState",
+        (SELECT status FROM tasks WHERE source_id LIKE $2 LIMIT 1)
+          AS "taskStatus",
+        (SELECT count(*) FROM my_day_items WHERE task_id IN (
+          SELECT id FROM tasks WHERE source_id LIKE $2
+        )) AS "myDayCount"
+    `, [connectorId, `finance-connection:${connectorId}:%`]);
+    expect(state.rows[0]).toEqual({
+      outageStatus: 'recovered',
+      notificationState: 'resolved',
+      taskStatus: 'done',
+      myDayCount: '0',
+    });
+    expect(sqliteEvaluation).not.toHaveBeenCalled();
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  }, 120_000);
 
   it('fences a released finance attempt and completes its retry with a new worker', async () => {
     const connectorId = `finance-worker-${randomUUID()}`;

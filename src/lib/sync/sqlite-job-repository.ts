@@ -14,11 +14,12 @@ import type {
   SyncQueueMetrics,
   SyncScheduleHealth,
 } from './job-repository';
-import { connectorSyncLeaseOwner, recoverExpiredSyncJobs } from './connector-lock';
+import { connectorSyncLeaseOwner } from './connector-lock-values';
+import { recoverExpiredSyncJobs } from './sqlite-connector-operation-lease-repository';
 import {
   assertConnectorSyncEnqueueAllowed,
   isConnectorSyncQuarantined,
-} from './control-state';
+} from './sqlite-control-state';
 
 interface SyncJobDatabaseRow {
   id: string;

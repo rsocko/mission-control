@@ -302,12 +302,13 @@ describe('POST /api/triage/import/twitter-archive', () => {
     process.env.MC_TWITTER_ARCHIVE_MAX_REQUEST_BYTES = '64';
     try {
       const { POST } = await import('@/app/api/triage/import/twitter-archive/route');
-      const form = new FormData();
-      form.set('file', new Blob([new Uint8Array(128)]), 'archive.zip');
       const req = new Request('http://localhost/api/triage/import/twitter-archive', {
         method: 'POST',
-        headers: { 'content-length': '1' },
-        body: form,
+        headers: {
+          'content-length': '1',
+          'content-type': 'application/octet-stream',
+        },
+        body: 'x'.repeat(128),
       });
 
       const res = await POST(req);

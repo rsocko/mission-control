@@ -1,11 +1,6 @@
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq, isNull, and } from 'drizzle-orm';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { ConnectorCapabilities } from '@/types';
-import {
-  CAPABILITY_DEFAULTS,
-  resolvePersistedConnectorCapabilities,
-} from './resolved-capabilities';
+import { resolvePersistedConnectorCapabilities } from './resolved-capabilities';
 
 export { CAPABILITY_DEFAULTS } from './resolved-capabilities';
 
@@ -20,19 +15,8 @@ export async function getConnectorCapabilities(
 ): Promise<ConnectorCapabilities | null> {
   if (!connectorInstanceId || connectorInstanceId === 'local') return null;
 
-  const [config] = await db
-    .select({
-      capabilities: connectorConfigs.capabilities,
-      settings: connectorConfigs.settings,
-      type: connectorConfigs.type,
-    })
-    .from(connectorConfigs)
-    .where(
-      and(
-        eq(connectorConfigs.id, connectorInstanceId),
-        isNull(connectorConfigs.deletedAt),
-      ),
-    );
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const config = await repositories.connectors.get(connectorInstanceId);
 
   if (!config?.capabilities) return null;
 
@@ -52,15 +36,8 @@ export async function isConnectorEnabled(
 ): Promise<boolean> {
   if (!connectorInstanceId || connectorInstanceId === 'local') return true;
 
-  const [config] = await db
-    .select({ enabled: connectorConfigs.enabled })
-    .from(connectorConfigs)
-    .where(
-      and(
-        eq(connectorConfigs.id, connectorInstanceId),
-        isNull(connectorConfigs.deletedAt),
-      ),
-    );
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const config = await repositories.connectors.get(connectorInstanceId);
 
   return config?.enabled ?? true;
 }

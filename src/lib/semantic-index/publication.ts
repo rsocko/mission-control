@@ -1,11 +1,13 @@
 import type { SemanticSourceEntityType } from './source/contracts';
-import { isSemanticIndexEnabled } from './config';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 async function publish(
   kind: 'upsert' | 'delete',
   entityType: SemanticSourceEntityType,
   entityId: string,
 ): Promise<void> {
+  if (resolveDatabaseBackend() === 'postgres') return;
+  const { isSemanticIndexEnabled } = await import('./config');
   if (!isSemanticIndexEnabled()) return;
   const { publishSemanticDelete, publishSemanticUpsert } = await import('./runtime');
   if (kind === 'upsert') await publishSemanticUpsert(entityType, entityId);

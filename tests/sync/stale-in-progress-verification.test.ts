@@ -183,7 +183,7 @@ vi.mock('@/lib/sync/maintenance-lock', () => ({
   assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@/lib/sync/connector-lock', () => ({
+vi.mock('@/lib/sync/connector-lock-runtime', () => ({
   ConnectorOperationBusyError: class ConnectorOperationBusyError extends Error {},
   runWithConnectorOperationLease: vi.fn(
     async (_id: string, _operation: string, callback: () => Promise<unknown>) => callback(),

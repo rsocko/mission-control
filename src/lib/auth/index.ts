@@ -1,5 +1,5 @@
 import { authLogger } from '@/lib/logger';
-import { resolveCertificateCredentials, buildCertificateAuthParams, isCertificateAuthConfigured } from './certificate';
+import { resolveCertificateCredentials, buildCertificateAuthParams } from './certificate';
 import { isPkceEnabled, generatePkceChallenge, storePkceVerifier, consumePkceVerifier } from './pkce';
 /**
  * Multi-Account OAuth2 Manager
@@ -21,9 +21,8 @@ import { isPkceEnabled, generatePkceChallenge, storePkceVerifier, consumePkceVer
  * - The resolved clientId is stored in connector settings so refreshes use the same app
  */
 
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
+import type { ConnectorConfig } from '@/types';
 
 // Microsoft OAuth2 endpoints
 const MS_AUTH_BASE = 'https://login.microsoftonline.com';
@@ -310,20 +309,25 @@ export async function refreshAccessToken(tokenSet: TokenSet, retries = 2, client
 // Simple per-instance refresh lock to prevent concurrent refresh races
 const refreshLocks = new Map<string, Promise<string>>();
 
+function connectorCredentials(value: object): ConnectorConfig['credentials'] {
+  return value as unknown as ConnectorConfig['credentials'];
+}
+
 /**
  * Force-invalidate a connector's cached access token so the next getValidToken
  * call triggers a refresh. Used when the API returns 401 even though our local
  * expiresAt hasn't elapsed (e.g. Microsoft revoked the token early).
  */
 export async function invalidateToken(connectorInstanceId: string): Promise<void> {
-  const [config] = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, connectorInstanceId));
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
+  const config = await repository.get(connectorInstanceId);
   if (config) {
     const creds = config.credentials as unknown as TokenSet;
     if (creds) {
-      await db.update(connectorConfigs).set({
-        credentials: { ...creds, expiresAt: 0 } as unknown as Record<string, unknown>,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(connectorConfigs.id, connectorInstanceId));
+      await repository.updateCredentials(
+        connectorInstanceId,
+        connectorCredentials({ ...creds, expiresAt: 0 }),
+      );
       authLogger.info({ connectorInstanceId }, 'Invalidated connector token');
     }
   }
@@ -334,8 +338,8 @@ export async function invalidateToken(connectorInstanceId: string): Promise<void
  * Uses a lock to prevent concurrent refresh attempts that could race on token rotation.
  */
 export async function getValidToken(connectorInstanceId: string): Promise<string> {
-  const configs = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, connectorInstanceId));
-  const config = configs[0];
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
+  const config = await repository.get(connectorInstanceId);
   if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
 
   const credentials = config.credentials as unknown as TokenSet;
@@ -352,7 +356,7 @@ export async function getValidToken(connectorInstanceId: string): Promise<string
     const refreshPromise = (async () => {
       try {
         // Re-read credentials inside lock in case another call already refreshed
-        const [freshConfig] = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, connectorInstanceId));
+        const freshConfig = await repository.get(connectorInstanceId);
         const freshCreds = freshConfig?.credentials as unknown as TokenSet;
         if (freshCreds && Date.now() < freshCreds.expiresAt - 300000) {
           authLogger.info({ connectorInstanceId }, 'Token was already refreshed by another request');
@@ -379,10 +383,10 @@ export async function getValidToken(connectorInstanceId: string): Promise<string
         }
 
         // Save refreshed tokens
-        await db.update(connectorConfigs).set({
-          credentials: refreshed as unknown as Record<string, unknown>,
-          updatedAt: new Date().toISOString(),
-        }).where(eq(connectorConfigs.id, connectorInstanceId));
+        await repository.updateCredentials(
+          connectorInstanceId,
+          connectorCredentials(refreshed),
+        );
 
         authLogger.info({ connectorInstanceId, expiresAt: refreshed.expiresAt }, 'Connector token refreshed successfully');
         return refreshed.accessToken;
@@ -406,17 +410,20 @@ export async function getValidToken(connectorInstanceId: string): Promise<string
  */
 export async function storeTokens(connectorInstanceId: string, tokenSet: TokenSet, clientId?: string): Promise<void> {
   const { clientSecret } = clientId ? resolveClientCredentials(tokenSet.accountType) : { clientSecret: undefined };
-  await db.update(connectorConfigs).set({
-    credentials: tokenSet as unknown as Record<string, unknown>,
-    settings: {
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
+  const config = await repository.get(connectorInstanceId);
+  if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
+  await repository.updateCredentials(
+    connectorInstanceId,
+    connectorCredentials(tokenSet),
+    {
       accountType: tokenSet.accountType,
       tenantId: tokenSet.tenantId,
       userEmail: tokenSet.userEmail,
       userName: tokenSet.userName,
       ...(clientId ? { clientId, clientSecret } : {}),
-    } as unknown as Record<string, unknown>,
-    updatedAt: new Date().toISOString(),
-  }).where(eq(connectorConfigs.id, connectorInstanceId));
+    },
+  );
 }
 
 /**
@@ -430,8 +437,8 @@ export async function storeTokens(connectorInstanceId: string, tokenSet: TokenSe
  * future Graph token refreshes.
  */
 export async function getSubstrateToken(connectorInstanceId: string): Promise<string> {
-  const configs = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, connectorInstanceId));
-  const config = configs[0];
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
+  const config = await repository.get(connectorInstanceId);
   if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
 
   const credentials = config.credentials as unknown as TokenSet & { substrateToken?: string; substrateExpiresAt?: number };
@@ -452,7 +459,7 @@ export async function getSubstrateToken(connectorInstanceId: string): Promise<st
   const refreshPromise = (async () => {
     try {
       // Re-read credentials inside lock in case another call already refreshed
-      const [freshConfig] = await db.select().from(connectorConfigs).where(eq(connectorConfigs.id, connectorInstanceId));
+      const freshConfig = await repository.get(connectorInstanceId);
       const freshCreds = freshConfig?.credentials as unknown as TokenSet & { substrateToken?: string; substrateExpiresAt?: number };
       if (freshCreds?.substrateToken && freshCreds.substrateExpiresAt && Date.now() < freshCreds.substrateExpiresAt - 300000) {
         return freshCreds.substrateToken;
@@ -532,10 +539,10 @@ export async function getSubstrateToken(connectorInstanceId: string): Promise<st
           authLogger.info('Substrate token request returned a rotated refresh token');
         }
 
-        await db.update(connectorConfigs).set({
-          credentials: updatedCredentials,
-          updatedAt: new Date().toISOString(),
-        }).where(eq(connectorConfigs.id, connectorInstanceId));
+        await repository.updateCredentials(
+          connectorInstanceId,
+          connectorCredentials(updatedCredentials),
+        );
 
         return data.access_token as string;
       }

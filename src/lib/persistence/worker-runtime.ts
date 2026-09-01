@@ -40,6 +40,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteTaskReminderRepository },
     { createSqliteTriagePersistenceRepositories },
     { createSqliteFinanceWorkerPersistence },
+    { createSqliteFinanceConnectionRecoveryPersistence },
     { createSqliteFinanceInsightPersistence },
     {
       createSqliteFinanceAttentionRepairPersistence,
@@ -64,6 +65,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-task-reminder-repository'),
     import('@/db/persistence/sqlite-triage-repositories'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
+    import('@/db/persistence/sqlite-finance-recovery-repository'),
     import('@/db/persistence/sqlite-finance-insights-repositories'),
     import('@/db/persistence/sqlite-finance-attention-repositories'),
     import('@/db/persistence/sqlite-finance-insight-notification-lifecycle'),
@@ -126,6 +128,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
       routing: createSqliteFinanceAttentionRoutingPersistence({ sqlite, db }),
       repair: createSqliteFinanceAttentionRepairPersistence(sqlite),
     },
+    recovery: createSqliteFinanceConnectionRecoveryPersistence(sqlite, db),
   };
   return {
     connectors: sqliteCorePersistenceRepositories.connectors,

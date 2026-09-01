@@ -22,6 +22,14 @@ const REQUIRED_TRIAGE_WORKER_TOKENS = [
   'Triage auto-sync completed',
 ];
 
+const REQUIRED_FINAL_WORKER_TOKENS = [
+  'createPostgresFinanceConnectionRecoveryPersistence',
+  'financeConnectionEpisodeId',
+  'Selected worker persistence composition is incomplete',
+  'legacy durable AI run worker is disabled on PostgreSQL',
+  'semantic index worker is disabled for this persistence backend',
+];
+
 export function assertSyncWorkerArtifact(source) {
   if (source.includes(RETIRED_FINANCE_BACKLOG_CODE)) {
     throw new Error(
@@ -40,6 +48,14 @@ export function assertSyncWorkerArtifact(source) {
   if (missingTriage.length > 0) {
     throw new Error(
       `Sync worker bundle omitted required triage activation markers:\n${missingTriage.join('\n')}`,
+    );
+  }
+  const missingFinal = REQUIRED_FINAL_WORKER_TOKENS.filter(
+    (token) => !source.includes(token),
+  );
+  if (missingFinal.length > 0) {
+    throw new Error(
+      `Sync worker bundle omitted final PostgreSQL worker markers:\n${missingFinal.join('\n')}`,
     );
   }
   if (

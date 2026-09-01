@@ -30,6 +30,32 @@ put it in a `NEXT_PUBLIC_` variable, image layer, Compose command line, log
 message, or committed environment file. The web and sync-worker processes must
 receive the same backend selection and point to the same database.
 
+## Packaged worker persistence parity
+
+Issue [#1680](https://github.com/rsocko/mission-control/issues/1680) completes
+PostgreSQL persistence for the packaged `src/sync-worker.ts` runtime. The
+PostgreSQL composition includes queue execution and retry/recovery, all
+registered connector repositories, GitHub and finance workers, Monarch
+connection recovery, notification delivery, reminders, scheduled triage,
+health/telemetry, cron polling, and retention maintenance. Repository
+registration is atomic and fails closed; a PostgreSQL configuration or
+registration error never falls back to SQLite.
+
+Architecture tests walk the source graph from the real worker entry and inspect
+the built artifact. The live PostgreSQL worker gate poisons Mission Control
+SQLite modules, starts the packaged worker and every scheduler family, exercises
+representative durable execution/retry/recovery behavior, stops cleanly, and
+restarts to verify lease recovery and idempotency.
+
+This is worker persistence parity only. It does **not** import existing SQLite
+data (tracked by [#1681](https://github.com/rsocko/mission-control/issues/1681)),
+select PostgreSQL in production, change deployment configuration, establish
+complete web/API persistence parity, or perform the production cutover tracked
+by [#1155](https://github.com/rsocko/mission-control/issues/1155).
+
+Keep SQLite databases and rollback artifacts until those separate activation
+and cutover steps are complete.
+
 ## Database role
 
 Use a dedicated, non-superuser login. It needs `CONNECT` on the Mission Control

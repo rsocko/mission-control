@@ -6,7 +6,7 @@ import {
   getSyncLeaseMs,
   getSyncJobRepository,
   type SyncJob,
-} from './job-queue';
+} from './job-runtime';
 import { setSyncEventPersistence } from './events';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';

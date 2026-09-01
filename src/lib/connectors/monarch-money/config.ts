@@ -1,14 +1,12 @@
 import 'server-only';
 
-import { and, eq, inArray, isNull } from 'drizzle-orm';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { ConnectorCapabilities, ConnectorConfig } from '@/types';
 import {
   normalizeTyrionBridgeUrl,
   TyrionBridgeUrlValidationError,
 } from './bridge-url';
-import { FINANCE_PROVIDER_ALIASES, normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import { currencySchema } from '@/lib/finance/currency';
 import {
   createFinanceIdentityNamespace,
@@ -16,7 +14,18 @@ import {
   financeIdentityNamespaceFromCredentials,
 } from './identity';
 
-type ConnectorConfigRow = typeof connectorConfigs.$inferSelect;
+type ConnectorConfigRow = {
+  id: string;
+  type: string;
+  name: string;
+  enabled: boolean;
+  syncMode: string;
+  pollIntervalMinutes: number | null;
+  capabilities: unknown;
+  credentials: unknown;
+  settings: unknown;
+  syncedLists: unknown;
+};
 type ConnectorConfigLike = {
   type: string;
   credentials?: unknown;
@@ -180,15 +189,13 @@ export function financeConnectorConfigFromRow(row: ConnectorConfigRow): Connecto
 export async function getPersistedFinanceConnectorConfig(
   connectorId?: string | null,
 ): Promise<ConnectorConfig> {
-  const rows = await db.select().from(connectorConfigs).where(and(
-    connectorId ? eq(connectorConfigs.id, connectorId) : undefined,
-    inArray(connectorConfigs.type, [...FINANCE_PROVIDER_ALIASES]),
-    eq(connectorConfigs.enabled, true),
-    isNull(connectorConfigs.deletedAt),
-  )).limit(connectorId ? 1 : 2);
-  if (rows.length === 0) throw new Error('Finance connector is not configured');
-  if (!connectorId && rows.length > 1) {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const configs = (await repositories.connectors.listEnabled())
+    .filter((config) => isFinanceConnectorType(config.type))
+    .filter((config) => !connectorId || config.id === connectorId);
+  if (configs.length === 0) throw new Error('Finance connector is not configured');
+  if (!connectorId && configs.length > 1) {
     throw new Error('connectorId is required when multiple finance connectors are enabled');
   }
-  return financeConnectorConfigFromRow(rows[0]);
+  return configs[0];
 }

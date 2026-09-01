@@ -208,6 +208,17 @@ describePostgres('PostgreSQL core repositories integration', () => {
     cleanupIds.connectors.add(connectorId);
 
     expect(await repositories.connectors.get(connectorId)).toMatchObject({ name: 'Integration connector' });
+    await repositories.connectors.updateCredentials(
+      connectorId,
+      { token: 'rotated' },
+      { accountType: 'work' },
+    );
+    expect(await repositories.connectors.get(connectorId)).toMatchObject({
+      name: 'Integration connector',
+      enabled: true,
+      credentials: { token: 'rotated' },
+      settings: { accountType: 'work' },
+    });
     expect(await repositories.connectors.delete(connectorId)).toBe(true);
     expect(await repositories.connectors.get(connectorId)).toBeNull();
     // Deleting an already soft-deleted connector reports no change.

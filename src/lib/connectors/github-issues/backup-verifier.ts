@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { createReadStream, statSync, type Stats } from 'node:fs';
 import path from 'node:path';
-import Database from 'better-sqlite3';
 import type { GitHubRecoveryBackupAttestation } from '@/db/persistence/github-recovery';
 import {
   BACKUP_ATTESTATION_MAX_AGE_MS,
@@ -33,6 +32,7 @@ export async function inspectGitHubRepointBackup(
   if (!initialStat.isFile() || initialStat.size <= 0) {
     throw new Error('Backup must be a non-empty file');
   }
+  const { default: Database } = await import('better-sqlite3');
   const backup = new Database(resolvedBackup, { readonly: true, fileMustExist: true });
   try {
     const rows = backup.pragma('integrity_check') as Array<{ integrity_check: string }>;

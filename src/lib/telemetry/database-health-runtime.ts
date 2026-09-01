@@ -1,4 +1,3 @@
-import { sqlite, withoutDatabaseObservation } from '@/db';
 import { PostgresDatabaseHealthProbe } from '@/db/postgres/health';
 import { getPostgresPersistenceBackend } from '@/db/runtime';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
@@ -7,42 +6,45 @@ import type {
 } from './health-snapshot-store';
 import type { DatabaseHealthProbe } from './database-health-probe';
 import { PostgresHealthSnapshotStore } from './postgres-health-snapshot-store';
-import { SqliteDatabaseHealthProbe } from './sqlite-database-health-probe';
-import { SqliteHealthSnapshotStore } from './sqlite-health-snapshot-store';
 
-const sqliteDatabaseHealthProbe = new SqliteDatabaseHealthProbe(
-  sqlite,
-  withoutDatabaseObservation,
-);
-
-function selectedDatabaseHealthProbe(): DatabaseHealthProbe {
-  if (resolveDatabaseBackend() === 'sqlite') return sqliteDatabaseHealthProbe;
-  return new PostgresDatabaseHealthProbe(
-    getPostgresPersistenceBackend().context.pool,
-  );
+async function selectedDatabaseHealthProbe(): Promise<DatabaseHealthProbe> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    return new PostgresDatabaseHealthProbe(
+      getPostgresPersistenceBackend().context.pool,
+    );
+  }
+  const [
+    { sqlite, withoutDatabaseObservation },
+    { SqliteDatabaseHealthProbe },
+  ] = await Promise.all([
+    import('@/db'),
+    import('./sqlite-database-health-probe'),
+  ]);
+  return new SqliteDatabaseHealthProbe(sqlite, withoutDatabaseObservation);
 }
 
 export const databaseHealthProbe: DatabaseHealthProbe = {
-  inspect: () => selectedDatabaseHealthProbe().inspect(),
-  hasSeedMarker: () => selectedDatabaseHealthProbe().hasSeedMarker(),
+  inspect: async () => (await selectedDatabaseHealthProbe()).inspect(),
+  hasSeedMarker: async () => (await selectedDatabaseHealthProbe()).hasSeedMarker(),
 };
 
 export function createHealthSnapshotStore<TSummary>(): HealthSnapshotStore<TSummary> {
-  let selectedStore: HealthSnapshotStore<TSummary> | null = null;
-  const getStore = (): HealthSnapshotStore<TSummary> => {
+  let selectedStore: Promise<HealthSnapshotStore<TSummary>> | null = null;
+  const getStore = (): Promise<HealthSnapshotStore<TSummary>> => {
     if (selectedStore) return selectedStore;
-    selectedStore = resolveDatabaseBackend() === 'sqlite'
-      ? new SqliteHealthSnapshotStore<TSummary>(
-          sqlite,
-          withoutDatabaseObservation,
-        )
-      : new PostgresHealthSnapshotStore<TSummary>(
+    selectedStore = resolveDatabaseBackend() === 'postgres'
+      ? Promise.resolve(new PostgresHealthSnapshotStore<TSummary>(
           getPostgresPersistenceBackend().context.db,
-        );
+        ))
+      : Promise.all([
+          import('@/db'),
+          import('./sqlite-health-snapshot-store'),
+        ]).then(([{ sqlite, withoutDatabaseObservation }, { SqliteHealthSnapshotStore }]) =>
+          new SqliteHealthSnapshotStore<TSummary>(sqlite, withoutDatabaseObservation));
     return selectedStore;
   };
   return {
-    write: (snapshot, validate) => getStore().write(snapshot, validate),
-    read: () => getStore().read(),
+    write: async (snapshot, validate) => (await getStore()).write(snapshot, validate),
+    read: async () => (await getStore()).read(),
   };
 }

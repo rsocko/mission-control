@@ -69,7 +69,7 @@ describe('Layer 7 triage worker persistence boundary', () => {
 
     expect(capture).toContain('getTriagePersistenceRepositories().capture.captureBatch(items)');
     expect(syncState).toContain('getTriagePersistenceRepositories().syncState.recordRun');
-    expect(scheduler).toContain('getCorePersistenceRepositories().settings');
+    expect(scheduler).toContain('getCorePersistenceRepositoriesForBackend()');
     for (const contents of [capture, syncState, scheduler]) {
       expect(contents).not.toMatch(
         /from\s+['"](?:better-sqlite3|pg|drizzle-orm|@\/db(?:['"]|\/(?:index|schema|sqlite)))/,

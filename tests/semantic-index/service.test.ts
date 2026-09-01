@@ -312,7 +312,7 @@ describe('SemanticIndexService', () => {
       // A newer projection lands first.
       harness.source.putTask(taskFixture({
         title: 'Newer title',
-        updatedAt: '2026-09-01T00:00:00.000Z',
+        updatedAt: '2036-09-01T00:00:00.000Z',
       }));
       await harness.service.publish({
         kind: 'upsert', entityType: 'task', entityId: 'task-1', indexId: identity.id,
@@ -322,7 +322,7 @@ describe('SemanticIndexService', () => {
       // Now a delayed worker arrives carrying the older source snapshot.
       harness.source.putTask(taskFixture({
         title: 'Older title',
-        updatedAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2036-08-01T00:00:00.000Z',
       }));
       await harness.service.publish({
         kind: 'upsert', entityType: 'task', entityId: 'task-1', indexId: identity.id,

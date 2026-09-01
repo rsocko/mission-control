@@ -15,7 +15,6 @@ import type {
   GitHubIdentityRunContext,
 } from '@/lib/external-identities/stable-identity-types';
 import { randomUUID } from 'crypto';
-import { emitEvent } from '@/lib/events';
 import { syncEventBus } from './events';
 import { syncLogger } from '@/lib/logger';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
@@ -35,22 +34,19 @@ import {
 import { upsertSourceLists, autoAssignFolderGroups } from './list-manager';
 import { indexAlertForSearch, warmUpSearchAfterSync } from './search-indexer';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
-import {
-  wakeNotificationDeliveryDispatcher,
-} from '@/lib/notifications';
+import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
 import {
   getSyncDurationBudgetMs,
   getSyncJobRepository,
   isDurableSyncMode,
   type SyncJobSource,
-} from './job-queue';
+} from './job-runtime';
 import { assertConnectorMaintenanceUnlockedAsync } from './maintenance-lock';
 import {
   ConnectorOperationBusyError,
   getConnectorOperationLeaseRepository,
   runWithConnectorOperationLease,
-} from './connector-lock';
-import { finalizePlanningSignalsIfDue } from '@/lib/planning-signals';
+} from './connector-lock-runtime';
 import { validateAndFreezeGitHubIdentityContext } from './github-identity-context';
 import {
   mergeGitHubHierarchyObservation,
@@ -70,7 +66,6 @@ import type {
   GitHubProjectIdentityFence,
   GitHubProjectReconciliation,
 } from '@/db/persistence/github-projects';
-import { evaluateRulesForTasks } from '@/lib/rules';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
 import {
   withDatabaseOperation,
@@ -737,6 +732,7 @@ export class SyncExecutionPipeline {
       // ─── PHASE 4d: AUTO-INCLUDE — Re-evaluate tasks changed by this connector ─
       if (executionPersistence.support.allowsLegacyWorkflow('project-automation')) {
         try {
+          const { evaluateRulesForTasks } = await import('@/lib/rules');
           const changedTaskIds = await executionPersistence.support
             .listConnectorTaskIds(connectorId, remoteSourceIds);
           await evaluateRulesForTasks(changedTaskIds);
@@ -915,6 +911,7 @@ export class SyncExecutionPipeline {
         },
       });
       if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+        const { emitEvent } = await import('@/lib/events');
         emitEvent({
           type: 'sync.completed',
           timestamp: result.syncedAt,
@@ -946,6 +943,7 @@ export class SyncExecutionPipeline {
 
       if (executionPersistence.support.allowsLegacyWorkflow('planning-signals')) {
         try {
+          const { finalizePlanningSignalsIfDue } = await import('@/lib/planning-signals');
           finalizePlanningSignalsIfDue();
         } catch (planningSignalError) {
           syncLogger.warn(
@@ -1039,6 +1037,7 @@ export class SyncExecutionPipeline {
         await getWorkerPersistenceRepositories()
       ).execution;
       if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+        const { emitEvent } = await import('@/lib/events');
         emitEvent({
           type: 'sync.failed',
           timestamp: result.syncedAt,

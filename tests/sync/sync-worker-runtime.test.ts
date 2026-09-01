@@ -32,7 +32,7 @@ const eventMocks = vi.hoisted(() => ({
   setSyncEventPersistence: vi.fn(),
 }));
 
-vi.mock('@/lib/sync/job-queue', () => ({
+vi.mock('@/lib/sync/job-runtime', () => ({
   getSyncLeaseMs: queueMocks.getSyncLeaseMs,
   // Backend-selected repository (see @/db/runtime): all of SyncWorker's
   // queue/lease operations go through this in the current implementation.

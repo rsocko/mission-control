@@ -351,6 +351,8 @@ export interface ConnectorNotificationInput {
   primaryActionId: string | null;
   receivedAt: string;
   sortAt: string;
+  groupKey?: string | null;
+  dedupeKey?: string | null;
   relatedTaskId: string | null;
   relatedProjectId: string | null;
   relatedEntityType: string | null;

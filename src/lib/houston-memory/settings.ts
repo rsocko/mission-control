@@ -1,4 +1,4 @@
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import {
   HOUSTON_MEMORY_DEFAULT_RETENTION_DAYS,
   HOUSTON_MEMORY_MAX_RETENTION_DAYS,
@@ -11,9 +11,19 @@ function normalizeRetentionDays(value: unknown): number {
 }
 
 export async function getHoustonMemorySettings(): Promise<HoustonMemorySettings> {
-  const config = getResolvedAIConfig();
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get('ai_provider_config');
+  const config = stored && typeof stored === 'object' && !Array.isArray(stored)
+    ? stored
+    : {};
+  const enabled = typeof config.houstonMemoryEnabled === 'boolean'
+    ? config.houstonMemoryEnabled
+    : /^(1|true|yes|on)$/i.test(process.env.AI_HOUSTON_MEMORY_ENABLED?.trim() ?? '');
   return {
-    enabled: config.houstonMemoryEnabled,
-    retentionDays: normalizeRetentionDays(config.houstonMemoryRetentionDays),
+    enabled,
+    retentionDays: normalizeRetentionDays(
+      config.houstonMemoryRetentionDays
+        ?? Number(process.env.AI_HOUSTON_MEMORY_RETENTION_DAYS),
+    ),
   };
 }

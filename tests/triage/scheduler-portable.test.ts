@@ -12,6 +12,12 @@ vi.mock('node-cron', () => ({
 }));
 
 vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositoriesForBackend: async () => ({
+    settings: {
+      get: mockSettingsGet,
+      set: mockSettingsSet,
+    },
+  }),
   getCorePersistenceRepositories: () => ({
     settings: {
       get: mockSettingsGet,
@@ -26,9 +32,15 @@ vi.mock('@/lib/triage/credentials', () => ({
   resolveYouTubeCredentials: vi.fn(),
 }));
 
-vi.mock('@/lib/triage/importers', () => ({
+vi.mock('@/lib/triage/importers/github-importer', () => ({
   importAllGitHubStars: mockGitHubImport,
+}));
+
+vi.mock('@/lib/triage/importers/reddit-importer', () => ({
   importAllRedditSaved: vi.fn(),
+}));
+
+vi.mock('@/lib/triage/importers/youtube-importer', () => ({
   importAllYouTubePlaylists: vi.fn(),
 }));
 
@@ -126,5 +138,28 @@ describe('portable triage scheduler', () => {
     release(fullResult('success'));
     await expect(first).resolves.toMatchObject({ outcome: 'success' });
     expect(mockGitHubImport).toHaveBeenCalledTimes(1);
+  });
+
+  it('waits for an active import while stopping scheduled work', async () => {
+    let finishRun: ((result: ReturnType<typeof fullResult>) => void) | undefined;
+    mockGitHubImport.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRun = resolve;
+    }));
+    const { TriageSyncScheduler } = await import('@/lib/triage/scheduler');
+    const scheduler = new TriageSyncScheduler();
+
+    const run = scheduler.runImport('github-stars');
+    await vi.waitFor(() => expect(mockGitHubImport).toHaveBeenCalledTimes(1));
+    let stopped = false;
+    const stop = scheduler.stopAll().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    finishRun?.(fullResult('success'));
+    await expect(run).resolves.toMatchObject({ outcome: 'success' });
+    await stop;
+    expect(stopped).toBe(true);
   });
 });

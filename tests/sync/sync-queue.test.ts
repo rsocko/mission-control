@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   assertConnectorSyncEnqueueAllowedAsync: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@/lib/sync/job-queue', () => ({
+vi.mock('@/lib/sync/job-runtime', () => ({
   isDurableSyncMode: mocks.isDurableSyncMode,
   waitForSyncJob: vi.fn(),
   getSyncJobRepository: () => Promise.resolve({

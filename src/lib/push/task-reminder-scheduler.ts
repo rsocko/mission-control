@@ -9,6 +9,7 @@ import { withDatabaseOperation } from '@/lib/telemetry/database-operation-contex
 export class TaskReminderScheduler {
   private task: ScheduledTask | null = null;
   private activeRun: Promise<void> | null = null;
+  private stopping = false;
   private lastRun: string | null = null;
   private lastResult: TaskReminderRunResult | null = null;
   private lastError: string | null = null;
@@ -18,6 +19,7 @@ export class TaskReminderScheduler {
   ) {}
 
   private runOnce(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
     if (this.activeRun) return this.activeRun;
     const run = (async () => {
       try {
@@ -42,6 +44,7 @@ export class TaskReminderScheduler {
 
   async start(): Promise<void> {
     if (this.task) return;
+    this.stopping = false;
     this.task = cron.schedule('* * * * *', async () => {
       try {
         await this.runOnce();
@@ -53,14 +56,16 @@ export class TaskReminderScheduler {
     try {
       await this.runOnce();
     } catch (error) {
-      this.stop();
+      await this.stop();
       throw error;
     }
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopping = true;
     this.task?.stop();
     this.task = null;
+    await this.activeRun;
   }
 
   isRunning(): boolean {

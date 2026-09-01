@@ -1,7 +1,7 @@
 import {
   quarantineFinanceConnectorSync,
 } from '../../../src/lib/sync/operator-control';
-import { enqueueSyncJob } from '../../../src/lib/sync/job-queue';
+import { enqueueSyncJob } from '../../../src/lib/sync/sqlite-job-repository';
 
 const [connectorId, action] = process.argv.slice(2);
 if (!connectorId || !action || !process.send) {

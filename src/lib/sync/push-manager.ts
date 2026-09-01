@@ -16,7 +16,7 @@ import {
 import {
   ConnectorOperationBusyError,
   runWithConnectorOperationLease,
-} from './connector-lock';
+} from './connector-lock-runtime';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   authorizeGitHubWrite,

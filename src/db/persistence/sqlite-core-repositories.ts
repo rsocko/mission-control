@@ -634,6 +634,38 @@ export class SqliteConnectorRepository implements ConnectorRepository {
     return this.getSync(id);
   }
 
+  async listEnabled(): Promise<ConnectorConfig[]> {
+    const rows = this.database.prepare(`
+      SELECT
+        id, type, name, enabled, sync_mode AS syncMode,
+        poll_interval_minutes AS pollIntervalMinutes,
+        capabilities, credentials, settings, synced_lists AS syncedLists
+      FROM connector_configs
+      WHERE enabled = 1 AND deleted_at IS NULL
+    `).all() as ConnectorRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      name: row.name,
+      enabled: true,
+      syncMode: row.syncMode as ConnectorConfig['syncMode'],
+      pollIntervalMinutes: row.pollIntervalMinutes ?? undefined,
+      capabilities: parseJsonObject(
+        row.capabilities,
+        'connector_configs.capabilities',
+      ) as unknown as ConnectorConfig['capabilities'],
+      credentials: parseJsonObject(
+        row.credentials,
+        'connector_configs.credentials',
+      ) as ConnectorConfig['credentials'],
+      settings: parseJsonObject(row.settings, 'connector_configs.settings'),
+      syncedLists: parseJsonArray(
+        row.syncedLists,
+        'connector_configs.synced_lists',
+      ).map(String),
+    }));
+  }
+
   async upsert(connector: ConnectorConfig): Promise<ConnectorConfig> {
     const now = new Date().toISOString();
     this.database.prepare(`
@@ -668,6 +700,47 @@ export class SqliteConnectorRepository implements ConnectorRepository {
       now,
     });
     return this.getSync(connector.id)!;
+  }
+
+  async updateCredentials(
+    id: string,
+    credentials: ConnectorConfig['credentials'],
+    settingsPatch?: Record<string, unknown>,
+  ): Promise<void> {
+    if (settingsPatch === undefined) {
+      const result = this.database.prepare(`
+        UPDATE connector_configs
+        SET credentials = ?, updated_at = ?
+        WHERE id = ? AND deleted_at IS NULL
+      `).run(stringifyJson(credentials), new Date().toISOString(), id);
+      if (result.changes !== 1) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      return;
+    }
+    this.database.transaction(() => {
+      const row = this.database.prepare(`
+        SELECT settings FROM connector_configs
+        WHERE id = ? AND deleted_at IS NULL
+      `).get(id) as { settings: string } | undefined;
+      if (!row) {
+        throw new RepositoryError('not-found', `Connector ${id} was not found`);
+      }
+      const settings = mergeConnectorSettings(
+        parseJsonObject(row.settings, 'connector_configs.settings'),
+        settingsPatch,
+      );
+      this.database.prepare(`
+          UPDATE connector_configs
+          SET credentials = ?, settings = ?, updated_at = ?
+          WHERE id = ? AND deleted_at IS NULL
+        `).run(
+          stringifyJson(credentials),
+          stringifyJson(settings),
+          new Date().toISOString(),
+          id,
+        );
+    }).immediate();
   }
 
   async delete(id: string): Promise<boolean> {

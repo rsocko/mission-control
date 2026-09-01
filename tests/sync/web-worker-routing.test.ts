@@ -113,7 +113,7 @@ vi.mock('@/lib/notifications', () => ({
   createNotificationsInTransaction: vi.fn(),
   wakeNotificationDeliveryDispatcher: vi.fn(),
 }));
-vi.mock('@/lib/sync/job-queue', () => ({
+vi.mock('@/lib/sync/job-runtime', () => ({
   isDurableSyncMode: queueMocks.isDurableSyncMode,
   waitForSyncJob: queueMocks.waitForSyncJob,
   getSyncDurationBudgetMs: vi.fn(() => 300_000),

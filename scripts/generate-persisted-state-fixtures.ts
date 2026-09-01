@@ -19,6 +19,7 @@ import {
   PERSISTED_STATE_FIXTURE_VERSION,
   type PersistedStateFixture,
 } from './persisted-state-fixture-manifest';
+import { syntheticRetainedMigrationHash } from './sqlite-migration-history';
 
 interface MigrationJournalEntry {
   readonly idx: number;
@@ -434,9 +435,7 @@ function seedRetainedHistoricalMigrationRows(
   );
   for (let index = 0; index < count; index += 1) {
     insert.run(
-      createHash('sha256')
-        .update(`synthetic-retained-migration:${fixture.id}:${index}`)
-        .digest('hex'),
+      syntheticRetainedMigrationHash(fixture.id, index),
       historicalTimestamp,
     );
   }

@@ -23,6 +23,7 @@ import {
   PERSISTED_STATE_FIXTURES,
   type PersistedStateFixture,
 } from '../persisted-state-fixture-manifest';
+import { trustedRetainedMigrationHashes } from '../sqlite-migration-history';
 
 const { Pool } = pg;
 
@@ -404,8 +405,8 @@ export function validateSqliteMigrationState(
   }
   const expected = currentSqliteMigrationEvidence(migrationsDirectory);
   const actual = (sqlite.prepare(
-    'SELECT hash, created_at AS createdAt FROM __drizzle_migrations',
-  ).all() as Array<{ hash: string; createdAt: number | null }>);
+    'SELECT id, hash, created_at AS createdAt FROM __drizzle_migrations ORDER BY id',
+  ).all() as Array<{ id: number; hash: string; createdAt: number | null }>);
   const actualHashes = new Set(actual.map((row) => row.hash));
   const malformed = actual.filter((row) => !/^[a-f0-9]{64}$/.test(row.hash));
   if (malformed.length > 0) {
@@ -422,13 +423,20 @@ export function validateSqliteMigrationState(
     );
   }
 
-  const terminalTimestamp = Math.max(...expected.map((entry) => entry.when));
-  const unknownNewer = actual.filter(
-    (row) => typeof row.createdAt !== 'number' || row.createdAt > terminalTimestamp,
-  );
-  if (unknownNewer.length > 0) {
+  const untimestamped = actual.filter((row) => typeof row.createdAt !== 'number');
+  if (untimestamped.length > 0) {
     throw new ImportPreconditionError(
-      `SQLite source migration journal contains ${unknownNewer.length} unknown-newer or untimestamped migration(s).`,
+      `SQLite source migration journal contains ${untimestamped.length} untimestamped migration(s).`,
+    );
+  }
+  const currentHashes = new Set(expected.flatMap((migration) => migration.hashes));
+  const trustedHistoricalHashes = trustedRetainedMigrationHashes();
+  const unrecognized = actual.filter(
+    (row) => !currentHashes.has(row.hash) && !trustedHistoricalHashes.has(row.hash),
+  );
+  if (unrecognized.length > 0) {
+    throw new ImportPreconditionError(
+      `SQLite source migration journal contains ${unrecognized.length} unrecognized migration hash(es).`,
     );
   }
 

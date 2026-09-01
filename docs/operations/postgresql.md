@@ -250,11 +250,13 @@ npm run db:import:postgres -- \
 The command opens the SQLite source read-only with `query_only`, requires
 evidence for every current migration, and accepts older journal rows retained
 when migration files were superseded. Retained rows must be valid timestamped
-Drizzle hashes no newer than the current migration stream, and every imported
+Drizzle hashes in the explicit repository-history allowlist, and every imported
 table's columns, SQLite types, nullability, and primary-key shape must match a
-fresh current bootstrap. This rejects partial, stale, unknown-newer, and
-schema-incompatible sources without assuming that a long-lived journal has the
-same row count as current migration metadata. The command also rejects
+fresh current bootstrap. Unknown hashes are rejected even when their timestamp
+is backdated and the schema otherwise appears current. This rejects partial,
+stale, unknown-newer, and schema-incompatible sources without assuming that a
+long-lived journal has the same row count as current migration metadata. The
+command also rejects
 WAL/rollback-journal sidecars, runs `PRAGMA integrity_check` and
 `PRAGMA foreign_key_check`, and rejects active `sync_jobs` for real sources.
 Synthetic fixture rehearsals may contain queued worker rows so queue copy

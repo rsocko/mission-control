@@ -13,6 +13,7 @@ import {
   validateSqliteMigrationState,
 } from '../../scripts/lib/sqlite-to-postgres-import';
 import { ImportPreconditionError } from '../../scripts/lib/sqlite-to-postgres-import';
+import { SQLITE_SUPERSEDED_MIGRATION_HASHES } from '../../scripts/sqlite-superseded-migration-hashes';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
@@ -215,29 +216,12 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.verdict.reason).toContain('dry-run only');
   }, 20_000);
 
-  it('accepts retained historical journal rows only with complete current migration evidence', () => {
+  it('rejects a source missing current terminal migration evidence', () => {
     const sqlite = currentSqlite();
     try {
-      const terminalTimestamp = sqlite.prepare(
-        'SELECT MAX(created_at) FROM __drizzle_migrations',
-      ).pluck().get() as number;
-      const insert = sqlite.prepare(
-        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
-      );
-      for (let index = 0; index < 101; index += 1) {
-        insert.run(index.toString(16).padStart(64, '0'), terminalTimestamp - 1);
-      }
-
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(227);
-
-      sqlite.prepare(`
-        DELETE FROM __drizzle_migrations
-        WHERE id = (
-          SELECT id FROM __drizzle_migrations
-          WHERE created_at = (SELECT MAX(created_at) FROM __drizzle_migrations)
-          LIMIT 1
-        )
-      `).run();
+      sqlite.prepare(
+        'DELETE FROM __drizzle_migrations WHERE id = (SELECT MAX(id) FROM __drizzle_migrations)',
+      ).run();
       expect(() => validateSqliteMigrationState(sqlite, migrationsDirectory)).toThrow(
         /missing 1 current migration/,
       );
@@ -246,20 +230,36 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   }, 20_000);
 
-  it('rejects unknown-newer journal rows and incompatible current schema shapes', () => {
+  it('accepts an explicitly trusted repository-history migration hash', () => {
+    const sqlite = currentSqlite();
+    try {
+      const historicalTimestamp = sqlite.prepare(
+        'SELECT MIN(created_at) FROM __drizzle_migrations',
+      ).pluck().get() as number;
+      sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
+
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(127);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('rejects backdated unknown journal rows and incompatible current schema shapes', () => {
     const unknownNewer = currentSqlite();
     const incompatible = currentSqlite();
     try {
-      const terminalTimestamp = unknownNewer.prepare(
-        'SELECT MAX(created_at) FROM __drizzle_migrations',
+      const historicalTimestamp = unknownNewer.prepare(
+        'SELECT MIN(created_at) FROM __drizzle_migrations',
       ).pluck().get() as number;
       unknownNewer.prepare(
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
-      ).run('f'.repeat(64), terminalTimestamp + 1);
+      ).run('f'.repeat(64), historicalTimestamp);
       expect(() => validateSqliteMigrationState(
         unknownNewer,
         migrationsDirectory,
-      )).toThrow(/unknown-newer/);
+      )).toThrow(/unrecognized migration hash/);
 
       incompatible.exec('ALTER TABLE tasks ADD COLUMN unknown_future_column TEXT');
       expect(() => validateSqliteMigrationState(

@@ -111,6 +111,7 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
     expect(graph).toContain('src/lib/connectors/monarch-money/recovery-scheduler.ts');
     expect(graph).toContain('src/lib/telemetry/health-snapshot.ts');
     expect(graph).toContain('src/lib/triage/scheduler.ts');
+    expect([...graph].filter((path) => path.includes('src/lib/triage/importers/'))).toEqual([]);
   });
 
   it('gates only the two known SQLite-only worker features at the entry', () => {

@@ -32,9 +32,15 @@ vi.mock('@/lib/triage/credentials', () => ({
   resolveYouTubeCredentials: vi.fn(),
 }));
 
-vi.mock('@/lib/triage/importers', () => ({
+vi.mock('@/lib/triage/importers/github-importer', () => ({
   importAllGitHubStars: mockGitHubImport,
+}));
+
+vi.mock('@/lib/triage/importers/reddit-importer', () => ({
   importAllRedditSaved: vi.fn(),
+}));
+
+vi.mock('@/lib/triage/importers/youtube-importer', () => ({
   importAllYouTubePlaylists: vi.fn(),
 }));
 

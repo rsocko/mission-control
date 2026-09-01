@@ -10,8 +10,6 @@ import type { ScheduledTask } from 'node-cron';
 import cron from 'node-cron';
 import logger from '@/lib/logger';
 import { resolveGitHubCredentials, resolveRedditCredentials, resolveYouTubeCredentials } from './credentials';
-import { importAllGitHubStars, importAllRedditSaved, importAllYouTubePlaylists } from './importers';
-import { importAllDocumentIntelligenceActions } from './importers/document-intelligence-importer';
 import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
 import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { FullSyncResult } from './importers/base-importer';
@@ -191,6 +189,7 @@ export class TriageSyncScheduler {
         logger.warn({ sourceId }, 'Triage auto-sync: no GitHub credentials configured');
         return this.missingConfigResult(sourceId, startedAt);
       }
+      const { importAllGitHubStars } = await import('./importers/github-importer');
       const result = await importAllGitHubStars({
         token: creds.token,
         username: creds.username,
@@ -204,6 +203,7 @@ export class TriageSyncScheduler {
         logger.warn({ sourceId }, 'Triage auto-sync: no Reddit credentials configured');
         return this.missingConfigResult(sourceId, startedAt);
       }
+      const { importAllRedditSaved } = await import('./importers/reddit-importer');
       const result = await importAllRedditSaved({
         clientId: creds.clientId,
         clientSecret: creds.clientSecret,
@@ -219,6 +219,7 @@ export class TriageSyncScheduler {
         logger.warn({ sourceId }, 'Triage auto-sync: no YouTube credentials configured');
         return this.missingConfigResult(sourceId, startedAt);
       }
+      const { importAllYouTubePlaylists } = await import('./importers/youtube-importer');
       const result = await importAllYouTubePlaylists({
         clientId: creds.clientId,
         clientSecret: creds.clientSecret,
@@ -229,6 +230,9 @@ export class TriageSyncScheduler {
       return this.scheduledResult(sourceId, result);
     }
     if (sourceId === 'document-intelligence') {
+      const { importAllDocumentIntelligenceActions } = await import(
+        './importers/document-intelligence-importer'
+      );
       const result = await importAllDocumentIntelligenceActions({ incremental: true });
       return this.scheduledResult(sourceId, result);
     }

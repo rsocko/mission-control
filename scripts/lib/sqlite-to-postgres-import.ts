@@ -24,6 +24,7 @@ import {
   type PersistedStateFixture,
 } from '../persisted-state-fixture-manifest';
 import { trustedRetainedMigrationHashes } from '../sqlite-migration-history';
+import { trustedHistoricalTasksColumnOrders } from '../sqlite-task-schema-history';
 
 const { Pool } = pg;
 
@@ -535,83 +536,9 @@ export function matchesSupportedSqliteColumnShape(
     return JSON.stringify(historical) === JSON.stringify(actual);
   }
   if (table === 'tasks') {
-    const lateMigrationsFirst = withExactOrder([
-      'id',
-      'source_id',
-      'connector_type',
-      'connector_instance_id',
-      'title',
-      'description',
-      'status',
-      'priority',
-      'due_date',
-      'created_at',
-      'updated_at',
-      'completed_at',
-      'parent_id',
-      'depth',
-      'is_checklist_item',
-      'source_list_id',
-      'source_list_name',
-      'assignee',
-      'metadata',
-      'sync_status',
-      'last_synced_at',
-      'kanban_column',
-      'kanban_order',
-      'micro_status',
-      'snoozed_until',
-      'effort',
-      'reminder_at',
-      'is_bulk_import',
-      'status_reason',
-      'push_retry_count',
-      'local_disposition',
-      'push_count',
-      'reminder_relative',
-      'reminder_due_time',
-      'recurrence_generated_from_task_id',
-      'planning_horizon',
-    ]);
-    const releasedRuntimeFirst = withExactOrder([
-      'id',
-      'source_id',
-      'connector_type',
-      'connector_instance_id',
-      'title',
-      'description',
-      'status',
-      'priority',
-      'due_date',
-      'created_at',
-      'updated_at',
-      'completed_at',
-      'parent_id',
-      'depth',
-      'is_checklist_item',
-      'source_list_id',
-      'source_list_name',
-      'assignee',
-      'metadata',
-      'sync_status',
-      'last_synced_at',
-      'kanban_column',
-      'kanban_order',
-      'micro_status',
-      'snoozed_until',
-      'effort',
-      'reminder_at',
-      'is_bulk_import',
-      'status_reason',
-      'push_retry_count',
-      'local_disposition',
-      'recurrence_generated_from_task_id',
-      'planning_horizon',
-      'push_count',
-      'reminder_relative',
-      'reminder_due_time',
-    ]);
-    return [lateMigrationsFirst, releasedRuntimeFirst].some(
+    const historicalShapes = trustedHistoricalTasksColumnOrders()
+      .map((order) => withExactOrder(order));
+    return historicalShapes.some(
       (historical) => JSON.stringify(historical) === JSON.stringify(actual),
     );
   }

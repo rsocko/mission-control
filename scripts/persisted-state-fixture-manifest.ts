@@ -16,7 +16,16 @@ export interface PersistedStateFixture {
   readonly includesHistoricalPriorityEntityLayout?: boolean;
   readonly includesHistoricalInboundWebhookLayout?: boolean;
   readonly includesProductionHistoricalLayouts?: boolean;
-  readonly tasksHistoricalOrder?: 'late-migrations-first' | 'released-runtime-first';
+  readonly tasksHistoricalOrder?:
+    | 'late-migrations-first'
+    | 'released-runtime-first'
+    | 'continuous-production'
+    | 'status-after-reminder'
+    | 'status-after-local-disposition'
+    | 'status-after-push-count'
+    | 'status-after-relative-reminders'
+    | 'status-after-recurrence';
+  readonly statusRuntimeAfterTag?: string;
   readonly retainedHistoricalMigrationRows?: number;
 }
 
@@ -31,6 +40,44 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     syncLogId: 'fixture-sync-log-0000',
     settingKey: 'fixture.setting.0000',
     searchToken: 'quartzbaseline',
+  },
+  {
+    id: 'v1-0020-continuous-production-tasks',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0020-continuous-production-tasks.sqlite3',
+    taskId: 'fixture-task-0020-continuous',
+    projectId: 'fixture-project-0020-continuous',
+    connectorId: 'fixture-connector-0020-continuous',
+    syncLogId: 'fixture-sync-log-0020-continuous',
+    settingKey: 'fixture.setting.0020.continuous',
+    searchToken: 'indigocontinuous',
+    notificationId: 'fixture-notification-0020-continuous',
+    syncJobId: 'fixture-sync-job-0020-continuous',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'continuous-production',
+    statusRuntimeAfterTag: '0020_add_task_effort',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0022-status-after-reminder',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0022-status-after-reminder.sqlite3',
+    taskId: 'fixture-task-0022-status',
+    projectId: 'fixture-project-0022-status',
+    connectorId: 'fixture-connector-0022-status',
+    syncLogId: 'fixture-sync-log-0022-status',
+    settingKey: 'fixture.setting.0022.status',
+    searchToken: 'violetreminder',
+    notificationId: 'fixture-notification-0022-status',
+    syncJobId: 'fixture-sync-job-0022-status',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'status-after-reminder',
+    statusRuntimeAfterTag: '0022_add_task_reminder',
+    retainedHistoricalMigrationRows: 101,
   },
   {
     id: 'v1-0047-durable-sync-queue',
@@ -48,6 +95,7 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     includesHistoricalInboundWebhookLayout: true,
     includesProductionHistoricalLayouts: true,
     tasksHistoricalOrder: 'late-migrations-first',
+    statusRuntimeAfterTag: '0027_add_bulk_import_flag',
     retainedHistoricalMigrationRows: 101,
   },
   {
@@ -66,6 +114,82 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     includesHistoricalInboundWebhookLayout: true,
     includesProductionHistoricalLayouts: true,
     tasksHistoricalOrder: 'released-runtime-first',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0053-status-after-local-disposition',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0053-status-after-local-disposition.sqlite3',
+    taskId: 'fixture-task-0053-status',
+    projectId: 'fixture-project-0053-status',
+    connectorId: 'fixture-connector-0053-status',
+    syncLogId: 'fixture-sync-log-0053-status',
+    settingKey: 'fixture.setting.0053.status',
+    searchToken: 'copperdisposition',
+    notificationId: 'fixture-notification-0053-status',
+    syncJobId: 'fixture-sync-job-0053-status',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'status-after-local-disposition',
+    statusRuntimeAfterTag: '0053_add_task_local_disposition',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0106-status-after-push-count',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0106-status-after-push-count.sqlite3',
+    taskId: 'fixture-task-0106-status',
+    projectId: 'fixture-project-0106-status',
+    connectorId: 'fixture-connector-0106-status',
+    syncLogId: 'fixture-sync-log-0106-status',
+    settingKey: 'fixture.setting.0106.status',
+    searchToken: 'silverpushcount',
+    notificationId: 'fixture-notification-0106-status',
+    syncJobId: 'fixture-sync-job-0106-status',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'status-after-push-count',
+    statusRuntimeAfterTag: '0106_task-delay-insights',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0109-status-after-relative-reminders',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0109-status-after-relative-reminders.sqlite3',
+    taskId: 'fixture-task-0109-status',
+    projectId: 'fixture-project-0109-status',
+    connectorId: 'fixture-connector-0109-status',
+    syncLogId: 'fixture-sync-log-0109-status',
+    settingKey: 'fixture.setting.0109.status',
+    searchToken: 'crimsonrelative',
+    notificationId: 'fixture-notification-0109-status',
+    syncJobId: 'fixture-sync-job-0109-status',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'status-after-relative-reminders',
+    statusRuntimeAfterTag: '0109_relative_task_reminders',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0111-status-after-recurrence',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0111-status-after-recurrence.sqlite3',
+    taskId: 'fixture-task-0111-status',
+    projectId: 'fixture-project-0111-status',
+    connectorId: 'fixture-connector-0111-status',
+    syncLogId: 'fixture-sync-log-0111-status',
+    settingKey: 'fixture.setting.0111.status',
+    searchToken: 'emeraldrecurrence',
+    notificationId: 'fixture-notification-0111-status',
+    syncJobId: 'fixture-sync-job-0111-status',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'status-after-recurrence',
+    statusRuntimeAfterTag: '0111_completion_anchored_recurrence',
     retainedHistoricalMigrationRows: 101,
   },
   {

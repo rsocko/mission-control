@@ -89,6 +89,28 @@ function createCheckpointMigrationDirectory(
   return { directory, entries };
 }
 
+function createMigrationSubsetDirectory(
+  root: string,
+  fixture: PersistedStateFixture,
+  name: string,
+  entries: readonly MigrationJournalEntry[],
+): string {
+  const journal = readJournal();
+  const directory = join(root, fixture.id, name);
+  mkdirSync(join(directory, 'meta'), { recursive: true });
+  writeFileSync(
+    join(directory, 'meta', '_journal.json'),
+    `${JSON.stringify({ ...journal, entries }, null, 2)}\n`,
+  );
+  for (const entry of entries) {
+    writeFileSync(
+      join(directory, `${entry.tag}.sql`),
+      normalizedMigrationSql(entry.tag),
+    );
+  }
+  return directory;
+}
+
 function tableExists(sqlite: Database.Database, table: string): boolean {
   return sqlite.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -199,12 +221,20 @@ function applyCheckpointProductionSafetyNets(
   fixture: PersistedStateFixture,
 ): void {
   if (!fixture.includesProductionHistoricalLayouts) return;
+  const taskColumnNames = tableColumns(sqlite, 'tasks');
+  if (!taskColumnNames.has('status_reason')) {
+    sqlite.exec('ALTER TABLE tasks ADD COLUMN status_reason TEXT');
+  }
+  if (!taskColumnNames.has('push_retry_count')) {
+    sqlite.exec('ALTER TABLE tasks ADD COLUMN push_retry_count INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!taskColumnNames.has('local_disposition')) {
+    sqlite.exec(`
+      ALTER TABLE tasks ADD COLUMN local_disposition TEXT NOT NULL DEFAULT 'active'
+        CHECK (local_disposition IN ('active', 'handled', 'dismissed'))
+    `);
+  }
   sqlite.exec(`
-    ALTER TABLE tasks ADD COLUMN status_reason TEXT;
-    ALTER TABLE tasks ADD COLUMN push_retry_count INTEGER NOT NULL DEFAULT 0;
-    ALTER TABLE tasks ADD COLUMN local_disposition TEXT NOT NULL DEFAULT 'active'
-      CHECK (local_disposition IN ('active', 'handled', 'dismissed'));
-
     ALTER TABLE sync_log ADD COLUMN tasks_pushed INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sync_log ADD COLUMN local_only_protected INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sync_log ADD COLUMN details TEXT NOT NULL DEFAULT '[]';
@@ -231,6 +261,63 @@ function applyCheckpointProductionSafetyNets(
       last_run_duration_ms INTEGER
     );
   `);
+}
+
+function applyStatusRuntimeTaskHistory(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+  checkpointEntries: readonly MigrationJournalEntry[],
+  temporaryRoot: string,
+): void {
+  if (!fixture.statusRuntimeAfterTag) return;
+  const journal = readJournal();
+  const lateTaskTags = new Set([
+    '0053_add_task_local_disposition',
+    '0106_task-delay-insights',
+    '0109_relative_task_reminders',
+    '0111_completion_anchored_recurrence',
+  ]);
+  const taskHistoryEntries = journal.entries.filter((entry) => (
+    checkpointEntries.some(({ tag }) => tag === entry.tag)
+    || lateTaskTags.has(entry.tag)
+  ));
+  const boundaryIndex = taskHistoryEntries.findIndex(
+    (entry) => entry.tag === fixture.statusRuntimeAfterTag,
+  );
+  if (boundaryIndex < 0) {
+    throw new Error(
+      `${fixture.id} requires migration ${fixture.statusRuntimeAfterTag}.`,
+    );
+  }
+  const earlyEntries = taskHistoryEntries.slice(0, boundaryIndex + 1);
+  const appliedTags = new Set(earlyEntries.map(({ tag }) => tag));
+  const laterCheckpointEntries = checkpointEntries.filter(
+    ({ tag }) => !appliedTags.has(tag),
+  );
+  _runMigrationsIndividually(
+    sqlite,
+    createMigrationSubsetDirectory(
+      temporaryRoot,
+      fixture,
+      'status-runtime-early',
+      earlyEntries,
+    ),
+  );
+  sqlite.exec(`
+    ALTER TABLE tasks ADD COLUMN status_reason TEXT;
+    ALTER TABLE tasks ADD COLUMN push_retry_count INTEGER NOT NULL DEFAULT 0;
+  `);
+  if (laterCheckpointEntries.length > 0) {
+    _runMigrationsIndividually(
+      sqlite,
+      createMigrationSubsetDirectory(
+        temporaryRoot,
+        fixture,
+        'status-runtime-later',
+        laterCheckpointEntries,
+      ),
+    );
+  }
 }
 
 function applyHistoricallyReleasedTaskMigrations(
@@ -619,7 +706,16 @@ function buildFixture(
     sqlite.pragma('foreign_keys = ON');
     createHistoricalInboundWebhookLayout(sqlite, fixture);
     createPreMigrationProductionLayouts(sqlite, fixture);
-    _runMigrationsIndividually(sqlite, checkpoint.directory);
+    if (fixture.statusRuntimeAfterTag) {
+      applyStatusRuntimeTaskHistory(
+        sqlite,
+        fixture,
+        checkpoint.entries,
+        temporaryRoot,
+      );
+    } else {
+      _runMigrationsIndividually(sqlite, checkpoint.directory);
+    }
     assertCheckpointApplied(sqlite, checkpoint.entries);
     seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);
     applyCheckpointProductionSafetyNets(sqlite, fixture);
@@ -657,7 +753,20 @@ function assertReplaceableFixtureDirectory(outputDirectory: string): void {
   );
   const previousFileNames = new Set(
     PERSISTED_STATE_FIXTURES
-      .filter((fixture) => fixture.tasksHistoricalOrder !== 'released-runtime-first')
+      .filter((fixture) => (
+        fixture.tasksHistoricalOrder === undefined
+        || fixture.tasksHistoricalOrder === 'continuous-production'
+        || fixture.tasksHistoricalOrder === 'late-migrations-first'
+        || fixture.tasksHistoricalOrder === 'released-runtime-first'
+      ))
+      .map((fixture) => fixture.fileName),
+  );
+  const legacyFileNames = new Set(
+    PERSISTED_STATE_FIXTURES
+      .filter((fixture) => (
+        fixture.tasksHistoricalOrder === undefined
+        || fixture.tasksHistoricalOrder === 'late-migrations-first'
+      ))
       .map((fixture) => fixture.fileName),
   );
   const matchesFileSet = (fileNames: ReadonlySet<string>): boolean => (
@@ -665,7 +774,9 @@ function assertReplaceableFixtureDirectory(outputDirectory: string): void {
     && entries.every((entry) => entry.isFile() && fileNames.has(entry.name))
   );
   const isCompleteCorpus = (
-    matchesFileSet(expectedFileNames) || matchesFileSet(previousFileNames)
+    matchesFileSet(expectedFileNames)
+    || matchesFileSet(previousFileNames)
+    || matchesFileSet(legacyFileNames)
   );
   if (!isCompleteCorpus) {
     throw new Error(

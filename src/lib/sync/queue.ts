@@ -7,7 +7,7 @@ import {
   isDurableSyncMode,
   waitForSyncJob,
   type SyncJobSource,
-} from './job-queue';
+} from './job-runtime';
 
 const MAX_CONCURRENT_SYNCS = 1;
 

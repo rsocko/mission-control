@@ -4,6 +4,9 @@ const mockSettingsGet = vi.fn();
 const mockFindActiveGitHubToken = vi.fn();
 
 vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositoriesForBackend: async () => ({
+    settings: { get: mockSettingsGet },
+  }),
   getCorePersistenceRepositories: () => ({
     settings: { get: mockSettingsGet },
   }),

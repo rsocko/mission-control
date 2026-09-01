@@ -11,7 +11,7 @@ import {
 } from '@/db/persistence/github-recovery-values';
 import { getGitHubRecoveryRepository } from '@/lib/sync/github-worker-persistence';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
-import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock';
+import { runWithConnectorOperationLease } from '@/lib/sync/connector-lock-runtime';
 import { GitHubHttpError } from './github-client';
 import { parseSourceId, refreshGitHubIssueMetadata } from './issue-transformer';
 import {

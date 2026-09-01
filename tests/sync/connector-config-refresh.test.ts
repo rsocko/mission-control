@@ -284,7 +284,7 @@ vi.mock('@/lib/notifications', () => ({
   createNotificationsInTransaction: vi.fn(async () => []),
   wakeNotificationDeliveryDispatcher: vi.fn(),
 }));
-vi.mock('@/lib/sync/job-queue', () => ({
+vi.mock('@/lib/sync/job-runtime', () => ({
   countRemainingSyncJobs: vi.fn(() => 0),
   enqueueSyncJob: vi.fn(),
   getActiveSyncJobConnectorIds: vi.fn(() => []),
@@ -305,7 +305,7 @@ vi.mock('@/lib/telemetry/operations', () => ({
   setQueuedExpensiveOperations: vi.fn(),
   withRuntimeOperation: vi.fn((_operation, callback: () => unknown) => callback()),
 }));
-vi.mock('@/lib/sync/connector-lock', () => {
+vi.mock('@/lib/sync/connector-lock-runtime', () => {
   class ConnectorOperationBusyError extends Error {
     constructor(message = 'Another operation is already queued or in progress for this connector') {
       super(message);
@@ -333,7 +333,7 @@ vi.mock('node-cron', () => ({
 }));
 
 import { SyncExecutionPipeline } from '@/lib/sync';
-import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock';
+import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock-runtime';
 
 function createScheduler(): SyncExecutionPipeline {
   const scheduler = Object.create(

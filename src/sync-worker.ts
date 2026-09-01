@@ -163,12 +163,12 @@ async function main(): Promise<void> {
     if (shutdownPromise) return;
     shutdownPromise = (async () => {
       syncLogger.info({ signal }, 'Sync worker shutting down');
-      healthSnapshotScheduler.stop();
-      taskReminderScheduler.stop();
-      financeConnectionRecoveryScheduler.stop();
-      triageSyncScheduler.stopAll();
-      houstonMemoryRetentionScheduler.stop();
       await Promise.all([
+        healthSnapshotScheduler.stop(),
+        taskReminderScheduler.stop(),
+        financeConnectionRecoveryScheduler.stop(),
+        triageSyncScheduler.stopAll(),
+        houstonMemoryRetentionScheduler.stop(),
         syncScheduler.stopAll(),
         worker.stop(),
         aiRunWorker?.stop() ?? Promise.resolve(),

@@ -46,12 +46,13 @@ import { isMicroStatusSyncEnabled } from '@/lib/micro-status';
 import { connectorLogger } from '@/lib/logger';
 import { GITHUB_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
 import {
-
   GitHubWriteFenceError,
   type GitHubWriteAuthorization,
-  type GitHubWriteOutcomeReadRequest,
-  type GitHubWriteOutcomeReadResult,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/github-write-fence';
+import type {
+  GitHubWriteOutcomeReadRequest,
+  GitHubWriteOutcomeReadResult,
+} from '@/lib/external-identities/write-outcome-resolution';
 import {
   GitHubProjectsSyncService,
   type GitHubProjectAssociation,

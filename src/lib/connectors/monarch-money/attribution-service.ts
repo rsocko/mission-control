@@ -5,7 +5,7 @@ import { sqlite } from '@/db';
 import {
   enqueueSyncJobInCurrentTransaction,
 } from '@/lib/sync/sqlite-job-repository';
-import { isDurableSyncMode } from '@/lib/sync/job-queue';
+import { isDurableSyncMode } from '@/lib/sync/job-runtime';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import type { MonarchTransaction } from './client';
 import type { ConnectorConfig } from '@/types';

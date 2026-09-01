@@ -40,13 +40,13 @@ import {
   getSyncJobRepository,
   isDurableSyncMode,
   type SyncJobSource,
-} from './job-queue';
+} from './job-runtime';
 import { assertConnectorMaintenanceUnlockedAsync } from './maintenance-lock';
 import {
   ConnectorOperationBusyError,
   getConnectorOperationLeaseRepository,
   runWithConnectorOperationLease,
-} from './connector-lock';
+} from './connector-lock-runtime';
 import { validateAndFreezeGitHubIdentityContext } from './github-identity-context';
 import {
   mergeGitHubHierarchyObservation,

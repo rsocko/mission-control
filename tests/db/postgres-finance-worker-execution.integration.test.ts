@@ -70,8 +70,8 @@ let pool: Pool;
 let shutdownRuntimeDatabase: (() => Promise<void>) | undefined;
 let SyncExecutionPipeline: typeof import('@/lib/sync')['SyncExecutionPipeline'];
 let SyncWorker: typeof import('@/lib/sync/worker')['SyncWorker'];
-let getSyncJobRepository: typeof import('@/lib/sync/job-queue')['getSyncJobRepository'];
-let waitForSyncJob: typeof import('@/lib/sync/job-queue')['waitForSyncJob'];
+let getSyncJobRepository: typeof import('@/lib/sync/job-runtime')['getSyncJobRepository'];
+let waitForSyncJob: typeof import('@/lib/sync/job-runtime')['waitForSyncJob'];
 const connectorIds = new Set<string>();
 
 async function waitFor(
@@ -495,10 +495,11 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     shutdownRuntimeDatabase = runtime.shutdownRuntimeDatabase;
     ({ SyncExecutionPipeline } = await import('@/lib/sync'));
     ({ SyncWorker } = await import('@/lib/sync/worker'));
-    ({ getSyncJobRepository, waitForSyncJob } = await import('@/lib/sync/job-queue'));
+    ({ getSyncJobRepository, waitForSyncJob } = await import('@/lib/sync/job-runtime'));
   }, 120_000);
 
   beforeEach(() => {
+    sqliteEvaluation.mockClear();
     sqliteTouch.mockClear();
     installSyntheticFinanceProvider();
   });
@@ -592,8 +593,9 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       notificationDelivery: expect.anything(),
       reminders: expect.anything(),
       triage: expect.anything(),
-      finance: expect.objectContaining({ recovery: expect.anything() }),
+      finance: expect.anything(),
     });
+    expect(repositories.finance.recovery).toBeDefined();
 
     await taskReminderScheduler.start();
     await triageSyncScheduler.initialize();
@@ -601,10 +603,12 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     houstonMemoryRetentionScheduler.start();
     await generateWorkerHealthSnapshot(`postgres-final-worker-${randomUUID()}`);
 
-    taskReminderScheduler.stop();
-    financeConnectionRecoveryScheduler.stop();
-    triageSyncScheduler.stopAll();
-    houstonMemoryRetentionScheduler.stop();
+    await Promise.all([
+      taskReminderScheduler.stop(),
+      financeConnectionRecoveryScheduler.stop(),
+      triageSyncScheduler.stopAll(),
+      houstonMemoryRetentionScheduler.stop(),
+    ]);
     expect(sqliteEvaluation).not.toHaveBeenCalled();
     expect(sqliteTouch).not.toHaveBeenCalled();
   }, 120_000);
@@ -708,25 +712,82 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
       taskCreated: true,
     });
     expect(episode).not.toBeNull();
+    const healthy = {
+      kind: 'health' as const,
+      health: {
+        status: 'ok',
+        mode: 'live',
+        reachable: true,
+        authenticated: true,
+        authState: 'connected' as const,
+      },
+    };
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: healthy,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 1),
+    });
     await expect(finance.recovery.recordBoundedSyncSuccess({
       connectorId,
       episodeId: 'stale-episode',
-      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 1),
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 2),
     })).resolves.toBe(false);
     await expect(finance.recovery.recordBoundedSyncSuccess({
       connectorId,
       episodeId: episode!.episodeId,
-      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 2),
-    })).resolves.toBe(true);
-    await expect(finance.recovery.settleEpisode({
-      connectorId,
-      episodeId: episode!.episodeId,
       now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 3),
     })).resolves.toBe(true);
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: unavailable,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 4),
+    });
+    await expect(finance.recovery.recordBoundedSyncFailure({
+      connectorId,
+      episodeId: episode!.episodeId,
+      errorCode: 'stale_bounded_failure',
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 5),
+    })).resolves.toBe(false);
     await expect(finance.recovery.settleEpisode({
       connectorId,
       episodeId: episode!.episodeId,
-      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 4),
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 6),
+    })).resolves.toBe(false);
+    await finance.recovery.reconcileObservation({
+      connectorId,
+      observation: healthy,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 7),
+    });
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 8),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.recordBoundedSyncFailure({
+      connectorId,
+      episodeId: episode!.episodeId,
+      errorCode: 'bounded_sync_failed',
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 9),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 10),
+    })).resolves.toBe(false);
+    await expect(finance.recovery.recordBoundedSyncSuccess({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 11),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 12),
+    })).resolves.toBe(true);
+    await expect(finance.recovery.settleEpisode({
+      connectorId,
+      episodeId: episode!.episodeId,
+      now: new Date(startedAt.getTime() + 4 * 60 * 60_000 + 13),
     })).resolves.toBe(false);
 
     const state = await pool.query<{

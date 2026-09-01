@@ -1,7 +1,7 @@
 import 'server-only';
 
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
-import type { SyncJobSource } from './job-queue';
+import type { SyncJobSource } from './job-repository';
 
 export { ConnectorSyncControlError } from './control-state-error';
 

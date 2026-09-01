@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import logger from '@/lib/logger';
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 import type { PersistenceJson } from '@/db/persistence/contracts';
 
@@ -58,7 +58,8 @@ function normalizeCredentials(value: unknown): TriageSourceCredentials {
 
 export async function GET() {
   try {
-    const value = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY);
+    const repositories = await getCorePersistenceRepositoriesForBackend();
+    const value = await repositories.settings.get(SETTINGS_KEY);
     const creds = normalizeCredentials(value);
 
     // Check if a github-issues connector already provides a token
@@ -112,7 +113,7 @@ export async function POST(request: Request) {
     };
 
     // Load existing
-    const settings = getCorePersistenceRepositories().settings;
+    const settings = (await getCorePersistenceRepositoriesForBackend()).settings;
     const existing = normalizeCredentials(await settings.get(SETTINGS_KEY));
     const credentials = body.credentials || {};
 
@@ -184,7 +185,7 @@ export async function DELETE(request: Request) {
   try {
     const body = await request.json() as { source: 'github' | 'reddit' | 'youtube' | 'karakeep' };
 
-    const settings = getCorePersistenceRepositories().settings;
+    const settings = (await getCorePersistenceRepositoriesForBackend()).settings;
     const existing = normalizeCredentials(await settings.get(SETTINGS_KEY));
 
     if (body.source === 'github') {

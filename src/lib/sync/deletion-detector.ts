@@ -1,12 +1,14 @@
 import type { SyncAuditEntry } from './index';
 import { syncLogger } from '@/lib/logger';
 import { archiveAndDeleteTask } from './deletion-recovery';
-import {
-  digestExternalIdentifier,
-  type GitHubStableResolvedCandidate,
-  type GitHubStableIdentityRuntime,
-  type GitHubIdentityResolutionDecision,
-} from '@/lib/external-identities';
+import { digestExternalIdentifier } from '@/lib/external-identities/identifier-digest';
+import type {
+  GitHubStableIdentityRuntime,
+  GitHubStableResolvedCandidate,
+} from '@/lib/external-identities/stable-identity-runtime';
+import type {
+  GitHubIdentityResolutionDecision,
+} from '@/lib/external-identities/stable-identity-types';
 import type { DeletionCandidateRecord } from '@/db/persistence/connector-execution';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 

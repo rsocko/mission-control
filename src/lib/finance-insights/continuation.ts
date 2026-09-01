@@ -25,8 +25,8 @@ export async function enqueueFinanceInsightContinuation(input: {
     { getConnectorOperationLeaseRepository },
     { getSyncJobRepository },
   ] = await Promise.all([
-    import('@/lib/sync/connector-lock'),
-    import('@/lib/sync/job-queue'),
+    import('@/lib/sync/connector-lock-runtime'),
+    import('@/lib/sync/job-runtime'),
   ]);
   const hasLease = await (await getConnectorOperationLeaseRepository()).hasActiveSyncJobLease({
     connectorId: input.connectorId,

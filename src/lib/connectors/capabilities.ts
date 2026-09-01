@@ -1,4 +1,4 @@
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { ConnectorCapabilities } from '@/types';
 import { resolvePersistedConnectorCapabilities } from './resolved-capabilities';
 
@@ -15,7 +15,8 @@ export async function getConnectorCapabilities(
 ): Promise<ConnectorCapabilities | null> {
   if (!connectorInstanceId || connectorInstanceId === 'local') return null;
 
-  const config = await getCorePersistenceRepositories().connectors.get(connectorInstanceId);
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const config = await repositories.connectors.get(connectorInstanceId);
 
   if (!config?.capabilities) return null;
 
@@ -35,7 +36,8 @@ export async function isConnectorEnabled(
 ): Promise<boolean> {
   if (!connectorInstanceId || connectorInstanceId === 'local') return true;
 
-  const config = await getCorePersistenceRepositories().connectors.get(connectorInstanceId);
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const config = await repositories.connectors.get(connectorInstanceId);
 
   return config?.enabled ?? true;
 }

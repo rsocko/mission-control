@@ -149,7 +149,7 @@ afterEach(() => {
 
 describe('PostgreSQL backend selection — sync job queue', () => {
   it('getSyncJobRepository resolves to the PostgreSQL adapter without touching SQLite', async () => {
-    const { getSyncJobRepository } = await import('@/lib/sync/job-queue');
+    const { getSyncJobRepository } = await import('@/lib/sync/job-runtime');
     const repository = await getSyncJobRepository();
     expect(repository).toBe(postgresMocks.syncJobRepository);
 
@@ -207,7 +207,7 @@ describe('PostgreSQL backend selection — sync job queue', () => {
 
 describe('PostgreSQL backend selection — connector operation lease', () => {
   it('getConnectorOperationLeaseRepository resolves to the PostgreSQL adapter without touching SQLite', async () => {
-    const { getConnectorOperationLeaseRepository } = await import('@/lib/sync/connector-lock');
+    const { getConnectorOperationLeaseRepository } = await import('@/lib/sync/connector-lock-runtime');
     const repository = await getConnectorOperationLeaseRepository();
     expect(repository).toBe(postgresMocks.leaseRepository);
 
@@ -221,7 +221,7 @@ describe('PostgreSQL backend selection — connector operation lease', () => {
   });
 
   it('runWithConnectorOperationLease acquires/releases through the PostgreSQL adapter without touching SQLite', async () => {
-    const { runWithConnectorOperationLease } = await import('@/lib/sync/connector-lock');
+    const { runWithConnectorOperationLease } = await import('@/lib/sync/connector-lock-runtime');
     const result = await runWithConnectorOperationLease('pg-connector', 'transfer', async () => 'done');
     expect(result).toBe('done');
     expect(postgresMocks.leaseRepository.acquire).toHaveBeenCalledWith(
@@ -405,7 +405,7 @@ describe('PostgreSQL backend selection — worker drain loop', () => {
     // `getSyncJobRepository()`, so asserting it resolves to the PostgreSQL
     // repository here is sufficient and avoids flakiness from resolving a
     // module dynamically imported from inside a long-lived timer loop.
-    vi.doMock('@/lib/sync/job-queue', () => ({
+    vi.doMock('@/lib/sync/job-runtime', () => ({
       getSyncLeaseMs: () => 120_000,
       getSyncQueueMetrics: () => ({ queued: 0 }),
       getSyncJobRepository: async () => postgresMocks.syncJobRepository,

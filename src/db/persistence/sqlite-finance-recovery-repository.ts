@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { and, eq, ne } from 'drizzle-orm';
+import { and, eq, lte } from 'drizzle-orm';
 import * as schema from '@/db/schema';
 import {
   financeConnectionOutages,
@@ -237,6 +237,15 @@ export function createSqliteFinanceConnectionRecoveryPersistence(
       return sqlite.transaction(() => {
         const nowIso = input.now.toISOString();
         let existing = readOutage(database, input.connectorId);
+        if (existing && input.now.getTime() < Date.parse(existing.lastObservedAt)) {
+          return {
+            status: existing.status,
+            notificationCreated: false,
+            taskCreated: false,
+            recovered: false,
+            pendingDelivery: false,
+          };
+        }
         const healthy = isStrictlyHealthyFinanceObservation(input.observation);
         if (!existing || existing.status === 'recovered') {
           if (healthy) {
@@ -283,6 +292,7 @@ export function createSqliteFinanceConnectionRecoveryPersistence(
           status,
           authState: financeObservationAuthState(input.observation),
           lastObservedAt: nowIso,
+          recoverySyncSucceededAt: healthy ? existing.recoverySyncSucceededAt : null,
           lastErrorCode: input.observation.kind === 'unavailable'
             ? input.observation.errorCode
             : null,
@@ -292,6 +302,7 @@ export function createSqliteFinanceConnectionRecoveryPersistence(
           status: row.status,
           authState: row.authState,
           lastObservedAt: row.lastObservedAt,
+          recoverySyncSucceededAt: row.recoverySyncSucceededAt,
           lastErrorCode: row.lastErrorCode,
           updatedAt: row.updatedAt,
         }).where(and(
@@ -377,12 +388,14 @@ export function createSqliteFinanceConnectionRecoveryPersistence(
 
     async recordBoundedSyncFailure(input) {
       return database.update(financeConnectionOutages).set({
+        recoverySyncSucceededAt: null,
         lastErrorCode: input.errorCode,
         updatedAt: input.now.toISOString(),
       }).where(and(
         eq(financeConnectionOutages.connectorId, input.connectorId),
         eq(financeConnectionOutages.episodeId, input.episodeId),
-        ne(financeConnectionOutages.status, 'recovered'),
+        eq(financeConnectionOutages.status, 'recovery_pending'),
+        lte(financeConnectionOutages.lastObservedAt, input.now.toISOString()),
       )).run().changes === 1;
     },
 
@@ -393,14 +406,21 @@ export function createSqliteFinanceConnectionRecoveryPersistence(
       }).where(and(
         eq(financeConnectionOutages.connectorId, input.connectorId),
         eq(financeConnectionOutages.episodeId, input.episodeId),
-        ne(financeConnectionOutages.status, 'recovered'),
+        eq(financeConnectionOutages.status, 'recovery_pending'),
+        lte(financeConnectionOutages.lastObservedAt, input.now.toISOString()),
       )).run().changes === 1;
     },
 
     async settleEpisode(input) {
       return sqlite.transaction(() => {
         const row = readOutage(database, input.connectorId);
-        if (!row || row.status === 'recovered' || row.episodeId !== input.episodeId) {
+        if (
+          !row
+          || row.status !== 'recovery_pending'
+          || row.episodeId !== input.episodeId
+          || !row.recoverySyncSucceededAt
+          || Date.parse(row.recoverySyncSucceededAt) > input.now.getTime()
+        ) {
           return false;
         }
         settle(database, row, input.now);

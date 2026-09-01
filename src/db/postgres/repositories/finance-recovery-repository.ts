@@ -291,6 +291,15 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
         await lockRecoveryScope(client, input.connectorId);
         const nowIso = input.now.toISOString();
         let existing = await readOutage(client, input.connectorId);
+        if (existing && input.now.getTime() < Date.parse(existing.lastObservedAt)) {
+          return {
+            status: existing.status,
+            notificationCreated: false,
+            taskCreated: false,
+            recovered: false,
+            pendingDelivery: false,
+          };
+        }
         if (!existing || existing.status === 'recovered') {
           if (isStrictlyHealthyFinanceObservation(input.observation)) {
             return {
@@ -357,6 +366,9 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
           status,
           authState: financeObservationAuthState(input.observation),
           lastObservedAt: nowIso,
+          recoverySyncSucceededAt: isStrictlyHealthyFinanceObservation(input.observation)
+            ? existing.recoverySyncSucceededAt
+            : null,
           lastErrorCode: input.observation.kind === 'unavailable'
             ? input.observation.errorCode
             : null,
@@ -365,12 +377,13 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
         await client.query(`
           UPDATE finance_connection_outages
           SET status = $1, auth_state = $2, last_observed_at = $3,
-              last_error_code = $4, updated_at = $3
-          WHERE connector_id = $5 AND episode_id = $6
+              recovery_sync_succeeded_at = $4, last_error_code = $5, updated_at = $3
+          WHERE connector_id = $6 AND episode_id = $7
         `, [
           row.status,
           row.authState,
           nowIso,
+          row.recoverySyncSucceededAt,
           row.lastErrorCode,
           row.connectorId,
           row.episodeId,
@@ -447,8 +460,9 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
     async recordBoundedSyncFailure(input) {
       const result = await pool.query(`
         UPDATE finance_connection_outages
-        SET last_error_code = $1, updated_at = $2
-        WHERE connector_id = $3 AND episode_id = $4 AND status <> 'recovered'
+        SET recovery_sync_succeeded_at = NULL, last_error_code = $1, updated_at = $2
+        WHERE connector_id = $3 AND episode_id = $4
+          AND status = 'recovery_pending' AND last_observed_at <= $2
       `, [input.errorCode, input.now.toISOString(), input.connectorId, input.episodeId]);
       return result.rowCount === 1;
     },
@@ -457,7 +471,8 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
       const result = await pool.query(`
         UPDATE finance_connection_outages
         SET recovery_sync_succeeded_at = $1, updated_at = $1
-        WHERE connector_id = $2 AND episode_id = $3 AND status <> 'recovered'
+        WHERE connector_id = $2 AND episode_id = $3
+          AND status = 'recovery_pending' AND last_observed_at <= $1
       `, [input.now.toISOString(), input.connectorId, input.episodeId]);
       return result.rowCount === 1;
     },
@@ -466,7 +481,13 @@ export function createPostgresFinanceConnectionRecoveryPersistence(
       return transaction(pool, async (client) => {
         await lockRecoveryScope(client, input.connectorId);
         const row = await readOutage(client, input.connectorId);
-        if (!row || row.status === 'recovered' || row.episodeId !== input.episodeId) {
+        if (
+          !row
+          || row.status !== 'recovery_pending'
+          || row.episodeId !== input.episodeId
+          || !row.recoverySyncSucceededAt
+          || Date.parse(row.recoverySyncSucceededAt) > input.now.getTime()
+        ) {
           return false;
         }
         await settle(client, row, input.now);

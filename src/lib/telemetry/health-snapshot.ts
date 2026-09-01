@@ -1,13 +1,17 @@
 import { performance } from 'node:perf_hooks';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  parseSavedAIProviderConfig,
+  resolveAICompletionConfig,
+} from '@/lib/ai/config-values';
 import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features';
 import logger from '@/lib/logger';
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { getDependencyRelationshipDegradation } from '@/lib/sync/dependency-health';
 import {
   getSyncJobRepository,
   type SyncQueueMetrics,
-} from '@/lib/sync/job-queue';
+} from '@/lib/sync/job-runtime';
 import {
   type DependencyReconciliationProgress,
 } from '@/lib/sync/task-dependency-manager';
@@ -277,35 +281,19 @@ export async function buildMaterializedHealthSummary(
     };
   });
 
-  const savedAIConfig = await getCorePersistenceRepositories().settings.get('ai_provider_config');
-  const aiSettings = savedAIConfig && typeof savedAIConfig === 'object' && !Array.isArray(savedAIConfig)
-    ? savedAIConfig
-    : {};
-  const aiProvider = typeof aiSettings.provider === 'string'
-    ? aiSettings.provider
-    : process.env.AI_PROVIDER || 'openai';
-  const aiModel = typeof aiSettings.model === 'string'
-    ? aiSettings.model
-    : process.env.AI_MODEL || 'gpt-4o-mini';
-  const aiBaseUrl = typeof aiSettings.baseUrl === 'string'
-    ? aiSettings.baseUrl
-    : process.env.AI_BASE_URL;
-  const hasAiApiKey = typeof aiSettings.apiKey === 'string'
-    ? aiSettings.apiKey.length > 0
-    : Boolean(process.env.OPENAI_API_KEY);
-  const aiConfigured = aiProvider === 'ollama'
-    ? true
-    : hasAiApiKey || Boolean(aiBaseUrl);
-  const ai = aiConfigured
+  const coreRepositories = await getCorePersistenceRepositoriesForBackend();
+  const savedAIConfig = await coreRepositories.settings.get('ai_provider_config');
+  const aiConfig = resolveAICompletionConfig(parseSavedAIProviderConfig(savedAIConfig));
+  const ai = aiConfig.configured
     ? {
         status: 'healthy' as const,
-        provider: aiProvider,
-        model: aiModel,
+        provider: aiConfig.provider,
+        model: aiConfig.model,
         message: 'Configured',
       }
     : { status: 'disabled' as const, message: 'No AI provider configured' };
   const disabledFeatures = getDisabledConnectorFeatures(configs);
-  if (!aiConfigured) disabledFeatures.push('AI Assistant');
+  if (!aiConfig.configured) disabledFeatures.push('AI Assistant');
   const enabledConnectors = connectors.filter(
     (connector) => connector.status !== 'disabled' && connector.status !== 'unconfigured',
   );
@@ -366,6 +354,7 @@ export async function readWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot |
 
 export class WorkerHealthSnapshotScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private activeRun: Promise<void> | null = null;
   private stopping = false;
 
   constructor(
@@ -382,16 +371,21 @@ export class WorkerHealthSnapshotScheduler {
     this.schedule(0);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopping = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    await this.activeRun;
   }
 
   private schedule(delayMs: number): void {
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.run();
+      const run = this.run();
+      this.activeRun = run;
+      void run.finally(() => {
+        if (this.activeRun === run) this.activeRun = null;
+      });
     }, delayMs);
     this.timer.unref();
   }

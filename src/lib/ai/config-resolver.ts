@@ -6,41 +6,23 @@ import {
   DEFAULT_AI_ROUTING_POLICY,
   validateAIRoutingPolicy,
 } from './sensitivity-policy';
+import {
+  parseSavedAIProviderConfig,
+  resolveAICompletionConfig,
+  resolveAIProviderApiKey,
+  resolveAIProviderBaseUrl,
+} from './config-values';
 
 const SETTINGS_KEY = 'ai_provider_config';
 const ROUTING_POLICY_SETTINGS_KEY = 'ai_routing_policy';
 const CONFIG_CACHE_TTL = 60_000;
-const DEFAULT_PROVIDER = 'openai';
-const DEFAULT_MODEL = 'gpt-4o-mini';
 export const DEFAULT_EMBEDDING_PROVIDER = 'bifrost';
 export const DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL = 'azure/text-embedding-3-small';
-const DEFAULT_OLLAMA_BASE_URL = 'http://localhost:11434/v1';
 
 let cachedConfig: ResolvedAIConfig | null = null;
 let cachedRoutingPolicy: AIRoutingPolicyConfig | null = null;
 let cacheTime = 0;
 let routingPolicyCacheTime = 0;
-
-function parseSavedAIProviderConfig(value: unknown): SavedAIProviderConfig {
-  if (!value) {
-    return {};
-  }
-
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value) as SavedAIProviderConfig;
-      return parsed && typeof parsed === 'object' ? parsed : {};
-    } catch {
-      return {};
-    }
-  }
-
-  if (typeof value === 'object') {
-    return value as SavedAIProviderConfig;
-  }
-
-  return {};
-}
 
 function loadSavedAIProviderConfigSync(): SavedAIProviderConfig {
   try {
@@ -52,64 +34,6 @@ function loadSavedAIProviderConfigSync(): SavedAIProviderConfig {
   } catch {
     return {};
   }
-}
-
-function resolveProviderBaseUrl(
-  provider: string,
-  saved: Pick<SavedAIProviderConfig, 'baseUrl'>,
-  allowGenericEnvironment = true,
-) {
-  if (provider === 'bifrost') {
-    return saved.baseUrl
-      || process.env.BIFROST_BASE_URL
-      || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
-  }
-
-  if (provider === 'azure') {
-    return saved.baseUrl
-      || process.env.AZURE_OPENAI_ENDPOINT
-      || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
-  }
-
-  if (provider === 'ollama') {
-    return saved.baseUrl || process.env.AI_BASE_URL || DEFAULT_OLLAMA_BASE_URL;
-  }
-
-  return saved.baseUrl || (allowGenericEnvironment ? process.env.AI_BASE_URL : undefined);
-}
-
-function resolveProviderApiKey(
-  provider: string,
-  saved: Pick<SavedAIProviderConfig, 'baseUrl' | 'apiKey'>,
-  allowGenericEnvironment = true,
-) {
-  const savedBaseUrl = saved.baseUrl?.replace(/\/+$/, '');
-  const environmentBaseUrl = resolveProviderBaseUrl(
-    provider,
-    {},
-    allowGenericEnvironment,
-  )?.replace(/\/+$/, '');
-  const mayUseEnvironmentCredential = !savedBaseUrl
-    || savedBaseUrl === environmentBaseUrl
-    || (provider === 'openai' && savedBaseUrl === 'https://api.openai.com/v1');
-
-  if (saved.apiKey) {
-    return saved.apiKey;
-  }
-
-  if (!mayUseEnvironmentCredential) {
-    return '';
-  }
-
-  if (provider === 'bifrost') {
-    return process.env.BIFROST_API_KEY || '';
-  }
-
-  if (provider === 'azure') {
-    return process.env.AZURE_OPENAI_API_KEY || process.env.OPENAI_API_KEY || '';
-  }
-
-  return process.env.OPENAI_API_KEY || '';
 }
 
 function getDefaultEmbeddingModel(provider: string) {
@@ -149,8 +73,8 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   }
 
   const saved = loadSavedAIProviderConfigSync();
-  const provider = saved.provider || process.env.AI_PROVIDER || DEFAULT_PROVIDER;
-  const model = saved.model || process.env.AI_MODEL || DEFAULT_MODEL;
+  const completion = resolveAICompletionConfig(saved);
+  const { provider, model, baseUrl, apiKey, configured } = completion;
   const legacyEmbeddingProvider = saved.provider || process.env.AI_PROVIDER;
   const embeddingProvider = saved.embeddingProvider
     || process.env.AI_EMBEDDING_PROVIDER
@@ -159,8 +83,6 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   const embeddingModel = saved.embeddingModel
     || process.env.AI_EMBEDDING_MODEL
     || getDefaultEmbeddingModel(embeddingProvider);
-  const baseUrl = resolveProviderBaseUrl(provider, saved);
-  const apiKey = resolveProviderApiKey(provider, saved);
   const sharesCompletionTarget = !saved.embeddingProvider
     && !process.env.AI_EMBEDDING_PROVIDER
     && embeddingProvider === provider;
@@ -172,19 +94,16 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
       || process.env.AI_EMBEDDING_API_KEY
       || (sharesCompletionTarget ? saved.apiKey : undefined),
   };
-  const embeddingBaseUrl = resolveProviderBaseUrl(
+  const embeddingBaseUrl = resolveAIProviderBaseUrl(
     embeddingProvider,
     embeddingTarget,
     sharesCompletionTarget,
   );
-  const embeddingApiKey = resolveProviderApiKey(
+  const embeddingApiKey = resolveAIProviderApiKey(
     embeddingProvider,
     embeddingTarget,
     sharesCompletionTarget,
   );
-  const configured = provider === 'ollama'
-    ? Boolean(baseUrl)
-    : Boolean(apiKey || baseUrl);
   const embeddingConfigured = embeddingProvider === 'ollama'
     ? Boolean(embeddingBaseUrl)
     : embeddingProvider === 'azure'

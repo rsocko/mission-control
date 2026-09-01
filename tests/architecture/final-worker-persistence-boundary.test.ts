@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import ts from 'typescript';
 
 const ROOT = 'src/sync-worker.ts';
 const POSTGRES_GATED_ENTRY_IMPORTS = new Set([
@@ -9,12 +10,55 @@ const POSTGRES_GATED_ENTRY_IMPORTS = new Set([
 ]);
 const SQLITE_MODULE = /(?:^|\/)(?:db\/(?:index|schema)(?:\.ts|\/)|[^/]*sqlite[^/]*\.ts$)/;
 const SQLITE_PACKAGE = /^(?:better-sqlite3|drizzle-orm\/better-sqlite3)$/;
-const STATIC_IMPORT =
-  /(?:^|\n)\s*(?:import|export)\s+(?!type\b)[^'"\n]*?from\s+['"]([^'"]+)['"]|(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g;
-const DYNAMIC_IMPORT = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
-
 function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8');
+}
+
+function sourceFile(path: string): ts.SourceFile {
+  return ts.createSourceFile(path, source(path), ts.ScriptTarget.Latest, true);
+}
+
+function staticImports(path: string): string[] {
+  return sourceFile(path).statements.flatMap((statement) => {
+    if (ts.isImportDeclaration(statement)) {
+      const clause = statement.importClause;
+      const onlyNamedTypes = clause?.namedBindings
+        && ts.isNamedImports(clause.namedBindings)
+        && !clause.name
+        && clause.namedBindings.elements.every((element) => element.isTypeOnly);
+      if (clause?.isTypeOnly || onlyNamedTypes) return [];
+      return ts.isStringLiteral(statement.moduleSpecifier)
+        ? [statement.moduleSpecifier.text]
+        : [];
+    }
+    if (ts.isExportDeclaration(statement)) {
+      const onlyNamedTypes = statement.exportClause
+        && ts.isNamedExports(statement.exportClause)
+        && statement.exportClause.elements.every((element) => element.isTypeOnly);
+      if (statement.isTypeOnly || onlyNamedTypes || !statement.moduleSpecifier) return [];
+      return ts.isStringLiteral(statement.moduleSpecifier)
+        ? [statement.moduleSpecifier.text]
+        : [];
+    }
+    return [];
+  });
+}
+
+function dynamicImports(path: string): string[] {
+  const imports: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node)
+      && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1
+      && ts.isStringLiteral(node.arguments[0])
+    ) {
+      imports.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile(path));
+  return imports;
 }
 
 function resolveApplicationImport(fromPath: string, specifier: string): string | null {
@@ -31,9 +75,7 @@ function resolveApplicationImport(fromPath: string, specifier: string): string |
 }
 
 function postgresStartupGraph(): Set<string> {
-  const entry = source(ROOT);
-  const roots = [...entry.matchAll(DYNAMIC_IMPORT)]
-    .map((match) => match[1])
+  const roots = dynamicImports(ROOT)
     .filter((specifier) => !POSTGRES_GATED_ENTRY_IMPORTS.has(specifier))
     .map((specifier) => resolveApplicationImport(ROOT, specifier))
     .filter((path): path is string => path !== null);
@@ -43,8 +85,7 @@ function postgresStartupGraph(): Set<string> {
     const path = pending.pop()!;
     if (visited.has(path)) continue;
     visited.add(path);
-    for (const match of source(path).matchAll(STATIC_IMPORT)) {
-      const specifier = match[1] ?? match[2];
+    for (const specifier of staticImports(path)) {
       const resolved = resolveApplicationImport(path, specifier);
       if (resolved && !visited.has(resolved)) pending.push(resolved);
     }
@@ -56,9 +97,7 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
   it('keeps the real PostgreSQL startup graph free of SQLite evaluation', () => {
     const graph = postgresStartupGraph();
     const violations = [...graph].flatMap((path) => {
-      const imports = [...source(path).matchAll(STATIC_IMPORT)]
-        .map((match) => match[1] ?? match[2]);
-      return imports.filter((specifier) => {
+      return staticImports(path).filter((specifier) => {
         const resolved = resolveApplicationImport(path, specifier);
         return SQLITE_PACKAGE.test(specifier) || Boolean(resolved && SQLITE_MODULE.test(resolved));
       })
@@ -76,8 +115,7 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
 
   it('gates only the two known SQLite-only worker features at the entry', () => {
     const entry = source(ROOT);
-    const gated = [...entry.matchAll(DYNAMIC_IMPORT)]
-      .map((match) => match[1])
+    const gated = dynamicImports(ROOT)
       .filter((specifier) => POSTGRES_GATED_ENTRY_IMPORTS.has(specifier));
     expect(new Set(gated)).toEqual(POSTGRES_GATED_ENTRY_IMPORTS);
     expect(entry).toContain("allowsLegacyWorkflow('semantic-search')");

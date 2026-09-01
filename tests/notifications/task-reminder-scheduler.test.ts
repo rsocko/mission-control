@@ -64,4 +64,25 @@ describe('task reminder scheduler', () => {
 
     expect(reminderMocks.runDueTaskReminders).toHaveBeenCalledTimes(2);
   });
+
+  it('waits for the active reminder scan when stopped', async () => {
+    let finishRun: ((result: typeof EMPTY_RESULT) => void) | undefined;
+    reminderMocks.runDueTaskReminders.mockImplementation(() => new Promise((resolve) => {
+      finishRun = resolve;
+    }));
+    const scheduler = new TaskReminderScheduler();
+    const startup = scheduler.start();
+    await vi.waitFor(() => expect(reminderMocks.runDueTaskReminders).toHaveBeenCalledTimes(1));
+
+    let stopped = false;
+    const stop = scheduler.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+
+    finishRun?.(EMPTY_RESULT);
+    await Promise.all([startup, stop]);
+    expect(stopped).toBe(true);
+  });
 });

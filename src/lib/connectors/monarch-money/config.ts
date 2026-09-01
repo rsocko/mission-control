@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { ConnectorCapabilities, ConnectorConfig } from '@/types';
 import {
   normalizeTyrionBridgeUrl,
@@ -189,7 +189,8 @@ export function financeConnectorConfigFromRow(row: ConnectorConfigRow): Connecto
 export async function getPersistedFinanceConnectorConfig(
   connectorId?: string | null,
 ): Promise<ConnectorConfig> {
-  const configs = (await getCorePersistenceRepositories().connectors.listEnabled())
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const configs = (await repositories.connectors.listEnabled())
     .filter((config) => isFinanceConnectorType(config.type))
     .filter((config) => !connectorId || config.id === connectorId);
   if (configs.length === 0) throw new Error('Finance connector is not configured');

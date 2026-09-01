@@ -6,7 +6,7 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
 import {
   getSyncJobRepository,
   isDurableSyncMode,
-} from './job-queue';
+} from './job-runtime';
 import type { SyncRequestOptions } from './queue';
 import { isConnectorSyncQuarantinedAsync } from './control-state';
 

@@ -6,20 +6,25 @@ const RETENTION_INTERVAL_MS = 15 * 60_000;
 class HoustonMemoryRetentionScheduler {
   private timer: NodeJS.Timeout | null = null;
   private running: Promise<void> | null = null;
+  private stopping = false;
 
   start(): void {
     if (this.timer) return;
+    this.stopping = false;
     void this.run();
     this.timer = setInterval(() => void this.run(), RETENTION_INTERVAL_MS);
     this.timer.unref?.();
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
+    this.stopping = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    await this.running;
   }
 
   private run(): Promise<void> {
+    if (this.stopping) return Promise.resolve();
     if (this.running) return this.running;
     this.running = deleteExpiredHoustonMemories()
       .then((deleted) => {

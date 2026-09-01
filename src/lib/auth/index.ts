@@ -21,7 +21,7 @@ import { isPkceEnabled, generatePkceChallenge, storePkceVerifier, consumePkceVer
  * - The resolved clientId is stored in connector settings so refreshes use the same app
  */
 
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import type { ConnectorConfig } from '@/types';
 
 // Microsoft OAuth2 endpoints
@@ -319,7 +319,7 @@ function connectorCredentials(value: object): ConnectorConfig['credentials'] {
  * expiresAt hasn't elapsed (e.g. Microsoft revoked the token early).
  */
 export async function invalidateToken(connectorInstanceId: string): Promise<void> {
-  const repository = getCorePersistenceRepositories().connectors;
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
   const config = await repository.get(connectorInstanceId);
   if (config) {
     const creds = config.credentials as unknown as TokenSet;
@@ -338,7 +338,7 @@ export async function invalidateToken(connectorInstanceId: string): Promise<void
  * Uses a lock to prevent concurrent refresh attempts that could race on token rotation.
  */
 export async function getValidToken(connectorInstanceId: string): Promise<string> {
-  const repository = getCorePersistenceRepositories().connectors;
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
   const config = await repository.get(connectorInstanceId);
   if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
 
@@ -410,7 +410,7 @@ export async function getValidToken(connectorInstanceId: string): Promise<string
  */
 export async function storeTokens(connectorInstanceId: string, tokenSet: TokenSet, clientId?: string): Promise<void> {
   const { clientSecret } = clientId ? resolveClientCredentials(tokenSet.accountType) : { clientSecret: undefined };
-  const repository = getCorePersistenceRepositories().connectors;
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
   const config = await repository.get(connectorInstanceId);
   if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
   await repository.updateCredentials(
@@ -437,7 +437,7 @@ export async function storeTokens(connectorInstanceId: string, tokenSet: TokenSe
  * future Graph token refreshes.
  */
 export async function getSubstrateToken(connectorInstanceId: string): Promise<string> {
-  const repository = getCorePersistenceRepositories().connectors;
+  const repository = (await getCorePersistenceRepositoriesForBackend()).connectors;
   const config = await repository.get(connectorInstanceId);
   if (!config) throw new Error(`Connector ${connectorInstanceId} not found`);
 

@@ -1,4 +1,4 @@
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import {
   HOUSTON_MEMORY_DEFAULT_RETENTION_DAYS,
   HOUSTON_MEMORY_MAX_RETENTION_DAYS,
@@ -11,7 +11,8 @@ function normalizeRetentionDays(value: unknown): number {
 }
 
 export async function getHoustonMemorySettings(): Promise<HoustonMemorySettings> {
-  const stored = await getCorePersistenceRepositories().settings.get('ai_provider_config');
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get('ai_provider_config');
   const config = stored && typeof stored === 'object' && !Array.isArray(stored)
     ? stored
     : {};

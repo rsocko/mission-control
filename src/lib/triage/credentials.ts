@@ -1,4 +1,4 @@
-import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { getTriagePersistenceRepositories } from './persistence';
 
 const SETTINGS_KEY = 'triage_source_credentials';
@@ -49,7 +49,8 @@ export interface ResolvedYouTubeCredentials {
  * 3. GITHUB_PAT environment variable
  */
 export async function resolveGitHubCredentials(): Promise<ResolvedGitHubCredentials | null> {
-  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get(SETTINGS_KEY) as StoredCredentials | null;
   if (stored?.github?.pat) {
     return { token: stored.github.pat, username: stored.github.username, source: 'triage-settings' };
   }
@@ -74,7 +75,8 @@ export async function resolveGitHubCredentials(): Promise<ResolvedGitHubCredenti
  * Resolves Reddit credentials from DB settings first, then falls back to env vars.
  */
 export async function resolveRedditCredentials(): Promise<ResolvedRedditCredentials | null> {
-  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get(SETTINGS_KEY) as StoredCredentials | null;
   if (stored?.reddit?.clientId && stored?.reddit?.clientSecret && stored?.reddit?.refreshToken) {
     return {
       clientId: stored.reddit.clientId,
@@ -108,7 +110,8 @@ export async function resolveRedditCredentials(): Promise<ResolvedRedditCredenti
 export async function resolveYouTubeCredentials(): Promise<ResolvedYouTubeCredentials | null> {
   const defaultPlaylistIds = ['WL', 'LL'];
 
-  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get(SETTINGS_KEY) as StoredCredentials | null;
   if (stored?.youtube?.clientId && stored?.youtube?.clientSecret && stored?.youtube?.refreshToken) {
     const enabledPlaylistIds = stored.youtube.playlists?.filter((p) => p.enabled).map((p) => p.id);
     const playlistIds = enabledPlaylistIds?.length
@@ -174,7 +177,8 @@ export async function resolveModelCatalogCredentials(): Promise<ResolvedModelCat
  * 2. Environment variables (MC_KARAKEEP_URL / KARAKEEP_URL and MC_KARAKEEP_API_KEY)
  */
 export async function resolveKarakeepCredentials(): Promise<ResolvedKarakeepCredentials | null> {
-  const stored = await getCorePersistenceRepositories().settings.get(SETTINGS_KEY) as StoredCredentials | null;
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const stored = await repositories.settings.get(SETTINGS_KEY) as StoredCredentials | null;
   if (stored?.karakeep?.url && stored?.karakeep?.apiKey) {
     return {
       url: stored.karakeep.url.replace(/\/+$/, ''),

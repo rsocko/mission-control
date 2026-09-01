@@ -3,7 +3,7 @@ import type { ConnectorConfig, SyncResult } from '@/types';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { syncLogger } from '@/lib/logger';
-import { isDurableSyncMode } from './job-queue';
+import { isDurableSyncMode } from './job-runtime';
 import { SyncCronScheduler } from './cron-scheduler';
 import { SyncExecutionPipeline } from './execution-pipeline';
 import { SyncQueue, type SyncRequestOptions } from './queue';

@@ -15,7 +15,14 @@ describe('sync worker artifact guard', () => {
     'MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE',
     'Triage auto-sync completed',
   ].join('\n');
-  const completeActivation = `${financeActivation}\n${triageActivation}`;
+  const finalActivation = [
+    'createPostgresFinanceConnectionRecoveryPersistence',
+    'financeConnectionEpisodeId',
+    'Selected worker persistence composition is incomplete',
+    'legacy durable AI run worker is disabled on PostgreSQL',
+    'semantic index worker is disabled for this persistence backend',
+  ].join('\n');
+  const completeActivation = `${financeActivation}\n${triageActivation}\n${finalActivation}`;
 
   it('rejects a bundle containing the retired finance backlog emitter', () => {
     const retiredCode = ['finance', 'attention', 'backlog', 'exceeded'].join('_');

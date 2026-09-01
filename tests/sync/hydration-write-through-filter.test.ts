@@ -227,7 +227,7 @@ describe('hydrateLastSyncResults write-through filtering', () => {
     );
     void queue.enqueueSync('active-connector');
     void queue.enqueueSync('github-1');
-    queue.queueFollowUpSync('github-1');
+    await queue.queueFollowUpSync('github-1');
     const duplicate = await queue.enqueueSync('github-1');
 
     expect(duplicate.errors).toEqual(['Sync already queued']);

@@ -29,6 +29,7 @@
     "db:generate": "drizzle-kit generate",
     "db:generate:postgres": "drizzle-kit generate --config=drizzle.postgres.config.ts",
     "db:fixtures:persisted-state": "node --conditions=react-server --import tsx scripts/generate-persisted-state-fixtures.ts",
+    "db:import:postgres": "node --conditions=react-server --import tsx scripts/sqlite-to-postgres-import.ts",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

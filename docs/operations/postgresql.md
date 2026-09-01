@@ -205,11 +205,83 @@ HNSW plans and exact-reference recall.
 See the [retrieval benchmark](../design/proposed/semantic-index-platform/retrieval-benchmark.md)
 for methodology and thresholds.
 
-The synthetic persisted-state fixtures validate SQLite forward upgrades only.
-They do not copy rows into PostgreSQL. Mission Control currently has no
-executable SQLite-to-PostgreSQL copy/import command; implementing and rehearsing
-that maintenance-window path is a hard dependency of the production cutover in
-[#1155](https://github.com/rsocko/mission-control/issues/1155).
+The synthetic persisted-state fixtures validate SQLite forward upgrades and feed
+the SQLite-to-PostgreSQL import rehearsal workflow below. They are synthetic only
+and must never be replaced with production data.
+
+## SQLite-to-PostgreSQL import rehearsal
+
+Mission Control ships a narrow, operator-driven import command for the future
+[#1155](https://github.com/rsocko/mission-control/issues/1155) maintenance
+window. It never changes `MC_DATABASE_BACKEND`, deployment configuration,
+Compose files, production data location, or activation state.
+
+Dry-run a retained SQLite artifact without touching PostgreSQL:
+
+```text
+npm run db:import:postgres -- \
+  --sqlite-source ./protected/mission-control.sqlite3 \
+  --confirm-writers-stopped \
+  --dry-run
+```
+
+Rehearse against a synthetic persisted-state fixture and a disposable,
+clearly-named PostgreSQL database:
+
+```text
+MC_POSTGRES_SSL_MODE=disable npm run db:import:postgres -- \
+  --fixture v1-0047-durable-sync-queue \
+  --postgres-url ******localhost/mission_control_import_rehearsal \
+  --rehearsal \
+  --reset-disposable-rehearsal-target
+```
+
+Run the future maintenance-window import only after the web and sync-worker
+writers are stopped, a protected SQLite backup exists, and the PostgreSQL target
+is empty:
+
+```text
+npm run db:import:postgres -- \
+  --sqlite-source /protected/mission-control.sqlite3 \
+  --postgres-url ******database.example/mission_control \
+  --confirm-writers-stopped
+```
+
+The command opens the SQLite source read-only with `query_only`, verifies the
+current migrated schema hash set, rejects WAL/rollback-journal sidecars, runs
+`PRAGMA integrity_check` and `PRAGMA foreign_key_check`, and rejects active
+`sync_jobs` for real sources. Synthetic fixture rehearsals may contain queued
+worker rows so queue copy behavior can be exercised.
+
+The target guard initializes an empty PostgreSQL schema from the baseline
+migration or validates that every Mission Control table exists and is empty. It
+rejects non-empty or unexpected targets. `--reset-disposable-rehearsal-target`
+drops and recreates only a rehearsal target whose database name is explicitly
+marked test/dev/local/sandbox/rehearsal/fixture and never a production-looking
+host or database.
+
+Rows are copied in PostgreSQL foreign-key order. The importer maps SQLite integer
+booleans to PostgreSQL booleans, JSON text to `jsonb`, preserves text
+timestamps/nulls, omits generated PostgreSQL columns, inserts explicit keys, and
+repairs serial/identity sequences afterwards. SQLite FTS virtual tables and
+PostgreSQL generated search-vector columns are classified as derived state and
+not copied. `task_search_documents` and `notification_search_documents` are
+rebuilt from authoritative `tasks` and `notifications` rows after import.
+
+Output is line-oriented and secret-safe. Logs contain stage names and coarse
+counts only. The final `summary` line is machine-readable JSON with command
+metadata, redacted source/target identities, SQLite checksum/integrity/WAL
+attestation, schema counts, copied domain counts, referential/domain invariants,
+derived-state classifications, search rebuild counts, worker smoke hooks,
+rollback criteria, observability hints, and
+`verdict.ready_for_cutover_planning`. A successful import still reports
+`activationChanged: false`; activation remains a separate gated step.
+
+If the import fails, leave SQLite as the active backend, keep the retained SQLite
+artifact and backup, and discard or drop the failed PostgreSQL target before
+retrying. Rollback after a future activation is not automatic or dual-written;
+it requires a write freeze and the preserved SQLite artifact from before the
+activation gate.
 
 ## Cutover readiness evidence
 
@@ -291,5 +363,13 @@ Focused PostgreSQL tests use a dedicated disposable database:
 MC_TEST_POSTGRES_URL=postgres://mission_control_test:REDACTED@localhost/mission_control_test?sslmode=disable
 ```
 
-Never point `MC_TEST_POSTGRES_URL` at production. The test harness creates and
-removes isolated schemas and may apply destructive migrations within them.
+Importer integration coverage is opt-in and uses a separately dedicated
+disposable database because it may reset the `public` schema:
+
+```env
+MC_TEST_POSTGRES_IMPORT_URL=******localhost/mission_control_import_test?sslmode=disable
+```
+
+Never point `MC_TEST_POSTGRES_URL` or `MC_TEST_POSTGRES_IMPORT_URL` at
+production. The test harness creates and removes isolated schemas and may apply
+destructive migrations within them.

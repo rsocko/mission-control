@@ -104,6 +104,16 @@ function columnDefault(
   ).pluck().get(table, column) as string | null;
 }
 
+function columnNotNull(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+): number {
+  return sqlite.prepare(
+    'SELECT "notnull" FROM pragma_table_xinfo(?) WHERE name = ?',
+  ).pluck().get(table, column) as number;
+}
+
 function openFixtureCopy(fixture: PersistedStateFixture): {
   readonly sqlite: Database.Database;
   readonly directory: string;
@@ -167,7 +177,7 @@ function assertCoreInvariants(
     success: 1,
     tasksAdded: 1,
     tasksUpdated: 2,
-    tasksPushed: 0,
+    tasksPushed: fixture.includesProductionHistoricalLayouts ? 1 : 0,
   });
   expect(JSON.parse((sqlite.prepare(
     'SELECT value FROM app_settings WHERE key = ?',
@@ -212,6 +222,36 @@ function assertCoreInvariants(
   }
   if (fixture.includesHistoricalInboundWebhookLayout) {
     expect(columnDefault(sqlite, 'inbound_webhooks', 'enabled')).toBe('1');
+  }
+  if (fixture.includesProductionHistoricalLayouts) {
+    expect(columnDefault(sqlite, 'routines', 'is_active')).toBe('1');
+    expect(columnDefault(sqlite, 'routines', 'is_archived')).toBe('0');
+    expect(columnDefault(sqlite, 'subtask_templates', 'is_built_in')).toBe('0');
+    expect(columnNames(sqlite, 'subtask_templates')).toEqual([
+      'id', 'name', 'description', 'category', 'type', 'subtasks',
+      'workflow_tasks', 'icon', 'is_built_in', 'created_at', 'updated_at',
+    ]);
+    expect(columnNames(sqlite, 'sync_log')).toEqual([
+      'id', 'connector_id', 'success', 'tasks_added', 'tasks_updated',
+      'tasks_removed', 'alerts_added', 'errors', 'synced_at', 'duration_ms',
+      'tasks_pushed', 'local_only_protected', 'details', 'job_id', 'trigger',
+      'scheduled_for', 'started_at', 'attempt', 'max_attempts', 'identity_mode',
+      'identity_mode_revision',
+    ]);
+    expect(columnNames(sqlite, 'task_triage_log')).toEqual([
+      'id', 'task_id', 'mode', 'action', 'triaged_at', 'operation_id', 'reversed_at',
+    ]);
+    expect(columnNames(sqlite, 'tasks')).toEqual([
+      'id', 'source_id', 'connector_type', 'connector_instance_id', 'title',
+      'description', 'status', 'priority', 'due_date', 'created_at', 'updated_at',
+      'completed_at', 'parent_id', 'depth', 'is_checklist_item', 'source_list_id',
+      'source_list_name', 'assignee', 'metadata', 'sync_status', 'last_synced_at',
+      'kanban_column', 'kanban_order', 'micro_status', 'snoozed_until', 'effort',
+      'reminder_at', 'is_bulk_import', 'status_reason', 'push_retry_count',
+      'local_disposition', 'push_count', 'reminder_relative', 'reminder_due_time',
+      'recurrence_generated_from_task_id', 'planning_horizon',
+    ]);
+    expect(columnNotNull(sqlite, 'triage_sync_state', 'id')).toBe(0);
   }
 }
 

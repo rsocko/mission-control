@@ -159,6 +159,80 @@ function createHistoricalInboundWebhookLayout(
   `);
 }
 
+function createPreMigrationProductionLayouts(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+): void {
+  if (!fixture.includesProductionHistoricalLayouts) return;
+  sqlite.exec(`
+    CREATE TABLE routines (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      cadence_type TEXT NOT NULL,
+      cadence_config TEXT NOT NULL DEFAULT '{}',
+      icon TEXT,
+      sort_order REAL NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      is_archived INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE subtask_templates (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      category TEXT,
+      type TEXT NOT NULL DEFAULT 'single',
+      subtasks TEXT NOT NULL,
+      workflow_tasks TEXT,
+      icon TEXT,
+      is_built_in INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
+function applyCheckpointProductionSafetyNets(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+): void {
+  if (!fixture.includesProductionHistoricalLayouts) return;
+  sqlite.exec(`
+    ALTER TABLE tasks ADD COLUMN status_reason TEXT;
+    ALTER TABLE tasks ADD COLUMN push_retry_count INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE tasks ADD COLUMN local_disposition TEXT NOT NULL DEFAULT 'active'
+      CHECK (local_disposition IN ('active', 'handled', 'dismissed'));
+
+    ALTER TABLE sync_log ADD COLUMN tasks_pushed INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sync_log ADD COLUMN local_only_protected INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE sync_log ADD COLUMN details TEXT NOT NULL DEFAULT '[]';
+
+    CREATE TABLE task_triage_log (
+      id TEXT PRIMARY KEY NOT NULL,
+      task_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      action TEXT NOT NULL,
+      triaged_at TEXT NOT NULL
+    );
+    CREATE INDEX idx_task_triage_log_triaged_at
+      ON task_triage_log(triaged_at DESC);
+
+    CREATE TABLE triage_sync_state (
+      id TEXT PRIMARY KEY,
+      last_cursor TEXT,
+      last_synced_at TEXT,
+      total_imported INTEGER NOT NULL DEFAULT 0,
+      total_skipped INTEGER NOT NULL DEFAULT 0,
+      last_run_imported INTEGER NOT NULL DEFAULT 0,
+      last_run_skipped INTEGER NOT NULL DEFAULT 0,
+      last_run_errors TEXT NOT NULL DEFAULT '[]',
+      last_run_duration_ms INTEGER
+    );
+  `);
+}
+
 function insertRow(
   sqlite: Database.Database,
   table: string,
@@ -520,9 +594,11 @@ function buildFixture(
   try {
     sqlite.pragma('foreign_keys = ON');
     createHistoricalInboundWebhookLayout(sqlite, fixture);
+    createPreMigrationProductionLayouts(sqlite, fixture);
     _runMigrationsIndividually(sqlite, checkpoint.directory);
     assertCheckpointApplied(sqlite, checkpoint.entries);
     seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);
+    applyCheckpointProductionSafetyNets(sqlite, fixture);
     createHistoricalPriorityEntityLayout(sqlite, fixture);
     sqlite.transaction(() => {
       seedCoreState(sqlite, fixture);

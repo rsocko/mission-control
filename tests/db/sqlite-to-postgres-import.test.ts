@@ -11,6 +11,7 @@ import {
   dependencySafeTableOrder,
   currentPostgresMigrationHashes,
   expectedImportTableNames,
+  matchesSupportedSqliteColumnShape,
   prepareTarget,
   runSqliteToPostgresImport,
   validateSqliteMigrationState,
@@ -58,11 +59,94 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       ? 'enabled INTEGER NOT NULL DEFAULT 1'
       : column
   ));
+  const productionHistoricalTables = [
+    'inbound_webhooks',
+    'priority_entities',
+    'routines',
+    'subtask_templates',
+    'sync_log',
+    'task_triage_log',
+    'tasks',
+    'triage_sync_state',
+  ] as const;
+  const newlySupportedHistoricalTables = productionHistoricalTables.slice(2);
+
+  interface TestSqliteColumn {
+    readonly name: string;
+    readonly type: string;
+    readonly notnull: number;
+    readonly dfltValue: string | null;
+    readonly pk: number;
+    readonly hidden: number;
+  }
 
   function currentSqlite(): Database.Database {
     const sqlite = new Database(':memory:');
     runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
     return sqlite;
+  }
+
+  let productionHistoricalDatabase: Buffer | undefined;
+
+  function productionHistoricalSqlite(): Database.Database {
+    if (!productionHistoricalDatabase) {
+      const directory = mkdtempSync(join(tmpdir(), 'mc-import-history-baseline-'));
+      const fixturePath = join(directory, 'production-shaped.sqlite3');
+      copyFileSync(resolve(
+        process.cwd(),
+        'tests',
+        'fixtures',
+        'persisted-state',
+        'sqlite',
+        'v1-0047-isolate-sync-worker.sqlite3',
+      ), fixturePath);
+      const fixture = new Database(fixturePath);
+      try {
+        runOrderedDatabaseBootstrap(fixture, migrationsDirectory);
+        productionHistoricalDatabase = fixture.serialize();
+      } finally {
+        fixture.close();
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+    return new Database(productionHistoricalDatabase);
+  }
+
+  function tableShape(
+    sqlite: Database.Database,
+    table: string,
+  ): readonly TestSqliteColumn[] {
+    return sqlite.prepare(`
+      SELECT name, type, "notnull", dflt_value AS dfltValue, pk, hidden
+      FROM pragma_table_xinfo(?)
+      ORDER BY cid
+    `).all(table) as TestSqliteColumn[];
+  }
+
+  function replaceTable(
+    sqlite: Database.Database,
+    table: string,
+    columns: readonly TestSqliteColumn[],
+  ): void {
+    const definitions = columns.map((column) => [
+      `"${column.name}"`,
+      column.type,
+      column.pk > 0 ? 'PRIMARY KEY' : '',
+      column.notnull > 0 ? 'NOT NULL' : '',
+      column.dfltValue === null ? '' : `DEFAULT ${column.dfltValue}`,
+    ].filter(Boolean).join(' '));
+    sqlite.exec(`
+      DROP TABLE "${table}";
+      CREATE TABLE "${table}" (${definitions.join(', ')});
+    `);
+  }
+
+  function replaceHistoricalTable(
+    sqlite: Database.Database,
+    table: string,
+    change: (columns: readonly TestSqliteColumn[]) => readonly TestSqliteColumn[],
+  ): void {
+    replaceTable(sqlite, table, change(tableShape(sqlite, table)));
   }
 
   function replacePriorityEntityTable(
@@ -264,6 +348,8 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(result.evidence.schema.sqliteMigrationCount).toBe(227);
+    expect(result.evidence.schema.importTableCount).toBe(160);
+    expect(result.copiedTables).toHaveLength(160);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
     expect(result.evidence.derivedState.droppedFromImport).toEqual(
       expect.arrayContaining(['sqlite_fts_virtual_tables']),
@@ -318,39 +404,174 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
   }, 20_000);
 
   it('reports every production-shaped historical difference and accepts exact equivalents', () => {
-    const directory = mkdtempSync(join(tmpdir(), 'mc-import-schema-'));
-    const fixturePath = join(directory, 'production-shaped.sqlite3');
-    copyFileSync(resolve(
-      process.cwd(),
-      'tests',
-      'fixtures',
-      'persisted-state',
-      'sqlite',
-      'v1-0047-isolate-sync-worker.sqlite3',
-    ), fixturePath);
-    const fixture = new Database(fixturePath);
+    const fixture = productionHistoricalSqlite();
     try {
-      runOrderedDatabaseBootstrap(fixture, migrationsDirectory);
-      expect(compareSqliteImportSchema(fixture, migrationsDirectory)).toEqual([
+      const mismatches = compareSqliteImportSchema(fixture, migrationsDirectory);
+      expect(mismatches.map(({ table }) => table)).toEqual(productionHistoricalTables);
+      expect(mismatches).toEqual(expect.arrayContaining([
+        expect.objectContaining({ table: 'inbound_webhooks', supportedHistoricalShape: true }),
+        expect.objectContaining({ table: 'priority_entities', supportedHistoricalShape: true }),
         expect.objectContaining({
-          table: 'inbound_webhooks',
-          columnMismatches: [{ column: 'enabled', properties: ['default'] }],
+          table: 'routines',
+          columnMismatches: [
+            { column: 'is_active', properties: ['default'] },
+            { column: 'is_archived', properties: ['default'] },
+          ],
           columnOrderMismatch: false,
           supportedHistoricalShape: true,
         }),
         expect.objectContaining({
-          table: 'priority_entities',
+          table: 'subtask_templates',
+          columnMismatches: [{ column: 'is_built_in', properties: ['default'] }],
+          columnOrderMismatch: true,
+          supportedHistoricalShape: true,
+        }),
+        expect.objectContaining({
+          table: 'sync_log',
           columnMismatches: [],
           columnOrderMismatch: true,
           supportedHistoricalShape: true,
         }),
-      ]);
+        expect.objectContaining({
+          table: 'task_triage_log',
+          columnMismatches: [],
+          columnOrderMismatch: true,
+          supportedHistoricalShape: true,
+        }),
+        expect.objectContaining({
+          table: 'tasks',
+          columnMismatches: [],
+          columnOrderMismatch: true,
+          supportedHistoricalShape: true,
+        }),
+        expect.objectContaining({
+          table: 'triage_sync_state',
+          columnMismatches: [{ column: 'id', properties: ['nullability'] }],
+          columnOrderMismatch: false,
+          supportedHistoricalShape: true,
+        }),
+      ]));
       expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
     } finally {
       fixture.close();
-      rmSync(directory, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it('rejects historical allowlists that do not cover a future expected column', () => {
+    const current = currentSqlite();
+    const historical = productionHistoricalSqlite();
+    try {
+      const futureColumn: TestSqliteColumn = {
+        name: 'future_required_column',
+        type: 'TEXT',
+        notnull: 1,
+        dfltValue: null,
+        pk: 0,
+        hidden: 0,
+      };
+      expect(matchesSupportedSqliteColumnShape(
+        'routines',
+        [...tableShape(current, 'routines'), futureColumn],
+        tableShape(historical, 'routines'),
+      )).toBe(false);
+    } finally {
+      current.close();
+      historical.close();
+    }
+  }, 20_000);
+
+  const exactHistoricalRejectionCases = newlySupportedHistoricalTables.flatMap((table) => [
+    { table, mismatch: 'declared type' },
+    { table, mismatch: 'nullability' },
+    { table, mismatch: 'primary key' },
+    { table, mismatch: 'column order' },
+    { table, mismatch: 'missing column' },
+    { table, mismatch: 'unexpected column' },
+    { table, mismatch: 'hidden generated column' },
+    ...(table !== 'task_triage_log'
+      ? [{ table, mismatch: 'alternate historical default' }]
+      : []),
+  ]);
+
+  it.each(exactHistoricalRejectionCases)(
+    'rejects the $table historical shape with a $mismatch perturbation',
+    ({ table, mismatch }) => {
+      const sqlite = productionHistoricalSqlite();
+      try {
+        if (mismatch === 'hidden generated column') {
+          sqlite.exec(`
+            ALTER TABLE "${table}"
+            ADD COLUMN generated_probe TEXT
+            GENERATED ALWAYS AS (id) VIRTUAL
+          `);
+        } else {
+          replaceHistoricalTable(sqlite, table, (columns) => {
+            if (mismatch === 'declared type') {
+              const index = columns.findIndex((column) => column.pk === 0);
+              return columns.map((column, columnIndex) => (
+                columnIndex === index ? { ...column, type: 'BLOB' } : column
+              ));
+            }
+            if (mismatch === 'nullability') {
+              const index = columns.findIndex(
+                (column) => column.pk === 0 && column.notnull === 0,
+              );
+              return columns.map((column, columnIndex) => (
+                columnIndex === index ? { ...column, notnull: 1 } : column
+              ));
+            }
+            if (mismatch === 'primary key') {
+              return columns.map((column) => (
+                column.pk > 0 ? { ...column, pk: 0 } : column
+              ));
+            }
+            if (mismatch === 'column order') {
+              return [columns[1], columns[0], ...columns.slice(2)];
+            }
+            if (mismatch === 'missing column') {
+              return columns.slice(0, -1);
+            }
+            if (mismatch === 'unexpected column') {
+              return [...columns, {
+                name: 'unknown_future_column',
+                type: 'TEXT',
+                notnull: 0,
+                dfltValue: null,
+                pk: 0,
+                hidden: 0,
+              }];
+            }
+            if (mismatch === 'alternate historical default') {
+              const defaultColumn = {
+                routines: 'is_active',
+                subtask_templates: 'is_built_in',
+                sync_log: 'tasks_added',
+                tasks: 'status',
+                triage_sync_state: 'total_imported',
+              }[table];
+              return columns.map((column) => (
+                column.name === defaultColumn
+                  ? {
+                      ...column,
+                      dfltValue: column.type === 'TEXT' ? "'unexpected'" : '2',
+                    }
+                  : column
+              ));
+            }
+            throw new Error(`Unhandled historical mismatch: ${mismatch}`);
+          });
+        }
+
+        expect(() => validateSqliteMigrationState(
+          sqlite,
+          migrationsDirectory,
+        )).toThrow(new RegExp(table));
+      } finally {
+        sqlite.close();
+      }
+    },
+    20_000,
+  );
 
   it('accepts only the exact historical inbound webhook default representation', () => {
     const sqlite = currentSqlite();
@@ -507,32 +728,22 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   }, 20_000);
 
-  it('summarizes every incompatible table and field in one secret-safe error', () => {
-    const sqlite = currentSqlite();
+  it('summarizes every incompatible production-history table and field in one secret-safe error', () => {
+    const sqlite = productionHistoricalSqlite();
     try {
+      replaceHistoricalTable(sqlite, 'routines', (columns) => columns.map((column) => (
+        column.name === 'is_active' ? { ...column, dfltValue: '2' } : column
+      )));
       sqlite.exec('ALTER TABLE tasks ADD COLUMN unknown_future_column TEXT');
-      replaceInboundWebhookTable(
-        sqlite,
-        historicalInboundWebhookColumns.map((column) => (
-          column === 'enabled INTEGER NOT NULL DEFAULT 1'
-            ? 'enabled INTEGER NOT NULL DEFAULT 0'
-            : column
-        )),
-      );
-      replacePriorityEntityTable(
-        sqlite,
-        historicalPriorityEntityColumns.map((column) => (
-          column === 'rank INTEGER NOT NULL DEFAULT 0'
-            ? 'rank TEXT NOT NULL DEFAULT 0'
-            : column
-        )),
-      );
+      replaceHistoricalTable(sqlite, 'triage_sync_state', (columns) => columns.map((column) => (
+        column.name === 'last_cursor' ? { ...column, notnull: 1 } : column
+      )));
 
       expect(() => validateSqliteMigrationState(
         sqlite,
         migrationsDirectory,
       )).toThrow(
-        /3 table\(s\): inbound_webhooks .*enabled:default.*priority_entities .*rank:type.*tasks .*unexpected: unknown_future_column/,
+        /3 table\(s\): routines .*is_active:default.*tasks .*unexpected: unknown_future_column.*triage_sync_state .*last_cursor:nullability/,
       );
     } finally {
       sqlite.close();

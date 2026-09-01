@@ -199,13 +199,17 @@ interface ColumnInfo {
   readonly generated: boolean;
 }
 
-interface SqliteColumnInfo {
+export interface SqliteColumnInfo {
   readonly name: string;
   readonly type: string;
   readonly notnull: number;
   readonly dfltValue: string | null;
   readonly pk: number;
   readonly hidden: number;
+}
+
+interface SqliteTableColumnInfo extends SqliteColumnInfo {
+  readonly tableName: string;
 }
 
 export interface SqliteColumnMismatch {
@@ -373,6 +377,31 @@ function sqliteColumnShape(
   `).all(table) as SqliteColumnInfo[]);
 }
 
+function sqliteImportSchemaColumns(
+  sqlite: Database.Database,
+  sourceTables: readonly string[],
+): ReadonlyMap<string, readonly SqliteColumnInfo[]> {
+  if (sourceTables.length === 0) return new Map();
+  const placeholders = sourceTables.map(() => '?').join(', ');
+  const rows = sqlite.prepare(`
+    SELECT tables.name AS tableName, columns.name, columns.type,
+      columns."notnull", columns.dflt_value AS dfltValue,
+      columns.pk, columns.hidden
+    FROM sqlite_schema AS tables
+    CROSS JOIN pragma_table_xinfo(tables.name) AS columns
+    WHERE tables.type = 'table'
+      AND tables.name IN (${placeholders})
+    ORDER BY tables.name, columns.cid
+  `).all(...sourceTables) as SqliteTableColumnInfo[];
+  const columnsByTable = new Map<string, SqliteColumnInfo[]>();
+  for (const { tableName, ...column } of rows) {
+    const tableColumns = columnsByTable.get(tableName) ?? [];
+    tableColumns.push(column);
+    columnsByTable.set(tableName, tableColumns);
+  }
+  return columnsByTable;
+}
+
 function sqliteWritableColumnNames(
   sqlite: Database.Database,
   table: string,
@@ -382,12 +411,34 @@ function sqliteWritableColumnNames(
     .map((column) => column.name);
 }
 
-function matchesSupportedSqliteColumnShape(
+export function matchesSupportedSqliteColumnShape(
   table: string,
   expected: readonly SqliteColumnInfo[],
   actual: readonly SqliteColumnInfo[],
 ): boolean {
   if (JSON.stringify(expected) === JSON.stringify(actual)) return true;
+  const withExactOrder = (
+    columnNames: readonly string[],
+    overrides: Readonly<Record<string, Partial<SqliteColumnInfo>>> = {},
+  ): readonly SqliteColumnInfo[] | undefined => {
+    const expectedByName = new Map(expected.map((column) => [column.name, column]));
+    if (
+      columnNames.length !== expected.length
+      || new Set(columnNames).size !== expected.length
+      || columnNames.some((name) => !expectedByName.has(name))
+    ) {
+      return undefined;
+    }
+    return columnNames.map((name) => {
+      const column = expectedByName.get(name);
+      if (!column) {
+        throw new ImportPreconditionError(
+          `Historical SQLite schema definition references unknown column ${name}.`,
+        );
+      }
+      return { ...column, ...overrides[name] };
+    });
+  };
   if (table === 'priority_entities') {
     const referenceColumnIndex = expected.findIndex((column) => column.name === 'reference_id');
     if (referenceColumnIndex < 0) return false;
@@ -404,6 +455,139 @@ function matchesSupportedSqliteColumnShape(
         ? { ...column, dfltValue: '1' }
         : column
     ));
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'routines') {
+    const historical = withExactOrder([
+      'id',
+      'name',
+      'description',
+      'cadence_type',
+      'cadence_config',
+      'icon',
+      'sort_order',
+      'is_active',
+      'is_archived',
+      'created_at',
+      'updated_at',
+    ], {
+      is_active: { dfltValue: '1' },
+      is_archived: { dfltValue: '0' },
+    });
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'subtask_templates') {
+    const historical = withExactOrder([
+      'id',
+      'name',
+      'description',
+      'category',
+      'type',
+      'subtasks',
+      'workflow_tasks',
+      'icon',
+      'is_built_in',
+      'created_at',
+      'updated_at',
+    ], {
+      is_built_in: { dfltValue: '0' },
+    });
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'sync_log') {
+    const historical = withExactOrder([
+      'id',
+      'connector_id',
+      'success',
+      'tasks_added',
+      'tasks_updated',
+      'tasks_removed',
+      'alerts_added',
+      'errors',
+      'synced_at',
+      'duration_ms',
+      'tasks_pushed',
+      'local_only_protected',
+      'details',
+      'job_id',
+      'trigger',
+      'scheduled_for',
+      'started_at',
+      'attempt',
+      'max_attempts',
+      'identity_mode',
+      'identity_mode_revision',
+    ]);
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'task_triage_log') {
+    const historical = withExactOrder([
+      'id',
+      'task_id',
+      'mode',
+      'action',
+      'triaged_at',
+      'operation_id',
+      'reversed_at',
+    ]);
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'tasks') {
+    const historical = withExactOrder([
+      'id',
+      'source_id',
+      'connector_type',
+      'connector_instance_id',
+      'title',
+      'description',
+      'status',
+      'priority',
+      'due_date',
+      'created_at',
+      'updated_at',
+      'completed_at',
+      'parent_id',
+      'depth',
+      'is_checklist_item',
+      'source_list_id',
+      'source_list_name',
+      'assignee',
+      'metadata',
+      'sync_status',
+      'last_synced_at',
+      'kanban_column',
+      'kanban_order',
+      'micro_status',
+      'snoozed_until',
+      'effort',
+      'reminder_at',
+      'is_bulk_import',
+      'status_reason',
+      'push_retry_count',
+      'local_disposition',
+      'push_count',
+      'reminder_relative',
+      'reminder_due_time',
+      'recurrence_generated_from_task_id',
+      'planning_horizon',
+    ]);
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'triage_sync_state') {
+    const historical = withExactOrder([
+      'id',
+      'last_cursor',
+      'last_synced_at',
+      'total_imported',
+      'total_skipped',
+      'last_run_imported',
+      'last_run_skipped',
+      'last_run_errors',
+      'last_run_duration_ms',
+      'revision',
+    ], {
+      id: { notnull: 0 },
+    });
     return JSON.stringify(historical) === JSON.stringify(actual);
   }
   return false;
@@ -427,14 +611,13 @@ function currentSqliteSchemaColumns(
   const current = new Database(':memory:');
   try {
     runOrderedDatabaseBootstrap(current, migrationsDirectory);
-    const columns = new Map<string, readonly SqliteColumnInfo[]>();
+    const columns = sqliteImportSchemaColumns(current, sourceTables);
     for (const table of sourceTables) {
-      if (!sqliteTableExists(current, table)) {
+      if (!columns.has(table)) {
         throw new ImportPreconditionError(
           `Current SQLite bootstrap did not create required import table ${table}.`,
         );
       }
-      columns.set(table, sqliteColumnShape(current, table));
     }
     return columns;
   } finally {
@@ -468,10 +651,12 @@ export function compareSqliteImportSchema(
   sourceTables = expectedImportTableNames().sourceTables,
 ): readonly SqliteSchemaMismatch[] {
   const currentColumns = currentSqliteSchemaColumns(migrationsDirectory, sourceTables);
+  const actualColumns = sqliteImportSchemaColumns(sqlite, sourceTables);
   const mismatches: SqliteSchemaMismatch[] = [];
   for (const table of sourceTables) {
     const expectedColumns = currentColumns.get(table) ?? [];
-    if (!sqliteTableExists(sqlite, table)) {
+    const actualTableColumns = actualColumns.get(table);
+    if (!actualTableColumns) {
       mismatches.push({
         table,
         missingTable: true,
@@ -484,10 +669,9 @@ export function compareSqliteImportSchema(
       continue;
     }
 
-    const actualColumns = sqliteColumnShape(sqlite, table);
-    if (JSON.stringify(expectedColumns) === JSON.stringify(actualColumns)) continue;
+    if (JSON.stringify(expectedColumns) === JSON.stringify(actualTableColumns)) continue;
     const expectedColumnSet = new Set(expectedColumns.map((column) => column.name));
-    const actualColumnSet = new Set(actualColumns.map((column) => column.name));
+    const actualColumnSet = new Set(actualTableColumns.map((column) => column.name));
     const missingColumns = [...expectedColumnSet].filter(
       (column) => !actualColumnSet.has(column),
     );
@@ -499,16 +683,18 @@ export function compareSqliteImportSchema(
       missingTable: false,
       missingColumns,
       unexpectedColumns,
-      columnMismatches: sqliteColumnMismatches(expectedColumns, actualColumns),
+      columnMismatches: sqliteColumnMismatches(expectedColumns, actualTableColumns),
       columnOrderMismatch: (
         missingColumns.length === 0
         && unexpectedColumns.length === 0
-        && expectedColumns.some((column, index) => actualColumns[index]?.name !== column.name)
+        && expectedColumns.some(
+          (column, index) => actualTableColumns[index]?.name !== column.name,
+        )
       ),
       supportedHistoricalShape: matchesSupportedSqliteColumnShape(
         table,
         expectedColumns,
-        actualColumns,
+        actualTableColumns,
       ),
     });
   }

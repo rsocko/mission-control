@@ -13,6 +13,7 @@ export interface PersistedStateFixture {
   readonly notificationId?: string;
   readonly syncJobId?: string;
   readonly includesPreNodeIdCutoverState?: boolean;
+  readonly includesHistoricalPriorityEntityLayout?: boolean;
   readonly retainedHistoricalMigrationRows?: number;
 }
 
@@ -40,6 +41,7 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     searchToken: 'cobaltqueue',
     notificationId: 'fixture-notification-0047',
     syncJobId: 'fixture-sync-job-0047',
+    includesHistoricalPriorityEntityLayout: true,
     retainedHistoricalMigrationRows: 101,
   },
   {

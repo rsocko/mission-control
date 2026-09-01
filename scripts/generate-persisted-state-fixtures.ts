@@ -136,6 +136,29 @@ function createHistoricalPriorityEntityLayout(
   `);
 }
 
+function createHistoricalInboundWebhookLayout(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+): void {
+  if (!fixture.includesHistoricalInboundWebhookLayout) return;
+  sqlite.exec(`
+    CREATE TABLE inbound_webhooks (
+      id TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL,
+      source_label TEXT NOT NULL DEFAULT 'webhook',
+      secret TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      default_action TEXT NOT NULL DEFAULT 'auto',
+      field_mappings TEXT NOT NULL DEFAULT '{}',
+      total_received INTEGER NOT NULL DEFAULT 0,
+      last_received_at TEXT,
+      last_status INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+}
+
 function insertRow(
   sqlite: Database.Database,
   table: string,
@@ -496,6 +519,7 @@ function buildFixture(
   let buildError: unknown;
   try {
     sqlite.pragma('foreign_keys = ON');
+    createHistoricalInboundWebhookLayout(sqlite, fixture);
     _runMigrationsIndividually(sqlite, checkpoint.directory);
     assertCheckpointApplied(sqlite, checkpoint.entries);
     seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);

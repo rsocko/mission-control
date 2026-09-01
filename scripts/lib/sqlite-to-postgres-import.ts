@@ -207,6 +207,21 @@ interface SqliteColumnInfo {
   readonly pk: number;
 }
 
+export interface SqliteColumnMismatch {
+  readonly column: string;
+  readonly properties: readonly ('type' | 'nullability' | 'default' | 'primary-key')[];
+}
+
+export interface SqliteSchemaMismatch {
+  readonly table: string;
+  readonly missingTable: boolean;
+  readonly missingColumns: readonly string[];
+  readonly unexpectedColumns: readonly string[];
+  readonly columnMismatches: readonly SqliteColumnMismatch[];
+  readonly columnOrderMismatch: boolean;
+  readonly supportedHistoricalShape: boolean;
+}
+
 interface ForeignKeyInfo {
   readonly table: string;
   readonly columns: readonly string[];
@@ -367,16 +382,25 @@ function matchesSupportedSqliteColumnShape(
   actual: readonly SqliteColumnInfo[],
 ): boolean {
   if (JSON.stringify(expected) === JSON.stringify(actual)) return true;
-  if (table !== 'priority_entities') return false;
-
-  const referenceColumnIndex = expected.findIndex((column) => column.name === 'reference_id');
-  if (referenceColumnIndex < 0) return false;
-  const historical = [
-    ...expected.slice(0, referenceColumnIndex),
-    ...expected.slice(referenceColumnIndex + 1),
-    expected[referenceColumnIndex],
-  ];
-  return JSON.stringify(historical) === JSON.stringify(actual);
+  if (table === 'priority_entities') {
+    const referenceColumnIndex = expected.findIndex((column) => column.name === 'reference_id');
+    if (referenceColumnIndex < 0) return false;
+    const historical = [
+      ...expected.slice(0, referenceColumnIndex),
+      ...expected.slice(referenceColumnIndex + 1),
+      expected[referenceColumnIndex],
+    ];
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  if (table === 'inbound_webhooks') {
+    const historical = expected.map((column) => (
+      column.name === 'enabled'
+        ? { ...column, dfltValue: '1' }
+        : column
+    ));
+    return JSON.stringify(historical) === JSON.stringify(actual);
+  }
+  return false;
 }
 
 function sqliteCount(sqlite: Database.Database, table: string): number {
@@ -410,6 +434,86 @@ function currentSqliteSchemaColumns(
   } finally {
     current.close();
   }
+}
+
+function sqliteColumnMismatches(
+  expected: readonly SqliteColumnInfo[],
+  actual: readonly SqliteColumnInfo[],
+): readonly SqliteColumnMismatch[] {
+  const actualByName = new Map(actual.map((column) => [column.name, column]));
+  return expected.flatMap((expectedColumn) => {
+    const actualColumn = actualByName.get(expectedColumn.name);
+    if (!actualColumn) return [];
+    const properties: SqliteColumnMismatch['properties'][number][] = [];
+    if (expectedColumn.type !== actualColumn.type) properties.push('type');
+    if (expectedColumn.notnull !== actualColumn.notnull) properties.push('nullability');
+    if (expectedColumn.dfltValue !== actualColumn.dfltValue) properties.push('default');
+    if (expectedColumn.pk !== actualColumn.pk) properties.push('primary-key');
+    return properties.length > 0
+      ? [{ column: expectedColumn.name, properties }]
+      : [];
+  });
+}
+
+export function compareSqliteImportSchema(
+  sqlite: Database.Database,
+  migrationsDirectory: string,
+  sourceTables = expectedImportTableNames().sourceTables,
+): readonly SqliteSchemaMismatch[] {
+  const currentColumns = currentSqliteSchemaColumns(migrationsDirectory, sourceTables);
+  const mismatches: SqliteSchemaMismatch[] = [];
+  for (const table of sourceTables) {
+    const expectedColumns = currentColumns.get(table) ?? [];
+    if (!sqliteTableExists(sqlite, table)) {
+      mismatches.push({
+        table,
+        missingTable: true,
+        missingColumns: expectedColumns.map((column) => column.name),
+        unexpectedColumns: [],
+        columnMismatches: [],
+        columnOrderMismatch: false,
+        supportedHistoricalShape: false,
+      });
+      continue;
+    }
+
+    const actualColumns = sqliteColumnShape(sqlite, table);
+    if (JSON.stringify(expectedColumns) === JSON.stringify(actualColumns)) continue;
+    const expectedColumnSet = new Set(expectedColumns.map((column) => column.name));
+    const actualColumnSet = new Set(actualColumns.map((column) => column.name));
+    const missingColumns = [...expectedColumnSet].filter(
+      (column) => !actualColumnSet.has(column),
+    );
+    const unexpectedColumns = [...actualColumnSet].filter(
+      (column) => !expectedColumnSet.has(column),
+    );
+    mismatches.push({
+      table,
+      missingTable: false,
+      missingColumns,
+      unexpectedColumns,
+      columnMismatches: sqliteColumnMismatches(expectedColumns, actualColumns),
+      columnOrderMismatch: (
+        missingColumns.length === 0
+        && unexpectedColumns.length === 0
+        && expectedColumns.some((column, index) => actualColumns[index]?.name !== column.name)
+      ),
+      supportedHistoricalShape: matchesSupportedSqliteColumnShape(
+        table,
+        expectedColumns,
+        actualColumns,
+      ),
+    });
+  }
+  return mismatches;
+}
+
+function formatSqliteSchemaMismatch(mismatch: SqliteSchemaMismatch): string {
+  if (mismatch.missingTable) return `${mismatch.table} (table missing)`;
+  const differences = mismatch.columnMismatches
+    .map(({ column, properties }) => `${column}:${properties.join('+')}`);
+  if (mismatch.columnOrderMismatch) differences.push('column-order');
+  return `${mismatch.table} (missing: ${mismatch.missingColumns.join(',') || 'none'}; unexpected: ${mismatch.unexpectedColumns.join(',') || 'none'}; differences: ${differences.join(',') || 'none'})`;
 }
 
 export function validateSqliteMigrationState(
@@ -459,28 +563,15 @@ export function validateSqliteMigrationState(
     );
   }
 
-  const currentColumns = currentSqliteSchemaColumns(migrationsDirectory, sourceTables);
-  for (const table of sourceTables) {
-    if (!sqliteTableExists(sqlite, table)) {
-      throw new ImportPreconditionError(
-        `SQLite source is missing required table ${table}.`,
-      );
-    }
-    const expectedColumns = currentColumns.get(table) ?? [];
-    const actualColumns = sqliteColumnShape(sqlite, table);
-    if (!matchesSupportedSqliteColumnShape(table, expectedColumns, actualColumns)) {
-      const expectedColumnSet = new Set(expectedColumns.map((column) => column.name));
-      const actualColumnSet = new Set(actualColumns.map((column) => column.name));
-      const missingColumns = [...expectedColumnSet].filter(
-        (column) => !actualColumnSet.has(column),
-      );
-      const unexpectedColumns = [...actualColumnSet].filter(
-        (column) => !expectedColumnSet.has(column),
-      );
-      throw new ImportPreconditionError(
-        `SQLite source table ${table} does not match the current import schema (missing: ${missingColumns.join(', ') || 'none'}; unexpected: ${unexpectedColumns.join(', ') || 'none'}; type/constraint mismatch: ${missingColumns.length === 0 && unexpectedColumns.length === 0 ? 'yes' : 'no'}).`,
-      );
-    }
+  const incompatibleTables = compareSqliteImportSchema(
+    sqlite,
+    migrationsDirectory,
+    sourceTables,
+  ).filter((mismatch) => !mismatch.supportedHistoricalShape);
+  if (incompatibleTables.length > 0) {
+    throw new ImportPreconditionError(
+      `SQLite source schema does not match the current import schema for ${incompatibleTables.length} table(s): ${incompatibleTables.map(formatSqliteSchemaMismatch).join('; ')}.`,
+    );
   }
 
   return actual.length;

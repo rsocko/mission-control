@@ -94,6 +94,16 @@ function columnNames(sqlite: Database.Database, table: string): string[] {
   }>).map((row) => row.name);
 }
 
+function columnDefault(
+  sqlite: Database.Database,
+  table: string,
+  column: string,
+): string | null {
+  return sqlite.prepare(
+    'SELECT dflt_value FROM pragma_table_info(?) WHERE name = ?',
+  ).pluck().get(table, column) as string | null;
+}
+
 function openFixtureCopy(fixture: PersistedStateFixture): {
   readonly sqlite: Database.Database;
   readonly directory: string;
@@ -199,6 +209,9 @@ function assertCoreInvariants(
       rank: 1,
       referenceId: fixture.projectId,
     });
+  }
+  if (fixture.includesHistoricalInboundWebhookLayout) {
+    expect(columnDefault(sqlite, 'inbound_webhooks', 'enabled')).toBe('1');
   }
 }
 

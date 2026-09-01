@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
-import { resolve } from 'node:path';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
+  compareSqliteImportSchema,
   convertSqliteValueForPostgres,
   dependencySafeRows,
   dependencySafeTableOrder,
@@ -36,6 +39,25 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     ...priorityEntityColumns.filter((column) => column !== 'reference_id TEXT'),
     'reference_id TEXT',
   ] as const;
+  const inboundWebhookColumns = [
+    'id TEXT PRIMARY KEY NOT NULL',
+    'name TEXT NOT NULL',
+    "source_label TEXT NOT NULL DEFAULT 'webhook'",
+    'secret TEXT',
+    'enabled INTEGER NOT NULL DEFAULT true',
+    "default_action TEXT NOT NULL DEFAULT 'auto'",
+    "field_mappings TEXT NOT NULL DEFAULT '{}'",
+    'total_received INTEGER NOT NULL DEFAULT 0',
+    'last_received_at TEXT',
+    'last_status INTEGER',
+    'created_at TEXT NOT NULL',
+    'updated_at TEXT NOT NULL',
+  ] as const;
+  const historicalInboundWebhookColumns = inboundWebhookColumns.map((column) => (
+    column === 'enabled INTEGER NOT NULL DEFAULT true'
+      ? 'enabled INTEGER NOT NULL DEFAULT 1'
+      : column
+  ));
 
   function currentSqlite(): Database.Database {
     const sqlite = new Database(':memory:');
@@ -50,6 +72,16 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     sqlite.exec(`
       DROP TABLE priority_entities;
       CREATE TABLE priority_entities (${columns.join(', ')});
+    `);
+  }
+
+  function replaceInboundWebhookTable(
+    sqlite: Database.Database,
+    columns: readonly string[],
+  ): void {
+    sqlite.exec(`
+      DROP TABLE inbound_webhooks;
+      CREATE TABLE inbound_webhooks (${columns.join(', ')});
     `);
   }
 
@@ -285,6 +317,109 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   }, 20_000);
 
+  it('reports every production-shaped historical difference and accepts exact equivalents', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mc-import-schema-'));
+    const fixturePath = join(directory, 'production-shaped.sqlite3');
+    copyFileSync(resolve(
+      process.cwd(),
+      'tests',
+      'fixtures',
+      'persisted-state',
+      'sqlite',
+      'v1-0047-isolate-sync-worker.sqlite3',
+    ), fixturePath);
+    const fixture = new Database(fixturePath);
+    try {
+      runOrderedDatabaseBootstrap(fixture, migrationsDirectory);
+      expect(compareSqliteImportSchema(fixture, migrationsDirectory)).toEqual([
+        expect.objectContaining({
+          table: 'inbound_webhooks',
+          columnMismatches: [{ column: 'enabled', properties: ['default'] }],
+          columnOrderMismatch: false,
+          supportedHistoricalShape: true,
+        }),
+        expect.objectContaining({
+          table: 'priority_entities',
+          columnMismatches: [],
+          columnOrderMismatch: true,
+          supportedHistoricalShape: true,
+        }),
+      ]);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+    } finally {
+      fixture.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it('accepts only the exact historical inbound webhook default representation', () => {
+    const sqlite = currentSqlite();
+    try {
+      replaceInboundWebhookTable(sqlite, historicalInboundWebhookColumns);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(126);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it.each([
+    {
+      mismatch: 'declared type',
+      columns: historicalInboundWebhookColumns.map((column) => (
+        column === 'enabled INTEGER NOT NULL DEFAULT 1'
+          ? 'enabled TEXT NOT NULL DEFAULT 1'
+          : column
+      )),
+    },
+    {
+      mismatch: 'nullability',
+      columns: historicalInboundWebhookColumns.map((column) => (
+        column === 'name TEXT NOT NULL' ? 'name TEXT' : column
+      )),
+    },
+    {
+      mismatch: 'primary key',
+      columns: historicalInboundWebhookColumns.map((column) => (
+        column === 'id TEXT PRIMARY KEY NOT NULL' ? 'id TEXT NOT NULL' : column
+      )),
+    },
+    {
+      mismatch: 'different default',
+      columns: historicalInboundWebhookColumns.map((column) => (
+        column === 'enabled INTEGER NOT NULL DEFAULT 1'
+          ? 'enabled INTEGER NOT NULL DEFAULT 0'
+          : column
+      )),
+    },
+    {
+      mismatch: 'column order',
+      columns: [
+        historicalInboundWebhookColumns[1],
+        historicalInboundWebhookColumns[0],
+        ...historicalInboundWebhookColumns.slice(2),
+      ],
+    },
+    {
+      mismatch: 'missing column',
+      columns: historicalInboundWebhookColumns.filter((column) => column !== 'secret TEXT'),
+    },
+    {
+      mismatch: 'unexpected column',
+      columns: [...historicalInboundWebhookColumns, 'unknown_future_column TEXT'],
+    },
+  ])('rejects a historical inbound webhook $mismatch mismatch', ({ columns }) => {
+    const sqlite = currentSqlite();
+    try {
+      replaceInboundWebhookTable(sqlite, columns);
+      expect(() => validateSqliteMigrationState(
+        sqlite,
+        migrationsDirectory,
+      )).toThrow(/inbound_webhooks/);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
   it.each([
     {
       mismatch: 'declared type',
@@ -314,6 +449,24 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           : column
       )),
     },
+    {
+      mismatch: 'different column order',
+      columns: [
+        historicalPriorityEntityColumns[1],
+        historicalPriorityEntityColumns[0],
+        ...historicalPriorityEntityColumns.slice(2),
+      ],
+    },
+    {
+      mismatch: 'missing column',
+      columns: historicalPriorityEntityColumns.filter(
+        (column) => column !== 'description TEXT',
+      ),
+    },
+    {
+      mismatch: 'unexpected column',
+      columns: [...historicalPriorityEntityColumns, 'unknown_future_column TEXT'],
+    },
   ])('rejects a priority entity $mismatch mismatch', ({ columns }) => {
     const sqlite = currentSqlite();
     try {
@@ -322,7 +475,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       expect(() => validateSqliteMigrationState(
         sqlite,
         migrationsDirectory,
-      )).toThrow(/priority_entities does not match the current import schema/);
+      )).toThrow(/priority_entities/);
     } finally {
       sqlite.close();
     }
@@ -347,10 +500,42 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       expect(() => validateSqliteMigrationState(
         incompatible,
         migrationsDirectory,
-      )).toThrow(/tasks does not match the current import schema/);
+      )).toThrow(/tasks .*unexpected: unknown_future_column/);
     } finally {
       unknownNewer.close();
       incompatible.close();
+    }
+  }, 20_000);
+
+  it('summarizes every incompatible table and field in one secret-safe error', () => {
+    const sqlite = currentSqlite();
+    try {
+      sqlite.exec('ALTER TABLE tasks ADD COLUMN unknown_future_column TEXT');
+      replaceInboundWebhookTable(
+        sqlite,
+        historicalInboundWebhookColumns.map((column) => (
+          column === 'enabled INTEGER NOT NULL DEFAULT 1'
+            ? 'enabled INTEGER NOT NULL DEFAULT 0'
+            : column
+        )),
+      );
+      replacePriorityEntityTable(
+        sqlite,
+        historicalPriorityEntityColumns.map((column) => (
+          column === 'rank INTEGER NOT NULL DEFAULT 0'
+            ? 'rank TEXT NOT NULL DEFAULT 0'
+            : column
+        )),
+      );
+
+      expect(() => validateSqliteMigrationState(
+        sqlite,
+        migrationsDirectory,
+      )).toThrow(
+        /3 table\(s\): inbound_webhooks .*enabled:default.*priority_entities .*rank:type.*tasks .*unexpected: unknown_future_column/,
+      );
+    } finally {
+      sqlite.close();
     }
   }, 20_000);
 });

@@ -1,4 +1,7 @@
+import Database from 'better-sqlite3';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
   convertSqliteValueForPostgres,
   dependencySafeRows,
@@ -7,11 +10,20 @@ import {
   expectedImportTableNames,
   prepareTarget,
   runSqliteToPostgresImport,
+  validateSqliteMigrationState,
 } from '../../scripts/lib/sqlite-to-postgres-import';
 import { ImportPreconditionError } from '../../scripts/lib/sqlite-to-postgres-import';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
+  const migrationsDirectory = resolve(process.cwd(), 'drizzle');
+
+  function currentSqlite(): Database.Database {
+    const sqlite = new Database(':memory:');
+    runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
+    return sqlite;
+  }
+
   function targetPreparationPool(options: {
     readonly tables: readonly string[];
     readonly counts?: Readonly<Record<string, number>>;
@@ -190,6 +202,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(227);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
     expect(result.evidence.derivedState.droppedFromImport).toEqual(
       expect.arrayContaining(['sqlite_fts_virtual_tables']),
@@ -200,5 +213,62 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     ]);
     expect(result.evidence.verdict.ready_for_cutover_planning).toBe(false);
     expect(result.evidence.verdict.reason).toContain('dry-run only');
+  }, 20_000);
+
+  it('accepts retained historical journal rows only with complete current migration evidence', () => {
+    const sqlite = currentSqlite();
+    try {
+      const terminalTimestamp = sqlite.prepare(
+        'SELECT MAX(created_at) FROM __drizzle_migrations',
+      ).pluck().get() as number;
+      const insert = sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      );
+      for (let index = 0; index < 101; index += 1) {
+        insert.run(index.toString(16).padStart(64, '0'), terminalTimestamp - 1);
+      }
+
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(227);
+
+      sqlite.prepare(`
+        DELETE FROM __drizzle_migrations
+        WHERE id = (
+          SELECT id FROM __drizzle_migrations
+          WHERE created_at = (SELECT MAX(created_at) FROM __drizzle_migrations)
+          LIMIT 1
+        )
+      `).run();
+      expect(() => validateSqliteMigrationState(sqlite, migrationsDirectory)).toThrow(
+        /missing 1 current migration/,
+      );
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('rejects unknown-newer journal rows and incompatible current schema shapes', () => {
+    const unknownNewer = currentSqlite();
+    const incompatible = currentSqlite();
+    try {
+      const terminalTimestamp = unknownNewer.prepare(
+        'SELECT MAX(created_at) FROM __drizzle_migrations',
+      ).pluck().get() as number;
+      unknownNewer.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      ).run('f'.repeat(64), terminalTimestamp + 1);
+      expect(() => validateSqliteMigrationState(
+        unknownNewer,
+        migrationsDirectory,
+      )).toThrow(/unknown-newer/);
+
+      incompatible.exec('ALTER TABLE tasks ADD COLUMN unknown_future_column TEXT');
+      expect(() => validateSqliteMigrationState(
+        incompatible,
+        migrationsDirectory,
+      )).toThrow(/tasks does not match the current import schema/);
+    } finally {
+      unknownNewer.close();
+      incompatible.close();
+    }
   }, 20_000);
 });

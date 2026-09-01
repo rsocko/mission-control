@@ -3,13 +3,43 @@ import {
   convertSqliteValueForPostgres,
   dependencySafeRows,
   dependencySafeTableOrder,
+  currentPostgresMigrationHashes,
   expectedImportTableNames,
+  prepareTarget,
   runSqliteToPostgresImport,
 } from '../../scripts/lib/sqlite-to-postgres-import';
 import { ImportPreconditionError } from '../../scripts/lib/sqlite-to-postgres-import';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
+  function targetPreparationPool(options: {
+    readonly tables: readonly string[];
+    readonly counts?: Readonly<Record<string, number>>;
+    readonly migrationJournal?: 'missing' | 'stale' | 'current';
+  }) {
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('FROM information_schema.tables') && sql.includes("table_schema = 'public'")) {
+        return { rows: options.tables.map((table_name) => ({ table_name })) };
+      }
+      if (sql.includes('FROM information_schema.tables') && sql.includes("table_schema = 'drizzle'")) {
+        return { rows: [{ exists: options.migrationJournal !== 'missing' }] };
+      }
+      if (sql.includes('FROM drizzle.__drizzle_migrations')) {
+        return {
+          rows: options.migrationJournal === 'current'
+            ? currentPostgresMigrationHashes().map((hash) => ({ hash }))
+            : [{ hash: 'stale-postgres-migration-hash' }],
+        };
+      }
+      const countTable = sql.match(/FROM "([^"]+)"/)?.[1];
+      if (countTable) {
+        return { rows: [{ count: String(options.counts?.[countTable] ?? 0) }] };
+      }
+      throw new Error(`Unexpected mocked PostgreSQL query: ${sql}`);
+    });
+    return { query } as never;
+  }
+
   it('plans only SQLite-backed tables and leaves PostgreSQL search projections derived', () => {
     const tables = expectedImportTableNames();
 
@@ -21,6 +51,42 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(tables.sourceTables).not.toContain('notification_search_documents');
     expect(tables.targetTables).toContain('task_search_documents');
     expect(tables.targetTables).toContain('notification_search_documents');
+  });
+
+  it('rejects existing empty targets without a current PostgreSQL migration journal', async () => {
+    const { targetTables } = expectedImportTableNames();
+
+    await expect(prepareTarget(
+      targetPreparationPool({ tables: targetTables, migrationJournal: 'missing' }),
+      { dryRun: false, rehearsal: false, resetDisposableRehearsalTarget: false },
+      'postgres://user:secret@localhost/mission_control_import_test',
+      targetTables,
+      'drizzle/postgres',
+    )).rejects.toThrow('missing drizzle.__drizzle_migrations');
+
+    await expect(prepareTarget(
+      targetPreparationPool({ tables: targetTables, migrationJournal: 'stale' }),
+      { dryRun: false, rehearsal: false, resetDisposableRehearsalTarget: false },
+      'postgres://user:secret@localhost/mission_control_import_test',
+      targetTables,
+      'drizzle/postgres',
+    )).rejects.toThrow('migration journal is not current');
+  });
+
+  it('accepts existing empty targets only when the PostgreSQL migration journal is current', async () => {
+    const { targetTables } = expectedImportTableNames();
+
+    await expect(prepareTarget(
+      targetPreparationPool({ tables: targetTables, migrationJournal: 'current' }),
+      { dryRun: false, rehearsal: false, resetDisposableRehearsalTarget: false },
+      'postgres://user:secret@localhost/mission_control_import_test',
+      targetTables,
+      'drizzle/postgres',
+    )).resolves.toEqual({
+      initialized: false,
+      reset: false,
+      emptyAttestation: 'empty-existing-schema',
+    });
   });
 
   it('orders table and self-referential row copies by dependency', () => {

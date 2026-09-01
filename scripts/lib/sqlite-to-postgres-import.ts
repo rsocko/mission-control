@@ -289,6 +289,16 @@ export function currentSqliteMigrationHashes(
     .sort();
 }
 
+export function currentPostgresMigrationHashes(
+  migrationsDirectory = DEFAULT_POSTGRES_MIGRATIONS_DIRECTORY,
+): readonly string[] {
+  return readMigrationJournal(migrationsDirectory).entries
+    .map((entry) => createHash('sha256')
+      .update(readFileSync(join(migrationsDirectory, `${entry.tag}.sql`), 'utf8'))
+      .digest('hex'))
+    .sort();
+}
+
 function sqliteTableExists(sqlite: Database.Database, table: string): boolean {
   return sqlite.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
@@ -531,7 +541,40 @@ async function resetPublicSchema(pool: pg.Pool): Promise<void> {
   await pool.query('DROP SCHEMA IF EXISTS drizzle CASCADE');
 }
 
-async function prepareTarget(
+async function validatePostgresMigrationState(
+  pool: pg.Pool,
+  migrationsDirectory: string,
+): Promise<void> {
+  const exists = await pool.query<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.tables
+      WHERE table_schema = 'drizzle'
+        AND table_name = '__drizzle_migrations'
+    ) AS exists
+  `);
+  if (exists.rows[0]?.exists !== true) {
+    throw new ImportPreconditionError(
+      'PostgreSQL target has an existing Mission Control schema but is missing drizzle.__drizzle_migrations.',
+    );
+  }
+
+  const expected = currentPostgresMigrationHashes(migrationsDirectory);
+  const actual = (await pool.query<{ hash: string }>(`
+    SELECT hash
+    FROM drizzle.__drizzle_migrations
+  `)).rows.map((row) => row.hash).sort();
+  if (
+    expected.length !== actual.length
+    || expected.some((hash, index) => hash !== actual[index])
+  ) {
+    throw new ImportPreconditionError(
+      `PostgreSQL target migration journal is not current: expected ${expected.length} migration(s), found ${actual.length}.`,
+    );
+  }
+}
+
+export async function prepareTarget(
   pool: pg.Pool,
   options: Required<Pick<SqliteToPostgresImportOptions, 'dryRun' | 'rehearsal' | 'resetDisposableRehearsalTarget'>>,
   postgresUrl: string,
@@ -592,6 +635,7 @@ async function prepareTarget(
       `PostgreSQL target is not empty: ${nonEmpty.length} table(s) contain rows. Import will not overwrite existing data.`,
     );
   }
+  await validatePostgresMigrationState(pool, postgresMigrationsDirectory);
   return { initialized: false, reset: false, emptyAttestation: 'empty-existing-schema' };
 }
 

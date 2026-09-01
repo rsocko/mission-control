@@ -233,6 +233,30 @@ function applyCheckpointProductionSafetyNets(
   `);
 }
 
+function applyHistoricallyReleasedTaskMigrations(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+  temporaryRoot: string,
+): void {
+  if (fixture.tasksHistoricalOrder !== 'released-runtime-first') return;
+
+  const tags = [
+    '0111_completion_anchored_recurrence',
+    '0118_add_planning_horizon',
+  ] as const;
+  const directory = join(temporaryRoot, fixture.id, 'released-task-migrations');
+  mkdirSync(join(directory, 'meta'), { recursive: true });
+  const entries = tags.map((tag, idx) => ({ idx, tag, when: idx + 1 }));
+  writeFileSync(
+    join(directory, 'meta', '_journal.json'),
+    `${JSON.stringify({ version: '7', dialect: 'sqlite', entries }, null, 2)}\n`,
+  );
+  for (const tag of tags) {
+    writeFileSync(join(directory, `${tag}.sql`), normalizedMigrationSql(tag));
+  }
+  _runMigrationsIndividually(sqlite, directory);
+}
+
 function insertRow(
   sqlite: Database.Database,
   table: string,
@@ -599,6 +623,7 @@ function buildFixture(
     assertCheckpointApplied(sqlite, checkpoint.entries);
     seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);
     applyCheckpointProductionSafetyNets(sqlite, fixture);
+    applyHistoricallyReleasedTaskMigrations(sqlite, fixture, temporaryRoot);
     createHistoricalPriorityEntityLayout(sqlite, fixture);
     sqlite.transaction(() => {
       seedCoreState(sqlite, fixture);
@@ -630,11 +655,17 @@ function assertReplaceableFixtureDirectory(outputDirectory: string): void {
   const expectedFileNames = new Set(
     PERSISTED_STATE_FIXTURES.map((fixture) => fixture.fileName),
   );
+  const previousFileNames = new Set(
+    PERSISTED_STATE_FIXTURES
+      .filter((fixture) => fixture.tasksHistoricalOrder !== 'released-runtime-first')
+      .map((fixture) => fixture.fileName),
+  );
+  const matchesFileSet = (fileNames: ReadonlySet<string>): boolean => (
+    entries.length === fileNames.size
+    && entries.every((entry) => entry.isFile() && fileNames.has(entry.name))
+  );
   const isCompleteCorpus = (
-    entries.length === expectedFileNames.size
-    && entries.every((entry) => (
-      entry.isFile() && expectedFileNames.has(entry.name)
-    ))
+    matchesFileSet(expectedFileNames) || matchesFileSet(previousFileNames)
   );
   if (!isCompleteCorpus) {
     throw new Error(

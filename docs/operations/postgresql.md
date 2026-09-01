@@ -258,11 +258,12 @@ accepted: `priority_entities.reference_id` appended after `updated_at`, and
 equivalent `DEFAULT true`. These exceptions still require the exact expected
 column order, types, nullability, defaults, and primary-key shape. Unknown
 hashes are rejected even when their timestamp is backdated and the schema
-otherwise appears current. Schema validation examines every imported table
-before failing and reports all mismatched tables and fields in one secret-safe
-error. This rejects partial, stale, unknown-newer, and schema-incompatible
-sources without assuming that a long-lived journal has the same row count as
-current migration metadata. The command also rejects
+otherwise appears current. Schema validation uses SQLite's extended table
+metadata so hidden and generated columns cannot evade comparison. It examines
+every imported table before failing and reports all mismatched tables and
+fields in one secret-safe error. This rejects partial, stale, unknown-newer,
+and schema-incompatible sources without assuming that a long-lived journal has
+the same row count as current migration metadata. The command also rejects
 WAL/rollback-journal sidecars, runs `PRAGMA integrity_check` and
 `PRAGMA foreign_key_check`, and rejects active `sync_jobs` for real sources.
 Synthetic fixture rehearsals may contain queued worker rows so queue copy

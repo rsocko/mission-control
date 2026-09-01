@@ -538,4 +538,44 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       sqlite.close();
     }
   }, 20_000);
+
+  it('rejects an unexpected generated column omitted by pragma_table_info', () => {
+    const sqlite = currentSqlite();
+    try {
+      sqlite.exec(`
+        ALTER TABLE tasks
+        ADD COLUMN generated_probe TEXT
+        GENERATED ALWAYS AS (title) VIRTUAL
+      `);
+
+      expect(
+        (sqlite.prepare(
+          "SELECT name FROM pragma_table_info('tasks') WHERE name = 'generated_probe'",
+        ).get()),
+      ).toBeUndefined();
+      expect(
+        (sqlite.prepare(
+          "SELECT hidden FROM pragma_table_xinfo('tasks') WHERE name = 'generated_probe'",
+        ).get()),
+      ).toEqual({ hidden: 2 });
+      expect(compareSqliteImportSchema(
+        sqlite,
+        migrationsDirectory,
+      )).toEqual([
+        expect.objectContaining({
+          table: 'tasks',
+          unexpectedColumns: ['generated_probe'],
+          supportedHistoricalShape: false,
+        }),
+      ]);
+      expect(() => validateSqliteMigrationState(
+        sqlite,
+        migrationsDirectory,
+      )).toThrow(
+        /1 table\(s\): tasks .*unexpected: generated_probe/,
+      );
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
 });

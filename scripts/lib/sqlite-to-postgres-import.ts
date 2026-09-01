@@ -205,11 +205,14 @@ interface SqliteColumnInfo {
   readonly notnull: number;
   readonly dfltValue: string | null;
   readonly pk: number;
+  readonly hidden: number;
 }
 
 export interface SqliteColumnMismatch {
   readonly column: string;
-  readonly properties: readonly ('type' | 'nullability' | 'default' | 'primary-key')[];
+  readonly properties: readonly (
+    'type' | 'nullability' | 'default' | 'primary-key' | 'hidden'
+  )[];
 }
 
 export interface SqliteSchemaMismatch {
@@ -359,21 +362,24 @@ function sqliteTableExists(sqlite: Database.Database, table: string): boolean {
   ).get(table) !== undefined;
 }
 
-function sqliteColumnNames(sqlite: Database.Database, table: string): readonly string[] {
-  return (sqlite.prepare('SELECT name FROM pragma_table_info(?)').all(table) as Array<{
-    name: string;
-  }>).map((row) => row.name);
-}
-
 function sqliteColumnShape(
   sqlite: Database.Database,
   table: string,
 ): readonly SqliteColumnInfo[] {
   return (sqlite.prepare(`
-    SELECT name, type, "notnull", dflt_value AS dfltValue, pk
-    FROM pragma_table_info(?)
+    SELECT name, type, "notnull", dflt_value AS dfltValue, pk, hidden
+    FROM pragma_table_xinfo(?)
     ORDER BY cid
   `).all(table) as SqliteColumnInfo[]);
+}
+
+function sqliteWritableColumnNames(
+  sqlite: Database.Database,
+  table: string,
+): readonly string[] {
+  return sqliteColumnShape(sqlite, table)
+    .filter((column) => column.hidden === 0)
+    .map((column) => column.name);
 }
 
 function matchesSupportedSqliteColumnShape(
@@ -449,6 +455,7 @@ function sqliteColumnMismatches(
     if (expectedColumn.notnull !== actualColumn.notnull) properties.push('nullability');
     if (expectedColumn.dfltValue !== actualColumn.dfltValue) properties.push('default');
     if (expectedColumn.pk !== actualColumn.pk) properties.push('primary-key');
+    if (expectedColumn.hidden !== actualColumn.hidden) properties.push('hidden');
     return properties.length > 0
       ? [{ column: expectedColumn.name, properties }]
       : [];
@@ -1084,7 +1091,7 @@ async function copyTableRows(
   columns: readonly ColumnInfo[],
   selfForeignKeys: readonly ForeignKeyInfo[],
 ): Promise<number> {
-  const sourceColumnSet = new Set(sqliteColumnNames(sqlite, table));
+  const sourceColumnSet = new Set(sqliteWritableColumnNames(sqlite, table));
   const importColumns = columns.filter(
     (column) => !column.generated && sourceColumnSet.has(column.name),
   );

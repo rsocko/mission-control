@@ -18,6 +18,7 @@ import {
   PERSISTED_STATE_FIXTURE_VERSION,
   type PersistedStateFixture,
 } from '../../scripts/persisted-state-fixture-manifest';
+import { deriveTrustedTasksColumnOrders } from '../../scripts/sqlite-task-schema-history';
 
 interface MigrationJournalEntry {
   readonly tag: string;
@@ -137,6 +138,11 @@ function assertCoreInvariants(
   sqlite: Database.Database,
   fixture: PersistedStateFixture,
 ): void {
+  const tasksOrder = fixture.tasksHistoricalOrder
+    ? deriveTrustedTasksColumnOrders().get(fixture.tasksHistoricalOrder)
+    : undefined;
+  const pushCountPresentBeforeSeed = tasksOrder !== undefined
+    && tasksOrder.indexOf('push_count') < tasksOrder.indexOf('status_reason');
   expect(sqlite.prepare(`
     SELECT title, status, priority, local_disposition AS localDisposition,
       push_count AS pushCount, last_synced_at AS lastSyncedAt
@@ -146,7 +152,7 @@ function assertCoreInvariants(
     status: 'in_progress',
     priority: 'high',
     localDisposition: 'active',
-    pushCount: 0,
+    pushCount: pushCountPresentBeforeSeed ? 2 : 0,
     lastSyncedAt: '2026-01-15T12:00:00.000Z',
   });
   expect(sqlite.prepare(`
@@ -241,27 +247,11 @@ function assertCoreInvariants(
     expect(columnNames(sqlite, 'task_triage_log')).toEqual([
       'id', 'task_id', 'mode', 'action', 'triaged_at', 'operation_id', 'reversed_at',
     ]);
-    const commonTaskColumns = [
-      'id', 'source_id', 'connector_type', 'connector_instance_id', 'title',
-      'description', 'status', 'priority', 'due_date', 'created_at', 'updated_at',
-      'completed_at', 'parent_id', 'depth', 'is_checklist_item', 'source_list_id',
-      'source_list_name', 'assignee', 'metadata', 'sync_status', 'last_synced_at',
-      'kanban_column', 'kanban_order', 'micro_status', 'snoozed_until', 'effort',
-      'reminder_at', 'is_bulk_import', 'status_reason', 'push_retry_count',
-      'local_disposition',
-    ];
+    if (!fixture.tasksHistoricalOrder) {
+      throw new Error(`Missing tasks chronology for ${fixture.id}.`);
+    }
     expect(columnNames(sqlite, 'tasks')).toEqual(
-      fixture.tasksHistoricalOrder === 'released-runtime-first'
-        ? [
-            ...commonTaskColumns,
-            'recurrence_generated_from_task_id', 'planning_horizon', 'push_count',
-            'reminder_relative', 'reminder_due_time',
-          ]
-        : [
-            ...commonTaskColumns,
-            'push_count', 'reminder_relative', 'reminder_due_time',
-            'recurrence_generated_from_task_id', 'planning_horizon',
-          ],
+      deriveTrustedTasksColumnOrders().get(fixture.tasksHistoricalOrder),
     );
     expect(columnNotNull(sqlite, 'triage_sync_state', 'id')).toBe(0);
   }
@@ -386,7 +376,7 @@ describe('persisted-state compatibility fixtures', () => {
           sqlite.close();
         }
       },
-      20_000,
+      120_000,
     );
   }
 
@@ -427,7 +417,7 @@ describe('persisted-state compatibility fixtures', () => {
         );
       }
     },
-    20_000,
+    120_000,
   );
 
   it('refuses to replace an output directory containing unrelated files', () => {

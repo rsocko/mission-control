@@ -1,5 +1,13 @@
 import Database from 'better-sqlite3';
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -23,6 +31,12 @@ import {
 } from '../../scripts/persisted-state-fixture-manifest';
 import { SQLITE_SUPERSEDED_MIGRATION_HASHES } from '../../scripts/sqlite-superseded-migration-hashes';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
+import {
+  deriveTrustedTasksColumnOrders,
+  TRUSTED_TASK_APPEND_COLUMNS,
+  TRUSTED_TASK_COLUMN_APPEND_EVENTS,
+  TRUSTED_TASKS_CHRONOLOGIES,
+} from '../../scripts/sqlite-task-schema-history';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
   const migrationsDirectory = resolve(process.cwd(), 'drizzle');
@@ -225,6 +239,143 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(tables.targetTables).toContain('notification_search_documents');
   });
 
+  it('derives every exact trusted tasks chronology from bounded append events', () => {
+    const derived = deriveTrustedTasksColumnOrders();
+    expect([...derived.keys()].sort()).toEqual([
+      'continuous-production',
+      'fresh',
+      'late-migrations-first',
+      'released-runtime-first',
+      'status-after-local-disposition',
+      'status-after-push-count',
+      'status-after-recurrence',
+      'status-after-relative-reminders',
+      'status-after-reminder',
+    ].sort());
+    expect(new Set([...derived.values()].map((order) => JSON.stringify(order))).size).toBe(9);
+    expect(TRUSTED_TASKS_CHRONOLOGIES.map(({ origin }) => origin)).toEqual([
+      expect.stringContaining('0020_add_task_effort'),
+      expect.stringContaining('0022_add_task_reminder'),
+      expect.stringContaining('0027_add_bulk_import_flag'),
+      expect.stringContaining('0053_add_task_local_disposition'),
+      expect.stringContaining('0106_task-delay-insights'),
+      expect.stringContaining('0109_relative_task_reminders'),
+      expect.stringContaining('0111_completion_anchored_recurrence'),
+      expect.stringContaining('0118_add_planning_horizon'),
+      expect.stringContaining('recurrence/planning runtimes'),
+    ]);
+
+    const current = currentSqlite();
+    try {
+      expect(tableShape(current, 'tasks').map(({ name }) => name)).toEqual(
+        derived.get('fresh'),
+      );
+    } finally {
+      current.close();
+    }
+  }, 20_000);
+
+  it('covers every repository task-column append in the chronology model', () => {
+    const migrationColumns = readdirSync(migrationsDirectory)
+      .filter((fileName) => fileName.endsWith('.sql'))
+      .flatMap((fileName) => [
+        ...readFileSync(resolve(migrationsDirectory, fileName), 'utf8')
+          .matchAll(/ALTER TABLE\s+[`"]?tasks[`"]?\s+ADD(?:\s+COLUMN)?\s+[`"]?([a-z_]+)/gi),
+      ].map((match) => match[1]));
+    const safetyNetColumns = [
+      ...readFileSync(
+        resolve(process.cwd(), 'src', 'db', 'bootstrap', 'safety-nets', 'tasks.ts'),
+        'utf8',
+      ).matchAll(/ALTER TABLE tasks ADD COLUMN ([a-z_]+)/g),
+    ].map((match) => match[1]);
+    const discovered = [...new Set([...migrationColumns, ...safetyNetColumns])].sort();
+
+    expect(discovered).toEqual([...TRUSTED_TASK_APPEND_COLUMNS].sort());
+  });
+
+  it('binds every chronology event and checkpoint to committed repository provenance', () => {
+    const journal = JSON.parse(
+      readFileSync(resolve(migrationsDirectory, 'meta', '_journal.json'), 'utf8'),
+    ) as { entries: Array<{ tag: string }> };
+    const journalIndexes = new Map(
+      journal.entries.map(({ tag }, index) => [tag, index]),
+    );
+    const normalizedSha256 = (content: string): string => createHash('sha256')
+      .update(content.replace(/\r\n?/g, '\n'))
+      .digest('hex');
+    const hasFullGitHistory = execFileSync(
+      'git',
+      ['rev-parse', '--is-shallow-repository'],
+      { encoding: 'utf8' },
+    ).trim() === 'false';
+
+    for (const event of Object.values(TRUSTED_TASK_COLUMN_APPEND_EVENTS)) {
+      const source = readFileSync(resolve(process.cwd(), event.provenance.path), 'utf8');
+      expect(normalizedSha256(source)).toBe(event.provenance.sha256);
+      if (event.provenance.kind === 'migration') {
+        expect(journalIndexes.has(event.provenance.tag)).toBe(true);
+        const columns = [
+          ...source.matchAll(
+            /ALTER TABLE\s+[`"]?tasks[`"]?\s+ADD(?:\s+COLUMN)?\s+[`"]?([a-z_]+)/gi,
+          ),
+        ].map((match) => match[1]);
+        expect(columns).toEqual(event.columns);
+        expect(event.provenance.firstReachableCommit).toMatch(/^[a-f0-9]{40}$/);
+        if (hasFullGitHistory) {
+          expect(() => execFileSync(
+            'git',
+            ['merge-base', '--is-ancestor', event.provenance.firstReachableCommit, 'HEAD'],
+            { stdio: 'ignore' },
+          )).not.toThrow();
+          for (const column of event.columns) {
+            expect(() => execFileSync(
+              'git',
+              ['grep', '-F', '-q', column, event.provenance.firstReachableCommit, '--'],
+              { stdio: 'ignore' },
+            )).not.toThrow();
+          }
+        }
+      } else {
+        for (const marker of event.provenance.sourceMarkers) {
+          expect(source).toContain(marker);
+        }
+        for (const commit of event.provenance.firstReachableCommits) {
+          expect(commit).toMatch(/^[a-f0-9]{40}$/);
+          if (hasFullGitHistory) {
+            expect(() => execFileSync(
+              'git',
+              ['merge-base', '--is-ancestor', commit, 'HEAD'],
+              { stdio: 'ignore' },
+            )).not.toThrow();
+            for (const marker of event.provenance.sourceMarkers) {
+              expect(() => execFileSync(
+                'git',
+                ['grep', '-F', '-q', marker, commit, '--'],
+                { stdio: 'ignore' },
+              )).not.toThrow();
+            }
+          }
+        }
+      }
+    }
+
+    for (const chronology of TRUSTED_TASKS_CHRONOLOGIES) {
+      const indexes = chronology.checkpointTags.map((tag) => journalIndexes.get(tag));
+      expect(indexes.every((index) => index !== undefined)).toBe(true);
+      expect(indexes).toEqual([...indexes].sort((left, right) => left! - right!));
+      expect(chronology.events.every(
+        (event) => event in TRUSTED_TASK_COLUMN_APPEND_EVENTS,
+      )).toBe(true);
+    }
+    expect(productionTasksFixtures.map(({ tasksHistoricalOrder }) => (
+      tasksHistoricalOrder
+    )).sort()).toEqual(
+      [...deriveTrustedTasksColumnOrders().keys()]
+        .filter((id) => id !== 'fresh')
+        .sort(),
+    );
+  });
+
   it('rejects existing empty targets without a current PostgreSQL migration journal', async () => {
     const { targetTables } = expectedImportTableNames();
 
@@ -378,7 +529,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.verdict.ready_for_cutover_planning).toBe(false);
     expect(result.evidence.verdict.reason).toContain('dry-run only');
     },
-    20_000,
+    60_000,
   );
 
   it('rejects a source missing current terminal migration evidence', () => {
@@ -422,8 +573,10 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   }, 20_000);
 
-  it('reports every production-shaped historical difference and accepts exact equivalents', () => {
-    const fixture = productionHistoricalSqlite();
+  it.each(productionTasksFixtures)(
+    'reports the exact raw mismatch set for $tasksHistoricalOrder tasks history',
+    (fixtureDefinition) => {
+    const fixture = productionHistoricalSqlite(fixtureDefinition.tasksHistoricalOrder);
     try {
       const mismatches = compareSqliteImportSchema(fixture, migrationsDirectory);
       expect(mismatches.map(({ table }) => table)).toEqual(productionHistoricalTables);
@@ -474,7 +627,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     } finally {
       fixture.close();
     }
-  }, 20_000);
+    },
+    20_000,
+  );
 
   it('accepts the exact released-runtime tasks order created before late migrations arrived', () => {
     const fixture = productionHistoricalSqlite('released-runtime-first');
@@ -508,6 +663,26 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   }, 20_000);
 
+  it('accepts the exact continuously upgraded production tasks order', () => {
+    const fixture = productionHistoricalSqlite('continuous-production');
+    try {
+      const tasksMismatch = compareSqliteImportSchema(
+        fixture,
+        migrationsDirectory,
+      ).find(({ table }) => table === 'tasks');
+      expect(tasksMismatch).toEqual(expect.objectContaining({
+        columnMismatches: [],
+        columnOrderMismatch: true,
+        expectedColumnOrder: deriveTrustedTasksColumnOrders().get('fresh'),
+        actualColumnOrder: deriveTrustedTasksColumnOrders().get('continuous-production'),
+        supportedHistoricalShape: true,
+      }));
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+    } finally {
+      fixture.close();
+    }
+  }, 20_000);
+
   it('checks all planned source tables with one aggregate pragma_table_xinfo query', () => {
     const sqlite = productionHistoricalSqlite('released-runtime-first');
     const prepare = vi.spyOn(sqlite, 'prepare');
@@ -534,8 +709,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     'missing column',
     'unexpected column',
     'hidden generated column',
-  ])('rejects released-runtime tasks with a %s perturbation', (mismatch) => {
-    const sqlite = productionHistoricalSqlite('released-runtime-first');
+  ])('rejects every trusted retained tasks history with a %s perturbation', (mismatch) => {
+    for (const fixtureDefinition of productionTasksFixtures) {
+      const sqlite = productionHistoricalSqlite(fixtureDefinition.tasksHistoricalOrder);
     try {
       if (mismatch === 'hidden generated column') {
         sqlite.exec(`
@@ -566,11 +742,11 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
             ));
           }
           if (mismatch === 'near-neighbor order') {
-            const planning = columns.findIndex((column) => column.name === 'planning_horizon');
+            const relative = columns.findIndex((column) => column.name === 'reminder_relative');
             const reordered = [...columns];
-            [reordered[planning], reordered[planning + 1]] = [
-              reordered[planning + 1],
-              reordered[planning],
+            [reordered[relative], reordered[relative + 1]] = [
+              reordered[relative + 1],
+              reordered[relative],
             ];
             return reordered;
           }
@@ -595,6 +771,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       )).toThrow(/tasks/);
     } finally {
       sqlite.close();
+    }
     }
   }, 20_000);
 

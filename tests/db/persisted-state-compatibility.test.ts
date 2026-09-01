@@ -174,6 +174,32 @@ function assertCoreInvariants(
   expect(columnNames(sqlite, 'triage_sync_state')).toContain('revision');
   expect(sqlite.prepare('PRAGMA integrity_check').pluck().get()).toBe('ok');
   expect(sqlite.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  if (fixture.includesHistoricalPriorityEntityLayout) {
+    expect(columnNames(sqlite, 'priority_entities')).toEqual([
+      'id',
+      'name',
+      'type',
+      'description',
+      'tier',
+      'color',
+      'rank',
+      'active_task_count',
+      'last_touched_at',
+      'created_at',
+      'updated_at',
+      'reference_id',
+    ]);
+    expect(sqlite.prepare(`
+      SELECT type, tier, rank, reference_id AS referenceId
+      FROM priority_entities
+      WHERE id = ?
+    `).get(`fixture-priority-entity-${fixture.id}`)).toEqual({
+      type: 'project',
+      tier: 'high',
+      rank: 1,
+      referenceId: fixture.projectId,
+    });
+  }
 }
 
 function assertNotificationAndQueueInvariants(

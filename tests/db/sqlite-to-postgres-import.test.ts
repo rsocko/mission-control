@@ -18,11 +18,39 @@ import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
   const migrationsDirectory = resolve(process.cwd(), 'drizzle');
+  const priorityEntityColumns = [
+    'id TEXT PRIMARY KEY',
+    'name TEXT NOT NULL',
+    'type TEXT NOT NULL',
+    'reference_id TEXT',
+    'description TEXT',
+    "tier TEXT NOT NULL DEFAULT 'standard'",
+    "color TEXT NOT NULL DEFAULT '#64748b'",
+    'rank INTEGER NOT NULL DEFAULT 0',
+    'active_task_count INTEGER NOT NULL DEFAULT 0',
+    'last_touched_at TEXT',
+    'created_at TEXT NOT NULL',
+    'updated_at TEXT NOT NULL',
+  ] as const;
+  const historicalPriorityEntityColumns = [
+    ...priorityEntityColumns.filter((column) => column !== 'reference_id TEXT'),
+    'reference_id TEXT',
+  ] as const;
 
   function currentSqlite(): Database.Database {
     const sqlite = new Database(':memory:');
     runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
     return sqlite;
+  }
+
+  function replacePriorityEntityTable(
+    sqlite: Database.Database,
+    columns: readonly string[],
+  ): void {
+    sqlite.exec(`
+      DROP TABLE priority_entities;
+      CREATE TABLE priority_entities (${columns.join(', ')});
+    `);
   }
 
   function targetPreparationPool(options: {
@@ -241,6 +269,60 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
 
       expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(127);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('accepts the historical priority entity layout created before reference_id existed', () => {
+    const sqlite = currentSqlite();
+    try {
+      replacePriorityEntityTable(sqlite, historicalPriorityEntityColumns);
+
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(126);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it.each([
+    {
+      mismatch: 'declared type',
+      columns: historicalPriorityEntityColumns.map((column) => (
+        column === 'rank INTEGER NOT NULL DEFAULT 0'
+          ? 'rank TEXT NOT NULL DEFAULT 0'
+          : column
+      )),
+    },
+    {
+      mismatch: 'nullability',
+      columns: historicalPriorityEntityColumns.map((column) => (
+        column === 'name TEXT NOT NULL' ? 'name TEXT' : column
+      )),
+    },
+    {
+      mismatch: 'primary key',
+      columns: historicalPriorityEntityColumns.map((column) => (
+        column === 'id TEXT PRIMARY KEY' ? 'id TEXT NOT NULL' : column
+      )),
+    },
+    {
+      mismatch: 'default',
+      columns: historicalPriorityEntityColumns.map((column) => (
+        column === "tier TEXT NOT NULL DEFAULT 'standard'"
+          ? "tier TEXT NOT NULL DEFAULT 'high'"
+          : column
+      )),
+    },
+  ])('rejects a priority entity $mismatch mismatch', ({ columns }) => {
+    const sqlite = currentSqlite();
+    try {
+      replacePriorityEntityTable(sqlite, columns);
+
+      expect(() => validateSqliteMigrationState(
+        sqlite,
+        migrationsDirectory,
+      )).toThrow(/priority_entities does not match the current import schema/);
     } finally {
       sqlite.close();
     }

@@ -111,6 +111,31 @@ function persistedValue(value: unknown): string | number | null {
   return JSON.stringify(value);
 }
 
+function createHistoricalPriorityEntityLayout(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+): void {
+  if (!fixture.includesHistoricalPriorityEntityLayout) return;
+  sqlite.exec(`
+    CREATE TABLE priority_entities (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      description TEXT,
+      tier TEXT NOT NULL DEFAULT 'standard',
+      color TEXT NOT NULL DEFAULT '#64748b',
+      rank INTEGER NOT NULL DEFAULT 0,
+      active_task_count INTEGER NOT NULL DEFAULT 0,
+      last_touched_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    ALTER TABLE priority_entities ADD COLUMN reference_id TEXT;
+    CREATE INDEX idx_priority_entities_tier ON priority_entities(tier);
+    CREATE INDEX idx_priority_entities_rank ON priority_entities(rank);
+  `);
+}
+
 function insertRow(
   sqlite: Database.Database,
   table: string,
@@ -211,6 +236,21 @@ function seedCoreState(
     attempt: 1,
     max_attempts: 3,
   });
+  if (fixture.includesHistoricalPriorityEntityLayout) {
+    insertRow(sqlite, 'priority_entities', {
+      id: `fixture-priority-entity-${fixture.id}`,
+      name: 'Synthetic historical priority entity',
+      type: 'project',
+      description: 'Persisted before reference_id was added by the runtime safety net',
+      tier: 'high',
+      color: '#3b82f6',
+      rank: 1,
+      active_task_count: 1,
+      created_at: FIXTURE_TIMESTAMP,
+      updated_at: FIXTURE_TIMESTAMP,
+      reference_id: fixture.projectId,
+    });
+  }
 }
 
 function seedNotificationAndQueueState(
@@ -459,6 +499,7 @@ function buildFixture(
     _runMigrationsIndividually(sqlite, checkpoint.directory);
     assertCheckpointApplied(sqlite, checkpoint.entries);
     seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);
+    createHistoricalPriorityEntityLayout(sqlite, fixture);
     sqlite.transaction(() => {
       seedCoreState(sqlite, fixture);
       seedNotificationAndQueueState(sqlite, fixture);

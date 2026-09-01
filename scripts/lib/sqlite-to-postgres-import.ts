@@ -203,6 +203,7 @@ interface SqliteColumnInfo {
   readonly name: string;
   readonly type: string;
   readonly notnull: number;
+  readonly dfltValue: string | null;
   readonly pk: number;
 }
 
@@ -354,10 +355,28 @@ function sqliteColumnShape(
   table: string,
 ): readonly SqliteColumnInfo[] {
   return (sqlite.prepare(`
-    SELECT name, type, "notnull", pk
+    SELECT name, type, "notnull", dflt_value AS dfltValue, pk
     FROM pragma_table_info(?)
     ORDER BY cid
   `).all(table) as SqliteColumnInfo[]);
+}
+
+function matchesSupportedSqliteColumnShape(
+  table: string,
+  expected: readonly SqliteColumnInfo[],
+  actual: readonly SqliteColumnInfo[],
+): boolean {
+  if (JSON.stringify(expected) === JSON.stringify(actual)) return true;
+  if (table !== 'priority_entities') return false;
+
+  const referenceColumnIndex = expected.findIndex((column) => column.name === 'reference_id');
+  if (referenceColumnIndex < 0) return false;
+  const historical = [
+    ...expected.slice(0, referenceColumnIndex),
+    ...expected.slice(referenceColumnIndex + 1),
+    expected[referenceColumnIndex],
+  ];
+  return JSON.stringify(historical) === JSON.stringify(actual);
 }
 
 function sqliteCount(sqlite: Database.Database, table: string): number {
@@ -449,7 +468,7 @@ export function validateSqliteMigrationState(
     }
     const expectedColumns = currentColumns.get(table) ?? [];
     const actualColumns = sqliteColumnShape(sqlite, table);
-    if (JSON.stringify(expectedColumns) !== JSON.stringify(actualColumns)) {
+    if (!matchesSupportedSqliteColumnShape(table, expectedColumns, actualColumns)) {
       const expectedColumnSet = new Set(expectedColumns.map((column) => column.name));
       const actualColumnSet = new Set(actualColumns.map((column) => column.name));
       const missingColumns = [...expectedColumnSet].filter(

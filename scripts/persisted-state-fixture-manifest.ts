@@ -13,6 +13,7 @@ export interface PersistedStateFixture {
   readonly notificationId?: string;
   readonly syncJobId?: string;
   readonly includesPreNodeIdCutoverState?: boolean;
+  readonly retainedHistoricalMigrationRows?: number;
 }
 
 export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
@@ -39,6 +40,7 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     searchToken: 'cobaltqueue',
     notificationId: 'fixture-notification-0047',
     syncJobId: 'fixture-sync-job-0047',
+    retainedHistoricalMigrationRows: 101,
   },
   {
     id: 'v1-0104-pre-nodeid-cutover',

@@ -23,6 +23,7 @@ import {
   PERSISTED_STATE_FIXTURES,
   type PersistedStateFixture,
 } from '../persisted-state-fixture-manifest';
+import { trustedRetainedMigrationHashes } from '../sqlite-migration-history';
 
 const { Pool } = pg;
 
@@ -172,7 +173,9 @@ export interface SqliteToPostgresImportResult {
 }
 
 interface MigrationJournalEntry {
+  readonly idx: number;
   readonly tag: string;
+  readonly when?: number;
 }
 
 interface MigrationJournal {
@@ -194,6 +197,13 @@ interface ColumnInfo {
   readonly nullable: boolean;
   readonly hasDefault: boolean;
   readonly generated: boolean;
+}
+
+interface SqliteColumnInfo {
+  readonly name: string;
+  readonly type: string;
+  readonly notnull: number;
+  readonly pk: number;
 }
 
 interface ForeignKeyInfo {
@@ -289,6 +299,34 @@ export function currentSqliteMigrationHashes(
     .sort();
 }
 
+function currentSqliteMigrationEvidence(
+  migrationsDirectory: string,
+): readonly {
+  readonly tag: string;
+  readonly when: number;
+  readonly hashes: readonly [string, string];
+}[] {
+  return readMigrationJournal(migrationsDirectory).entries.map((entry) => {
+    if (typeof entry.when !== 'number') {
+      throw new ImportPreconditionError(
+        `SQLite migration metadata is missing a timestamp for ${entry.tag}.`,
+      );
+    }
+    const normalizedSql = readFileSync(
+      join(migrationsDirectory, `${entry.tag}.sql`),
+      'utf8',
+    ).replace(/\r\n?/g, '\n');
+    return {
+      tag: entry.tag,
+      when: entry.when,
+      hashes: [
+        createHash('sha256').update(normalizedSql).digest('hex'),
+        createHash('sha256').update(normalizedSql.replace(/\n/g, '\r\n')).digest('hex'),
+      ],
+    };
+  });
+}
+
 export function currentPostgresMigrationHashes(
   migrationsDirectory = DEFAULT_POSTGRES_MIGRATIONS_DIRECTORY,
 ): readonly string[] {
@@ -311,6 +349,17 @@ function sqliteColumnNames(sqlite: Database.Database, table: string): readonly s
   }>).map((row) => row.name);
 }
 
+function sqliteColumnShape(
+  sqlite: Database.Database,
+  table: string,
+): readonly SqliteColumnInfo[] {
+  return (sqlite.prepare(`
+    SELECT name, type, "notnull", pk
+    FROM pragma_table_info(?)
+    ORDER BY cid
+  `).all(table) as SqliteColumnInfo[]);
+}
+
 function sqliteCount(sqlite: Database.Database, table: string): number {
   const row = sqlite.prepare(
     `SELECT COUNT(*) AS count FROM ${quoteIdentifier(table)}`,
@@ -322,27 +371,99 @@ function fileSha256(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
-function validateSqliteMigrationState(
+function currentSqliteSchemaColumns(
+  migrationsDirectory: string,
+  sourceTables: readonly string[],
+): ReadonlyMap<string, readonly SqliteColumnInfo[]> {
+  const current = new Database(':memory:');
+  try {
+    runOrderedDatabaseBootstrap(current, migrationsDirectory);
+    const columns = new Map<string, readonly SqliteColumnInfo[]>();
+    for (const table of sourceTables) {
+      if (!sqliteTableExists(current, table)) {
+        throw new ImportPreconditionError(
+          `Current SQLite bootstrap did not create required import table ${table}.`,
+        );
+      }
+      columns.set(table, sqliteColumnShape(current, table));
+    }
+    return columns;
+  } finally {
+    current.close();
+  }
+}
+
+export function validateSqliteMigrationState(
   sqlite: Database.Database,
   migrationsDirectory: string,
+  sourceTables = expectedImportTableNames().sourceTables,
 ): number {
   if (!sqliteTableExists(sqlite, '__drizzle_migrations')) {
     throw new ImportPreconditionError(
       'SQLite source is not a migrated Mission Control database: missing __drizzle_migrations.',
     );
   }
-  const expected = currentSqliteMigrationHashes(migrationsDirectory);
+  const expected = currentSqliteMigrationEvidence(migrationsDirectory);
   const actual = (sqlite.prepare(
-    'SELECT hash FROM __drizzle_migrations',
-  ).all() as Array<{ hash: string }>).map((row) => row.hash).sort();
-  if (
-    expected.length !== actual.length
-    || expected.some((hash, index) => hash !== actual[index])
-  ) {
+    'SELECT id, hash, created_at AS createdAt FROM __drizzle_migrations ORDER BY id',
+  ).all() as Array<{ id: number; hash: string; createdAt: number | null }>);
+  const actualHashes = new Set(actual.map((row) => row.hash));
+  const malformed = actual.filter((row) => !/^[a-f0-9]{64}$/.test(row.hash));
+  if (malformed.length > 0) {
     throw new ImportPreconditionError(
-      `SQLite source is not at the supported migration state: expected ${expected.length} current migrations, found ${actual.length}.`,
+      `SQLite source migration journal contains ${malformed.length} malformed migration hash(es).`,
     );
   }
+  const missing = expected.filter(
+    (migration) => !migration.hashes.some((hash) => actualHashes.has(hash)),
+  );
+  if (missing.length > 0) {
+    throw new ImportPreconditionError(
+      `SQLite source is not at the supported migration state: missing ${missing.length} current migration(s), including ${missing.slice(0, 3).map((entry) => entry.tag).join(', ')}.`,
+    );
+  }
+
+  const untimestamped = actual.filter((row) => typeof row.createdAt !== 'number');
+  if (untimestamped.length > 0) {
+    throw new ImportPreconditionError(
+      `SQLite source migration journal contains ${untimestamped.length} untimestamped migration(s).`,
+    );
+  }
+  const currentHashes = new Set(expected.flatMap((migration) => migration.hashes));
+  const trustedHistoricalHashes = trustedRetainedMigrationHashes();
+  const unrecognized = actual.filter(
+    (row) => !currentHashes.has(row.hash) && !trustedHistoricalHashes.has(row.hash),
+  );
+  if (unrecognized.length > 0) {
+    throw new ImportPreconditionError(
+      `SQLite source migration journal contains ${unrecognized.length} unrecognized migration hash(es).`,
+    );
+  }
+
+  const currentColumns = currentSqliteSchemaColumns(migrationsDirectory, sourceTables);
+  for (const table of sourceTables) {
+    if (!sqliteTableExists(sqlite, table)) {
+      throw new ImportPreconditionError(
+        `SQLite source is missing required table ${table}.`,
+      );
+    }
+    const expectedColumns = currentColumns.get(table) ?? [];
+    const actualColumns = sqliteColumnShape(sqlite, table);
+    if (JSON.stringify(expectedColumns) !== JSON.stringify(actualColumns)) {
+      const expectedColumnSet = new Set(expectedColumns.map((column) => column.name));
+      const actualColumnSet = new Set(actualColumns.map((column) => column.name));
+      const missingColumns = [...expectedColumnSet].filter(
+        (column) => !actualColumnSet.has(column),
+      );
+      const unexpectedColumns = [...actualColumnSet].filter(
+        (column) => !expectedColumnSet.has(column),
+      );
+      throw new ImportPreconditionError(
+        `SQLite source table ${table} does not match the current import schema (missing: ${missingColumns.join(', ') || 'none'}; unexpected: ${unexpectedColumns.join(', ') || 'none'}; type/constraint mismatch: ${missingColumns.length === 0 && unexpectedColumns.length === 0 ? 'yes' : 'no'}).`,
+      );
+    }
+  }
+
   return actual.length;
 }
 
@@ -1172,6 +1293,7 @@ export async function runSqliteToPostgresImport(
     const sqliteMigrationCount = validateSqliteMigrationState(
       source.sqlite,
       rawOptions.sqliteMigrationsDirectory ?? DEFAULT_SQLITE_MIGRATIONS_DIRECTORY,
+      sourceTables,
     );
     const quiescence = validateSqliteQuiescence(
       source.sqlite,

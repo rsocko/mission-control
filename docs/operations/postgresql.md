@@ -247,11 +247,20 @@ npm run db:import:postgres -- \
   --confirm-writers-stopped
 ```
 
-The command opens the SQLite source read-only with `query_only`, verifies the
-current migrated schema hash set, rejects WAL/rollback-journal sidecars, runs
-`PRAGMA integrity_check` and `PRAGMA foreign_key_check`, and rejects active
-`sync_jobs` for real sources. Synthetic fixture rehearsals may contain queued
-worker rows so queue copy behavior can be exercised.
+The command opens the SQLite source read-only with `query_only`, requires
+evidence for every current migration, and accepts older journal rows retained
+when migration files were superseded. Retained rows must be valid timestamped
+Drizzle hashes in the explicit repository-history allowlist, and every imported
+table's columns, SQLite types, nullability, and primary-key shape must match a
+fresh current bootstrap. Unknown hashes are rejected even when their timestamp
+is backdated and the schema otherwise appears current. This rejects partial,
+stale, unknown-newer, and schema-incompatible sources without assuming that a
+long-lived journal has the same row count as current migration metadata. The
+command also rejects
+WAL/rollback-journal sidecars, runs `PRAGMA integrity_check` and
+`PRAGMA foreign_key_check`, and rejects active `sync_jobs` for real sources.
+Synthetic fixture rehearsals may contain queued worker rows so queue copy
+behavior can be exercised.
 
 The target guard initializes an empty PostgreSQL schema from the baseline
 migration or validates that every Mission Control table exists and is empty. It

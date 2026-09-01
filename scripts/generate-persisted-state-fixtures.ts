@@ -19,6 +19,7 @@ import {
   PERSISTED_STATE_FIXTURE_VERSION,
   type PersistedStateFixture,
 } from './persisted-state-fixture-manifest';
+import { syntheticRetainedMigrationHash } from './sqlite-migration-history';
 
 interface MigrationJournalEntry {
   readonly idx: number;
@@ -419,6 +420,27 @@ function assertCheckpointApplied(
   }
 }
 
+function seedRetainedHistoricalMigrationRows(
+  sqlite: Database.Database,
+  fixture: PersistedStateFixture,
+  entries: readonly MigrationJournalEntry[],
+): void {
+  const count = fixture.retainedHistoricalMigrationRows ?? 0;
+  if (count === 0) return;
+  const historicalTimestamp = Math.min(
+    ...entries.map((entry) => entry.when ?? 0),
+  );
+  const insert = sqlite.prepare(
+    'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+  );
+  for (let index = 0; index < count; index += 1) {
+    insert.run(
+      syntheticRetainedMigrationHash(fixture.id, index),
+      historicalTimestamp,
+    );
+  }
+}
+
 function buildFixture(
   fixture: PersistedStateFixture,
   outputDirectory: string,
@@ -436,6 +458,7 @@ function buildFixture(
     sqlite.pragma('foreign_keys = ON');
     _runMigrationsIndividually(sqlite, checkpoint.directory);
     assertCheckpointApplied(sqlite, checkpoint.entries);
+    seedRetainedHistoricalMigrationRows(sqlite, fixture, checkpoint.entries);
     sqlite.transaction(() => {
       seedCoreState(sqlite, fixture);
       seedNotificationAndQueueState(sqlite, fixture);

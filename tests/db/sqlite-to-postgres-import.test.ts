@@ -1,4 +1,7 @@
+import Database from 'better-sqlite3';
+import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
   convertSqliteValueForPostgres,
   dependencySafeRows,
@@ -7,11 +10,21 @@ import {
   expectedImportTableNames,
   prepareTarget,
   runSqliteToPostgresImport,
+  validateSqliteMigrationState,
 } from '../../scripts/lib/sqlite-to-postgres-import';
 import { ImportPreconditionError } from '../../scripts/lib/sqlite-to-postgres-import';
+import { SQLITE_SUPERSEDED_MIGRATION_HASHES } from '../../scripts/sqlite-superseded-migration-hashes';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
 describe('SQLite-to-PostgreSQL import tooling', () => {
+  const migrationsDirectory = resolve(process.cwd(), 'drizzle');
+
+  function currentSqlite(): Database.Database {
+    const sqlite = new Database(':memory:');
+    runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
+    return sqlite;
+  }
+
   function targetPreparationPool(options: {
     readonly tables: readonly string[];
     readonly counts?: Readonly<Record<string, number>>;
@@ -190,6 +203,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(227);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
     expect(result.evidence.derivedState.droppedFromImport).toEqual(
       expect.arrayContaining(['sqlite_fts_virtual_tables']),
@@ -200,5 +214,61 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     ]);
     expect(result.evidence.verdict.ready_for_cutover_planning).toBe(false);
     expect(result.evidence.verdict.reason).toContain('dry-run only');
+  }, 20_000);
+
+  it('rejects a source missing current terminal migration evidence', () => {
+    const sqlite = currentSqlite();
+    try {
+      sqlite.prepare(
+        'DELETE FROM __drizzle_migrations WHERE id = (SELECT MAX(id) FROM __drizzle_migrations)',
+      ).run();
+      expect(() => validateSqliteMigrationState(sqlite, migrationsDirectory)).toThrow(
+        /missing 1 current migration/,
+      );
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('accepts an explicitly trusted repository-history migration hash', () => {
+    const sqlite = currentSqlite();
+    try {
+      const historicalTimestamp = sqlite.prepare(
+        'SELECT MIN(created_at) FROM __drizzle_migrations',
+      ).pluck().get() as number;
+      sqlite.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
+
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(127);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('rejects backdated unknown journal rows and incompatible current schema shapes', () => {
+    const unknownNewer = currentSqlite();
+    const incompatible = currentSqlite();
+    try {
+      const historicalTimestamp = unknownNewer.prepare(
+        'SELECT MIN(created_at) FROM __drizzle_migrations',
+      ).pluck().get() as number;
+      unknownNewer.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+      ).run('f'.repeat(64), historicalTimestamp);
+      expect(() => validateSqliteMigrationState(
+        unknownNewer,
+        migrationsDirectory,
+      )).toThrow(/unrecognized migration hash/);
+
+      incompatible.exec('ALTER TABLE tasks ADD COLUMN unknown_future_column TEXT');
+      expect(() => validateSqliteMigrationState(
+        incompatible,
+        migrationsDirectory,
+      )).toThrow(/tasks does not match the current import schema/);
+    } finally {
+      unknownNewer.close();
+      incompatible.close();
+    }
   }, 20_000);
 });

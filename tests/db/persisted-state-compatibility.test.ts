@@ -106,11 +106,11 @@ function openFixtureCopy(fixture: PersistedStateFixture): {
 }
 
 function assertCurrentMigrationState(sqlite: Database.Database): void {
-  const expected = currentMigrationHashes().sort();
+  const expected = new Set(currentMigrationHashes());
   const actual = (sqlite.prepare(
     'SELECT hash FROM __drizzle_migrations',
-  ).all() as Array<{ hash: string }>).map((row) => row.hash).sort();
-  expect(actual).toEqual(expected);
+  ).all() as Array<{ hash: string }>).map((row) => row.hash);
+  expect(actual.filter((hash) => expected.has(hash))).toHaveLength(expected.size);
 }
 
 function assertCoreInvariants(
@@ -286,6 +286,11 @@ describe('persisted-state compatibility fixtures', () => {
         const { sqlite } = openFixtureCopy(fixture);
         try {
           await assertCompatibleFixture(sqlite, fixture);
+          expect(sqlite.prepare(
+            'SELECT COUNT(*) FROM __drizzle_migrations',
+          ).pluck().get()).toBe(
+            currentMigrationHashes().length + (fixture.retainedHistoricalMigrationRows ?? 0),
+          );
         } finally {
           sqlite.close();
         }

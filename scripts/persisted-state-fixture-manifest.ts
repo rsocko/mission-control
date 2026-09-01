@@ -16,6 +16,7 @@ export interface PersistedStateFixture {
   readonly includesHistoricalPriorityEntityLayout?: boolean;
   readonly includesHistoricalInboundWebhookLayout?: boolean;
   readonly includesProductionHistoricalLayouts?: boolean;
+  readonly tasksHistoricalOrder?: 'late-migrations-first' | 'released-runtime-first';
   readonly retainedHistoricalMigrationRows?: number;
 }
 
@@ -46,6 +47,25 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     includesHistoricalPriorityEntityLayout: true,
     includesHistoricalInboundWebhookLayout: true,
     includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'late-migrations-first',
+    retainedHistoricalMigrationRows: 101,
+  },
+  {
+    id: 'v1-0047-released-runtime-tasks',
+    checkpointTag: '0047_isolate_sync_worker',
+    fileName: 'v1-0047-released-runtime-tasks.sqlite3',
+    taskId: 'fixture-task-0047-runtime',
+    projectId: 'fixture-project-0047-runtime',
+    connectorId: 'fixture-connector-0047-runtime',
+    syncLogId: 'fixture-sync-log-0047-runtime',
+    settingKey: 'fixture.setting.0047.runtime',
+    searchToken: 'saffronruntime',
+    notificationId: 'fixture-notification-0047-runtime',
+    syncJobId: 'fixture-sync-job-0047-runtime',
+    includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
+    includesProductionHistoricalLayouts: true,
+    tasksHistoricalOrder: 'released-runtime-first',
     retainedHistoricalMigrationRows: 101,
   },
   {

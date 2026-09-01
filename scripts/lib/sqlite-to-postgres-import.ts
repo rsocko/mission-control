@@ -226,6 +226,8 @@ export interface SqliteSchemaMismatch {
   readonly unexpectedColumns: readonly string[];
   readonly columnMismatches: readonly SqliteColumnMismatch[];
   readonly columnOrderMismatch: boolean;
+  readonly expectedColumnOrder: readonly string[];
+  readonly actualColumnOrder: readonly string[];
   readonly supportedHistoricalShape: boolean;
 }
 
@@ -533,7 +535,7 @@ export function matchesSupportedSqliteColumnShape(
     return JSON.stringify(historical) === JSON.stringify(actual);
   }
   if (table === 'tasks') {
-    const historical = withExactOrder([
+    const lateMigrationsFirst = withExactOrder([
       'id',
       'source_id',
       'connector_type',
@@ -571,7 +573,47 @@ export function matchesSupportedSqliteColumnShape(
       'recurrence_generated_from_task_id',
       'planning_horizon',
     ]);
-    return JSON.stringify(historical) === JSON.stringify(actual);
+    const releasedRuntimeFirst = withExactOrder([
+      'id',
+      'source_id',
+      'connector_type',
+      'connector_instance_id',
+      'title',
+      'description',
+      'status',
+      'priority',
+      'due_date',
+      'created_at',
+      'updated_at',
+      'completed_at',
+      'parent_id',
+      'depth',
+      'is_checklist_item',
+      'source_list_id',
+      'source_list_name',
+      'assignee',
+      'metadata',
+      'sync_status',
+      'last_synced_at',
+      'kanban_column',
+      'kanban_order',
+      'micro_status',
+      'snoozed_until',
+      'effort',
+      'reminder_at',
+      'is_bulk_import',
+      'status_reason',
+      'push_retry_count',
+      'local_disposition',
+      'recurrence_generated_from_task_id',
+      'planning_horizon',
+      'push_count',
+      'reminder_relative',
+      'reminder_due_time',
+    ]);
+    return [lateMigrationsFirst, releasedRuntimeFirst].some(
+      (historical) => JSON.stringify(historical) === JSON.stringify(actual),
+    );
   }
   if (table === 'triage_sync_state') {
     const historical = withExactOrder([
@@ -664,6 +706,8 @@ export function compareSqliteImportSchema(
         unexpectedColumns: [],
         columnMismatches: [],
         columnOrderMismatch: false,
+        expectedColumnOrder: expectedColumns.map((column) => column.name),
+        actualColumnOrder: [],
         supportedHistoricalShape: false,
       });
       continue;
@@ -691,6 +735,8 @@ export function compareSqliteImportSchema(
           (column, index) => actualTableColumns[index]?.name !== column.name,
         )
       ),
+      expectedColumnOrder: expectedColumns.map((column) => column.name),
+      actualColumnOrder: actualTableColumns.map((column) => column.name),
       supportedHistoricalShape: matchesSupportedSqliteColumnShape(
         table,
         expectedColumns,
@@ -705,7 +751,11 @@ function formatSqliteSchemaMismatch(mismatch: SqliteSchemaMismatch): string {
   if (mismatch.missingTable) return `${mismatch.table} (table missing)`;
   const differences = mismatch.columnMismatches
     .map(({ column, properties }) => `${column}:${properties.join('+')}`);
-  if (mismatch.columnOrderMismatch) differences.push('column-order');
+  if (mismatch.columnOrderMismatch) {
+    differences.push(
+      `column-order expected=[${mismatch.expectedColumnOrder.join(',')}] actual=[${mismatch.actualColumnOrder.join(',')}]`,
+    );
+  }
   return `${mismatch.table} (missing: ${mismatch.missingColumns.join(',') || 'none'}; unexpected: ${mismatch.unexpectedColumns.join(',') || 'none'}; differences: ${differences.join(',') || 'none'})`;
 }
 

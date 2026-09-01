@@ -241,16 +241,28 @@ function assertCoreInvariants(
     expect(columnNames(sqlite, 'task_triage_log')).toEqual([
       'id', 'task_id', 'mode', 'action', 'triaged_at', 'operation_id', 'reversed_at',
     ]);
-    expect(columnNames(sqlite, 'tasks')).toEqual([
+    const commonTaskColumns = [
       'id', 'source_id', 'connector_type', 'connector_instance_id', 'title',
       'description', 'status', 'priority', 'due_date', 'created_at', 'updated_at',
       'completed_at', 'parent_id', 'depth', 'is_checklist_item', 'source_list_id',
       'source_list_name', 'assignee', 'metadata', 'sync_status', 'last_synced_at',
       'kanban_column', 'kanban_order', 'micro_status', 'snoozed_until', 'effort',
       'reminder_at', 'is_bulk_import', 'status_reason', 'push_retry_count',
-      'local_disposition', 'push_count', 'reminder_relative', 'reminder_due_time',
-      'recurrence_generated_from_task_id', 'planning_horizon',
-    ]);
+      'local_disposition',
+    ];
+    expect(columnNames(sqlite, 'tasks')).toEqual(
+      fixture.tasksHistoricalOrder === 'released-runtime-first'
+        ? [
+            ...commonTaskColumns,
+            'recurrence_generated_from_task_id', 'planning_horizon', 'push_count',
+            'reminder_relative', 'reminder_due_time',
+          ]
+        : [
+            ...commonTaskColumns,
+            'push_count', 'reminder_relative', 'reminder_due_time',
+            'recurrence_generated_from_task_id', 'planning_horizon',
+          ],
+    );
     expect(columnNotNull(sqlite, 'triage_sync_state', 'id')).toBe(0);
   }
 }
@@ -381,7 +393,10 @@ describe('persisted-state compatibility fixtures', () => {
   it(
     'rejects a persisted shape that prevents the migration chain from completing',
     async () => {
-      const fixture = PERSISTED_STATE_FIXTURES[2];
+      const fixture = PERSISTED_STATE_FIXTURES.find(
+        (candidate) => candidate.includesPreNodeIdCutoverState,
+      );
+      if (!fixture) throw new Error('Missing pre-node-ID cutover fixture');
       const { sqlite } = openFixtureCopy(fixture);
       try {
         sqlite.exec(`

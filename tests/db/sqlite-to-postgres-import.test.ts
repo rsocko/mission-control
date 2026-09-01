@@ -17,6 +17,10 @@ import {
   validateSqliteMigrationState,
 } from '../../scripts/lib/sqlite-to-postgres-import';
 import { ImportPreconditionError } from '../../scripts/lib/sqlite-to-postgres-import';
+import {
+  PERSISTED_STATE_FIXTURES,
+  type PersistedStateFixture,
+} from '../../scripts/persisted-state-fixture-manifest';
 import { SQLITE_SUPERSEDED_MIGRATION_HASHES } from '../../scripts/sqlite-superseded-migration-hashes';
 import { parseArgs } from '../../scripts/sqlite-to-postgres-import';
 
@@ -70,6 +74,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     'triage_sync_state',
   ] as const;
   const newlySupportedHistoricalTables = productionHistoricalTables.slice(2);
+  const productionTasksFixtures = PERSISTED_STATE_FIXTURES.filter(
+    (fixture) => fixture.tasksHistoricalOrder !== undefined,
+  );
 
   interface TestSqliteColumn {
     readonly name: string;
@@ -86,10 +93,17 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     return sqlite;
   }
 
-  let productionHistoricalDatabase: Buffer | undefined;
+  const productionHistoricalDatabases = new Map<PersistedStateFixture['tasksHistoricalOrder'], Buffer>();
 
-  function productionHistoricalSqlite(): Database.Database {
-    if (!productionHistoricalDatabase) {
+  function productionHistoricalSqlite(
+    tasksHistoricalOrder: PersistedStateFixture['tasksHistoricalOrder'] = 'late-migrations-first',
+  ): Database.Database {
+    let serialized = productionHistoricalDatabases.get(tasksHistoricalOrder);
+    if (!serialized) {
+      const fixtureDefinition = PERSISTED_STATE_FIXTURES.find(
+        (fixture) => fixture.tasksHistoricalOrder === tasksHistoricalOrder,
+      );
+      if (!fixtureDefinition) throw new Error(`Missing fixture for ${tasksHistoricalOrder}`);
       const directory = mkdtempSync(join(tmpdir(), 'mc-import-history-baseline-'));
       const fixturePath = join(directory, 'production-shaped.sqlite3');
       copyFileSync(resolve(
@@ -98,18 +112,19 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'fixtures',
         'persisted-state',
         'sqlite',
-        'v1-0047-isolate-sync-worker.sqlite3',
+        fixtureDefinition.fileName,
       ), fixturePath);
       const fixture = new Database(fixturePath);
       try {
         runOrderedDatabaseBootstrap(fixture, migrationsDirectory);
-        productionHistoricalDatabase = fixture.serialize();
+        serialized = fixture.serialize();
+        productionHistoricalDatabases.set(tasksHistoricalOrder, serialized);
       } finally {
         fixture.close();
         rmSync(directory, { recursive: true, force: true });
       }
     }
-    return new Database(productionHistoricalDatabase);
+    return new Database(serialized);
   }
 
   function tableShape(
@@ -333,12 +348,14 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     ])).toThrow(ImportPreconditionError);
   });
 
-  it('emits non-activating cutover-planning evidence for fixture dry-runs without a target', async () => {
+  it.each(productionTasksFixtures)(
+    'emits non-activating full dry-run evidence for $tasksHistoricalOrder tasks history',
+    async (fixture) => {
     vi.stubEnv('MC_POSTGRES_IMPORT_URL', '');
     vi.stubEnv('MC_POSTGRES_URL', '');
 
     const result = await runSqliteToPostgresImport({
-      fixtureId: 'v1-0047-durable-sync-queue',
+      fixtureId: fixture.id,
       dryRun: true,
     });
 
@@ -360,7 +377,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     ]);
     expect(result.evidence.verdict.ready_for_cutover_planning).toBe(false);
     expect(result.evidence.verdict.reason).toContain('dry-run only');
-  }, 20_000);
+    },
+    20_000,
+  );
 
   it('rejects a source missing current terminal migration evidence', () => {
     const sqlite = currentSqlite();
@@ -454,6 +473,151 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
     } finally {
       fixture.close();
+    }
+  }, 20_000);
+
+  it('accepts the exact released-runtime tasks order created before late migrations arrived', () => {
+    const fixture = productionHistoricalSqlite('released-runtime-first');
+    try {
+      const mismatches = compareSqliteImportSchema(
+        fixture,
+        migrationsDirectory,
+      );
+      expect(mismatches.map(({ table }) => table)).toEqual(productionHistoricalTables);
+      expect(mismatches.every(({ supportedHistoricalShape }) => (
+        supportedHistoricalShape
+      ))).toBe(true);
+      const tasksMismatch = mismatches.find(({ table }) => table === 'tasks');
+      expect(tasksMismatch).toMatchObject({
+        columnMismatches: [],
+        columnOrderMismatch: true,
+        supportedHistoricalShape: true,
+      });
+      expect(tasksMismatch?.actualColumnOrder.slice(-7)).toEqual([
+        'push_retry_count',
+        'local_disposition',
+        'recurrence_generated_from_task_id',
+        'planning_horizon',
+        'push_count',
+        'reminder_relative',
+        'reminder_due_time',
+      ]);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+    } finally {
+      fixture.close();
+    }
+  }, 20_000);
+
+  it('checks all planned source tables with one aggregate pragma_table_xinfo query', () => {
+    const sqlite = productionHistoricalSqlite('released-runtime-first');
+    const prepare = vi.spyOn(sqlite, 'prepare');
+    try {
+      const mismatches = compareSqliteImportSchema(sqlite, migrationsDirectory);
+      expect(expectedImportTableNames().sourceTables).toHaveLength(160);
+      expect(mismatches.every(({ missingTable }) => !missingTable)).toBe(true);
+      const aggregateCalls = prepare.mock.calls.filter(
+        ([sql]) => String(sql).includes('CROSS JOIN pragma_table_xinfo'),
+      );
+      expect(aggregateCalls).toHaveLength(1);
+      expect(String(aggregateCalls[0]?.[0]).match(/\?/g)).toHaveLength(160);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it.each([
+    'declared type',
+    'nullability',
+    'default',
+    'primary key',
+    'near-neighbor order',
+    'missing column',
+    'unexpected column',
+    'hidden generated column',
+  ])('rejects released-runtime tasks with a %s perturbation', (mismatch) => {
+    const sqlite = productionHistoricalSqlite('released-runtime-first');
+    try {
+      if (mismatch === 'hidden generated column') {
+        sqlite.exec(`
+          ALTER TABLE tasks
+          ADD COLUMN generated_probe TEXT
+          GENERATED ALWAYS AS (title) VIRTUAL
+        `);
+      } else {
+        replaceHistoricalTable(sqlite, 'tasks', (columns) => {
+          if (mismatch === 'declared type') {
+            return columns.map((column) => (
+              column.name === 'description' ? { ...column, type: 'BLOB' } : column
+            ));
+          }
+          if (mismatch === 'nullability') {
+            return columns.map((column) => (
+              column.name === 'description' ? { ...column, notnull: 1 } : column
+            ));
+          }
+          if (mismatch === 'default') {
+            return columns.map((column) => (
+              column.name === 'status' ? { ...column, dfltValue: "'unexpected'" } : column
+            ));
+          }
+          if (mismatch === 'primary key') {
+            return columns.map((column) => (
+              column.name === 'id' ? { ...column, pk: 0 } : column
+            ));
+          }
+          if (mismatch === 'near-neighbor order') {
+            const planning = columns.findIndex((column) => column.name === 'planning_horizon');
+            const reordered = [...columns];
+            [reordered[planning], reordered[planning + 1]] = [
+              reordered[planning + 1],
+              reordered[planning],
+            ];
+            return reordered;
+          }
+          if (mismatch === 'missing column') return columns.slice(0, -1);
+          if (mismatch === 'unexpected column') {
+            return [...columns, {
+              name: 'unknown_future_column',
+              type: 'TEXT',
+              notnull: 0,
+              dfltValue: null,
+              pk: 0,
+              hidden: 0,
+            }];
+          }
+          throw new Error(`Unhandled released-runtime mismatch: ${mismatch}`);
+        });
+      }
+
+      expect(() => validateSqliteMigrationState(
+        sqlite,
+        migrationsDirectory,
+      )).toThrow(/tasks/);
+    } finally {
+      sqlite.close();
+    }
+  }, 20_000);
+
+  it('reports secret-safe expected and actual sequences for unsupported task orders', () => {
+    const sqlite = productionHistoricalSqlite('released-runtime-first');
+    try {
+      replaceHistoricalTable(sqlite, 'tasks', (columns) => [
+        columns[1],
+        columns[0],
+        ...columns.slice(2),
+      ]);
+      let message = '';
+      try {
+        validateSqliteMigrationState(sqlite, migrationsDirectory);
+      } catch (error) {
+        message = error instanceof Error ? error.message : String(error);
+      }
+      expect(message).toMatch(
+        /column-order expected=\[id,source_id,.*planning_horizon,status_reason,push_retry_count\] actual=\[source_id,id,.*reminder_due_time\]/,
+      );
+      expect(message).not.toMatch(/CREATE TABLE|DEFAULT|Synthetic|saffronruntime/);
+    } finally {
+      sqlite.close();
     }
   }, 20_000);
 

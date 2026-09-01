@@ -75,7 +75,8 @@ explicit maintenance window:
    least-privilege credentials through the homelab configuration.
 2. Stop web and worker writers and retain an integrity-checked final SQLite file
    as the rollback artifact.
-3. Copy the required data with the migration procedure tracked in #1155.
+3. Copy the required data with the SQLite-to-PostgreSQL import procedure tracked
+   in #1681 and validated through the #1155 cutover-readiness checklist.
 4. Configure both web and worker with the same PostgreSQL backend, URL, TLS,
    pool, and timeout settings.
 5. Start the services and verify representative CRUD, connector sync, queue and
@@ -89,7 +90,9 @@ provisioning, secrets, storage, backup, monitoring, deployment configuration,
 and the homelab maintenance window belong to
 [homelab-config#574](https://github.com/rsocko/homelab-config/issues/574).
 Operator settings and failure behavior are documented in the
-[PostgreSQL deployment guide](../../operations/postgresql.md).
+[PostgreSQL deployment guide](../../operations/postgresql.md). The
+[cutover-readiness checklist](../../operations/postgresql-cutover-readiness.md)
+defines the import rehearsal evidence required before planning activation.
 
 ## Compatibility and Portability Rules
 

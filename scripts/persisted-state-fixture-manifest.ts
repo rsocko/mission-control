@@ -14,6 +14,7 @@ export interface PersistedStateFixture {
   readonly syncJobId?: string;
   readonly includesPreNodeIdCutoverState?: boolean;
   readonly includesHistoricalPriorityEntityLayout?: boolean;
+  readonly includesHistoricalInboundWebhookLayout?: boolean;
   readonly retainedHistoricalMigrationRows?: number;
 }
 
@@ -42,6 +43,7 @@ export const PERSISTED_STATE_FIXTURES: readonly PersistedStateFixture[] = [
     notificationId: 'fixture-notification-0047',
     syncJobId: 'fixture-sync-job-0047',
     includesHistoricalPriorityEntityLayout: true,
+    includesHistoricalInboundWebhookLayout: true,
     retainedHistoricalMigrationRows: 101,
   },
   {

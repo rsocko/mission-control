@@ -1,14 +1,19 @@
+import './configure-sqlite-uri';
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
   copyFileSync,
   existsSync,
   mkdtempSync,
+  openSync,
   readFileSync,
+  readSync,
+  realpathSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 import pg from 'pg';
 import { getTableName, isTable, type Table } from 'drizzle-orm/table';
@@ -52,6 +57,7 @@ const QUIESCENT_SYNC_JOB_STATUSES = new Set([
   'succeeded',
   'skipped',
 ]);
+const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-journal', '-shm'] as const;
 
 const REPRESENTATIVE_TABLES = [
   'tasks',
@@ -117,6 +123,9 @@ export interface ImportEvidence {
     readonly sha256: string;
     readonly retainedArtifact: boolean;
     readonly walOrJournalPresent: boolean;
+    readonly sidecarsPresent: false;
+    readonly openedReadOnly: true;
+    readonly immutable: true;
     readonly integrityCheck: 'ok';
     readonly foreignKeyViolations: number;
   };
@@ -134,6 +143,7 @@ export interface ImportEvidence {
   readonly quiescence: {
     readonly writersStoppedConfirmed: boolean;
     readonly checkedWalAndRollbackJournal: boolean;
+    readonly checkedSidecarsBeforeOpen: true;
     readonly activeSyncJobs: number;
     readonly acceptedForSyntheticFixture: boolean;
   };
@@ -188,6 +198,7 @@ interface SourceHandle {
   readonly path: string;
   readonly label: string;
   readonly kind: 'sqlite-file' | 'persisted-state-fixture';
+  readonly sha256: string;
   readonly cleanup: () => void;
 }
 
@@ -570,7 +581,18 @@ function sqliteCount(sqlite: Database.Database, table: string): number {
 }
 
 function fileSha256(path: string): string {
-  return createHash('sha256').update(readFileSync(path)).digest('hex');
+  const file = openSync(path, 'r');
+  const hash = createHash('sha256');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let bytesRead: number;
+    while ((bytesRead = readSync(file, buffer, 0, buffer.length, null)) > 0) {
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    return hash.digest('hex');
+  } finally {
+    closeSync(file);
+  }
 }
 
 function currentSqliteSchemaColumns(
@@ -747,27 +769,18 @@ export function validateSqliteMigrationState(
   return actual.length;
 }
 
-function validateSqliteQuiescence(
+function validateOpenedSqlite(
   sqlite: Database.Database,
-  sourcePath: string,
-  confirmWritersStopped: boolean,
   allowSyntheticActiveQueue: boolean,
 ): ImportEvidence['quiescence'] {
-  if (!confirmWritersStopped) {
+  let integrity: unknown;
+  try {
+    integrity = sqlite.prepare('PRAGMA integrity_check').pluck().get();
+  } catch (error) {
     throw new ImportPreconditionError(
-      'Refusing to import until the operator passes --confirm-writers-stopped after stopping web and worker writers.',
+      `SQLite source failed PRAGMA integrity_check: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-
-  for (const suffix of ['-wal', '-journal']) {
-    if (existsSync(`${sourcePath}${suffix}`)) {
-      throw new ImportPreconditionError(
-        `SQLite source is not quiescent: ${basename(sourcePath)}${suffix} exists. Checkpoint/stop writers before import.`,
-      );
-    }
-  }
-
-  const integrity = sqlite.prepare('PRAGMA integrity_check').pluck().get();
   if (integrity !== 'ok') {
     throw new ImportPreconditionError('SQLite source failed PRAGMA integrity_check.');
   }
@@ -795,15 +808,95 @@ function validateSqliteQuiescence(
   return {
     writersStoppedConfirmed: true,
     checkedWalAndRollbackJournal: true,
+    checkedSidecarsBeforeOpen: true,
     activeSyncJobs: activeCount,
     acceptedForSyntheticFixture: activeCount > 0 && allowSyntheticActiveQueue,
   };
 }
 
-function openReadonlySqlite(path: string): Database.Database {
-  const sqlite = new Database(path, { readonly: true, fileMustExist: true });
-  sqlite.pragma('query_only = ON');
-  return sqlite;
+export function validateSourceSidecars(sourcePath: string): void {
+  for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
+    if (existsSync(`${sourcePath}${suffix}`)) {
+      throw new ImportPreconditionError(
+        `SQLite source is not quiescent: ${basename(sourcePath)}${suffix} exists. Checkpoint/stop writers before import.`,
+      );
+    }
+  }
+}
+
+export function openImmutableReadonlySqlite(sourcePath: string): Database.Database {
+  const sourceUri = new URL(pathToFileURL(sourcePath));
+  sourceUri.searchParams.set('mode', 'ro');
+  sourceUri.searchParams.set('immutable', '1');
+
+  let sqlite: Database.Database;
+  try {
+    sqlite = new Database(sourceUri.href, { readonly: true, fileMustExist: true });
+  } catch (error) {
+    throw new ImportPreconditionError(
+      'Unable to establish an immutable read-only SQLite source. '
+      + 'SQLITE_USE_URI=1 must be configured before the first better-sqlite3 connection. '
+      + `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
+    sqlite.pragma('query_only = ON');
+    const queryOnly = sqlite.pragma('query_only', { simple: true });
+    const databasePath = (sqlite.pragma('database_list') as Array<{
+      name: string;
+      file: string;
+    }>).find((database) => database.name === 'main')?.file;
+    if (
+      queryOnly !== 1
+      || !databasePath
+      || realpathSync.native(databasePath) !== realpathSync.native(sourcePath)
+    ) {
+      throw new ImportPreconditionError(
+        'Unable to verify immutable read-only SQLite source semantics.',
+      );
+    }
+    return sqlite;
+  } catch (error) {
+    sqlite.close();
+    if (error instanceof ImportPreconditionError) throw error;
+    throw new ImportPreconditionError(
+      `Unable to verify immutable read-only SQLite source semantics: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
+function openValidatedSource(
+  sourcePath: string,
+  confirmWritersStopped: boolean,
+): Pick<SourceHandle, 'sqlite' | 'sha256'> {
+  if (!confirmWritersStopped) {
+    throw new ImportPreconditionError(
+      'Refusing to import until the operator passes --confirm-writers-stopped after stopping web and worker writers.',
+    );
+  }
+
+  validateSourceSidecars(sourcePath);
+  const sha256 = fileSha256(sourcePath);
+  const sqlite = openImmutableReadonlySqlite(sourcePath);
+  try {
+    // Immutable opens never create sidecars, so this closes the check/open race without
+    // confusing an importer-created artifact for source-state evidence.
+    validateSourceSidecars(sourcePath);
+    return { sqlite, sha256 };
+  } catch (error) {
+    sqlite.close();
+    throw error;
+  }
+}
+
+function validateSourceUnchanged(source: SourceHandle): void {
+  validateSourceSidecars(source.path);
+  if (fileSha256(source.path) !== source.sha256) {
+    throw new ImportPreconditionError(
+      'SQLite source changed after pre-open validation. Keep the retained source offline and read-only for the entire import.',
+    );
+  }
 }
 
 function persistedFixture(id: string): PersistedStateFixture {
@@ -823,31 +916,38 @@ function openSource(options: SqliteToPostgresImportOptions): SourceHandle {
     const fixture = persistedFixture(options.fixtureId);
     const directory = mkdtempSync(join(tmpdir(), `mc-postgres-import-${fixture.id}-`));
     const sourcePath = join(directory, fixture.fileName);
-    copyFileSync(
-      join(options.fixtureDirectory ?? DEFAULT_FIXTURE_DIRECTORY, fixture.fileName),
-      sourcePath,
-    );
-    const writable = new Database(sourcePath);
     try {
-      runOrderedDatabaseBootstrap(writable, sqliteMigrationsDirectory);
-    } finally {
-      writable.close();
+      copyFileSync(
+        join(options.fixtureDirectory ?? DEFAULT_FIXTURE_DIRECTORY, fixture.fileName),
+        sourcePath,
+      );
+      const writable = new Database(sourcePath);
+      try {
+        runOrderedDatabaseBootstrap(writable, sqliteMigrationsDirectory);
+      } finally {
+        writable.close();
+      }
+      const opened = openValidatedSource(sourcePath, true);
+      return {
+        ...opened,
+        path: sourcePath,
+        label: fixture.id,
+        kind: 'persisted-state-fixture',
+        cleanup: () => rmSync(directory, { recursive: true, force: true }),
+      };
+    } catch (error) {
+      rmSync(directory, { recursive: true, force: true });
+      throw error;
     }
-    return {
-      sqlite: openReadonlySqlite(sourcePath),
-      path: sourcePath,
-      label: fixture.id,
-      kind: 'persisted-state-fixture',
-      cleanup: () => rmSync(directory, { recursive: true, force: true }),
-    };
   }
 
   if (!options.sqliteSourcePath) {
     throw new ImportPreconditionError('Pass --sqlite-source <path> or --fixture <id>.');
   }
   const sourcePath = resolve(options.sqliteSourcePath);
+  const opened = openValidatedSource(sourcePath, options.confirmWritersStopped === true);
   return {
-    sqlite: openReadonlySqlite(sourcePath),
+    ...opened,
     path: sourcePath,
     label: basename(sourcePath),
     kind: 'sqlite-file',
@@ -1334,12 +1434,13 @@ async function repairSequences(client: pg.PoolClient): Promise<void> {
   }
 }
 
-async function copyAllTables(
+export async function copyAllTables(
   pool: pg.Pool,
   sqlite: Database.Database,
   orderedTables: readonly string[],
   columnsByTable: Map<string, readonly ColumnInfo[]>,
   foreignKeys: readonly ForeignKeyInfo[],
+  validateSource: () => void,
 ): Promise<readonly ImportTableCount[]> {
   const client = await pool.connect();
   const counts: ImportTableCount[] = [];
@@ -1362,6 +1463,7 @@ async function copyAllTables(
       counts.push({ table, sourceRows: copied, targetRows: copied });
     }
     await repairSequences(client);
+    validateSource();
     await client.query('COMMIT');
   } catch (error) {
     try {
@@ -1499,6 +1601,9 @@ function buildEvidence(input: {
       sha256: input.sourceSha256,
       retainedArtifact: input.source.kind === 'sqlite-file',
       walOrJournalPresent: false,
+      sidecarsPresent: false,
+      openedReadOnly: true,
+      immutable: true,
       integrityCheck: 'ok',
       foreignKeyViolations: 0,
     },
@@ -1559,7 +1664,7 @@ export async function runSqliteToPostgresImport(
   const postgresMigrationsDirectory = rawOptions.postgresMigrationsDirectory
     ?? DEFAULT_POSTGRES_MIGRATIONS_DIRECTORY;
   const source = openSource(rawOptions);
-  const sourceSha256 = fileSha256(source.path);
+  const sourceSha256 = source.sha256;
   const sourceIdentity = `${source.kind}:${source.label}`;
   let pool: pg.Pool | null = null;
   let evidenceTarget: ImportEvidence['target'] = {
@@ -1575,10 +1680,8 @@ export async function runSqliteToPostgresImport(
       rawOptions.sqliteMigrationsDirectory ?? DEFAULT_SQLITE_MIGRATIONS_DIRECTORY,
       sourceTables,
     );
-    const quiescence = validateSqliteQuiescence(
+    const quiescence = validateOpenedSqlite(
       source.sqlite,
-      source.path,
-      rawOptions.confirmWritersStopped === true || source.kind === 'persisted-state-fixture',
       source.kind === 'persisted-state-fixture',
     );
     assertSourceTablesExist(source.sqlite, sourceTables);
@@ -1603,6 +1706,7 @@ export async function runSqliteToPostgresImport(
         copiedTables: plannedCounts.length,
         sourceRows: plannedCounts.reduce((sum, count) => sum + count.sourceRows, 0),
       });
+      validateSourceUnchanged(source);
       const evidence = buildEvidence({
         dryRun,
         rehearsal,
@@ -1659,6 +1763,7 @@ export async function runSqliteToPostgresImport(
         wouldInitializeTarget: !targetState.initialized,
         wouldResetDisposableTarget: targetState.reset,
       });
+      validateSourceUnchanged(source);
       const evidence = buildEvidence({
         dryRun,
         rehearsal,
@@ -1692,8 +1797,10 @@ export async function runSqliteToPostgresImport(
       orderedTables,
       columnsByTable,
       foreignKeys,
+      () => validateSourceUnchanged(source),
     );
     const invariants = await invariantReport(pool, copiedTables);
+    validateSourceUnchanged(source);
     const evidence = buildEvidence({
       dryRun,
       rehearsal,

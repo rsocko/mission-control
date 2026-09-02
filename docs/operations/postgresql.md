@@ -247,12 +247,21 @@ npm run db:import:postgres -- \
   --confirm-writers-stopped
 ```
 
-The command opens the SQLite source read-only with `query_only`, requires
-evidence for every current migration, and accepts older journal rows retained
-when migration files were superseded. Retained rows must be valid timestamped
-Drizzle hashes in the explicit repository-history allowlist, and every imported
-table's columns, SQLite types, nullability, and primary-key shape must match a
-fresh current bootstrap. Two exact historical representations are also
+Before any SQLite connection is created, the command requires the retained
+source to have no `-wal`, `-journal`, or `-shm` sidecar. It then opens the
+offline snapshot through a SQLite `mode=ro&immutable=1` file URI, verifies the
+resolved main database and query-only state, and rechecks both the source hash
+and sidecar absence after the read window. Never delete a sidecar to satisfy
+this guard: checkpoint it through the stopped source SQLite engine before
+creating the retained snapshot. The import assumes the retained source is
+mounted read-only and all writers remain stopped for the whole import;
+immutable mode is not a substitute for that offline snapshot contract.
+
+The command requires evidence for every current migration and accepts older
+journal rows retained when migration files were superseded. Retained rows must
+be valid timestamped Drizzle hashes in the explicit repository-history
+allowlist, and every imported table's columns, SQLite types, nullability, and
+primary-key shape must match a fresh current bootstrap. Two exact historical representations are also
 accepted: `priority_entities.reference_id` appended after `updated_at`, and
 `inbound_webhooks.enabled` declared with SQLite `DEFAULT 1` instead of the
 equivalent `DEFAULT true`. These exceptions still require the exact expected
@@ -264,7 +273,7 @@ every imported table before failing and reports all mismatched tables and
 fields in one secret-safe error. This rejects partial, stale, unknown-newer,
 and schema-incompatible sources without assuming that a long-lived journal has
 the same row count as current migration metadata. The command also rejects
-WAL/rollback-journal sidecars, runs `PRAGMA integrity_check` and
+SQLite sidecars, runs `PRAGMA integrity_check` and
 `PRAGMA foreign_key_check`, and rejects active `sync_jobs` for real sources.
 Synthetic fixture rehearsals may contain queued worker rows so queue copy
 behavior can be exercised.

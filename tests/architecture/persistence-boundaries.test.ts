@@ -16,7 +16,7 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/app/api/notifications/writebacks/route.ts',
   'src/lib/ai/agents/maintenance.ts',
   'src/lib/ai/config-resolver.ts',
-  'src/lib/ai/durable-runs/store.ts',
+  'src/lib/ai/durable-runs/sqlite-adapter.ts',
   'src/lib/ai/finance-approval-store.ts',
   'src/lib/connectors/monarch-money/attribution-service.ts',
   'src/lib/connectors/monarch-money/dataset-sync.ts',

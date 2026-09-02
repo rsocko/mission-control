@@ -2,7 +2,7 @@ import 'server-only';
 
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { DurableAiRunStore } from './store';
+import type { DurableAiRunRepository } from './repository';
 import type {
   ClaimedDurableAiRun,
   DurableAiRun,
@@ -18,15 +18,15 @@ export interface DurableAiRunExecutionContext {
     kind: string,
     payload?: Record<string, unknown>,
     idempotencyKey?: string,
-  ): void;
+  ): Promise<void>;
   setRouteOutcome(outcome: DurableAiRunRouteOutcome): void;
-  getProviderSession(): ProtectedProviderSession | null;
+  getProviderSession(): Promise<ProtectedProviderSession | null>;
   setProviderSession(
     provider: string,
     reference: string,
     expiresAt?: Date,
-  ): ProtectedProviderSession;
-  revokeProviderSession(): boolean;
+  ): Promise<ProtectedProviderSession>;
+  revokeProviderSession(): Promise<boolean>;
 }
 
 export interface DurableAiRunCleanupContext {
@@ -113,6 +113,7 @@ export class DurableAiRunWorker {
   private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
+  private prunePromise: Promise<void> | null = null;
   private active:
     | {
         run: ClaimedDurableAiRun;
@@ -122,7 +123,7 @@ export class DurableAiRunWorker {
     | null = null;
 
   constructor(
-    private readonly store: DurableAiRunStore,
+    private readonly store: DurableAiRunRepository,
     private readonly executors: ReadonlyMap<string, DurableAiRunExecutor>,
     private readonly options: DurableAiRunWorkerOptions = {},
   ) {
@@ -151,19 +152,9 @@ export class DurableAiRunWorker {
   start(): void {
     if (this.loopPromise) return;
     this.stopping = false;
-    try {
-      this.store.pruneExpired();
-    } catch (error) {
-      this.reportError(error, 'retention');
-    }
+    this.pruneExpired();
     this.pruneTimer = setInterval(
-      () => {
-        try {
-          this.store.pruneExpired();
-        } catch (error) {
-          this.reportError(error, 'retention');
-        }
-      },
+      () => this.pruneExpired(),
       this.pruneIntervalMs,
     );
     this.pruneTimer.unref();
@@ -173,10 +164,10 @@ export class DurableAiRunWorker {
   }
 
   async runOnce(): Promise<boolean> {
-    this.store.expireTimedOutQueuedRuns();
+    await this.store.expireTimedOutQueuedRuns();
     const routes = [...this.executors.keys()];
-    this.store.recoverExpiredRuns(new Date(), routes);
-    const cleanup = this.store.claimCleanup(
+    await this.store.recoverExpiredRuns(new Date(), routes);
+    const cleanup = await this.store.claimCleanup(
       this.ownerId,
       routes,
       this.leaseMs,
@@ -192,7 +183,7 @@ export class DurableAiRunWorker {
       }
       return true;
     }
-    const run = this.store.claimNextRun(this.ownerId, routes, this.leaseMs);
+    const run = await this.store.claimNextRun(this.ownerId, routes, this.leaseMs);
     if (!run) return false;
     const controller = new AbortController();
     const promise = this.executeRun(run, controller);
@@ -223,7 +214,7 @@ export class DurableAiRunWorker {
   ): Promise<void> {
     const executor = this.executors.get(run.executionRoute);
     if (!executor) {
-      this.store.failRun(
+      await this.store.failRun(
         run.id,
         this.ownerId,
         new Error(`No executor is registered for ${run.executionRoute}.`),
@@ -234,17 +225,17 @@ export class DurableAiRunWorker {
 
     let routeOutcome: DurableAiRunRouteOutcome = {};
     let cancelPromise: Promise<void> | null = null;
-    let heartbeatRunning = false;
+    let heartbeatPromise: Promise<void> | null = null;
     let executionClosed = false;
     const context: DurableAiRunExecutionContext = {
       run,
       signal: controller.signal,
       routingHeaders: durableAiRunTraceHeaders(run),
-      emit: (kind, payload = {}, idempotencyKey) => {
+      emit: async (kind, payload = {}, idempotencyKey) => {
         if (executionClosed) {
           throw new Error(`Durable AI run ${run.id} execution is closed.`);
         }
-        this.store.appendEventForClaim(run.id, this.ownerId, run.attempt, {
+        await this.store.appendEventForClaim(run.id, this.ownerId, run.attempt, {
           idempotencyKey: idempotencyKey
             ?? `executor:${run.attempt}:${randomUUID()}`,
           kind,
@@ -263,7 +254,7 @@ export class DurableAiRunWorker {
         this.ownerId,
         run.attempt,
       ),
-      setProviderSession: (provider, reference, expiresAt) => {
+      setProviderSession: async (provider, reference, expiresAt) => {
         if (executionClosed) {
           throw new Error(`Durable AI run ${run.id} execution is closed.`);
         }
@@ -307,22 +298,21 @@ export class DurableAiRunWorker {
     timeout.unref();
 
     const heartbeat = setInterval(() => {
-      if (heartbeatRunning || controller.signal.aborted) return;
-      heartbeatRunning = true;
-      void (async () => {
+      if (heartbeatPromise || controller.signal.aborted) return;
+      heartbeatPromise = (async () => {
         try {
-          if (this.store.isCancellationRequested(run.id, this.ownerId)) {
+          if (await this.store.isCancellationRequested(run.id, this.ownerId)) {
             controller.abort(new RunCancelledError('Durable AI run cancelled.'));
             return;
           }
-          if (!this.store.renewLease(run.id, this.ownerId, this.leaseMs)) {
+          if (!(await this.store.renewLease(run.id, this.ownerId, this.leaseMs))) {
             controller.abort(new RunLeaseLostError('Durable AI run lease was lost.'));
           }
         } catch (error) {
           this.reportError(error, 'heartbeat', run.id);
           controller.abort(error instanceof Error ? error : new Error(String(error)));
         } finally {
-          heartbeatRunning = false;
+          heartbeatPromise = null;
         }
       })();
     }, Math.max(25, Math.floor(this.leaseMs / 3)));
@@ -331,7 +321,12 @@ export class DurableAiRunWorker {
     try {
       const result = await raceWithAbort(executor.execute(context), controller.signal);
       if (result) routeOutcome = { ...routeOutcome, ...result };
-      const completed = this.store.completeRun(
+      clearInterval(heartbeat);
+      await heartbeatPromise;
+      if (controller.signal.aborted) {
+        throw controller.signal.reason;
+      }
+      const completed = await this.store.completeRun(
         run.id,
         this.ownerId,
         routeOutcome,
@@ -348,7 +343,7 @@ export class DurableAiRunWorker {
         } catch (cancelError) {
           this.reportError(cancelError, 'provider-cancel', run.id);
         }
-        const cancelled = this.store.cancelRun(run.id, this.ownerId);
+        const cancelled = await this.store.cancelRun(run.id, this.ownerId);
         await this.notifyTerminal(cancelled);
       } else if (reason instanceof RunTimedOutError) {
         try {
@@ -356,7 +351,7 @@ export class DurableAiRunWorker {
         } catch (cancelError) {
           this.reportError(cancelError, 'provider-cancel-timeout', run.id);
         }
-        const timedOut = this.store.timeOutRun(run.id, this.ownerId);
+        const timedOut = await this.store.timeOutRun(run.id, this.ownerId);
         await this.notifyTerminal(timedOut);
       } else if (
         reason instanceof RunLeaseLostError
@@ -368,7 +363,7 @@ export class DurableAiRunWorker {
       ) {
         this.reportError(reason, 'lease-release', run.id);
       } else {
-        const failed = this.store.failRun(run.id, this.ownerId, reason, {
+        const failed = await this.store.failRun(run.id, this.ownerId, reason, {
           outcome: routeOutcome,
         });
         if (failed.status === 'failed') await this.notifyTerminal(failed);
@@ -385,29 +380,32 @@ export class DurableAiRunWorker {
     controller: AbortController,
   ): Promise<void> {
     const executor = this.executors.get(run.executionRoute);
-    let heartbeatRunning = false;
+    let heartbeatPromise: Promise<void> | null = null;
     let leaseLost = false;
     const heartbeat = setInterval(() => {
-      if (heartbeatRunning) return;
-      heartbeatRunning = true;
-      try {
-        if (!this.store.renewCleanupLease(run.id, this.ownerId, this.leaseMs)) {
-          leaseLost = true;
-          controller.abort(
-            new RunLeaseLostError(`Durable AI run ${run.id} cleanup lease was lost.`),
-          );
-          this.reportError(
-            new Error(`Durable AI run ${run.id} cleanup lease was lost.`),
-            'cleanup-heartbeat',
-            run.id,
-          );
+      if (heartbeatPromise) return;
+      heartbeatPromise = (async () => {
+        try {
+          if (
+            !(await this.store.renewCleanupLease(run.id, this.ownerId, this.leaseMs))
+          ) {
+            leaseLost = true;
+            controller.abort(
+              new RunLeaseLostError(`Durable AI run ${run.id} cleanup lease was lost.`),
+            );
+            this.reportError(
+              new Error(`Durable AI run ${run.id} cleanup lease was lost.`),
+              'cleanup-heartbeat',
+              run.id,
+            );
+          }
+        } catch (error) {
+          this.reportError(error, 'cleanup-heartbeat', run.id);
+          controller.abort(error instanceof Error ? error : new Error(String(error)));
+        } finally {
+          heartbeatPromise = null;
         }
-      } catch (error) {
-        this.reportError(error, 'cleanup-heartbeat', run.id);
-        controller.abort(error instanceof Error ? error : new Error(String(error)));
-      } finally {
-        heartbeatRunning = false;
-      }
+      })();
     }, Math.max(25, Math.floor(this.leaseMs / 3)));
     heartbeat.unref();
     const timeout = setTimeout(() => {
@@ -422,16 +420,19 @@ export class DurableAiRunWorker {
           `No provider cleanup handler is registered for ${run.executionRoute}.`,
         );
       }
+      const providerSession = await this.store.getProviderSession(run.id);
       await raceWithAbort(
         executor.cleanup({
           run,
-          providerSession: this.store.getProviderSession(run.id),
+          providerSession,
           signal: controller.signal,
         }),
         controller.signal,
       );
+      clearInterval(heartbeat);
+      await heartbeatPromise;
       if (leaseLost) return;
-      this.store.finishCleanup(run.id, this.ownerId);
+      await this.store.finishCleanup(run.id, this.ownerId);
     } catch (error) {
       const reason = controller.signal.aborted
         ? controller.signal.reason
@@ -442,7 +443,7 @@ export class DurableAiRunWorker {
       }
       if (!leaseLost) {
         try {
-          this.store.finishCleanup(run.id, this.ownerId, reason);
+          await this.store.finishCleanup(run.id, this.ownerId, reason);
         } catch (finishError) {
           this.reportError(finishError, 'provider-cleanup-finish', run.id);
         }
@@ -459,6 +460,7 @@ export class DurableAiRunWorker {
     this.stopping = true;
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
+    await this.prunePromise;
     const active = this.active;
     if (active) {
       const completed = await Promise.race([
@@ -489,6 +491,18 @@ export class DurableAiRunWorker {
 
   private reportError(error: unknown, operation: string, runId?: string): void {
     this.options.reportError?.(error, operation, runId);
+  }
+
+  private pruneExpired(): void {
+    if (this.prunePromise) return;
+    this.prunePromise = this.store.pruneExpired()
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        this.reportError(error, 'retention');
+      })
+      .finally(() => {
+        this.prunePromise = null;
+      });
   }
 
   private delay(ms: number): Promise<void> {

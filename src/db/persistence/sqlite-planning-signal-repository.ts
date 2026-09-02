@@ -250,6 +250,15 @@ function windowKey(now: Date): string {
   ).toISOString();
 }
 
+function isWindowFinalized(sqlite: Database.Database, window: string): boolean {
+  return Boolean(sqlite.prepare(`
+    SELECT 1
+    FROM task_history_events
+    WHERE task_id = ? AND event_type = ? AND new_value = ?
+    LIMIT 1
+  `).get(FINALIZATION_MARKER_TASK_ID, FINALIZATION_MARKER_EVENT_TYPE, window));
+}
+
 export function createSqlitePlanningSignalRepository(
   sqlite: Database.Database,
 ): PlanningSignalRepository {
@@ -261,15 +270,10 @@ export function createSqlitePlanningSignalRepository(
       return Promise.resolve(sqlite.transaction(() => finalize(sqlite, today)).immediate());
     },
     finalizeIfDue({ today, now }) {
+      const window = windowKey(now);
+      if (isWindowFinalized(sqlite, window)) return Promise.resolve(null);
       return Promise.resolve(sqlite.transaction(() => {
-        const window = windowKey(now);
-        const completed = sqlite.prepare(`
-          SELECT 1
-          FROM task_history_events
-          WHERE task_id = ? AND event_type = ? AND new_value = ?
-          LIMIT 1
-        `).get(FINALIZATION_MARKER_TASK_ID, FINALIZATION_MARKER_EVENT_TYPE, window);
-        if (completed) return null;
+        if (isWindowFinalized(sqlite, window)) return null;
         const result = finalize(sqlite, today);
         sqlite.prepare(`
           INSERT INTO task_history_events (

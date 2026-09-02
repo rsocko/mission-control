@@ -42,6 +42,7 @@ import {
   type MissionControlPushPayload,
   type NotificationDeliveryChannel,
 } from './push-payload';
+import { reconcileNotificationEnrichmentMetadata } from '@/db/persistence/notification-enrichment';
 
 export { wakeNotificationDeliveryDispatcher } from './dispatcher-wake';
 export {
@@ -111,6 +112,7 @@ export interface CreateNotificationInput {
   navigationTarget?: string | null;
   metadata?: Record<string, unknown>;
   presentation?: Record<string, unknown>;
+  enrichmentRevision?: string | null;
   isActionable?: boolean;
   primaryActionId?: string | null;
   aiSuggestedActionId?: string | null;
@@ -481,6 +483,8 @@ function createOneInTransaction(
       navigationTarget,
       metadata: input.metadata ?? {},
       presentation: input.presentation ?? {},
+      enrichmentRevision: input.enrichmentRevision ?? null,
+      enrichmentGeneration: input.enrichmentRevision === undefined ? 0 : 1,
       isActionable: input.isActionable ?? false,
       primaryActionId: input.primaryActionId ?? null,
       aiSuggestedActionId: input.aiSuggestedActionId ?? null,
@@ -550,8 +554,21 @@ function createOneInTransaction(
       relatedEntityType: input.relatedEntityType ?? null,
       relatedEntityId: input.relatedEntityId ?? null,
       navigationTarget,
-      metadata: input.metadata ?? {},
+      metadata: reconcileNotificationEnrichmentMetadata(
+        notification.metadata,
+        input.metadata ?? {},
+        notification.enrichmentRevision,
+        input.enrichmentRevision,
+      ),
       presentation: input.presentation ?? {},
+      enrichmentRevision: input.enrichmentRevision === undefined
+        ? notification.enrichmentRevision
+        : input.enrichmentRevision,
+      enrichmentGeneration: input.enrichmentRevision === undefined
+        ? notification.enrichmentGeneration
+        : input.enrichmentRevision === notification.enrichmentRevision
+          ? notification.enrichmentGeneration
+          : notification.enrichmentGeneration + 1,
       isActionable: input.isActionable ?? false,
       primaryActionId: input.primaryActionId ?? null,
       aiSuggestedActionId: input.aiSuggestedActionId ?? null,

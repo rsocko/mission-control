@@ -128,6 +128,22 @@ describe('SyncQueue', () => {
     await expect(request).rejects.toBe(failure);
   });
 
+  it('rejects queued callers when local execution rejects', async () => {
+    const active = deferred<SyncResult>();
+    const failure = new Error('event outbox unavailable');
+    const queue = new SyncQueue((connectorId) => {
+      if (connectorId === 'active') return active.promise;
+      return Promise.reject(failure);
+    }, () => false);
+
+    const running = queue.enqueueSync('active');
+    const queued = queue.enqueueSync('queued');
+    active.resolve(result('active'));
+
+    await running;
+    await expect(queued).rejects.toBe(failure);
+  });
+
   it('rejects direct sync requests while connector quarantine is active', async () => {
     const failure = new Error('connector_sync_quarantined');
     mocks.assertConnectorSyncEnqueueAllowedAsync.mockImplementationOnce(() => {

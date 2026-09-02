@@ -30,6 +30,15 @@ const REQUIRED_FINAL_WORKER_TOKENS = [
   'semantic index worker is disabled for this persistence backend',
 ];
 
+const REQUIRED_EVENT_OUTBOX_WORKER_TOKENS = [
+  'EventOutboxDispatcher',
+  'createPostgresEventDeliveryRepositories',
+  'createSqliteEventDeliveryRepositories',
+  'durable event outbox dispatcher initialized',
+  'Event delivery lease was fenced out mid-flight',
+  'Event delivery moved to dead letter',
+];
+
 export function assertSyncWorkerArtifact(source) {
   if (source.includes(RETIRED_FINANCE_BACKLOG_CODE)) {
     throw new Error(
@@ -56,6 +65,14 @@ export function assertSyncWorkerArtifact(source) {
   if (missingFinal.length > 0) {
     throw new Error(
       `Sync worker bundle omitted final PostgreSQL worker markers:\n${missingFinal.join('\n')}`,
+    );
+  }
+  const missingEventOutbox = REQUIRED_EVENT_OUTBOX_WORKER_TOKENS.filter(
+    (token) => !source.includes(token),
+  );
+  if (missingEventOutbox.length > 0) {
+    throw new Error(
+      `Sync worker bundle omitted durable event outbox markers:\n${missingEventOutbox.join('\n')}`,
     );
   }
   if (

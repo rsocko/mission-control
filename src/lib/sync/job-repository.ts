@@ -54,6 +54,28 @@ export interface SyncJobFailureOptions {
   retry?: boolean;
   cancelled?: boolean;
   terminal?: boolean;
+  /**
+   * Durable events enqueued inside the same transaction as the terminal
+   * transition. Ignored when the computed status is not terminal (a retry is
+   * still in flight), which is what keeps retries from duplicating events.
+   */
+  events?: readonly SyncTerminalEvent[];
+}
+
+/**
+ * An outbound event whose durability is coupled to a sync job's authoritative
+ * terminal transition. `stableKey` is derived from durable sync job/run
+ * identity, so re-running a finalizer can never produce a second delivery.
+ */
+export interface SyncTerminalEvent {
+  stableKey: string;
+  eventType: 'sync.completed' | 'sync.failed';
+  occurredAt: string;
+  payload: Record<string, unknown>;
+}
+
+export interface SyncJobFinalizationOptions {
+  events?: readonly SyncTerminalEvent[];
 }
 
 export interface SyncJobEnqueueRequest {
@@ -113,7 +135,12 @@ export interface SyncJobRepository {
   renewLease(jobId: string, owner: string, leaseMs?: number): Promise<boolean>;
   isCancellationRequested(jobId: string, owner: string): Promise<boolean>;
   complete(jobId: string, owner: string, result: SyncResult): Promise<void>;
-  finalizeSuccess(job: SyncJob, owner: string, result: SyncResult): Promise<void>;
+  finalizeSuccess(
+    job: SyncJob,
+    owner: string,
+    result: SyncResult,
+    options?: SyncJobFinalizationOptions,
+  ): Promise<void>;
   linkSyncLog(job: SyncJob, result: SyncResult): Promise<void>;
   fail(
     job: SyncJob,

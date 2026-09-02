@@ -57,6 +57,8 @@ export const notifications = sqliteTable('notifications', {
 
   metadata: text('metadata', { mode: 'json' }).notNull().default('{}'),
   presentation: text('presentation', { mode: 'json' }).notNull().default('{}'),
+  enrichmentRevision: text('enrichment_revision'),
+  enrichmentGeneration: integer('enrichment_generation').notNull().default(0),
 }, (table) => ({
   sourceIdIdx: uniqueIndex('idx_notifications_source_id').on(table.sourceId),
   stateIdx: index('idx_notifications_state').on(table.state),
@@ -84,6 +86,36 @@ export const notifications = sqliteTable('notifications', {
     table.lastReconciledAt,
   ),
   relatedTaskIdx: index('idx_notifications_related_task_id').on(table.relatedTaskId),
+}));
+
+export const notificationEnrichmentJobs = sqliteTable('notification_enrichment_jobs', {
+  id: text('id').primaryKey(),
+  notificationId: text('notification_id').notNull()
+    .references(() => notifications.id, { onDelete: 'cascade' }),
+  sourceId: text('source_id').notNull(),
+  sourceRevision: text('source_revision').notNull(),
+  sourceGeneration: integer('source_generation').notNull(),
+  payload: text('payload', { mode: 'json' }).notNull(),
+  status: text('status')
+    .$type<'pending' | 'processing' | 'completed' | 'superseded' | 'dead_letter'>()
+    .notNull()
+    .default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: text('next_attempt_at'),
+  leaseOwner: text('lease_owner'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: text('lease_expires_at'),
+  lastError: text('last_error'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => ({
+  generationIdx: uniqueIndex('idx_notification_enrichment_generation')
+    .on(table.notificationId, table.sourceGeneration),
+  claimIdx: index('idx_notification_enrichment_claim')
+    .on(table.status, table.nextAttemptAt, table.createdAt),
+  leaseIdx: index('idx_notification_enrichment_lease')
+    .on(table.status, table.leaseExpiresAt),
 }));
 
 // ─── NOTIFICATION ACTIONS ───────────────────────────────────────────────────

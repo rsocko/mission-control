@@ -38,7 +38,9 @@ const mocks = vi.hoisted(() => {
         },
         connectors: {
           get: vi.fn(async () => null),
+          listEnabled: vi.fn(async () => []),
           upsert: vi.fn(async (connector) => connector),
+          updateCredentials: vi.fn(async () => undefined),
           delete: vi.fn(async () => false),
           mergeSettings: vi.fn(async (_id, settings, patch) => ({ ...settings, ...patch })),
           patchSettingsState: vi.fn(async (_id, key, patch) => ({
@@ -84,6 +86,10 @@ const mocks = vi.hoisted(() => {
             getAll: vi.fn(async () => []),
           },
         } as unknown as WorkerPersistenceRepositories['triage'],
+        planningSignals: {} as WorkerPersistenceRepositories['planningSignals'],
+        projectAutomation: {} as WorkerPersistenceRepositories['projectAutomation'],
+        eventDelivery: {} as WorkerPersistenceRepositories['eventDelivery'],
+        notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);

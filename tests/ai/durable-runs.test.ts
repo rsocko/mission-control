@@ -15,12 +15,24 @@ process.env.MC_AI_PROVIDER_SESSION_KEY = Buffer.alloc(32, 7).toString('base64');
 process.env.MC_AI_RUN_RETRY_BASE_MS = '1';
 
 let database: typeof import('@/db');
-let durable: typeof import('@/lib/ai/durable-runs');
+let durable: typeof import('@/lib/ai/durable-runs') & {
+  DurableAiRunStore:
+    typeof import('@/lib/ai/durable-runs/sqlite-adapter').SqliteDurableAiRunStore;
+};
+let sqliteDurable: typeof import('@/lib/ai/durable-runs/sqlite-adapter');
 let copilotPersistence: typeof import('@/lib/ai/durable-runs/copilot-adapter');
 
 beforeAll(async () => {
   database = await import('@/db');
-  durable = await import('@/lib/ai/durable-runs');
+  const [durableModule, sqliteDurableModule] = await Promise.all([
+    import('@/lib/ai/durable-runs'),
+    import('@/lib/ai/durable-runs/sqlite-adapter'),
+  ]);
+  sqliteDurable = sqliteDurableModule;
+  durable = {
+    ...durableModule,
+    DurableAiRunStore: sqliteDurableModule.SqliteDurableAiRunStore,
+  };
   copilotPersistence = await import('@/lib/ai/durable-runs/copilot-adapter');
   database.sqlite.prepare('SELECT 1').get();
 });
@@ -57,6 +69,12 @@ function enqueue(
     timeoutMs: 60_000,
     ...overrides,
   });
+}
+
+function repository(
+  store: InstanceType<typeof durable.DurableAiRunStore>,
+) {
+  return new sqliteDurable.SqliteDurableAiRunRepository(store);
 }
 
 describe('DurableAiRunStore', () => {
@@ -468,7 +486,170 @@ describe('DurableAiRunStore', () => {
   });
 });
 
+describe('DurableAiRunRepository contract', () => {
+  it('exposes every SQLite operation asynchronously without changing its result', async () => {
+    const store = new durable.DurableAiRunStore();
+    const durableRuns = repository(store);
+    const now = new Date('2026-08-06T17:00:00.000Z');
+    const created = await durableRuns.createRun({
+      id: 'contract-run',
+      idempotencyKey: 'contract:create',
+      featureId: 'contract-test',
+      sensitivity: 'standard',
+      executionRoute: 'contract-route',
+      maxAttempts: 1,
+      timeoutMs: 60_000,
+      now,
+    });
+    expect(created.created).toBe(true);
+    await expect(durableRuns.createRun({
+      id: 'contract-run-duplicate',
+      idempotencyKey: 'contract:create',
+      featureId: 'contract-test',
+      sensitivity: 'standard',
+      executionRoute: 'contract-route',
+      maxAttempts: 1,
+      timeoutMs: 60_000,
+      now,
+    })).resolves.toEqual({ run: created.run, created: false });
+    await expect(durableRuns.getRun(created.run.id)).resolves.toEqual(created.run);
+    await expect(durableRuns.getInternalRun(created.run.id)).resolves.toMatchObject({
+      id: created.run.id,
+      idempotencyKey: 'contract:create',
+    });
+    await expect(durableRuns.listRuns({ featureId: 'contract-test' })).resolves
+      .toHaveLength(1);
+    await expect(durableRuns.listInternalRunsByRoute('contract-route')).resolves
+      .toHaveLength(1);
+
+    const appended = await durableRuns.appendEvent(created.run.id, {
+      idempotencyKey: 'contract:event',
+      kind: 'contract.event',
+      payload: { token: 'removed', progress: 1 },
+      now,
+    });
+    await expect(durableRuns.appendEvent(created.run.id, {
+      idempotencyKey: 'contract:event',
+      kind: 'contract.event',
+      payload: { progress: 2 },
+      now,
+    })).resolves.toEqual(appended);
+    await expect(durableRuns.getEventsAfter(created.run.id)).resolves
+      .toContainEqual(appended);
+    await expect(durableRuns.getEventIdempotencyKeys(created.run.id)).resolves
+      .toContain('contract:event');
+
+    const claimed = await durableRuns.claimNextRun(
+      'contract-owner',
+      ['contract-route'],
+      30_000,
+      now,
+    );
+    expect(claimed).toMatchObject({ id: created.run.id, attempt: 1 });
+    await expect(durableRuns.renewLease(
+      created.run.id,
+      'contract-owner',
+      30_000,
+      new Date(now.getTime() + 1),
+    )).resolves.toBe(true);
+    await expect(durableRuns.appendEventForClaim(
+      created.run.id,
+      'contract-owner',
+      1,
+      { idempotencyKey: 'contract:claimed', kind: 'contract.claimed', now },
+    )).resolves.toMatchObject({ kind: 'contract.claimed' });
+    await expect(durableRuns.setProviderSessionForClaim(
+      created.run.id,
+      'contract-owner',
+      1,
+      'provider',
+      'private-session',
+      { now },
+    )).resolves.toMatchObject({ provider: 'provider', reference: 'private-session' });
+    await expect(durableRuns.getProviderSessionForClaim(
+      created.run.id,
+      'contract-owner',
+      1,
+      now,
+    )).resolves.toMatchObject({ reference: 'private-session' });
+    await expect(durableRuns.revokeProviderSessionForClaim(
+      created.run.id,
+      'contract-owner',
+      1,
+      now,
+    )).resolves.toBe(true);
+    await expect(durableRuns.completeRun(
+      created.run.id,
+      'contract-owner',
+      { provider: 'provider', model: 'model' },
+      new Date(now.getTime() + 2),
+    )).resolves.toMatchObject({ status: 'succeeded' });
+
+    await expect(durableRuns.claimNextRun('nobody', [], 1, now)).resolves.toBeNull();
+    await expect(durableRuns.claimCleanup('nobody', [], 1, now)).resolves.toBeNull();
+    await expect(durableRuns.requestCancellation('missing', now)).resolves.toBeNull();
+    await expect(durableRuns.retryRun('missing', 'contract:retry', now)).resolves
+      .toBeNull();
+    await expect(durableRuns.isCancellationRequested('missing')).resolves.toBe(false);
+    await expect(durableRuns.renewLease('missing', 'nobody', 1, now)).resolves.toBe(false);
+    await expect(durableRuns.renewCleanupLease('missing', 'nobody', 1, now)).resolves
+      .toBe(false);
+    await expect(durableRuns.getProviderSession('missing', now)).resolves.toBeNull();
+    await expect(durableRuns.revokeProviderSession('missing', now)).resolves.toBe(false);
+    await expect(durableRuns.expireTimedOutQueuedRuns(now)).resolves.toBe(0);
+    await expect(durableRuns.recoverExpiredRuns(now, [])).resolves.toBe(0);
+    await expect(durableRuns.pruneExpired(now)).resolves.toEqual({
+      deletedRuns: 0,
+      revokedProviderSessions: 0,
+    });
+  });
+
+  it('propagates synchronous SQLite failures as rejected promises', async () => {
+    const durableRuns = repository(new durable.DurableAiRunStore());
+
+    await expect(durableRuns.appendEvent('missing', {
+      idempotencyKey: 'contract:error',
+      kind: 'contract.error',
+    })).rejects.toThrow('was not found');
+  });
+});
+
 describe('DurableAiRunWorker', () => {
+  it('waits for an in-flight asynchronous heartbeat before committing terminal state', async () => {
+    const store = new durable.DurableAiRunStore();
+    const durableRuns = repository(store);
+    const { run } = enqueue(store, 'async-heartbeat');
+    let finishExecution!: () => void;
+    let finishHeartbeat!: (renewed: boolean) => void;
+    const execution = new Promise<void>((resolve) => {
+      finishExecution = resolve;
+    });
+    const heartbeat = new Promise<boolean>((resolve) => {
+      finishHeartbeat = resolve;
+    });
+    vi.spyOn(durableRuns, 'renewLease').mockReturnValue(heartbeat);
+    const worker = new durable.DurableAiRunWorker(
+      durableRuns,
+      new Map([[
+        'test-route',
+        { async execute() { await execution; } } satisfies DurableAiRunExecutor,
+      ]]),
+      { ownerId: 'async-heartbeat-worker', leaseMs: 300 },
+    );
+
+    const work = worker.runOnce();
+    await vi.waitFor(() => {
+      expect(durableRuns.renewLease).toHaveBeenCalledOnce();
+    });
+    finishExecution();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(store.getRun(run.id)?.status).toBe('running');
+    finishHeartbeat(true);
+    await work;
+
+    expect(store.getRun(run.id)?.status).toBe('succeeded');
+  });
+
   it('does not recover leases for routes without a registered executor', async () => {
     const store = new durable.DurableAiRunStore();
     const startedAt = new Date(Date.now() - 1_000);
@@ -478,7 +659,7 @@ describe('DurableAiRunWorker', () => {
     });
     store.claimNextRun('external-worker', ['external-route'], 50, startedAt);
     const worker = new durable.DurableAiRunWorker(
-      store,
+      repository(store),
       new Map([[
         'owned-route',
         { async execute() {} } satisfies DurableAiRunExecutor,
@@ -503,7 +684,7 @@ describe('DurableAiRunWorker', () => {
     const cleanup = vi.fn(async () => undefined);
     const executor: DurableAiRunExecutor = {
       async execute(context) {
-        context.setProviderSession('provider', 'provider-session');
+        await context.setProviderSession('provider', 'provider-session');
         await new Promise<void>((resolve, reject) => {
           context.signal.addEventListener(
             'abort',
@@ -516,7 +697,7 @@ describe('DurableAiRunWorker', () => {
       cleanup,
     };
     const worker = new durable.DurableAiRunWorker(
-      store,
+      repository(store),
       new Map([['test-route', executor]]),
       { ownerId: 'worker-cancel', leaseMs: 1_000 },
     );
@@ -554,7 +735,7 @@ describe('DurableAiRunWorker', () => {
       cancel,
     };
     const worker = new durable.DurableAiRunWorker(
-      store,
+      repository(store),
       new Map([['test-route', executor]]),
       { ownerId: 'worker-timeout', leaseMs: 100 },
     );
@@ -571,7 +752,7 @@ describe('DurableAiRunWorker', () => {
   it('closes a timed-out run even when its executor ignores aborts', async () => {
     const store = new durable.DurableAiRunStore();
     const { run } = enqueue(store, 'worker-non-cooperative', { timeoutMs: 25 });
-    let emitAfterTimeout: (() => void) | undefined;
+    let emitAfterTimeout: (() => Promise<void>) | undefined;
     const cancel = vi.fn(() => new Promise<void>(() => undefined));
     const executor: DurableAiRunExecutor = {
       async execute(context) {
@@ -581,7 +762,7 @@ describe('DurableAiRunWorker', () => {
       cancel,
     };
     const worker = new durable.DurableAiRunWorker(
-      store,
+      repository(store),
       new Map([['test-route', executor]]),
       { ownerId: 'worker-non-cooperative', leaseMs: 100 },
     );
@@ -591,7 +772,7 @@ describe('DurableAiRunWorker', () => {
     expect(cancel).toHaveBeenCalledOnce();
     expect(store.getRun(run.id)?.status).toBe('timed_out');
     expect(emitAfterTimeout).toBeDefined();
-    expect(emitAfterTimeout!).toThrow(/execution is closed/);
+    await expect(emitAfterTimeout!()).rejects.toThrow(/execution is closed/);
   });
 
   it('bounds hung provider cleanup and leaves it retryable', async () => {
@@ -606,7 +787,7 @@ describe('DurableAiRunWorker', () => {
       cleanup,
     };
     const worker = new durable.DurableAiRunWorker(
-      store,
+      repository(store),
       new Map([['test-route', executor]]),
       {
         ownerId: 'cleanup-worker',
@@ -623,6 +804,27 @@ describe('DurableAiRunWorker', () => {
       lastErrorCode: 'provider_cleanup_failed',
     });
   });
+
+  it('reports asynchronous retention failures and releases its timer on stop', async () => {
+    const durableRuns = repository(new durable.DurableAiRunStore());
+    const failure = new Error('retention unavailable');
+    vi.spyOn(durableRuns, 'pruneExpired').mockRejectedValue(failure);
+    const reportError = vi.fn();
+    const worker = new durable.DurableAiRunWorker(durableRuns, new Map(), {
+      pollIntervalMs: 5,
+      pruneIntervalMs: 5,
+      reportError,
+    });
+
+    worker.start();
+    await vi.waitFor(() => {
+      expect(reportError).toHaveBeenCalledWith(failure, 'retention', undefined);
+    });
+    await worker.stop();
+    const callCount = reportError.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(reportError).toHaveBeenCalledTimes(callCount);
+  });
 });
 
 describe('Copilot durable persistence adapter', () => {
@@ -630,9 +832,9 @@ describe('Copilot durable persistence adapter', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-06T17:00:00.000Z'));
     const store = new durable.DurableAiRunStore();
-    const persistence = copilotPersistence.createDurableCopilotPersistence(
+    const persistence = await copilotPersistence.createDurableCopilotPersistence(
       'copilot-worker',
-      store,
+      repository(store),
     );
     const record: CopilotRunRecord = {
       runId: 'copilot-run',
@@ -718,16 +920,25 @@ describe('Copilot durable persistence adapter', () => {
     });
     expect(disposition.accepted).toBe(true);
     if (!disposition.accepted) throw new Error('Expected a mapped lifecycle event.');
-    persistence.eventSink.emit(disposition.event);
-    expect(() => new copilotPersistence.DurableCopilotEventSink(
-      store,
+    await persistence.eventSink.emit(disposition.event);
+    await expect(new copilotPersistence.DurableCopilotEventSink(
+      repository(store),
       'stale-copilot-worker',
-    ).emit(disposition.event)).toThrow(/ownership was lost/);
+    ).emit(disposition.event)).rejects.toThrow(/ownership was lost/);
 
+    expect(await copilotPersistence.getDurableCopilotEventCursor(
+      repository(store),
+      record.runId,
+    )).toMatchObject({
+      sequence: 1,
+      parentEventId: disposition.event.eventId,
+    });
+    await persistence.primeEventCursor(record.runId);
     expect(persistence.eventCursor(record.runId)).toMatchObject({
       sequence: 1,
       parentEventId: disposition.event.eventId,
     });
+    expect(persistence.eventCursor(record.runId)).toBeUndefined();
     expect(JSON.stringify(store.getEventsAfter(record.runId))).not.toContain(
       'private-copilot-session',
     );
@@ -742,7 +953,7 @@ describe('Copilot durable persistence adapter', () => {
     );
   });
 
-  it('restores event cursors beyond a single event page', () => {
+  it('restores event cursors beyond a single event page', async () => {
     const store = new durable.DurableAiRunStore();
     const { run } = enqueue(store, 'copilot-long-cursor');
     for (let sequence = 1; sequence <= 1_001; sequence += 1) {
@@ -756,7 +967,7 @@ describe('Copilot durable persistence adapter', () => {
       });
     }
 
-    expect(copilotPersistence.getDurableCopilotEventCursor(store, run.id))
+    expect(await copilotPersistence.getDurableCopilotEventCursor(repository(store), run.id))
       .toMatchObject({
         sequence: 1_001,
         parentEventId: 'copilot-event-1001',

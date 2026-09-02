@@ -293,6 +293,17 @@ PostgreSQL generated search-vector columns are classified as derived state and
 not copied. `task_search_documents` and `notification_search_documents` are
 rebuilt from authoritative `tasks` and `notifications` rows after import.
 
+Before opening a PostgreSQL pool, the importer derives every `jsonb` mapping from
+the source and target schemas and streams all mapped SQLite values through
+syntax, storage-type, Unicode, and deterministic nesting checks. Diagnostics
+contain only table, column, reason category, and count. During the transaction,
+the same serialized text is validated in bounded batches through
+`::text::jsonb` before insertion; the count-only result never returns payloads
+to the importer. This preserves JSON scalars and JSON `null` distinctly from SQL
+`NULL`, while PostgreSQL remains authoritative for numeric and binary-storage
+limits. A rejected value is isolated with savepoints and reported only by
+table, column, and category before the transaction is rolled back.
+
 Output is line-oriented and secret-safe. Logs contain stage names and coarse
 counts only. The final `summary` line is machine-readable JSON with command
 metadata, redacted source/target identities, SQLite checksum/integrity/WAL

@@ -38,6 +38,15 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./tests/setup.ts'],
     maxWorkers: Math.min(8, Math.max(1, availableParallelism() - 1)),
+    onUnhandledError(error) {
+      // happy-dom's Web Animations API rejects the `finished` promise with an
+      // AbortError when an in-flight animation is canceled (e.g. framer-motion
+      // stopping an animation on unmount). This is expected teardown noise, not
+      // a real bug, so it shouldn't fail the test run.
+      if (error.name === 'AbortError' && error.message === 'The animation was canceled.') {
+        return false;
+      }
+    },
     projects: [
       {
         extends: true,

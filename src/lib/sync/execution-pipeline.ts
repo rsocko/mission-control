@@ -944,7 +944,7 @@ export class SyncExecutionPipeline {
       if (executionPersistence.support.allowsLegacyWorkflow('planning-signals')) {
         try {
           const { finalizePlanningSignalsIfDue } = await import('@/lib/planning-signals');
-          finalizePlanningSignalsIfDue();
+          await finalizePlanningSignalsIfDue();
         } catch (planningSignalError) {
           syncLogger.warn(
             { err: planningSignalError, connectorId },

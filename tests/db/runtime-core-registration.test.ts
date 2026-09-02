@@ -84,6 +84,8 @@ const mocks = vi.hoisted(() => {
             getAll: vi.fn(async () => []),
           },
         } as unknown as WorkerPersistenceRepositories['triage'],
+        planningSignals: {} as WorkerPersistenceRepositories['planningSignals'],
+        projectAutomation: {} as WorkerPersistenceRepositories['projectAutomation'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);

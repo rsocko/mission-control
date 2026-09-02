@@ -61,6 +61,8 @@ async function main(): Promise<void> {
     && workerPersistence.notificationDelivery
     && workerPersistence.reminders
     && workerPersistence.triage
+    && workerPersistence.planningSignals
+    && workerPersistence.projectAutomation
     && workerPersistence.finance
     && workerPersistence.finance.recovery,
   );

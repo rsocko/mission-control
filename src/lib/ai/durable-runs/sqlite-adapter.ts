@@ -529,6 +529,7 @@ export class SqliteDurableAiRunStore {
     owner: string,
     input: AppendDurableAiRunEventInput,
     receivedAt = new Date(),
+    attempt?: number,
   ): DurableAiRunEvent {
     const transaction = sqlite.transaction(() => {
       const run = getInternalRunBy('id', runId);
@@ -539,6 +540,15 @@ export class SqliteDurableAiRunStore {
       if (
         !executionState
         || executionState.ownerId !== owner
+        || (
+          attempt !== undefined
+          && (
+            run.attempt !== attempt
+            || run.leaseOwner !== owner
+            || !run.leaseExpiresAt
+            || run.leaseExpiresAt <= receivedAt.toISOString()
+          )
+        )
         || (
           ['running', 'cancelling'].includes(run.status)
           && (
@@ -1530,6 +1540,9 @@ export class SqliteDurableAiRunStore {
       tracestate?: string;
       owner?: string;
       leaseExpiresAt?: string;
+      requiredLeaseOwner?: string;
+      requiredAttempt?: number;
+      leaseState?: 'active' | 'expired';
       providerSession?: {
         provider: string;
         reference: string;
@@ -1552,6 +1565,10 @@ export class SqliteDurableAiRunStore {
             updated_at = ?,
             revision = revision + 1
         WHERE id = ? AND revision = ? AND execution_state IS NULL
+          ${options.requiredLeaseOwner ? 'AND lease_owner = ?' : ''}
+          ${options.requiredAttempt !== undefined ? 'AND attempt = ?' : ''}
+          ${options.leaseState === 'active' ? 'AND lease_expires_at > ?' : ''}
+          ${options.leaseState === 'expired' ? 'AND lease_expires_at <= ?' : ''}
       `).run(
         JSON.stringify(sanitizeDurableAiState(state)),
         options.status ?? null,
@@ -1562,6 +1579,9 @@ export class SqliteDurableAiRunStore {
         nowIso,
         runId,
         options.expectedRevision,
+        ...(options.requiredLeaseOwner ? [options.requiredLeaseOwner] : []),
+        ...(options.requiredAttempt !== undefined ? [options.requiredAttempt] : []),
+        ...(options.leaseState ? [nowIso] : []),
       ).changes === 1;
       if (updated && options.providerSession) {
         this.setProviderSessionInTransaction(
@@ -1602,6 +1622,7 @@ export class SqliteDurableAiRunStore {
       allowedCurrentStatuses?: readonly DurableAiRunStatus[];
       cancellation?: 'absent' | 'requested';
       requiredLeaseOwner?: string;
+      requiredAttempt?: number;
       leaseState?: 'active' | 'expired';
       now?: Date;
     } = {},
@@ -1625,6 +1646,10 @@ export class SqliteDurableAiRunStore {
       if (options.requiredLeaseOwner) {
         conditions.push('lease_owner = ?');
         conditionValues.push(options.requiredLeaseOwner);
+      }
+      if (options.requiredAttempt !== undefined) {
+        conditions.push('attempt = ?');
+        conditionValues.push(options.requiredAttempt);
       }
       if (options.leaseState === 'active') {
         conditions.push('lease_expires_at > ?');
@@ -1757,8 +1782,15 @@ export class SqliteDurableAiRunRepository implements DurableAiRunRepository {
     owner: string,
     input: AppendDurableAiRunEventInput,
     receivedAt = new Date(),
+    attempt?: number,
   ) {
-    return this.store.appendEventForExecutionOwner(runId, owner, input, receivedAt);
+    return this.store.appendEventForExecutionOwner(
+      runId,
+      owner,
+      input,
+      receivedAt,
+      attempt,
+    );
   }
 
   async claimNextRun(

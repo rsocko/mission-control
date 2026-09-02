@@ -41,6 +41,9 @@ export interface DurableAiRunInitializeStateOptions {
   tracestate?: string;
   owner?: string;
   leaseExpiresAt?: string;
+  requiredLeaseOwner?: string;
+  requiredAttempt?: number;
+  leaseState?: 'active' | 'expired';
   providerSession?: {
     provider: string;
     reference: string;
@@ -69,6 +72,7 @@ export interface DurableAiRunCompareAndSetOptions {
   allowedCurrentStatuses?: readonly DurableAiRunStatus[];
   cancellation?: 'absent' | 'requested';
   requiredLeaseOwner?: string;
+  requiredAttempt?: number;
   leaseState?: 'active' | 'expired';
   now?: Date;
 }
@@ -103,6 +107,7 @@ export interface DurableAiRunRepository {
     owner: string,
     input: AppendDurableAiRunEventInput,
     receivedAt?: Date,
+    attempt?: number,
   ): Promise<DurableAiRunEvent>;
   claimNextRun(
     owner: string,

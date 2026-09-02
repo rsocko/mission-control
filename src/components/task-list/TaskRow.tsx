@@ -22,6 +22,7 @@ import {
   REMINDER_RELATIVE_RULES,
 } from '@/lib/tasks/relative-reminder';
 import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
+import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { cn } from '@/lib/utils';
 
 /**
@@ -218,8 +219,7 @@ export function TaskRow({
   };
   const isDone = task.status === 'done' || isCompleting;
   const isInactive = isInactiveTaskStatus(task.status) || isCompleting;
-  const taskMeta = task.metadata ? (() => { try { return JSON.parse(task.metadata); } catch { return null; } })() : null;
-  const recurrence = taskMeta?.recurrence;
+  const recurrence = extractRecurrenceFromMetadata(task.metadata);
   const isSnoozed = task.snoozedUntil && new Date(task.snoozedUntil) > new Date();
   const hasFutureReminder = Boolean(task.reminderAt && new Date(task.reminderAt) > new Date());
   const relativeReminder = task.reminderRelative

@@ -17,6 +17,7 @@ import { detectDeletions } from './deletion-detector';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   findOpenRecurringTaskDuplicates,
+  findOrphanedRecurringTasks,
   getRecurringSeriesKey,
   getRecurringTitleKey,
   hasRecurrenceEvidence,
@@ -1301,15 +1302,36 @@ async function cleanupOpenRecurringTasks(
     knownRecurringTitleKeys,
   );
   let removed = 0;
+  const removedIds = new Set<string>();
 
   for (const group of duplicateGroups) {
     for (const duplicate of group.duplicates) {
       const reason = `Duplicate open Microsoft To Do recurrence — kept ${group.keeper.id}`;
       const archivedTasks = await deleteSyncedTask(duplicate.id, reason);
       removed++;
+      removedIds.add(duplicate.id);
       for (const archived of archivedTasks) {
         audit.push({ action: 'removed', ...archived });
       }
+    }
+  }
+
+  // Some duplicate recurrence chains never overlap as open rows at the same
+  // time (e.g. an old chain sits overdue and untouched while a separate,
+  // newer chain for the same title keeps completing and regenerating). The
+  // duplicate-group check above can't see those since only one row is ever
+  // open per chain at a time — catch them by comparing against completed
+  // history instead.
+  const orphanedTasks = findOrphanedRecurringTasks(
+    openTasks.filter((task) => !removedIds.has(task.id)),
+    historyTasks,
+  );
+  for (const orphaned of orphanedTasks) {
+    const reason = 'Stale open Microsoft To Do recurrence superseded by a later completed occurrence';
+    const archivedTasks = await deleteSyncedTask(orphaned.id, reason);
+    removed++;
+    for (const archived of archivedTasks) {
+      audit.push({ action: 'removed', ...archived });
     }
   }
 

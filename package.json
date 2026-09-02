@@ -52,7 +52,7 @@
     "@lexical/react": "^0.46.1-nightly.20260706.0",
     "@modelcontextprotocol/ext-apps": "^1.7.5",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@number-flow/react": "^0.6.1",
+    "@number-flow/react": "^0.6.2",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",

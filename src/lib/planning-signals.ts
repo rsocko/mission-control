@@ -27,14 +27,20 @@ export async function appendPlanningSignal(input: PlanningSignalInput): Promise<
 export async function finalizePlanningSignals(
   today = getLocalToday(),
 ): Promise<PlanningSignalFinalizationResult> {
-  return (await getWorkerPersistenceRepositories()).planningSignals.finalize(today);
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('planning-signals')) {
+    throw new Error('Planning signal finalization is disabled for the selected backend');
+  }
+  return repositories.planningSignals.finalize(today);
 }
 
 export async function finalizePlanningSignalsIfDue(
   today = getLocalToday(),
   now = new Date(),
 ): Promise<PlanningSignalFinalizationResult | null> {
-  return (await getWorkerPersistenceRepositories()).planningSignals.finalizeIfDue({ today, now });
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('planning-signals')) return null;
+  return repositories.planningSignals.finalizeIfDue({ today, now });
 }
 
 export function planningFrictionEventTypes(): readonly PlanningFrictionEventType[] {

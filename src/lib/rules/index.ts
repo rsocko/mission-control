@@ -34,18 +34,28 @@ export function normalizeAutoIncludeRules(value: unknown): AutoIncludeRule[] {
 }
 
 export async function evaluateAllProjectRules(): Promise<Array<{ projectId: string; added: number }>> {
-  return (await getWorkerPersistenceRepositories()).projectAutomation.evaluateAll();
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('project-automation')) return [];
+  return repositories.projectAutomation.evaluateAll();
 }
 
 export async function reevaluateProject(projectId: string): Promise<ProjectRuleEvaluation> {
-  return (await getWorkerPersistenceRepositories()).projectAutomation.evaluateProject(projectId);
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('project-automation')) {
+    return { added: 0, matched: 0, matches: [] };
+  }
+  return repositories.projectAutomation.evaluateProject(projectId);
 }
 
 export async function previewProjectRules(projectId: string): Promise<ProjectRuleMatch[]> {
-  return (await getWorkerPersistenceRepositories()).projectAutomation.previewProject(projectId);
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('project-automation')) return [];
+  return repositories.projectAutomation.previewProject(projectId);
 }
 
 export async function evaluateRulesForTasks(taskIds: string[]): Promise<void> {
   if (taskIds.length === 0) return;
-  await (await getWorkerPersistenceRepositories()).projectAutomation.evaluateTasks(taskIds);
+  const repositories = await getWorkerPersistenceRepositories();
+  if (!repositories.execution.support.allowsLegacyWorkflow('project-automation')) return;
+  await repositories.projectAutomation.evaluateTasks(taskIds);
 }

@@ -1,25 +1,31 @@
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   copyFileSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
   compareSqliteImportSchema,
+  copyAllTables,
   convertSqliteValueForPostgres,
   dependencySafeRows,
   dependencySafeTableOrder,
   currentPostgresMigrationHashes,
   expectedImportTableNames,
   matchesSupportedSqliteColumnShape,
+  openImmutableReadonlySqlite,
   prepareTarget,
   runSqliteToPostgresImport,
   validateSqliteMigrationState,
@@ -105,6 +111,36 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const sqlite = new Database(':memory:');
     runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
     return sqlite;
+  }
+
+  function retainedSqliteSource(): {
+    readonly directory: string;
+    readonly sourcePath: string;
+    readonly cleanup: () => void;
+  } {
+    const fixture = PERSISTED_STATE_FIXTURES.find(({ id }) => id === 'v1-0000-baseline');
+    if (!fixture) throw new Error('Missing baseline persisted-state fixture');
+    const directory = mkdtempSync(join(tmpdir(), 'mc-import-retained-source-'));
+    const sourcePath = join(directory, 'mission-control.db');
+    copyFileSync(
+      resolve('tests', 'fixtures', 'persisted-state', 'sqlite', fixture.fileName),
+      sourcePath,
+    );
+    const sqlite = new Database(sourcePath);
+    try {
+      runOrderedDatabaseBootstrap(sqlite, migrationsDirectory);
+    } finally {
+      sqlite.close();
+    }
+    return {
+      directory,
+      sourcePath,
+      cleanup: () => rmSync(directory, { recursive: true, force: true }),
+    };
+  }
+
+  function sha256(path: string): string {
+    return createHash('sha256').update(readFileSync(path)).digest('hex');
   }
 
   const productionHistoricalDatabases = new Map<PersistedStateFixture['tasksHistoricalOrder'], Buffer>();
@@ -487,7 +523,6 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       confirmWritersStopped: true,
       dryRun: true,
     });
-
     expect(() => parseArgs([
       '--sqlite-source',
       'source.sqlite3',
@@ -497,6 +532,275 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(() => parseArgs([
       '--reset-disposable-rehearsal-target',
     ])).toThrow(ImportPreconditionError);
+  });
+
+    it('imports a consolidated WAL-mode source immutably without creating sidecars', async () => {
+      vi.stubEnv('MC_POSTGRES_IMPORT_URL', '');
+      vi.stubEnv('MC_POSTGRES_URL', '');
+      const source = retainedSqliteSource();
+      const sidecarPaths = ['-wal', '-journal', '-shm'].map(
+        (suffix) => `${source.sourcePath}${suffix}`,
+      );
+      try {
+        const writable = new Database(source.sourcePath);
+        try {
+          expect(writable.pragma('journal_mode = WAL', { simple: true })).toBe('wal');
+          writable.pragma('wal_checkpoint(TRUNCATE)');
+        } finally {
+          writable.close();
+        }
+        expect(sidecarPaths.some(existsSync)).toBe(false);
+
+        const ordinaryReadonly = new Database(source.sourcePath, {
+          readonly: true,
+          fileMustExist: true,
+        });
+        let ordinarySidecars: string[];
+        try {
+          ordinaryReadonly.prepare('SELECT COUNT(*) FROM sqlite_master').get();
+          ordinarySidecars = sidecarPaths.filter(existsSync);
+        } finally {
+          ordinaryReadonly.close();
+        }
+        for (const sidecarPath of ordinarySidecars) rmSync(sidecarPath, { force: true });
+
+        const sourceHash = sha256(source.sourcePath);
+        const result = await runSqliteToPostgresImport({
+          sqliteSourcePath: source.sourcePath,
+          confirmWritersStopped: true,
+          dryRun: true,
+        });
+
+        expect(ordinarySidecars).toEqual(expect.arrayContaining([
+          `${source.sourcePath}-wal`,
+          `${source.sourcePath}-shm`,
+        ]));
+        expect(result.copiedTables).toHaveLength(160);
+        expect(result.evidence.source).toMatchObject({
+          walOrJournalPresent: false,
+          sidecarsPresent: false,
+          openedReadOnly: true,
+          immutable: true,
+        });
+        expect(result.evidence.quiescence).toMatchObject({
+          checkedWalAndRollbackJournal: true,
+          checkedSidecarsBeforeOpen: true,
+        });
+        expect(sidecarPaths.some(existsSync)).toBe(false);
+        expect(sha256(source.sourcePath)).toBe(sourceHash);
+      } finally {
+        source.cleanup();
+      }
+    }, 60_000);
+
+    it.each(['-wal', '-journal', '-shm'])(
+      'rejects a preexisting %s sidecar before opening SQLite',
+      async (suffix) => {
+        const source = retainedSqliteSource();
+        try {
+          writeFileSync(`${source.sourcePath}${suffix}`, 'preexisting sidecar');
+          await expect(runSqliteToPostgresImport({
+            sqliteSourcePath: source.sourcePath,
+            confirmWritersStopped: true,
+            dryRun: true,
+          })).rejects.toThrow(
+            `SQLite source is not quiescent: mission-control.db${suffix} exists.`,
+          );
+        } finally {
+          source.cleanup();
+        }
+      },
+      30_000,
+    );
+
+    it('rejects integrity failures through the immutable source path', async () => {
+      const source = retainedSqliteSource();
+      try {
+        const writable = new Database(source.sourcePath);
+        let pageSize: number;
+        let rootPage: number;
+        try {
+          writable.exec(`
+            CREATE TABLE corruption_probe (id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO corruption_probe (value) VALUES ('must be checked');
+          `);
+          pageSize = writable.pragma('page_size', { simple: true }) as number;
+          rootPage = writable.prepare(
+            "SELECT rootpage FROM sqlite_schema WHERE name = 'corruption_probe'",
+          ).pluck().get() as number;
+        } finally {
+          writable.close();
+        }
+        const corrupted = readFileSync(source.sourcePath);
+        corrupted[(rootPage - 1) * pageSize] = 0xff;
+        writeFileSync(source.sourcePath, corrupted);
+
+        await expect(runSqliteToPostgresImport({
+          sqliteSourcePath: source.sourcePath,
+          confirmWritersStopped: true,
+          dryRun: true,
+        })).rejects.toThrow('SQLite source failed PRAGMA integrity_check.');
+      } finally {
+        source.cleanup();
+      }
+    }, 30_000);
+
+    it('enforces read-only query semantics on immutable source handles', () => {
+      const source = retainedSqliteSource();
+      try {
+        const sourceHash = sha256(source.sourcePath);
+        const sqlite = openImmutableReadonlySqlite(source.sourcePath);
+        try {
+          expect(sqlite.readonly).toBe(true);
+          expect(sqlite.pragma('query_only', { simple: true })).toBe(1);
+          expect(() => sqlite.exec(
+            "INSERT INTO app_settings (key, value) VALUES ('immutable.probe', 'blocked')",
+          )).toThrow(/readonly database/);
+        } finally {
+          sqlite.close();
+        }
+        expect(sha256(source.sourcePath)).toBe(sourceHash);
+        expect(['-wal', '-journal', '-shm'].some(
+          (suffix) => existsSync(`${source.sourcePath}${suffix}`),
+        )).toBe(false);
+      } finally {
+        source.cleanup();
+      }
+    }, 30_000);
+
+  it('fails closed when SQLite URI handling was disabled before addon initialization', () => {
+    const source = retainedSqliteSource();
+    try {
+      const importerUrl = pathToFileURL(resolve(
+        'scripts',
+        'lib',
+        'sqlite-to-postgres-import.ts',
+      )).href;
+      const probe = spawnSync(process.execPath, [
+        '--conditions=react-server',
+        '--import',
+        'tsx',
+        '--eval',
+        `import(${JSON.stringify(importerUrl)}).then(({ openImmutableReadonlySqlite }) => openImmutableReadonlySqlite(${JSON.stringify(source.sourcePath)}))`,
+      ], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { ...process.env, SQLITE_USE_URI: '0' },
+      });
+
+      expect(probe.status).not.toBe(0);
+      expect(probe.stderr).toContain(
+        'SQLITE_USE_URI=1 must be configured before the first better-sqlite3 connection',
+      );
+      expect(['-wal', '-journal', '-shm'].some(
+        (suffix) => existsSync(`${source.sourcePath}${suffix}`),
+      )).toBe(false);
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
+
+  it('rejects source mutation during the immutable read window', async () => {
+    vi.stubEnv('MC_POSTGRES_IMPORT_URL', '');
+    vi.stubEnv('MC_POSTGRES_URL', '');
+    const source = retainedSqliteSource();
+    try {
+      await expect(runSqliteToPostgresImport({
+        sqliteSourcePath: source.sourcePath,
+        confirmWritersStopped: true,
+        dryRun: true,
+        logger: {
+          info(message) {
+            if (message === 'dry-run-without-target') {
+              appendFileSync(source.sourcePath, 'external mutation');
+            }
+          },
+          warn() {},
+          error() {},
+        },
+      })).rejects.toThrow('SQLite source changed after pre-open validation.');
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
+
+  it('rejects a sidecar that appears during the immutable read window', async () => {
+    vi.stubEnv('MC_POSTGRES_IMPORT_URL', '');
+    vi.stubEnv('MC_POSTGRES_URL', '');
+    const source = retainedSqliteSource();
+    try {
+      await expect(runSqliteToPostgresImport({
+        sqliteSourcePath: source.sourcePath,
+        confirmWritersStopped: true,
+        dryRun: true,
+        logger: {
+          info(message) {
+            if (message === 'dry-run-without-target') {
+              writeFileSync(`${source.sourcePath}-shm`, 'late sidecar');
+            }
+          },
+          warn() {},
+          error() {},
+        },
+      })).rejects.toThrow(
+        'SQLite source is not quiescent: mission-control.db-shm exists.',
+      );
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
+
+  it('rolls back copied rows when final source validation fails before commit', async () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec("CREATE TABLE probe (id TEXT PRIMARY KEY); INSERT INTO probe VALUES ('row-1')");
+    const queries: string[] = [];
+    const client = {
+      async query(sql: string) {
+        queries.push(sql);
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client) };
+    try {
+      await expect(copyAllTables(
+        pool as never,
+        sqlite,
+        ['probe'],
+        new Map([['probe', [{
+          name: 'id',
+          dataType: 'text',
+          udtName: 'text',
+          nullable: false,
+          hasDefault: false,
+          generated: false,
+        }]]]),
+        [],
+        () => {
+          throw new ImportPreconditionError('late source validation failed');
+        },
+      )).rejects.toThrow('late source validation failed');
+
+      expect(queries).toContain('BEGIN');
+      expect(queries).toContain('ROLLBACK');
+      expect(queries).not.toContain('COMMIT');
+      expect(client.release).toHaveBeenCalledOnce();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('removes the fixture temp directory when the fixture copy fails', async () => {
+    const prefix = 'mc-postgres-import-v1-0000-baseline-';
+    const before = readdirSync(tmpdir()).filter((entry) => entry.startsWith(prefix)).sort();
+
+    await expect(runSqliteToPostgresImport({
+      fixtureId: 'v1-0000-baseline',
+      fixtureDirectory: join(tmpdir(), 'missing-mc-fixture-directory'),
+      dryRun: true,
+    })).rejects.toThrow();
+
+    expect(readdirSync(tmpdir()).filter((entry) => entry.startsWith(prefix)).sort()).toEqual(before);
   });
 
   it.each(productionTasksFixtures)(

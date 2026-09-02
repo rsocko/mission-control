@@ -16,6 +16,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import Database from 'better-sqlite3';
 import pg from 'pg';
+import { getTableColumns } from 'drizzle-orm/utils';
 import { getTableName, isTable, type Table } from 'drizzle-orm/table';
 import { runOrderedDatabaseBootstrap } from '../../src/db/bootstrap/registry';
 import { resolvePostgresConfig } from '../../src/db/postgres/config';
@@ -58,6 +59,11 @@ const QUIESCENT_SYNC_JOB_STATUSES = new Set([
   'skipped',
 ]);
 const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-journal', '-shm'] as const;
+const JSON_PREFLIGHT_BATCH_SIZE = 500;
+// PostgreSQL's parser limit depends on server stack settings. A fixed conservative ceiling makes
+// source-only acceptance deterministic and prevents environment-specific failures after writes.
+const JSON_MAX_NESTING_DEPTH = 100;
+const JSON_UTF8_DECODER = new TextDecoder('utf-8', { fatal: true });
 
 const REPRESENTATIVE_TABLES = [
   'tasks',
@@ -139,6 +145,8 @@ export interface ImportEvidence {
     readonly sqliteMigrationCount: number;
     readonly importTableCount: number;
     readonly targetTableCount: number;
+    readonly jsonTargetColumnCount: number;
+    readonly jsonRowsScanned: number;
   };
   readonly quiescence: {
     readonly writersStoppedConfirmed: boolean;
@@ -211,6 +219,31 @@ interface ColumnInfo {
   readonly generated: boolean;
 }
 
+export type JsonCompatibilityCategory =
+  | 'invalid-json'
+  | 'invalid-utf8'
+  | 'excessive-nesting'
+  | 'target-jsonb-rejected'
+  | 'unsupported-unicode'
+  | 'unsupported-storage-type';
+
+export interface JsonTargetColumn {
+  readonly table: string;
+  readonly column: string;
+}
+
+export interface JsonCompatibilityIssue extends JsonTargetColumn {
+  readonly category: JsonCompatibilityCategory;
+  readonly count: number;
+}
+
+export interface JsonPreflightReport {
+  readonly targetColumns: readonly JsonTargetColumn[];
+  readonly rowsScanned: number;
+  readonly batchesScanned: number;
+  readonly issues: readonly JsonCompatibilityIssue[];
+}
+
 export interface SqliteColumnInfo {
   readonly name: string;
   readonly type: string;
@@ -281,6 +314,17 @@ export class ImportInvariantError extends Error {
   }
 }
 
+export class ImportValueCompatibilityError extends ImportPreconditionError {
+  constructor(
+    readonly table: string,
+    readonly column: string,
+    readonly category: JsonCompatibilityCategory,
+  ) {
+    super(`SQLite import value is incompatible with PostgreSQL at ${table}.${column} (${category}).`);
+    this.name = 'ImportValueCompatibilityError';
+  }
+}
+
 function noopLogger(): ImportLogger {
   return {
     info: () => undefined,
@@ -315,6 +359,45 @@ export function expectedImportTableNames(): {
     .filter((table) => !POSTGRES_SEARCH_PROJECTION_TABLES.has(table))
     .sort();
   return { sourceTables, targetTables };
+}
+
+export function expectedJsonTargetColumns(
+  sourceTables = expectedImportTableNames().sourceTables,
+): readonly JsonTargetColumn[] {
+  const sourceTableSet = new Set(sourceTables);
+  const sqliteTables = new Map(
+    Object.values(sqliteSchema)
+      .filter(isTable)
+      .map((table) => [getTableName(table as Table), table as Table]),
+  );
+  const columns: JsonTargetColumn[] = [];
+  for (const value of Object.values(postgresSchema)) {
+    if (!isTable(value)) continue;
+    const table = getTableName(value as Table);
+    if (!sourceTableSet.has(table)) continue;
+    const sqliteTable = sqliteTables.get(table);
+    const sqliteColumns = sqliteTable
+      ? new Map(Object.values(getTableColumns(sqliteTable)).map((column) => [column.name, column]))
+      : new Map();
+    for (const column of Object.values(getTableColumns(value as Table))) {
+      if (column.dataType === 'json') {
+        if (column.getSQLType() !== 'jsonb') {
+          throw new ImportPreconditionError(
+            `PostgreSQL JSON import target ${table}.${column.name} has unsupported type ${column.getSQLType()}.`,
+          );
+        }
+        if (sqliteColumns.get(column.name)?.dataType !== 'json') {
+          throw new ImportPreconditionError(
+            `SQLite JSON source mapping is missing for PostgreSQL target ${table}.${column.name}.`,
+          );
+        }
+        columns.push({ table, column: column.name });
+      }
+    }
+  }
+  return columns.sort((left, right) => (
+    left.table.localeCompare(right.table) || left.column.localeCompare(right.column)
+  ));
 }
 
 function readMigrationJournal(migrationsDirectory: string): MigrationJournal {
@@ -1042,6 +1125,16 @@ async function resetPublicSchema(pool: pg.Pool): Promise<void> {
   await pool.query('DROP SCHEMA IF EXISTS drizzle CASCADE');
 }
 
+export async function cleanupDisposableRehearsalTarget(pool: pg.Pool): Promise<void> {
+  await resetPublicSchema(pool);
+  const remaining = await publicTableNames(pool);
+  if (remaining.length > 0) {
+    throw new ImportInvariantError(
+      `Disposable rehearsal cleanup left ${remaining.length} public table(s).`,
+    );
+  }
+}
+
 async function validatePostgresMigrationState(
   pool: pg.Pool,
   migrationsDirectory: string,
@@ -1099,12 +1192,12 @@ export async function prepareTarget(
   const counts = await tableCounts(pool, existingTables);
   const nonEmpty = [...counts.entries()].filter(([, count]) => count > 0);
   const resetRequested = options.rehearsal && options.resetDisposableRehearsalTarget;
+  if (resetRequested && !disposableTargetLooksSafe(postgresUrl)) {
+    throw new ImportPreconditionError(
+      'Refusing disposable rehearsal reset because the PostgreSQL database name is not clearly test/dev/local/rehearsal/fixture-marked.',
+    );
+  }
   if ((unexpected.length > 0 || nonEmpty.length > 0) && resetRequested) {
-    if (!disposableTargetLooksSafe(postgresUrl)) {
-      throw new ImportPreconditionError(
-        'Refusing disposable rehearsal reset because the PostgreSQL database name is not clearly test/dev/local/rehearsal/fixture-marked.',
-      );
-    }
     if (options.dryRun) {
       return {
         initialized: false,
@@ -1317,6 +1410,7 @@ export function dependencySafeRows(
 export function convertSqliteValueForPostgres(
   value: unknown,
   column: ColumnInfo,
+  table = '<unknown>',
 ): unknown {
   if (value === null || value === undefined) return null;
   if (column.dataType === 'boolean') {
@@ -1327,14 +1421,161 @@ export function convertSqliteValueForPostgres(
       if (value === '0' || value.toLowerCase() === 'false') return false;
     }
     throw new ImportPreconditionError(
-      `Cannot convert SQLite value for PostgreSQL boolean column ${column.name}.`,
+      `SQLite import value is incompatible with PostgreSQL at ${table}.${column.name} (invalid-boolean).`,
     );
   }
   if (column.dataType === 'json' || column.dataType === 'jsonb') {
-    if (typeof value === 'string') return JSON.parse(value);
+    const category = jsonCompatibilityCategory(value);
+    if (category) {
+      throw new ImportValueCompatibilityError(table, column.name, category);
+    }
+    // node-postgres sends strings verbatim for json/jsonb parameters. Keeping the validated
+    // serialized form preserves JSON string scalars and JSON null instead of changing semantics.
     return value;
   }
   return value;
+}
+
+function stringHasUnsupportedJsonbUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const codeUnit = value.charCodeAt(index);
+    if (codeUnit === 0) return true;
+    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!Number.isInteger(next) || next < 0xdc00 || next > 0xdfff) return true;
+      index += 1;
+    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function jsonbTokenCompatibilityCategory(
+  serialized: string,
+): JsonCompatibilityCategory | null {
+  let depth = 0;
+  let stringStart = -1;
+  let escaped = false;
+  for (let index = 0; index < serialized.length; index += 1) {
+    const character = serialized[index];
+    if (stringStart >= 0) {
+      if (character === '\0') return 'unsupported-unicode';
+      if (escaped) {
+        escaped = false;
+      } else if (character === '\\') {
+        escaped = true;
+      } else if (character === '"') {
+        const token = serialized.slice(stringStart, index + 1);
+        let decoded: unknown;
+        try {
+          decoded = JSON.parse(token) as unknown;
+        } catch {
+          decoded = null;
+        }
+        if (typeof decoded === 'string') {
+          if (stringHasUnsupportedJsonbUnicode(decoded)) return 'unsupported-unicode';
+        }
+        stringStart = -1;
+      }
+      continue;
+    }
+    if (character === '"') {
+      stringStart = index;
+    } else if (character === '{' || character === '[') {
+      depth += 1;
+      if (depth > JSON_MAX_NESTING_DEPTH) return 'excessive-nesting';
+    } else if (character === '}' || character === ']') {
+      depth -= 1;
+    }
+  }
+  return null;
+}
+
+function jsonCompatibilityCategory(value: unknown): JsonCompatibilityCategory | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== 'string') return 'unsupported-storage-type';
+  const tokenCategory = jsonbTokenCompatibilityCategory(value);
+  if (tokenCategory) return tokenCategory;
+  try {
+    JSON.parse(value);
+  } catch {
+    return 'invalid-json';
+  }
+  return null;
+}
+
+export function preflightJsonCompatibility(
+  sqlite: Database.Database,
+  targetColumns = expectedJsonTargetColumns(),
+): JsonPreflightReport {
+  const columnsByTable = new Map<string, string[]>();
+  for (const target of targetColumns) {
+    const columns = columnsByTable.get(target.table) ?? [];
+    columns.push(target.column);
+    columnsByTable.set(target.table, columns);
+  }
+
+  const issueCounts = new Map<string, JsonCompatibilityIssue>();
+  let rowsScanned = 0;
+  let batchesScanned = 0;
+  for (const [table, columns] of columnsByTable) {
+    const selections = columns.flatMap((column, index) => [
+      `${quoteIdentifier(column)} AS ${quoteIdentifier(`__json_value_${index}`)}`,
+      `CAST(${quoteIdentifier(column)} AS BLOB) AS ${quoteIdentifier(`__json_raw_${index}`)}`,
+    ]);
+    const statement = sqlite.prepare(
+      `SELECT ${selections.join(', ')} FROM ${quoteIdentifier(table)}`,
+    );
+    let tableRows = 0;
+    for (const row of statement.iterate() as Iterable<Record<string, unknown>>) {
+      tableRows += 1;
+      rowsScanned += 1;
+      if ((tableRows - 1) % JSON_PREFLIGHT_BATCH_SIZE === 0) batchesScanned += 1;
+      for (const [columnIndex, column] of columns.entries()) {
+        const value = row[`__json_value_${columnIndex}`];
+        const raw = row[`__json_raw_${columnIndex}`];
+        let category: JsonCompatibilityCategory | null;
+        if (typeof value === 'string') {
+          try {
+            const decoded = JSON_UTF8_DECODER.decode(raw as Uint8Array);
+            category = decoded === value ? jsonCompatibilityCategory(value) : 'invalid-utf8';
+          } catch {
+            category = 'invalid-utf8';
+          }
+        } else {
+          category = jsonCompatibilityCategory(value);
+        }
+        if (!category) continue;
+        const key = `${table}\0${column}\0${category}`;
+        const existing = issueCounts.get(key);
+        issueCounts.set(key, {
+          table,
+          column,
+          category,
+          count: (existing?.count ?? 0) + 1,
+        });
+      }
+    }
+  }
+
+  const issues = [...issueCounts.values()].sort((left, right) => (
+    left.table.localeCompare(right.table)
+    || left.column.localeCompare(right.column)
+    || left.category.localeCompare(right.category)
+  ));
+  return { targetColumns, rowsScanned, batchesScanned, issues };
+}
+
+function assertJsonPreflightCompatible(report: JsonPreflightReport): void {
+  if (report.issues.length === 0) return;
+  throw new ImportPreconditionError(
+    `SQLite source has incompatible JSON for ${report.issues.length} table/column/category group(s): ${
+      report.issues.map((issue) => (
+        `${issue.table}.${issue.column}:${issue.category}=${issue.count}`
+      )).join('; ')
+    }.`,
+  );
 }
 
 function selectRows(
@@ -1370,6 +1611,13 @@ async function copyTableRows(
     );
   }
 
+  const jsonTargets = importColumns
+    .filter((column) => column.dataType === 'json' || column.dataType === 'jsonb')
+    .map((column) => ({ table, column: column.name }));
+  if (jsonTargets.length > 0) {
+    assertJsonPreflightCompatible(preflightJsonCompatibility(sqlite, jsonTargets));
+  }
+
   const rows = dependencySafeRows(
     selectRows(sqlite, table, importColumns.map((column) => column.name)),
     selfForeignKeys,
@@ -1380,19 +1628,67 @@ async function copyTableRows(
   for (let offset = 0; offset < rows.length; offset += batchSize) {
     const batch = rows.slice(offset, offset + batchSize);
     const values: unknown[] = [];
+    const jsonValues: Array<{ readonly column: string; readonly value: unknown }> = [];
     const placeholders = batch.map((row, rowIndex) => {
       const rowPlaceholders = importColumns.map((column, columnIndex) => {
-        values.push(convertSqliteValueForPostgres(row[column.name], column));
-        return `$${rowIndex * importColumns.length + columnIndex + 1}`;
+        const value = convertSqliteValueForPostgres(row[column.name], column, table);
+        values.push(value);
+        if (column.dataType === 'json' || column.dataType === 'jsonb') {
+          jsonValues.push({ column: column.name, value });
+        }
+        const parameter = `$${rowIndex * importColumns.length + columnIndex + 1}`;
+        return column.dataType === 'json' || column.dataType === 'jsonb'
+          ? `${parameter}::jsonb`
+          : parameter;
       });
       return `(${rowPlaceholders.join(', ')})`;
     });
+    await validateJsonbBatchWithTarget(client, table, jsonValues);
     await client.query(
       `INSERT INTO ${quoteIdentifier(table)} (${importColumns.map((column) => quoteIdentifier(column.name)).join(', ')}) VALUES ${placeholders.join(', ')}`,
       values,
     );
   }
   return rows.length;
+}
+
+async function validateJsonbBatchWithTarget(
+  client: pg.PoolClient,
+  table: string,
+  jsonValues: readonly { readonly column: string; readonly value: unknown }[],
+): Promise<void> {
+  if (jsonValues.length === 0) return;
+  await client.query('SAVEPOINT validate_jsonb_batch');
+  try {
+    await client.query(
+      `SELECT COUNT(value::jsonb)::text AS validated_count FROM (VALUES ${
+        jsonValues.map((_, index) => `($${index + 1}::text)`).join(', ')
+      }) AS source(value)`,
+      jsonValues.map(({ value }) => value),
+    );
+    await client.query('RELEASE SAVEPOINT validate_jsonb_batch');
+    return;
+  } catch {
+    await client.query('ROLLBACK TO SAVEPOINT validate_jsonb_batch');
+  }
+
+  for (const candidate of jsonValues) {
+    await client.query('SAVEPOINT validate_jsonb_value');
+    try {
+      await client.query('SELECT COUNT($1::jsonb)::text AS validated_count', [candidate.value]);
+      await client.query('RELEASE SAVEPOINT validate_jsonb_value');
+    } catch {
+      await client.query('ROLLBACK TO SAVEPOINT validate_jsonb_value');
+      throw new ImportValueCompatibilityError(
+        table,
+        candidate.column,
+        'target-jsonb-rejected',
+      );
+    }
+  }
+  throw new ImportPreconditionError(
+    `PostgreSQL rejected a JSON validation batch for ${table} (target-jsonb-rejected).`,
+  );
 }
 
 async function sequenceInfos(client: pg.PoolClient): Promise<readonly SequenceInfo[]> {
@@ -1573,6 +1869,7 @@ function buildEvidence(input: {
   readonly quiescence: ImportEvidence['quiescence'];
   readonly target: ImportEvidence['target'];
   readonly copiedTables: readonly ImportTableCount[];
+  readonly jsonPreflight: JsonPreflightReport;
   readonly invariants?: ImportInvariantReport;
 }): ImportEvidence {
   const taskCount = input.copiedTables.find((count) => count.table === 'tasks')?.sourceRows ?? 0;
@@ -1612,6 +1909,8 @@ function buildEvidence(input: {
       sqliteMigrationCount: input.sqliteMigrationCount,
       importTableCount: input.sourceTables.length,
       targetTableCount: input.targetTables.length,
+      jsonTargetColumnCount: input.jsonPreflight.targetColumns.length,
+      jsonRowsScanned: input.jsonPreflight.rowsScanned,
     },
     quiescence: input.quiescence,
     derivedState: {
@@ -1667,6 +1966,7 @@ export async function runSqliteToPostgresImport(
   const sourceSha256 = source.sha256;
   const sourceIdentity = `${source.kind}:${source.label}`;
   let pool: pg.Pool | null = null;
+  let disposableTargetTouched = false;
   let evidenceTarget: ImportEvidence['target'] = {
     identity: 'not-provided',
     initializedSchema: false,
@@ -1685,11 +1985,16 @@ export async function runSqliteToPostgresImport(
       source.kind === 'persisted-state-fixture',
     );
     assertSourceTablesExist(source.sqlite, sourceTables);
+    const jsonPreflight = preflightJsonCompatibility(source.sqlite);
+    assertJsonPreflightCompatible(jsonPreflight);
 
     logger.info('source-ready', {
       source: source.label,
       sourceKind: source.kind,
       requiredTables: sourceTables.length,
+      jsonTargetColumns: jsonPreflight.targetColumns.length,
+      jsonRowsScanned: jsonPreflight.rowsScanned,
+      jsonBatchesScanned: jsonPreflight.batchesScanned,
     });
 
     const plannedCounts = await sourceCounts(source.sqlite, sourceTables);
@@ -1720,6 +2025,7 @@ export async function runSqliteToPostgresImport(
         quiescence,
         target: evidenceTarget,
         copiedTables: plannedCounts,
+        jsonPreflight,
       });
       return {
         dryRun,
@@ -1733,7 +2039,17 @@ export async function runSqliteToPostgresImport(
       };
     }
 
+    if (
+      resetDisposableRehearsalTarget
+      && rehearsal
+      && !disposableTargetLooksSafe(postgresUrl)
+    ) {
+      throw new ImportPreconditionError(
+        'Refusing disposable rehearsal reset because the PostgreSQL database name is not clearly test/dev/local/rehearsal/fixture-marked.',
+      );
+    }
     pool = poolForImport(postgresUrl);
+    disposableTargetTouched = resetDisposableRehearsalTarget && rehearsal && !dryRun;
     logger.info('target-connect', { target: redactedTargetLabel(postgresUrl) });
     const targetState = await prepareTarget(
       pool,
@@ -1777,6 +2093,7 @@ export async function runSqliteToPostgresImport(
         quiescence,
         target: evidenceTarget,
         copiedTables: plannedCounts,
+        jsonPreflight,
       });
       return {
         dryRun,
@@ -1814,6 +2131,7 @@ export async function runSqliteToPostgresImport(
       quiescence,
       target: evidenceTarget,
       copiedTables,
+      jsonPreflight,
       invariants,
     });
     logger.info('import-complete', {
@@ -1835,6 +2153,18 @@ export async function runSqliteToPostgresImport(
       evidence,
       invariants,
     };
+  } catch (error) {
+    if (pool && disposableTargetTouched && !dryRun) {
+      try {
+        await cleanupDisposableRehearsalTarget(pool);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          'SQLite-to-PostgreSQL import failed and disposable rehearsal cleanup could not be verified',
+        );
+      }
+    }
+    throw error;
   } finally {
     source.sqlite.close();
     source.cleanup();

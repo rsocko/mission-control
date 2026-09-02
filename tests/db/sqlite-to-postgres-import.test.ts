@@ -18,14 +18,17 @@ import { describe, expect, it, vi } from 'vitest';
 import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
   compareSqliteImportSchema,
+  cleanupDisposableRehearsalTarget,
   copyAllTables,
   convertSqliteValueForPostgres,
   dependencySafeRows,
   dependencySafeTableOrder,
   currentPostgresMigrationHashes,
+  expectedJsonTargetColumns,
   expectedImportTableNames,
   matchesSupportedSqliteColumnShape,
   openImmutableReadonlySqlite,
+  preflightJsonCompatibility,
   prepareTarget,
   runSqliteToPostgresImport,
   validateSqliteMigrationState,
@@ -506,8 +509,347 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       nullable: false,
       hasDefault: false,
       generated: false,
-    })).toEqual({ safe: true });
+    })).toBe('{"safe":true}');
   });
+
+  it('derives the complete JSON target inventory from the PostgreSQL schema', () => {
+    const columns = expectedJsonTargetColumns();
+
+    expect(columns).toHaveLength(115);
+    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(115);
+    expect(columns).toContainEqual({ table: 'app_settings', column: 'value' });
+    expect(columns).toContainEqual({ table: 'tasks', column: 'metadata' });
+    expect(columns).toContainEqual({ table: 'worker_health_snapshot', column: 'payload' });
+  });
+
+  it('preserves every valid JSON semantic class as serialized PostgreSQL input', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE json_values (value)');
+    const values: unknown[] = [
+      '{"object":true}',
+      '[1,2,3]',
+      '"string scalar"',
+      '"ordinary Unicode: café 世界"',
+      '"escaped quote: \\" and backslash: \\\\"',
+      '{"escaped\\\"key":"backslash \\\\"}',
+      '"{\\"doubleEncoded\\":true}"',
+      '"1e999999999999999999999"',
+      '{"1e999999999999999999999":"numeric-looking key"}',
+      '42',
+      `1${'0'.repeat(400)}`,
+      '1e309',
+      '1e131071',
+      '1e-16383',
+      '-0',
+      '-0.000',
+      '1.2300e2',
+      '0e999',
+      'true',
+      'false',
+      'null',
+      ' { "duplicate": 1, "duplicate": 2 } ',
+      JSON.stringify('x'.repeat(1_000_000)),
+      null,
+    ];
+    const insert = sqlite.prepare('INSERT INTO json_values (value) VALUES (?)');
+    for (const value of values) insert.run(value);
+    try {
+      const report = preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ]);
+      expect(report).toMatchObject({
+        targetColumns: [{ table: 'json_values', column: 'value' }],
+        rowsScanned: values.length,
+        batchesScanned: 1,
+        issues: [],
+      });
+      const jsonColumn = {
+        name: 'value',
+        dataType: 'jsonb',
+        udtName: 'jsonb',
+        nullable: true,
+        hasDefault: false,
+        generated: false,
+      };
+      expect(values.map((value) => convertSqliteValueForPostgres(
+        value,
+        jsonColumn,
+        'json_values',
+      ))).toEqual(values);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('aggregates every incompatible JSON category without values or row identifiers', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE first_json (left_value, right_value);
+      CREATE TABLE second_json (payload);
+    `);
+    sqlite.prepare('INSERT INTO first_json VALUES (?, ?)').run(
+      'secret plain text',
+      Buffer.from('secret bytes'),
+    );
+    sqlite.prepare('INSERT INTO first_json VALUES (?, ?)').run('', 'secret invalid json');
+    sqlite.prepare('INSERT INTO second_json VALUES (?)').run(
+      `${'['.repeat(101)}0${']'.repeat(101)}`,
+    );
+    try {
+      const report = preflightJsonCompatibility(sqlite, [
+        { table: 'first_json', column: 'left_value' },
+        { table: 'first_json', column: 'right_value' },
+        { table: 'second_json', column: 'payload' },
+      ]);
+
+      expect(report.issues).toEqual([
+        { table: 'first_json', column: 'left_value', category: 'invalid-json', count: 2 },
+        {
+          table: 'first_json',
+          column: 'right_value',
+          category: 'invalid-json',
+          count: 1,
+        },
+        {
+          table: 'first_json',
+          column: 'right_value',
+          category: 'unsupported-storage-type',
+          count: 1,
+        },
+        {
+          table: 'second_json',
+          column: 'payload',
+          category: 'excessive-nesting',
+          count: 1,
+        },
+      ]);
+      expect(JSON.stringify(report)).not.toContain('secret');
+      expect(() => convertSqliteValueForPostgres(
+        'secret plain text',
+        {
+          name: 'left_value',
+          dataType: 'jsonb',
+          udtName: 'jsonb',
+          nullable: false,
+          hasDefault: false,
+          generated: false,
+        },
+        'first_json',
+      )).toThrow(
+        'SQLite import value is incompatible with PostgreSQL at first_json.left_value (invalid-json).',
+      );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('streams JSON preflight in bounded batches', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE json_values (value TEXT NOT NULL)');
+    const insertRows = sqlite.transaction(() => {
+      const insert = sqlite.prepare('INSERT INTO json_values VALUES (?)');
+      for (let index = 0; index < 501; index += 1) insert.run('{"valid":true}');
+    });
+
+    insertRows();
+    try {
+      expect(preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ])).toMatchObject({
+        rowsScanned: 501,
+        batchesScanned: 2,
+        issues: [],
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects jsonb-incompatible Unicode while accepting valid surrogate pairs', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE json_values (value TEXT NOT NULL)');
+    const insert = sqlite.prepare('INSERT INTO json_values VALUES (?)');
+    insert.run('"\\u0000"');
+    insert.run('{"\\ud800":"value"}');
+    insert.run('"\\udc00"');
+    insert.run('{"duplicate":"\\u0000","duplicate":"safe"}');
+    insert.run('{"duplicate":"\\ud800","duplicate":"safe"}');
+    insert.run('{"escaped\\\"key":"safe","next":"\\u0000"}');
+    insert.run('"\\ud83d\\ude00"');
+    insert.run('"café 世界"');
+    try {
+      expect(preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ]).issues).toEqual([{
+        table: 'json_values',
+        column: 'value',
+        category: 'unsupported-unicode',
+        count: 6,
+      }]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects malformed UTF-8 text without exposing replacement-decoded content', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE json_values (value TEXT NOT NULL);
+      INSERT INTO json_values VALUES (CAST(X'22C32822' AS TEXT));
+    `);
+    try {
+      expect(preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ])).toMatchObject({
+        rowsScanned: 1,
+        issues: [{
+          table: 'json_values',
+          column: 'value',
+          category: 'invalid-utf8',
+          count: 1,
+        }],
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('applies the deterministic nesting ceiling to arrays and objects, not width', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE json_values (value TEXT NOT NULL)');
+    const insert = sqlite.prepare('INSERT INTO json_values VALUES (?)');
+    insert.run(JSON.stringify(Array.from({ length: 200_000 }, (_, index) => index)));
+    insert.run(`${'['.repeat(101)}0${']'.repeat(101)}`);
+    insert.run(`${'{"nested":'.repeat(101)}0${'}'.repeat(101)}`);
+    insert.run(`${'[{"nested":'.repeat(51)}0${'}]'.repeat(51)}`);
+    insert.run(`{"duplicate":${'['.repeat(101)}0${']'.repeat(101)},"duplicate":"safe"}`);
+    try {
+      expect(preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ])).toMatchObject({
+        rowsScanned: 5,
+        issues: [{
+          table: 'json_values',
+          column: 'value',
+          category: 'excessive-nesting',
+          count: 4,
+        }],
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('accounts for wide jsonb containers without recursion or spread', () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE json_values (value TEXT NOT NULL)');
+    sqlite.prepare('INSERT INTO json_values VALUES (?)').run(JSON.stringify(
+      Array.from({ length: 200_000 }, (_, index) => (
+        index % 4 === 0 ? null : index % 4 === 1 ? true : index % 4 === 2 ? 'value' : index
+      )),
+    ));
+    try {
+      expect(preflightJsonCompatibility(sqlite, [
+        { table: 'json_values', column: 'value' },
+      ])).toMatchObject({
+        rowsScanned: 1,
+        issues: [],
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rejects incompatible source JSON before any PostgreSQL access', async () => {
+    const source = retainedSqliteSource();
+    try {
+      const writable = new Database(source.sourcePath);
+      try {
+        writable.prepare(`
+          INSERT INTO app_settings (key, value, updated_at)
+          VALUES ('json-preflight-probe', 'ambiguous plain text', '2026-09-01T00:00:00.000Z')
+        `).run();
+      } finally {
+        writable.close();
+      }
+
+      await expect(runSqliteToPostgresImport({
+        sqliteSourcePath: source.sourcePath,
+        confirmWritersStopped: true,
+        dryRun: true,
+        postgresUrl: 'postgresql://127.0.0.1:1/mission_control_import_rehearsal',
+      })).rejects.toThrow(
+        'app_settings.value:invalid-json=1',
+      );
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
+
+  it('accepts production-shaped scalar, JSON null, double-encoded, and large settings', async () => {
+    vi.stubEnv('MC_POSTGRES_IMPORT_URL', '');
+    vi.stubEnv('MC_POSTGRES_URL', '');
+    const source = retainedSqliteSource();
+    try {
+      const writable = new Database(source.sourcePath);
+      try {
+        const insert = writable.prepare(`
+          INSERT INTO app_settings (key, value, updated_at)
+          VALUES (?, ?, '2026-09-01T00:00:00.000Z')
+        `);
+        insert.run('json-string-scalar', '"historical scalar"');
+        insert.run('json-null', 'null');
+        insert.run('double-encoded', '"{\\"historical\\":true}"');
+        insert.run('large-json-scalar', JSON.stringify('x'.repeat(1_000_000)));
+      } finally {
+        writable.close();
+      }
+
+      const result = await runSqliteToPostgresImport({
+        sqliteSourcePath: source.sourcePath,
+        confirmWritersStopped: true,
+        dryRun: true,
+      });
+
+      expect(result.evidence.schema).toMatchObject({
+        importTableCount: 160,
+        jsonTargetColumnCount: 115,
+      });
+      expect(result.evidence.schema.jsonRowsScanned).toBeGreaterThan(0);
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
+
+  it('aggregates production-shaped incompatibilities across tables before target access', async () => {
+    const source = retainedSqliteSource();
+    try {
+      const writable = new Database(source.sourcePath);
+      try {
+        writable.prepare(`
+          INSERT INTO app_settings (key, value, updated_at)
+          VALUES ('invalid-one', 'ambiguous', '2026-09-01T00:00:00.000Z'),
+                 ('invalid-two', '', '2026-09-01T00:00:00.000Z')
+        `).run();
+        writable.prepare('UPDATE tasks SET metadata = ?').run(Buffer.from('sensitive bytes'));
+      } finally {
+        writable.close();
+      }
+
+      const failure = runSqliteToPostgresImport({
+        sqliteSourcePath: source.sourcePath,
+        confirmWritersStopped: true,
+        dryRun: true,
+        postgresUrl: 'postgresql://127.0.0.1:1/mission_control_import_rehearsal',
+      });
+      await expect(failure).rejects.toThrow('app_settings.value:invalid-json=2');
+      await expect(failure).rejects.toThrow('tasks.metadata:unsupported-storage-type=1');
+      await expect(failure).rejects.not.toThrow('ambiguous');
+      await expect(failure).rejects.not.toThrow('sensitive bytes');
+    } finally {
+      source.cleanup();
+    }
+  }, 30_000);
 
   it('parses operator flags and rejects unsafe source/target combinations', () => {
     expect(parseArgs([
@@ -788,6 +1130,100 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     } finally {
       sqlite.close();
     }
+  });
+
+  it('isolates target-dependent jsonb rejection without exposing the value', async () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec('CREATE TABLE probe (id TEXT PRIMARY KEY, payload TEXT)');
+    sqlite.prepare('INSERT INTO probe VALUES (?, ?)').run('row-1', '"secret target value"');
+    const queries: string[] = [];
+    const client = {
+      async query(sql: string, values?: readonly unknown[]) {
+        queries.push(sql);
+        if (sql.includes('::jsonb') && values?.includes('"secret target value"')) {
+          throw new Error('target detail containing secret target value');
+        }
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client) };
+    try {
+      const failure = copyAllTables(
+        pool as never,
+        sqlite,
+        ['probe'],
+        new Map([['probe', [
+          {
+            name: 'id',
+            dataType: 'text',
+            udtName: 'text',
+            nullable: false,
+            hasDefault: false,
+            generated: false,
+          },
+          {
+            name: 'payload',
+            dataType: 'jsonb',
+            udtName: 'jsonb',
+            nullable: true,
+            hasDefault: false,
+            generated: false,
+          },
+        ]]]),
+        [],
+        () => undefined,
+      );
+      await expect(failure).rejects.toThrow(
+        'probe.payload (target-jsonb-rejected)',
+      );
+      await expect(failure).rejects.not.toThrow('secret target value');
+      expect(queries.some((sql) => sql.includes('COUNT(value::jsonb)'))).toBe(true);
+      expect(queries.some((sql) => sql.includes('SELECT value::jsonb'))).toBe(false);
+      expect(queries.some((sql) => sql.includes('COUNT($1::jsonb)'))).toBe(true);
+      expect(queries.some((sql) => sql === 'SELECT $1::jsonb')).toBe(false);
+      expect(queries).toContain('ROLLBACK TO SAVEPOINT validate_jsonb_batch');
+      expect(queries).toContain('ROLLBACK TO SAVEPOINT validate_jsonb_value');
+      expect(queries).toContain('ROLLBACK');
+      expect(queries.join(' ')).not.toContain('secret target value');
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('cleans and verifies a failed disposable rehearsal schema', async () => {
+    const queries: string[] = [];
+    const pool = {
+      async query(sql: string) {
+        queries.push(sql);
+        if (sql.includes('FROM information_schema.tables')) return { rows: [] };
+        return { rows: [] };
+      },
+    };
+
+    await cleanupDisposableRehearsalTarget(pool as never);
+
+    expect(queries).toEqual([
+      'DROP SCHEMA public CASCADE',
+      'CREATE SCHEMA public',
+      'DROP SCHEMA IF EXISTS drizzle CASCADE',
+      expect.stringContaining('FROM information_schema.tables'),
+    ]);
+  });
+
+  it('fails closed when disposable rehearsal cleanup cannot be verified', async () => {
+    const pool = {
+      async query(sql: string) {
+        if (sql.includes('FROM information_schema.tables')) {
+          return { rows: [{ table_name: 'leftover_table' }] };
+        }
+        return { rows: [] };
+      },
+    };
+
+    await expect(cleanupDisposableRehearsalTarget(pool as never)).rejects.toThrow(
+      'Disposable rehearsal cleanup left 1 public table(s).',
+    );
   });
 
   it('removes the fixture temp directory when the fixture copy fails', async () => {

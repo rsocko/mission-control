@@ -86,9 +86,11 @@ async function main(): Promise<void> {
   );
   let aiRunWorker: { start(): void; stop(): Promise<void> } | null = null;
   if (process.env.MC_DATABASE_BACKEND !== 'postgres') {
-    const { DurableAiRunStore, DurableAiRunWorker } = await import('@/lib/ai/durable-runs');
+    const { DurableAiRunWorker, getDurableAiRunRepository } = await import(
+      '@/lib/ai/durable-runs'
+    );
     aiRunWorker = new DurableAiRunWorker(
-      new DurableAiRunStore(),
+      await getDurableAiRunRepository(),
       new Map(),
       {
         reportError: (error, operation, runId) => {

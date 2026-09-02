@@ -138,6 +138,14 @@ function createDirectCopilotExecutor(
     }
     return lifecycle;
   };
+  const releaseLifecycle = async (
+    run: ClaimedDurableAiRun,
+    lifecycle: DirectCopilotExecutorLifecycle,
+  ) => {
+    const key = `${run.id}:${run.attempt}`;
+    await lifecycle.shutdownForRestart();
+    lifecycles.delete(key);
+  };
   const assertNotAborted = (context: DurableAiRunExecutionContext) => {
     context.signal.throwIfAborted();
   };
@@ -181,6 +189,9 @@ function createDirectCopilotExecutor(
           `Durable AI run ${context.run.id} is not executable from Copilot state ${record.state}.`,
         );
       }
+      if (record.state === 'cleaned_up') {
+        await releaseLifecycle(context.run, copilot);
+      }
 
       return {
         provider: COPILOT_PROVIDER,
@@ -194,7 +205,14 @@ function createDirectCopilotExecutor(
       await assertPersistedClaim(dependencies, context.run);
       const copilot = await lifecycleFor(context.run);
       let record = await copilot.getRun(context.run.id);
-      if (!record || record.state === 'cleaned_up') return;
+      if (!record) {
+        await releaseLifecycle(context.run, copilot);
+        return;
+      }
+      if (record.state === 'cleaned_up') {
+        await releaseLifecycle(context.run, copilot);
+        return;
+      }
       if (record.ownerId !== ownerId) {
         throw new Error(
           `Durable AI run ${context.run.id} cancellation ownership was lost.`,
@@ -211,7 +229,10 @@ function createDirectCopilotExecutor(
       ) {
         return;
       }
-      await copilot.cancelRun(context.run.id);
+      record = await copilot.cancelRun(context.run.id);
+      if (record.state === 'cleaned_up') {
+        await releaseLifecycle(context.run, copilot);
+      }
     },
 
     async cleanup(context: DurableAiRunCleanupContext) {
@@ -223,21 +244,34 @@ function createDirectCopilotExecutor(
       await assertPersistedClaim(dependencies, context.run);
       const copilot = await lifecycleFor(context.run);
       let record = await copilot.getRun(context.run.id);
-      if (!record || record.state === 'cleaned_up') return;
+      if (!record) {
+        await releaseLifecycle(context.run, copilot);
+        return;
+      }
+      if (record.state === 'cleaned_up') {
+        await releaseLifecycle(context.run, copilot);
+        return;
+      }
       if (record.ownerId !== ownerId) {
         throw new Error(
           `Durable AI run ${context.run.id} cleanup ownership was lost.`,
         );
       }
       if (record.cleanupPending) {
-        await copilot.retryCleanup(context.run.id);
+        record = await copilot.retryCleanup(context.run.id);
+        if (record.state === 'cleaned_up') {
+          await releaseLifecycle(context.run, copilot);
+        }
         return;
       }
       if (record.state === 'idle' && record.connection === 'detached') {
         record = await copilot.resumeRun(context.run.id);
       }
       if (record.state === 'idle' && record.connection === 'attached') {
-        await copilot.completeRun(context.run.id);
+        record = await copilot.completeRun(context.run.id);
+        if (record.state === 'cleaned_up') {
+          await releaseLifecycle(context.run, copilot);
+        }
         return;
       }
       throw new Error(

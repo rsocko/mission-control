@@ -245,8 +245,12 @@ describe('durable AI executor registry', () => {
   it('creates and resumes the direct Copilot route without replacing its provider session', async () => {
     const freshLifecycle = lifecycle(undefined);
     vi.mocked(freshLifecycle.getRun).mockResolvedValueOnce(undefined);
-    const fresh = createDurableAiExecutorRegistry(dependencies(freshLifecycle))
-      .get(COPILOT_EXECUTION_ROUTE)!;
+    const createCopilotLifecycle = vi.fn(() => freshLifecycle);
+    const fresh = createDurableAiExecutorRegistry({
+      ownerId: 'worker-a',
+      durableRuns,
+      createCopilotLifecycle,
+    }).get(COPILOT_EXECUTION_ROUTE)!;
 
     await expect(fresh.execute(executionContext())).resolves.toEqual({
       provider: COPILOT_PROVIDER,
@@ -254,6 +258,8 @@ describe('durable AI executor registry', () => {
       fallbackState: 'not_used',
     });
     expect(freshLifecycle.createRun).toHaveBeenCalledOnce();
+    await fresh.cancel!(executionContext());
+    expect(createCopilotLifecycle).toHaveBeenCalledTimes(2);
 
     const detachedLifecycle = lifecycle(lifecycleRecord({
       connection: 'detached',

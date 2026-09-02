@@ -272,10 +272,6 @@ export function createSqlitePlanningSignalRepository(
         if (completed) return null;
         const result = finalize(sqlite, today);
         sqlite.prepare(`
-          DELETE FROM task_history_events
-          WHERE task_id = ? AND event_type = ? AND new_value <> ?
-        `).run(FINALIZATION_MARKER_TASK_ID, FINALIZATION_MARKER_EVENT_TYPE, window);
-        sqlite.prepare(`
           INSERT INTO task_history_events (
             task_id, event_type, field_name, previous_value, new_value,
             occurred_at, recorded_at, provenance, metadata

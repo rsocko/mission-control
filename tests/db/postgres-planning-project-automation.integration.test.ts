@@ -24,9 +24,13 @@ describePostgres('PostgreSQL planning and project automation integration', () =>
       : {}),
   });
   const planningTaskId = `planning-${suffix}`;
+  const recoveryTaskId = `planning-recovery-${suffix}`;
   const projectId = `project-${suffix}`;
   const bulkConnectorId = `bulk-${suffix}`;
   const projectTaskIds = Array.from({ length: 501 }, (_, index) => `project-${suffix}-${index}`);
+  const uniqueWindowMinute = Number.parseInt(suffix.replaceAll('-', '').slice(0, 6), 16);
+  const replicaWindow = new Date(Date.UTC(2030, 0, 1, 0, uniqueWindowMinute));
+  const retryWindow = new Date(replicaWindow.getTime() + 5 * 60 * 1000);
 
   beforeAll(async () => {
     if (connectionString) assertSafeIntegrationTestTarget(connectionString);
@@ -79,19 +83,8 @@ describePostgres('PostgreSQL planning and project automation integration', () =>
     await pool.query(`DELETE FROM task_projects WHERE project_id = $1`, [projectId]);
     await pool.query(`DELETE FROM hub_projects WHERE id = $1`, [projectId]);
     await pool.query(`DELETE FROM my_day_items WHERE task_id = $1`, [planningTaskId]);
-    await pool.query(`
-      DELETE FROM task_history_events
-      WHERE task_id = $1
-         OR (
-           task_id = '__planning-signal-finalizer__'
-           AND new_value IN (
-             '2026-08-20T12:00:00.000Z',
-             '2026-08-20T12:05:00.000Z'
-           )
-         )
-    `, [planningTaskId]);
-    await pool.query(`DELETE FROM tasks WHERE id = $1 OR id = ANY($2::text[])`, [
-      planningTaskId,
+    await pool.query(`DELETE FROM tasks WHERE id = ANY($1::text[]) OR id = ANY($2::text[])`, [
+      [planningTaskId, recoveryTaskId],
       projectTaskIds,
     ]);
     await pool.query(`DROP TRIGGER IF EXISTS planning_signal_recovery_test ON task_history_events`);
@@ -103,20 +96,27 @@ describePostgres('PostgreSQL planning and project automation integration', () =>
     const { pool } = backend.context;
     const repositoryA = createPostgresPlanningSignalRepository(pool);
     const repositoryB = createPostgresPlanningSignalRepository(pool);
-    const now = new Date('2026-08-20T12:02:00.000Z');
 
     const replicaResults = await Promise.all([
-      repositoryA.finalizeIfDue({ today: '2026-08-20', now }),
-      repositoryB.finalizeIfDue({ today: '2026-08-20', now }),
+      repositoryA.finalizeIfDue({ today: '2026-08-20', now: replicaWindow }),
+      repositoryB.finalizeIfDue({ today: '2026-08-20', now: replicaWindow }),
     ]);
     expect(replicaResults.filter((result) => result !== null)).toHaveLength(1);
     expect(replicaResults.filter((result) => result === null)).toHaveLength(1);
 
+    const seededAt = new Date().toISOString();
+    await pool.query(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, due_date, created_at, updated_at, last_synced_at
+      ) VALUES ($1, $2, 'local', 'local', 'Recovery task', 'todo', 'none',
+                '2026-08-18', $3, $3, $3)
+    `, [recoveryTaskId, `local:${recoveryTaskId}`, seededAt]);
     await pool.query(`
       CREATE OR REPLACE FUNCTION planning_signal_recovery_test()
       RETURNS trigger LANGUAGE plpgsql AS $$
       BEGIN
-        IF NEW.task_id = '${planningTaskId}' AND NEW.event_type = 'became_overdue' THEN
+        IF NEW.task_id = '${recoveryTaskId}' AND NEW.event_type = 'became_overdue' THEN
           RAISE EXCEPTION 'injected finalizer failure';
         END IF;
         RETURN NEW;
@@ -128,15 +128,6 @@ describePostgres('PostgreSQL planning and project automation integration', () =>
       BEFORE INSERT ON task_history_events
       FOR EACH ROW EXECUTE FUNCTION planning_signal_recovery_test()
     `);
-    await pool.query(`
-      DELETE FROM task_history_events
-      WHERE task_id = $1
-         OR (
-           task_id = '__planning-signal-finalizer__'
-           AND new_value = '2026-08-20T12:05:00.000Z'
-         )
-    `, [planningTaskId]);
-    const retryWindow = new Date('2026-08-20T12:06:00.000Z');
     await expect(repositoryA.finalizeIfDue({
       today: '2026-08-20',
       now: retryWindow,

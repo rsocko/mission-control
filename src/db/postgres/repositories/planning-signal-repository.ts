@@ -310,10 +310,6 @@ export function createPostgresPlanningSignalRepository(pool: Pool): PlanningSign
       if (completed.length > 0) return null;
       const result = await finalize(client, today);
       await client.query(`
-        DELETE FROM task_history_events
-        WHERE task_id = $1 AND event_type = $2 AND new_value <> $3
-      `, [FINALIZATION_MARKER_TASK_ID, FINALIZATION_MARKER_EVENT_TYPE, window]);
-      await client.query(`
         INSERT INTO task_history_events (
           task_id, event_type, field_name, previous_value, new_value,
           occurred_at, recorded_at, provenance, metadata

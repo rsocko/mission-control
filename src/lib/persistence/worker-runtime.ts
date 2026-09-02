@@ -39,6 +39,8 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteNotificationDeliveryRepository },
     { createSqliteTaskReminderRepository },
     { createSqliteTriagePersistenceRepositories },
+    { createSqlitePlanningSignalRepository },
+    { createSqliteProjectAutomationRepository },
     { createSqliteFinanceWorkerPersistence },
     { createSqliteFinanceConnectionRecoveryPersistence },
     { createSqliteFinanceInsightPersistence },
@@ -64,6 +66,8 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-notification-delivery-repository'),
     import('@/db/persistence/sqlite-task-reminder-repository'),
     import('@/db/persistence/sqlite-triage-repositories'),
+    import('@/db/persistence/sqlite-planning-signal-repository'),
+    import('@/db/persistence/sqlite-project-automation-repository'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
     import('@/db/persistence/sqlite-finance-recovery-repository'),
     import('@/db/persistence/sqlite-finance-insights-repositories'),
@@ -148,6 +152,8 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite),
     reminders: createSqliteTaskReminderRepository(sqlite),
     triage: createSqliteTriagePersistenceRepositories(sqlite),
+    planningSignals: createSqlitePlanningSignalRepository(sqlite),
+    projectAutomation: createSqliteProjectAutomationRepository(sqlite),
     finance,
   };
 }

@@ -151,6 +151,20 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  planningSignals: new Proxy({} as WorkerPersistenceRepositories['planningSignals'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().planningSignals[
+        property as keyof WorkerPersistenceRepositories['planningSignals']
+      ]
+    ),
+  }),
+  projectAutomation: new Proxy({} as WorkerPersistenceRepositories['projectAutomation'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().projectAutomation[
+        property as keyof WorkerPersistenceRepositories['projectAutomation']
+      ]
+    ),
+  }),
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[

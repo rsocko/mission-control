@@ -6,6 +6,8 @@ import type { FinanceWorkerPersistence } from './finance-worker';
 import type { NotificationDeliveryRepository } from './notification-delivery';
 import type { TaskReminderRepository } from './task-reminders';
 import type { TriagePersistenceRepositories } from './triage-repositories';
+import type { PlanningSignalRepository } from './planning-signals';
+import type { ProjectAutomationRepository } from './project-automation';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -48,6 +50,8 @@ export interface WorkerPersistenceRepositories {
   notificationDelivery: NotificationDeliveryRepository;
   reminders: TaskReminderRepository;
   triage: TriagePersistenceRepositories;
+  planningSignals: PlanningSignalRepository;
+  projectAutomation: ProjectAutomationRepository;
   /**
    * Layer 5A: the atomic core finance worker projection (identity, transaction
    * snapshots, reference datasets, and automated attribution).

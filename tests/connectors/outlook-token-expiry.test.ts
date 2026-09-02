@@ -1,4 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// Import the connectors barrel first: it eagerly wires up `registerDefaultConnectorFactories()`
+// during module evaluation, and that function reads each connector's factory export
+// synchronously. Importing an individual connector submodule first here would create a
+// circular-require ordering issue (connectors/index.ts <-> outlook-email/index.ts) where
+// the factory is read before its module finishes evaluating, crashing with
+// "Cannot read properties of undefined (reading 'notificationTypes')".
+import '@/lib/connectors';
 import { outlookEmailFactory } from '@/lib/connectors/outlook-email';
 import { outlookCalendarFactory } from '@/lib/connectors/outlook-calendar';
 import type { ConnectorConfig } from '@/types';

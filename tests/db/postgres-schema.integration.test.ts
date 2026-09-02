@@ -55,7 +55,7 @@ describePostgres('PostgreSQL schema integration', () => {
     `);
 
     expect(Number(result.rows[0]?.count)).toBe(
-      backend.context.vector.available ? 163 : 162,
+      backend.context.vector.available ? 165 : 164,
     );
   });
 

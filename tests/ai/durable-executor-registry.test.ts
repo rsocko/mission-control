@@ -46,6 +46,14 @@ process.env.MC_AI_PROVIDER_SESSION_KEY = Buffer.alloc(32, 11).toString('base64')
 let database: typeof import('@/db');
 let durableRuns: DurableAiRunRepository;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
 beforeAll(async () => {
   database = await import('@/db');
   const { SqliteDurableAiRunRepository, SqliteDurableAiRunStore } =
@@ -286,6 +294,50 @@ describe('durable AI executor registry', () => {
       attempt: 0,
     }))).rejects.toThrow(/ownership was lost/);
     expect(manager.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it('retires a lifecycle only after overlapping operations release it', async () => {
+    const manager = lifecycle();
+    const completion = deferred<ReturnType<typeof lifecycleRecord>>();
+    vi.mocked(manager.completeRun).mockImplementation(async () => completion.promise);
+    const createCopilotLifecycle = vi.fn(() => manager);
+    const executor = createDurableAiExecutorRegistry({
+      ownerId: 'worker-a',
+      durableRuns,
+      createCopilotLifecycle,
+    }).get(COPILOT_EXECUTION_ROUTE)!;
+
+    const execution = executor.execute(executionContext());
+    await vi.waitFor(() => expect(manager.completeRun).toHaveBeenCalledOnce());
+    await executor.cancel!(executionContext());
+
+    expect(createCopilotLifecycle).toHaveBeenCalledOnce();
+    expect(manager.shutdownForRestart).not.toHaveBeenCalled();
+
+    completion.resolve(lifecycleRecord({
+      state: 'cleaned_up',
+      connection: 'detached',
+      terminalState: 'completed',
+      providerSessionId: undefined,
+    }));
+    await execution;
+
+    expect(manager.shutdownForRestart).toHaveBeenCalledOnce();
+    await executor.cancel!(executionContext());
+    expect(createCopilotLifecycle).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces terminal lifecycle shutdown failures for durable retry handling', async () => {
+    const manager = lifecycle();
+    vi.mocked(manager.shutdownForRestart).mockRejectedValue(
+      new Error('lifecycle shutdown failed'),
+    );
+    const executor = createDurableAiExecutorRegistry(dependencies(manager))
+      .get(COPILOT_EXECUTION_ROUTE)!;
+
+    await expect(executor.execute(executionContext())).rejects.toThrow(
+      'lifecycle shutdown failed',
+    );
   });
 
   it('uses persisted cleanup state and shuts the lifecycle down for restart', async () => {

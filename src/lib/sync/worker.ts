@@ -12,6 +12,8 @@ import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';
 import { StaleGitHubIdentityContextError } from './github-identity-context';
 import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
+import { buildSyncCompletedEvent, buildSyncFailedEvent } from './terminal-events';
+import { wakeEventOutboxDispatcher } from '@/lib/events/dispatcher-wake';
 
 export type SyncJobExecutor = (
   connectorId: string,
@@ -240,7 +242,14 @@ export class SyncWorker {
           controller.signal.reason instanceof Error
             ? controller.signal.reason.message
             : 'Sync cancelled',
-          { retry: !cancelled, cancelled },
+          {
+            retry: !cancelled,
+            cancelled,
+            events: [buildSyncFailedEvent(job, {
+              errors: result.errors.length > 0 ? result.errors : ['Sync cancelled'],
+              occurredAt: result.syncedAt,
+            })],
+          },
         ));
       } else if (!result.success) {
         await withDatabaseOperation(
@@ -251,6 +260,12 @@ export class SyncWorker {
           job,
           this.ownerId,
           result.errors.join('; ') || 'Connector sync failed',
+          {
+            events: [buildSyncFailedEvent(job, {
+              errors: result.errors,
+              occurredAt: result.syncedAt,
+            })],
+          },
         ));
         syncLogger.warn(
           { jobId: job.id, connectorId: job.connectorId, status, attempt: job.attempt },
@@ -259,13 +274,16 @@ export class SyncWorker {
       } else {
         await withDatabaseOperation(
           'sync-job-finalize',
-          () => repository.finalizeSuccess(job, this.ownerId, result),
+          () => repository.finalizeSuccess(job, this.ownerId, result, {
+            events: [buildSyncCompletedEvent(job, result)],
+          }),
         );
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
           'Sync worker job completed',
         );
       }
+      wakeEventOutboxDispatcher();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       try {
@@ -283,8 +301,10 @@ export class SyncWorker {
             retry: !staleIdentityContext && !cancelled,
             cancelled,
             terminal: staleIdentityContext,
+            events: [buildSyncFailedEvent(job, { errors: [message] })],
           },
         ));
+        wakeEventOutboxDispatcher();
       } catch (recordError) {
         syncLogger.error(
           { err: recordError, jobId: job.id, connectorId: job.connectorId },

@@ -1071,7 +1071,7 @@ export async function POST(request: Request) {
         );
 
         // Emit event for real-time UI updates
-        emitEvent({
+        await emitEvent({
           type: 'task.created',
           timestamp: new Date().toISOString(),
           payload: { id, title: item.title, connectorType: 'scout' },

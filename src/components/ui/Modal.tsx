@@ -117,7 +117,7 @@ export function Modal({
     <AnimatePresence propagate>
       {isOpen && (
         <motion.div
-          className={cn('fixed inset-0 z-50 flex items-start justify-center pt-[10vh]', overlayClassName)}
+          className={cn('fixed inset-0 z-[100] flex items-start justify-center pt-[10vh]', overlayClassName)}
           variants={modalOverlay}
           initial="hidden"
           animate="show"

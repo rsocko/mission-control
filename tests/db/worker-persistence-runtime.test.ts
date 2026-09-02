@@ -5,7 +5,9 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
   return {
     connectors: {
       get: vi.fn(async () => null),
+      listEnabled: vi.fn(async () => []),
       upsert: vi.fn(async (connector) => connector),
+      updateCredentials: vi.fn(async () => undefined),
       delete: vi.fn(async () => false),
       mergeSettings: vi.fn(async (_id, settings, patch) => ({ ...settings, ...patch })),
       patchSettingsState: vi.fn(async (_id, key, patch) => ({
@@ -31,6 +33,13 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
     notificationDelivery: {} as WorkerPersistenceRepositories['notificationDelivery'],
     reminders: {} as WorkerPersistenceRepositories['reminders'],
     triage: {} as WorkerPersistenceRepositories['triage'],
+    planningSignals: {} as WorkerPersistenceRepositories['planningSignals'],
+    projectAutomation: {} as WorkerPersistenceRepositories['projectAutomation'],
+    eventDelivery: {
+      subscriptions: {},
+      outbox: {},
+    } as WorkerPersistenceRepositories['eventDelivery'],
+    notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
     finance: {
       identity: {},
       snapshots: {},
@@ -67,6 +76,10 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-notification-delivery-repository');
   vi.doUnmock('@/db/persistence/sqlite-task-reminder-repository');
   vi.doUnmock('@/db/persistence/sqlite-triage-repositories');
+  vi.doUnmock('@/db/persistence/sqlite-planning-signal-repository');
+  vi.doUnmock('@/db/persistence/sqlite-project-automation-repository');
+  vi.doUnmock('@/db/persistence/sqlite-event-outbox-repository');
+  vi.doUnmock('@/db/persistence/sqlite-notification-enrichment-repository');
   vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-insights-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-attention-repositories');
@@ -122,10 +135,21 @@ describe('worker persistence runtime', () => {
     const triageModule = vi.fn(() => ({
       createSqliteTriagePersistenceRepositories: () => repositories.triage,
     }));
+    const planningSignalsModule = vi.fn(() => ({
+      createSqlitePlanningSignalRepository: () => repositories.planningSignals,
+    }));
+    const projectAutomationModule = vi.fn(() => ({
+      createSqliteProjectAutomationRepository: () => repositories.projectAutomation,
+    }));
+    const eventOutboxModule = vi.fn(() => ({
+      createSqliteEventDeliveryRepositories: () => repositories.eventDelivery,
+    }));
+    const notificationEnrichmentModule = vi.fn(() => ({
+      createSqliteNotificationEnrichmentRepository: () => repositories.notificationEnrichment,
+    }));
     const financeModule = vi.fn(() => ({
       createSqliteFinanceWorkerPersistence: () => repositories.finance,
-    }));
-    const financeInsightsModule = vi.fn(() => ({
+    }));    const financeInsightsModule = vi.fn(() => ({
       createSqliteFinanceInsightPersistence: () => repositories.finance.insights,
     }));
     const financeAttentionModule = vi.fn(() => ({
@@ -164,6 +188,13 @@ describe('worker persistence runtime', () => {
     );
     vi.doMock('@/db/persistence/sqlite-task-reminder-repository', taskReminderModule);
     vi.doMock('@/db/persistence/sqlite-triage-repositories', triageModule);
+    vi.doMock('@/db/persistence/sqlite-planning-signal-repository', planningSignalsModule);
+    vi.doMock('@/db/persistence/sqlite-project-automation-repository', projectAutomationModule);
+    vi.doMock('@/db/persistence/sqlite-event-outbox-repository', eventOutboxModule);
+    vi.doMock(
+      '@/db/persistence/sqlite-notification-enrichment-repository',
+      notificationEnrichmentModule,
+    );
     vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
     vi.doMock(
       '@/db/persistence/sqlite-finance-insights-repositories',
@@ -198,6 +229,10 @@ describe('worker persistence runtime', () => {
     expect(notificationDeliveryModule).not.toHaveBeenCalled();
     expect(taskReminderModule).not.toHaveBeenCalled();
     expect(triageModule).not.toHaveBeenCalled();
+    expect(planningSignalsModule).not.toHaveBeenCalled();
+    expect(projectAutomationModule).not.toHaveBeenCalled();
+    expect(eventOutboxModule).not.toHaveBeenCalled();
+    expect(notificationEnrichmentModule).not.toHaveBeenCalled();
     expect(financeModule).not.toHaveBeenCalled();
     expect(financeInsightsModule).not.toHaveBeenCalled();
     expect(financeAttentionModule).not.toHaveBeenCalled();
@@ -220,6 +255,10 @@ describe('worker persistence runtime', () => {
     expect(first.notificationDelivery).toBe(repositories.notificationDelivery);
     expect(first.reminders).toBe(repositories.reminders);
     expect(first.triage).toBe(repositories.triage);
+    expect(first.planningSignals).toBe(repositories.planningSignals);
+    expect(first.projectAutomation).toBe(repositories.projectAutomation);
+    expect(first.eventDelivery).toBe(repositories.eventDelivery);
+    expect(first.notificationEnrichment).toBe(repositories.notificationEnrichment);
     expect(first.finance.identity).toBe(repositories.finance.identity);
     expect(first.finance.snapshots).toBe(repositories.finance.snapshots);
     expect(first.finance.datasets).toBe(repositories.finance.datasets);
@@ -247,6 +286,10 @@ describe('worker persistence runtime', () => {
     expect(notificationDeliveryModule).toHaveBeenCalledOnce();
     expect(taskReminderModule).toHaveBeenCalledOnce();
     expect(triageModule).toHaveBeenCalledOnce();
+    expect(planningSignalsModule).toHaveBeenCalledOnce();
+    expect(projectAutomationModule).toHaveBeenCalledOnce();
+    expect(eventOutboxModule).toHaveBeenCalledOnce();
+    expect(notificationEnrichmentModule).toHaveBeenCalledOnce();
     expect(financeModule).toHaveBeenCalledOnce();
     expect(financeInsightsModule).toHaveBeenCalledOnce();
     expect(financeAttentionModule).toHaveBeenCalledOnce();

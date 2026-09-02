@@ -40,7 +40,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(160);
+    expect(Object.keys(postgresTables)).toHaveLength(163);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -210,14 +210,16 @@ describe('PostgreSQL schema', () => {
     expect(notificationDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.notifications);
   });
 
-  it('ships one clean PostgreSQL baseline migration', () => {
+  it('ships one clean PostgreSQL baseline plus additive notification enrichment', () => {
     const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
-    const migrations = readdirSync(migrationDirectory).filter((file) => file.endsWith('.sql'));
-    expect(migrations).toHaveLength(1);
+    const migrations = readdirSync(migrationDirectory)
+      .filter((file) => file.endsWith('.sql'))
+      .sort();
+    expect(migrations).toHaveLength(2);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
-    // 160 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
-    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(162);
+    // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
+    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(164);
     expect(sql).toContain('CREATE TABLE "task_search_documents"');
     expect(sql).toContain('CREATE TABLE "notification_search_documents"');
     expect(sql).toContain('"id" serial PRIMARY KEY NOT NULL');
@@ -229,6 +231,16 @@ describe('PostgreSQL schema', () => {
     expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
     expect(sql).toContain('USING gin ("search_vector")');
     expect(sql).not.toContain('AUTOINCREMENT');
+
+    const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');
+    expect(enrichmentSql).toContain('CREATE TABLE "notification_enrichment_jobs"');
+    expect(enrichmentSql).toContain(
+      'ALTER TABLE "notifications" ADD COLUMN "enrichment_revision" text',
+    );
+    expect(enrichmentSql).toContain(
+      'ALTER TABLE "notifications" ADD COLUMN "enrichment_generation" integer',
+    );
+    expect(enrichmentSql).toContain('idx_notification_enrichment_generation');
     expect(sql).not.toContain('PRAGMA');
   });
 });

@@ -12,6 +12,7 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const workerEntry = path.join(root, 'dist', 'sync-worker.cjs');
+const workerHealthcheckEntry = path.join(root, 'dist', 'sync-worker-healthcheck.cjs');
 const identityOperatorEntry = path.join(root, 'dist', 'github-identity-operator.cjs');
 const defaultStandaloneDir = path.join(root, '.next', 'standalone');
 const supplementalEntries = syncWorkerSupplementalPackages.map((packageName) =>
@@ -37,7 +38,7 @@ function validateTrace(fileList, warnings) {
     const optionalCanvas = message.includes('Failed to resolve dependency "canvas"')
       && /node_modules[\\/]+jsdom[\\/]+/.test(message);
     const optionalPgNative = message.includes('Failed to resolve dependency "pg-native"')
-      && /dist[\\/]+(?:sync-worker|github-identity-operator)\.cjs/.test(message);
+      && /dist[\\/]+(?:sync-worker(?:-healthcheck)?|github-identity-operator)\.cjs/.test(message);
     return !optionalCanvas && !optionalPgNative;
   });
   if (unexpectedWarnings.length > 0) {
@@ -69,6 +70,7 @@ async function copyFiles(files, destination) {
 export async function packageSyncWorkerRuntime(standaloneDir = defaultStandaloneDir) {
   const { fileList, warnings } = await nodeFileTrace([
     workerEntry,
+    workerHealthcheckEntry,
     identityOperatorEntry,
     ...supplementalEntries,
   ], {

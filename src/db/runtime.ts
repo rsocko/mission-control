@@ -151,6 +151,49 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  planningSignals: new Proxy({} as WorkerPersistenceRepositories['planningSignals'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().planningSignals[
+        property as keyof WorkerPersistenceRepositories['planningSignals']
+      ]
+    ),
+  }),
+  projectAutomation: new Proxy({} as WorkerPersistenceRepositories['projectAutomation'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().projectAutomation[
+        property as keyof WorkerPersistenceRepositories['projectAutomation']
+      ]
+    ),
+  }),
+  eventDelivery: {
+    subscriptions: new Proxy(
+      {} as WorkerPersistenceRepositories['eventDelivery']['subscriptions'],
+      {
+        get: (_target, property) => (
+          requirePostgresWorkerRepositories().eventDelivery.subscriptions[
+            property as keyof WorkerPersistenceRepositories['eventDelivery']['subscriptions']
+          ]
+        ),
+      },
+    ),
+    outbox: new Proxy({} as WorkerPersistenceRepositories['eventDelivery']['outbox'], {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().eventDelivery.outbox[
+          property as keyof WorkerPersistenceRepositories['eventDelivery']['outbox']
+        ]
+      ),
+    }),
+  },
+  notificationEnrichment: new Proxy(
+    {} as WorkerPersistenceRepositories['notificationEnrichment'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().notificationEnrichment[
+          property as keyof WorkerPersistenceRepositories['notificationEnrichment']
+        ]
+      ),
+    },
+  ),
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[

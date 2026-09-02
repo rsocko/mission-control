@@ -248,6 +248,26 @@ try {
     }
   });
 
+  const healthcheck = spawnSync(
+    process.execPath,
+    ['dist/sync-worker-healthcheck.cjs'],
+    {
+      cwd: runtimeRoot,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        MC_DATABASE_BACKEND: 'sqlite',
+        MC_DB_PATH: databasePath,
+        MC_WORKER_INSTANCE_FILE: instancePath,
+      },
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
+  );
+  if (healthcheck.status !== 0) {
+    throw new Error(healthcheck.stderr || 'Packaged worker healthcheck did not pass');
+  }
+
   worker.send('shutdown');
   const exit = await waitForExit(worker, 30_000);
   if (exit.code !== 0) {

@@ -90,35 +90,35 @@ describe('planning signals', () => {
       estimatedDuration: 60,
       isTimeBlocked: true,
     });
-    planning.appendPlanningSignal({
+    await planning.appendPlanningSignal({
       taskId: 'withdrawn',
       eventType: 'my_day_committed',
       date: '2026-08-19',
       occurredAt: '2026-08-19T12:00:00.000Z',
       provenance: 'test',
     });
-    planning.appendPlanningSignal({
+    await planning.appendPlanningSignal({
       taskId: 'withdrawn',
       eventType: 'my_day_committed',
       date: '2026-08-19',
       occurredAt: '2026-08-19T14:00:00.000Z',
       provenance: 'test',
     });
-    planning.appendPlanningSignal({
+    await planning.appendPlanningSignal({
       taskId: 'withdrawn-only',
       eventType: 'my_day_committed',
       date: '2026-08-19',
       occurredAt: '2026-08-19T12:00:00.000Z',
       provenance: 'test',
     });
-    planning.appendPlanningSignal({
+    await planning.appendPlanningSignal({
       taskId: 'withdrawn-only',
       eventType: 'my_day_withdrawn',
       date: '2026-08-19',
       occurredAt: '2026-08-19T13:00:00.000Z',
       provenance: 'test',
     });
-    planning.appendPlanningSignal({
+    await planning.appendPlanningSignal({
       taskId: 'withdrawn',
       eventType: 'my_day_withdrawn',
       date: '2026-08-19',
@@ -132,9 +132,9 @@ describe('planning signals', () => {
     delete process.env.MC_DB_PATH;
   });
 
-  it('derives retry-safe friction signals after day close', () => {
-    const first = planning.finalizePlanningSignals('2026-08-20');
-    const second = planning.finalizePlanningSignals('2026-08-20');
+  it('derives retry-safe friction signals after day close', async () => {
+    const first = await planning.finalizePlanningSignals('2026-08-20');
+    const second = await planning.finalizePlanningSignals('2026-08-20');
 
     expect(first).toEqual({
       commitmentsBackfilled: 3,
@@ -143,6 +143,7 @@ describe('planning signals', () => {
       elapsedBlocks: 1,
       overdueTransitions: 1,
     });
+
     expect(second).toEqual({
       commitmentsBackfilled: 0,
       myDayMisses: 0,
@@ -164,6 +165,29 @@ describe('planning signals', () => {
       { taskId: 'withdrawn', eventType: 'my_day_missed' },
       { taskId: 'elapsed-block', eventType: 'scheduled_block_elapsed' },
     ]);
+  });
+
+  it('coordinates automatic finalization through a durable five-minute window', async () => {
+    const now = new Date('2026-08-20T12:02:00.000Z');
+    const first = await planning.finalizePlanningSignalsIfDue('2026-08-20', now);
+    const duplicate = await planning.finalizePlanningSignalsIfDue(
+      '2026-08-20',
+      new Date('2026-08-20T12:04:59.999Z'),
+    );
+    const nextWindow = await planning.finalizePlanningSignalsIfDue(
+      '2026-08-20',
+      new Date('2026-08-20T12:05:00.000Z'),
+    );
+
+    expect(first).not.toBeNull();
+    expect(duplicate).toBeNull();
+    expect(nextWindow).toEqual({
+      commitmentsBackfilled: 0,
+      myDayMisses: 0,
+      focusMisses: 0,
+      elapsedBlocks: 0,
+      overdueTransitions: 0,
+    });
   });
 
   it('records only later snooze changes', () => {

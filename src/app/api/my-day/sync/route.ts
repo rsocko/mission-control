@@ -91,7 +91,7 @@ async function reconcileMyDay(
   const startedAt = Date.now();
   try {
     try {
-      finalizePlanningSignalsIfDue();
+      await finalizePlanningSignalsIfDue();
     } catch (error) {
       logger.warn({ err: error }, 'Planning signal finalization will retry later');
     }
@@ -434,7 +434,7 @@ async function reconcileMyDay(
     }
     added = await insertMyDayRows(myDayRowsToInsert);
     for (const item of myDayRowsToInsert) {
-      appendPlanningSignal({
+      await appendPlanningSignal({
         taskId: item.taskId,
         eventType: 'my_day_committed',
         date: today,
@@ -493,7 +493,7 @@ async function reconcileMyDay(
     for (const itemId of myDayIdsToRemove) {
       const item = localItemsById.get(itemId);
       if (!item) continue;
-      appendPlanningSignal({
+      await appendPlanningSignal({
         taskId: item.taskId,
         eventType: 'my_day_withdrawn',
         date: today,
@@ -553,7 +553,7 @@ async function reconcileMyDay(
     );
     if (historicalObserved > 0) {
       try {
-        finalizePlanningSignals();
+        await finalizePlanningSignals();
       } catch (error) {
         logger.warn({ err: error }, 'Historical planning signals will finalize later');
       }
@@ -648,7 +648,7 @@ async function observeRecentRemoteMyDay(
 
     const { dayStart } = getLocalDateBoundsISO(date);
     for (const task of localTasks) {
-      if (appendPlanningSignal({
+      if (await appendPlanningSignal({
         taskId: task.id,
         eventType: 'my_day_committed',
         date,

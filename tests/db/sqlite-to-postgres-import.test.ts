@@ -268,10 +268,12 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
   it('plans only SQLite-backed tables and leaves PostgreSQL search projections derived', () => {
     const tables = expectedImportTableNames();
 
-    expect(tables.sourceTables).toHaveLength(160);
-    expect(tables.targetTables).toHaveLength(162);
+    expect(tables.sourceTables).toHaveLength(163);
+    expect(tables.targetTables).toHaveLength(165);
     expect(tables.sourceTables).toContain('tasks');
     expect(tables.sourceTables).toContain('notifications');
+    expect(tables.sourceTables).toContain('event_outbox');
+    expect(tables.sourceTables).toContain('event_outbox_deliveries');
     expect(tables.sourceTables).not.toContain('task_search_documents');
     expect(tables.sourceTables).not.toContain('notification_search_documents');
     expect(tables.targetTables).toContain('task_search_documents');
@@ -515,11 +517,16 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
   it('derives the complete JSON target inventory from the PostgreSQL schema', () => {
     const columns = expectedJsonTargetColumns();
 
-    expect(columns).toHaveLength(115);
-    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(115);
+    expect(columns).toHaveLength(117);
+    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(117);
     expect(columns).toContainEqual({ table: 'app_settings', column: 'value' });
     expect(columns).toContainEqual({ table: 'tasks', column: 'metadata' });
     expect(columns).toContainEqual({ table: 'worker_health_snapshot', column: 'payload' });
+    expect(columns).toContainEqual({ table: 'event_outbox', column: 'payload' });
+    expect(columns).toContainEqual({
+      table: 'notification_enrichment_jobs',
+      column: 'payload',
+    });
   });
 
   it('preserves every valid JSON semantic class as serialized PostgreSQL input', () => {
@@ -812,8 +819,8 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       });
 
       expect(result.evidence.schema).toMatchObject({
-        importTableCount: 160,
-        jsonTargetColumnCount: 115,
+        importTableCount: 163,
+        jsonTargetColumnCount: 117,
       });
       expect(result.evidence.schema.jsonRowsScanned).toBeGreaterThan(0);
     } finally {
@@ -917,7 +924,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           `${source.sourcePath}-wal`,
           `${source.sourcePath}-shm`,
         ]));
-        expect(result.copiedTables).toHaveLength(160);
+        expect(result.copiedTables).toHaveLength(163);
         expect(result.evidence.source).toMatchObject({
           walOrJournalPresent: false,
           sidecarsPresent: false,
@@ -1255,9 +1262,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.evidence.schema.sqliteMigrationCount).toBe(227);
-    expect(result.evidence.schema.importTableCount).toBe(160);
-    expect(result.copiedTables).toHaveLength(160);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(229);
+    expect(result.evidence.schema.importTableCount).toBe(163);
+    expect(result.copiedTables).toHaveLength(163);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
     expect(result.evidence.derivedState.droppedFromImport).toEqual(
       expect.arrayContaining(['sqlite_fts_virtual_tables']),
@@ -1296,7 +1303,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
       ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(127);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(129);
     } finally {
       sqlite.close();
     }
@@ -1307,7 +1314,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     try {
       replacePriorityEntityTable(sqlite, historicalPriorityEntityColumns);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(126);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(128);
     } finally {
       sqlite.close();
     }
@@ -1363,7 +1370,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           supportedHistoricalShape: true,
         }),
       ]));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(229);
     } finally {
       fixture.close();
     }
@@ -1397,7 +1404,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'reminder_relative',
         'reminder_due_time',
       ]);
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(229);
     } finally {
       fixture.close();
     }
@@ -1417,7 +1424,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         actualColumnOrder: deriveTrustedTasksColumnOrders().get('continuous-production'),
         supportedHistoricalShape: true,
       }));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(227);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(229);
     } finally {
       fixture.close();
     }
@@ -1428,13 +1435,13 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const prepare = vi.spyOn(sqlite, 'prepare');
     try {
       const mismatches = compareSqliteImportSchema(sqlite, migrationsDirectory);
-      expect(expectedImportTableNames().sourceTables).toHaveLength(160);
+      expect(expectedImportTableNames().sourceTables).toHaveLength(163);
       expect(mismatches.every(({ missingTable }) => !missingTable)).toBe(true);
       const aggregateCalls = prepare.mock.calls.filter(
         ([sql]) => String(sql).includes('CROSS JOIN pragma_table_xinfo'),
       );
       expect(aggregateCalls).toHaveLength(1);
-      expect(String(aggregateCalls[0]?.[0]).match(/\?/g)).toHaveLength(160);
+      expect(String(aggregateCalls[0]?.[0]).match(/\?/g)).toHaveLength(163);
     } finally {
       sqlite.close();
     }
@@ -1658,7 +1665,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const sqlite = currentSqlite();
     try {
       replaceInboundWebhookTable(sqlite, historicalInboundWebhookColumns);
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(126);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(128);
     } finally {
       sqlite.close();
     }

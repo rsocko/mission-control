@@ -205,6 +205,51 @@ export function findOpenRecurringTaskDuplicates(
   return duplicateGroups;
 }
 
+function recurrenceSeriesId(task: { metadata: unknown }): string | null {
+  return getRecurrenceIdentity(task.metadata) ?? getRecurrenceLabel(task.metadata);
+}
+
+/**
+ * Microsoft To Do occasionally ends up with two independent recurrence chains
+ * sharing the same title (e.g. the task was duplicated upstream, or a chain
+ * was recreated after being deleted). Once one chain has a completed
+ * occurrence dated after another chain's still-open occurrence, the open one
+ * is a stale leftover that will never be completed by the user going forward
+ * — the active series has already moved past it. This is distinct from
+ * findOpenRecurringTaskDuplicates, which only reconciles open rows against
+ * each other and never looks at completed history.
+ */
+export function findOrphanedRecurringTasks(
+  openTasks: RecurringTaskCandidate[],
+  historyTasks: RecurringTaskHistoryCandidate[],
+): RecurringTaskCandidate[] {
+  const latestCompletionBySeriesKey = new Map<string, string>();
+  for (const task of historyTasks) {
+    if (task.status !== 'done' || !task.completedAt) continue;
+    const seriesId = recurrenceSeriesId(task);
+    if (!seriesId) continue;
+    const key = `${getRecurringTitleKey(task)}::${seriesId}`;
+    const existing = latestCompletionBySeriesKey.get(key);
+    if (!existing || task.completedAt > existing) {
+      latestCompletionBySeriesKey.set(key, task.completedAt);
+    }
+  }
+
+  const orphaned: RecurringTaskCandidate[] = [];
+  for (const task of openTasks) {
+    if (!task.dueDate) continue;
+    const seriesId = recurrenceSeriesId(task);
+    if (!seriesId) continue;
+    const key = `${getRecurringTitleKey(task)}::${seriesId}`;
+    const latestCompletion = latestCompletionBySeriesKey.get(key);
+    if (latestCompletion && latestCompletion.slice(0, 10) > task.dueDate) {
+      orphaned.push(task);
+    }
+  }
+
+  return orphaned;
+}
+
 export function shouldSuppressRecurringMyDaySuccessor(input: {
   isRecurring: boolean;
   dueDate?: string;

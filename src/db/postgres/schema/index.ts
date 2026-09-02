@@ -101,6 +101,7 @@ export {
 export {
   notifications,
   notificationActions,
+  notificationEnrichmentJobs,
   notificationSavedViews,
 } from './notifications';
 

@@ -42,6 +42,7 @@ import type {
 import {
   UnsupportedConnectorExecutionError,
 } from '@/db/persistence/connector-execution';
+import { reconcileNotificationEnrichmentMetadata } from '@/db/persistence/notification-enrichment';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import { cleanupTaskAssociations } from './task-deletion';
 
@@ -804,11 +805,11 @@ async function ingestNotification(
         is_actionable, primary_action_id, received_at, sort_at, group_key,
         dedupe_key, related_task_id,
         related_project_id, related_entity_type, related_entity_id,
-        navigation_target, metadata, presentation
+        navigation_target, metadata, presentation, enrichment_revision, enrichment_generation
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
         $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, $31, $32
+        $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
       )
       ON CONFLICT(source_id) DO NOTHING
       RETURNING id
@@ -846,6 +847,8 @@ async function ingestNotification(
       input.navigationTarget,
       input.metadata,
       input.presentation,
+      command.enrichment?.sourceRevision ?? null,
+      command.enrichment ? 1 : 0,
     ],
   );
   const created = inserted.length === 1;
@@ -860,6 +863,9 @@ async function ingestNotification(
     lastSourceActivityKey: string | null;
     sortAt: string;
     primaryActionId: string | null;
+    metadata: Record<string, unknown>;
+    enrichmentRevision: string | null;
+    enrichmentGeneration: number;
   }>(
     client,
     `
@@ -873,7 +879,10 @@ async function ingestNotification(
         last_source_activity_at AS "lastSourceActivityAt",
         last_source_activity_key AS "lastSourceActivityKey",
         sort_at AS "sortAt",
-        primary_action_id AS "primaryActionId"
+        primary_action_id AS "primaryActionId",
+        metadata,
+        enrichment_revision AS "enrichmentRevision",
+        enrichment_generation AS "enrichmentGeneration"
       FROM notifications WHERE source_id = $1 FOR UPDATE
     `,
     [input.sourceId],
@@ -888,6 +897,10 @@ async function ingestNotification(
   }
   let currentDisposition = stored.disposition;
   let currentReadState = stored.readState;
+  const nextEnrichmentGeneration = command.enrichment
+    && stored.enrichmentRevision !== command.enrichment.sourceRevision
+    ? stored.enrichmentGeneration + 1
+    : stored.enrichmentGeneration;
   if (!created) {
     const reopen = shouldReopenForSourceActivity(
       {
@@ -937,8 +950,10 @@ async function ingestNotification(
           metadata = $22,
           presentation = $23,
           is_actionable = $24,
-          primary_action_id = $25
-        WHERE id = $26
+          primary_action_id = $25,
+          enrichment_revision = COALESCE($26, enrichment_revision),
+          enrichment_generation = $27
+        WHERE id = $28
       `,
       [
         input.title,
@@ -966,10 +981,17 @@ async function ingestNotification(
         input.relatedEntityType,
         input.relatedEntityId,
         input.navigationTarget,
-        input.metadata,
+        reconcileNotificationEnrichmentMetadata(
+          stored.metadata,
+          input.metadata,
+          stored.enrichmentRevision,
+          command.enrichment?.sourceRevision,
+        ),
         input.presentation,
         input.isActionable,
         stored.primaryActionId,
+        command.enrichment?.sourceRevision ?? null,
+        nextEnrichmentGeneration,
         stored.id,
       ],
     );
@@ -1001,6 +1023,37 @@ async function ingestNotification(
           action.opensExternal,
           action.requiresConfirmation,
           action.createdBy,
+        ],
+      );
+    }
+  }
+  if (command.enrichment) {
+    await client.query(
+      `
+        UPDATE notification_enrichment_jobs
+        SET status = 'superseded', completed_at = $1, updated_at = $1
+        WHERE notification_id = $2 AND source_generation <> $3 AND status = 'pending'
+      `,
+      [now, stored.id, nextEnrichmentGeneration],
+    );
+    if (command.enrichment.payload) {
+      await client.query(
+        `
+            INSERT INTO notification_enrichment_jobs (
+              id, notification_id, source_id, source_revision, source_generation,
+              payload, status,
+              attempt_count, next_attempt_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, 'pending', 0, $7, $7, $7)
+            ON CONFLICT(notification_id, source_generation) DO NOTHING
+          `,
+        [
+          randomUUID(),
+          stored.id,
+          input.sourceId,
+          command.enrichment.sourceRevision,
+          nextEnrichmentGeneration,
+          JSON.stringify({ ...command.enrichment.payload, notificationId: stored.id }),
+          now,
         ],
       );
     }

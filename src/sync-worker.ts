@@ -67,7 +67,8 @@ async function main(): Promise<void> {
     && workerPersistence.finance.recovery
     && workerPersistence.eventDelivery
     && workerPersistence.eventDelivery.outbox
-    && workerPersistence.eventDelivery.subscriptions,
+    && workerPersistence.eventDelivery.subscriptions
+    && workerPersistence.notificationEnrichment
   );
   if (!completeWorkerCompositionPresent) {
     throw new Error('Selected worker persistence composition is incomplete');
@@ -114,6 +115,15 @@ async function main(): Promise<void> {
   const eventOutboxDispatcher = new EventOutboxDispatcher();
   await eventOutboxDispatcher.start();
   syncLogger.info('Sync worker: durable event outbox dispatcher initialized');
+
+  const { NotificationEnrichmentWorker } = await import(
+    '@/lib/notifications/enrichment/worker'
+  );
+  const notificationEnrichmentWorker = new NotificationEnrichmentWorker({
+    repository: workerPersistence.notificationEnrichment,
+  });
+  notificationEnrichmentWorker.start();
+  syncLogger.info('Sync worker: durable notification enrichment worker initialized');
 
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
@@ -177,6 +187,7 @@ async function main(): Promise<void> {
         healthSnapshotScheduler.stop(),
         taskReminderScheduler.stop(),
         eventOutboxDispatcher.stop(),
+        notificationEnrichmentWorker.stop(),
         financeConnectionRecoveryScheduler.stop(),
         triageSyncScheduler.stopAll(),
         houstonMemoryRetentionScheduler.stop(),

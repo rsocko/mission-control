@@ -9,6 +9,7 @@ import { kanbanCard } from '@/lib/motion';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import { CONNECTOR_BRAND_ICONS, PRIORITY_DOTS, PRIORITY_LABELS } from './constants';
 import { getLocalToday } from '@/lib/utils/client-date';
+import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { SnoozePopover } from './SnoozePopover';
 import type { KanbanTaskViewModel } from './types';
@@ -39,8 +40,7 @@ interface KanbanCardProps {
 export function KanbanCard({ task, dragHandleProps, onClick, showSources, showDueDates, showScores, onSnooze }: KanbanCardProps) {
   const today = getLocalToday();
   const isOverdue = task.dueDate && task.dueDate < today;
-  const taskMeta = task.metadata ? (() => { try { return JSON.parse(task.metadata); } catch { return null; } })() : null;
-  const recurrence = taskMeta?.recurrence;
+  const recurrence = extractRecurrenceFromMetadata(task.metadata);
 
   return (
     <motion.div

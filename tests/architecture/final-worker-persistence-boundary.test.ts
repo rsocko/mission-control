@@ -134,6 +134,9 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
       'notificationDelivery',
       'reminders',
       'triage',
+      'planningSignals',
+      'projectAutomation',
+      'notificationEnrichment',
       'finance',
       'finance.recovery',
     ]) {

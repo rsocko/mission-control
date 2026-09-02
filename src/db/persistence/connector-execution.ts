@@ -380,6 +380,18 @@ export interface ConnectorNotificationAction {
 export interface ConnectorNotificationCommand {
   input: ConnectorNotificationInput;
   actions: readonly ConnectorNotificationAction[];
+  enrichment?: {
+    sourceRevision: string;
+    payload: {
+      notificationId: string;
+      title: string;
+      body: string | null;
+      connectorType: string;
+      category: string;
+      metadata: Record<string, unknown>;
+      presentation: Record<string, unknown>;
+    } | null;
+  };
 }
 
 export interface ActiveConnectorNotification {

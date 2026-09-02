@@ -175,6 +175,12 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       expect.objectContaining({ success: true }),
+      {
+        events: [expect.objectContaining({
+          eventType: 'sync.completed',
+          stableKey: 'sync.completed:job:job-1:run:job-1',
+        })],
+      },
     );
     expect(queueMocks.linkSyncLogToJob).not.toHaveBeenCalled();
   });
@@ -197,7 +203,12 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'Sync job job-1 ownership was lost before completion',
-      { retry: true, cancelled: false, terminal: false },
+      {
+        retry: true,
+        cancelled: false,
+        terminal: false,
+        events: expect.any(Array),
+      },
     );
     expect(queueMocks.completeSyncJob).not.toHaveBeenCalled();
   });
@@ -266,6 +277,9 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'connector failed',
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventType: 'sync.failed' })],
+      }),
     );
   });
 
@@ -293,7 +307,12 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'Sync execution exceeded its 5ms duration budget',
-      { retry: true, cancelled: false, terminal: false },
+      {
+        retry: true,
+        cancelled: false,
+        terminal: false,
+        events: expect.any(Array),
+      },
     );
   });
 
@@ -317,7 +336,11 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'Worker shutdown grace period expired',
-      { retry: true, cancelled: false },
+      expect.objectContaining({
+        retry: true,
+        cancelled: false,
+        events: expect.any(Array),
+      }),
     );
   });
 
@@ -368,6 +391,7 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-2' }),
       'worker-a',
       expect.objectContaining({ success: true }),
+      expect.objectContaining({ events: expect.any(Array) }),
     );
     const persistEvent = eventMocks.setSyncEventPersistence.mock.calls[0]?.[0];
     persistEvent?.({
@@ -385,6 +409,7 @@ describe('sync worker runtime', () => {
     await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalled());
     expect(queueMocks.finalizeSuccessfulSyncJob).not.toHaveBeenCalledWith(
       expect.objectContaining({ id: 'job-1' }),
+      expect.anything(),
       expect.anything(),
       expect.anything(),
     );

@@ -26,7 +26,7 @@ import { isPublicDemoMode } from '@/lib/public-demo';
 import { getTaskSourceVisibilityConditions } from '@/app/api/tasks/canonical-filter';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 import {
-  appendPlanningSignal,
+  getPlanningSignalRepository,
   finalizePlanningSignalsIfDue,
   planningFrictionEventTypes,
 } from '@/lib/planning-signals';
@@ -183,7 +183,7 @@ export async function GET(request: Request) {
 
   try {
     try {
-      finalizePlanningSignalsIfDue();
+      await finalizePlanningSignalsIfDue();
     } catch (error) {
       logger.warn({ err: error }, 'Planning signal finalization will retry later');
     }
@@ -834,6 +834,7 @@ export async function POST(request: Request) {
     const id = `md-${crypto.randomUUID().slice(0, 8)}`;
 
     const addedAt = new Date().toISOString();
+    const planningSignals = await getPlanningSignalRepository();
     runTransaction((tx) => {
       tx.insert(myDayItems).values({
         id,
@@ -843,14 +844,14 @@ export async function POST(request: Request) {
         isAutoIncluded: false,
         order,
       }).run();
-      appendPlanningSignal({
+      void planningSignals.append({
         taskId,
         eventType: 'my_day_committed',
         date: targetDate,
         occurredAt: addedAt,
         provenance: 'my-day-api',
         metadata: { origin: 'explicit-local' },
-      }, tx);
+      });
     });
 
     // Write-back: set isInMyDay on Microsoft Todo
@@ -883,6 +884,7 @@ export async function DELETE(request: Request) {
 
   try {
     const removedAt = new Date().toISOString();
+    const planningSignals = await getPlanningSignalRepository();
     const resolvedTaskId = runTransaction((tx) => {
       let removedTaskId: string | null = taskId;
       let removedDate = requestedDate || getLocalToday();
@@ -909,14 +911,14 @@ export async function DELETE(request: Request) {
       }
 
       if (removedTaskId && removedExistingItem) {
-        appendPlanningSignal({
+        void planningSignals.append({
           taskId: removedTaskId,
           eventType: 'my_day_withdrawn',
           date: removedDate,
           occurredAt: removedAt,
           provenance: 'my-day-api',
           metadata: { origin: 'explicit-local' },
-        }, tx);
+        });
         const existingExclusion = tx.select({ id: myDayExclusions.id })
           .from(myDayExclusions)
           .where(and(

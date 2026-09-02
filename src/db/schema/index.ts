@@ -30,6 +30,8 @@ export {
   dependencyReconciliationEdges,
   dependencyReconciliationCandidates,
   outboundWebhooks,
+  eventOutbox,
+  eventOutboxDeliveries,
   integrationConfigs,
   inboundWebhooks,
   inboundWebhookLog,
@@ -99,6 +101,7 @@ export {
 export {
   notifications,
   notificationActions,
+  notificationEnrichmentJobs,
   notificationSavedViews,
 } from './notifications';
 

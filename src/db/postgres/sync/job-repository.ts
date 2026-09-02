@@ -9,6 +9,7 @@ import type {
   SyncCancellationResult,
   SyncJob,
   SyncJobFailureOptions,
+  SyncJobFinalizationOptions,
   SyncJobRepository,
   SyncJobSource,
   SyncJobStatus,
@@ -16,7 +17,9 @@ import type {
   SyncSchedule,
   SyncScheduleHealth,
 } from '@/lib/sync/job-repository';
+import { isTerminalSyncJobStatus } from '@/lib/sync/terminal-events';
 import type { SyncResult } from '@/types';
+import { enqueuePostgresEventOutbox } from '@/db/postgres/repositories/event-outbox-repository';
 import { connectorSyncLeaseOwner, recoverExpiredSyncJobsWithOutcome } from './lease-helpers';
 
 // ─── Environment-tunable defaults (mirrors the SQLite worker's knobs) ──────
@@ -633,7 +636,12 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     });
   }
 
-  async finalizeSuccess(job: SyncJob, owner: string, result: SyncResult): Promise<void> {
+  async finalizeSuccess(
+    job: SyncJob,
+    owner: string,
+    result: SyncResult,
+    options: SyncJobFinalizationOptions = {},
+  ): Promise<void> {
     if (!result.syncRunId) {
       throw new Error(`Sync job ${job.id} returned no exact sync-run identity`);
     }
@@ -727,6 +735,16 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
       );
       if (released.rowCount !== 1) {
         throw new Error(`Sync job ${job.id} connector lease was lost before completion`);
+      }
+      // Same transaction as the authoritative terminal transition: the outbox
+      // row exists if and only if the job actually succeeded.
+      for (const event of options.events ?? []) {
+        await enqueuePostgresEventOutbox(client, {
+          stableKey: event.stableKey,
+          eventType: event.eventType,
+          payload: event.payload,
+          occurredAt: event.occurredAt,
+        });
       }
     });
   }
@@ -858,6 +876,18 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         `DELETE FROM connector_operation_leases WHERE connector_id = $1 AND owner = $2`,
         [job.connectorId, lockOwner],
       );
+      // A `queued` status means the attempt will be retried, so no terminal
+      // event has occurred yet — this stops retries from duplicating events.
+      if (isTerminalSyncJobStatus(status)) {
+        for (const event of options.events ?? []) {
+          await enqueuePostgresEventOutbox(client, {
+            stableKey: event.stableKey,
+            eventType: event.eventType,
+            payload: event.payload,
+            occurredAt: event.occurredAt,
+          });
+        }
+      }
       return status;
     });
   }

@@ -30,6 +30,10 @@ import { createPostgresFinanceInsightNotificationLifecyclePersistence } from './
 import { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 import { createPostgresTaskReminderRepository } from './task-reminder-repository';
 import { createPostgresTriagePersistenceRepositories } from './triage-repositories';
+import { createPostgresPlanningSignalRepository } from './planning-signal-repository';
+import { createPostgresProjectAutomationRepository } from './project-automation-repository';
+import { createPostgresEventDeliveryRepositories } from './event-outbox-repository';
+import { createPostgresNotificationEnrichmentRepository } from './notification-enrichment-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -59,6 +63,15 @@ export {
 export { createPostgresNotificationDeliveryRepository } from './notification-delivery-repository';
 export { createPostgresTaskReminderRepository } from './task-reminder-repository';
 export { createPostgresTriagePersistenceRepositories } from './triage-repositories';
+export { createPostgresPlanningSignalRepository } from './planning-signal-repository';
+export { createPostgresProjectAutomationRepository } from './project-automation-repository';
+export {
+  createPostgresEventDeliveryRepositories,
+  enqueuePostgresEventOutbox,
+} from './event-outbox-repository';
+export {
+  createPostgresNotificationEnrichmentRepository,
+} from './notification-enrichment-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -133,6 +146,10 @@ export function createPostgresWorkerPersistenceRepositories(
     notificationDelivery: createPostgresNotificationDeliveryRepository(pool),
     reminders: createPostgresTaskReminderRepository(pool),
     triage: createPostgresTriagePersistenceRepositories(db),
+    planningSignals: createPostgresPlanningSignalRepository(pool),
+    projectAutomation: createPostgresProjectAutomationRepository(pool),
+    eventDelivery: createPostgresEventDeliveryRepositories(pool),
+    notificationEnrichment: createPostgresNotificationEnrichmentRepository(pool),
     finance: {
       ...financeCore,
       insights: {

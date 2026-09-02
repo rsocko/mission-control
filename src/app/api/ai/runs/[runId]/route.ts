@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DurableAiRunStore } from '@/lib/ai/durable-runs';
+import { getDurableAiRunRepository } from '@/lib/ai/durable-runs';
 import { ApiErrors } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +14,7 @@ export async function GET(
   if (!parsed.success) return ApiErrors.badRequest('Invalid durable AI run ID.');
 
   try {
-    const run = new DurableAiRunStore().getRun(parsed.data);
+    const run = await (await getDurableAiRunRepository()).getRun(parsed.data);
     if (!run) return ApiErrors.notFound('Durable AI run');
     return Response.json(
       { run },

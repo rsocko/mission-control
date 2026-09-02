@@ -94,7 +94,8 @@ function testDatabase() {
       related_task_id TEXT, related_project_id TEXT, related_entity_type TEXT, related_entity_id TEXT,
       navigation_target TEXT, reconcile_attempts INTEGER DEFAULT 0 NOT NULL,
       last_reconciled_at TEXT, stale_since TEXT, auto_resolve_reason TEXT,
-      metadata TEXT DEFAULT '{}' NOT NULL, presentation TEXT DEFAULT '{}' NOT NULL
+      metadata TEXT DEFAULT '{}' NOT NULL, presentation TEXT DEFAULT '{}' NOT NULL,
+      enrichment_revision TEXT, enrichment_generation INTEGER DEFAULT 0 NOT NULL
     );
   `);
   const migration = readFileSync(

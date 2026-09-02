@@ -8,6 +8,7 @@ import type { TaskReminderRepository } from './task-reminders';
 import type { TriagePersistenceRepositories } from './triage-repositories';
 import type { PlanningSignalRepository } from './planning-signals';
 import type { ProjectAutomationRepository } from './project-automation';
+import type { EventDeliveryRepositories } from './event-outbox';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -52,6 +53,12 @@ export interface WorkerPersistenceRepositories {
   triage: TriagePersistenceRepositories;
   planningSignals: PlanningSignalRepository;
   projectAutomation: ProjectAutomationRepository;
+  /**
+   * Layer 2: the durable outbound-event outbox (subscription selection plus
+   * enqueue/claim/finalize persistence) that replaced fire-and-forget webhook
+   * emission.
+   */
+  eventDelivery: EventDeliveryRepositories;
   /**
    * Layer 5A: the atomic core finance worker projection (identity, transaction
    * snapshots, reference datasets, and automated attribution).

@@ -1,8 +1,11 @@
-import { createHmac } from 'crypto';
-import db from '@/db';
-import { outboundWebhooks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { randomUUID } from 'crypto';
+import type { EventDeliveryRepositories } from '@/db/persistence/event-outbox';
 import logger from '@/lib/logger';
+import { deliverEvent } from './delivery';
+import { wakeEventOutboxDispatcher } from './dispatcher-wake';
+import { resolveEventDeliveryRepositories } from './repositories';
+
+export { resolveEventDeliveryRepositories };
 
 export type MCEventType =
   | 'task.created'
@@ -32,83 +35,72 @@ export interface OutboundWebhookRecord {
   enabled: boolean;
 }
 
-function matchesEventType(webhook: OutboundWebhookRecord, eventType: MCEventType) {
-  const eventTypes = Array.isArray(webhook.eventTypes) ? webhook.eventTypes : [];
-  return webhook.enabled && eventTypes.includes(eventType);
+export interface EmitEventOptions {
+  /**
+   * Idempotency key for the durable outbox. Callers with a durable identity of
+   * their own (for example a terminal sync job) supply a derived key so a retry
+   * cannot enqueue the same event twice. Omitted keys get a unique key, which
+   * preserves the previous "every call emits" semantics for ad-hoc callers.
+   */
+  stableKey?: string;
+  repositories?: EventDeliveryRepositories;
 }
 
-function buildSignature(payload: string, secret?: string | null) {
-  const signingSecret = secret || process.env.MC_EVENT_SECRET || '';
-  if (!signingSecret) {
-    return '';
-  }
-
-  return `sha256=${createHmac('sha256', signingSecret).update(payload).digest('hex')}`;
-}
-
+/**
+ * One-shot signed delivery to an explicit webhook, used by the "send test
+ * event" endpoint. Regular event emission goes through {@link emitEvent} and
+ * the durable outbox instead.
+ */
 export async function sendWebhookEvent(
   webhook: OutboundWebhookRecord,
   event: MCEvent,
+  options: { repositories?: EventDeliveryRepositories } = {},
 ): Promise<{ ok: boolean; status: number | null }> {
-  const payload = JSON.stringify(event.payload);
+  const repositories = await resolveEventDeliveryRepositories(options.repositories);
   const triggeredAt = new Date().toISOString();
+  const outcome = await deliverEvent(
+    { url: webhook.url, secret: webhook.secret },
+    { eventType: event.type, payload: event.payload },
+  );
 
-  try {
-    const response = await fetch(webhook.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-MC-Event': event.type,
-        'X-MC-Signature': buildSignature(payload, webhook.secret),
+  await repositories.subscriptions.recordDeliveryOutcome({
+    webhookId: webhook.id,
+    triggeredAt,
+    status: outcome.status,
+  });
+
+  if (outcome.kind !== 'delivered') {
+    logger.error(
+      {
+        webhookId: webhook.id,
+        eventType: event.type,
+        status: outcome.status,
+        failureCode: outcome.code,
       },
-      body: payload,
-    });
-
-    await db
-      .update(outboundWebhooks)
-      .set({
-        lastTriggeredAt: triggeredAt,
-        lastStatus: response.status,
-      })
-      .where(eq(outboundWebhooks.id, webhook.id));
-
-    if (!response.ok) {
-      logger.error({ webhookName: webhook.name, status: response.status }, 'Webhook delivery returned a non-OK status');
-    }
-
-    return { ok: response.ok, status: response.status };
-  } catch (error) {
-    await db
-      .update(outboundWebhooks)
-      .set({
-        lastTriggeredAt: triggeredAt,
-        lastStatus: null,
-      })
-      .where(eq(outboundWebhooks.id, webhook.id))
-      .catch((err: unknown) => { logger.error({ err, webhookName: webhook.name }, 'Failed to update webhook status'); });
-
-    logger.error({ err: error, webhookName: webhook.name }, 'Webhook delivery failed');
-    return { ok: false, status: null };
+      'Webhook delivery attempt did not succeed',
+    );
   }
+
+  return { ok: outcome.kind === 'delivered', status: outcome.status };
 }
 
-export async function emitEvent(event: MCEvent): Promise<void> {
-  let subscriptions;
-  try {
-    subscriptions = await db.select().from(outboundWebhooks);
-  } catch {
-    // Table may not exist yet; skip silently
-    return;
-  }
-  const matchingWebhooks = subscriptions.filter((webhook) =>
-    matchesEventType(webhook as OutboundWebhookRecord, event.type),
-  ) as OutboundWebhookRecord[];
+/**
+ * Durably enqueues an event for every matching outbound webhook.
+ *
+ * Persistence failures propagate to the caller: an event that could not be
+ * recorded has not been emitted, and silently returning would recreate exactly
+ * the lost-notification class this outbox exists to remove.
+ */
+export async function emitEvent(event: MCEvent, options: EmitEventOptions = {}): Promise<void> {
+  const repositories = await resolveEventDeliveryRepositories(options.repositories);
+  const result = await repositories.outbox.enqueue({
+    stableKey: options.stableKey ?? `${event.type}:${event.timestamp}:${randomUUID()}`,
+    eventType: event.type,
+    payload: event.payload,
+    occurredAt: event.timestamp,
+  });
 
-  if (!matchingWebhooks.length) {
-    return;
+  if (result.created && result.deliveryCount > 0) {
+    wakeEventOutboxDispatcher();
   }
-
-  void Promise.allSettled(
-    matchingWebhooks.map((webhook) => sendWebhookEvent(webhook, event)),
-  );
 }

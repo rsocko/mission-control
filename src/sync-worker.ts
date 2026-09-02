@@ -64,7 +64,10 @@ async function main(): Promise<void> {
     && workerPersistence.planningSignals
     && workerPersistence.projectAutomation
     && workerPersistence.finance
-    && workerPersistence.finance.recovery,
+    && workerPersistence.finance.recovery
+    && workerPersistence.eventDelivery
+    && workerPersistence.eventDelivery.outbox
+    && workerPersistence.eventDelivery.subscriptions,
   );
   if (!completeWorkerCompositionPresent) {
     throw new Error('Selected worker persistence composition is incomplete');
@@ -106,6 +109,11 @@ async function main(): Promise<void> {
   aiRunWorker?.start();
   await taskReminderScheduler.start();
   syncLogger.info('Sync worker: durable task reminder scheduler initialized');
+
+  const { EventOutboxDispatcher } = await import('@/lib/events/dispatcher');
+  const eventOutboxDispatcher = new EventOutboxDispatcher();
+  await eventOutboxDispatcher.start();
+  syncLogger.info('Sync worker: durable event outbox dispatcher initialized');
 
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
@@ -168,6 +176,7 @@ async function main(): Promise<void> {
       await Promise.all([
         healthSnapshotScheduler.stop(),
         taskReminderScheduler.stop(),
+        eventOutboxDispatcher.stop(),
         financeConnectionRecoveryScheduler.stop(),
         triageSyncScheduler.stopAll(),
         houstonMemoryRetentionScheduler.stop(),

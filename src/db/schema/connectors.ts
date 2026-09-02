@@ -504,6 +504,61 @@ export const outboundWebhooks = sqliteTable('outbound_webhooks', {
   createdAt: text('created_at').notNull(),
 });
 
+// ─── DURABLE EVENT OUTBOX (LAYER 2) ───────────────────────────────────────────
+
+/**
+ * Durable outbound-event log. `sequence` is the monotonic ordering key used to
+ * guarantee deterministic per-webhook delivery order, and `stableKey` is the
+ * caller-supplied idempotency key that makes repeated enqueue attempts (sync
+ * job retries, worker restarts) collapse onto a single row.
+ */
+export const eventOutbox = sqliteTable('event_outbox', {
+  sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+  stableKey: text('stable_key').notNull(),
+  eventType: text('event_type').notNull(),
+  payload: text('payload', { mode: 'json' }).notNull(),
+  occurredAt: text('occurred_at').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_event_outbox_stable_key').on(table.stableKey),
+  index('idx_event_outbox_type').on(table.eventType, table.sequence),
+]);
+
+/**
+ * One row per (event, webhook) pair. The unique pair index provides the stable
+ * delivery identity required for at-least-once delivery without duplicates,
+ * and the lease columns implement owner/token fencing for the dispatcher.
+ */
+export const eventOutboxDeliveries = sqliteTable('event_outbox_deliveries', {
+  id: text('id').primaryKey(),
+  eventSequence: integer('event_sequence')
+    .notNull()
+    .references(() => eventOutbox.sequence, { onDelete: 'cascade' }),
+  webhookId: text('webhook_id')
+    .notNull()
+    .references(() => outboundWebhooks.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: text('next_attempt_at'),
+  leaseOwner: text('lease_owner'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: text('lease_expires_at'),
+  lastError: text('last_error'),
+  lastStatus: integer('last_status'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_event_outbox_deliveries_pair').on(table.eventSequence, table.webhookId),
+  index('idx_event_outbox_deliveries_dispatch').on(
+    table.status,
+    table.nextAttemptAt,
+    table.eventSequence,
+  ),
+  index('idx_event_outbox_deliveries_webhook_order').on(table.webhookId, table.eventSequence),
+  index('idx_event_outbox_deliveries_lease').on(table.status, table.leaseExpiresAt),
+]);
+
 export const integrationConfigs = sqliteTable('integration_configs', {
   id: text('id').primaryKey(),
   type: text('type').notNull(),

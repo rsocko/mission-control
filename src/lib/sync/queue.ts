@@ -21,6 +21,7 @@ interface QueuedSync {
   connectorId: string;
   options?: { full?: boolean };
   resolve: (result: SyncResult) => void;
+  reject: (error: unknown) => void;
 }
 
 function rejectedSyncResult(connectorId: string, error: string): SyncResult {
@@ -90,8 +91,8 @@ export class SyncQueue {
       return this.executeSync(connectorId, options);
     }
 
-    return new Promise<SyncResult>((resolve) => {
-      this.queue.push({ connectorId, options, resolve });
+    return new Promise<SyncResult>((resolve, reject) => {
+      this.queue.push({ connectorId, options, resolve, reject });
       setQueuedExpensiveOperations(this.queue.length);
     });
   }
@@ -113,6 +114,7 @@ export class SyncQueue {
         connectorId,
         options: { full: true },
         resolve: () => undefined,
+        reject: () => undefined,
       });
       setQueuedExpensiveOperations(this.queue.length);
       return;
@@ -154,7 +156,7 @@ export class SyncQueue {
         next.resolve(rejectedSyncResult(next.connectorId, 'Sync already in progress'));
         continue;
       }
-      void this.executeSync(next.connectorId, next.options).then(next.resolve);
+      void this.executeSync(next.connectorId, next.options).then(next.resolve, next.reject);
     }
   }
 

@@ -30,6 +30,8 @@ export {
   dependencyReconciliationEdges,
   dependencyReconciliationCandidates,
   outboundWebhooks,
+  eventOutbox,
+  eventOutboxDeliveries,
   integrationConfigs,
   inboundWebhooks,
   inboundWebhookLog,

@@ -32,6 +32,7 @@ import { createPostgresTaskReminderRepository } from './task-reminder-repository
 import { createPostgresTriagePersistenceRepositories } from './triage-repositories';
 import { createPostgresPlanningSignalRepository } from './planning-signal-repository';
 import { createPostgresProjectAutomationRepository } from './project-automation-repository';
+import { createPostgresEventDeliveryRepositories } from './event-outbox-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -63,6 +64,10 @@ export { createPostgresTaskReminderRepository } from './task-reminder-repository
 export { createPostgresTriagePersistenceRepositories } from './triage-repositories';
 export { createPostgresPlanningSignalRepository } from './planning-signal-repository';
 export { createPostgresProjectAutomationRepository } from './project-automation-repository';
+export {
+  createPostgresEventDeliveryRepositories,
+  enqueuePostgresEventOutbox,
+} from './event-outbox-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -139,6 +144,7 @@ export function createPostgresWorkerPersistenceRepositories(
     triage: createPostgresTriagePersistenceRepositories(db),
     planningSignals: createPostgresPlanningSignalRepository(pool),
     projectAutomation: createPostgresProjectAutomationRepository(pool),
+    eventDelivery: createPostgresEventDeliveryRepositories(pool),
     finance: {
       ...financeCore,
       insights: {

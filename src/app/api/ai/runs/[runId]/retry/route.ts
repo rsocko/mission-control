@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DurableAiRunStore } from '@/lib/ai/durable-runs';
+import { getDurableAiRunRepository } from '@/lib/ai/durable-runs';
 import { ApiErrors } from '@/lib/api-error';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 
@@ -28,7 +28,7 @@ export async function POST(
   }
 
   try {
-    const run = new DurableAiRunStore().retryRun(
+    const run = await (await getDurableAiRunRepository()).retryRun(
       parsed.data.runId,
       parsed.data.idempotencyKey,
     );

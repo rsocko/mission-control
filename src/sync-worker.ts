@@ -180,6 +180,7 @@ async function main(): Promise<void> {
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = (signal: NodeJS.Signals) => {
     if (shutdownPromise) return;
+    rmSync(instanceFile, { force: true });
     shutdownPromise = (async () => {
       syncLogger.info({ signal }, 'Sync worker shutting down');
       await Promise.all([
@@ -198,7 +199,6 @@ async function main(): Promise<void> {
       await stopRuntimeTelemetry(signal);
       const { shutdownRuntimeDatabase } = await import('@/db/runtime');
       await shutdownRuntimeDatabase();
-      rmSync(instanceFile, { force: true });
     })().then(
       () => process.exit(0),
       (error) => {

@@ -14,7 +14,7 @@ import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
 } from '@/lib/external-identities/stable-identity-types';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { syncEventBus } from './events';
 import { syncLogger } from '@/lib/logger';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
@@ -77,6 +77,34 @@ import type {
   ConnectorNotificationCommand,
   ConnectorNotificationInput,
 } from '@/db/persistence/connector-execution';
+import {
+  shouldEnrichWithAI,
+  type AIEnrichmentInput,
+} from '@/lib/notifications/enrichment/ai-enrichment';
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(',')}}`;
+}
+
+export function notificationEnrichmentSourceRevision(
+  input: AIEnrichmentInput,
+): string {
+  return `sha256:${createHash('sha256').update(canonicalJson({
+    title: input.title,
+    body: input.body ?? null,
+    connectorType: input.connectorType,
+    category: input.category,
+    metadata: input.metadata,
+    presentation: input.presentation,
+  })).digest('hex')}`;
+}
 
 class SyncEventPersistenceError extends Error {
   constructor(cause: unknown) {
@@ -1263,10 +1291,30 @@ export class SyncExecutionPipeline {
     const notificationPersistence = (
       await getWorkerPersistenceRepositories()
     ).execution.notifications;
-    const commands: ConnectorNotificationCommand[] = prepared.map((item) => ({
-      input: item.input,
-      actions: item.actionRecords,
-    }));
+    const commands: ConnectorNotificationCommand[] = prepared.map((item) => {
+      const enrichmentInput = {
+        notificationId: item.input.id,
+        title: item.input.title,
+        body: item.input.body ?? null,
+        connectorType: item.input.connectorType,
+        category: item.input.category,
+        metadata: item.input.metadata,
+        presentation: item.input.presentation,
+      };
+      return {
+        input: item.input,
+        actions: item.actionRecords,
+        enrichment: {
+          sourceRevision: notificationEnrichmentSourceRevision(enrichmentInput),
+          payload: item.enrichment
+            && item.sourceMetadata
+            && item.input.sourceState === 'active'
+            && shouldEnrichWithAI(enrichmentInput)
+            ? enrichmentInput
+            : null,
+        },
+      };
+    });
     const creationResults = await notificationPersistence.ingest(commands);
     if (
       creationResults.some(result => result.pendingDelivery)
@@ -1285,67 +1333,9 @@ export class SyncExecutionPipeline {
         connectorType,
       });
       added++;
-
-      // ─── Async AI enrichment (fire-and-forget after persist) ──────────
-      if (item.enrichment && item.sourceMetadata) {
-        this.scheduleAIEnrichment(
-          item.search.id,
-          item.search.title,
-          item.search.body,
-          connectorType,
-          item.search.category,
-          item.sourceMetadata,
-          item.enrichment.presentation,
-        );
-      }
     }
 
     return added;
-  }
-
-  /**
-   * Schedule AI enrichment to run asynchronously after the notification is persisted.
-   * Updates the notification in-place once AI completes.
-   */
-  private scheduleAIEnrichment(
-    notificationId: string,
-    title: string,
-    body: string | null,
-    connectorType: string,
-    category: string,
-    metadata: Record<string, unknown>,
-    presentation: Record<string, unknown>,
-  ): void {
-    // Fire-and-forget — don't block sync
-    setImmediate(async () => {
-      try {
-        const { enrichWithAI } = await import('@/lib/notifications/enrichment/ai-enrichment');
-        const result = await enrichWithAI({
-          notificationId,
-          title,
-          body,
-          connectorType,
-          category,
-          metadata,
-          presentation,
-        });
-
-        if (result) {
-          const persistence = (
-            await getWorkerPersistenceRepositories()
-          ).execution.notifications;
-          await persistence.mergeMetadata(notificationId, {
-              aiSummary: result.summary,
-              aiSuggestedAction: result.suggestedAction,
-              aiSuggestedActionReason: result.suggestedActionReason,
-              aiContextTags: result.contextTags,
-              aiEnrichedAt: new Date().toISOString(),
-          });
-        }
-      } catch {
-        // Silent — AI enrichment is optional
-      }
-    });
   }
 
   // ─── Notification Reconciliation ──────────────────────────────────────────

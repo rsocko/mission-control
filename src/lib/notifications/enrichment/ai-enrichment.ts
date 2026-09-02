@@ -11,8 +11,6 @@
  * the sync pipeline.
  */
 
-import { connectorLogger } from '@/lib/logger';
-
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
 export interface AIEnrichmentInput {
@@ -36,6 +34,13 @@ export interface AIEnrichmentResult {
   urgencyBoost?: boolean;
   /** Additional context tags AI extracted */
   contextTags?: string[];
+}
+
+export class NotificationEnrichmentPermanentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NotificationEnrichmentPermanentError';
+  }
 }
 
 // ─── ENRICHMENT RULES ───────────────────────────────────────────────────────
@@ -95,46 +100,56 @@ Respond with JSON:
  *
  * Returns null if enrichment is skipped or fails gracefully.
  */
-export async function enrichWithAI(input: AIEnrichmentInput): Promise<AIEnrichmentResult | null> {
+export async function enrichWithAI(
+  input: AIEnrichmentInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AIEnrichmentResult | null> {
   if (!shouldEnrichWithAI(input)) {
     return null;
   }
 
-  try {
-    // Dynamic import to avoid circular dependencies with AI module
-    const { generateText } = await import('ai');
-    const { getAIModel } = await import('@/lib/ai/provider-factory');
+  // Dynamic import to avoid circular dependencies with AI module
+  const { generateText } = await import('ai');
+  const { getAIModel } = await import('@/lib/ai/provider-factory');
 
-    const prompt = buildEnrichmentPrompt(input);
-    const route = getAIModel('notification-enrichment', {
-      sources: [input.connectorType],
-    });
+  const prompt = buildEnrichmentPrompt(input);
+  const route = getAIModel('notification-enrichment', {
+    sources: [input.connectorType],
+  });
 
-    const { text } = await generateText({
-      model: route.model,
-      prompt,
-    });
+  const { text } = await generateText({
+    model: route.model,
+    prompt,
+    abortSignal: options.signal,
+  });
 
-    // Parse the AI response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      connectorLogger.warn({ err: 'no-json' }, '[AI Enrichment] Could not parse AI response as JSON');
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as AIEnrichmentResult;
-    return {
-      summary: parsed.summary,
-      suggestedAction: parsed.suggestedAction,
-      suggestedActionReason: parsed.suggestedActionReason,
-      urgencyBoost: parsed.urgencyBoost === true,
-      contextTags: Array.isArray(parsed.contextTags) ? parsed.contextTags : undefined,
-    };
-  } catch (error) {
-    // AI enrichment is optional — never fail the sync
-    connectorLogger.warn({ err: error instanceof Error ? error.message : String(error) }, '[AI Enrichment] Failed');
-    return null;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new NotificationEnrichmentPermanentError('AI response did not contain JSON');
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new NotificationEnrichmentPermanentError('AI response contained invalid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new NotificationEnrichmentPermanentError('AI response JSON must be an object');
+  }
+  const result = parsed as AIEnrichmentResult;
+  return {
+    summary: typeof result.summary === 'string' ? result.summary : undefined,
+    suggestedAction: typeof result.suggestedAction === 'string'
+      ? result.suggestedAction
+      : undefined,
+    suggestedActionReason: typeof result.suggestedActionReason === 'string'
+      ? result.suggestedActionReason
+      : undefined,
+    urgencyBoost: result.urgencyBoost === true,
+    contextTags: Array.isArray(result.contextTags)
+      ? result.contextTags.filter((tag): tag is string => typeof tag === 'string')
+      : undefined,
+  };
 }
 
 // ─── BATCH ENRICHMENT ───────────────────────────────────────────────────────

@@ -1074,6 +1074,7 @@ export function createSqliteConnectorExecutionRepositories(
             transaction,
             [{
             ...command.input,
+            enrichmentRevision: command.enrichment?.sourceRevision,
             primaryActionId: existing
               ? existing.primaryActionId
               : command.input.primaryActionId,
@@ -1086,6 +1087,42 @@ export function createSqliteConnectorExecutionRepositories(
                 icon: action.icon ?? null,
               })))
               .run();
+            }
+            if (command.enrichment) {
+              const now = new Date().toISOString();
+              database.prepare(`
+                UPDATE notification_enrichment_jobs
+                SET status = 'superseded', completed_at = ?, updated_at = ?
+                WHERE notification_id = ? AND source_generation <> ? AND status = 'pending'
+              `).run(
+                now,
+                now,
+                result.notification.id,
+                result.notification.enrichmentGeneration,
+              );
+              if (command.enrichment.payload) {
+                database.prepare(`
+                  INSERT INTO notification_enrichment_jobs (
+                    id, notification_id, source_id, source_revision, source_generation,
+                    payload, status,
+                    attempt_count, next_attempt_at, created_at, updated_at
+                  ) VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)
+                  ON CONFLICT(notification_id, source_generation) DO NOTHING
+                `).run(
+                  randomUUID(),
+                  result.notification.id,
+                  command.input.sourceId,
+                  command.enrichment.sourceRevision,
+                  result.notification.enrichmentGeneration,
+                  JSON.stringify({
+                    ...command.enrichment.payload,
+                    notificationId: result.notification.id,
+                  }),
+                  now,
+                  now,
+                  now,
+                );
+              }
             }
             return result;
           });

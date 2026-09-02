@@ -67,7 +67,8 @@ async function main(): Promise<void> {
     && workerPersistence.finance.recovery
     && workerPersistence.eventDelivery
     && workerPersistence.eventDelivery.outbox
-    && workerPersistence.eventDelivery.subscriptions,
+    && workerPersistence.eventDelivery.subscriptions
+    && workerPersistence.notificationEnrichment
   );
   if (!completeWorkerCompositionPresent) {
     throw new Error('Selected worker persistence composition is incomplete');
@@ -115,6 +116,15 @@ async function main(): Promise<void> {
   await eventOutboxDispatcher.start();
   syncLogger.info('Sync worker: durable event outbox dispatcher initialized');
 
+  const { NotificationEnrichmentWorker } = await import(
+    '@/lib/notifications/enrichment/worker'
+  );
+  const notificationEnrichmentWorker = new NotificationEnrichmentWorker({
+    repository: workerPersistence.notificationEnrichment,
+  });
+  notificationEnrichmentWorker.start();
+  syncLogger.info('Sync worker: durable notification enrichment worker initialized');
+
   await syncScheduler.scheduleAll();
   syncScheduler.startNightlyFullSync();
   // The GitHub worker composition is registered atomically, so a present
@@ -145,7 +155,6 @@ async function main(): Promise<void> {
 
   try {
     await triageSyncScheduler.initialize();
-    syncLogger.info('Sync worker: triage auto-sync scheduler initialized');
   } catch (error) {
     syncLogger.warn({ err: error }, 'Sync worker: triage auto-sync initialization failed');
   }
@@ -171,12 +180,14 @@ async function main(): Promise<void> {
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = (signal: NodeJS.Signals) => {
     if (shutdownPromise) return;
+    rmSync(instanceFile, { force: true });
     shutdownPromise = (async () => {
       syncLogger.info({ signal }, 'Sync worker shutting down');
       await Promise.all([
         healthSnapshotScheduler.stop(),
         taskReminderScheduler.stop(),
         eventOutboxDispatcher.stop(),
+        notificationEnrichmentWorker.stop(),
         financeConnectionRecoveryScheduler.stop(),
         triageSyncScheduler.stopAll(),
         houstonMemoryRetentionScheduler.stop(),
@@ -188,7 +199,6 @@ async function main(): Promise<void> {
       await stopRuntimeTelemetry(signal);
       const { shutdownRuntimeDatabase } = await import('@/db/runtime');
       await shutdownRuntimeDatabase();
-      rmSync(instanceFile, { force: true });
     })().then(
       () => process.exit(0),
       (error) => {
@@ -200,6 +210,7 @@ async function main(): Promise<void> {
 
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
+  syncLogger.info('Sync worker: triage auto-sync scheduler initialized');
 }
 
 void main().catch((error) => {

@@ -681,7 +681,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         '--import',
         'tsx',
         '--eval',
-        `import(${JSON.stringify(importerUrl)}).then(({ openImmutableReadonlySqlite }) => openImmutableReadonlySqlite(${JSON.stringify(source.sourcePath)}))`,
+        `import(${JSON.stringify(importerUrl)}).then((module) => (module.openImmutableReadonlySqlite ?? module.default?.openImmutableReadonlySqlite)(${JSON.stringify(source.sourcePath)}))`,
       ], {
         cwd: process.cwd(),
         encoding: 'utf8',

@@ -99,17 +99,26 @@ function formatDateYMD(d: Date): string {
 }
 
 /**
- * Extract the recurrence pattern from a task's JSON metadata string.
+ * Extract the recurrence pattern from a task's metadata. Metadata columns are
+ * stored as JSON in the database (Drizzle's `mode: 'json'`), so API responses
+ * deliver it as an already-parsed object — only some legacy/manual call sites
+ * still pass a raw JSON string. Handle both to avoid silently losing recurrence.
  * Returns null if metadata is absent, malformed, or contains no recurrence.
  */
-export function extractRecurrenceFromMetadata(metadata: string | null | undefined): string | null {
+export function extractRecurrenceFromMetadata(
+  metadata: Record<string, unknown> | string | null | undefined,
+): string | null {
   if (!metadata) return null;
-  try {
-    const parsed = JSON.parse(metadata) as Record<string, unknown>;
-    return typeof parsed?.recurrence === 'string' ? parsed.recurrence : null;
-  } catch {
-    return null;
-  }
+  const parsed = typeof metadata === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(metadata) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })()
+    : metadata;
+  return typeof parsed?.recurrence === 'string' ? parsed.recurrence : null;
 }
 
 /**

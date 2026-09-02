@@ -504,6 +504,7 @@ export function TaskMoveDialog({
                                     <Search size={11} className="shrink-0 text-[var(--text-muted)]" />
                                     <input
                                       type="text"
+                                      autoFocus
                                       value={listSearch}
                                       onChange={(e) => setListSearch(e.target.value)}
                                       placeholder="Search lists…"

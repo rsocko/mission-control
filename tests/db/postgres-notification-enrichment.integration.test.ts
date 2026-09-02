@@ -152,8 +152,15 @@ if (connectionString) {
         leaseMs: 1_000,
         owner: 'worker-c',
       });
+      expect(recovered).toMatchObject({ id: stale.id, attemptCount: 2 });
+      expect(recovered!.leaseToken).not.toBe(stale.leaseToken);
+      expect(await repository.deadLetter(stale, {
+        lastError: 'stale',
+        completedAt: '2026-01-01T00:00:03.000Z',
+      })).toBe(false);
+    });
 
-      it('preserves completed current-revision metadata across idempotent ingest', async () => {
+    it('preserves completed current-revision metadata across idempotent ingest', async () => {
         const db = await pool();
         const execution = createPostgresConnectorExecutionRepositories(db);
         const repository = createPostgresNotificationEnrichmentRepository(db);
@@ -198,9 +205,9 @@ if (connectionString) {
           job_count: 1,
           delivery_count: before.rows[0].count,
         });
-      });
+    });
 
-      it('creates one monotonic generation for concurrent A-B-A reversion and fences stale A', async () => {
+    it('creates one monotonic generation for concurrent A-B-A reversion and fences stale A', async () => {
         const db = await pool();
         const execution = createPostgresConnectorExecutionRepositories(db);
         const repository = createPostgresNotificationEnrichmentRepository(db);
@@ -262,13 +269,6 @@ if (connectionString) {
           metadata: { sourceOwned: 'current' },
           delivery_count: deliveryCount.rows[0].count,
         });
-      });
-      expect(recovered).toMatchObject({ id: stale.id, attemptCount: 2 });
-      expect(recovered!.leaseToken).not.toBe(stale.leaseToken);
-      expect(await repository.deadLetter(stale, {
-        lastError: 'stale',
-        completedAt: '2026-01-01T00:00:03.000Z',
-      })).toBe(false);
     });
 
     it.each([

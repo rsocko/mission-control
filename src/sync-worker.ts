@@ -155,7 +155,6 @@ async function main(): Promise<void> {
 
   try {
     await triageSyncScheduler.initialize();
-    syncLogger.info('Sync worker: triage auto-sync scheduler initialized');
   } catch (error) {
     syncLogger.warn({ err: error }, 'Sync worker: triage auto-sync initialization failed');
   }
@@ -211,6 +210,7 @@ async function main(): Promise<void> {
 
   process.once('SIGTERM', shutdown);
   process.once('SIGINT', shutdown);
+  syncLogger.info('Sync worker: triage auto-sync scheduler initialized');
 }
 
 void main().catch((error) => {

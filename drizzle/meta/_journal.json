@@ -883,6 +883,13 @@
       "when": 1788212099198,
       "tag": "0125_triage-sync-state-revision",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "6",
+      "when": 1788298502117,
+      "tag": "0126_event-outbox",
+      "breakpoints": true
     }
   ]
 }

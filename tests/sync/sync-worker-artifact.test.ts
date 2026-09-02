@@ -22,7 +22,16 @@ describe('sync worker artifact guard', () => {
     'legacy durable AI run worker is disabled on PostgreSQL',
     'semantic index worker is disabled for this persistence backend',
   ].join('\n');
-  const completeActivation = `${financeActivation}\n${triageActivation}\n${finalActivation}`;
+  const eventOutboxActivation = [
+    'EventOutboxDispatcher',
+    'createPostgresEventDeliveryRepositories',
+    'createSqliteEventDeliveryRepositories',
+    'durable event outbox dispatcher initialized',
+    'Event delivery lease was fenced out mid-flight',
+    'Event delivery moved to dead letter',
+  ].join('\n');
+  const completeActivation =
+    `${financeActivation}\n${triageActivation}\n${finalActivation}\n${eventOutboxActivation}`;
 
   it('rejects a bundle containing the retired finance backlog emitter', () => {
     const retiredCode = ['finance', 'attention', 'backlog', 'exceeded'].join('_');
@@ -45,6 +54,12 @@ describe('sync worker artifact guard', () => {
       `${completeActivation}\nif (config.type === "finance-manager") { `
       + 'throw new UnsupportedConnectorExecutionError("connector-owned state"); }',
     )).toThrow('Sync worker bundle retained the PostgreSQL finance support rejection');
+  });
+
+  it('rejects a bundle missing the packaged durable event outbox runtime', () => {
+    expect(() => assertSyncWorkerArtifact(
+      `${financeActivation}\n${triageActivation}\n${finalActivation}`,
+    )).toThrow('Sync worker bundle omitted durable event outbox markers');
   });
 
   it('accepts the activated finance and triage worker with separately gated delivery', () => {

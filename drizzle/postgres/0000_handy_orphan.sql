@@ -1614,6 +1614,32 @@ CREATE TABLE "outbound_webhooks" (
 	"created_at" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "event_outbox" (
+	"sequence" serial PRIMARY KEY NOT NULL,
+	"stable_key" text NOT NULL,
+	"event_type" text NOT NULL,
+	"payload" jsonb NOT NULL,
+	"occurred_at" text NOT NULL,
+	"created_at" text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "event_outbox_deliveries" (
+	"id" text PRIMARY KEY NOT NULL,
+	"event_sequence" integer NOT NULL,
+	"webhook_id" text NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"attempt_count" integer DEFAULT 0 NOT NULL,
+	"next_attempt_at" text,
+	"lease_owner" text,
+	"lease_token" text,
+	"lease_expires_at" text,
+	"last_error" text,
+	"last_status" integer,
+	"completed_at" text,
+	"created_at" text NOT NULL,
+	"updated_at" text NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "priority_entities" (
 	"id" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
@@ -2592,6 +2618,8 @@ ALTER TABLE "task_source_write_lease_targets" ADD CONSTRAINT "task_source_write_
 ALTER TABLE "task_source_write_leases" ADD CONSTRAINT "task_source_write_leases_connector_instance_id_connector_configs_id_fk" FOREIGN KEY ("connector_instance_id") REFERENCES "public"."connector_configs"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "task_source_write_leases" ADD CONSTRAINT "task_source_write_leases_write_cycle_id_github_identity_write_cycles_id_fk" FOREIGN KEY ("write_cycle_id") REFERENCES "public"."github_identity_write_cycles"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "triage_action_claims" ADD CONSTRAINT "triage_action_claims_triage_item_id_triage_items_id_fk" FOREIGN KEY ("triage_item_id") REFERENCES "public"."triage_items"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "event_outbox_deliveries" ADD CONSTRAINT "event_outbox_deliveries_event_sequence_event_outbox_sequence_fk" FOREIGN KEY ("event_sequence") REFERENCES "public"."event_outbox"("sequence") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "event_outbox_deliveries" ADD CONSTRAINT "event_outbox_deliveries_webhook_id_outbound_webhooks_id_fk" FOREIGN KEY ("webhook_id") REFERENCES "public"."outbound_webhooks"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_agent_dispatch_attempt_number" ON "agent_dispatch_attempts" USING btree ("dispatch_id","attempt_number");--> statement-breakpoint
 CREATE INDEX "idx_agent_dispatch_attempt_status" ON "agent_dispatch_attempts" USING btree ("status","started_at");--> statement-breakpoint
 CREATE INDEX "idx_agent_dispatch_events_dispatch" ON "agent_dispatch_events" USING btree ("dispatch_id","id");--> statement-breakpoint
@@ -2886,4 +2914,10 @@ CREATE INDEX "idx_weekly_one_thing_task_id" ON "weekly_one_thing" USING btree ("
 CREATE INDEX "idx_work_todo_list_delta_connector" ON "work_todo_list_delta_state" USING btree ("connector_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "idx_work_todo_change_task_version" ON "work_todo_outbound_changes" USING btree ("connector_id","task_id","task_version");--> statement-breakpoint
 CREATE INDEX "idx_work_todo_change_ready" ON "work_todo_outbound_changes" USING btree ("connector_id","status","lease_expires_at","created_at");--> statement-breakpoint
-CREATE INDEX "idx_work_todo_change_task" ON "work_todo_outbound_changes" USING btree ("task_id");
+CREATE INDEX "idx_work_todo_change_task" ON "work_todo_outbound_changes" USING btree ("task_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_event_outbox_stable_key" ON "event_outbox" USING btree ("stable_key");--> statement-breakpoint
+CREATE INDEX "idx_event_outbox_type" ON "event_outbox" USING btree ("event_type","sequence");--> statement-breakpoint
+CREATE UNIQUE INDEX "idx_event_outbox_deliveries_pair" ON "event_outbox_deliveries" USING btree ("event_sequence","webhook_id");--> statement-breakpoint
+CREATE INDEX "idx_event_outbox_deliveries_dispatch" ON "event_outbox_deliveries" USING btree ("status","next_attempt_at","event_sequence");--> statement-breakpoint
+CREATE INDEX "idx_event_outbox_deliveries_webhook_order" ON "event_outbox_deliveries" USING btree ("webhook_id","event_sequence");--> statement-breakpoint
+CREATE INDEX "idx_event_outbox_deliveries_lease" ON "event_outbox_deliveries" USING btree ("status","lease_expires_at");

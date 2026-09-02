@@ -165,6 +165,25 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  eventDelivery: {
+    subscriptions: new Proxy(
+      {} as WorkerPersistenceRepositories['eventDelivery']['subscriptions'],
+      {
+        get: (_target, property) => (
+          requirePostgresWorkerRepositories().eventDelivery.subscriptions[
+            property as keyof WorkerPersistenceRepositories['eventDelivery']['subscriptions']
+          ]
+        ),
+      },
+    ),
+    outbox: new Proxy({} as WorkerPersistenceRepositories['eventDelivery']['outbox'], {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().eventDelivery.outbox[
+          property as keyof WorkerPersistenceRepositories['eventDelivery']['outbox']
+        ]
+      ),
+    }),
+  },
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[

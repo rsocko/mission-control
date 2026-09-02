@@ -8,6 +8,8 @@ import type {
   PersistedSyncEvent,
   SyncCancellationResult,
   SyncJob,
+  SyncJobFailureOptions,
+  SyncJobFinalizationOptions,
   SyncJobRepository,
   SyncJobSource,
   SyncJobStatus,
@@ -15,6 +17,8 @@ import type {
   SyncScheduleHealth,
 } from './job-repository';
 import { connectorSyncLeaseOwner } from './connector-lock-values';
+import { enqueueSqliteEventOutbox } from '@/db/persistence/sqlite-event-outbox-repository';
+import { isTerminalSyncJobStatus } from './terminal-events';
 import { recoverExpiredSyncJobs } from './sqlite-connector-operation-lease-repository';
 import {
   assertConnectorSyncEnqueueAllowed,
@@ -469,6 +473,7 @@ export function finalizeSuccessfulSyncJob(
   job: SyncJob,
   owner: string,
   result: SyncResult,
+  options: SyncJobFinalizationOptions = {},
 ): void {
   if (!result.syncRunId) {
     throw new Error(`Sync job ${job.id} returned no exact sync-run identity`);
@@ -544,6 +549,16 @@ export function finalizeSuccessfulSyncJob(
     if (released.changes !== 1) {
       throw new Error(`Sync job ${job.id} connector lease was lost before completion`);
     }
+    // Same transaction as the authoritative terminal transition: the outbox row
+    // exists if and only if the job actually succeeded.
+    for (const event of options.events ?? []) {
+      enqueueSqliteEventOutbox(sqlite, {
+        stableKey: event.stableKey,
+        eventType: event.eventType,
+        payload: event.payload,
+        occurredAt: event.occurredAt,
+      });
+    }
   });
   transaction.immediate();
 }
@@ -590,7 +605,7 @@ export function failSyncJob(
   job: SyncJob,
   owner: string,
   error: string,
-  options: { retry?: boolean; cancelled?: boolean; terminal?: boolean } = {},
+  options: SyncJobFailureOptions = {},
 ): SyncJobStatus {
   const now = new Date();
   const nowIso = now.toISOString();
@@ -640,6 +655,18 @@ export function failSyncJob(
       DELETE FROM connector_operation_leases
       WHERE connector_id = ? AND owner = ?
     `).run(job.connectorId, lockOwner);
+    // A `queued` status means the attempt will be retried, so no terminal event
+    // has occurred yet — this is what stops retries from duplicating events.
+    if (isTerminalSyncJobStatus(status)) {
+      for (const event of options.events ?? []) {
+        enqueueSqliteEventOutbox(sqlite, {
+          stableKey: event.stableKey,
+          eventType: event.eventType,
+          payload: event.payload,
+          occurredAt: event.occurredAt,
+        });
+      }
+    }
     return status;
   });
   return transaction.immediate();

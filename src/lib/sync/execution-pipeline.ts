@@ -78,6 +78,13 @@ import type {
   ConnectorNotificationInput,
 } from '@/db/persistence/connector-execution';
 
+class SyncEventPersistenceError extends Error {
+  constructor(cause: unknown) {
+    super('Failed to persist terminal sync event', { cause });
+    this.name = 'SyncEventPersistenceError';
+  }
+}
+
 type DependencyResumeTrigger = 'startup' | 'recurring' | 'retry' | 'manual';
 
 interface DependencyResumeSummary {
@@ -910,21 +917,31 @@ export class SyncExecutionPipeline {
           subtasksAdded: upsertResult.subtasksAdded,
         },
       });
-      if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+      if (
+        options?.jobId === undefined
+        && executionPersistence.support.allowsLegacyWorkflow('event-outbox')
+      ) {
+        // Job-backed runs let the durable finalizer own the terminal event so
+        // it commits atomically with the authoritative transition.
         const { emitEvent } = await import('@/lib/events');
-        emitEvent({
-          type: 'sync.completed',
-          timestamp: result.syncedAt,
-          payload: {
-            connectorId,
-            success: result.success,
-            tasksAdded,
-            tasksUpdated,
-            tasksRemoved,
-            notificationsAdded,
-            errors,
-          },
-        }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.completed event'));
+        try {
+          await emitEvent({
+            type: 'sync.completed',
+            timestamp: result.syncedAt,
+            payload: {
+              connectorId,
+              success: result.success,
+              tasksAdded,
+              tasksUpdated,
+              tasksRemoved,
+              notificationsAdded,
+              errors,
+            },
+          }, { stableKey: `sync.completed:run:${syncRunId}` });
+        } catch (eventError) {
+          // Surface persistence failure without reclassifying a committed sync.
+          throw new SyncEventPersistenceError(eventError);
+        }
       }
 
       // Pre-warm search indexes in background so first Ctrl+K is instant
@@ -976,6 +993,9 @@ export class SyncExecutionPipeline {
 
       return result;
     } catch (err) {
+      if (err instanceof SyncEventPersistenceError) {
+        throw err.cause;
+      }
       const syncRunId = randomUUID();
       const result: SyncResult = {
         connectorId,
@@ -1036,16 +1056,21 @@ export class SyncExecutionPipeline {
       const executionPersistence = (
         await getWorkerPersistenceRepositories()
       ).execution;
-      if (executionPersistence.support.allowsLegacyWorkflow('event-outbox')) {
+      if (
+        options?.jobId === undefined
+        && executionPersistence.support.allowsLegacyWorkflow('event-outbox')
+      ) {
+        // Job-backed runs let the durable finalizer own the terminal event so
+        // it commits atomically with the authoritative transition.
         const { emitEvent } = await import('@/lib/events');
-        emitEvent({
+        await emitEvent({
           type: 'sync.failed',
           timestamp: result.syncedAt,
           payload: {
             connectorId,
             errors: result.errors,
           },
-        }).catch((e) => syncLogger.error({ err: e, connectorId }, 'Failed to emit sync.failed event'));
+        }, { stableKey: `sync.failed:run:${syncRunId}` });
       }
 
       syncLogger.error({

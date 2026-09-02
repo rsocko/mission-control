@@ -33,6 +33,10 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
     triage: {} as WorkerPersistenceRepositories['triage'],
     planningSignals: {} as WorkerPersistenceRepositories['planningSignals'],
     projectAutomation: {} as WorkerPersistenceRepositories['projectAutomation'],
+    eventDelivery: {
+      subscriptions: {},
+      outbox: {},
+    } as WorkerPersistenceRepositories['eventDelivery'],
     finance: {
       identity: {},
       snapshots: {},
@@ -71,6 +75,7 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-triage-repositories');
   vi.doUnmock('@/db/persistence/sqlite-planning-signal-repository');
   vi.doUnmock('@/db/persistence/sqlite-project-automation-repository');
+  vi.doUnmock('@/db/persistence/sqlite-event-outbox-repository');
   vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-insights-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-attention-repositories');
@@ -132,10 +137,12 @@ describe('worker persistence runtime', () => {
     const projectAutomationModule = vi.fn(() => ({
       createSqliteProjectAutomationRepository: () => repositories.projectAutomation,
     }));
+    const eventOutboxModule = vi.fn(() => ({
+      createSqliteEventDeliveryRepositories: () => repositories.eventDelivery,
+    }));
     const financeModule = vi.fn(() => ({
       createSqliteFinanceWorkerPersistence: () => repositories.finance,
-    }));
-    const financeInsightsModule = vi.fn(() => ({
+    }));    const financeInsightsModule = vi.fn(() => ({
       createSqliteFinanceInsightPersistence: () => repositories.finance.insights,
     }));
     const financeAttentionModule = vi.fn(() => ({
@@ -176,6 +183,7 @@ describe('worker persistence runtime', () => {
     vi.doMock('@/db/persistence/sqlite-triage-repositories', triageModule);
     vi.doMock('@/db/persistence/sqlite-planning-signal-repository', planningSignalsModule);
     vi.doMock('@/db/persistence/sqlite-project-automation-repository', projectAutomationModule);
+    vi.doMock('@/db/persistence/sqlite-event-outbox-repository', eventOutboxModule);
     vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
     vi.doMock(
       '@/db/persistence/sqlite-finance-insights-repositories',
@@ -212,6 +220,7 @@ describe('worker persistence runtime', () => {
     expect(triageModule).not.toHaveBeenCalled();
     expect(planningSignalsModule).not.toHaveBeenCalled();
     expect(projectAutomationModule).not.toHaveBeenCalled();
+    expect(eventOutboxModule).not.toHaveBeenCalled();
     expect(financeModule).not.toHaveBeenCalled();
     expect(financeInsightsModule).not.toHaveBeenCalled();
     expect(financeAttentionModule).not.toHaveBeenCalled();
@@ -236,6 +245,7 @@ describe('worker persistence runtime', () => {
     expect(first.triage).toBe(repositories.triage);
     expect(first.planningSignals).toBe(repositories.planningSignals);
     expect(first.projectAutomation).toBe(repositories.projectAutomation);
+    expect(first.eventDelivery).toBe(repositories.eventDelivery);
     expect(first.finance.identity).toBe(repositories.finance.identity);
     expect(first.finance.snapshots).toBe(repositories.finance.snapshots);
     expect(first.finance.datasets).toBe(repositories.finance.datasets);
@@ -265,6 +275,7 @@ describe('worker persistence runtime', () => {
     expect(triageModule).toHaveBeenCalledOnce();
     expect(planningSignalsModule).toHaveBeenCalledOnce();
     expect(projectAutomationModule).toHaveBeenCalledOnce();
+    expect(eventOutboxModule).toHaveBeenCalledOnce();
     expect(financeModule).toHaveBeenCalledOnce();
     expect(financeInsightsModule).toHaveBeenCalledOnce();
     expect(financeAttentionModule).toHaveBeenCalledOnce();

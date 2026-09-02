@@ -57,10 +57,12 @@ async function transaction<T>(
 ): Promise<T> {
   for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt++) {
     const client = await pool.connect();
+    let lockAcquired = false;
     try {
+      await client.query('SELECT pg_advisory_lock(hashtext($1))', [projectId]);
+      lockAcquired = true;
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
       try {
-        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [projectId]);
         const result = await work(client);
         await client.query('COMMIT');
         return result;
@@ -69,6 +71,9 @@ async function transaction<T>(
         if (!retryable(error) || attempt === MAX_TRANSACTION_ATTEMPTS) throw error;
       }
     } finally {
+      if (lockAcquired) {
+        await client.query('SELECT pg_advisory_unlock(hashtext($1))', [projectId]);
+      }
       client.release();
     }
   }

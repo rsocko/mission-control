@@ -45,6 +45,39 @@ describe('PostgreSQL planning and project automation boundary', () => {
     expect(support.allowsLegacyWorkflow('project-automation')).toBe(false);
   });
 
+  it('acquires the project lock before opening the serializable snapshot', async () => {
+    const statements: string[] = [];
+    const client = {
+      async query(text: string) {
+        statements.push(text);
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const { createPostgresProjectAutomationRepository } = await import(
+      '@/db/postgres/repositories/project-automation-repository'
+    );
+    const repository = createPostgresProjectAutomationRepository({
+      connect: async () => client,
+    } as never);
+
+    await expect(repository.evaluateProject('project-1')).resolves.toEqual({
+      added: 0,
+      matched: 0,
+      matches: [],
+    });
+    const lockIndex = statements.findIndex((statement) =>
+      statement.includes('pg_advisory_lock')
+    );
+    const beginIndex = statements.findIndex((statement) =>
+      statement.includes('BEGIN ISOLATION LEVEL SERIALIZABLE')
+    );
+    expect(lockIndex).toBeGreaterThanOrEqual(0);
+    expect(beginIndex).toBeGreaterThan(lockIndex);
+    expect(statements.some((statement) => statement.includes('pg_advisory_xact_lock')))
+      .toBe(false);
+  });
+
   it('prevents shared services from bypassing the closed gates', async () => {
     const planning = await import('@/lib/planning-signals');
     const rules = await import('@/lib/rules');

@@ -118,14 +118,49 @@ export async function GET(request: Request) {
       lastSyncs.map((row) => [row.connectorId, row.syncedAt]),
     );
 
+    // Get the outcome of the most recent sync attempt (success or failure) per
+    // connector, regardless of overall status, so the settings UI can surface an
+    // ongoing failure (e.g. an expired OAuth token) instead of only showing
+    // "credentials stored" as if the connection were healthy.
+    const latestSyncOutcomes = await db.all<{
+      connectorId: string;
+      success: number;
+      errors: string | null;
+    }>(sql`
+      SELECT connector_id as connectorId, success, errors
+      FROM (
+        SELECT connector_id, success, errors,
+               ROW_NUMBER() OVER (PARTITION BY connector_id ORDER BY synced_at DESC) AS rn
+        FROM sync_log
+      )
+      WHERE rn = 1
+    `);
+
+    const lastSyncStatusMap = new Map<string, { success: boolean; error: string | null }>();
+    for (const row of latestSyncOutcomes) {
+      let errorList: unknown[] = [];
+      try {
+        errorList = row.errors ? JSON.parse(row.errors) : [];
+      } catch {
+        errorList = [];
+      }
+      lastSyncStatusMap.set(row.connectorId, {
+        success: !!row.success,
+        error: Array.isArray(errorList) && errorList.length > 0 ? String(errorList[0]) : null,
+      });
+    }
+
     // Merge lastSyncedAt and capability defaults into connector configs
     const connectors = configs.map(c => {
       const defaults = CAPABILITY_DEFAULTS[c.type] ?? {};
       const storedCaps = (c.capabilities ?? {}) as Record<string, unknown>;
+      const lastOutcome = lastSyncStatusMap.get(c.id);
       return serializeConnectorForBrowser({
         ...c,
         capabilities: { ...defaults, ...storedCaps },
         lastSyncedAt: lastSyncMap.get(c.id) || null,
+        lastSyncStatus: lastOutcome ? (lastOutcome.success ? 'success' : 'failed') : null,
+        lastSyncError: lastOutcome?.error ?? null,
       });
     });
 

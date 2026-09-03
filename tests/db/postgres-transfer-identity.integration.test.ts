@@ -113,12 +113,24 @@ async function seed(): Promise<void> {
   );
 }
 
-function instrumentPool(pool: Pool, statements: string[]): Pool {
+interface ConnectorLockControl {
+  afterQueryStarted(connection: number, processId: number): void;
+  afterLockAcquired(connection: number): Promise<void>;
+}
+
+function instrumentPool(
+  pool: Pool,
+  statements: string[],
+  lockControl?: ConnectorLockControl,
+): Pool {
+  let connection = 0;
   return new Proxy(pool, {
     get(target, property, receiver) {
       if (property === 'connect') {
         return async () => {
           const client = await target.connect();
+          connection += 1;
+          const connectionNumber = connection;
           return new Proxy(client, {
             get(clientTarget, clientProperty, clientReceiver) {
               if (clientProperty === 'query') {
@@ -129,7 +141,23 @@ function instrumentPool(pool: Pool, statements: string[]): Pool {
                       ? String(query.text)
                       : '';
                   statements.push(text.replace(/\s+/g, ' ').trim());
-                  return Reflect.apply(clientTarget.query, clientTarget, [query, ...args]);
+                  const result = Reflect.apply(
+                    clientTarget.query,
+                    clientTarget,
+                    [query, ...args],
+                  );
+                  if (
+                    lockControl
+                    && text.includes('pg_advisory_xact_lock(hashtextextended($1, 0))')
+                    && !text.includes('unnest')
+                  ) {
+                    lockControl.afterQueryStarted(connectionNumber, clientTarget.processID);
+                    return Promise.resolve(result).then(async (value) => {
+                      await lockControl.afterLockAcquired(connectionNumber);
+                      return value;
+                    });
+                  }
+                  return result;
                 };
               }
               const value = Reflect.get(clientTarget, clientProperty, clientReceiver);
@@ -330,6 +358,10 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
       statement.toLowerCase().includes('from "tasks"')
       && statement.toLowerCase().includes('for update')
     ))).toBe(true);
+    expect(statements.some((statement) => (
+      statement.toLowerCase().includes('from "source_lists"')
+      && statement.toLowerCase().includes('for share')
+    ))).toBe(true);
   });
 
   it('rolls back task, source-list binding, and entity rows on a late task failure', async () => {
@@ -363,15 +395,51 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
 
   it('serializes concurrent retries behind deterministic connector and identity locks', async () => {
     const statements: string[] = [];
-    const pool = instrumentPool(backend.context.pool, statements);
+    let markFirstLocked: (() => void) | undefined;
+    let markSecondAttempted: ((processId: number) => void) | undefined;
+    let releaseFirst: (() => void) | undefined;
+    const firstLocked = new Promise<void>((resolve) => {
+      markFirstLocked = resolve;
+    });
+    const secondAttempted = new Promise<number>((resolve) => {
+      markSecondAttempted = resolve;
+    });
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const pool = instrumentPool(backend.context.pool, statements, {
+      afterQueryStarted(connection, processId) {
+        if (connection === 2) markSecondAttempted?.(processId);
+      },
+      async afterLockAcquired(connection) {
+        if (connection !== 1) return;
+        markFirstLocked?.();
+        await firstRelease;
+      },
+    });
     const repository = createPostgresGitHubIdentityRepositories(pool).transferIdentity;
 
-    const results = await Promise.all([
-      repository.persist(bridgeInput()),
-      repository.persist(bridgeInput()),
-    ]);
+    const first = repository.persist(bridgeInput());
+    await firstLocked;
+    const second = repository.persist(bridgeInput());
+    const secondProcessId = await secondAttempted;
 
-    expect(results).toEqual([undefined, undefined]);
+    try {
+      let waiting = false;
+      for (let attempt = 0; attempt < 20 && !waiting; attempt += 1) {
+        const result = await backend.context.pool.query<{ waiting: boolean }>(
+          'SELECT cardinality(pg_blocking_pids($1)) > 0 AS waiting',
+          [secondProcessId],
+        );
+        waiting = result.rows[0]?.waiting ?? false;
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiting).toBe(true);
+    } finally {
+      releaseFirst?.();
+    }
+
+    expect(await Promise.all([first, second])).toEqual([undefined, undefined]);
     expect(statements.filter((statement) => statement === 'BEGIN')).toHaveLength(2);
     expect(statements.filter((statement) => statement === 'COMMIT')).toHaveLength(2);
     expect(statements.filter((statement) => (

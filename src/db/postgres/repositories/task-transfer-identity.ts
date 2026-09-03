@@ -1,4 +1,7 @@
 import { and, asc, eq, inArray } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import type { PoolClient } from 'pg';
+import * as schema from '../schema';
 import { sourceLists, tasks } from '../schema';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import type { TaskTransferIdentityRepository } from '@/lib/tasks/core/contracts';
@@ -9,6 +12,35 @@ type ResolveResult = Awaited<
 >;
 type ReconcileInput = Parameters<TaskTransferIdentityRepository['reconcileTaskRefresh']>[0];
 type TransactionDatabase = PostgresDatabase | PostgresTransaction;
+const transactionScope = Symbol('PostgresTaskTransferIdentityTransaction');
+
+export interface PostgresTaskTransferIdentityTransaction {
+  readonly database: TransactionDatabase;
+  readonly [transactionScope]: true;
+}
+
+function createTransactionScope(
+  database: TransactionDatabase,
+): PostgresTaskTransferIdentityTransaction {
+  return Object.freeze({
+    database,
+    [transactionScope]: true as const,
+  });
+}
+
+export function bindPostgresTaskTransferIdentityDrizzleTransaction(
+  transaction: PostgresTransaction,
+): PostgresTaskTransferIdentityTransaction {
+  return createTransactionScope(transaction);
+}
+
+export async function bindPostgresTaskTransferIdentityClientTransaction(
+  client: PoolClient,
+): Promise<PostgresTaskTransferIdentityTransaction> {
+  await client.query('SAVEPOINT task_transfer_identity_scope');
+  await client.query('RELEASE SAVEPOINT task_transfer_identity_scope');
+  return createTransactionScope(drizzle(client, { schema }));
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -62,18 +94,22 @@ export function resolvePostgresTaskTransferIdentityTargets(
  * Source-list and task rows are locked in deterministic order before writes.
  */
 export function resolvePostgresTaskTransferIdentityTargetsInTransaction(
-  transaction: TransactionDatabase,
+  transaction: PostgresTaskTransferIdentityTransaction,
   input: ResolveInput,
 ): Promise<ResolveResult> {
-  return resolvePostgresTaskTransferIdentityTargetsInternal(transaction, input, true);
+  return resolvePostgresTaskTransferIdentityTargetsInternal(
+    transaction.database,
+    input,
+    true,
+  );
 }
 
 /** Only call with a handle already bound to the adapter's owning transaction. */
 export async function reconcilePostgresTaskTransferIdentityRefreshInTransaction(
-  transaction: TransactionDatabase,
+  transaction: PostgresTaskTransferIdentityTransaction,
   input: ReconcileInput,
 ): Promise<boolean> {
-  const [current] = await transaction.select({ metadata: tasks.metadata })
+  const [current] = await transaction.database.select({ metadata: tasks.metadata })
     .from(tasks)
     .where(and(
       eq(tasks.id, input.taskId),
@@ -86,7 +122,7 @@ export async function reconcilePostgresTaskTransferIdentityRefreshInTransaction(
     ...asRecord(current.metadata),
     ...input.task.metadata,
   };
-  const updated = await transaction.update(tasks).set({
+  const updated = await transaction.database.update(tasks).set({
     sourceId: input.task.sourceId,
     sourceListId: input.task.sourceListId,
     sourceListName: input.task.sourceListName,

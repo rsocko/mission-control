@@ -42,6 +42,7 @@ import {
   type PostgresCanonicalTaskFilterInputs,
 } from './task-core-filter';
 import {
+  bindPostgresTaskTransferIdentityDrizzleTransaction,
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargets,
 } from './task-transfer-identity';
@@ -1567,7 +1568,10 @@ class PostgresTaskTransferIdentityRepository implements TaskTransferIdentityRepo
     observedAt: string;
   }): Promise<boolean> {
     return this.db.transaction((tx) => (
-      reconcilePostgresTaskTransferIdentityRefreshInTransaction(tx, input)
+      reconcilePostgresTaskTransferIdentityRefreshInTransaction(
+        bindPostgresTaskTransferIdentityDrizzleTransaction(tx),
+        input,
+      )
     ));
   }
 }

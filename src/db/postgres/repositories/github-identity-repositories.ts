@@ -1,14 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
-import * as schema from '@/db/postgres/schema';
 import {
   buildGitHubTransferIdentityWrites,
   sourceListIdsForGitHubTransferIdentity,
   type GitHubTransferIdentityPersistence,
 } from '@/db/persistence/github-transfer-identity';
 import {
+  bindPostgresTaskTransferIdentityClientTransaction,
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargetsInTransaction,
 } from './task-transfer-identity';
@@ -4167,9 +4166,10 @@ export function createPostgresGitHubIdentityRepositories(
           'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
           [`connector:${input.connectorInstanceId}`],
         );
-        const transactionDb = drizzle(client, { schema });
+        const taskTransaction =
+          await bindPostgresTaskTransferIdentityClientTransaction(client);
         const targets = await resolvePostgresTaskTransferIdentityTargetsInTransaction(
-          transactionDb,
+          taskTransaction,
           {
             taskId: input.taskId,
             connectorInstanceId: input.connectorInstanceId,
@@ -4202,7 +4202,7 @@ export function createPostgresGitHubIdentityRepositories(
         if (
           input.reconcileTask
           && !await reconcilePostgresTaskTransferIdentityRefreshInTransaction(
-            transactionDb,
+            taskTransaction,
             {
               taskId: input.taskId,
               connectorInstanceId: input.connectorInstanceId,

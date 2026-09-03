@@ -175,12 +175,20 @@ describe('createPostgresGitHubIdentityOperatorRepositories', () => {
       const { createPostgresGitHubIdentityOperatorRepositories: freshFactory } = await import(
         '@/db/postgres/repositories/github-identity-operator-repositories'
       );
+      // vi.resetModules() gives the re-imported adapter module its own fresh
+      // copy of every module it transitively imports, including the error
+      // class module. Re-import it here too so the `instanceof` check below
+      // compares against the exact constructor the fresh adapter throws,
+      // rather than the one captured by this file's top-level static import
+      // (which resolves to a different registry entry after the reset).
+      const { UnsupportedGitHubWorkerOperationError: FreshUnsupportedGitHubWorkerOperationError } =
+        await import('@/db/persistence/github-worker-errors');
       const operator = freshFactory();
 
       for (const methodName of ALL_METHODS) {
         const [, , args] = METHOD_CALLS[methodName];
         const method = operator[methodName] as (...callArgs: unknown[]) => Promise<unknown>;
-        await expect(method(...args)).rejects.toBeInstanceOf(UnsupportedGitHubWorkerOperationError);
+        await expect(method(...args)).rejects.toBeInstanceOf(FreshUnsupportedGitHubWorkerOperationError);
       }
 
       expect(betterSqlite3ConstructorCalls).not.toHaveBeenCalled();

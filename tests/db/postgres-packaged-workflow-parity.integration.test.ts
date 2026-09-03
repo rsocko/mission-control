@@ -237,6 +237,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
 
   it('recovers every in-flight family through the normal packaged composition', async () => {
     const pool = runtime.getPostgresPersistenceBackend().context.pool;
+    const semanticMaintenanceIntervalMs = 30_000;
     const requests = {
       connectorTasks: 0,
       connectorAlerts: 0,
@@ -480,6 +481,9 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           MC_SEMANTIC_WORKER_CONCURRENCY: '1',
           MC_SEMANTIC_INTENT_LEASE_MS: '4000',
           MC_SEMANTIC_RUN_LEASE_MS: '4000',
+          MC_SEMANTIC_MAINTENANCE_INTERVAL_MS: String(
+            semanticMaintenanceIntervalMs,
+          ),
           MC_COPILOT_REQUEST_TIMEOUT_MS: '50000',
           MC_COPILOT_IDLE_TIMEOUT_MS: '5000',
           MC_COPILOT_SESSION_OPERATION_TIMEOUT_MS: '50000',
@@ -1140,7 +1144,29 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         expect(
           await runtime.getPostgresSemanticIndexRepository().getActiveIdentity(),
         ).not.toBeNull();
-      });
+      }, semanticMaintenanceIntervalMs * 2);
+      const semanticPromotion = await pool.query(
+        `SELECT
+           identity.status,
+           identity.activated_at,
+           vector.embedded_at,
+           identity.activated_at >= vector.embedded_at AS promoted_after_vector
+         FROM semantic_intents intent
+         INNER JOIN semantic_index_identities identity
+           ON identity.id = intent.index_id
+         INNER JOIN semantic_vectors vector
+           ON vector.intent_id = intent.id
+         WHERE intent.id = $1`,
+        [prioritizedClaimIds.semantic],
+      );
+      expect(semanticPromotion.rows).toEqual([
+        expect.objectContaining({
+          status: 'active',
+          activated_at: expect.any(String),
+          embedded_at: expect.any(String),
+          promoted_after_vector: true,
+        }),
+      ]);
       expect(requests.outbox).toBe(2);
       expect(requests.enrichment).toBe(2);
       expect(outboxSignatures.every((signature) =>

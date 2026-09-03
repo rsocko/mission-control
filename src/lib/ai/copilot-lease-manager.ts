@@ -96,7 +96,7 @@ export class CopilotLeaseManager {
     const timestamp = this.clock.now();
     return (await this.store.list()).filter(
       (record) =>
-        record.connection === 'attached' &&
+        (record.connection === 'attached' || record.state === 'resuming') &&
         record.leaseExpiresAt <= timestamp,
     );
   }

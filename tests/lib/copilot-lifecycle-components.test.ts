@@ -125,6 +125,49 @@ describe('CopilotLeaseManager', () => {
         updatedAt: 990,
       }),
     );
+    await store.create(
+      run({
+        runId: 'run-3',
+        state: 'resuming',
+        connection: 'detached',
+        providerSessionId: 'session-3',
+        leaseExpiresAt: 999,
+        updatedAt: 990,
+      }),
+    );
+    await store.create(
+      run({
+        runId: 'run-4',
+        state: 'resuming',
+        connection: 'detached',
+        providerSessionId: 'session-4',
+        leaseExpiresAt: 1_001,
+        updatedAt: 990,
+      }),
+    );
+    await store.create(
+      run({
+        runId: 'run-5',
+        state: 'completed',
+        connection: 'detached',
+        terminalState: 'completed',
+        providerSessionId: 'session-5',
+        leaseExpiresAt: 999,
+        updatedAt: 990,
+      }),
+    );
+    await store.create(
+      run({
+        runId: 'run-6',
+        state: 'failed',
+        connection: 'detached',
+        terminalState: 'failed',
+        cleanupPending: true,
+        providerSessionId: 'session-6',
+        leaseExpiresAt: 999,
+        updatedAt: 990,
+      }),
+    );
     const clock: CopilotLifecycleClock = {
       now: () => 1_000,
       setTimeout: () => 1,
@@ -137,7 +180,7 @@ describe('CopilotLeaseManager', () => {
     ).toEqual(['run-1']);
     expect(
       (await leases.expiredAttachedLeases()).map(({ runId }) => runId),
-    ).toEqual(['run-2']);
+    ).toEqual(['run-2', 'run-3']);
   });
 
   it('owns idle timer replacement and cancellation', () => {

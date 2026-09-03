@@ -1191,6 +1191,86 @@ describe('CopilotSessionLifecycleManager', () => {
     });
   });
 
+  it('fences an expired detached resume before retrying the same provider session', async () => {
+    let now = 1_000;
+    const store = new InMemoryCopilotRunStore();
+    const first = fakeClient();
+    const firstManager = new CopilotSessionLifecycleManager(
+      first.client,
+      store,
+      {
+        ...options,
+        sessionOperationTimeoutMs: 5_000,
+        leaseDurationMs: 20_000,
+      },
+      () => now,
+    );
+    await firstManager.createRun(input('run-a'));
+    await firstManager.disconnectRun('run-a');
+    const heldResume = deferred<ReturnType<typeof fakeSession>>();
+    first.client.resumeSession.mockReturnValueOnce(heldResume.promise);
+    const staleResume = firstManager.resumeRun('run-a');
+    void staleResume.catch(() => undefined);
+    await vi.waitFor(async () => {
+      await expect(firstManager.getRun('run-a')).resolves.toMatchObject({
+        state: 'resuming',
+        connection: 'detached',
+        ownerId: 'worker-a',
+      });
+    });
+    now += 20_000;
+
+    try {
+      const second = fakeClient();
+      const secondManager = new CopilotSessionLifecycleManager(
+        second.client,
+        store,
+        { ...options, leaseDurationMs: 20_000, workerId: 'worker-b' },
+        () => now,
+      );
+      await expect(secondManager.recoverExpiredWorkerLeases()).resolves.toEqual([
+        expect.objectContaining({
+          runId: 'run-a',
+          state: 'idle',
+          connection: 'detached',
+          ownerId: 'worker-b',
+        }),
+      ]);
+      await expect(secondManager.resumeRun('run-a')).resolves.toMatchObject({
+        state: 'idle',
+        connection: 'attached',
+        ownerId: 'worker-b',
+      });
+      await expect(secondManager.completeRun('run-a')).resolves.toMatchObject({
+        state: 'cleaned_up',
+        terminalState: 'completed',
+        ownerId: 'worker-b',
+      });
+
+      expect(first.client.createSession).toHaveBeenCalledOnce();
+      expect(first.client.resumeSession).toHaveBeenCalledOnce();
+      expect(second.client.createSession).not.toHaveBeenCalled();
+      expect(second.client.resumeSession).toHaveBeenCalledOnce();
+      expect(second.client.deleteSession).toHaveBeenCalledOnce();
+      heldResume.resolve(fakeSession('sdk-1'));
+      await expect(staleResume).rejects.toMatchObject({
+        code: 'lifecycle_conflict',
+      });
+      await expect(firstManager.completeRun('run-a')).rejects.toMatchObject({
+        code: 'lifecycle_conflict',
+      });
+      await expect(firstManager.cancelRun('run-a')).rejects.toMatchObject({
+        code: 'run_not_active',
+      });
+      await expect(firstManager.retryCleanup('run-a')).rejects.toMatchObject({
+        code: 'lifecycle_conflict',
+      });
+    } finally {
+      heldResume.resolve(fakeSession('sdk-1'));
+      await Promise.allSettled([staleResume]);
+    }
+  });
+
   it('preserves a restored terminal cursor and emits recovery cleanup failure', async () => {
     const store = new InMemoryCopilotRunStore();
     await store.create({

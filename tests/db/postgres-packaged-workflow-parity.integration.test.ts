@@ -5,10 +5,13 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.unmock('drizzle-orm');
+import type {
+  CopilotLifecycleClient,
+  CopilotLifecycleSession,
+} from '@/lib/ai/copilot-lifecycle-contracts';
 import type { ConnectorNotificationCommand } from '@/db/persistence/connector-execution';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
@@ -234,10 +237,6 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
 
   it('recovers every in-flight family through the normal packaged composition', async () => {
     const pool = runtime.getPostgresPersistenceBackend().context.pool;
-    const aiCompletionLockKey = `${prefix}:durable-ai-complete`;
-    const aiCompletionTrigger = `layer7_ai_complete_${suffix.replaceAll('-', '_')}`;
-    const aiCompletionFunction = `${aiCompletionTrigger}_fn`;
-    let aiCompletionLock: PoolClient | null = null;
     const requests = {
       connectorTasks: 0,
       connectorAlerts: 0,
@@ -306,28 +305,41 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           if (holdFirstAttempts && requests.outbox === 1) return hold();
           return json({}, 204);
         }
-        if (request.url === '/v1/chat/completions') {
+        if (request.url === '/v1/responses') {
+          if (
+            request.method !== 'POST'
+            || body.model !== 'loopback'
+            || !Array.isArray(body.input)
+          ) {
+            unexpectedLoopbackPaths.add('/v1/responses:invalid-request');
+            return json({}, 400);
+          }
           requests.enrichment += 1;
           if (holdFirstAttempts && requests.enrichment === 1) return hold();
+          const content = JSON.stringify({
+            summary: 'Durably enriched',
+            suggestedAction: 'open_url',
+            contextTags: ['parity'],
+            urgencyBoost: false,
+          });
           return json({
-            id: `${prefix}:completion`,
-            object: 'chat.completion',
-            created: 1,
+            id: `${prefix}:response`,
+            object: 'response',
+            created_at: 1,
+            status: 'completed',
             model: 'loopback',
-            choices: [{
-              index: 0,
-              message: {
-                role: 'assistant',
-                content: JSON.stringify({
-                  summary: 'Durably enriched',
-                  suggestedAction: 'open_url',
-                  contextTags: ['parity'],
-                  urgencyBoost: false,
-                }),
-              },
-              finish_reason: 'stop',
+            output: [{
+              id: `${prefix}:message`,
+              type: 'message',
+              role: 'assistant',
+              status: 'completed',
+              content: [{
+                type: 'output_text',
+                text: content,
+                annotations: [],
+              }],
             }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
           });
         }
         if (request.url === '/v1/embeddings') {
@@ -349,6 +361,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         }
         if (request.url === '/resume') {
           requests.copilotResume += 1;
+          if (holdFirstAttempts && requests.copilotResume === 1) return hold();
           return json({});
         }
         if (request.url === '/send') {
@@ -368,6 +381,50 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('Loopback server did not bind');
     const baseUrl = `http://127.0.0.1:${address.port}`;
+    const controllerRequest = async <T>(
+      operation: string,
+      payload: Record<string, unknown>,
+    ): Promise<T> => {
+      const response = await fetch(`${baseUrl}/${operation}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw new Error(`Copilot integration controller rejected ${operation}`);
+      }
+      return await response.json() as T;
+    };
+    const controllerSession = (sessionId: string): CopilotLifecycleSession => ({
+      sessionId,
+      async sendAndWait(prompt) {
+        return {
+          data: await controllerRequest<{ content: string }>('send', {
+            sessionId,
+            promptLength: prompt.length,
+          }),
+        };
+      },
+      async abort() {
+        await controllerRequest('abort', { sessionId });
+      },
+      async disconnect() {
+        await controllerRequest('disconnect', { sessionId });
+      },
+    });
+    const controllerClient: CopilotLifecycleClient = {
+      async createSession() {
+        const created = await controllerRequest<{ sessionId: string }>('create', {});
+        return controllerSession(created.sessionId);
+      },
+      async resumeSession(sessionId) {
+        await controllerRequest('resume', { sessionId });
+        return controllerSession(sessionId);
+      },
+      async deleteSession(sessionId) {
+        await controllerRequest('delete', { sessionId });
+      },
+    };
     const runtimeRoot = await mkdtemp(join(tmpdir(), 'mc-whole-worker-'));
     const readyFile = join(runtimeRoot, 'worker-instance');
     const sqlitePath = join(runtimeRoot, 'poison.db');
@@ -425,7 +482,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           MC_SEMANTIC_RUN_LEASE_MS: '4000',
           MC_COPILOT_REQUEST_TIMEOUT_MS: '50000',
           MC_COPILOT_IDLE_TIMEOUT_MS: '5000',
-          MC_COPILOT_SESSION_OPERATION_TIMEOUT_MS: '5000',
+          MC_COPILOT_SESSION_OPERATION_TIMEOUT_MS: '50000',
           MC_COPILOT_CLEANUP_TIMEOUT_MS: '5000',
           MC_COPILOT_LEASE_MS: '55000',
           AI_PROVIDER: 'ollama',
@@ -575,32 +632,55 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         timeoutMs: 240_000,
         notifyOnCompletion: true,
       });
-      aiCompletionLock = await pool.connect();
-      await aiCompletionLock.query(
-        'SELECT pg_advisory_lock(hashtext($1), hashtext($2))',
-        [prefix, aiCompletionLockKey],
+      const [
+        { createDurableCopilotPersistence },
+        { CopilotSessionLifecycleManager },
+      ] = await Promise.all([
+        import('@/lib/ai/durable-runs/copilot-adapter'),
+        import('@/lib/ai/copilot-session-lifecycle'),
+      ]);
+      const setupOwner = `${prefix}:setup`;
+      const setupPersistence = await createDurableCopilotPersistence(
+        setupOwner,
+        durableRuns,
       );
-      await pool.query(`
-        CREATE FUNCTION ${aiCompletionFunction}() RETURNS trigger
-        LANGUAGE plpgsql AS $$
-        BEGIN
-          IF NEW.id = '${prefix}:ai'
-             AND OLD.execution_state ->> 'state' = 'idle'
-             AND NEW.execution_state ->> 'state' = 'completed' THEN
-            PERFORM pg_advisory_xact_lock(
-              hashtext('${prefix}'),
-              hashtext('${aiCompletionLockKey}')
-            );
-          END IF;
-          RETURN NEW;
-        END;
-        $$
-      `);
-      await pool.query(`
-        CREATE TRIGGER ${aiCompletionTrigger}
-        BEFORE UPDATE ON ai_runs
-        FOR EACH ROW EXECUTE FUNCTION ${aiCompletionFunction}()
-      `);
+      const setupLifecycle = new CopilotSessionLifecycleManager(
+        controllerClient,
+        setupPersistence.store,
+        {
+          maxConcurrentSessions: Number.MAX_SAFE_INTEGER,
+          requestTimeoutMs: 50_000,
+          idleTimeoutMs: 5_000,
+          cleanupTimeoutMs: 5_000,
+          sessionOperationTimeoutMs: 50_000,
+          leaseDurationMs: 55_000,
+          workerId: setupOwner,
+          eventSink: setupPersistence.eventSink,
+          reportError: () => undefined,
+        },
+      );
+      await setupLifecycle.createRun({
+        runId: `${prefix}:ai`,
+        featureId: 'whole-worker-parity',
+        sensitivity: 'standard',
+        correlationId: `${prefix}:correlation`,
+        model: 'loopback',
+      });
+      await setupLifecycle.shutdownForRestart();
+      const preparedAi = await pool.query<{ id: string }>(
+        `UPDATE ai_runs
+         SET status = 'queued',
+             lease_owner = NULL,
+             lease_expires_at = NULL
+         WHERE id = $1
+           AND status = 'running'
+           AND execution_state ->> 'state' = 'idle'
+           AND execution_state ->> 'connection' = 'detached'
+         RETURNING id`,
+        [`${prefix}:ai`],
+      );
+      expect(preparedAi.rowCount).toBe(1);
+      expect(preparedAi.rows[0].id).toBe(`${prefix}:ai`);
       const producerSemanticRuntime = await import(
         '@/lib/semantic-index/packaged-worker-runtime'
       );
@@ -716,27 +796,14 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             (SELECT job.id
              FROM notification_enrichment_jobs job
              WHERE job.notification_id = $3
-               AND job.status = 'processing'
-               AND job.lease_owner IS NOT NULL) AS enrichment_claim_id,
-            (SELECT attempt_count FROM notification_enrichment_jobs
-             WHERE notification_id = $3) AS enrichment_attempts,
-            (SELECT last_error FROM notification_enrichment_jobs
-             WHERE notification_id = $3) AS enrichment_error,
+              AND job.status = 'processing'
+              AND job.lease_owner IS NOT NULL) AS enrichment_claim_id,
             (SELECT status FROM ai_runs WHERE id = $4) AS ai,
             (SELECT id FROM ai_runs
              WHERE id = $4 AND status = 'running' AND lease_owner IS NOT NULL)
               AS ai_claim_id,
             (SELECT execution_state ->> 'state' FROM ai_runs WHERE id = $4)
               AS ai_lifecycle,
-            (SELECT attempt FROM ai_runs WHERE id = $4) AS ai_attempts,
-            (SELECT last_error_code FROM ai_runs WHERE id = $4) AS ai_error,
-            (SELECT count(*)::int FROM ai_runs
-             WHERE id <> $4
-              AND execution_route = 'direct-copilot-sdk'
-              AND cleanup_status = ANY(ARRAY['pending', 'failed', 'running'])
-              AND available_at <= $7
-              AND (lease_expires_at IS NULL OR lease_expires_at <= $7))
-              AS ai_cleanup_ready,
             (SELECT status FROM semantic_intents WHERE id = $6) AS semantic,
             (SELECT id FROM semantic_intents
              WHERE entity_id = $5 AND status = 'running' AND lease_owner IS NOT NULL
@@ -748,51 +815,11 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             `${prefix}:ai`,
             `${prefix}:semantic`,
             prioritizedClaimIds.semantic,
-            new Date().toISOString(),
           ],
         );
-        const {
-          enrichment_attempts,
-          enrichment_error,
-          ai_attempts,
-          ai_error,
-          ai_cleanup_ready,
-          ...canaryStates
-        } = states.rows[0];
-        const workerErrors = Buffer.concat(output).toString().split(/\r?\n/)
-          .flatMap((line) => {
-            try {
-              const entry = JSON.parse(line) as Record<string, unknown>;
-              if (
-                entry.msg !== 'Durable AI worker operation failed'
-                && entry.msg !== 'Notification enrichment scheduled for retry'
-              ) {
-                return [];
-              }
-              const error = entry.err && typeof entry.err === 'object'
-                ? entry.err as Record<string, unknown>
-                : {};
-              return [{
-                msg: entry.msg,
-                operation: entry.operation,
-                errorType: entry.errorType ?? error.type,
-                errorCode: error.code,
-                failureCode: entry.failureCode,
-              }];
-            } catch {
-              return [];
-            }
-          })
-          .slice(-10);
-        expect(canaryStates, JSON.stringify({
+        expect(states.rows[0], JSON.stringify({
           requests,
           unexpectedLoopbackPaths: [...unexpectedLoopbackPaths],
-          workerErrors,
-          enrichment_attempts,
-          enrichment_error,
-          ai_attempts,
-          ai_error,
-          ai_cleanup_ready,
         })).toEqual({
           sync: 'succeeded',
           outbox: 'delivering',
@@ -800,7 +827,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           enrichment_claim_id: prioritizedClaimIds.enrichment,
           ai: 'running',
           ai_claim_id: prioritizedClaimIds.ai,
-          ai_lifecycle: 'idle',
+          ai_lifecycle: 'resuming',
           semantic: 'running',
           semantic_claim_id: prioritizedClaimIds.semantic,
         });
@@ -811,34 +838,48 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           enrichment: 1,
           embedding: 1,
           copilotCreate: 1,
+          copilotResume: 1,
         });
       }, 45_000);
       const firstInstanceId = (await readFile(readyFile, 'utf8')).trim();
 
       first.kill('SIGKILL');
       await waitForExit(first);
+      for (const response of held) response.destroy();
+      held.clear();
       expect((await readFile(readyFile, 'utf8')).trim()).toBe(firstInstanceId);
       const crashedAi = await pool.query<{
+        attempt: number;
         lease_expires_at: string | null;
         lifecycle_lease_expires_at: string | null;
+        lifecycle_revision: string | null;
         timeout_at: string;
       }>(
         `SELECT
+           attempt,
            lease_expires_at,
            execution_state ->> 'leaseExpiresAt' AS lifecycle_lease_expires_at,
+           execution_state ->> 'revision' AS lifecycle_revision,
            timeout_at
          FROM ai_runs
          WHERE id = $1`,
         [`${prefix}:ai`],
       );
       const timing = crashedAi.rows[0];
-      if (!timing?.lease_expires_at || !timing.lifecycle_lease_expires_at) {
+      if (
+        !timing?.lease_expires_at
+        || !timing.lifecycle_lease_expires_at
+        || !timing.lifecycle_revision
+      ) {
         throw new Error(`Missing durable AI recovery expiry: ${JSON.stringify({
           hasQueueLease: Boolean(timing?.lease_expires_at),
           hasLifecycleLease: Boolean(timing?.lifecycle_lease_expires_at),
+          hasLifecycleRevision: Boolean(timing?.lifecycle_revision),
           hasDeadline: Boolean(timing?.timeout_at),
         })}`);
       }
+      expect(timing.attempt).toBe(1);
+      const crashedLifecycleRevision = Number(timing.lifecycle_revision);
       const queueLeaseExpiresAt = Date.parse(timing.lease_expires_at);
       const lifecycleLeaseExpiresAt = Number(timing.lifecycle_lease_expires_at);
       const timeoutAt = Date.parse(timing.timeout_at);
@@ -847,6 +888,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       if (
         !Number.isFinite(queueLeaseExpiresAt)
         || !Number.isFinite(lifecycleLeaseExpiresAt)
+        || !Number.isFinite(crashedLifecycleRevision)
         || !Number.isFinite(timeoutAt)
         || queueLeaseExpiresAt <= killedAt
         || lifecycleLeaseExpiresAt <= killedAt
@@ -857,12 +899,6 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           deadlineDeltaMs: timeoutAt - killedAt,
         })}`);
       }
-      await aiCompletionLock.query(
-        'SELECT pg_advisory_unlock(hashtext($1), hashtext($2))',
-        [prefix, aiCompletionLockKey],
-      );
-      aiCompletionLock.release();
-      aiCompletionLock = null;
       const expiryWaitDeadline = Date.now() + 60_000;
       let persistedQueueExpiry = queueLeaseExpiresAt;
       let persistedLifecycleExpiry = lifecycleLeaseExpiresAt;
@@ -926,6 +962,11 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       holdFirstAttempts = false;
 
       const second = startWorker();
+      const terminalWaitMs = Math.min(
+        90_000,
+        timeoutAt - Date.now() - 5_000,
+      );
+      expect(terminalWaitMs).toBeGreaterThan(0);
       await waitFor(async () => {
         if (second.exitCode !== null) throw new Error(Buffer.concat(output).toString());
         await stat(readyFile);
@@ -945,6 +986,19 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
                 ON job.notification_id = notification.id
               WHERE notification.id = $3) AS enrichment,
              (SELECT status FROM ai_runs WHERE id = $4) AS ai,
+             (SELECT cleanup_status FROM ai_runs WHERE id = $4) AS ai_cleanup,
+             (SELECT count(*)::int
+              FROM ai_provider_sessions
+              WHERE run_id = $4
+                AND state = 'revoked'
+                AND encrypted_reference = '') AS revoked_provider_sessions,
+             (SELECT count(*)::int
+              FROM notifications
+              WHERE source_id = 'ai-run:' || $4) AS terminal_notifications,
+             (SELECT count(*)::int
+              FROM ai_run_events
+              WHERE run_id = $4
+                AND kind = 'run.terminal') AS terminal_ai_events,
              (SELECT status FROM semantic_intents WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1)
                AS semantic`,
            [
@@ -960,9 +1014,13 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           outbox: 'delivered',
           enrichment: 'completed',
           ai: 'succeeded',
+          ai_cleanup: 'completed',
+          revoked_provider_sessions: 1,
+          terminal_notifications: 1,
+          terminal_ai_events: 1,
           semantic: 'succeeded',
         });
-      }, 90_000);
+      }, terminalWaitMs);
       expect((await readFile(readyFile, 'utf8')).trim()).not.toBe(firstInstanceId);
 
       const evidence = await pool.query(
@@ -980,11 +1038,21 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
               ON job.notification_id = notification.id
             WHERE notification.id = $2) AS enrichment_attempts,
            (SELECT attempt FROM ai_runs WHERE id = $3) AS ai_attempts,
+           (SELECT (execution_state ->> 'revision')::int
+            FROM ai_runs WHERE id = $3) AS ai_lifecycle_revision,
            (SELECT attempt FROM semantic_intents WHERE entity_id = $4 ORDER BY created_at DESC LIMIT 1)
              AS semantic_attempts,
            (SELECT count(*)::int FROM semantic_documents WHERE entity_id = $4) AS documents,
            (SELECT count(*)::int FROM semantic_vectors WHERE entity_id = $4) AS vectors,
-           (SELECT count(*)::int FROM ai_provider_sessions WHERE run_id = $3) AS provider_sessions,
+           (SELECT count(*)::int
+            FROM ai_provider_sessions
+            WHERE run_id = $3
+              AND state = 'revoked'
+              AND encrypted_reference = '') AS revoked_provider_sessions,
+           (SELECT count(*)::int
+            FROM ai_run_events
+            WHERE run_id = $3
+              AND kind = 'run.terminal') AS ai_terminal_events,
            (SELECT count(*)::int FROM notifications WHERE source_id = $5) AS terminal_notifications,
            (SELECT count(*)::int FROM task_projects WHERE project_id = $6) AS project_memberships,
            (SELECT count(*)::int FROM task_history_events
@@ -1035,7 +1103,8 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         semantic_attempts: 2,
         documents: 1,
         vectors: 1,
-        provider_sessions: 0,
+        revoked_provider_sessions: 1,
+        ai_terminal_events: 1,
         terminal_notifications: 1,
         project_memberships: 2,
         planning_outputs: 1,
@@ -1047,6 +1116,9 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         pipeline_related_task: `${prefix}:semantic`,
         pipeline_navigation: `/tasks?selected=${prefix}:semantic`,
       });
+      expect(evidence.rows[0].ai_lifecycle_revision).toBeGreaterThan(
+        crashedLifecycleRevision,
+      );
       expect(evidence.rows[0].terminal_event_key).toBe(
         `sync.completed:job:${syncJob.id}:run:${evidence.rows[0].sync_run_id}`,
       );
@@ -1056,12 +1128,14 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         ).not.toBeNull();
       });
       expect(requests.outbox).toBe(2);
+      expect(requests.enrichment).toBe(2);
       expect(outboxSignatures.every((signature) =>
         /^sha256=[0-9a-f]{64}$/.test(signature)
       )).toBe(true);
       expect(requests.copilotCreate).toBe(1);
-      expect(requests.copilotResume).toBeGreaterThanOrEqual(1);
+      expect(requests.copilotResume).toBe(2);
       expect(requests.copilotDelete).toBe(1);
+      expect([...unexpectedLoopbackPaths]).toEqual([]);
       const semanticRepository = runtime.getPostgresSemanticIndexRepository();
       const activeIdentity = await semanticRepository.getActiveIdentity();
       expect(activeIdentity).not.toBeNull();
@@ -1111,30 +1185,13 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       for (const child of liveChildren) child.kill('SIGKILL');
       await Promise.allSettled(liveChildren.map((child) => waitForExit(child, 10_000)));
       for (const response of held) response.destroy();
-      try {
-        if (aiCompletionLock) {
-          const client = aiCompletionLock;
-          try {
-            await client.query(
-              'SELECT pg_advisory_unlock(hashtext($1), hashtext($2))',
-              [prefix, aiCompletionLockKey],
-            );
-          } finally {
-            client.release();
-            aiCompletionLock = null;
-          }
-        }
-        await pool.query(`DROP TRIGGER IF EXISTS ${aiCompletionTrigger} ON ai_runs`);
-        await pool.query(`DROP FUNCTION IF EXISTS ${aiCompletionFunction}()`);
-      } finally {
-        server.closeAllConnections();
-        await new Promise<void>((resolve) => server.close(() => resolve()));
-        await rm(runtimeRoot, { recursive: true, force: true });
-        if (savedAiConfig === null) await settings.delete('ai_provider_config');
-        else await settings.set('ai_provider_config', savedAiConfig);
-        if (savedRoutingPolicy === null) await settings.delete('ai_routing_policy');
-        else await settings.set('ai_routing_policy', savedRoutingPolicy);
-      }
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(runtimeRoot, { recursive: true, force: true });
+      if (savedAiConfig === null) await settings.delete('ai_provider_config');
+      else await settings.set('ai_provider_config', savedAiConfig);
+      if (savedRoutingPolicy === null) await settings.delete('ai_routing_policy');
+      else await settings.set('ai_routing_policy', savedRoutingPolicy);
     }
   }, 300_000);
 });

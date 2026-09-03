@@ -91,7 +91,17 @@ function listTypeScriptFiles(directory: string): string[] {
   });
 }
 
-const IMPORT_STATEMENT_RE = /(?:^|\n)[ \t]*(?:import|export)\b([\s\S]*?)from\s*['"]([^'"]+)['"]/g;
+// The clause is deliberately `[^;]*?` rather than `[\s\S]*?`: a lazy
+// dot-all clause can span past an unrelated statement (e.g.
+// `export type Foo = string;\nexport { Bar } from './bar';`) to reach a
+// *later* `from` clause that belongs to a different statement, merging the
+// two into one match and causing `clauseIsTypeOnly` to misjudge a real
+// value-level import/export as type-only. No import/export...from clause
+// in this codebase's style contains a bare `;` before its own `from`
+// keyword (multi-line named-binding lists never do), so this bound cannot
+// clip a legitimate clause while it prevents the clause from ever
+// swallowing an intervening statement's terminator.
+const IMPORT_STATEMENT_RE = /(?:^|\n)[ \t]*(?:import|export)\b([^;]*?)from\s*['"]([^'"]+)['"]/g;
 const BARE_IMPORT_RE = /(?:^|\n)[ \t]*import\s*['"]([^'"]+)['"]/g;
 const DYNAMIC_IMPORT_RE = /import\(\s*['"]([^'"]+)['"]\s*\)/g;
 const REQUIRE_RE = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
@@ -222,8 +232,12 @@ export function computeWebPersistenceGraph(root: string): WebPersistenceGraphRes
     (edges.get(r) ?? []).some((edge) => !edge.dynamic && DB_NAMESPACE_SPECIFIER_RE.test(edge.spec))).sort();
 
   const taintedLibA = [...tierA].filter((f) => f.startsWith('src/lib/')).sort();
+  // Scoped to src/app/api/** (not all of src/app/**) to match this field's
+  // documented contract: a tainted src/app/**/page.tsx or layout.tsx is
+  // neither an API route nor a "shared API helper" and must not be silently
+  // folded into this bucket.
   const taintedApiHelpers = [...tierA]
-    .filter((f) => f.startsWith('src/app/') && !/route\.tsx?$/.test(f))
+    .filter((f) => f.startsWith('src/app/api/') && !/route\.tsx?$/.test(f))
     .sort();
 
   return {

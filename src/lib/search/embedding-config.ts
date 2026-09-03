@@ -48,7 +48,7 @@ export function buildEmbeddingConfig(
     model,
   );
   assertAIProviderCanReceive(context, provider, route);
-  const routingHeaders = provider === 'bifrost'
+  const routingHeaders: Record<string, string> = provider === 'bifrost'
     ? {
         'x-mc-ai-feature-id': context.featureId,
         'x-mc-ai-sensitivity': context.sensitivity,

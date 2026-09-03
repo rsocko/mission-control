@@ -46,6 +46,12 @@ const POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES = new Set([
   'src/lib/semantic-index/publication.ts -> ./config',
   'src/lib/semantic-index/publication.ts -> ./runtime',
 ]);
+const FEATURE_GUARDED_DYNAMIC_EDGES = new Set([
+  'src/lib/triage/scheduler.ts -> ./importers/github-importer',
+  'src/lib/triage/scheduler.ts -> ./importers/reddit-importer',
+  'src/lib/triage/scheduler.ts -> ./importers/youtube-importer',
+  'src/lib/triage/scheduler.ts -> ./importers/document-intelligence-importer',
+]);
 const SQLITE_MODULE = /(?:^|\/)(?:db\/(?:index|schema)(?:\.ts|\/)|[^/]*sqlite[^/]*\.ts$)/;
 const SQLITE_PACKAGE = /^(?:better-sqlite3|drizzle-orm\/better-sqlite3)$/;
 function source(path: string): string {
@@ -131,7 +137,8 @@ function postgresStartupGraph(): Set<string> {
           || Boolean(resolved && SQLITE_MODULE.test(resolved));
         return !sqliteTarget
           && !POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier)
-          && !POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`);
+          && !POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`)
+          && !FEATURE_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`);
       }),
     ]) {
       const resolved = resolveApplicationImport(path, specifier);
@@ -165,7 +172,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect([...graph].filter((path) => path.includes('src/lib/triage/importers/'))).toEqual([]);
   });
 
-  it('allowlists every guarded dynamic SQLite or compatibility-barrel edge', () => {
+  it('allowlists every guarded dynamic startup edge', () => {
     const graph = postgresStartupGraph();
     const monarchClient = source('src/lib/connectors/monarch-money/index.ts');
     const guardedEdges = [...graph].flatMap((path) =>
@@ -176,6 +183,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
           || Boolean(resolved && SQLITE_MODULE.test(resolved))
           || POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier)
           || POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`)
+          || FEATURE_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`)
         )
           ? [`${path} -> ${specifier}`]
           : [];
@@ -212,6 +220,13 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(guardedEdges).toContain(
       'src/lib/semantic-index/publication.ts -> ./runtime',
     );
+    expect(
+      guardedEdges.filter((edge) => edge.startsWith('src/lib/triage/scheduler.ts -> ')),
+    ).toEqual([...FEATURE_GUARDED_DYNAMIC_EDGES]);
+    const triageScheduler = source('src/lib/triage/scheduler.ts');
+    expect(triageScheduler.match(/enabled: false/g)).toHaveLength(4);
+    expect(triageScheduler.indexOf('if (sourceConfig.enabled)'))
+      .toBeLessThan(triageScheduler.indexOf('this.scheduleSource('));
     expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(2);
     const categoryFailure = monarchClient.indexOf(
       'Legacy finance category write-back is unavailable',

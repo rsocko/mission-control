@@ -610,6 +610,29 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       ).resolves.toMatchObject({ status: 'published' });
       await producerSemanticRuntime.stopPackagedPostgresSemanticWorker();
 
+      const claimPriorityAt = '1970-01-01T00:00:00.000Z';
+      const prioritizedClaims = await Promise.all([
+        pool.query(
+          `UPDATE notification_enrichment_jobs
+           SET created_at = $2, next_attempt_at = $2
+           WHERE notification_id = $1`,
+          [`${prefix}:enrichment`, claimPriorityAt],
+        ),
+        pool.query(
+          `UPDATE ai_runs
+           SET created_at = $2, available_at = $2
+           WHERE id = $1`,
+          [`${prefix}:ai`, claimPriorityAt],
+        ),
+        pool.query(
+          `UPDATE semantic_intents
+           SET requested_at = $2, created_at = $2, available_at = $2
+           WHERE entity_id = $1`,
+          [`${prefix}:semantic`, claimPriorityAt],
+        ),
+      ]);
+      expect(prioritizedClaims.map((result) => result.rowCount)).toEqual([1, 1, 1]);
+
       await expect(stat(readyFile)).rejects.toMatchObject({ code: 'ENOENT' });
       const beforeActivation = await pool.query(
         `SELECT

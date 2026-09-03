@@ -662,7 +662,7 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
             throw new Error(logs || `Worker exited with code ${child.exitCode}`);
           }
           const instanceId = (await readFile(instancePath, 'utf8')).trim();
-          if (!instanceId || !logs.includes('triage auto-sync scheduler initialized')) {
+          if (!instanceId || !logs.includes('Triage auto-sync scheduler initialized')) {
             throw new Error(logs || 'Worker startup is incomplete');
           }
         }, 60_000);

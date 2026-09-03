@@ -1,5 +1,8 @@
-import db, { runTransaction, sqlite } from '@/db';
+import type Database from 'better-sqlite3';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type * as schema from '@/db/schema';
 import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import { getGitHubIdentityOperatorRepository } from './worker-persistence';
 
 export interface GitHubWriteCycleReconciliationCommand {
   connectorInstanceId: string;
@@ -62,12 +65,201 @@ interface LeaseRow {
   finalizedAt: string | null;
 }
 
-export function reconcileInterruptedGitHubWriteCycle(
+/**
+ * Reconciles an interrupted or completed pre-dispatch GitHub write cycle back
+ * to a retryable or superseded state, or leaves it durably quarantined when the
+ * local evidence cannot rule out a possible remote effect.
+ *
+ * This is one of the five pre-existing, previously audited GitHub worker
+ * operator/recovery surfaces (see `github-worker-errors.ts`): a manual,
+ * operator-only recovery workflow with no normal HTTP/application caller.
+ * PostgreSQL does not implement it and fails closed via
+ * `UnsupportedGitHubWorkerOperationError` before any SQLite import,
+ * transaction, or durable mutation. The exact logic is preserved bit-for-bit
+ * in `reconcileInterruptedGitHubWriteCycleSync` below, which is the SQLite
+ * adapter's implementation (`sqlite-github-identity-operator-repositories.ts`);
+ * only the database handle sourcing changed from a module-level singleton
+ * import to an injected parameter so this file carries no SQLite/`@/db` import
+ * of its own.
+ */
+export async function reconcileInterruptedGitHubWriteCycle(
+  command: GitHubWriteCycleReconciliationCommand,
+): Promise<GitHubWriteCycleReconciliationResult> {
+  return (await getGitHubIdentityOperatorRepository()).reconcileInterruptedWriteCycle(command);
+}
+
+/**
+ * SQLite-only synchronous implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL.
+ */
+export function reconcileInterruptedGitHubWriteCycleSync(
+  deps: { sqlite: Database.Database; db: BetterSQLite3Database<typeof schema> },
   command: GitHubWriteCycleReconciliationCommand,
 ): GitHubWriteCycleReconciliationResult {
+  const { sqlite, db } = deps;
+
+  function validateCommand(cmd: GitHubWriteCycleReconciliationCommand): void {
+    if (!cmd.confirmPreDispatch) {
+      throw new Error('Pre-dispatch reconciliation requires explicit confirmation');
+    }
+    if (!Number.isSafeInteger(cmd.expectedRevision) || cmd.expectedRevision < 0) {
+      throw new Error('Expected revision must be a non-negative integer');
+    }
+    for (const [name, value, min, max] of [
+      ['actor', cmd.actor, 1, 80],
+      ['reason', cmd.reason, 3, 500],
+      ['idempotency key', cmd.idempotencyKey, 8, 192],
+    ] as const) {
+      if (
+        value.trim().length < min
+        || value.length > max
+        || /[\u0000-\u001f\u007f]/.test(value)
+      ) {
+        throw new Error(`Write cycle ${name} is invalid`);
+      }
+    }
+  }
+
+  function loadCycle(connectorInstanceId: string, cycleId: string): CycleRow | undefined {
+    return sqlite.prepare(`
+      SELECT id,
+        mode_revision AS modeRevision,
+        pending_candidate_count AS pendingCandidateCount,
+        state,
+        reconciliation_state AS reconciliationState,
+        reconciliation_reason AS reconciliationReason,
+        reconciliation_code AS reconciliationCode,
+        reconciled_by AS reconciledBy,
+        reconciliation_idempotency_key AS reconciliationIdempotencyKey
+      FROM github_identity_write_cycles
+      WHERE id = ? AND connector_instance_id = ?
+    `).get(cycleId, connectorInstanceId) as CycleRow | undefined;
+  }
+
+  function loadRelatedLeases(cycle: CycleRow): LeaseRow[] {
+    return sqlite.prepare(`
+      SELECT id,
+        write_cycle_id AS writeCycleId,
+        task_id AS taskId,
+        operation,
+        task_version AS taskVersion,
+        idempotency_key AS idempotencyKey,
+        state,
+        dispatched_at AS dispatchedAt,
+        expires_at AS expiresAt,
+        finalized_at AS finalizedAt
+      FROM task_source_write_leases
+      WHERE write_cycle_id = ?
+      ORDER BY created_at, id
+    `).all(cycle.id) as LeaseRow[];
+  }
+
+  function expireRelatedUndispatchedLeases(cycle: CycleRow, now: string): void {
+    sqlite.prepare(`
+      UPDATE task_source_write_leases
+      SET state = 'expired',
+          finalized_at = COALESCE(finalized_at, ?),
+          updated_at = ?
+      WHERE write_cycle_id = ?
+        AND state IN ('claimed', 'authorized')
+        AND dispatched_at IS NULL
+        AND expires_at <= ?
+    `).run(now, now, cycle.id, now);
+  }
+
+  /**
+   * Every lease that reached a route decision carries `cycle_observed_at`, so the
+   * lease rows themselves bound the cycle. A cycle that collected more leases
+   * than it planned candidates, or leases without a route observation, is
+   * ambiguous and must be quarantined rather than reconciled.
+   */
+  function leasesMatchCycleBudget(cycle: CycleRow, leases: readonly LeaseRow[]): boolean {
+    return leases.length <= cycle.pendingCandidateCount
+      && leases.every((lease) => lease.writeCycleId === cycle.id);
+  }
+
+  function observedRouteCount(cycleId: string): number {
+    const row = sqlite.prepare(`
+      SELECT COUNT(*) AS value
+      FROM task_source_write_leases
+      WHERE write_cycle_id = ? AND cycle_observed_at IS NOT NULL
+    `).get(cycleId) as { value: number };
+    return Number(row.value);
+  }
+
+  function refreshQuarantinedCycleCounts(cycle: CycleRow): void {
+    const unknownCount = sqlite.prepare(`
+      SELECT COUNT(*) AS value
+      FROM task_source_write_leases
+      WHERE write_cycle_id = ?
+        AND state = 'unknown'
+    `).get(cycle.id) as { value: number };
+    sqlite.prepare(`
+      UPDATE github_identity_write_cycles
+      SET observed_route_count = ?,
+          unknown_count = ?
+      WHERE id = ?
+    `).run(
+      observedRouteCount(cycle.id),
+      Number(unknownCount.value),
+      cycle.id,
+    );
+  }
+
+  function hasPossibleDispatch(lease: LeaseRow): boolean {
+    return lease.dispatchedAt !== null
+      || ['dispatched', 'unknown', 'succeeded'].includes(lease.state);
+  }
+
+  function expectedLeaseIdempotencyKey(lease: LeaseRow): string {
+    return `${lease.taskId}:${lease.operation}:${lease.taskVersion}`;
+  }
+
+  function leaseOutcomeCounts(leases: readonly LeaseRow[]): { blocked: number; failed: number } {
+    return {
+      blocked: leases.filter((lease) => lease.state === 'blocked').length,
+      failed: leases.filter((lease) => lease.state === 'failed').length,
+    };
+  }
+
+  function quarantineCycle(
+    cycleId: string,
+    cmd: GitHubWriteCycleReconciliationCommand,
+    now: string,
+    reasonCode: string,
+  ): void {
+    sqlite.prepare(`
+      UPDATE github_identity_write_cycles
+      SET reconciliation_state = 'quarantined',
+          reconciliation_reason = ?,
+          reconciliation_code = ?,
+          reconciled_at = ?,
+          reconciled_by = ?,
+          reconciliation_idempotency_key = ?
+      WHERE id = ?
+    `).run(
+      cmd.reason,
+      reasonCode,
+      now,
+      cmd.actor,
+      cmd.idempotencyKey,
+      cycleId,
+    );
+  }
+
+  function failure(
+    cycleId: string,
+    code: Extract<GitHubWriteCycleReconciliationResult, { ok: false }>['code'],
+    message: string,
+    changed = false,
+  ): GitHubWriteCycleReconciliationResult {
+    return { ok: false, changed, cycleId, code, message };
+  }
+
   validateCommand(command);
   const now = command.now ?? new Date().toISOString();
-  return runTransaction(() => {
+  return db.transaction(() => {
     const cycle = loadCycle(command.connectorInstanceId, command.cycleId);
     if (!cycle) {
       return failure(command.cycleId, 'write_cycle_not_found', 'Write cycle was not found');
@@ -305,163 +497,5 @@ export function reconcileInterruptedGitHubWriteCycle(
       reasonCode,
       observedRouteCount: observedCount,
     };
-  });
-}
-
-function validateCommand(command: GitHubWriteCycleReconciliationCommand): void {
-  if (!command.confirmPreDispatch) {
-    throw new Error('Pre-dispatch reconciliation requires explicit confirmation');
-  }
-  if (!Number.isSafeInteger(command.expectedRevision) || command.expectedRevision < 0) {
-    throw new Error('Expected revision must be a non-negative integer');
-  }
-  for (const [name, value, min, max] of [
-    ['actor', command.actor, 1, 80],
-    ['reason', command.reason, 3, 500],
-    ['idempotency key', command.idempotencyKey, 8, 192],
-  ] as const) {
-    if (
-      value.trim().length < min
-      || value.length > max
-      || /[\u0000-\u001f\u007f]/.test(value)
-    ) {
-      throw new Error(`Write cycle ${name} is invalid`);
-    }
-  }
-}
-
-function loadCycle(connectorInstanceId: string, cycleId: string): CycleRow | undefined {
-  return sqlite.prepare(`
-    SELECT id,
-      mode_revision AS modeRevision,
-      pending_candidate_count AS pendingCandidateCount,
-      state,
-      reconciliation_state AS reconciliationState,
-      reconciliation_reason AS reconciliationReason,
-      reconciliation_code AS reconciliationCode,
-      reconciled_by AS reconciledBy,
-      reconciliation_idempotency_key AS reconciliationIdempotencyKey
-    FROM github_identity_write_cycles
-    WHERE id = ? AND connector_instance_id = ?
-  `).get(cycleId, connectorInstanceId) as CycleRow | undefined;
-}
-
-function loadRelatedLeases(cycle: CycleRow): LeaseRow[] {
-  return sqlite.prepare(`
-    SELECT id,
-      write_cycle_id AS writeCycleId,
-      task_id AS taskId,
-      operation,
-      task_version AS taskVersion,
-      idempotency_key AS idempotencyKey,
-      state,
-      dispatched_at AS dispatchedAt,
-      expires_at AS expiresAt,
-      finalized_at AS finalizedAt
-    FROM task_source_write_leases
-    WHERE write_cycle_id = ?
-    ORDER BY created_at, id
-  `).all(cycle.id) as LeaseRow[];
-}
-
-function expireRelatedUndispatchedLeases(cycle: CycleRow, now: string): void {
-  sqlite.prepare(`
-    UPDATE task_source_write_leases
-    SET state = 'expired',
-        finalized_at = COALESCE(finalized_at, ?),
-        updated_at = ?
-    WHERE write_cycle_id = ?
-      AND state IN ('claimed', 'authorized')
-      AND dispatched_at IS NULL
-      AND expires_at <= ?
-  `).run(now, now, cycle.id, now);
-}
-
-/**
- * Every lease that reached a route decision carries `cycle_observed_at`, so the
- * lease rows themselves bound the cycle. A cycle that collected more leases
- * than it planned candidates, or leases without a route observation, is
- * ambiguous and must be quarantined rather than reconciled.
- */
-function leasesMatchCycleBudget(cycle: CycleRow, leases: readonly LeaseRow[]): boolean {
-  return leases.length <= cycle.pendingCandidateCount
-    && leases.every((lease) => lease.writeCycleId === cycle.id);
-}
-
-function observedRouteCount(cycleId: string): number {
-  const row = sqlite.prepare(`
-    SELECT COUNT(*) AS value
-    FROM task_source_write_leases
-    WHERE write_cycle_id = ? AND cycle_observed_at IS NOT NULL
-  `).get(cycleId) as { value: number };
-  return Number(row.value);
-}
-
-function refreshQuarantinedCycleCounts(cycle: CycleRow): void {
-  const unknownCount = sqlite.prepare(`
-    SELECT COUNT(*) AS value
-    FROM task_source_write_leases
-    WHERE write_cycle_id = ?
-      AND state = 'unknown'
-  `).get(cycle.id) as { value: number };
-  sqlite.prepare(`
-    UPDATE github_identity_write_cycles
-    SET observed_route_count = ?,
-        unknown_count = ?
-    WHERE id = ?
-  `).run(
-    observedRouteCount(cycle.id),
-    Number(unknownCount.value),
-    cycle.id,
-  );
-}
-
-function hasPossibleDispatch(lease: LeaseRow): boolean {
-  return lease.dispatchedAt !== null
-    || ['dispatched', 'unknown', 'succeeded'].includes(lease.state);
-}
-
-function expectedLeaseIdempotencyKey(lease: LeaseRow): string {
-  return `${lease.taskId}:${lease.operation}:${lease.taskVersion}`;
-}
-
-function leaseOutcomeCounts(leases: readonly LeaseRow[]): { blocked: number; failed: number } {
-  return {
-    blocked: leases.filter((lease) => lease.state === 'blocked').length,
-    failed: leases.filter((lease) => lease.state === 'failed').length,
-  };
-}
-
-function quarantineCycle(
-  cycleId: string,
-  command: GitHubWriteCycleReconciliationCommand,
-  now: string,
-  reasonCode: string,
-): void {
-  sqlite.prepare(`
-    UPDATE github_identity_write_cycles
-    SET reconciliation_state = 'quarantined',
-        reconciliation_reason = ?,
-        reconciliation_code = ?,
-        reconciled_at = ?,
-        reconciled_by = ?,
-        reconciliation_idempotency_key = ?
-    WHERE id = ?
-  `).run(
-    command.reason,
-    reasonCode,
-    now,
-    command.actor,
-    command.idempotencyKey,
-    cycleId,
-  );
-}
-
-function failure(
-  cycleId: string,
-  code: Extract<GitHubWriteCycleReconciliationResult, { ok: false }>['code'],
-  message: string,
-  changed = false,
-): GitHubWriteCycleReconciliationResult {
-  return { ok: false, changed, cycleId, code, message };
+  }, { behavior: 'immediate' });
 }

@@ -23,10 +23,6 @@ const LEGACY_RAW_SQLITE_IMPORTS = new Set([
   'src/lib/connectors/monarch-money/identity-sqlite.ts',
   'src/lib/connectors/monarch-money/snapshot-sync.ts',
   'src/lib/external-agents/service.ts',
-  'src/lib/external-identities/github-backfill.ts',
-  'src/lib/external-identities/identity-status.ts',
-  'src/lib/external-identities/write-cycle-reconciliation.ts',
-  'src/lib/external-identities/write-outcome-resolution.ts',
   'src/lib/finance-insights/cutover-operator.ts',
   'src/lib/finance-insights/cutover.ts',
   'src/lib/finance/houston-tools.ts',
@@ -127,6 +123,25 @@ function isSqliteAdapter(path: string): boolean {
     || path === 'src/lib/telemetry/database-health-runtime.ts';
 }
 
+/**
+ * True when `source` has a runtime (non-`import type`) import from
+ * `better-sqlite3`. A leading `import type` clause is excluded because
+ * TypeScript erases it entirely at build time and additionally rejects, at
+ * compile time, any attempt to use a type-only binding in a value/runtime
+ * expression (`new Database(...)`, `.prepare(...)`, etc.) — so this exclusion
+ * cannot be used to smuggle in a live driver reference under a "type" label.
+ * It is *not* excluded for a per-specifier inline `type` modifier mixed with
+ * a real value binding in the same clause (e.g. `import Database, { type
+ * Options } from 'better-sqlite3'`) or for a plain default/named import:
+ * those clauses still bind a real, callable runtime value, so they must
+ * still count as a driver import regardless of any `type` token elsewhere in
+ * the same statement. See the "cannot be evaded by mixed type/value syntax"
+ * test below.
+ */
+function importsRuntimeBetterSqlite3Driver(source: string): boolean {
+  return /(?<!import type )(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]better-sqlite3['"]/.test(source);
+}
+
 function importsRawSqliteHandle(source: string): boolean {
   const databaseImport = /import\s+([^'"]+?)\s+from\s+['"](?:@\/db(?:\/index)?|(?:\.\.?\/)+db(?:\/index)?)['"]/g;
   return Array.from(source.matchAll(databaseImport), (match) => match[1])
@@ -160,11 +175,37 @@ describe('portable persistence dependency ratchet', () => {
     )).toBe(false);
   });
 
+  it('flags runtime better-sqlite3 imports but not a leading import type, and cannot be evaded by mixed type/value syntax', () => {
+    // Genuine runtime imports: must be flagged regardless of default/named form.
+    expect(importsRuntimeBetterSqlite3Driver("import Database from 'better-sqlite3';")).toBe(true);
+    expect(importsRuntimeBetterSqlite3Driver("import { Database } from 'better-sqlite3';")).toBe(true);
+    // A leading `import type` is erased at build time and cannot be used as a
+    // value (a real construction under this alias is a compile error), so it
+    // is correctly excluded.
+    expect(importsRuntimeBetterSqlite3Driver("import type Database from 'better-sqlite3';")).toBe(false);
+    expect(importsRuntimeBetterSqlite3Driver("import type { Database } from 'better-sqlite3';")).toBe(false);
+    // Mixed clauses that still carry a real value binding alongside an inline
+    // per-specifier `type` modifier must still be flagged: the `type`
+    // modifier only erases that one named binding, not the whole statement,
+    // so the default import remains a live, callable driver reference.
+    expect(importsRuntimeBetterSqlite3Driver(
+      "import Database, { type Options } from 'better-sqlite3';",
+    )).toBe(true);
+    expect(importsRuntimeBetterSqlite3Driver(
+      "import { type Options, Database } from 'better-sqlite3';",
+    )).toBe(true);
+  });
+
   it('keeps direct better-sqlite3 imports inside adapters or documented exceptions', () => {
+    // Group-2 SQLite-adapter-internal sync helpers use a leading `import
+    // type` to type a transaction handle parameter without making the
+    // module itself a runtime `better-sqlite3` importer; see
+    // `importsRuntimeBetterSqlite3Driver` above for why this cannot be
+    // gamed by mixed type/value syntax.
     const unexpected = sourceFiles.flatMap((path) => {
       const source = readFileSync(path, 'utf8');
       const name = repoPath(path);
-      return source.match(/from\s+['"]better-sqlite3['"]/)
+      return importsRuntimeBetterSqlite3Driver(source)
         && !isSqliteAdapter(name)
         && !LEGACY_DRIVER_IMPORTS.has(name)
         ? [name]

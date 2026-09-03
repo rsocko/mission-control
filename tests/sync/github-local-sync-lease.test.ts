@@ -98,7 +98,7 @@ describe('local GitHub sync operation visibility', () => {
         operationType: 'sync',
       }),
     ]);
-    expect(identity.getGitHubIdentityStatus('local-sync-lease', { now: NOW }))
+    expect(await identity.getGitHubIdentityStatus('local-sync-lease', { now: NOW }))
       .toMatchObject({ identity: { model: 'github_node_id', permanent: true } });
 
     releaseNotifications([]);

@@ -6,7 +6,6 @@ import {
   githubIdentityTaskTransferReconciliations,
   tasks,
 } from '@/db/schema';
-import { runTransaction } from '@/db';
 import {
   buildHistoricalTransferProof,
   canonicalIssueSourceId,
@@ -150,11 +149,25 @@ function inspectGitHubTaskTransferBinding(
   };
 }
 
+/**
+ * SQLite-adapter-oriented helper. Takes the SQLite Drizzle handle as an
+ * explicit parameter (rather than importing the `@/db` module-level
+ * singleton) so this file carries no runtime SQLite dependency of its own;
+ * `db`'s static type comes from `ExternalIdentityTransaction`, which is
+ * sourced from a type-only import in `service.ts` and therefore does not
+ * propagate SQLite taint. This function is consumed exclusively by
+ * `sqlite-github-recovery-repositories.ts` (via its
+ * `recordHistoricalTransferReconciliation` port method) and must never be
+ * selected as a normal PostgreSQL application service — PostgreSQL already
+ * has its own genuine implementation of that port method in
+ * `github-recovery-repositories.ts`.
+ */
 export function recordGitHubTaskTransferReconciliation(
+  db: ExternalIdentityTransaction,
   request: GitHubTaskTransferReconciliationRequest,
 ): GitHubTaskTransferReconciliationResult {
   validateHistoricalAuditRequest(request);
-  return runTransaction((tx) => {
+  return db.transaction((tx) => {
     const mode = getGitHubIdentityModeSnapshotInTransaction(
       tx,
       request.connectorInstanceId,
@@ -241,7 +254,7 @@ export function recordGitHubTaskTransferReconciliation(
     }).returning().get();
     if (!inserted) throw new Error('Failed to persist historical transfer reconciliation');
     return toResult(inserted, true);
-  });
+  }, { behavior: 'immediate' });
 }
 
 export function provenSupersededGitHubTaskIds(

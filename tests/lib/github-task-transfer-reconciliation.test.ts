@@ -48,7 +48,7 @@ describe('historical GitHub task transfer reconciliation', () => {
 
   it('records the exact historical endpoint to observable successor proof', async () => {
     const connectorId = 'historical-transfer-exact';
-    const pair = seedTransferPair(connectorId);
+    const pair = await seedTransferPair(connectorId);
     const observation = restObservation(
       connectorId,
       'I_kwDOTWhjas8AAAABMFO0qg',
@@ -118,7 +118,7 @@ describe('historical GitHub task transfer reconciliation', () => {
 
   it('rejects stable-identity and canonical-locator near matches without persisting proof', async () => {
     const stableMismatchConnector = 'historical-transfer-stable-mismatch';
-    const stableMismatchPair = seedTransferPair(stableMismatchConnector);
+    const stableMismatchPair = await seedTransferPair(stableMismatchConnector);
     await expect(service.reconcileHistoricalGitHubIssueTransfer({
       connectorInstanceId: stableMismatchConnector,
       sourceTaskId: stableMismatchPair.sourceTaskId,
@@ -136,7 +136,7 @@ describe('historical GitHub task transfer reconciliation', () => {
     })).rejects.toThrow('did not resolve to the successor stable identity');
 
     const locatorMismatchConnector = 'historical-transfer-locator-mismatch';
-    const locatorMismatchPair = seedTransferPair(locatorMismatchConnector);
+    const locatorMismatchPair = await seedTransferPair(locatorMismatchConnector);
     await expect(service.reconcileHistoricalGitHubIssueTransfer({
       connectorInstanceId: locatorMismatchConnector,
       sourceTaskId: locatorMismatchPair.sourceTaskId,
@@ -163,10 +163,10 @@ describe('historical GitHub task transfer reconciliation', () => {
   });
 });
 
-function seedTransferPair(connectorInstanceId: string): {
+async function seedTransferPair(connectorInstanceId: string): Promise<{
   sourceTaskId: string;
   successorTaskId: string;
-} {
+}> {
   const sourceTaskId = `${connectorInstanceId}-historical-task`;
   const successorTaskId = `${connectorInstanceId}-successor-task`;
   database.default.insert(schema.connectorConfigs).values({
@@ -218,7 +218,7 @@ function seedTransferPair(connectorInstanceId: string): {
       lastSyncedAt: now,
     },
   ]).run();
-  identities.persistExternalIdentityBatch([
+  await identities.persistExternalIdentityBatch([
     {
       target: {
         connectorInstanceId,

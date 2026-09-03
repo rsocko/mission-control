@@ -1,5 +1,4 @@
 import { and, desc, eq } from 'drizzle-orm';
-import { runTransaction } from '@/db';
 import {
   githubIdentityBackfillItems,
   githubIdentityExceptionEvents,
@@ -14,7 +13,7 @@ import { GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE } from '@/db/schema';
 import type { GitHubIdentityExceptionProofType } from '@/db/schema';
 import type { GitHubIdentityExceptionSnapshot } from '@/db/persistence/github-identity';
 import type { ExternalIdentityTransaction } from './service';
-import { getGitHubIdentityRepository } from './worker-persistence';
+import { getGitHubIdentityOperatorRepository, getGitHubIdentityRepository } from './worker-persistence';
 
 export type GitHubIdentityExceptionEvent =
   typeof githubIdentityExceptionEvents.$inferSelect;
@@ -25,11 +24,17 @@ export type GitHubIdentityExceptionEvent =
  * local and durable: either the Stage-1 backfill proved the issue inaccessible,
  * or the operator explicitly confirms an authoritative deletion for a task that
  * still carries a verified NodeID binding.
+ *
+ * This is one of the five pre-existing, previously audited GitHub worker
+ * operator/recovery surfaces (see `github-worker-errors.ts`). It is a manual,
+ * operator-only mutation with no normal HTTP/application caller; PostgreSQL
+ * does not implement it and fails closed via `UnsupportedGitHubWorkerOperationError`
+ * before any SQLite import, transaction, or durable mutation.
  */
-export function recordGitHubIdentityException(
+export async function recordGitHubIdentityException(
   request: GitHubIdentityExceptionRequest,
-): GitHubIdentityExceptionResult {
-  return runTransaction((tx) => recordGitHubIdentityExceptionInTransaction(tx, request));
+): Promise<GitHubIdentityExceptionResult> {
+  return (await getGitHubIdentityOperatorRepository()).recordIdentityException(request);
 }
 
 export function recordGitHubIdentityExceptionInTransaction(

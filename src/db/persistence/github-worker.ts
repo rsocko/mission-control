@@ -2,6 +2,7 @@ import type {
   GitHubIdentityPersistence,
   GitHubWriteFencePersistence,
 } from './github-identity';
+import type { GitHubIdentityOperatorPersistence } from './github-identity-operator';
 import type { GitHubDependencyPersistence } from './github-dependencies';
 import type { GitHubHierarchyPersistence } from './github-hierarchy';
 import type { GitHubProjectPersistence } from './github-projects';
@@ -24,11 +25,13 @@ export { UnsupportedGitHubWorkerOperationError } from './github-worker-errors';
  * native issue transfer, historical task-transfer succession reconciliation,
  * bulk transfer runs, and repository repoint.
  *
- * The remaining operator surfaces (identity backfill/status, manual exception
- * mutation, unknown-outcome resolution, interrupted write-cycle recovery) are
- * deliberately absent. Under PostgreSQL they fail closed through
- * `UnsupportedGitHubWorkerOperationError` or
- * `UnsupportedConnectorExecutionError` before any remote effect is attempted.
+ * `operator` covers the remaining operator surfaces (identity backfill/status,
+ * manual exception mutation, unknown-outcome resolution, interrupted
+ * write-cycle recovery). Every member of the composition still resolves on
+ * PostgreSQL, but `operator`'s PostgreSQL adapter is not a genuine async
+ * implementation: it fails closed through `UnsupportedGitHubWorkerOperationError`
+ * before any remote effect is attempted. These are pre-existing, previously
+ * audited worker exclusions, not new exceptions.
  */
 export interface GitHubWorkerRepositories {
   readonly identity: GitHubIdentityPersistence;
@@ -37,4 +40,5 @@ export interface GitHubWorkerRepositories {
   readonly hierarchy: GitHubHierarchyPersistence;
   readonly projects: GitHubProjectPersistence;
   readonly recovery: GitHubRecoveryPersistence;
+  readonly operator: GitHubIdentityOperatorPersistence;
 }

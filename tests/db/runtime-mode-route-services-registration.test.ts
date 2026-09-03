@@ -73,6 +73,12 @@ vi.mock('@/lib/triage/lifecycle', () => {
 
 describe('initializeRuntimeDatabase PostgreSQL branch: mode-route-services registration', () => {
   beforeEach(() => {
+    // `initializeRuntimeDatabase()` registers process-wide composition-root
+    // singletons (see `tests/db/sqlite-core-repositories.test.ts`'s
+    // "rejects replacement" tests for the same pattern), so each test needs
+    // a fresh module instance — otherwise the second `it()`'s call throws
+    // "already registered" against the first test's registration.
+    vi.resetModules();
     vi.clearAllMocks();
   });
 

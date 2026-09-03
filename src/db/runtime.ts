@@ -244,32 +244,31 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * Also registers the two `src/app/api/settings/mode/route.ts` (Layer L02)
  * services declared in `@/lib/settings/mode-route-services` — see that
  * module's doc comment. For SQLite this wires the real
- * `clearDatabase`/`resetDemoDatabase`/`clearTriageSampleData` functions and
- * the drizzle-backed timezone repository. For PostgreSQL, the timezone
- * repository gets a real adapter, but the demo/seed commands have no
- * PostgreSQL equivalent yet, so all three reject with the same
- * "SQLite-only" error already used by `@/lib/seed-api`/
- * `@/lib/triage/lifecycle` — without importing either of those SQLite-only
- * modules on the PostgreSQL branch at all.
+ * `clearDatabase`/`resetDemoDatabase`/`clearTriageSampleData` functions
+ * (via the SQLite-named `./persistence/sqlite-demo-seed-command-adapter`
+ * seam, so `@/lib/seed-api`/`@/lib/triage/lifecycle` are never imported —
+ * statically or dynamically — from anywhere reachable on the PostgreSQL
+ * branch) and the drizzle-backed timezone repository. For PostgreSQL, the
+ * timezone repository gets a real adapter, but the demo/seed commands have
+ * no PostgreSQL equivalent yet, so all three reject with the documented
+ * "SQLite-only" error.
  */
 export async function initializeRuntimeDatabase(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const [
       { initializeDatabase, default: sqliteDb },
       { sqliteCorePersistenceRepositories },
-      { clearDatabase, resetDemoDatabase },
-      { clearTriageSampleData },
+      { createSqliteDemoSeedCommandService },
       { createSqliteRelativeReminderTimezoneRepository },
     ] = await Promise.all([
       import('./index'),
       import('./persistence/sqlite-core-repositories'),
-      import('@/lib/seed-api'),
-      import('@/lib/triage/lifecycle'),
+      import('./persistence/sqlite-demo-seed-command-adapter'),
       import('./persistence/sqlite-relative-reminder-timezone-repository'),
     ]);
     initializeDatabase();
     registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
-    registerDemoSeedCommandService({ clearDatabase, resetDemoDatabase, clearTriageSampleData });
+    registerDemoSeedCommandService(createSqliteDemoSeedCommandService());
     registerRelativeReminderTimezoneRepository(
       createSqliteRelativeReminderTimezoneRepository(sqliteDb),
     );

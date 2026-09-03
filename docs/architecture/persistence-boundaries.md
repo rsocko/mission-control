@@ -799,9 +799,26 @@ for `CorePersistenceRepositories` (it already calls
 `registerCorePersistenceRepositories`) — which runs from
 `src/instrumentation.ts` before the server accepts any request. For SQLite,
 this wires the real `clearDatabase`/`resetDemoDatabase`/
-`clearTriageSampleData` functions (dynamically imported inside that
-function, alongside the existing SQLite core-repository wiring) and the
-drizzle-backed timezone repository. For PostgreSQL, the timezone repository
+`clearTriageSampleData` functions and the drizzle-backed timezone repository.
+The demo-command trio is wired through one dynamically-imported seam file,
+`src/db/persistence/sqlite-demo-seed-command-adapter.ts` (its name
+deliberately contains "sqlite", following the same convention as
+`sqlite-core-repositories.ts`/`sqlite-relative-reminder-timezone-repository.
+ts`): `runtime.ts` itself never names `@/lib/seed-api` or
+`@/lib/triage/lifecycle` — statically or dynamically — only the adapter file
+does, so the sync-worker's PostgreSQL-startup-graph ratchet
+(`tests/architecture/final-worker-persistence-boundary.test.ts`), which
+follows *every* dynamic import out of `runtime.ts` (a permanent member of its
+traversal) unless the resolved target's filename itself signals
+SQLite-only, does not pull `@/db`/`@/db/schema`'s entire subtree into the
+PostgreSQL startup graph through this wiring. An earlier draft imported
+`@/lib/seed-api` and `@/lib/triage/lifecycle` directly from `runtime.ts`;
+that passed the route-focused `web-persistence-graph` census (which only
+traces from route entry points) but failed the separate sync-worker ratchet,
+which starts from `src/sync-worker.ts` and reaches `runtime.ts` as one of its
+guarded dynamic importers — a reminder that this layer's route-level
+"clean" proof and the pre-existing worker-boundary proof are independent
+gates that both must hold. For PostgreSQL, the timezone repository
 gets the real PostgreSQL adapter, but the three demo commands are
 constructed inline as immediate rejections using the exact same
 "SQLite-only" error text `seed-api.ts`/`lifecycle.ts` already throw — the

@@ -1,16 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mockGetAppMode = vi.fn();
-const mockSetAppMode = vi.fn();
-const mockGetSettings = vi.fn();
-const mockUpdateSettings = vi.fn();
-const mockIsPublicDemoMode = vi.fn();
-const mockClearDatabase = vi.fn();
-const mockResetDemoDatabase = vi.fn();
-const mockClearTriageSampleData = vi.fn();
-const mockApplyTimezoneRecompute = vi.fn();
-const mockGetDemoSeedCommandService = vi.fn();
-const mockGetRelativeReminderTimezoneRepository = vi.fn();
+const {
+  mockGetAppMode,
+  mockSetAppMode,
+  mockGetSettings,
+  mockUpdateSettings,
+  mockIsPublicDemoMode,
+  mockClearDatabase,
+  mockResetDemoDatabase,
+  mockClearTriageSampleData,
+  mockApplyTimezoneRecompute,
+  mockGetDemoSeedCommandService,
+  mockGetRelativeReminderTimezoneRepository,
+} = vi.hoisted(() => ({
+  mockGetAppMode: vi.fn(),
+  mockSetAppMode: vi.fn(),
+  mockGetSettings: vi.fn(),
+  mockUpdateSettings: vi.fn(),
+  mockIsPublicDemoMode: vi.fn(),
+  mockClearDatabase: vi.fn(),
+  mockResetDemoDatabase: vi.fn(),
+  mockClearTriageSampleData: vi.fn(),
+  mockApplyTimezoneRecompute: vi.fn(),
+  mockGetDemoSeedCommandService: vi.fn(),
+  mockGetRelativeReminderTimezoneRepository: vi.fn(),
+}));
 
 vi.mock('@/lib/mode', () => ({
   getAppMode: mockGetAppMode,

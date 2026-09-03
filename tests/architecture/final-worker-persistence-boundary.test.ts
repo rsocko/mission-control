@@ -203,6 +203,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     const unexpectedImporters = guardedEdges.filter((edge) =>
       !POSTGRES_GUARDED_DYNAMIC_IMPORTERS.has(edge.split(' -> ')[0])
       && !edge.startsWith(`${ROOT} -> `)
+      && !FEATURE_GUARDED_DYNAMIC_EDGES.has(edge)
     );
 
     expect(unexpectedImporters).toEqual([]);

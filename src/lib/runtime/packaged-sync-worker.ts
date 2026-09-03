@@ -7,6 +7,7 @@ import type { AtomicWorkerComponent } from '@/lib/runtime/atomic-components';
 
 export interface PackagedSyncWorkerDependencies {
   createCopilotClient?: (options: CopilotClientOptions) => CopilotLifecycleClient;
+  eventDeliveryTimeoutMs?: number;
 }
 
 type ShutdownSignal = NodeJS.Signals | 'startup_failure';
@@ -145,6 +146,7 @@ export async function runPackagedSyncWorker(
       repositories: workerPersistence.eventDelivery,
       isEnabled: () => isParityActive('event-outbox'),
       scheduleWakeups: true,
+      deliveryTimeoutMs: dependencies.eventDeliveryTimeoutMs,
     });
     const notificationEnrichmentWorker = new NotificationEnrichmentWorker({
       repository: workerPersistence.notificationEnrichment,

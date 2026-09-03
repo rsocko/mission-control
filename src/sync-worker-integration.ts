@@ -5,6 +5,7 @@ import type {
 import { runPackagedSyncWorker } from '@/lib/runtime/packaged-sync-worker';
 
 const INTEGRATION_TOKEN = 'postgres-whole-worker';
+const INTEGRATION_REQUEST_TIMEOUT_MS = 60_000;
 
 function requireLoopbackController(): URL {
   if (
@@ -81,6 +82,7 @@ process.env.MC_PROCESS_ROLE = 'worker';
 
 void runPackagedSyncWorker({
   createCopilotClient: () => createControllerClient(controller),
+  eventDeliveryTimeoutMs: INTEGRATION_REQUEST_TIMEOUT_MS,
 }).catch((error) => {
   console.error('Packaged sync worker integration failed', error);
   process.exit(1);

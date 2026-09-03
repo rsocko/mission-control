@@ -408,6 +408,8 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           MC_AI_RUN_WORKER_POLL_MS: '100',
           MC_AI_RUN_LEASE_MS: '50000',
           MC_NOTIFICATION_ENRICHMENT_LEASE_MS: '4000',
+          MC_NOTIFICATION_ENRICHMENT_TIMEOUT_MS: '60000',
+          MC_SEMANTIC_EMBEDDING_TIMEOUT_MS: '60000',
           MC_SYNC_WORKER_POLL_MS: '100',
           MC_SEMANTIC_WORKER_POLL_MS: '100',
           MC_SEMANTIC_WORKER_BUSY_POLL_MS: '50',

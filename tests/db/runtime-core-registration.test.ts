@@ -210,5 +210,30 @@ describe('PostgreSQL runtime core repository registration', () => {
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].reminders.cancelInvalidated).toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].triage.syncState.getAll).toHaveBeenCalledOnce();
+
+    mocks.stopSemantic.mockRejectedValueOnce(new Error('semantic stop failed'));
+    mocks.backend.shutdown.mockRejectedValueOnce(new Error('backend stop failed'));
+    await expect(shutdownRuntimeDatabase()).rejects.toThrow('PostgreSQL runtime shutdown failed');
+    expect(mocks.stopSemantic).toHaveBeenCalledTimes(2);
+    expect(mocks.backend.shutdown).toHaveBeenCalledTimes(2);
+    expect(() => registeredComposition.tasks.get('fenced-task')).toThrow(
+      'PostgreSQL core repositories have not been registered',
+    );
+
+    let finishCleanup!: () => void;
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    }));
+    const reinitialize = initializeRuntimeDatabase();
+    await Promise.resolve();
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
+    finishCleanup();
+    await reinitialize;
+    expect(mocks.stopSemantic).toHaveBeenCalledTimes(3);
+    expect(mocks.backend.shutdown).toHaveBeenCalledTimes(3);
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(3);
+    expect(mocks.registerCore).toHaveBeenCalledTimes(3);
+    expect(mocks.registerWorker).toHaveBeenCalledTimes(3);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(3);
   });
 });

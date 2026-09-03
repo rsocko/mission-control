@@ -192,5 +192,27 @@ describe('packaged PostgreSQL semantic runtime lifecycle', () => {
       ),
     ).resolves.toEqual({ status: 'skipped', reason: 'runtime-shutdown' });
     expect(mocks.workerConstructed).toHaveBeenCalledTimes(2);
+
+    mocks.backendDisposed = false;
+    runtime.resumePackagedPostgresSemanticRuntime();
+    await runtime.createPackagedPostgresSemanticRuntime();
+    mocks.workerStop.mockRejectedValueOnce(new Error('stop outcome unknown'));
+    await expect(runtime.stopPackagedPostgresSemanticWorker()).rejects.toThrow(
+      'stop outcome unknown',
+    );
+    expect(() => runtime.resumePackagedPostgresSemanticRuntime()).toThrow(
+      'still stopping',
+    );
+    await expect(
+      runtime.publishPackagedPostgresSemanticEntity('upsert', 'task', 'task-after-failed-stop'),
+    ).resolves.toEqual({ status: 'skipped', reason: 'runtime-shutdown' });
+
+    await runtime.stopPackagedPostgresSemanticWorker();
+    runtime.resumePackagedPostgresSemanticRuntime();
+    await runtime.createPackagedPostgresSemanticRuntime();
+    expect(mocks.workerConstructed).toHaveBeenCalledTimes(4);
+    expect(mocks.workerStop).toHaveBeenCalledTimes(4);
+    await runtime.stopPackagedPostgresSemanticWorker();
+    expect(mocks.workerStop).toHaveBeenCalledTimes(5);
   });
 });

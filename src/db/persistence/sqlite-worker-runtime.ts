@@ -1,4 +1,6 @@
-import db, { sqlite } from '@/db';
+import type Database from 'better-sqlite3';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/db/schema';
 import type { CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import { financeInsightDigestV1 } from '@/lib/finance-insights/canonical';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
@@ -13,7 +15,7 @@ import {
 import { registerKeywordSearchRepository } from '@/lib/search/keyword-runtime';
 import { sqliteKeywordSearchRepository } from '@/lib/search/sqlite-fts-repository';
 import type { WorkerPersistenceRepositories } from './worker-repositories';
-import { sqliteCorePersistenceRepositories } from './sqlite-core-repositories';
+import type { CorePersistenceRepositories } from './core-repositories';
 import { SqliteSyncRunRepository } from './sqlite-sync-run-repository';
 import { createSqliteConnectorExecutionRepositories } from './sqlite-connector-execution-repositories';
 import { createSqliteGitHubIdentityRepositories } from './sqlite-github-identity-repositories';
@@ -45,13 +47,19 @@ import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-quer
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
-export function createSqliteWorkerPersistenceRepositories():
-WorkerPersistenceRepositories {
+export function registerSqliteWorkerRuntimeServices(): void {
   registerSqliteGitHubRepointBackupVerifier();
   registerFinanceTransactionQuery(sqliteFinanceTransactionQuery);
   registerSqliteLegacySearchIndexingService();
   registerSqliteAIEnrichmentService();
   registerKeywordSearchRepository(sqliteKeywordSearchRepository);
+}
+
+export function createSqliteWorkerPersistenceRepositories(
+  sqlite: Database.Database,
+  db: BetterSQLite3Database<typeof schema>,
+  coreRepositories: CorePersistenceRepositories,
+): WorkerPersistenceRepositories {
   if (repositories) return repositories;
 
   const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
@@ -112,7 +120,7 @@ WorkerPersistenceRepositories {
     recovery: createSqliteFinanceConnectionRecoveryPersistence(sqlite, db),
   };
   repositories = {
-    connectors: sqliteCorePersistenceRepositories.connectors,
+    connectors: coreRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),
     execution: createSqliteConnectorExecutionRepositories(sqlite, db),
     github: {

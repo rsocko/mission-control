@@ -210,9 +210,6 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
       'src/lib/ai/durable-runs/runtime.ts -> ./sqlite-adapter',
     );
     expect(guardedEdges).toContain(
-      'src/lib/sync/search-indexer.ts -> @/lib/search',
-    );
-    expect(guardedEdges).toContain(
       'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
     );
     expect(guardedEdges).toContain(

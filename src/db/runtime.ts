@@ -53,6 +53,7 @@ let postgresDurableAiRunRepository: DurableAiRunRepository | null = null;
 let runtimeInitialized = false;
 let runtimeInitializationPromise: Promise<void> | null = null;
 let runtimeShutdownPromise: Promise<void> | null = null;
+let runtimeCleanupRequired = false;
 
 function clearPostgresRuntimeComposition(): void {
   postgresRepositories = null;
@@ -268,16 +269,13 @@ async function initializeRuntimeDatabaseOnce(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const [
       { initializeDatabase },
-      { sqliteCorePersistenceRepositories },
-      { createSqliteWorkerPersistenceRepositories },
+      { registerSqliteWorkerRuntimeServices },
     ] = await Promise.all([
       import('./index'),
-      import('./persistence/sqlite-core-repositories'),
       import('./persistence/sqlite-worker-runtime'),
     ]);
     initializeDatabase();
-    registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
-    registerWorkerPersistenceRepositories(createSqliteWorkerPersistenceRepositories());
+    registerSqliteWorkerRuntimeServices();
     return;
   }
   clearGitHubRepointBackupVerifier();
@@ -315,6 +313,9 @@ export function initializeRuntimeDatabase(): Promise<void> {
   if (runtimeShutdownPromise) {
     return runtimeShutdownPromise.then(() => initializeRuntimeDatabase());
   }
+  if (runtimeCleanupRequired) {
+    return shutdownRuntimeDatabase().then(() => initializeRuntimeDatabase());
+  }
   if (runtimeInitialized) return Promise.resolve();
   if (runtimeInitializationPromise) return runtimeInitializationPromise;
 
@@ -324,8 +325,19 @@ export function initializeRuntimeDatabase(): Promise<void> {
     })
     .catch(async (error) => {
       if (resolveDatabaseBackend() === 'postgres') {
-        await postgresBackend.shutdown();
-        clearPostgresRuntimeComposition();
+        try {
+          await postgresBackend.shutdown();
+          runtimeCleanupRequired = false;
+        } catch (cleanupError) {
+          runtimeCleanupRequired = true;
+          throw new AggregateError(
+            [error, cleanupError],
+            'PostgreSQL runtime initialization cleanup failed',
+            { cause: error },
+          );
+        } finally {
+          clearPostgresRuntimeComposition();
+        }
       }
       throw error;
     })
@@ -342,13 +354,30 @@ export function shutdownRuntimeDatabase(): Promise<void> {
     if (runtimeInitializationPromise) {
       await runtimeInitializationPromise.catch(() => undefined);
     }
-    if (resolveDatabaseBackend() === 'postgres') {
-      const { stopPackagedPostgresSemanticWorker } = await import(
-        '@/lib/semantic-index/packaged-worker-runtime'
-      );
-      await stopPackagedPostgresSemanticWorker();
-      await postgresBackend.shutdown();
-      clearPostgresRuntimeComposition();
+    if (runtimeCleanupRequired || resolveDatabaseBackend() === 'postgres') {
+      const shutdownErrors: unknown[] = [];
+      try {
+        const { stopPackagedPostgresSemanticWorker } = await import(
+          '@/lib/semantic-index/packaged-worker-runtime'
+        );
+        await stopPackagedPostgresSemanticWorker();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+      try {
+        await postgresBackend.shutdown();
+      } catch (error) {
+        shutdownErrors.push(error);
+      } finally {
+        clearPostgresRuntimeComposition();
+        runtimeInitialized = false;
+      }
+      runtimeCleanupRequired = shutdownErrors.length > 0;
+      if (shutdownErrors.length === 1) throw shutdownErrors[0];
+      if (shutdownErrors.length > 1) {
+        throw new AggregateError(shutdownErrors, 'PostgreSQL runtime shutdown failed');
+      }
+      return;
     }
     runtimeInitialized = false;
   })().finally(() => {

@@ -144,8 +144,8 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   }),
 }));
 
-vi.mock('@/db/runtime', () => ({
-  getPostgresKeywordSearchRepository: () => mocks.searchRepository,
+vi.mock('@/lib/search/keyword-runtime', () => ({
+  getKeywordSearchRepository: () => mocks.searchRepository,
 }));
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;

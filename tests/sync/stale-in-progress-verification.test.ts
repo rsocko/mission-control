@@ -212,6 +212,14 @@ vi.mock('@/lib/connectors', () => ({
   },
 }));
 
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: vi.fn(() => mockConnectorInstance),
+    getAllConnectors: vi.fn(() => []),
+    replaceConnector: vi.fn(() => mockConnectorInstance),
+  }),
+}));
+
 vi.mock('@/lib/external-identities', () => ({
   GITHUB_IDENTITY_MODE: 'stable',
   GitHubStableIdentityRuntime: class {

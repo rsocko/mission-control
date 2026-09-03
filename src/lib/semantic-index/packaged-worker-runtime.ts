@@ -91,6 +91,7 @@ let runtimePromise: Promise<PackagedPostgresSemanticRuntime> | null = null;
 let runtimeGeneration = 0;
 let runtimeSuspended = false;
 let runtimeStopPromise: Promise<void> | null = null;
+let runtimePendingStop: PackagedPostgresSemanticRuntime | null = null;
 const activePublications = new Set<Promise<SemanticPublishResult>>();
 
 function parseRoutingPolicy(value: unknown): AIRoutingPolicyConfig {
@@ -211,7 +212,7 @@ export function startPackagedPostgresSemanticWorker(
 }
 
 export function resumePackagedPostgresSemanticRuntime(): void {
-  if (runtimeStopPromise) {
+  if (runtimeStopPromise || runtimePendingStop) {
     throw new Error('Packaged PostgreSQL semantic runtime is still stopping');
   }
   if (runtimeSuspended) runtimeGeneration++;
@@ -224,12 +225,14 @@ export function stopPackagedPostgresSemanticWorker(): Promise<void> {
     runtimeSuspended = true;
     runtimeGeneration++;
     const pending = runtimePromise;
-    const current = runtime;
+    const current = runtimePendingStop ?? runtime;
+    runtimePendingStop = current;
     runtime = null;
     if (pending) await pending.catch(() => undefined);
     if (runtimePromise === pending) runtimePromise = null;
     await Promise.allSettled(activePublications);
     if (current) await current.worker.stop();
+    runtimePendingStop = null;
   })().finally(() => {
     runtimeStopPromise = null;
   });

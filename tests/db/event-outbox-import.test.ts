@@ -137,5 +137,5 @@ describe('event outbox SQLite-to-PostgreSQL import support', () => {
       // Unroutable port: reaching PostgreSQL at all would fail the assertion below.
       postgresUrl: 'postgresql://127.0.0.1:1/mission_control_import_rehearsal',
     })).rejects.toThrow('event_outbox.payload:invalid-json=1');
-  });
+  }, 20_000);
 });

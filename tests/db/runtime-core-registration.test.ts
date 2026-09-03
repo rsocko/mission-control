@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => {
   const clearCore = vi.fn();
   const clearWorker = vi.fn();
   const registerConnectorRuntime = vi.fn();
+  const registerDemoSeedCommandService = vi.fn();
+  const registerRelativeReminderTimezoneRepository = vi.fn();
   const resumeSemantic = vi.fn();
   const stopSemantic = vi.fn(async () => undefined);
   const backend = {
@@ -32,6 +34,8 @@ const mocks = vi.hoisted(() => {
     clearCore,
     clearWorker,
     registerConnectorRuntime,
+    registerDemoSeedCommandService,
+    registerRelativeReminderTimezoneRepository,
     registerCore,
     repositories,
     createCore: vi.fn(() => {
@@ -136,6 +140,10 @@ vi.mock('@/lib/persistence/runtime', () => ({
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   clearWorkerPersistenceRepositories: mocks.clearWorker,
   registerWorkerPersistenceRepositories: mocks.registerWorker,
+}));
+vi.mock('@/lib/settings/mode-route-services', () => ({
+  registerDemoSeedCommandService: mocks.registerDemoSeedCommandService,
+  registerRelativeReminderTimezoneRepository: mocks.registerRelativeReminderTimezoneRepository,
 }));
 vi.mock('@/db/postgres/runtime', () => ({
   PostgresPersistenceBackend: class {
@@ -255,6 +263,17 @@ describe('PostgreSQL runtime core repository registration', () => {
     await expect(durableRuntime.getDurableAiRunRepository()).rejects.toThrow(
       'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
     );
+    const registeredDemoSeedCommandService =
+      mocks.registerDemoSeedCommandService.mock.calls[0][0];
+    const registeredTimezoneRepository =
+      mocks.registerRelativeReminderTimezoneRepository.mock.calls[0][0];
+    expect(() => registeredDemoSeedCommandService.clearDatabase()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => registeredTimezoneRepository.applyTimezoneRecompute({
+      now: new Date(),
+      recompute: () => ({ success: false }),
+    })).toThrow('Persistence composition is unavailable until initializeRuntimeDatabase() completes');
     expect(() => (
       durableRuntime.registerPostgresDurableAiRunRepository(replacementDurableRepository)
     )).toThrow(

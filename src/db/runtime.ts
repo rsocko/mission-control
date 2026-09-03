@@ -44,6 +44,12 @@ import {
   clearWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
+import type { DemoSeedCommandService } from '@/lib/settings/mode-route-services';
+import type { RelativeReminderTimezoneRepository } from './persistence/relative-reminder-timezone';
+import {
+  registerDemoSeedCommandService,
+  registerRelativeReminderTimezoneRepository,
+} from '@/lib/settings/mode-route-services';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
@@ -56,6 +62,7 @@ import { createPostgresAIEnrichmentService } from './postgres/sync/notification-
 import { createPostgresKeywordSearchRepository } from './postgres/search';
 import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
+import { createPostgresRelativeReminderTimezoneRepository } from './postgres/repositories/relative-reminder-timezone-repository';
 
 const postgresBackend = new PostgresPersistenceBackend();
 let postgresRepositories: CorePersistenceRepositories | null = null;
@@ -73,6 +80,52 @@ let runtimeShutdownPromise: Promise<void> | null = null;
 let runtimePostShutdownInitializationPromise: Promise<void> | null = null;
 let runtimeCleanupRequired = false;
 let runtimeLifecycleGeneration = 0;
+let modeRouteDemoSeedCommandDelegate: DemoSeedCommandService | null = null;
+let modeRouteTimezoneDelegate: RelativeReminderTimezoneRepository | null = null;
+
+function requireModeRouteDemoSeedCommandDelegate(): DemoSeedCommandService {
+  assertPersistenceCompositionAccessAllowed();
+  if (!modeRouteDemoSeedCommandDelegate) {
+    throw new Error('Demo seed command service has not been registered');
+  }
+  return modeRouteDemoSeedCommandDelegate;
+}
+
+function requireModeRouteTimezoneDelegate(): RelativeReminderTimezoneRepository {
+  assertPersistenceCompositionAccessAllowed();
+  if (!modeRouteTimezoneDelegate) {
+    throw new Error('Relative reminder timezone repository has not been registered');
+  }
+  return modeRouteTimezoneDelegate;
+}
+
+const modeRouteDemoSeedCommandService: DemoSeedCommandService = {
+  resetDemoDatabase: () => requireModeRouteDemoSeedCommandDelegate().resetDemoDatabase(),
+  clearDatabase: () => requireModeRouteDemoSeedCommandDelegate().clearDatabase(),
+  clearTriageSampleData: () => (
+    requireModeRouteDemoSeedCommandDelegate().clearTriageSampleData()
+  ),
+};
+const modeRouteTimezoneRepository: RelativeReminderTimezoneRepository = {
+  applyTimezoneRecompute: (input) => (
+    requireModeRouteTimezoneDelegate().applyTimezoneRecompute(input)
+  ),
+};
+
+function registerModeRouteServices(
+  demoSeedCommandService: DemoSeedCommandService,
+  timezoneRepository: RelativeReminderTimezoneRepository,
+): void {
+  modeRouteDemoSeedCommandDelegate = demoSeedCommandService;
+  modeRouteTimezoneDelegate = timezoneRepository;
+  registerDemoSeedCommandService(modeRouteDemoSeedCommandService);
+  registerRelativeReminderTimezoneRepository(modeRouteTimezoneRepository);
+}
+
+function clearModeRouteServiceDelegates(): void {
+  modeRouteDemoSeedCommandDelegate = null;
+  modeRouteTimezoneDelegate = null;
+}
 
 function clearPostgresRuntimeComposition(): void {
   if (postgresWorkerRepositories) {
@@ -311,6 +364,18 @@ const semanticPublicationRuntimeService: SemanticPublicationService = {
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite loads the same composition through its backend-selected startup path.
+ *
+ * Also registers the two `src/app/api/settings/mode/route.ts` (Layer L02)
+ * services declared in `@/lib/settings/mode-route-services` — see that
+ * module's doc comment. For SQLite this wires the real
+ * `clearDatabase`/`resetDemoDatabase`/`clearTriageSampleData` functions
+ * (via the SQLite-named `./persistence/sqlite-demo-seed-command-adapter`
+ * seam, so `@/lib/seed-api`/`@/lib/triage/lifecycle` are never imported —
+ * statically or dynamically — from anywhere reachable on the PostgreSQL
+ * branch) and the drizzle-backed timezone repository. For PostgreSQL, the
+ * timezone repository gets a real adapter, but the demo/seed commands have
+ * no PostgreSQL equivalent yet, so all three reject with the documented
+ * "SQLite-only" error.
  */
 async function registerStableRuntimeServices(): Promise<void> {
   assertCanRegisterConnectorRuntimeRegistry();
@@ -321,10 +386,22 @@ async function registerStableRuntimeServices(): Promise<void> {
 
 async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
-    const { initializeSqlitePersistenceComposition } = await import('./index');
+    const { initializeSqlitePersistenceComposition, default: sqliteDb } = await import('./index');
     await initializeSqlitePersistenceComposition();
     if (!isCurrentGeneration()) return;
     await registerStableRuntimeServices();
+    const [
+      { createSqliteDemoSeedCommandService },
+      { createSqliteRelativeReminderTimezoneRepository },
+    ] = await Promise.all([
+      import('./persistence/sqlite-demo-seed-command-adapter'),
+      import('./persistence/sqlite-relative-reminder-timezone-repository'),
+    ]);
+    if (!isCurrentGeneration()) return;
+    registerModeRouteServices(
+      createSqliteDemoSeedCommandService(),
+      createSqliteRelativeReminderTimezoneRepository(sqliteDb),
+    );
     return;
   }
   await postgresBackend.initialize();
@@ -355,6 +432,22 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   );
   if (!isCurrentGeneration()) return;
   resumePackagedPostgresSemanticRuntime();
+  const unsupportedDemoSeedCommand = (message: string) => () => Promise.reject(new Error(message));
+  const postgresDemoSeedCommandService: DemoSeedCommandService = {
+    resetDemoDatabase: unsupportedDemoSeedCommand(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+    clearDatabase: unsupportedDemoSeedCommand(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+    clearTriageSampleData: unsupportedDemoSeedCommand(
+      'Clearing triage demo/sample data is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+  };
+  registerModeRouteServices(
+    postgresDemoSeedCommandService,
+    createPostgresRelativeReminderTimezoneRepository(db),
+  );
 }
 
 export function initializeRuntimeDatabase(): Promise<void> {
@@ -467,6 +560,7 @@ export function shutdownRuntimeDatabase(): Promise<void> {
         shutdownErrors.push(error);
       } finally {
         clearPostgresRuntimeComposition();
+        clearModeRouteServiceDelegates();
         runtimeInitialized = false;
       }
       runtimeCleanupRequired = shutdownErrors.length > 0;
@@ -484,6 +578,8 @@ export function shutdownRuntimeDatabase(): Promise<void> {
     } catch (error) {
       runtimeCleanupRequired = true;
       throw error;
+    } finally {
+      clearModeRouteServiceDelegates();
     }
   })().finally(() => {
     runtimeShutdownPromise = null;

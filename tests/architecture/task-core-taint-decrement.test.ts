@@ -209,8 +209,8 @@ describe('L04 task-core taint decrement', () => {
       taintedLibA: 114,
       taintedApiHelpers: 1,
       tierARoutes: 219,
-      tierBRoutes: 39,
-      cleanRoutes: 8,
+      tierBRoutes: 26,
+      cleanRoutes: 21,
       totalMigrationUnits: 334,
     });
   });

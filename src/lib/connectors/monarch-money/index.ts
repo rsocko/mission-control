@@ -20,6 +20,10 @@ import { captureFinanceInsightPublication } from '@/lib/finance-insights/publica
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
 import logger from '@/lib/logger';
 import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
+import {
+  queryFinanceTransactions,
+  type FinanceTransactionFilters,
+} from './transaction-query';
 
 export {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -30,15 +34,6 @@ export {
 const activeProjectionSyncs = new Set<string>();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface TransactionFilters {
-  startDate?: string;
-  endDate?: string;
-  kidId?: string;
-  category?: string;
-  triageStatus?: string;
-  limit?: number;
-}
 
 // ─── Connector ────────────────────────────────────────────────────────────────
 // Mission Control talks to Tyrion here. Tyrion owns the Monarch integration
@@ -240,50 +235,9 @@ export class FinanceManagerConnector implements IConnector {
 
   // ─── Query ─────────────────────────────────────────────────────────────────
 
-  async getTransactions(filters: TransactionFilters = {}) {
-    const [
-      { default: db },
-      { financeTransactions },
-      { eq, and, gte, lte, sql },
-    ] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
-      import('drizzle-orm'),
-    ]);
+  async getTransactions(filters: FinanceTransactionFilters = {}) {
     const config = this.requireConfig();
-    const conditions = [
-      eq(financeTransactions.connectorInstanceId, config.id),
-      eq(financeTransactions.lifecycleStatus, 'active'),
-    ];
-
-    if (filters.startDate) {
-      conditions.push(gte(financeTransactions.date, filters.startDate));
-    }
-    if (filters.endDate) {
-      conditions.push(lte(financeTransactions.date, filters.endDate));
-    }
-    if (filters.kidId) {
-      conditions.push(eq(financeTransactions.assignedKidId, filters.kidId));
-    }
-    if (filters.category) {
-      conditions.push(eq(financeTransactions.confirmedCategory, filters.category));
-    }
-    if (filters.triageStatus) {
-      conditions.push(eq(financeTransactions.triageStatus, filters.triageStatus));
-    }
-
-    const where = and(...conditions);
-    const limit = typeof filters.limit === 'number'
-      && Number.isSafeInteger(filters.limit)
-      && filters.limit > 0
-      ? Math.min(filters.limit, 500)
-      : 100;
-
-    return db.select()
-      .from(financeTransactions)
-      .where(where)
-      .orderBy(sql`${financeTransactions.date} DESC`)
-      .limit(limit);
+    return queryFinanceTransactions(config.id, filters);
   }
 
   // ─── Write-back ────────────────────────────────────────────────────────────

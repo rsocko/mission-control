@@ -1,5 +1,4 @@
 import type Database from 'better-sqlite3';
-import { sqlite } from '@/db';
 import type {
   ConnectorConfig,
   HubProject,
@@ -1312,6 +1311,3 @@ export function createSqliteCorePersistenceRepositories(
     houstonMemories: new SqliteHoustonMemoryRepository(database),
   };
 }
-
-export const sqliteCorePersistenceRepositories =
-  createSqliteCorePersistenceRepositories(sqlite);

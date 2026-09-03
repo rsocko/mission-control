@@ -47,6 +47,8 @@ vi.mock('better-sqlite3', () => {
       };
     }
 
+    function(): void {}
+
     close(): void {
       state.events.push('close');
     }
@@ -79,7 +81,9 @@ vi.mock('fs', () => {
 });
 
 vi.mock('@/lib/notifications/providers/registry', () => ({
+  getNotificationProvider: vi.fn(),
   normalizeNotificationUrl: vi.fn(),
+  registerNotificationProvider: vi.fn(),
 }));
 
 vi.mock('@/lib/telemetry/database', () => ({

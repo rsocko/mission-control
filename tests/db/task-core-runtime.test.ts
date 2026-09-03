@@ -1,12 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 import {
+  clearSelectedTaskCorePersistence,
   clearTaskCorePersistence,
   getRegisteredTaskCorePersistence,
   getTaskCorePersistence,
   registerTaskCorePersistence,
   registerTaskCorePersistenceProvider,
 } from '@/lib/tasks/core/runtime';
+import {
+  beginPersistenceCompositionInitialization,
+  blockPersistenceComposition,
+  completePersistenceCompositionInitialization,
+} from '@/lib/persistence/composition-lifecycle';
 
 /**
  * Composition-seam semantics for the L04 task-core registry.
@@ -23,10 +29,14 @@ function stub(name: string): TaskCorePersistence {
 
 describe('task-core persistence runtime', () => {
   beforeEach(() => {
+    beginPersistenceCompositionInitialization();
+    completePersistenceCompositionInitialization();
     clearTaskCorePersistence();
   });
 
   afterEach(() => {
+    beginPersistenceCompositionInitialization();
+    completePersistenceCompositionInitialization();
     clearTaskCorePersistence();
   });
 
@@ -97,5 +107,30 @@ describe('task-core persistence runtime', () => {
     await expect(getTaskCorePersistence()).rejects.toThrow(
       /Task-core persistence has not been registered/,
     );
+  });
+
+  it('fences access and publication with the shared composition lifecycle', async () => {
+    registerTaskCorePersistence(stub('postgres'));
+    blockPersistenceComposition();
+
+    await expect(getTaskCorePersistence()).rejects.toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => registerTaskCorePersistence(stub('replacement'))).toThrow(
+      'Persistence composition publication is blocked until initializeRuntimeDatabase()',
+    );
+  });
+
+  it('clears a selected backend identity without removing the SQLite provider', async () => {
+    const provider = vi.fn(() => stub('sqlite'));
+    const postgres = stub('postgres');
+    registerTaskCorePersistenceProvider(provider);
+    registerTaskCorePersistence(postgres);
+
+    clearSelectedTaskCorePersistence(postgres);
+
+    expect(getRegisteredTaskCorePersistence()).toBeNull();
+    await expect(getTaskCorePersistence()).resolves.toEqual({ marker: 'sqlite' });
+    expect(provider).toHaveBeenCalledOnce();
   });
 });

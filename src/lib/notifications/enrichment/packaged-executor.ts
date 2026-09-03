@@ -18,7 +18,7 @@ import {
   buildEnrichmentPrompt,
   parseAIEnrichmentResult,
   shouldEnrichWithAI,
-} from './ai-enrichment';
+} from './ai-enrichment-policy';
 import type { NotificationEnrichmentExecutor } from './worker';
 
 function routingPolicy(value: unknown): AIRoutingPolicyConfig {

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConnectorConfig } from '@/types';
 
 const tempDirectories: string[] = [];
+const originalBackend = process.env.MC_DATABASE_BACKEND;
 
 function health(
   overrides: Partial<{
@@ -40,11 +41,14 @@ async function loadHarness(existingPath?: string) {
   const directory = existingPath ?? mkdtempSync(join(tmpdir(), 'mc-monarch-recovery-'));
   if (!existingPath) tempDirectories.push(directory);
   process.env.MC_DB_PATH = join(directory, 'recovery.db');
+  process.env.MC_DATABASE_BACKEND = 'sqlite';
   process.env.TYRION_OPERATIONS_URL = 'https://operations.example';
   process.env.FINANCE_EXTERNAL_ALLOWED_HOSTS = 'operations.example';
   vi.doUnmock('@/db');
   vi.doUnmock('drizzle-orm');
   vi.resetModules();
+  const { initializeDatabaseWithRetry } = await import('@/db/startup');
+  await initializeDatabaseWithRetry();
   const [dbModule, schema, recovery] = await Promise.all([
     import('@/db'),
     import('@/db/schema'),
@@ -62,6 +66,8 @@ async function loadHarness(existingPath?: string) {
 afterEach(() => {
   vi.unstubAllGlobals();
   delete process.env.MC_DB_PATH;
+  if (originalBackend === undefined) delete process.env.MC_DATABASE_BACKEND;
+  else process.env.MC_DATABASE_BACKEND = originalBackend;
   delete process.env.TYRION_OPERATIONS_URL;
   delete process.env.FINANCE_EXTERNAL_ALLOWED_HOSTS;
   while (tempDirectories.length > 0) {

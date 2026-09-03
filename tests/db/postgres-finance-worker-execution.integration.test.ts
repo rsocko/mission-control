@@ -489,8 +489,11 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
     process.env.MC_MODE = 'live';
     process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
     process.env.TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED = 'true';
-    const runtime = await import('@/db/runtime');
-    await runtime.initializeRuntimeDatabase();
+    const [{ initializeDatabaseWithRetry }, runtime] = await Promise.all([
+      import('@/db/startup'),
+      import('@/db/runtime'),
+    ]);
+    await initializeDatabaseWithRetry();
     pool = runtime.getPostgresPersistenceBackend().context.pool;
     shutdownRuntimeDatabase = runtime.shutdownRuntimeDatabase;
     ({ SyncExecutionPipeline } = await import('@/lib/sync'));

@@ -84,7 +84,7 @@ describe('Layer 5C finance persistence boundary', () => {
   it('composes the core, insight, and attention ports atomically on both backends', () => {
     const finance = source('src/db/persistence/finance-worker.ts');
     const worker = source('src/db/persistence/worker-repositories.ts');
-    const sqliteRuntime = source('src/lib/persistence/worker-runtime.ts');
+    const sqliteRuntime = source('src/db/persistence/sqlite-worker-runtime.ts');
     const postgres = source('src/db/postgres/repositories/index.ts');
     const runtime = source('src/db/runtime.ts');
 
@@ -92,7 +92,7 @@ describe('Layer 5C finance persistence boundary', () => {
     expect(finance).toContain('readonly attention:');
     expect(worker).toContain('finance: FinanceWorkerPersistence');
     expect(sqliteRuntime).toContain(
-      "import('@/db/persistence/sqlite-finance-worker-repositories')",
+      "from './sqlite-finance-worker-repositories'",
     );
     expect(sqliteRuntime).toContain('finance,');
     expect(postgres).toContain('createPostgresFinanceWorkerPersistence(pool)');

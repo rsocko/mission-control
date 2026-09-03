@@ -140,7 +140,11 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => postgresMocks.workerRepositories,
 }));
 
-vi.mock('@/lib/semantic-index/publication', () => ({
+vi.mock('@/lib/search/keyword-runtime', () => ({
+  getKeywordSearchRepository: () => postgresMocks.searchRepository,
+}));
+
+vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityDelete: postgresMocks.publishSemanticEntityDelete,
   publishSemanticEntityUpsert: postgresMocks.publishSemanticEntityUpsert,
 }));

@@ -42,17 +42,19 @@ describe('notification delivery persistence boundary', () => {
     expect(jobs).not.toContain("from '@/lib/sync/control-state'");
   });
 
-  it('loads the SQLite adapter lazily and registers both backends atomically', () => {
-    const runtime = read('src/lib/persistence/worker-runtime.ts');
+  it('loads the isolated SQLite composition only through backend selection', () => {
+    const runtime = read('src/db/persistence/sqlite-worker-runtime.ts');
     expect(runtime).toContain(
-      "import('@/db/persistence/sqlite-notification-delivery-repository')",
-    );
-    expect(runtime).not.toMatch(
-      /(?:^|\n)import\s+[^;]*from\s+['"]@\/db\/persistence\/sqlite-notification-delivery-repository['"]/,
+      "from './sqlite-notification-delivery-repository'",
     );
     expect(runtime).toContain(
       'notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite)',
     );
+    expect(read('src/db/runtime.ts')).toContain("import('./index')");
+    expect(read('src/db/index.ts')).toMatch(
+      /(?:from\s+|import\()['"]\.\/persistence\/sqlite-worker-runtime['"]/,
+    );
+    expect(read('src/lib/persistence/worker-runtime.ts')).not.toContain('sqlite');
 
     const postgres = read('src/db/postgres/repositories/index.ts');
     expect(postgres).toContain(

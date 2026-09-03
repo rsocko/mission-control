@@ -3,21 +3,24 @@ import { createReadStream, statSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { GitHubRecoveryBackupAttestation } from '@/db/persistence/github-recovery';
 import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import {
   BACKUP_ATTESTATION_MAX_AGE_MS,
   BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
 } from '@/db/persistence/github-recovery-values';
 
-/**
- * SQLite backup verification — an *edge helper*, not persistence.
- *
- * The GitHub recovery services only ever consume the bounded
- * {@link GitHubRecoveryBackupAttestation} value, so this module is the single
- * place that opens a database file. It is deliberately not part of the
- * persistence ports: PostgreSQL deployments verify their own dumps out of band
- * and pass an equivalent `source: 'external-preverified'` attestation, and this
- * repository ships no PostgreSQL dump, restore, or deployment tooling.
- */
-export async function inspectGitHubRepointBackup(
+export interface GitHubRepointBackupVerifier {
+  inspect(
+    backupPath: string,
+    now?: Date,
+  ): Promise<GitHubRecoveryBackupAttestation>;
+}
+
+let verifier: GitHubRepointBackupVerifier | null = null;
+
+async function inspectSqliteBackup(
   backupPath: string,
   now = new Date(),
 ): Promise<GitHubRecoveryBackupAttestation> {
@@ -32,7 +35,7 @@ export async function inspectGitHubRepointBackup(
   if (!initialStat.isFile() || initialStat.size <= 0) {
     throw new Error('Backup must be a non-empty file');
   }
-  const { default: Database } = await import('better-sqlite3');
+  const Database = (await import('better-sqlite3')).default;
   const backup = new Database(resolvedBackup, { readonly: true, fileMustExist: true });
   try {
     const rows = backup.pragma('integrity_check') as Array<{ integrity_check: string }>;
@@ -79,4 +82,54 @@ async function hashFile(filePath: string): Promise<string> {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(filePath)) hash.update(chunk);
   return hash.digest('hex');
+}
+
+const sqliteVerifier: GitHubRepointBackupVerifier = {
+  inspect: inspectSqliteBackup,
+};
+
+export function registerGitHubRepointBackupVerifier(
+  next: GitHubRepointBackupVerifier,
+): void {
+  assertCanRegisterGitHubRepointBackupVerifier(next);
+  verifier = next;
+}
+
+export function assertCanRegisterGitHubRepointBackupVerifier(
+  next: GitHubRepointBackupVerifier,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  if (verifier && verifier !== next) {
+    throw new Error('GitHub repoint backup verifier is already selected');
+  }
+}
+
+export function clearGitHubRepointBackupVerifier(
+  expectedVerifier?: GitHubRepointBackupVerifier,
+): void {
+  if (expectedVerifier && verifier !== expectedVerifier) return;
+  verifier = null;
+}
+
+export function registerSqliteGitHubRepointBackupVerifier(): void {
+  registerGitHubRepointBackupVerifier(sqliteVerifier);
+}
+
+export function assertCanRegisterSqliteGitHubRepointBackupVerifier(): void {
+  assertCanRegisterGitHubRepointBackupVerifier(sqliteVerifier);
+}
+
+export function clearSqliteGitHubRepointBackupVerifier(): void {
+  clearGitHubRepointBackupVerifier(sqliteVerifier);
+}
+
+export async function inspectGitHubRepointBackup(
+  backupPath: string,
+  now = new Date(),
+): Promise<GitHubRecoveryBackupAttestation> {
+  assertPersistenceCompositionAccessAllowed();
+  if (!verifier) {
+    throw new Error('GitHub backup verification is unavailable for the selected backend');
+  }
+  return verifier.inspect(backupPath, now);
 }

@@ -1,4 +1,8 @@
 import type { TaskCorePersistence } from './contracts';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
 
 /**
  * Composition seam for the L04 task-core persistence layer.
@@ -54,6 +58,7 @@ let resolvedRevision = -1;
 export function registerTaskCorePersistence(
   persistence: TaskCorePersistence,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   const slot = registry();
   slot.selected = persistence;
   slot.revision += 1;
@@ -83,11 +88,26 @@ export function clearTaskCorePersistence(): void {
   resolved = null;
 }
 
+/**
+ * Clears only the selected backend instance when it is still the expected
+ * identity. The SQLite provider remains installed across runtime generations.
+ */
+export function clearSelectedTaskCorePersistence(
+  persistence: TaskCorePersistence,
+): void {
+  const slot = registry();
+  if (slot.selected !== persistence) return;
+  slot.selected = null;
+  slot.revision += 1;
+  resolved = null;
+}
+
 export function getRegisteredTaskCorePersistence(): TaskCorePersistence | null {
   return registry().selected;
 }
 
 export async function getTaskCorePersistence(): Promise<TaskCorePersistence> {
+  assertPersistenceCompositionAccessAllowed();
   const slot = registry();
   if (slot.selected) return slot.selected;
   if (!slot.provider) {

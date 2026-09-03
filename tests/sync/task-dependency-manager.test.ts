@@ -4,11 +4,13 @@ import type { SourceTaskDependency } from '@/types';
 import { bindGitHubTaskIdentities, githubIssueEvidence, mirrorFenceTargets } from '../fixtures/github-node-identity';
 
 describe('task dependency reconciliation', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
+    const { initializeRuntimeDatabase } = await import('@/db/runtime');
+    await initializeRuntimeDatabase();
   });
 
   it('imports, retries, removes, and preserves dependencies by provenance', async () => {

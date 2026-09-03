@@ -7,21 +7,50 @@ import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
 import type { SemanticSourcePort } from '@/lib/semantic-index/source/contracts';
 import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
 import {
+  clearKeywordSearchRepository,
+  registerKeywordSearchRepository,
+} from '@/lib/search/keyword-runtime';
+import {
+  clearAIEnrichmentService,
+  registerAIEnrichmentService,
+  type AIEnrichmentService,
+} from '@/lib/notifications/enrichment/ai-enrichment-service';
+import {
+  assertCanRegisterSemanticPublicationService,
+  registerSemanticPublicationService,
+  type SemanticPublicationService,
+} from '@/lib/semantic-index/publication-service';
+import {
+  assertCanRegisterConnectorRuntimeRegistry,
+  registerConnectorRuntimeRegistry,
+} from '@/lib/connectors/registry-runtime';
+import {
   clearPostgresDurableAiRunRepository,
   registerPostgresDurableAiRunRepository,
 } from '@/lib/ai/durable-runs/runtime';
 import { PostgresDurableAiRunRepository } from '@/lib/ai/durable-runs/postgres-adapter';
 import {
+  clearCorePersistenceRepositories,
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
 import {
+  clearSelectedTaskCorePersistence,
   registerTaskCorePersistence,
 } from '@/lib/tasks/core/runtime';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 import {
-  getWorkerPersistenceRepositories,
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+  beginPersistenceCompositionInitialization,
+  blockPersistenceComposition,
+  completePersistenceCompositionInitialization,
+} from '@/lib/persistence/composition-lifecycle';
+import {
+  clearWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
 import type { DemoSeedCommandService } from '@/lib/settings/mode-route-services';
+import type { RelativeReminderTimezoneRepository } from './persistence/relative-reminder-timezone';
 import {
   registerDemoSeedCommandService,
   registerRelativeReminderTimezoneRepository,
@@ -35,6 +64,7 @@ import {
 import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
+import { createPostgresAIEnrichmentService } from './postgres/sync/notification-enrichment-service';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
 import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
@@ -49,8 +79,94 @@ let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
 let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
 let postgresSemanticSourcePort: SemanticSourcePort | null = null;
 let postgresDurableAiRunRepository: DurableAiRunRepository | null = null;
+let postgresAIEnrichmentService: AIEnrichmentService | null = null;
+let postgresTaskCorePersistence: TaskCorePersistence | null = null;
+let runtimeInitialized = false;
+let runtimeInitializationPromise: Promise<void> | null = null;
+let runtimeShutdownPromise: Promise<void> | null = null;
+let runtimePostShutdownInitializationPromise: Promise<void> | null = null;
+let runtimeCleanupRequired = false;
+let runtimeLifecycleGeneration = 0;
+let modeRouteDemoSeedCommandDelegate: DemoSeedCommandService | null = null;
+let modeRouteTimezoneDelegate: RelativeReminderTimezoneRepository | null = null;
+
+function requireModeRouteDemoSeedCommandDelegate(): DemoSeedCommandService {
+  assertPersistenceCompositionAccessAllowed();
+  if (!modeRouteDemoSeedCommandDelegate) {
+    throw new Error('Demo seed command service has not been registered');
+  }
+  return modeRouteDemoSeedCommandDelegate;
+}
+
+function requireModeRouteTimezoneDelegate(): RelativeReminderTimezoneRepository {
+  assertPersistenceCompositionAccessAllowed();
+  if (!modeRouteTimezoneDelegate) {
+    throw new Error('Relative reminder timezone repository has not been registered');
+  }
+  return modeRouteTimezoneDelegate;
+}
+
+const modeRouteDemoSeedCommandService: DemoSeedCommandService = {
+  resetDemoDatabase: () => requireModeRouteDemoSeedCommandDelegate().resetDemoDatabase(),
+  clearDatabase: () => requireModeRouteDemoSeedCommandDelegate().clearDatabase(),
+  clearTriageSampleData: () => (
+    requireModeRouteDemoSeedCommandDelegate().clearTriageSampleData()
+  ),
+};
+const modeRouteTimezoneRepository: RelativeReminderTimezoneRepository = {
+  applyTimezoneRecompute: (input) => (
+    requireModeRouteTimezoneDelegate().applyTimezoneRecompute(input)
+  ),
+};
+
+function registerModeRouteServices(
+  demoSeedCommandService: DemoSeedCommandService,
+  timezoneRepository: RelativeReminderTimezoneRepository,
+): void {
+  modeRouteDemoSeedCommandDelegate = demoSeedCommandService;
+  modeRouteTimezoneDelegate = timezoneRepository;
+  registerDemoSeedCommandService(modeRouteDemoSeedCommandService);
+  registerRelativeReminderTimezoneRepository(modeRouteTimezoneRepository);
+}
+
+function clearModeRouteServiceDelegates(): void {
+  modeRouteDemoSeedCommandDelegate = null;
+  modeRouteTimezoneDelegate = null;
+}
+
+function clearPostgresRuntimeComposition(): void {
+  if (postgresTaskCorePersistence) {
+    clearSelectedTaskCorePersistence(postgresTaskCorePersistence);
+  }
+  if (postgresWorkerRepositories) {
+    clearWorkerPersistenceRepositories(postgresWorkerPersistenceRepositories);
+  }
+  if (postgresRepositories) {
+    clearCorePersistenceRepositories(postgresCorePersistenceRepositories);
+  }
+  if (postgresKeywordSearchRepository) {
+    clearKeywordSearchRepository(postgresKeywordSearchRepository);
+  }
+  if (postgresAIEnrichmentService) {
+    clearAIEnrichmentService(postgresAIEnrichmentService);
+  }
+  if (postgresDurableAiRunRepository) {
+    clearPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
+  }
+  postgresRepositories = null;
+  postgresWorkerRepositories = null;
+  postgresSyncJobRepository = null;
+  postgresConnectorOperationLeaseRepository = null;
+  postgresKeywordSearchRepository = null;
+  postgresSemanticIndexRepository = null;
+  postgresSemanticSourcePort = null;
+  postgresDurableAiRunRepository = null;
+  postgresAIEnrichmentService = null;
+  postgresTaskCorePersistence = null;
+}
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresRepositories) {
     throw new Error('PostgreSQL core repositories have not been registered');
   }
@@ -58,6 +174,7 @@ function requirePostgresRepositories(): CorePersistenceRepositories {
 }
 
 function requirePostgresWorkerRepositories(): WorkerPersistenceRepositories {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresWorkerRepositories) {
     throw new Error('PostgreSQL worker repositories have not been registered');
   }
@@ -229,6 +346,20 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
     ),
   }),
 };
+const semanticPublicationRuntimeService: SemanticPublicationService = {
+  upsert: async (entityType, entityId) => {
+    const { publishSemanticEntityUpsert } = await import(
+      '@/lib/semantic-index/publication'
+    );
+    return publishSemanticEntityUpsert(entityType, entityId);
+  },
+  delete: async (entityType, entityId) => {
+    const { publishSemanticEntityDelete } = await import(
+      '@/lib/semantic-index/publication'
+    );
+    return publishSemanticEntityDelete(entityType, entityId);
+  },
+};
 
 /**
  * Initializes the selected persistence backend. For PostgreSQL, this also
@@ -243,7 +374,7 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * `createPostgresSemanticSourcePort`) from the freshly-initialized
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its
  * siblings below are guaranteed to be populated as soon as this resolves.
- * SQLite initialization is untouched.
+ * SQLite loads the same composition through its backend-selected startup path.
  *
  * Also registers the two `src/app/api/settings/mode/route.ts` (Layer L02)
  * services declared in `@/lib/settings/mode-route-services` — see that
@@ -257,39 +388,43 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * no PostgreSQL equivalent yet, so all three reject with the documented
  * "SQLite-only" error.
  */
-export async function initializeRuntimeDatabase(): Promise<void> {
+async function registerStableRuntimeServices(): Promise<void> {
+  assertCanRegisterConnectorRuntimeRegistry();
+  assertCanRegisterSemanticPublicationService(semanticPublicationRuntimeService);
+  registerConnectorRuntimeRegistry();
+  registerSemanticPublicationService(semanticPublicationRuntimeService);
+}
+
+async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
+    const { initializeSqlitePersistenceComposition, default: sqliteDb } = await import('./index');
+    await initializeSqlitePersistenceComposition();
+    if (!isCurrentGeneration()) return;
+    await registerStableRuntimeServices();
     const [
-      { initializeDatabase, default: sqliteDb },
-      { sqliteCorePersistenceRepositories },
-      { sqliteTaskCorePersistence },
       { createSqliteDemoSeedCommandService },
       { createSqliteRelativeReminderTimezoneRepository },
     ] = await Promise.all([
-      import('./index'),
-      import('./persistence/sqlite-core-repositories'),
-      import('./persistence/sqlite-task-core-repositories'),
       import('./persistence/sqlite-demo-seed-command-adapter'),
       import('./persistence/sqlite-relative-reminder-timezone-repository'),
     ]);
-    initializeDatabase();
-    registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
-    registerTaskCorePersistence(sqliteTaskCorePersistence);
-    registerDemoSeedCommandService(createSqliteDemoSeedCommandService());
-    registerRelativeReminderTimezoneRepository(
+    if (!isCurrentGeneration()) return;
+    registerModeRouteServices(
+      createSqliteDemoSeedCommandService(),
       createSqliteRelativeReminderTimezoneRepository(sqliteDb),
     );
-    await getWorkerPersistenceRepositories();
     return;
   }
   await postgresBackend.initialize();
+  if (!isCurrentGeneration()) return;
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
   // The task-core composition is built atomically from the freshly
   // initialized handle, so no request can observe a half-registered
   // task-core surface under PostgreSQL.
-  registerTaskCorePersistence(createPostgresTaskCorePersistence(db));
+  postgresTaskCorePersistence = createPostgresTaskCorePersistence(db);
+  registerTaskCorePersistence(postgresTaskCorePersistence);
   postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
     db,
     pool,
@@ -299,13 +434,20 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
+  registerKeywordSearchRepository(postgresKeywordSearchRepository);
+  postgresAIEnrichmentService = createPostgresAIEnrichmentService();
+  registerAIEnrichmentService(postgresAIEnrichmentService);
   postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
-  registerRelativeReminderTimezoneRepository(
-    createPostgresRelativeReminderTimezoneRepository(db),
+  await registerStableRuntimeServices();
+  if (!isCurrentGeneration()) return;
+  const { resumePackagedPostgresSemanticRuntime } = await import(
+    '@/lib/semantic-index/packaged-worker-runtime'
   );
+  if (!isCurrentGeneration()) return;
+  resumePackagedPostgresSemanticRuntime();
   const unsupportedDemoSeedCommand = (message: string) => () => Promise.reject(new Error(message));
   const postgresDemoSeedCommandService: DemoSeedCommandService = {
     resetDemoDatabase: unsupportedDemoSeedCommand(
@@ -318,25 +460,151 @@ export async function initializeRuntimeDatabase(): Promise<void> {
       'Clearing triage demo/sample data is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
     ),
   };
-  registerDemoSeedCommandService(postgresDemoSeedCommandService);
+  registerModeRouteServices(
+    postgresDemoSeedCommandService,
+    createPostgresRelativeReminderTimezoneRepository(db),
+  );
 }
 
-export async function shutdownRuntimeDatabase(): Promise<void> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    await postgresBackend.shutdown();
-    postgresRepositories = null;
-    postgresWorkerRepositories = null;
-    postgresSyncJobRepository = null;
-    postgresConnectorOperationLeaseRepository = null;
-    postgresKeywordSearchRepository = null;
-    postgresSemanticIndexRepository = null;
-    postgresSemanticSourcePort = null;
-    postgresDurableAiRunRepository = null;
-    clearPostgresDurableAiRunRepository();
+export function initializeRuntimeDatabase(): Promise<void> {
+  if (runtimeShutdownPromise) {
+    return initializeRuntimeDatabaseAfterShutdown(runtimeShutdownPromise);
   }
+  if (runtimePostShutdownInitializationPromise) {
+    return runtimePostShutdownInitializationPromise;
+  }
+  if (runtimeCleanupRequired) {
+    const shutdown = shutdownRuntimeDatabase();
+    return initializeRuntimeDatabaseAfterShutdown(shutdown);
+  }
+  if (runtimeInitialized) return Promise.resolve();
+  if (runtimeInitializationPromise) return runtimeInitializationPromise;
+
+  const initializationGeneration = ++runtimeLifecycleGeneration;
+  beginPersistenceCompositionInitialization();
+  runtimeInitializationPromise = initializeRuntimeDatabaseOnce(
+    () => initializationGeneration === runtimeLifecycleGeneration,
+  )
+    .then(() => {
+      if (initializationGeneration !== runtimeLifecycleGeneration) return;
+      completePersistenceCompositionInitialization();
+      runtimeInitialized = true;
+    })
+    .catch(async (error) => {
+      blockPersistenceComposition();
+      try {
+        if (resolveDatabaseBackend() === 'postgres') {
+          try {
+            await postgresBackend.shutdown();
+            runtimeCleanupRequired = false;
+          } catch (cleanupError) {
+            runtimeCleanupRequired = true;
+            throw new AggregateError(
+              [error, cleanupError],
+              'PostgreSQL runtime initialization cleanup failed',
+              { cause: error },
+            );
+          } finally {
+            clearPostgresRuntimeComposition();
+          }
+        } else {
+          try {
+            const { shutdownSqlitePersistenceComposition } = await import('./index');
+            await shutdownSqlitePersistenceComposition();
+            runtimeCleanupRequired = false;
+          } catch (cleanupError) {
+            runtimeCleanupRequired = true;
+            throw new AggregateError(
+              [error, cleanupError],
+              'SQLite runtime initialization cleanup failed',
+              { cause: error },
+            );
+          }
+        }
+        throw error;
+      } finally {
+        blockPersistenceComposition();
+      }
+    })
+    .finally(() => {
+      runtimeInitializationPromise = null;
+    });
+  return runtimeInitializationPromise;
+}
+
+function initializeRuntimeDatabaseAfterShutdown(shutdown: Promise<void>): Promise<void> {
+  if (runtimePostShutdownInitializationPromise) {
+    return runtimePostShutdownInitializationPromise;
+  }
+  const queued = shutdown.then(() => {
+    if (runtimePostShutdownInitializationPromise === queued) {
+      runtimePostShutdownInitializationPromise = null;
+    }
+    return initializeRuntimeDatabase();
+  }, (error) => {
+    if (runtimePostShutdownInitializationPromise === queued) {
+      runtimePostShutdownInitializationPromise = null;
+    }
+    throw error;
+  });
+  runtimePostShutdownInitializationPromise = queued;
+  return queued;
+}
+
+export function shutdownRuntimeDatabase(): Promise<void> {
+  runtimeLifecycleGeneration += 1;
+  blockPersistenceComposition();
+  if (runtimeShutdownPromise) return runtimeShutdownPromise;
+
+  runtimeShutdownPromise = (async () => {
+    if (runtimeInitializationPromise) {
+      await runtimeInitializationPromise.catch(() => undefined);
+    }
+    if (resolveDatabaseBackend() === 'postgres') {
+      const shutdownErrors: unknown[] = [];
+      try {
+        const { stopPackagedPostgresSemanticWorker } = await import(
+          '@/lib/semantic-index/packaged-worker-runtime'
+        );
+        await stopPackagedPostgresSemanticWorker();
+      } catch (error) {
+        shutdownErrors.push(error);
+      }
+      try {
+        await postgresBackend.shutdown();
+      } catch (error) {
+        shutdownErrors.push(error);
+      } finally {
+        clearPostgresRuntimeComposition();
+        clearModeRouteServiceDelegates();
+        runtimeInitialized = false;
+      }
+      runtimeCleanupRequired = shutdownErrors.length > 0;
+      if (shutdownErrors.length === 1) throw shutdownErrors[0];
+      if (shutdownErrors.length > 1) {
+        throw new AggregateError(shutdownErrors, 'PostgreSQL runtime shutdown failed');
+      }
+      return;
+    }
+    try {
+      const { shutdownSqlitePersistenceComposition } = await import('./index');
+      await shutdownSqlitePersistenceComposition();
+      runtimeCleanupRequired = false;
+      runtimeInitialized = false;
+    } catch (error) {
+      runtimeCleanupRequired = true;
+      throw error;
+    } finally {
+      clearModeRouteServiceDelegates();
+    }
+  })().finally(() => {
+    runtimeShutdownPromise = null;
+  });
+  return runtimeShutdownPromise;
 }
 
 export function getPostgresPersistenceBackend(): PostgresPersistenceBackend {
+  assertPersistenceCompositionAccessAllowed();
   if (resolveDatabaseBackend() !== 'postgres') {
     throw new Error('PostgreSQL persistence is not selected');
   }
@@ -351,6 +619,7 @@ export function getPostgresPersistenceBackend(): PostgresPersistenceBackend {
 export function registerPostgresCoreRepositories(
   repositories: CorePersistenceRepositories,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresRepositories = repositories;
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
 }
@@ -368,10 +637,12 @@ export function getPostgresWorkerPersistenceRepositories(): WorkerPersistenceRep
  * `registerPostgresCoreRepositories`.
  */
 export function registerPostgresSyncJobRepository(repository: SyncJobRepository): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresSyncJobRepository = repository;
 }
 
 export function getPostgresSyncJobRepository(): SyncJobRepository {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresSyncJobRepository) {
     throw new Error('PostgreSQL sync job repository has not been registered');
   }
@@ -385,10 +656,12 @@ export function getPostgresSyncJobRepository(): SyncJobRepository {
 export function registerPostgresConnectorOperationLeaseRepository(
   repository: ConnectorOperationLeaseRepository,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresConnectorOperationLeaseRepository = repository;
 }
 
 export function getPostgresConnectorOperationLeaseRepository(): ConnectorOperationLeaseRepository {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresConnectorOperationLeaseRepository) {
     throw new Error('PostgreSQL connector-operation lease repository has not been registered');
   }
@@ -400,10 +673,12 @@ export function getPostgresConnectorOperationLeaseRepository(): ConnectorOperati
  * `registerPostgresCoreRepositories`.
  */
 export function registerPostgresKeywordSearchRepository(repository: KeywordSearchRepository): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresKeywordSearchRepository = repository;
 }
 
 export function getPostgresKeywordSearchRepository(): KeywordSearchRepository {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresKeywordSearchRepository) {
     throw new Error('PostgreSQL keyword search repository has not been registered');
   }
@@ -417,10 +692,12 @@ export function getPostgresKeywordSearchRepository(): KeywordSearchRepository {
 export function registerPostgresSemanticIndexRepository(
   repository: SemanticIndexRepository,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresSemanticIndexRepository = repository;
 }
 
 export function getPostgresSemanticIndexRepository(): SemanticIndexRepository {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresSemanticIndexRepository) {
     throw new Error('PostgreSQL semantic index repository has not been registered');
   }
@@ -429,10 +706,12 @@ export function getPostgresSemanticIndexRepository(): SemanticIndexRepository {
 
 /** Explicit override hook (primarily for tests). */
 export function registerPostgresSemanticSourcePort(port: SemanticSourcePort): void {
+  assertPersistenceCompositionPublicationAllowed();
   postgresSemanticSourcePort = port;
 }
 
 export function getPostgresSemanticSourcePort(): SemanticSourcePort {
+  assertPersistenceCompositionAccessAllowed();
   if (!postgresSemanticSourcePort) {
     throw new Error('PostgreSQL semantic source port has not been registered');
   }

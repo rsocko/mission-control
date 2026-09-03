@@ -1,6 +1,22 @@
 /**
  * Triage lifecycle module — item deletion, thumbnail updates, retention
  * purges, and demo sample-data administration.
+ *
+ * Backend-specific exception (see `docs/architecture/persistence-boundaries.md`,
+ * "Web/API PostgreSQL parity: Layer L02"): only `clearTriageSampleData` is a
+ * SQLite-only seed/demo exception — it is reachable exclusively from
+ * `/api/settings/mode`'s demo-only `clear-triage-samples` action, so it
+ * fails closed under `MC_DATABASE_BACKEND=postgres` with an explicit,
+ * specific message before its `db`/`triageItems` access. Every other export
+ * here (`updateTriageItemThumbnail`, `hardDeleteTriageItem`,
+ * `hardDeleteTriageItems`, `purgeDismissedItems`) is reachable from normal
+ * (non-demo) triage routes — `/api/triage/[id]`, `/api/triage/maintenance`,
+ * `/api/triage/storage`, `/api/triage/import/bulk` — and is intentionally
+ * left untouched (still statically importing `@/db`/`@/db/schema`), i.e.
+ * still owned by whichever later layer migrates triage persistence to
+ * PostgreSQL. They already throw under PostgreSQL today via `@/db`'s own
+ * `initDatabase()` guard; this file does not change that behavior, and does
+ * not move their taint from Tier A to Tier B.
  */
 import db from '@/db';
 import { triageItems } from '@/db/schema';
@@ -10,6 +26,7 @@ import { cleanupTriageItemStorage } from './capture-image-lifecycle';
 import logger from '@/lib/logger';
 import { resetSeedGuard } from './shared';
 import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 /**
  * Update just the thumbnailUrl for an existing triage item.
@@ -57,7 +74,17 @@ export async function hardDeleteTriageItems(ids: string[]): Promise<number> {
   return result.changes;
 }
 
+/**
+ * Deletes the canonical demo/sample triage items. Reachable only from
+ * `/api/settings/mode`'s `clear-triage-samples` demo action — see the
+ * module doc comment for why this is the one SQLite-only exception here.
+ */
 export async function clearTriageSampleData(): Promise<number> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    throw new Error(
+      'Clearing triage demo/sample data is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    );
+  }
   const sampleIds = SAMPLE_TRIAGE_ITEMS.map((item) => item.id);
   const result = await db.delete(triageItems).where(
     or(...sampleIds.map((id) => eq(triageItems.id, id)))

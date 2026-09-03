@@ -2,18 +2,33 @@
  * Seed API — importable functions for seeding/clearing the database.
  * Used by the mode toggle API route. Provides rich, realistic demo data
  * spanning multiple projects, priorities, sources, and time ranges.
+ *
+ * Backend-specific exception (see `docs/architecture/persistence-boundaries.md`,
+ * "Web/API PostgreSQL parity: Layer L02"): seed/demo database management is
+ * SQLite-only. There is no PostgreSQL equivalent yet, so `getDb()` explicitly
+ * fails closed under `MC_DATABASE_BACKEND=postgres` *before* the `better-sqlite3`
+ * driver is ever imported/constructed or any `.db`/`-wal`/`-shm` file is
+ * created, instead of silently opening/creating a stray SQLite file while a
+ * PostgreSQL backend is configured. `better-sqlite3` is imported type-only
+ * (erased at build time) and the real database handle is obtained lazily from
+ * the shared `@/db` singleton, which already owns the one physical connection
+ * (WAL/foreign_keys/busy_timeout configured once in `configureDatabaseConnection`)
+ * — this file no longer opens or closes a private connection of its own.
  */
-import Database from 'better-sqlite3';
+import type Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
 import { SAMPLE_TRIAGE_ITEMS } from '@/lib/triage/seed-data';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
-const DB_PATH = path.resolve(process.cwd(), process.env.MC_DB_PATH || './data/mission-control.db');
-
-function getDb() {
-  const db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  return db;
+async function getDb(): Promise<Database.Database> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    throw new Error(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    );
+  }
+  const { sqlite } = await import('@/db');
+  return sqlite;
 }
 
 interface TableListRow {
@@ -88,12 +103,8 @@ function localDate(offsetDays = 0): string {
  * Clear all user data from the database (keeps schema intact)
  */
 export async function clearDatabase(): Promise<void> {
-  const db = getDb();
-  try {
-    clearUserDataTables(db);
-  } finally {
-    db.close();
-  }
+  const db = await getDb();
+  clearUserDataTables(db);
 }
 
 /**
@@ -1193,7 +1204,7 @@ function seedDatabaseContents(db: Database.Database): void {
  * This is the single reset path used by local demo mode, CLI seeding, and Azure.
  */
 export async function resetDemoDatabase(): Promise<void> {
-  const db = getDb();
+  const db = await getDb();
   const tables = listUserDataTables(db, false);
   const foreignKeysEnabled = db.pragma('foreign_keys', { simple: true }) === 1;
 
@@ -1208,6 +1219,5 @@ export async function resetDemoDatabase(): Promise<void> {
     })();
   } finally {
     if (foreignKeysEnabled) db.pragma('foreign_keys = ON');
-    db.close();
   }
 }

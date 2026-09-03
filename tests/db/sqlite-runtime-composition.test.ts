@@ -24,6 +24,12 @@ describe('SQLite runtime composition', () => {
     expect(source).toMatch(
       /function initDatabase\(\)[\s\S]*publishTemporarySqliteCompatibilityComposition\(\)/,
     );
+    const connectorSource = readFileSync('src/lib/connectors/index.ts', 'utf8');
+    const semanticSource = readFileSync('src/lib/semantic-index/publication.ts', 'utf8');
+    expect(connectorSource).not.toMatch(
+      /^registerConnectorRegistry\(connectorRegistry\);/m,
+    );
+    expect(semanticSource).not.toMatch(/^registerSemanticPublicationService\(/m);
 
     const database = await import('@/db');
     const workerRuntime = await import('@/lib/persistence/worker-runtime');

@@ -47,6 +47,8 @@ vi.mock('better-sqlite3', () => {
       };
     }
 
+    function(): void {}
+
     close(): void {
       state.events.push('close');
     }

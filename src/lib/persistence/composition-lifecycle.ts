@@ -15,6 +15,10 @@ export function blockPersistenceComposition(): void {
   accessBlocked = true;
 }
 
+export function isPersistenceCompositionAccessBlocked(): boolean {
+  return accessBlocked;
+}
+
 export function assertPersistenceCompositionPublicationAllowed(): void {
   if (publicationBlocked) {
     throw new Error(

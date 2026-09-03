@@ -16,6 +16,11 @@ import {
   type AIEnrichmentService,
 } from '@/lib/notifications/enrichment/ai-enrichment-service';
 import {
+  assertCanRegisterSemanticPublicationService,
+  registerSemanticPublicationService,
+  type SemanticPublicationService,
+} from '@/lib/semantic-index/publication-service';
+import {
   clearPostgresDurableAiRunRepository,
   registerPostgresDurableAiRunRepository,
 } from '@/lib/ai/durable-runs/runtime';
@@ -272,6 +277,20 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
     ),
   }),
 };
+const semanticPublicationRuntimeService: SemanticPublicationService = {
+  upsert: async (entityType, entityId) => {
+    const { publishSemanticEntityUpsert } = await import(
+      '@/lib/semantic-index/publication'
+    );
+    return publishSemanticEntityUpsert(entityType, entityId);
+  },
+  delete: async (entityType, entityId) => {
+    const { publishSemanticEntityDelete } = await import(
+      '@/lib/semantic-index/publication'
+    );
+    return publishSemanticEntityDelete(entityType, entityId);
+  },
+};
 
 /**
  * Initializes the selected persistence backend. For PostgreSQL, this also
@@ -288,10 +307,22 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite loads the same composition through its backend-selected startup path.
  */
+async function registerStableRuntimeServices(): Promise<void> {
+  const {
+    assertCanRegisterConnectorRuntimeRegistry,
+    registerConnectorRuntimeRegistry,
+  } = await import('@/lib/connectors');
+  assertCanRegisterConnectorRuntimeRegistry();
+  assertCanRegisterSemanticPublicationService(semanticPublicationRuntimeService);
+  registerConnectorRuntimeRegistry();
+  registerSemanticPublicationService(semanticPublicationRuntimeService);
+}
+
 async function initializeRuntimeDatabaseOnce(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const { initializeSqlitePersistenceComposition } = await import('./index');
     await initializeSqlitePersistenceComposition();
+    await registerStableRuntimeServices();
     return;
   }
   await postgresBackend.initialize();
@@ -314,6 +345,7 @@ async function initializeRuntimeDatabaseOnce(): Promise<void> {
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
+  await registerStableRuntimeServices();
   const { resumePackagedPostgresSemanticRuntime } = await import(
     '@/lib/semantic-index/packaged-worker-runtime'
   );
@@ -357,6 +389,19 @@ export function initializeRuntimeDatabase(): Promise<void> {
           } finally {
             clearPostgresRuntimeComposition();
           }
+        } else {
+          try {
+            const { shutdownSqlitePersistenceComposition } = await import('./index');
+            await shutdownSqlitePersistenceComposition();
+            runtimeCleanupRequired = false;
+          } catch (cleanupError) {
+            runtimeCleanupRequired = true;
+            throw new AggregateError(
+              [error, cleanupError],
+              'SQLite runtime initialization cleanup failed',
+              { cause: error },
+            );
+          }
         }
         throw error;
       } finally {
@@ -373,8 +418,7 @@ function initializeRuntimeDatabaseAfterShutdown(shutdown: Promise<void>): Promis
   if (runtimePostShutdownInitializationPromise) {
     return runtimePostShutdownInitializationPromise;
   }
-  let queued: Promise<void>;
-  queued = shutdown.then(() => {
+  const queued = shutdown.then(() => {
     if (runtimePostShutdownInitializationPromise === queued) {
       runtimePostShutdownInitializationPromise = null;
     }

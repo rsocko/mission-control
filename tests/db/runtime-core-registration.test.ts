@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
   const registerWorker = vi.fn();
   const clearCore = vi.fn();
   const clearWorker = vi.fn();
+  const registerConnectorRuntime = vi.fn();
   const resumeSemantic = vi.fn();
   const stopSemantic = vi.fn(async () => undefined);
   const backend = {
@@ -30,6 +31,7 @@ const mocks = vi.hoisted(() => {
     backend,
     clearCore,
     clearWorker,
+    registerConnectorRuntime,
     registerCore,
     repositories,
     createCore: vi.fn(() => {
@@ -116,6 +118,14 @@ vi.mock('@/db', () => ({
 vi.mock('@/db/runtime-backend', () => ({
   resolveDatabaseBackend: () => 'postgres',
 }));
+vi.mock('@/lib/connectors', () => ({
+  assertCanRegisterConnectorRuntimeRegistry: vi.fn(),
+  registerConnectorRuntimeRegistry: mocks.registerConnectorRuntime,
+}));
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  assertCanRegisterSemanticPublicationService: vi.fn(),
+  registerSemanticPublicationService: vi.fn(),
+}));
 vi.mock('@/lib/persistence/runtime', () => ({
   clearCorePersistenceRepositories: mocks.clearCore,
   registerCorePersistenceRepositories: mocks.registerCore,
@@ -193,6 +203,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.backend.initialize).toHaveBeenCalledTimes(1);
     expect(mocks.registerCore).toHaveBeenCalledTimes(1);
     expect(mocks.registerWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.registerConnectorRuntime).toHaveBeenCalledTimes(1);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(1);
 
     await shutdownRuntimeDatabase();
@@ -253,7 +264,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     }));
     const reinitialize = initializeRuntimeDatabase();
     expect(initializeRuntimeDatabase()).toBe(reinitialize);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(finishCleanup).toBeTypeOf('function'));
     expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
     finishCleanup();
     await reinitialize;

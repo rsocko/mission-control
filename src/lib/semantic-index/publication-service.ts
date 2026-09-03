@@ -21,11 +21,17 @@ let selectedService: SemanticPublicationService | null = null;
 export function registerSemanticPublicationService(
   service: SemanticPublicationService,
 ): void {
+  assertCanRegisterSemanticPublicationService(service);
+  selectedService = service;
+}
+
+export function assertCanRegisterSemanticPublicationService(
+  service: SemanticPublicationService,
+): void {
   assertPersistenceCompositionPublicationAllowed();
   if (selectedService && selectedService !== service) {
     throw new Error('Semantic publication service is already selected');
   }
-  selectedService = service;
 }
 
 function getService(): SemanticPublicationService {

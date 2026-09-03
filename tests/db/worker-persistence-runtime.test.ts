@@ -101,4 +101,23 @@ describe('worker persistence runtime', () => {
     expect(() => runtime.registerWorkerPersistenceRepositories(createWorkerRepositories()))
       .toThrow('Worker persistence repositories are already selected');
   });
+
+  it('borrows an accessed triage identity without taking cleanup ownership', async () => {
+    const runtime = await import('@/lib/persistence/worker-runtime');
+    const triageRuntime = await import('@/lib/triage/persistence');
+    const selectedTriage = createWorkerRepositories().triage;
+    const generated = createWorkerRepositories();
+    const composed = { ...generated, triage: selectedTriage };
+
+    triageRuntime.registerTriagePersistenceRepositories(selectedTriage);
+    expect(triageRuntime.getTriagePersistenceRepositories()).toBe(selectedTriage);
+    runtime.registerWorkerPersistenceRepositoriesWithBorrowedTriage(composed);
+    expect(await runtime.getWorkerPersistenceRepositories()).toBe(composed);
+
+    runtime.clearWorkerPersistenceRepositories(generated);
+    expect(await runtime.getWorkerPersistenceRepositories()).toBe(composed);
+    runtime.clearWorkerPersistenceRepositories(composed);
+    expect(triageRuntime.getTriagePersistenceRepositories()).toBe(selectedTriage);
+    triageRuntime.clearTriagePersistenceRepositories(selectedTriage);
+  });
 });

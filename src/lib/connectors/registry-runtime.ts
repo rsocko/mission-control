@@ -15,11 +15,17 @@ export interface ConnectorRuntimeRegistry {
 let selectedConnectorRegistry: ConnectorRuntimeRegistry | null = null;
 
 export function registerConnectorRegistry(registry: ConnectorRuntimeRegistry): void {
+  assertCanRegisterConnectorRegistry(registry);
+  selectedConnectorRegistry = registry;
+}
+
+export function assertCanRegisterConnectorRegistry(
+  registry: ConnectorRuntimeRegistry,
+): void {
   assertPersistenceCompositionPublicationAllowed();
   if (selectedConnectorRegistry && selectedConnectorRegistry !== registry) {
     throw new Error('Connector registry is already selected');
   }
-  selectedConnectorRegistry = registry;
 }
 
 export function getConnectorRegistry(): ConnectorRuntimeRegistry {

@@ -7,6 +7,11 @@ import {
 let repositories: TriagePersistenceRepositories | null = null;
 let repositoriesAccessed = false;
 
+export interface TriagePersistenceRegistration {
+  repositories: TriagePersistenceRepositories;
+  accessed: boolean;
+}
+
 export function registerTriagePersistenceRepositories(
   nextRepositories: TriagePersistenceRepositories,
 ): void {
@@ -28,6 +33,13 @@ export function clearTriagePersistenceRepositories(
 ): void {
   if (repositories === expectedRepositories) repositories = null;
   if (!repositories) repositoriesAccessed = false;
+}
+
+export function getTriagePersistenceRegistrationForComposition():
+  TriagePersistenceRegistration | null {
+  assertPersistenceCompositionPublicationAllowed();
+  if (!repositories) return null;
+  return { repositories, accessed: repositoriesAccessed };
 }
 
 export function getTriagePersistenceRepositories(): TriagePersistenceRepositories {

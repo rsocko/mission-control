@@ -246,8 +246,10 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       embedding: 0,
       copilotCreate: 0,
       copilotResume: 0,
+      copilotSend: 0,
       copilotDelete: 0,
     };
+    const unexpectedLoopbackPaths = new Set<string>();
     const outboxSignatures: string[] = [];
     let holdFirstAttempts = true;
     const held = new Set<ServerResponse>();
@@ -349,12 +351,16 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           requests.copilotResume += 1;
           return json({});
         }
-        if (request.url === '/send') return json({ content: 'loopback complete' });
+        if (request.url === '/send') {
+          requests.copilotSend += 1;
+          return json({ content: 'loopback complete' });
+        }
         if (request.url === '/delete') {
           requests.copilotDelete += 1;
           return json({});
         }
         if (request.url === '/abort' || request.url === '/disconnect') return json({});
+        unexpectedLoopbackPaths.add(request.url?.split('?')[0] ?? '<missing>');
         return json({}, 404);
       });
     });
@@ -753,8 +759,35 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           ai_cleanup_ready,
           ...canaryStates
         } = states.rows[0];
+        const workerErrors = Buffer.concat(output).toString().split(/\r?\n/)
+          .flatMap((line) => {
+            try {
+              const entry = JSON.parse(line) as Record<string, unknown>;
+              if (
+                entry.msg !== 'Durable AI worker operation failed'
+                && entry.msg !== 'Notification enrichment scheduled for retry'
+              ) {
+                return [];
+              }
+              const error = entry.err && typeof entry.err === 'object'
+                ? entry.err as Record<string, unknown>
+                : {};
+              return [{
+                msg: entry.msg,
+                operation: entry.operation,
+                errorType: entry.errorType ?? error.type,
+                errorCode: error.code,
+                failureCode: entry.failureCode,
+              }];
+            } catch {
+              return [];
+            }
+          })
+          .slice(-10);
         expect(canaryStates, JSON.stringify({
           requests,
+          unexpectedLoopbackPaths: [...unexpectedLoopbackPaths],
+          workerErrors,
           enrichment_attempts,
           enrichment_error,
           ai_attempts,

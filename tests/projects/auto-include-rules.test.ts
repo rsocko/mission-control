@@ -1,11 +1,12 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
-beforeAll(() => {
+beforeAll(async () => {
   process.env.MC_DB_PATH = ':memory:';
   vi.doUnmock('drizzle-orm');
   vi.doUnmock('crypto');
   vi.resetModules();
+  await importInitializedSqliteDatabase();
 });
 
 describe('project auto-include rules', () => {

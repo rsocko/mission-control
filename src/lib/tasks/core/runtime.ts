@@ -14,15 +14,14 @@ import {
  * helpers) drop out of the web/API SQLite-taint census entirely instead of
  * merely being reclassified from import-time to call-time taint.
  *
- * Two registration shapes exist on purpose:
+ * Two registration shapes exist:
  *
  * - `registerTaskCorePersistence` — an eager, already-constructed
  *   composition. `initializeRuntimeDatabase` uses this for PostgreSQL, so
  *   the selected backend is pinned before the first request is served.
- * - `registerTaskCorePersistenceProvider` — a lazy factory. `@/db` installs
- *   the SQLite default this way, so a SQLite process gets a working
- *   composition without any module in the clean import graph having to name
- *   a SQLite module.
+ * - `registerTaskCorePersistenceProvider` — a lazy factory retained for
+ *   controlled consumers and tests. Production runtime startup pins its
+ *   selected backend explicitly.
  *
  * The provider slot lives on `globalThis` so it survives Next.js hot reloads
  * and `vi.resetModules()`, while the *resolved* value is memoized per module
@@ -41,13 +40,22 @@ interface TaskCoreRegistrySlot {
   revision: number;
 }
 
-const REGISTRY_KEY = Symbol.for('mission-control.task-core-persistence-registry');
+const LEGACY_REGISTRY_KEY = Symbol.for('mission-control.task-core-persistence-registry');
+const REGISTRY_KEY = Symbol.for('mission-control.task-core-persistence-registry.v2');
 
 function registry(): TaskCoreRegistrySlot {
   const host = globalThis as typeof globalThis & {
+    [LEGACY_REGISTRY_KEY]?: TaskCoreRegistrySlot;
     [REGISTRY_KEY]?: TaskCoreRegistrySlot;
   };
-  host[REGISTRY_KEY] ??= { selected: null, provider: null, revision: 0 };
+  if (!host[REGISTRY_KEY]) {
+    const legacy = host[LEGACY_REGISTRY_KEY];
+    host[REGISTRY_KEY] = {
+      selected: legacy?.selected ?? null,
+      provider: null,
+      revision: (legacy?.revision ?? 0) + 1,
+    };
+  }
   return host[REGISTRY_KEY];
 }
 

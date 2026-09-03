@@ -13,7 +13,6 @@ import {
   DatabaseTelemetryCollector,
   type DatabaseTelemetrySnapshot,
 } from '@/lib/telemetry/database';
-import { registerTaskCorePersistenceProvider } from '@/lib/tasks/core/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
   assertPersistenceCompositionPublicationAllowed,
@@ -21,6 +20,7 @@ import {
 } from '@/lib/persistence/composition-lifecycle';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 
 // Keep connection creation lazy so Next.js build workers do not race to open
 // the database during static analysis.
@@ -30,6 +30,7 @@ let _db: BetterSQLite3Database<typeof schema> | null = null;
 let sqliteComposition: {
   coreRepositories: CorePersistenceRepositories;
   workerRepositories: WorkerPersistenceRepositories;
+  taskCorePersistence: TaskCorePersistence;
   borrowsTriage: boolean;
 } | null = null;
 type SqliteCompositionModules = {
@@ -39,6 +40,9 @@ type SqliteCompositionModules = {
   coreRuntime: typeof import('@/lib/persistence/runtime');
   workerPersistenceRuntime: typeof import('@/lib/persistence/worker-runtime');
   triageRuntime: typeof import('@/lib/triage/persistence');
+  taskCoreRuntime: typeof import('@/lib/tasks/core/runtime');
+  taskCorePersistence:
+    typeof import('./persistence/sqlite-task-core-repositories').sqliteTaskCorePersistence;
 };
 let sqliteCompositionModules: SqliteCompositionModules | null = null;
 let sqliteCompositionModulesPromise: Promise<SqliteCompositionModules> | null = null;
@@ -83,18 +87,24 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     import('@/lib/persistence/runtime'),
     import('@/lib/persistence/worker-runtime'),
     import('@/lib/triage/persistence'),
+    import('@/lib/tasks/core/runtime'),
+    import('./persistence/sqlite-task-core-repositories'),
   ]).then(([
     core,
     workerRuntime,
     coreRuntime,
     workerPersistenceRuntime,
     triageRuntime,
+    taskCoreRuntime,
+    taskCorePersistence,
   ]) => ({
     createCoreRepositories: core.createSqliteCorePersistenceRepositories,
     workerRuntime,
     coreRuntime,
     workerPersistenceRuntime,
     triageRuntime,
+    taskCoreRuntime,
+    taskCorePersistence: taskCorePersistence.sqliteTaskCorePersistence,
   }));
   sqliteCompositionModulesPromise = pending;
   try {
@@ -132,6 +142,7 @@ function getOrCreateSqliteComposition(
       workerRepositories: borrowedTriage
         ? { ...workerRepositories, triage: borrowedTriage }
         : workerRepositories,
+      taskCorePersistence: modules.taskCorePersistence,
       borrowsTriage: borrowedTriage !== null,
     };
   }
@@ -168,8 +179,12 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
       );
     }
     modules.workerRuntime.registerSqliteWorkerRuntimeServices();
+    modules.taskCoreRuntime.registerTaskCorePersistence(composition.taskCorePersistence);
     sqliteCompositionState = 'active';
   } catch (error) {
+    modules.taskCoreRuntime.clearSelectedTaskCorePersistence(
+      composition.taskCorePersistence,
+    );
     modules.workerRuntime.clearSqliteWorkerRuntimeServices();
     modules.workerPersistenceRuntime.clearWorkerPersistenceRepositories(
       composition.workerRepositories,
@@ -276,6 +291,9 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       sqliteCompositionModules.coreRuntime.clearCorePersistenceRepositories(
         sqliteComposition.coreRepositories,
       );
+      sqliteCompositionModules.taskCoreRuntime.clearSelectedTaskCorePersistence(
+        sqliteComposition.taskCorePersistence,
+      );
     }
     sqliteCompositionState = 'stopped';
   })();
@@ -332,29 +350,6 @@ export {
   getDatabaseTelemetry,
   withoutDatabaseObservation,
 };
-
-/**
- * Installs the SQLite task-core default as a *lazy* provider, after the SQLite
- * handles this module exports (`db`, `runTransaction`) exist.
- *
- * The L04 task-core seam (`@/lib/tasks/core/runtime`) is deliberately free of
- * any SQLite reference so its consumers stay out of the web/API taint census.
- * Doing the registration here instead keeps that property while guaranteeing
- * that any process which actually reaches SQLite (dev server, scripts, tests)
- * has a working composition without a per-call-site bootstrap.
- *
- * This is registration only: no domain logic and no PostgreSQL branch lives
- * here. It is also not a PostgreSQL fallback — `initializeRuntimeDatabase`
- * registers the PostgreSQL composition eagerly, an explicit registration
- * always wins over this provider, and the provider resolves through the same
- * `db` handle that already refuses to initialize under the PostgreSQL backend.
- */
-registerTaskCorePersistenceProvider(async () => {
-  const { sqliteTaskCorePersistence } = await import(
-    './persistence/sqlite-task-core-repositories'
-  );
-  return sqliteTaskCorePersistence;
-});
 
 export {
   shouldRunDatabaseInitialization,

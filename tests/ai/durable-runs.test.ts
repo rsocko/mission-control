@@ -615,6 +615,36 @@ describe('DurableAiRunRepository contract', () => {
 });
 
 describe('DurableAiRunWorker', () => {
+  it('stays dormant until activation and wakes without waiting for the poll interval', async () => {
+    const store = new durable.DurableAiRunStore();
+    const durableRuns = repository(store);
+    const { run } = enqueue(store, 'activation');
+    const claimNext = vi.spyOn(durableRuns, 'claimNext');
+    let enabled = false;
+    const execute = vi.fn(async () => undefined);
+    const worker = new durable.DurableAiRunWorker(
+      durableRuns,
+      new Map([['test-route', { execute } satisfies DurableAiRunExecutor]]),
+      {
+        ownerId: 'activation-worker',
+        pollIntervalMs: 60_000,
+        isEnabled: () => enabled,
+      },
+    );
+
+    worker.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(claimNext).not.toHaveBeenCalled();
+    expect(store.getRun(run.id)?.status).toBe('queued');
+
+    enabled = true;
+    worker.wake();
+    worker.wake();
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('succeeded'));
+    await worker.stop();
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it('waits for an in-flight asynchronous heartbeat before committing terminal state', async () => {
     const store = new durable.DurableAiRunStore();
     const durableRuns = repository(store);

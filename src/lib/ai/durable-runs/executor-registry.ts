@@ -64,6 +64,7 @@ const REQUIRED_CAPABILITIES = {
 const COPILOT_RECOVERABLE_STATES = new Set([
   'creating',
   'active',
+  'idle',
   'resuming',
   'cancelling',
 ]);

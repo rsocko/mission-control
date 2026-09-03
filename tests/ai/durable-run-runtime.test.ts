@@ -48,8 +48,28 @@ describe('durable AI run persistence runtime', () => {
     );
 
     await expect(getDurableAiRunRepository()).rejects.toThrow(
-      'PostgreSQL durable AI run persistence is unsupported in this release',
+      'PostgreSQL durable AI run repository has not been registered',
     );
+    expect(adapterModule).not.toHaveBeenCalled();
+  });
+
+  it('returns the registered PostgreSQL repository without evaluating SQLite', async () => {
+    const repository = { marker: 'postgres' };
+    const adapterModule = vi.fn(() => {
+      throw new Error('SQLite adapter must not be evaluated');
+    });
+    vi.doMock('@/db/runtime-backend', () => ({
+      resolveDatabaseBackend: () => 'postgres',
+    }));
+    vi.doMock('@/lib/ai/durable-runs/sqlite-adapter', adapterModule);
+    const {
+      getDurableAiRunRepository,
+      registerPostgresDurableAiRunRepository,
+    } = await import('@/lib/ai/durable-runs/runtime');
+
+    registerPostgresDurableAiRunRepository(repository as never);
+
+    await expect(getDurableAiRunRepository()).resolves.toBe(repository);
     expect(adapterModule).not.toHaveBeenCalled();
   });
 

@@ -60,6 +60,30 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('notification enrichment worker', () => {
+  it('stays dormant until activation and wakes immediately once activated', async () => {
+    seed();
+    let enabled = false;
+    const claimNext = vi.spyOn(repository, 'claimNext');
+    const worker = new NotificationEnrichmentWorker({
+      repository,
+      execute: async () => ({ summary: 'Activated' }),
+      owner: 'worker',
+      pollMs: 60_000,
+      isEnabled: () => enabled,
+    });
+
+    worker.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(claimNext).not.toHaveBeenCalled();
+    expect(job().status).toBe('pending');
+
+    enabled = true;
+    worker.wake();
+    worker.wake();
+    await vi.waitFor(() => expect(job().status).toBe('completed'));
+    await worker.stop();
+  });
+
   it('completes a claim and merges AI metadata without touching delivery state', async () => {
     seed();
     const execute = vi.fn(async () => ({

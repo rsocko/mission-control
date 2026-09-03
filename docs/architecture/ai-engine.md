@@ -119,11 +119,11 @@ graph LR
 ## Configuration
 
 PostgreSQL is the approved production target and is implemented for the core
-persistence composition. The AI paths shown here still use the legacy SQLite
-compatibility API, including direct Drizzle and `better-sqlite3` access. They
-fail explicitly rather than falling back or mixing backends when PostgreSQL is
-selected. Port each required AI workflow behind a backend-neutral repository
-before enabling it in the PostgreSQL deployment. See the
+persistence composition. Durable AI execution and notification enrichment use
+backend-neutral repositories in both SQLite and PostgreSQL compositions.
+PostgreSQL composition resolves provider configuration without evaluating the
+SQLite settings runtime and fails explicitly rather than falling back or
+mixing backends. See the
 [database scaling and migration strategy](../design/active/database-scaling-strategy.md).
 
 AI config is resolved from `app_settings` in the database:
@@ -150,9 +150,12 @@ is an append-only, idempotent progress stream addressed by a durable cursor.
 with AES-256-GCM. The provider reference is never a run identifier and is never
 returned by an API.
 
-The current durable AI worker is a SQLite compatibility workflow. It claims
-runs with an immediate transaction and a renewable lease. Completion, failure,
-retry, cancellation, timeout, and cleanup mutations are revision/owner guarded.
+The packaged durable AI worker runs against the selected backend repository. It
+uses the same exhaustive enqueueable-route registry on SQLite and PostgreSQL,
+and startup fails before readiness if any route lacks a real executor. It claims
+runs with a backend-owned transaction and a renewable lease. Completion,
+failure, retry, cancellation, timeout, and cleanup mutations are
+revision/owner guarded.
 Retry commands and events carry idempotency keys. An expired worker lease either
 requeues the same MC run for resume or records a terminal timeout/failure; it
 never creates a second MC run. Provider adapters receive `cancel` and `cleanup`
@@ -164,11 +167,13 @@ executors, so an unregistered route is never recovered or claimed by the wrong
 provider. Provider cleanup is abortable and bounded by
 `MC_AI_RUN_CLEANUP_TIMEOUT_MS`.
 
-The direct Copilot SDK spike plugs into this boundary through
+The Copilot SDK lifecycle plugs into this boundary through
 `DurableCopilotRunStore` and `DurableCopilotEventSink`. Its lifecycle checkpoint and
 content-free Houston events are persisted by MC, while the SDK session ID remains
 encrypted and revocable. Copilot is an executor, not the persistence boundary.
-No production Copilot route is enabled by this foundation.
+The packaged registry resolves every enqueueable Copilot route before worker
+readiness. Tests may inject loopback transports, but cannot replace that
+registry with an empty or partial map.
 
 ### Reconnect API
 
@@ -183,9 +188,10 @@ No production Copilot route is enabled by this foundation.
 Mutation routes use the existing same-origin or `MC_API_KEY` trust policy. Responses
 never include executor checkpoints, leases, request fingerprints, prompts, results,
 or provider session references. The AI settings screen polls the history API so a
-new browser or resumed PWA can reconnect by MC run ID. Executors can opt into the
-existing notification system with `notifyOnCompletion` and
-`notifyDurableAiRunCompletion`.
+new browser or resumed PWA can reconnect by MC run ID. Executors can opt into the existing notification system with
+`notifyOnCompletion`. Terminal notification ingestion uses a deterministic
+`ai-run:<run>:<status>` dedupe key through the backend-selected connector
+notification repository, preserving completion semantics without SQLite access.
 
 ### Retention and redaction
 

@@ -4,8 +4,36 @@ import { describe, expect, it } from 'vitest';
 import ts from 'typescript';
 
 const ROOT = 'src/sync-worker.ts';
-const POSTGRES_GATED_ENTRY_IMPORTS = new Set([
-  '@/lib/ai/durable-runs',
+const INTEGRATION_ROOT = 'src/sync-worker-integration.ts';
+const COMPOSITION_ROOT = 'src/lib/runtime/packaged-sync-worker.ts';
+const POSTGRES_EXCLUDED_ENTRY_IMPORTS = new Set([
+  '@/lib/semantic-index/runtime',
+]);
+const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
+  COMPOSITION_ROOT,
+  'src/db/runtime.ts',
+  'src/lib/ai/durable-runs/runtime.ts',
+  'src/lib/connectors/github-issues/backup-verifier.ts',
+  'src/lib/connectors/monarch-money/index.ts',
+  'src/lib/connectors/rymessage/rymessage-client.ts',
+  'src/lib/houston-memory/service.ts',
+  'src/lib/persistence/worker-runtime.ts',
+  'src/lib/persistence/runtime.ts',
+  'src/lib/search/fts.ts',
+  'src/lib/semantic-index/publication.ts',
+  'src/lib/semantic-index/repository-facade.ts',
+  'src/lib/semantic-index/source/facade.ts',
+  'src/lib/sync/connector-lock-runtime.ts',
+  'src/lib/sync/control-state.ts',
+  'src/lib/sync/job-runtime.ts',
+  'src/lib/sync/maintenance-lock.ts',
+  'src/lib/sync/search-indexer.ts',
+  'src/lib/telemetry/database-health-runtime.ts',
+  'src/lib/telemetry/health-snapshot.ts',
+  'src/lib/telemetry/runtime.ts',
+]);
+const POSTGRES_GUARDED_DYNAMIC_BARRELS = new Set([
+  '@/lib/search',
   '@/lib/semantic-index/runtime',
 ]);
 const SQLITE_MODULE = /(?:^|\/)(?:db\/(?:index|schema)(?:\.ts|\/)|[^/]*sqlite[^/]*\.ts$)/;
@@ -75,8 +103,8 @@ function resolveApplicationImport(fromPath: string, specifier: string): string |
 }
 
 function postgresStartupGraph(): Set<string> {
-  const roots = dynamicImports(ROOT)
-    .filter((specifier) => !POSTGRES_GATED_ENTRY_IMPORTS.has(specifier))
+  const roots = [...staticImports(ROOT), ...dynamicImports(ROOT)]
+    .filter((specifier) => !POSTGRES_EXCLUDED_ENTRY_IMPORTS.has(specifier))
     .map((specifier) => resolveApplicationImport(ROOT, specifier))
     .filter((path): path is string => path !== null);
   const visited = new Set<string>([ROOT]);
@@ -85,7 +113,15 @@ function postgresStartupGraph(): Set<string> {
     const path = pending.pop()!;
     if (visited.has(path)) continue;
     visited.add(path);
-    for (const specifier of staticImports(path)) {
+    for (const specifier of [
+      ...staticImports(path),
+      ...dynamicImports(path).filter((specifier) => {
+        const resolved = resolveApplicationImport(path, specifier);
+        const sqliteTarget = SQLITE_PACKAGE.test(specifier)
+          || Boolean(resolved && SQLITE_MODULE.test(resolved));
+        return !sqliteTarget && !POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier);
+      }),
+    ]) {
       const resolved = resolveApplicationImport(path, specifier);
       if (resolved && !visited.has(resolved)) pending.push(resolved);
     }
@@ -93,7 +129,7 @@ function postgresStartupGraph(): Set<string> {
   return visited;
 }
 
-describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
+describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
   it('keeps the real PostgreSQL startup graph free of SQLite evaluation', () => {
     const graph = postgresStartupGraph();
     const violations = [...graph].flatMap((path) => {
@@ -111,20 +147,56 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
     expect(graph).toContain('src/lib/connectors/monarch-money/recovery-scheduler.ts');
     expect(graph).toContain('src/lib/telemetry/health-snapshot.ts');
     expect(graph).toContain('src/lib/triage/scheduler.ts');
+    expect(graph).toContain('src/lib/ai/durable-runs/packaged-worker.ts');
+    expect(graph).toContain('src/lib/semantic-index/packaged-worker-runtime.ts');
+    expect(graph).toContain('src/lib/notifications/enrichment/packaged-executor.ts');
     expect([...graph].filter((path) => path.includes('src/lib/triage/importers/'))).toEqual([]);
   });
 
-  it('gates only the two known SQLite-only worker features at the entry', () => {
-    const entry = source(ROOT);
-    const gated = dynamicImports(ROOT)
-      .filter((specifier) => POSTGRES_GATED_ENTRY_IMPORTS.has(specifier));
-    expect(new Set(gated)).toEqual(POSTGRES_GATED_ENTRY_IMPORTS);
-    expect(entry).toContain("allowsLegacyWorkflow('semantic-search')");
-    expect(entry).toContain('legacy durable AI run worker is disabled on PostgreSQL');
+  it('allowlists every guarded dynamic SQLite or compatibility-barrel edge', () => {
+    const graph = postgresStartupGraph();
+    const guardedEdges = [...graph].flatMap((path) =>
+      dynamicImports(path).flatMap((specifier) => {
+        const resolved = resolveApplicationImport(path, specifier);
+        return (
+          SQLITE_PACKAGE.test(specifier)
+          || Boolean(resolved && SQLITE_MODULE.test(resolved))
+          || POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier)
+        )
+          ? [`${path} -> ${specifier}`]
+          : [];
+      })
+    );
+    const unexpectedImporters = guardedEdges.filter((edge) =>
+      !POSTGRES_GUARDED_DYNAMIC_IMPORTERS.has(edge.split(' -> ')[0])
+      && !edge.startsWith(`${ROOT} -> `)
+    );
+
+    expect(unexpectedImporters).toEqual([]);
+    expect(guardedEdges).toContain('src/db/runtime.ts -> ./index');
+    expect(guardedEdges).toContain(
+      'src/lib/ai/durable-runs/runtime.ts -> ./sqlite-adapter',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/sync/search-indexer.ts -> @/lib/search',
+    );
+  });
+
+  it('selects real PostgreSQL composition without retired disable branches', () => {
+    const entry = source(COMPOSITION_ROOT);
+    expect(entry).toContain("import('@/lib/ai/durable-runs/packaged-worker')");
+    expect(entry).toContain("import('@/lib/semantic-index/packaged-worker-runtime')");
+    expect(entry).toContain('createPackagedDurableAiRuntime');
+    expect(entry).toContain('createPackagedPostgresSemanticRuntime');
+    expect(entry).toContain('composePostgresPackagedWorkflowCapability');
+    expect(entry).toContain('PostgresWorkerProcessingLatch');
+    expect(entry).toContain('processingLatch.activate');
+    expect(entry).toContain('startAtomicWorkerComponents');
+    expect(entry).not.toContain('legacy durable AI run worker is disabled on PostgreSQL');
   });
 
   it('requires every inherited repository in the atomic composition', () => {
-    const entry = source(ROOT);
+    const entry = source(COMPOSITION_ROOT);
     for (const member of [
       'connectors',
       'syncRuns',
@@ -136,6 +208,9 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
       'triage',
       'planningSignals',
       'projectAutomation',
+      'eventDelivery',
+      'eventDelivery.outbox',
+      'eventDelivery.subscriptions',
       'notificationEnrichment',
       'finance',
       'finance.recovery',
@@ -143,5 +218,20 @@ describe('Layer 8 final PostgreSQL worker persistence boundary', () => {
       expect(entry).toContain(`workerPersistence.${member}`);
     }
     expect(entry).toContain("throw new Error('Selected worker persistence composition is incomplete')");
+  });
+
+  it('uses the same composition for production and guarded integration bootstraps', () => {
+    const production = source(ROOT);
+    const integration = source(INTEGRATION_ROOT);
+    expect(production).toContain(
+      "import { runPackagedSyncWorker } from '@/lib/runtime/packaged-sync-worker'",
+    );
+    expect(integration).toContain(
+      "import { runPackagedSyncWorker } from '@/lib/runtime/packaged-sync-worker'",
+    );
+    expect(production).toContain('runPackagedSyncWorker()');
+    expect(production).not.toContain('createCopilotClient');
+    expect(integration).toContain('createCopilotClient:');
+    expect(integration).toContain('MC_PACKAGED_WORKER_INTEGRATION');
   });
 });

@@ -51,6 +51,7 @@ export interface DurableAiRunWorkerOptions {
   pruneIntervalMs?: number;
   onTerminal?(run: DurableAiRun): void | Promise<void>;
   reportError?(error: unknown, operation: string, runId?: string): void;
+  isEnabled?(): boolean;
 }
 
 class WorkerStoppingError extends Error {}
@@ -114,6 +115,7 @@ export class DurableAiRunWorker {
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
   private prunePromise: Promise<void> | null = null;
+  private wakeWaiter: (() => void) | null = null;
   private active:
     | {
         run: ClaimedDurableAiRun;
@@ -152,9 +154,11 @@ export class DurableAiRunWorker {
   start(): void {
     if (this.loopPromise) return;
     this.stopping = false;
-    this.pruneExpired();
+    if (this.isEnabled()) this.pruneExpired();
     this.pruneTimer = setInterval(
-      () => this.pruneExpired(),
+      () => {
+        if (this.isEnabled()) this.pruneExpired();
+      },
       this.pruneIntervalMs,
     );
     this.pruneTimer.unref();
@@ -164,9 +168,12 @@ export class DurableAiRunWorker {
   }
 
   async runOnce(): Promise<boolean> {
+    if (!this.isEnabled()) return false;
     await this.store.expireTimedOutQueuedRuns();
+    if (!this.isEnabled()) return false;
     const routes = [...this.executors.keys()];
     await this.store.recoverExpiredRuns(new Date(), routes);
+    if (!this.isEnabled()) return false;
     const cleanup = await this.store.claimCleanup(
       this.ownerId,
       routes,
@@ -183,6 +190,7 @@ export class DurableAiRunWorker {
       }
       return true;
     }
+    if (!this.isEnabled()) return false;
     const run = await this.store.claimNextRun(this.ownerId, routes, this.leaseMs);
     if (!run) return false;
     const controller = new AbortController();
@@ -458,6 +466,7 @@ export class DurableAiRunWorker {
   async stop(graceMs = 30_000): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;
+    this.wake();
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
     await this.prunePromise;
@@ -493,6 +502,10 @@ export class DurableAiRunWorker {
     this.options.reportError?.(error, operation, runId);
   }
 
+  private isEnabled(): boolean {
+    return this.options.isEnabled?.() ?? true;
+  }
+
   private pruneExpired(): void {
     if (this.prunePromise) return;
     this.prunePromise = this.store.pruneExpired()
@@ -506,6 +519,21 @@ export class DurableAiRunWorker {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.wakeWaiter = null;
+        resolve();
+      }, ms);
+      timer.unref?.();
+      this.wakeWaiter = () => {
+        clearTimeout(timer);
+        this.wakeWaiter = null;
+        resolve();
+      };
+    });
+  }
+
+  wake(): void {
+    this.wakeWaiter?.();
   }
 }

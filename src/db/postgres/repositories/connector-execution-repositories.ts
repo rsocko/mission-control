@@ -39,6 +39,7 @@ import type {
   RetentionDetailRecord,
   SourceListRecord,
 } from '@/db/persistence/connector-execution';
+import { isPostgresBackendWorkflowSupported } from '@/lib/runtime/postgres-workflow-capability';
 import {
   UnsupportedConnectorExecutionError,
 } from '@/db/persistence/connector-execution';
@@ -2731,10 +2732,13 @@ export function createPostgresConnectorExecutionRepositories(
 
     support: {
       allowsLegacyWorkflow(workflow) {
-        // Layer 3A migrated GitHub dependency reconciliation, and Layer 6A
-        // migrated notification delivery including both default senders.
-        return workflow === 'dependency-reconciliation'
-          || workflow === 'notification-dispatcher';
+        if (
+          workflow === 'dependency-reconciliation'
+          || workflow === 'notification-dispatcher'
+        ) {
+          return true;
+        }
+        return isPostgresBackendWorkflowSupported(workflow);
       },
       assertConfigSupported(config: ConnectorConfig) {
         // Layer 4 migrated Microsoft To Do hidden-list discovery and the whole

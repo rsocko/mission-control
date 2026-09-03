@@ -17,9 +17,9 @@ import {
   semanticSearch,
 } from './semantic';
 import {
-  publishSemanticDelete,
-  publishSemanticUpsert,
-} from '@/lib/semantic-index/runtime';
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication';
 import { fuseHybridResults } from './hybrid-ranking';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
@@ -199,8 +199,8 @@ async function publishSemantic(
   entityType: 'task' | 'alert',
   entityId: string,
 ): Promise<void> {
-  if (kind === 'upsert') await publishSemanticUpsert(entityType, entityId);
-  else await publishSemanticDelete(entityType, entityId);
+  if (kind === 'upsert') await publishSemanticEntityUpsert(entityType, entityId);
+  else await publishSemanticEntityDelete(entityType, entityId);
 }
 
 /**

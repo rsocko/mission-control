@@ -43,6 +43,36 @@ export class NotificationEnrichmentPermanentError extends Error {
   }
 }
 
+export function parseAIEnrichmentResult(text: string): AIEnrichmentResult {
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new NotificationEnrichmentPermanentError('AI response did not contain JSON');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonMatch[0]);
+  } catch {
+    throw new NotificationEnrichmentPermanentError('AI response contained invalid JSON');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new NotificationEnrichmentPermanentError('AI response JSON must be an object');
+  }
+  const result = parsed as AIEnrichmentResult;
+  return {
+    summary: typeof result.summary === 'string' ? result.summary : undefined,
+    suggestedAction: typeof result.suggestedAction === 'string'
+      ? result.suggestedAction
+      : undefined,
+    suggestedActionReason: typeof result.suggestedActionReason === 'string'
+      ? result.suggestedActionReason
+      : undefined,
+    urgencyBoost: result.urgencyBoost === true,
+    contextTags: Array.isArray(result.contextTags)
+      ? result.contextTags.filter((tag): tag is string => typeof tag === 'string')
+      : undefined,
+  };
+}
+
 // ─── ENRICHMENT RULES ───────────────────────────────────────────────────────
 
 /**
@@ -123,33 +153,7 @@ export async function enrichWithAI(
     abortSignal: options.signal,
   });
 
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new NotificationEnrichmentPermanentError('AI response did not contain JSON');
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(jsonMatch[0]);
-  } catch {
-    throw new NotificationEnrichmentPermanentError('AI response contained invalid JSON');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new NotificationEnrichmentPermanentError('AI response JSON must be an object');
-  }
-  const result = parsed as AIEnrichmentResult;
-  return {
-    summary: typeof result.summary === 'string' ? result.summary : undefined,
-    suggestedAction: typeof result.suggestedAction === 'string'
-      ? result.suggestedAction
-      : undefined,
-    suggestedActionReason: typeof result.suggestedActionReason === 'string'
-      ? result.suggestedActionReason
-      : undefined,
-    urgencyBoost: result.urgencyBoost === true,
-    contextTags: Array.isArray(result.contextTags)
-      ? result.contextTags.filter((tag): tag is string => typeof tag === 'string')
-      : undefined,
-  };
+  return parseAIEnrichmentResult(text);
 }
 
 // ─── BATCH ENRICHMENT ───────────────────────────────────────────────────────

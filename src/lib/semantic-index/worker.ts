@@ -136,6 +136,7 @@ export class SemanticIndexWorker {
   private shutdown: AbortController | null = null;
   private lastMaintenanceMs = 0;
   private lastReport: SemanticWorkerCycleReport = EMPTY_REPORT;
+  private wakeAfterCycle = false;
 
   constructor(options: SemanticIndexWorkerOptions) {
     this.repository = options.repository;
@@ -204,6 +205,19 @@ export class SemanticIndexWorker {
     }, 'Semantic index worker stopped');
   }
 
+  wake(): void {
+    if (!this.running) return;
+    if (this.cycle) {
+      this.wakeAfterCycle = true;
+      return;
+    }
+    if (this.timer) {
+      this.clearTimer(this.timer);
+      this.timer = null;
+    }
+    this.schedule(0);
+  }
+
   private schedule(delayMs: number): void {
     if (!this.running) return;
     this.timer = this.setTimer(() => {
@@ -231,7 +245,13 @@ export class SemanticIndexWorker {
     this.lastReport = report;
     const busy = report.status === 'worked'
       && report.intentsClaimed >= this.config.batchSize;
-    this.schedule(busy ? this.config.busyIntervalMs : this.config.pollIntervalMs);
+    const delayMs = this.wakeAfterCycle
+      ? 0
+      : busy
+        ? this.config.busyIntervalMs
+        : this.config.pollIntervalMs;
+    this.wakeAfterCycle = false;
+    this.schedule(delayMs);
   }
 
   /**
@@ -251,9 +271,15 @@ export class SemanticIndexWorker {
     if (maintenanceDue) {
       const recovered = await this.recoverLeases();
       report.leasesRecovered = recovered;
+      if (!this.isEnabled()) {
+        return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+      }
     }
 
     const identity = await this.resolveIdentity(maintenanceDue, abortSignal);
+    if (!this.isEnabled()) {
+      return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+    }
     if (!identity.identity) {
       this.lastMaintenanceMs = maintenanceDue ? Date.now() : this.lastMaintenanceMs;
       return { ...report, status: 'unavailable', reason: identity.reason };
@@ -262,6 +288,9 @@ export class SemanticIndexWorker {
 
     if (maintenanceDue) {
       await this.scheduleRuns(identity.identity);
+      if (!this.isEnabled()) {
+        return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+      }
       // Promotion is re-evaluated on every maintenance tick, not only when a
       // backfill completes: the backfill finishes as soon as it has *enqueued*
       // every entity, so the activation gate almost always fails on that first
@@ -270,10 +299,13 @@ export class SemanticIndexWorker {
       this.lastMaintenanceMs = Date.now();
     }
 
+    if (!this.isEnabled()) {
+      return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+    }
     const intentReport = await this.drainIntents(identity.identity, entityTypes, abortSignal);
     Object.assign(report, intentReport);
 
-    if (!abortSignal.aborted) {
+    if (!abortSignal.aborted && this.isEnabled()) {
       report.runsExecuted = await this.executeRun(identity.identity, entityTypes, abortSignal) ? 1 : 0;
     }
 

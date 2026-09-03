@@ -174,10 +174,12 @@ describe('Layer 6 semantic worker package boundary', () => {
     expect(entry).toContain('embedding route must be loopback-only');
     expect(entry).toContain('MC_SEMANTIC_HARNESS_CRASH_AFTER_RUN_CHECKPOINT');
 
-    const normalWorker = source('src/sync-worker.ts');
+    const normalWorker = source('src/lib/runtime/packaged-sync-worker.ts');
     expect(normalWorker).toContain(
-      "workerPersistence.execution.support.allowsLegacyWorkflow('semantic-search')",
+      "import('@/lib/semantic-index/packaged-worker-runtime')",
     );
+    expect(normalWorker).toContain('createPackagedPostgresSemanticRuntime');
+    expect(normalWorker).toContain("isParityActive('semantic-search')");
     expect(normalWorker).not.toContain('MC_SEMANTIC_PACKAGED_HARNESS');
     expect(source('src/lib/semantic-index/runtime.ts')).not.toContain('onRunCheckpointed');
     const normalWorkerGraph = applicationGraph('src/sync-worker.ts', true);

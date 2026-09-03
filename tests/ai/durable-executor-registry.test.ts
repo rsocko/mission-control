@@ -279,6 +279,46 @@ describe('durable AI executor registry', () => {
     expect(detachedLifecycle.createRun).not.toHaveBeenCalled();
   });
 
+  it('recovers an expired attached idle session before resuming it', async () => {
+    let current = lifecycleRecord({
+      ownerId: 'worker-before-restart',
+      leaseExpiresAt: 0,
+    });
+    const manager = lifecycle(current);
+    vi.mocked(manager.getRun).mockImplementation(async () => current);
+    vi.mocked(manager.recoverExpiredWorkerLeases).mockImplementation(async () => {
+      current = lifecycleRecord({
+        connection: 'detached',
+        ownerId: 'worker-a',
+      });
+      return [current];
+    });
+    vi.mocked(manager.resumeRun).mockImplementation(async () => {
+      current = lifecycleRecord({ ownerId: 'worker-a' });
+      return current;
+    });
+    vi.mocked(manager.completeRun).mockImplementation(async () => {
+      current = lifecycleRecord({
+        state: 'cleaned_up',
+        connection: 'detached',
+        terminalState: 'completed',
+        providerSessionId: undefined,
+        ownerId: 'worker-a',
+      });
+      return current;
+    });
+    const executor = createDurableAiExecutorRegistry(dependencies(manager))
+      .get(COPILOT_EXECUTION_ROUTE)!;
+
+    await expect(executor.execute(executionContext())).resolves.toMatchObject({
+      provider: COPILOT_PROVIDER,
+      fallbackState: 'not_used',
+    });
+    expect(manager.recoverExpiredWorkerLeases).toHaveBeenCalledOnce();
+    expect(manager.resumeRun).toHaveBeenCalledWith('run-a');
+    expect(manager.completeRun).toHaveBeenCalledWith('run-a');
+  });
+
   it('fences stale cancellation before touching the Copilot lifecycle', async () => {
     const manager = lifecycle();
     const executor = createDurableAiExecutorRegistry(dependencies(manager))

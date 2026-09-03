@@ -560,6 +560,13 @@ export interface TaskRowActionsProps {
   snoozedUntil?: string | null;
   surfaceActions?: ReactNode;
   showMoreActions?: boolean;
+  /**
+   * Trims the action rail so narrow lists (e.g. Plan/Assign phase columns)
+   * keep more room for the task title. Drops the smart score and planning
+   * horizon badges entirely and narrows the due-date / trailing-actions
+   * columns instead of reserving their full dashboard width.
+   */
+  dense?: boolean;
   onSetDueDate: (date: string | null) => void | Promise<void>;
   onSetPriority: (priority: string) => void | Promise<void>;
   onSetStatus: (status: string) => void | Promise<void>;
@@ -596,6 +603,7 @@ export function TaskRowActions({
   onOpenNotes,
   onSnoozeUntil,
   onSetLocalDisposition,
+  dense = false,
 }: TaskRowActionsProps) {
   const canEditDueDate = canEditTaskField(editPolicy, 'dueDate');
   const canEditDescription = canEditTaskField(editPolicy, 'description');
@@ -607,17 +615,26 @@ export function TaskRowActions({
   return (
     <div
       data-testid="task-row-properties"
-      className="grid shrink-0 grid-cols-[36px_30px_32px_32px_32px_32px] items-center gap-1 @min-[480px]:grid-cols-[36px_30px_30px_32px_72px_32px_32px_96px] @min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]"
+      className={cn(
+        'grid shrink-0 items-center gap-1',
+        dense
+          ? 'grid-cols-[30px_32px_32px_32px_32px] @min-[480px]:grid-cols-[30px_30px_32px_56px_32px_32px_64px]'
+          : 'grid-cols-[36px_30px_32px_32px_32px_32px] @min-[480px]:grid-cols-[36px_30px_30px_32px_72px_32px_32px_96px] @min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]',
+      )}
     >
-      <span className="flex h-7 w-9 items-center justify-center">
-        {smartScore != null && (
-          <SmartScoreBadge score={smartScore} breakdown={scoreBreakdown} size="sm" />
-        )}
-      </span>
+      {!dense && (
+        <span className="flex h-7 w-9 items-center justify-center">
+          {smartScore != null && (
+            <SmartScoreBadge score={smartScore} breakdown={scoreBreakdown} size="sm" />
+          )}
+        </span>
+      )}
 
-      <span className="hidden h-6 w-[52px] items-center justify-center @min-[960px]:flex">
-        <PlanningHorizonBadge planningHorizon={planningHorizon} />
-      </span>
+      {!dense && (
+        <span className="hidden h-6 w-[52px] items-center justify-center @min-[960px]:flex">
+          <PlanningHorizonBadge planningHorizon={planningHorizon} />
+        </span>
+      )}
 
       <span className="flex h-7 w-[30px] items-center justify-center">
         <PriorityMenu
@@ -654,7 +671,8 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'hidden h-8 w-[72px] items-center justify-start @min-[480px]:flex',
+        'hidden h-8 items-center justify-start @min-[480px]:flex',
+        dense ? 'w-[56px]' : 'w-[72px]',
         !dueDate && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         <DateMenu
@@ -724,7 +742,10 @@ export function TaskRowActions({
         )}
       </span>
 
-      <span className="flex h-8 w-8 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[480px]:w-24">
+      <span className={cn(
+        'flex h-8 w-8 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
+        dense ? '@min-[480px]:w-16' : '@min-[480px]:w-24',
+      )}>
         {surface === 'dashboard' && onSnoozeUntil && (
           <span className="hidden @min-[480px]:contents">
             <SnoozeMenu

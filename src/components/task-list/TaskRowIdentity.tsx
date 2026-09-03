@@ -80,6 +80,7 @@ export function TaskRowIdentity({
               compact ? 'text-xs text-[var(--text-secondary)]' : 'text-sm text-[var(--text-primary)]',
               isDone && 'line-through text-[var(--text-muted)]',
             )}
+            title={task.title}
           >
             {task.title}
           </span>

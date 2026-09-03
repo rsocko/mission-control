@@ -1,4 +1,4 @@
-import { describe, it, afterAll } from 'vitest';
+import { describe, it, afterAll, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import {
@@ -11,6 +11,9 @@ import {
   type SeedTask,
   type TaskCoreContractHarness,
 } from '../contracts/task-core.contract';
+
+vi.unmock('drizzle-orm');
+
 /**
  * Runs the *same* task-core contract suite against a live PostgreSQL
  * database, proving the two adapters agree on filter semantics, ordering,

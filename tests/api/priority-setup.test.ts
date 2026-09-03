@@ -328,7 +328,15 @@ describe('GET /api/priority-entities/options', () => {
 });
 
 describe('PUT /api/priority-entities', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFixture();
+    registerTaskCore();
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
+  });
 
   it('batch-updates entities and returns updated list', async () => {
     mockDb.select.mockImplementation(() => chainable([{ id: 'e1', name: 'Updated', rank: 1 }]));

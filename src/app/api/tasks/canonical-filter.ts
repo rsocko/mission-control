@@ -108,10 +108,11 @@ export async function buildCanonicalTaskFilterConditions(
     conditions.push(isNull(tasks.planningHorizon));
   }
 
-  if (spec.localDispositions.length > 1) {
-    conditions.push(inArray(tasks.localDisposition, [...spec.localDispositions]));
-  } else if (spec.localDispositions.length === 1) {
-    conditions.push(eq(tasks.localDisposition, spec.localDispositions[0]));
+  const localDispositions = [...spec.localDispositions];
+  if (localDispositions.length > 1) {
+    conditions.push(inArray(tasks.localDisposition, localDispositions));
+  } else if (localDispositions.length === 1) {
+    conditions.push(eq(tasks.localDisposition, localDispositions[0]));
   }
 
   if (spec.excludeClosedStatuses) {

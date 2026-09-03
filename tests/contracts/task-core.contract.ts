@@ -1464,15 +1464,18 @@ export function describeTaskCoreContract(
     });
 
     describe('transfer-identity reconciliation', () => {
+      const CONNECTOR_ID = 'conn-ti';
+      const FOREIGN_CONNECTOR_ID = 'conn-mismatch';
+
       beforeEach(async () => {
         await harness.insertSourceLists([
-          { id: 'sl-ti-x', connectorInstanceId: 'conn-ti', sourceId: 'list-x', name: 'List X' },
-          { id: 'sl-ti-y', connectorInstanceId: 'conn-ti', sourceId: 'list-y', name: 'List Y' },
+          { id: 'sl-ti-x', connectorInstanceId: CONNECTOR_ID, sourceId: 'list-x', name: 'List X' },
+          { id: 'sl-ti-y', connectorInstanceId: CONNECTOR_ID, sourceId: 'list-y', name: 'List Y' },
           // Same sourceId under a different connector: must never resolve for 'conn-ti'.
           {
             id: 'sl-other-x',
-            connectorInstanceId: 'conn-mismatch',
-            sourceId: 'list-x',
+            connectorInstanceId: FOREIGN_CONNECTOR_ID,
+            sourceId: 'list-only-other',
             name: 'Other List X',
           },
         ]);
@@ -1481,7 +1484,7 @@ export function describeTaskCoreContract(
             id: 'ti-task',
             title: 'Transfer identity task',
             connectorType: 'github',
-            connectorInstanceId: 'conn-ti',
+            connectorInstanceId: CONNECTOR_ID,
             sourceId: 'remote:ti-task',
             updatedAt: NOW,
             metadata: { existing: 'a', shared: 'old' },
@@ -1503,10 +1506,11 @@ export function describeTaskCoreContract(
         });
 
         it('does not resolve a source list that belongs to a different connector', async () => {
+          expect(CONNECTOR_ID).not.toBe(FOREIGN_CONNECTOR_ID);
           const result = await harness.persistence.transferIdentity.resolveIdentityTargets({
             taskId: 'ti-task',
-            connectorInstanceId: 'conn-mismatch',
-            sourceListIds: ['list-x'],
+            connectorInstanceId: CONNECTOR_ID,
+            sourceListIds: ['list-only-other'],
           });
           expect(result.sourceLists).toEqual([]);
         });

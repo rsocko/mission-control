@@ -57,7 +57,7 @@ export interface TaskFilterSpec {
   readonly planningHorizons: readonly string[];
   /** `planningHorizon=none` — matches rows whose horizon is SQL NULL. */
   readonly planningHorizonIsNull: boolean;
-  readonly localDispositions: readonly string[];
+  readonly localDispositions: readonly LocalDisposition[];
   /**
    * `openOnly=true` (and not the `recentlyClosed` quick filter) with no
    * explicit status filter: excludes `done`/`cancelled`.

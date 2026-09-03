@@ -13,7 +13,10 @@ import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
  * instead of only failing in production under PostgreSQL.
  */
 
+const poisonState = vi.hoisted(() => ({ triggered: false }));
+
 vi.mock('@/db', () => {
+  poisonState.triggered = true;
   throw new Error('POISONED: @/db must not be imported by migrated task-core consumers');
 });
 
@@ -29,8 +32,6 @@ vi.mock('@/lib/connectors/transfer-identity', () => ({
   persistCreatedTaskIdentity: vi.fn(async () => undefined),
   reconcileTransferIdentity: vi.fn(async () => undefined),
 }));
-
-const POISON = /POISONED: @\/db must not be imported/;
 
 const originalBackend = process.env.MC_DATABASE_BACKEND;
 
@@ -214,7 +215,8 @@ afterAll(() => {
 
 describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
   it('proves the poison actually fires when @/db is imported', async () => {
-    await expect(import('@/db')).rejects.toThrow(POISON);
+    await expect(import('@/db')).rejects.toThrow();
+    expect(poisonState.triggered).toBe(true);
   });
 
   it('hard-deletes a Scout task through the registered composition', async () => {

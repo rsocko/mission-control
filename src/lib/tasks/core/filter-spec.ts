@@ -166,7 +166,7 @@ export function buildTaskFilterSpec(
   const localDispositions = csv('localDispositions', VALID_LOCAL_DISPOSITIONS)
     .filter(isLocalDisposition);
   const localDisposition = searchParams.get('localDisposition');
-  const resolvedLocalDispositions: string[] = localDispositions.length
+  const resolvedLocalDispositions: LocalDisposition[] = localDispositions.length
     ? localDispositions
     : localDisposition && isLocalDisposition(localDisposition)
       ? [localDisposition]

@@ -76,7 +76,7 @@ describePostgres('PostgreSQL relative reminder timezone repository integration',
              due_date, reminder_at, reminder_relative, reminder_due_time,
              created_at, updated_at, last_synced_at
            ) VALUES (
-             $1, 'seed', 'seed', 'seed', 'Relative reminder timezone contract', $2,
+             $1, $1, 'seed', 'seed', 'Relative reminder timezone contract', $2,
              $3, $4, $5, $6, $7, $7, $7
            )`,
           [

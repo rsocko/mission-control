@@ -560,17 +560,9 @@ export function describeTaskCoreContract(
         expect(await page('sourceList', 'desc', 2, 2)).toEqual(['nul-a', 'nul-b']);
       });
 
-      /**
-       * `effort` is coalesced to the largest sortable integer on both backends
-       * rather than left NULL, so "unknown effort" sorts last ascending. That
-       * is deliberately *not* the legacy route's `COALESCE(effort, 0)`; the
-       * divergence is documented in `docs/architecture/persistence-boundaries.md`
-       * and belongs to the read-route migration, not to this contract. What
-       * this pins is that both adapters agree.
-       */
-      it('sorts a null effort last ascending and first descending on both backends', async () => {
-        expect(await page('effort', 'asc')).toEqual(['set-x', 'set-y', 'nul-a', 'nul-b']);
-        expect(await page('effort', 'desc')).toEqual(['nul-a', 'nul-b', 'set-y', 'set-x']);
+      it('preserves legacy COALESCE(effort, 0) ordering on both backends', async () => {
+        expect(await page('effort', 'asc')).toEqual(['nul-a', 'nul-b', 'set-x', 'set-y']);
+        expect(await page('effort', 'desc')).toEqual(['set-y', 'set-x', 'nul-a', 'nul-b']);
       });
     });
 
@@ -1387,7 +1379,14 @@ export function describeTaskCoreContract(
         await moves().recordSourceCopyProvenance({
           taskId: 'wt-source',
           updatedAt: MOVE_NOW,
-          metadata: { origin: 'seed', copiedTo: { taskId: 'wt-successor' } },
+          copiedTo: {
+            taskId: 'wt-successor',
+            sourceId: 'remote-successor',
+            connectorType: 'github-issues',
+            connectorInstanceId: 'github-1',
+            sourceListId: 'repo-1',
+            copiedAt: MOVE_NOW,
+          },
         });
         expect(await moves().getTask('wt-source')).toMatchObject({
           updatedAt: MOVE_NOW,
@@ -1397,6 +1396,42 @@ export function describeTaskCoreContract(
         });
         expect(await harness.listTaskTagIds('wt-source')).toEqual(['tag-wt']);
         expect(await harness.listAttachmentTaskIds()).toEqual(['wt-source']);
+      });
+
+      it('merges copy provenance without erasing an active move claim', async () => {
+        await moves().claimTaskMove(claim({
+          claimToken: 'copy-race-claim',
+          metadata: {
+            origin: 'seed',
+            taskMoveClaim: {
+              token: 'copy-race-claim',
+              claimedAt: MOVE_NOW,
+              previousSyncStatus: 'synced',
+            },
+          },
+        }));
+
+        await moves().recordSourceCopyProvenance({
+          taskId: 'wt-source',
+          updatedAt: MOVE_NOW,
+          copiedTo: {
+            taskId: 'wt-successor',
+            sourceId: 'remote-successor',
+            connectorType: 'github-issues',
+            connectorInstanceId: 'github-1',
+            sourceListId: 'repo-1',
+            copiedAt: MOVE_NOW,
+          },
+        });
+
+        expect(await moves().getTask('wt-source')).toMatchObject({
+          syncStatus: 'move_in_progress',
+          metadata: {
+            origin: 'seed',
+            copiedTo: { taskId: 'wt-successor' },
+            taskMoveClaim: { token: 'copy-race-claim' },
+          },
+        });
       });
     });
 

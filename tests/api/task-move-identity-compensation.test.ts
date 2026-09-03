@@ -202,6 +202,23 @@ describe('write-through move compensation around created-identity persistence', 
     expect(releaseTaskMoveClaim).toHaveBeenCalledTimes(1);
   });
 
+  it('arms compensation before validating created GitHub metadata', async () => {
+    mocks.createTask.mockResolvedValue({
+      sourceId: 'malformed-created-source-id',
+      title: 'Move me',
+      metadata: {},
+    });
+    const { executeWriteThroughTaskMove } = await import('@/lib/tasks/task-move-write-through');
+
+    const result = await executeWriteThroughTaskMove(moveInput);
+
+    expect(result.status).toBe(500);
+    expect(mocks.deleteTask).toHaveBeenCalledWith('malformed-created-source-id');
+    expect(discardMaterializedDestination).toHaveBeenCalledTimes(1);
+    expect(materializeDestination).not.toHaveBeenCalled();
+    expect(releaseTaskMoveClaim).toHaveBeenCalledTimes(1);
+  });
+
   it('still completes the move when identity persistence succeeds', async () => {
     const { executeWriteThroughTaskMove } = await import('@/lib/tasks/task-move-write-through');
 

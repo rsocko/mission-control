@@ -1,4 +1,4 @@
-import { describe, it, afterAll, vi } from 'vitest';
+import { describe, expect, it, beforeEach, afterAll, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import {
@@ -349,8 +349,175 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
   return harness;
 }
 
+async function waitForTaskCoreLockWait(): Promise<void> {
+  if (!pool) throw new Error('PostgreSQL task-core test pool is not initialized');
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND application_name = 'mission-control-task-core-contract-test'
+        AND wait_event_type = 'Lock'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('Timed out waiting for task-core operation to block on a row lock');
+}
+
 if (connectionString) {
   describeTaskCoreContract('PostgreSQL adapter', createHarness);
+
+  describe('PostgreSQL task-core row locking', () => {
+    beforeEach(async () => {
+      const contractHarness = await createHarness();
+      await contractHarness.reset();
+    });
+
+    it('preserves metadata committed concurrently before transfer refresh acquires its row lock', async () => {
+      const contractHarness = await createHarness();
+      await contractHarness.insertTasks([{
+        id: 'refresh-lock-task',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'github-refresh',
+        metadata: { existing: 'seed' },
+      }]);
+      const blocker = await pool!.connect();
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          `UPDATE tasks
+           SET metadata = metadata || '{"concurrent":"kept"}'::jsonb
+           WHERE id = 'refresh-lock-task'`,
+        );
+
+        const refresh = contractHarness.persistence.transferIdentity.reconcileTaskRefresh({
+          taskId: 'refresh-lock-task',
+          connectorInstanceId: 'github-refresh',
+          task: {
+            sourceId: 'remote:refreshed',
+            sourceListId: null,
+            sourceListName: null,
+            title: 'Refreshed',
+            description: null,
+            status: 'todo',
+            statusReason: null,
+            priority: 'none',
+            effort: null,
+            microStatus: null,
+            assignee: null,
+            updatedAt: DEFAULT_NOW,
+            completedAt: null,
+            metadata: { incoming: 'kept' },
+          },
+          observedAt: DEFAULT_NOW,
+        });
+
+        await waitForTaskCoreLockWait();
+        await blocker.query('COMMIT');
+        expect(await refresh).toBe(true);
+
+        const result = await pool!.query<{ metadata: Record<string, unknown> }>(
+          'SELECT metadata FROM tasks WHERE id = $1',
+          ['refresh-lock-task'],
+        );
+        expect(result.rows[0]?.metadata).toEqual({
+          existing: 'seed',
+          concurrent: 'kept',
+          incoming: 'kept',
+        });
+      } finally {
+        await blocker.query('ROLLBACK');
+        blocker.release();
+      }
+    });
+
+    it('does not hard-delete a Scout task whose ownership changes while deletion waits', async () => {
+      const contractHarness = await createHarness();
+      await contractHarness.insertTasks([{
+        id: 'scout-lock-task',
+        sourceId: 'scout:lock-task',
+        connectorType: 'scout',
+        connectorInstanceId: 'scout-lock',
+      }]);
+      const blocker = await pool!.connect();
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          `UPDATE tasks
+           SET connector_type = 'local', connector_instance_id = 'local'
+           WHERE id = 'scout-lock-task'`,
+        );
+
+        const deletion = contractHarness.persistence.scoutDeletion
+          .hardDeleteScoutTask('scout-lock-task');
+        await waitForTaskCoreLockWait();
+        await blocker.query('COMMIT');
+
+        expect(await deletion).toEqual({ kind: 'not-scout' });
+        const result = await pool!.query<{ connector_type: string }>(
+          'SELECT connector_type FROM tasks WHERE id = $1',
+          ['scout-lock-task'],
+        );
+        expect(result.rows[0]?.connector_type).toBe('local');
+      } finally {
+        await blocker.query('ROLLBACK');
+        blocker.release();
+      }
+    });
+
+    it('merges copy provenance after a concurrently committed move claim', async () => {
+      const contractHarness = await createHarness();
+      await contractHarness.insertTasks([{
+        id: 'copy-lock-task',
+        metadata: { existing: 'seed' },
+      }]);
+      const blocker = await pool!.connect();
+      try {
+        await blocker.query('BEGIN');
+        await blocker.query(
+          `UPDATE tasks
+           SET metadata = metadata || '{"taskMoveClaim":{"token":"concurrent-claim"}}'::jsonb,
+               sync_status = 'move_in_progress'
+           WHERE id = 'copy-lock-task'`,
+        );
+
+        const provenance = contractHarness.persistence.writeThroughMoves
+          .recordSourceCopyProvenance({
+            taskId: 'copy-lock-task',
+            updatedAt: DEFAULT_NOW,
+            copiedTo: {
+              taskId: 'copy-target',
+              sourceId: 'remote:copy-target',
+              connectorType: 'github-issues',
+              connectorInstanceId: 'github-copy',
+              sourceListId: 'repo-copy',
+              copiedAt: DEFAULT_NOW,
+            },
+          });
+        await waitForTaskCoreLockWait();
+        await blocker.query('COMMIT');
+        await provenance;
+
+        const result = await pool!.query<{
+          metadata: Record<string, unknown>;
+          sync_status: string;
+        }>('SELECT metadata, sync_status FROM tasks WHERE id = $1', ['copy-lock-task']);
+        expect(result.rows[0]).toMatchObject({
+          sync_status: 'move_in_progress',
+          metadata: {
+            existing: 'seed',
+            taskMoveClaim: { token: 'concurrent-claim' },
+            copiedTo: { taskId: 'copy-target' },
+          },
+        });
+      } finally {
+        await blocker.query('ROLLBACK');
+        blocker.release();
+      }
+    });
+  });
 
   afterAll(async () => {
     if (runtime && harness) {

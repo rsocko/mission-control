@@ -568,10 +568,24 @@ export interface TaskMoveSourceSyncIntent {
 }
 
 /** Provenance recorded on the source of a `copy` (the source is untouched). */
+export interface TaskMoveCopyTarget {
+  readonly taskId: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceListId: string;
+  readonly copiedAt: string;
+}
+
 export interface TaskMoveSourceCopyProvenance {
   readonly taskId: string;
   readonly updatedAt: string;
-  readonly metadata: Record<string, unknown>;
+  /**
+   * Only the copy target is accepted here. The adapter merges it into the
+   * current metadata atomically so stale caller snapshots cannot erase a
+   * concurrent move claim or another independently-written metadata field.
+   */
+  readonly copiedTo: TaskMoveCopyTarget;
 }
 
 /**

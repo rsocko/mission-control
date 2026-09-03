@@ -193,7 +193,7 @@ const PRIORITY_ORDER_EXPRESSION = sql`CASE ${tasks.priority}
   WHEN 'low' THEN 3
   ELSE 4 END`;
 
-const EFFORT_ORDER_EXPRESSION = sql`COALESCE(${tasks.effort}, 2147483647)`;
+const EFFORT_ORDER_EXPRESSION = sql`COALESCE(${tasks.effort}, 0)`;
 
 /**
  * Explicit NULL placement for the nullable sort columns (`dueDate`,
@@ -655,7 +655,7 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
         sourceId: tasks.sourceId,
         connectorType: tasks.connectorType,
         connectorInstanceId: tasks.connectorInstanceId,
-      }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      }).from(tasks).where(eq(tasks.id, taskId)).limit(1).for('update');
       if (!task) return { kind: 'not-found' };
       if (task.connectorType !== 'scout') return { kind: 'not-scout' };
 
@@ -1380,7 +1380,8 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
   ): Promise<void> {
     await this.db.update(tasks).set({
       updatedAt: request.updatedAt,
-      metadata: request.metadata,
+      metadata: sql`COALESCE(${tasks.metadata}, '{}'::jsonb)
+        || ${JSON.stringify({ copiedTo: request.copiedTo })}::jsonb`,
     }).where(eq(tasks.id, request.taskId));
   }
 }
@@ -1589,10 +1590,15 @@ class PostgresTaskTransferIdentityRepository implements TaskTransferIdentityRepo
     return this.db.transaction(async (tx) => {
       const [current] = await tx.select({ metadata: tasks.metadata })
         .from(tasks)
-        .where(eq(tasks.id, input.taskId))
-        .limit(1);
+        .where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.connectorInstanceId, input.connectorInstanceId),
+        ))
+        .limit(1)
+        .for('update');
+      if (!current) return false;
       const metadata = {
-        ...asRecord(current?.metadata),
+        ...asRecord(current.metadata),
         ...input.task.metadata,
       };
       const updated = await tx.update(tasks).set({

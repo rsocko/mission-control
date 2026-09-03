@@ -682,17 +682,11 @@ export async function executeWriteThroughTaskMove(
         const createdTask = await targetConnector.createTask!(taskPayload);
         newSourceId = createdTask.sourceId;
         newTaskNativeId = newSourceId;
-        destinationMetadata = targetConnectorRow.type === 'github-issues'
-          ? refreshGitHubIssueMetadata(
-              createdTask.metadata,
-              createdTask.sourceId,
-              createdTask.externalIdentity,
-            )
-          : parseMetadata(createdTask.metadata);
         createdRemoteSourceIds.push(newSourceId);
-        // Install compensation before any further awaits: once the remote
-        // destination exists, every subsequent failure (including identity
-        // persistence) must be able to roll the remote creation back.
+        // Install compensation before any further fallible operation: once
+        // the remote destination exists, metadata validation, identity
+        // persistence and later connector calls must all be able to roll the
+        // remote creation back.
         compensateRemoteCreation = async () => {
           const cleanupErrors: unknown[] = [];
           for (const sourceId of [...createdRemoteSourceIds].reverse()) {
@@ -715,6 +709,13 @@ export async function executeWriteThroughTaskMove(
             throw new AggregateError(cleanupErrors, 'One or more destination tasks could not be cleaned up');
           }
         };
+        destinationMetadata = targetConnectorRow.type === 'github-issues'
+          ? refreshGitHubIssueMetadata(
+              createdTask.metadata,
+              createdTask.sourceId,
+              createdTask.externalIdentity,
+            )
+          : parseMetadata(createdTask.metadata);
 
         if (targetConnectorRow.type === 'github-issues' && createdTask.externalIdentity) {
           await persistCreatedTaskIdentity({
@@ -1174,11 +1175,17 @@ export async function executeWriteThroughTaskMove(
       }
 
       // Update source task metadata with "movedTo" provenance
-      const srcMeta = { ...srcTask.metadata, copiedTo: movedToMeta };
       await writeThroughMoves.recordSourceCopyProvenance({
         taskId,
         updatedAt: now,
-        metadata: srcMeta,
+        copiedTo: {
+          taskId: newMcTaskId,
+          sourceId: newSourceId,
+          connectorType: targetConnectorRow.type,
+          connectorInstanceId: targetConnectorInstanceId,
+          sourceListId: targetSourceListId,
+          copiedAt: now,
+        },
       });
     }
 

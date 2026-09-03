@@ -686,16 +686,8 @@ so it is never left to the dialect default. Both adapters prepend a
 direction, for the two nullable sort columns (`dueDate`, `sourceListName`). The
 pinned behavior is "NULL sorts lowest", which is exactly what the legacy SQLite
 `/api/tasks` route already returns. `priority`, `status`, `title`, `createdAt`
-and `updatedAt` are `NOT NULL`, and `effort` is coalesced, so none of them needs
-a rank.
-
-One deliberate, *not* silent difference from the legacy route remains: the
-route's `effort` sort is `COALESCE(effort, 0)` (unknown effort sorts lowest)
-while both adapters use `COALESCE(effort, 2147483647)` (unknown effort sorts
-last ascending). The adapters agree with each other — the shared contract pins
-that in both directions — and reconciling the adapter and route expressions
-belongs to the L05 read-route migration, which is the change that actually
-switches the route onto `TaskQueryRepository`.
+and `updatedAt` are `NOT NULL`. Both adapters preserve the route's exact
+`COALESCE(effort, 0)` expression, so unknown effort also sorts lowest.
 
 ### The composition seam
 

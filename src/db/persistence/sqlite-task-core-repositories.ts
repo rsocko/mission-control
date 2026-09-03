@@ -209,7 +209,7 @@ const PRIORITY_ORDER_EXPRESSION = sql`CASE ${tasks.priority}
   WHEN 'low' THEN 3
   ELSE 4 END`;
 
-const EFFORT_ORDER_EXPRESSION = sql`COALESCE(${tasks.effort}, 2147483647)`;
+const EFFORT_ORDER_EXPRESSION = sql`COALESCE(${tasks.effort}, 0)`;
 
 /**
  * Explicit NULL placement for the nullable sort columns (`dueDate`,
@@ -1241,10 +1241,21 @@ class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveReposi
   async recordSourceCopyProvenance(
     request: TaskMoveSourceCopyProvenance,
   ): Promise<void> {
-    await this.database.update(tasks).set({
-      updatedAt: request.updatedAt,
-      metadata: JSON.stringify(request.metadata),
-    }).where(eq(tasks.id, request.taskId));
+    this.runTransaction((tx) => {
+      const current = tx.select({ metadata: tasks.metadata })
+        .from(tasks)
+        .where(eq(tasks.id, request.taskId))
+        .limit(1)
+        .get();
+      if (!current) return;
+      tx.update(tasks).set({
+        updatedAt: request.updatedAt,
+        metadata: JSON.stringify({
+          ...decodeLenientJsonObject(current.metadata),
+          copiedTo: request.copiedTo,
+        }),
+      }).where(eq(tasks.id, request.taskId)).run();
+    });
   }
 }
 

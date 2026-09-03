@@ -329,7 +329,7 @@ export class SemanticIndexService {
     const now = this.now();
     if (outcome.status === 'succeeded') {
       const recorded = await this.repository.completeIntent({
-        id: intent.id, owner, now, outcome: outcome.outcome,
+        id: intent.id, owner, attempt: intent.attempt, now, outcome: outcome.outcome,
       });
       return recorded ? outcome : { status: 'lease-lost', outcome: 'lease-lost' };
     }
@@ -337,6 +337,7 @@ export class SemanticIndexService {
     const recorded = await this.repository.failIntent({
       id: intent.id,
       owner,
+      attempt: intent.attempt,
       error: outcome.outcome,
       now,
       denied: outcome.status === 'denied',
@@ -352,6 +353,11 @@ export class SemanticIndexService {
     intent: SemanticIntent,
     context: { owner: string; runId?: string | null; signal?: AbortSignal },
   ): Promise<SemanticIntentOutcome> {
+    const leaseFence = {
+      intentId: intent.id,
+      owner: context.owner,
+      attempt: intent.attempt,
+    };
     if (!isSemanticSourceEntityType(intent.entityType)) {
       return { status: 'failed', outcome: `unsupported-entity-type:${intent.entityType}` };
     }
@@ -371,7 +377,7 @@ export class SemanticIndexService {
     // indexed, which is what makes duplicate and out-of-order intents harmless.
     const source = await this.source.get(intent.entityType, intent.entityId);
     if (!source) {
-      return this.applyDelete(intent, intent.entityType);
+      return this.applyDelete(intent, intent.entityType, context.owner);
     }
     if (intent.kind === 'delete') {
       // The entity exists again. The source is authoritative, so index it
@@ -389,13 +395,23 @@ export class SemanticIndexService {
       projectionVersion: identity.projectionVersion,
     });
     if (document.retainUntil && document.retainUntil <= this.now()) {
-      return this.applyDelete(intent, intent.entityType, document.sourceUpdatedAt);
+      return this.applyDelete(
+        intent,
+        intent.entityType,
+        context.owner,
+        document.sourceUpdatedAt,
+      );
     }
     const requestedSourceUpdatedAt = document.sourceUpdatedAt > intent.requestedAt
       ? document.sourceUpdatedAt
       : intent.requestedAt;
     if (!source.semanticEligible) {
-      return this.applyDelete(intent, intent.entityType, requestedSourceUpdatedAt);
+      return this.applyDelete(
+        intent,
+        intent.entityType,
+        context.owner,
+        requestedSourceUpdatedAt,
+      );
     }
     const now = this.now();
 
@@ -417,7 +433,11 @@ export class SemanticIndexService {
       id: existing?.id ?? this.newId(),
       indexId: identity.id,
       now,
+      leaseFence,
     });
+    if (write.status === 'stale' && write.reason === 'lease-lost') {
+      return { status: 'lease-lost', outcome: 'lease-lost' };
+    }
     if (write.status === 'stale' || !write.document) {
       return { status: 'succeeded', outcome: `document-stale:${write.reason ?? 'unknown'}` };
     }
@@ -522,8 +542,12 @@ export class SemanticIndexService {
       intentId: intent.id,
       expiresAt,
       now: this.now(),
+      leaseFence,
     });
 
+    if (vectorWrite.status === 'stale' && vectorWrite.reason === 'lease-lost') {
+      return { status: 'lease-lost', outcome: 'lease-lost' };
+    }
     if (vectorWrite.status === 'stale') {
       // A newer document version landed while this vector was being produced.
       // Dropping it is correct: the newer work owns the entity now.
@@ -538,6 +562,7 @@ export class SemanticIndexService {
   private async applyDelete(
     intent: SemanticIntent,
     entityType: SemanticEntityType,
+    owner: string,
     sourceUpdatedAt?: string,
   ): Promise<SemanticIntentOutcome> {
     const result = await this.repository.deleteDocument({
@@ -546,8 +571,15 @@ export class SemanticIndexService {
       entityId: intent.entityId,
       now: this.now(),
       sourceUpdatedAt,
+      leaseFence: {
+        intentId: intent.id,
+        owner,
+        attempt: intent.attempt,
+      },
     });
-    return { status: 'succeeded', outcome: result.status };
+    return result.status === 'lease-lost'
+      ? { status: 'lease-lost', outcome: 'lease-lost' }
+      : { status: 'succeeded', outcome: result.status };
   }
 
   /** Rebuilds the projection for a source snapshot without writing anything. */

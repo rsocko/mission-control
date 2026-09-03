@@ -325,6 +325,29 @@ export function alertFixture(overrides: Partial<SemanticAlertSource> = {}): Sema
   };
 }
 
+export function houstonSummaryFixture(
+  overrides: Partial<SemanticHoustonSummarySource> = {},
+): SemanticHoustonSummarySource {
+  return {
+    entityType: 'houston-summary',
+    semanticEligible: true,
+    id: 'conversation-1',
+    authorizationScope: 'installation',
+    title: 'Architecture planning',
+    summary: 'The team selected a durable semantic index.',
+    decisions: ['Use fenced queue processing'],
+    commitments: ['Preserve backend isolation'],
+    topics: ['semantic search'],
+    linkedEntities: [],
+    sensitivity: 'restricted',
+    retainUntil: '2099-01-01T00:00:00.000Z',
+    excludedAt: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-20T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
 export function projectFixture(
   overrides: Partial<SemanticProjectSource> = {},
 ): SemanticProjectSource {

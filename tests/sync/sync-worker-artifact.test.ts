@@ -30,8 +30,13 @@ describe('sync worker artifact guard', () => {
     'Event delivery lease was fenced out mid-flight',
     'Event delivery moved to dead letter',
   ].join('\n');
-  const completeActivation =
-    `${financeActivation}\n${triageActivation}\n${finalActivation}\n${eventOutboxActivation}`;
+  const completeActivation = [
+    financeActivation,
+    triageActivation,
+    finalActivation,
+    eventOutboxActivation,
+    "allowsLegacyWorkflow('semantic-search')",
+  ].join('\n');
 
   it('rejects a bundle containing the retired finance backlog emitter', () => {
     const retiredCode = ['finance', 'attention', 'backlog', 'exceeded'].join('_');
@@ -64,5 +69,14 @@ describe('sync worker artifact guard', () => {
 
   it('accepts the activated finance and triage worker with separately gated delivery', () => {
     expect(() => assertSyncWorkerArtifact(completeActivation)).not.toThrow();
+  });
+
+  it('rejects a normal worker bundle that opens or omits the semantic PostgreSQL gate', () => {
+    const missingGate = completeActivation.replace(
+      "allowsLegacyWorkflow('semantic-search')",
+      'startSemanticIndexWorker()',
+    );
+    expect(() => assertSyncWorkerArtifact(missingGate))
+      .toThrow('semantic PostgreSQL gate');
   });
 });

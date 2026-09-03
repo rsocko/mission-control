@@ -365,6 +365,7 @@ export async function startSemanticIndexWorker(
       embeddings: resolved.embeddings,
       service: resolved.service,
       config: resolved.config,
+      isEnabled: isSemanticIndexEnabled,
       enabledEntityTypes: () => getSemanticWorkerConfig().entityTypes,
     });
     worker.start();

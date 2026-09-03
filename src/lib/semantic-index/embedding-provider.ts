@@ -3,9 +3,10 @@
  *
  * This module owns exactly one responsibility: turn projected text into a
  * validated vector, or an honest, classified refusal. It performs **no**
- * routing or credential logic of its own — that lives in
- * `src/lib/search/embedding-request.ts`, which the keyword/semantic search path
- * uses too, so there is a single implementation of the security-relevant code.
+ * routing or credential logic of its own. Production configuration remains in
+ * `src/lib/search/embedding-request.ts`, and the request/response transport it
+ * shares with interactive search lives in `embedding-transport.ts`, so there is
+ * one implementation of the security-relevant HTTP behavior.
  *
  * Two guarantees this seam adds on top of that shared path:
  *
@@ -20,14 +21,12 @@
  *    retrying cannot make a foreign vector belong to this space.
  */
 
-import { AIRoutingDeniedError } from '@/lib/ai/provider-factory';
-import { routeIdForProvider } from '@/lib/ai/sensitivity-policy';
+import { AIRoutingDeniedError, routeIdForProvider } from '@/lib/ai/sensitivity-policy';
 import {
   getConfiguredEmbeddingRoute,
-  getEmbeddingConfig,
   requestEmbeddingResult,
   type EmbeddingConfig,
-} from '@/lib/search/embedding-request';
+} from '@/lib/search/embedding-transport';
 import { semanticSensitivityRank, type SemanticSensitivity } from './contracts';
 
 export interface SemanticEmbeddingRoute {
@@ -97,6 +96,20 @@ export interface SemanticEmbeddingProvider {
 }
 
 const LOCAL_ROUTE_ID = 'ollama';
+type EmbeddingConfigResolver = (
+  sources?: string[],
+  options?: { sensitivityOverride?: SemanticSensitivity },
+) => Promise<EmbeddingConfig | null>;
+
+async function defaultEmbeddingConfigResolver(
+  sources?: string[],
+  options?: { sensitivityOverride?: SemanticSensitivity },
+): Promise<EmbeddingConfig | null> {
+  const { getEmbeddingConfig } = await import('@/lib/search/embedding-request');
+  return options === undefined
+    ? getEmbeddingConfig(sources)
+    : getEmbeddingConfig(sources, options);
+}
 
 function deniedOutcome(reason: string): SemanticEmbeddingFailure {
   return { status: 'denied', reason, retryAfter: null };
@@ -113,6 +126,7 @@ function deniedOutcome(reason: string): SemanticEmbeddingFailure {
  * ever tighten.
  */
 async function resolveConfig(
+  getEmbeddingConfig: EmbeddingConfigResolver,
   sensitivity: SemanticSensitivity,
   sources: string[],
 ): Promise<EmbeddingConfig | null> {
@@ -134,13 +148,19 @@ function violatesLocalOnly(sensitivity: SemanticSensitivity, provider: string): 
 }
 
 export class AIEmbeddingProvider implements SemanticEmbeddingProvider {
+  private readonly getEmbeddingConfig: EmbeddingConfigResolver;
+
+  constructor(options: { getEmbeddingConfig?: EmbeddingConfigResolver } = {}) {
+    this.getEmbeddingConfig = options.getEmbeddingConfig ?? defaultEmbeddingConfigResolver;
+  }
+
   async resolveRoute(
     sensitivity: SemanticSensitivity,
     sources: string[] = [],
   ): Promise<SemanticRouteResolution> {
     let config: EmbeddingConfig | null;
     try {
-      config = await resolveConfig(sensitivity, sources);
+      config = await resolveConfig(this.getEmbeddingConfig, sensitivity, sources);
     } catch (error) {
       if (error instanceof AIRoutingDeniedError) {
         return { status: 'denied', reason: 'routing-denied' };
@@ -175,7 +195,11 @@ export class AIEmbeddingProvider implements SemanticEmbeddingProvider {
 
     let config: EmbeddingConfig | null;
     try {
-      config = await resolveConfig(request.sensitivity, request.sources ?? []);
+      config = await resolveConfig(
+        this.getEmbeddingConfig,
+        request.sensitivity,
+        request.sources ?? [],
+      );
     } catch (error) {
       if (error instanceof AIRoutingDeniedError) return deniedOutcome('routing-denied');
       throw error;

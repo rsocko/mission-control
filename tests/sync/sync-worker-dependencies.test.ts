@@ -5,6 +5,7 @@ import {
   syncWorkerRequiredNativeArtifacts,
   syncWorkerSupplementalPackages,
 } from '../../scripts/lib/sync-worker-dependencies.mjs';
+import { readFileSync } from 'node:fs';
 
 describe('sync worker dependency metadata', () => {
   it('keeps packaged dependencies aligned with esbuild externals', () => {
@@ -40,5 +41,13 @@ describe('sync worker dependency metadata', () => {
         pattern.test('node_modules/re2/build/Release/re2.node'),
       ),
     ).toBe(true);
+  });
+
+  it('packages the gated semantic worker harness as a traced runtime entry', () => {
+    const build = readFileSync('scripts/build-sync-worker.mjs', 'utf8');
+    const packaging = readFileSync('scripts/package-sync-worker-runtime.mjs', 'utf8');
+    expect(build).toContain("['semantic-worker-harness.ts', 'semantic-worker-harness.cjs']");
+    expect(packaging).toContain('semanticWorkerHarnessEntry');
+    expect(packaging).toContain('semantic-worker-harness.cjs');
   });
 });

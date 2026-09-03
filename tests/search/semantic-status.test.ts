@@ -215,7 +215,12 @@ describe('semantic search status and readiness observability', () => {
       indexId, owner: 'worker-1', limit: 5, leaseMs: 60_000, now: T0,
     });
     await harness.repository.failIntent({
-      id: claimed[0].id, owner: 'worker-1', error: 'nope', now: T0, terminal: true,
+      id: claimed[0].id,
+      owner: 'worker-1',
+      attempt: claimed[0].attempt,
+      error: 'nope',
+      now: T0,
+      terminal: true,
     });
     await harness.repository.createRun({
       id: 'run-1',
@@ -224,9 +229,14 @@ describe('semantic search status and readiness observability', () => {
       idempotencyKey: 'run-key-1',
       now: T0,
     });
-    await harness.repository.claimRun({ owner: 'worker-1', leaseMs: 60_000, now: T0 });
+    await harness.repository.claimRun({ owner: 'worker-1', leaseMs: 7_200_000, now: T0 });
     await harness.repository.checkpointRun({
-      id: 'run-1', owner: 'worker-1', now: T1, checkpoint: 'task:cursor-42', processedDelta: 7,
+      id: 'run-1',
+      owner: 'worker-1',
+      attempt: 0,
+      now: T1,
+      checkpoint: 'task:cursor-42',
+      processedDelta: 7,
     });
 
     const status = await semantic.getSemanticSearchStatus();

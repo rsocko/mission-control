@@ -39,6 +39,10 @@ const REQUIRED_EVENT_OUTBOX_WORKER_TOKENS = [
   'Event delivery moved to dead letter',
 ];
 
+const REQUIRED_GATED_SEMANTIC_WORKER_TOKENS = [
+  'semantic index worker is disabled for this persistence backend',
+];
+
 export function assertSyncWorkerArtifact(source) {
   if (source.includes(RETIRED_FINANCE_BACKLOG_CODE)) {
     throw new Error(
@@ -73,6 +77,17 @@ export function assertSyncWorkerArtifact(source) {
   if (missingEventOutbox.length > 0) {
     throw new Error(
       `Sync worker bundle omitted durable event outbox markers:\n${missingEventOutbox.join('\n')}`,
+    );
+  }
+  const missingSemanticGate = REQUIRED_GATED_SEMANTIC_WORKER_TOKENS.filter(
+    (token) => !source.includes(token),
+  );
+  if (!/allowsLegacyWorkflow\((["'])semantic-search\1\)/.test(source)) {
+    missingSemanticGate.push('allowsLegacyWorkflow("semantic-search")');
+  }
+  if (missingSemanticGate.length > 0) {
+    throw new Error(
+      `Sync worker bundle opened or omitted the semantic PostgreSQL gate:\n${missingSemanticGate.join('\n')}`,
     );
   }
   if (

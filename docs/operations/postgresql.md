@@ -53,6 +53,27 @@ select PostgreSQL in production, change deployment configuration, establish
 complete web/API persistence parity, or perform the production cutover tracked
 by [#1155](https://github.com/rsocko/mission-control/issues/1155).
 
+### Gated semantic worker parity
+
+The packaged runtime also contains a test-only semantic worker harness for
+PostgreSQL parity verification. It composes the production PostgreSQL semantic
+repository and source adapter, the normal semantic service and worker loop, and
+the production `AIEmbeddingProvider` request/response path. The harness fails
+closed unless it is running in the test environment with its explicit harness
+token, a safe test PostgreSQL URL, and a loopback embedding endpoint.
+The guarded runtime proof terminates the packaged process after a durable
+backfill checkpoint and verifies lease-expiry recovery resumes from that cursor
+without duplicate intents, documents, or vectors. PostgreSQL semantic
+idempotency keys use an explicit storage-version discriminator: preexisting raw
+TEXT rows remain version 0, while arbitrary new contract strings use the
+injective version 1 encoding.
+
+This artifact is evidence, not activation. Normal PostgreSQL semantic
+publication and the `src/sync-worker.ts` semantic entrypoint remain closed by
+the legacy-workflow gate. No packaged semantic test may select or evaluate
+SQLite, and enabling the test harness does not open any production runtime
+gate.
+
 Keep SQLite databases and rollback artifacts until those separate activation
 and cutover steps are complete.
 

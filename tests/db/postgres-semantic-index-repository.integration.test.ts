@@ -56,8 +56,11 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     await backend.shutdown();
   });
 
-  async function createIdentity(overrides: { status?: 'building' | 'ready' } = {}) {
-    const id = `semantic-${randomUUID()}`;
+  async function createIdentity(overrides: {
+    id?: string;
+    status?: 'building' | 'ready';
+  } = {}) {
+    const id = overrides.id ?? `semantic-${randomUUID()}`;
     identityIds.add(id);
     await repository.createIdentity({
       id,
@@ -358,6 +361,168 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     expect(metrics.intents).toMatchObject({ queued: 0, running: 6 });
   });
 
+  it('returns a bounded claim in deterministic FIFO order', async () => {
+    const indexId = await createIdentity();
+    for (const [id, requestedAt] of [
+      ['newest', T2],
+      ['oldest', T0],
+      ['middle', T1],
+    ] as const) {
+      await repository.enqueueIntent(intentFor(indexId, {
+        idempotencyKey: `${indexId}:upsert:task:${id}`,
+        entityId: id,
+        requestedAt,
+      }));
+    }
+
+    const claimed = await repository.claimIntents({
+      indexId, owner: 'fifo-worker', limit: 2, leaseMs: 60_000, now: T2,
+    });
+
+    expect(claimed.map((intent) => intent.entityId)).toEqual(['oldest', 'middle']);
+  });
+
+  it('round-trips arbitrary idempotency keys and coalesces concurrent publication', async () => {
+    const indexId = await createIdentity();
+    const keys = [
+      `${indexId}\u0000\u0000`,
+      `${indexId}\u0000task\u0000café-東京-🚀`,
+      '\u0000',
+      'mc-semantic-key:v1:AA',
+      'mc-semantic-key:v1:',
+      '\ud800',
+    ];
+    const intentIds: string[] = [];
+
+    for (const [position, idempotencyKey] of keys.entries()) {
+      const entityId = `key-shape-${position}`;
+      const [left, right] = await Promise.all([
+        repository.enqueueIntent(intentFor(indexId, { idempotencyKey, entityId })),
+        repository.enqueueIntent(intentFor(indexId, { idempotencyKey, entityId })),
+      ]);
+      expect(new Set([left.status, right.status])).toEqual(new Set(['enqueued', 'coalesced']));
+      expect(left.intent.id).toBe(right.intent.id);
+      expect(left.intent.idempotencyKey).toBe(idempotencyKey);
+      expect((await repository.getIntent(left.intent.id))?.idempotencyKey).toBe(idempotencyKey);
+      intentIds.push(left.intent.id);
+    }
+
+    const stored = await backend.context.pool.query<{
+      idempotency_key: string;
+      idempotency_key_version: number;
+    }>(
+      `SELECT idempotency_key, idempotency_key_version
+       FROM semantic_intents WHERE id = ANY($1::text[])`,
+      [intentIds],
+    );
+    expect(stored.rows).toHaveLength(keys.length);
+    expect(new Set(stored.rows.map((row) => row.idempotency_key)).size).toBe(keys.length);
+    expect(stored.rows.every((row) => !row.idempotency_key.includes('\u0000'))).toBe(true);
+    expect(stored.rows.every((row) => row.idempotency_key_version === 1)).toBe(true);
+  });
+
+  it('preserves canonical legacy prefix lookalikes without colliding with encoded keys', async () => {
+    const indexId = await createIdentity();
+    const logicalKey = `legacy-logical-${randomUUID()}`;
+    const legacyLookalike =
+      `mc-semantic-key:v1:${Buffer.from(logicalKey, 'utf16le').toString('base64url')}`;
+    const legacyId = `legacy-intent-${randomUUID()}`;
+    await backend.context.pool.query(
+      `INSERT INTO semantic_intents (
+         id, idempotency_key, index_id, kind, entity_type, entity_id,
+         requested_at, status, attempt, max_attempts, available_at, created_at, updated_at
+       ) VALUES ($1, $2, $3, 'upsert', 'task', 'legacy-entity',
+         $4, 'queued', 0, 5, $4, $4, $4)`,
+      [legacyId, legacyLookalike, indexId, T1],
+    );
+
+    const preserved = await repository.enqueueIntent(intentFor(indexId, {
+      id: `ignored-${randomUUID()}`,
+      idempotencyKey: legacyLookalike,
+      entityId: 'legacy-entity',
+      requestedAt: T0,
+    }));
+    expect(preserved).toMatchObject({
+      status: 'ignored',
+      intent: { id: legacyId, idempotencyKey: legacyLookalike },
+    });
+
+    const encoded = await repository.enqueueIntent(intentFor(indexId, {
+      id: `encoded-${randomUUID()}`,
+      idempotencyKey: logicalKey,
+      entityId: 'encoded-entity',
+    }));
+    expect(encoded).toMatchObject({
+      status: 'enqueued',
+      intent: { idempotencyKey: logicalKey },
+    });
+
+    const rows = await backend.context.pool.query<{
+      idempotency_key: string;
+      idempotency_key_version: number;
+    }>(
+      `SELECT idempotency_key, idempotency_key_version
+       FROM semantic_intents
+       WHERE id = ANY($1::text[])
+       ORDER BY idempotency_key_version`,
+      [[legacyId, encoded.intent.id]],
+    );
+    expect(rows.rows).toEqual([
+      { idempotency_key: legacyLookalike, idempotency_key_version: 0 },
+      { idempotency_key: legacyLookalike, idempotency_key_version: 1 },
+    ]);
+
+    const runLogicalKey = `legacy-run-${randomUUID()}`;
+    const runLegacyLookalike =
+      `mc-semantic-key:v1:${Buffer.from(runLogicalKey, 'utf16le').toString('base64url')}`;
+    const legacyRunId = `legacy-run-row-${randomUUID()}`;
+    await backend.context.pool.query(
+      `INSERT INTO semantic_runs (
+         id, index_id, kind, idempotency_key, status, checkpoint,
+         processed_count, failed_count, skipped_count, attempt, max_attempts,
+         available_at, created_at, updated_at, completed_at
+       ) VALUES ($1, $2, 'reconcile', $3, 'succeeded', NULL,
+         0, 0, 0, 0, 3, $4, $4, $4, $4)`,
+      [legacyRunId, indexId, runLegacyLookalike, T0],
+    );
+    const preservedRun = await repository.createRun({
+      id: `ignored-run-${randomUUID()}`,
+      indexId,
+      kind: 'reconcile',
+      idempotencyKey: runLegacyLookalike,
+      now: T1,
+    });
+    expect(preservedRun).toMatchObject({
+      status: 'existing',
+      run: { id: legacyRunId, idempotencyKey: runLegacyLookalike },
+    });
+    const encodedRun = await repository.createRun({
+      id: `encoded-run-${randomUUID()}`,
+      indexId,
+      kind: 'reconcile',
+      idempotencyKey: runLogicalKey,
+      now: T1,
+    });
+    expect(encodedRun).toMatchObject({
+      status: 'created',
+      run: { idempotencyKey: runLogicalKey },
+    });
+    const runRows = await backend.context.pool.query<{
+      idempotency_key: string;
+      idempotency_key_version: number;
+    }>(
+      `SELECT idempotency_key, idempotency_key_version
+       FROM semantic_runs
+       WHERE id = ANY($1::text[])
+       ORDER BY idempotency_key_version`,
+      [[legacyRunId, encodedRun.run.id]],
+    );
+    expect(runRows.rows).toEqual([
+      { idempotency_key: runLegacyLookalike, idempotency_key_version: 0 },
+      { idempotency_key: runLegacyLookalike, idempotency_key_version: 1 },
+    ]);
+  });
+
   it('coalesces newer work, ignores older work, and never mutates a running attempt', async () => {
     const indexId = await createIdentity();
     const first = await repository.enqueueIntent(intentFor(indexId));
@@ -385,6 +550,95 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     expect((await repository.getIntent(first.intent.id))?.sourceRevision).toBe('rev-2');
   });
 
+  it('fences every stale same-owner intent mutation after recovery and reclaim', async () => {
+    const indexId = await createIdentity();
+    const document = (await repository.upsertDocument(documentFor(indexId))).document!;
+    await repository.upsertVector(vectorFor(indexId, document.id));
+    const created = await repository.enqueueIntent(intentFor(indexId, { maxAttempts: 4 }));
+    await repository.claimIntents({
+      indexId, owner: 'worker-a', limit: 1, leaseMs: 1_000, now: T0,
+    });
+    expect(await repository.recoverExpiredIntentLeases(T1))
+      .toEqual({ requeued: 1, expired: 0 });
+    const availableAt = (await repository.getIntent(created.intent.id))!.availableAt;
+    expect(await repository.claimIntents({
+      indexId,
+      owner: 'worker-a',
+      limit: 1,
+      leaseMs: 60_000,
+      now: availableAt,
+    })).toMatchObject([{ attempt: 2, leaseOwner: 'worker-a' }]);
+
+    expect(await repository.renewIntentLease({
+      id: created.intent.id,
+      owner: 'worker-a',
+      attempt: 1,
+      leaseMs: 60_000,
+      now: availableAt,
+    })).toBe(false);
+    expect(await repository.completeIntent({
+      id: created.intent.id, owner: 'worker-a', attempt: 1, now: availableAt,
+    })).toBe(false);
+    expect(await repository.failIntent({
+      id: created.intent.id,
+      owner: 'worker-a',
+      attempt: 1,
+      error: 'stale failure',
+      now: availableAt,
+    })).toBeNull();
+    expect(await repository.upsertDocument(documentFor(indexId, {
+      id: document.id,
+      title: 'stale title',
+      sourceRevision: 'rev-stale-worker',
+      sourceUpdatedAt: T2,
+      now: availableAt,
+      leaseFence: { intentId: created.intent.id, owner: 'worker-a', attempt: 1 },
+    }))).toEqual({ status: 'stale', document: null, reason: 'lease-lost' });
+    expect(await repository.upsertVector(vectorFor(indexId, document.id, {
+      embedding: new Float32Array([0, 1, 0]),
+      now: availableAt,
+      leaseFence: { intentId: created.intent.id, owner: 'worker-a', attempt: 1 },
+    }))).toEqual({ status: 'stale', reason: 'lease-lost' });
+    expect(await repository.deleteDocument({
+      indexId,
+      entityType: 'task',
+      entityId: 'task-1',
+      now: availableAt,
+      leaseFence: { intentId: created.intent.id, owner: 'worker-a', attempt: 1 },
+    })).toEqual({ status: 'lease-lost', removedVectors: 0 });
+    expect(await repository.getDocument(indexId, 'task', 'task-1'))
+      .toMatchObject({ title: 'Integration task', deletedAt: null });
+    expect(await repository.getVector(indexId, 'task', 'task-1')).not.toBeNull();
+    expect(await repository.completeIntent({
+      id: created.intent.id, owner: 'worker-a', attempt: 2, now: availableAt,
+    })).toBe(true);
+  });
+
+  it('rejects intent failure and settlement exactly at the lease expiry boundary', async () => {
+    const indexId = await createIdentity();
+    const expiresAt = '2026-08-29T00:01:00.000Z';
+    const created = await repository.enqueueIntent(intentFor(indexId));
+    await repository.claimIntents({
+      indexId, owner: 'worker-a', limit: 1, leaseMs: 60_000, now: T0,
+    });
+
+    expect(await repository.failIntent({
+      id: created.intent.id, owner: 'worker-a', attempt: 1, error: 'too late', now: expiresAt,
+    })).toBeNull();
+    expect(await repository.renewIntentLease({
+      id: created.intent.id,
+      owner: 'worker-a',
+      attempt: 1,
+      leaseMs: 60_000,
+      now: expiresAt,
+    })).toBe(false);
+    expect(await repository.completeIntent({
+      id: created.intent.id, owner: 'worker-a', attempt: 1, now: expiresAt,
+    })).toBe(false);
+    expect(await repository.getIntent(created.intent.id))
+      .toMatchObject({ status: 'running', attempt: 1 });
+  });
+
   it('retries, denies, and recovers expired intent leases', async () => {
     const indexId = await createIdentity();
     await repository.enqueueIntent(intentFor(indexId, {
@@ -393,7 +647,7 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     await repository.claimIntents({ indexId, owner: 'w', limit: 5, leaseMs: 60_000, now: T0 });
 
     expect(await repository.failIntent({
-      id: 'retryable', owner: 'w', error: 'rate limited', now: T0, retryAfter: T1,
+      id: 'retryable', owner: 'w', attempt: 1, error: 'rate limited', now: T0, retryAfter: T1,
     })).toBe('queued');
     expect(await repository.getIntent('retryable')).toMatchObject({
       status: 'queued', attempt: 1, availableAt: T1, retryAfter: T1,
@@ -410,7 +664,7 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     }));
     await repository.claimIntents({ indexId, owner: 'w', limit: 5, leaseMs: 60_000, now: T2 });
     expect(await repository.failIntent({
-      id: 'denied', owner: 'w', error: 'sensitivity policy', now: T2, denied: true,
+      id: 'denied', owner: 'w', attempt: 1, error: 'sensitivity policy', now: T2, denied: true,
     })).toBe('denied');
   });
 
@@ -438,19 +692,44 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     const claimed = await repository.claimRun({ owner: 'w', leaseMs: 1_000, now: T0, indexId });
     expect(claimed?.id).toBe(created.run.id);
     await repository.checkpointRun({
-      id: created.run.id, owner: 'w', now: T0, checkpoint: 'task:250', processedDelta: 250,
+      id: created.run.id,
+      owner: 'w',
+      attempt: 0,
+      now: T0,
+      checkpoint: 'task:250',
+      processedDelta: 250,
     });
 
     expect(await repository.recoverExpiredRunLeases(T1)).toMatchObject({ requeued: 1 });
-    const resumed = await repository.claimRun({ owner: 'w2', leaseMs: 60_000, now: T2, indexId });
+    const resumed = await repository.claimRun({ owner: 'w', leaseMs: 60_000, now: T2, indexId });
     expect(resumed).toMatchObject({
       // One abandoned lease was recovered, so exactly one attempt was spent —
       // the two claims themselves cost nothing.
       status: 'running', checkpoint: 'task:250', processedCount: 250, attempt: 1,
     });
+    expect(await repository.checkpointRun({
+      id: created.run.id,
+      owner: 'w',
+      attempt: 0,
+      now: T2,
+      checkpoint: 'stale-overwrite',
+      processedDelta: 99,
+    })).toBe(false);
+    expect(await repository.renewRunLease({
+      id: created.run.id, owner: 'w', attempt: 0, leaseMs: 60_000, now: T2,
+    })).toBe(false);
+    expect(await repository.failRun({
+      id: created.run.id, owner: 'w', attempt: 0, error: 'stale failure', now: T2,
+    })).toBeNull();
+    expect(await repository.completeRun({
+      id: created.run.id, owner: 'w', attempt: 0, now: T2,
+    })).toBe(false);
+    expect(await repository.releaseRun({
+      id: created.run.id, owner: 'w', attempt: 0, now: T2,
+    })).toBe(false);
 
     expect(await repository.completeRun({
-      id: created.run.id, owner: 'w2', now: T2, checkpoint: 'task:end',
+      id: created.run.id, owner: 'w', attempt: 1, now: T2, checkpoint: 'task:end',
     })).toBe(true);
     expect(await repository.getRun(created.run.id)).toMatchObject({
       status: 'succeeded', checkpoint: 'task:end',
@@ -467,6 +746,242 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
     })).toMatchObject({ status: 'existing', run: { id: created.run.id } });
   });
 
+  it('allows only one concurrent running claim per identity and run kind', async () => {
+    const indexId = await createIdentity();
+    await Promise.all([
+      repository.createRun({
+        id: `run-a-${indexId}`,
+        indexId,
+        kind: 'reconcile',
+        idempotencyKey: `${indexId}:reconcile:first`,
+        now: T0,
+      }),
+      repository.createRun({
+        id: `run-b-${indexId}`,
+        indexId,
+        kind: 'reconcile',
+        idempotencyKey: `${indexId}:reconcile:second`,
+        now: T0,
+      }),
+    ]);
+
+    const claims = await Promise.all([
+      repository.claimRun({
+        owner: 'run-worker-a', leaseMs: 600_000, now: T0, indexId, kinds: ['reconcile'],
+      }),
+      repository.claimRun({
+        owner: 'run-worker-b', leaseMs: 600_000, now: T0, indexId, kinds: ['reconcile'],
+      }),
+    ]);
+    const active = claims.filter((run) => run !== null);
+    expect(active).toHaveLength(1);
+    const claimedRun = active[0];
+    if (!claimedRun?.leaseOwner) throw new Error('Expected one leased reconcile run');
+    expect(claimedRun.id).toBe(`run-a-${indexId}`);
+
+    const otherIndexId = await createIdentity();
+    await Promise.all([
+      repository.createRun({
+        id: `run-other-${otherIndexId}`,
+        indexId: otherIndexId,
+        kind: 'reconcile',
+        idempotencyKey: `${otherIndexId}:reconcile`,
+        now: T0,
+      }),
+      repository.createRun({
+        id: `run-cleanup-${indexId}`,
+        indexId,
+        kind: 'cleanup',
+        idempotencyKey: `${indexId}:cleanup`,
+        now: T0,
+      }),
+    ]);
+    const independent = await Promise.all([
+      repository.claimRun({
+        owner: 'run-worker-other',
+        leaseMs: 600_000,
+        now: T0,
+        indexId: otherIndexId,
+        kinds: ['reconcile'],
+      }),
+      repository.claimRun({
+        owner: 'run-worker-cleanup',
+        leaseMs: 600_000,
+        now: T0,
+        indexId,
+        kinds: ['cleanup'],
+      }),
+    ]);
+    expect(independent).toMatchObject([
+      { id: `run-other-${otherIndexId}` },
+      { id: `run-cleanup-${indexId}` },
+    ]);
+
+    expect(await repository.releaseRun({
+      id: claimedRun.id,
+      owner: claimedRun.leaseOwner,
+      attempt: claimedRun.attempt,
+      now: T0,
+      availableAt: T2,
+    })).toBe(true);
+    expect(await repository.claimRun({
+      owner: 'run-worker-c', leaseMs: 600_000, now: T0, indexId, kinds: ['reconcile'],
+    })).toMatchObject({ id: `run-b-${indexId}` });
+  });
+
+  it('serializes advisory-hash collisions without coalescing unrelated runs', async () => {
+    const collision = await backend.context.pool.query<{ identities: string[] }>(`
+      WITH candidates AS (
+        SELECT
+          'semantic-collision-' || value::text AS identity,
+          hashtext(
+            'mission-control-semantic-run:'
+            || 'semantic-collision-'
+            || value::text
+          ) AS lock_key
+        FROM generate_series(1, 500000) AS value
+      )
+      SELECT array_agg(identity ORDER BY identity) AS identities
+      FROM candidates
+      GROUP BY lock_key
+      HAVING COUNT(*) > 1
+      LIMIT 1
+    `);
+    const [firstId, secondId] = collision.rows[0]?.identities ?? [];
+    expect(firstId).toBeDefined();
+    expect(secondId).toBeDefined();
+    if (!firstId || !secondId) throw new Error('Expected a deterministic advisory hash collision');
+
+    await Promise.all([
+      createIdentity({ id: firstId }),
+      createIdentity({ id: secondId }),
+    ]);
+    await Promise.all([
+      repository.createRun({
+        id: `run-${firstId}`,
+        indexId: firstId,
+        kind: 'cleanup',
+        idempotencyKey: `${firstId}:cleanup`,
+        now: T0,
+      }),
+      repository.createRun({
+        id: `run-${secondId}`,
+        indexId: secondId,
+        kind: 'cleanup',
+        idempotencyKey: `${secondId}:cleanup`,
+        now: T0,
+      }),
+    ]);
+
+    const claims = await Promise.all([
+      repository.claimRun({
+        owner: 'collision-worker-a',
+        leaseMs: 60_000,
+        now: T0,
+        indexId: firstId,
+        kinds: ['cleanup'],
+      }),
+      repository.claimRun({
+        owner: 'collision-worker-b',
+        leaseMs: 60_000,
+        now: T0,
+        indexId: secondId,
+        kinds: ['cleanup'],
+      }),
+    ]);
+    expect(claims).toMatchObject([
+      { id: `run-${firstId}`, indexId: firstId },
+      { id: `run-${secondId}`, indexId: secondId },
+    ]);
+  }, 120_000);
+
+  it('releases the run coalescing lock when a claim transaction rolls back', async () => {
+    const indexId = await createIdentity();
+    const probeName = `semantic_claim_rollback_probe_${process.pid}_${Date.now()}`;
+    if (!/^semantic_claim_rollback_probe_\d+_\d+$/.test(probeName)) {
+      throw new Error('Generated semantic rollback probe name is unsafe');
+    }
+    const created = await repository.createRun({
+      id: `run-${randomUUID()}`,
+      indexId,
+      kind: 'cleanup',
+      idempotencyKey: `${indexId}:cleanup:rollback`,
+      now: T0,
+    });
+
+    try {
+      await backend.context.pool.query(`
+        CREATE FUNCTION "${probeName}"()
+        RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.lease_owner = 'rollback-worker' THEN
+            RAISE EXCEPTION 'forced semantic claim rollback';
+          END IF;
+          RETURN NEW;
+        END;
+        $$
+      `);
+      await backend.context.pool.query(`
+        CREATE TRIGGER "${probeName}"
+        BEFORE UPDATE ON semantic_runs
+        FOR EACH ROW EXECUTE FUNCTION "${probeName}"()
+      `);
+      await expect(repository.claimRun({
+        owner: 'rollback-worker',
+        leaseMs: 60_000,
+        now: T0,
+        indexId,
+        kinds: ['cleanup'],
+      })).rejects.toThrow('forced semantic claim rollback');
+    } finally {
+      await backend.context.pool.query(
+        `DROP TRIGGER IF EXISTS "${probeName}" ON semantic_runs`,
+      );
+      await backend.context.pool.query(
+        `DROP FUNCTION IF EXISTS "${probeName}"()`,
+      );
+    }
+
+    expect(await repository.claimRun({
+      owner: 'recovery-worker',
+      leaseMs: 60_000,
+      now: T0,
+      indexId,
+      kinds: ['cleanup'],
+    })).toMatchObject({ id: created.run.id, leaseOwner: 'recovery-worker' });
+  });
+
+  it('rejects run failure and settlement exactly at the lease expiry boundary', async () => {
+    const indexId = await createIdentity();
+    const expiresAt = '2026-08-29T00:01:00.000Z';
+    const created = await repository.createRun({
+      id: `run-${randomUUID()}`,
+      indexId,
+      kind: 'backfill',
+      idempotencyKey: `${indexId}:expiry-boundary`,
+      now: T0,
+    });
+    await repository.claimRun({ owner: 'w', leaseMs: 60_000, now: T0, indexId });
+
+    expect(await repository.failRun({
+      id: created.run.id, owner: 'w', attempt: 0, error: 'too late', now: expiresAt,
+    })).toBeNull();
+    expect(await repository.renewRunLease({
+      id: created.run.id, owner: 'w', attempt: 0, leaseMs: 60_000, now: expiresAt,
+    })).toBe(false);
+    expect(await repository.checkpointRun({
+      id: created.run.id, owner: 'w', attempt: 0, checkpoint: 'too-late', now: expiresAt,
+    })).toBe(false);
+    expect(await repository.completeRun({
+      id: created.run.id, owner: 'w', attempt: 0, now: expiresAt,
+    })).toBe(false);
+    expect(await repository.releaseRun({
+      id: created.run.id, owner: 'w', attempt: 0, now: expiresAt,
+    })).toBe(false);
+    expect(await repository.getRun(created.run.id))
+      .toMatchObject({ status: 'running', attempt: 0 });
+  });
+
   it('keeps a run claimable across many clean yields and re-schedules it after terminal failure', async () => {
     const indexId = await createIdentity();
     const key = `${indexId}:backfill`;
@@ -481,20 +996,32 @@ describePostgres('PostgreSQL semantic index repository integration', () => {
       const claimed = await repository.claimRun({ owner: `w${slice}`, leaseMs: 60_000, now: T0, indexId });
       expect(claimed?.id, `slice ${slice}`).toBe(created.run.id);
       await repository.checkpointRun({
-        id: created.run.id, owner: `w${slice}`, now: T0, checkpoint: `task:${slice}`, processedDelta: 10,
+        id: created.run.id,
+        owner: `w${slice}`,
+        attempt: 0,
+        now: T0,
+        checkpoint: `task:${slice}`,
+        processedDelta: 10,
       });
-      await repository.releaseRun({ id: created.run.id, owner: `w${slice}`, now: T0 });
+      await repository.releaseRun({
+        id: created.run.id, owner: `w${slice}`, attempt: 0, now: T0,
+      });
     }
     expect(await repository.getRun(created.run.id)).toMatchObject({
       status: 'queued', attempt: 0, processedCount: 60, checkpoint: 'task:6',
     });
 
     // Spend the whole budget on real failures.
-    for (const expected of ['queued', 'queued', 'failed'] as const) {
+    for (const [attempt, expected] of (['queued', 'queued', 'failed'] as const).entries()) {
       const at = (await repository.getRun(created.run.id))!.availableAt;
       await repository.claimRun({ owner: 'w', leaseMs: 60_000, now: at, indexId });
       expect(await repository.failRun({
-        id: created.run.id, owner: 'w', error: 'provider down', now: at, availableAt: at,
+        id: created.run.id,
+        owner: 'w',
+        attempt,
+        error: 'provider down',
+        now: at,
+        availableAt: at,
       })).toBe(expected);
     }
     expect(await repository.getRun(created.run.id)).toMatchObject({ status: 'failed', attempt: 3 });

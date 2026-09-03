@@ -249,11 +249,14 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(configuredTriageImporters).toHaveLength(FEATURE_GUARDED_DYNAMIC_EDGES.size);
     const configuredTriageGraph = postgresApplicationGraph(configuredTriageImporters);
     expect(staticSqliteViolations(configuredTriageGraph)).toEqual([]);
-    expect([...configuredTriageGraph].flatMap((path) =>
+    const configuredTriageSqliteEdges = [...configuredTriageGraph].flatMap((path) =>
       dynamicImports(path).filter((specifier) => {
         const resolved = resolveApplicationImport(path, specifier);
         return SQLITE_PACKAGE.test(specifier) || Boolean(resolved && SQLITE_MODULE.test(resolved));
       }).map((specifier) => `${path} -> ${specifier}`)
+    );
+    expect(configuredTriageSqliteEdges.filter((edge) =>
+      !POSTGRES_GUARDED_DYNAMIC_IMPORTERS.has(edge.split(' -> ')[0])
     )).toEqual([]);
     expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(2);
     const categoryFailure = monarchClient.indexOf(

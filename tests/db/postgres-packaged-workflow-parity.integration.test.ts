@@ -712,14 +712,26 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
              WHERE job.notification_id = $3
                AND job.status = 'processing'
                AND job.lease_owner IS NOT NULL) AS enrichment_claim_id,
+            (SELECT attempt_count FROM notification_enrichment_jobs
+             WHERE notification_id = $3) AS enrichment_attempts,
+            (SELECT last_error FROM notification_enrichment_jobs
+             WHERE notification_id = $3) AS enrichment_error,
             (SELECT status FROM ai_runs WHERE id = $4) AS ai,
             (SELECT id FROM ai_runs
              WHERE id = $4 AND status = 'running' AND lease_owner IS NOT NULL)
               AS ai_claim_id,
             (SELECT execution_state ->> 'state' FROM ai_runs WHERE id = $4)
               AS ai_lifecycle,
-            (SELECT status FROM semantic_intents
-             WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1) AS semantic,
+            (SELECT attempt FROM ai_runs WHERE id = $4) AS ai_attempts,
+            (SELECT last_error_code FROM ai_runs WHERE id = $4) AS ai_error,
+            (SELECT count(*)::int FROM ai_runs
+             WHERE id <> $4
+              AND execution_route = 'direct-copilot-sdk'
+              AND cleanup_status = ANY(ARRAY['pending', 'failed', 'running'])
+              AND available_at <= $7
+              AND (lease_expires_at IS NULL OR lease_expires_at <= $7))
+              AS ai_cleanup_ready,
+            (SELECT status FROM semantic_intents WHERE id = $6) AS semantic,
             (SELECT id FROM semantic_intents
              WHERE entity_id = $5 AND status = 'running' AND lease_owner IS NOT NULL
              ORDER BY created_at DESC LIMIT 1) AS semantic_claim_id`,
@@ -729,9 +741,26 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             `${prefix}:enrichment`,
             `${prefix}:ai`,
             `${prefix}:semantic`,
+            prioritizedClaimIds.semantic,
+            new Date().toISOString(),
           ],
         );
-        expect(states.rows[0]).toEqual({
+        const {
+          enrichment_attempts,
+          enrichment_error,
+          ai_attempts,
+          ai_error,
+          ai_cleanup_ready,
+          ...canaryStates
+        } = states.rows[0];
+        expect(canaryStates, JSON.stringify({
+          requests,
+          enrichment_attempts,
+          enrichment_error,
+          ai_attempts,
+          ai_error,
+          ai_cleanup_ready,
+        })).toEqual({
           sync: 'succeeded',
           outbox: 'delivering',
           enrichment: 'processing',

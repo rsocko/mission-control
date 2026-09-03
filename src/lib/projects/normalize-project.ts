@@ -1,3 +1,5 @@
+import { decodeLenientJsonArray } from '@/db/persistence/value-codecs';
+
 type ProjectJsonCollections = {
   sourceBindings: unknown;
   autoIncludeRules: unknown;
@@ -12,15 +14,7 @@ export function resolveProjectIconColor(
 }
 
 function normalizeJsonArray(value: unknown): unknown[] {
-  if (Array.isArray(value)) return value;
-  if (typeof value !== 'string') return [];
-
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+  return decodeLenientJsonArray(value);
 }
 
 export function normalizeProjectJsonCollections<T extends ProjectJsonCollections>(

@@ -1,3 +1,4 @@
+import { decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import type { ResolvedAIConfig, SavedAIProviderConfig } from './types';
 
 type AIEnvironment = Readonly<Record<string, string | undefined>>;
@@ -9,20 +10,7 @@ export const DEFAULT_EMBEDDING_PROVIDER = 'bifrost';
 export const DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL = 'azure/text-embedding-3-small';
 
 export function parseSavedAIProviderConfig(value: unknown): SavedAIProviderConfig {
-  if (!value) return {};
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value) as unknown;
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as SavedAIProviderConfig
-        : {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof value === 'object' && !Array.isArray(value)
-    ? value as SavedAIProviderConfig
-    : {};
+  return decodeLenientJsonObject(value) as SavedAIProviderConfig;
 }
 
 export function resolveAIProviderBaseUrl(

@@ -15,6 +15,7 @@ import type {
   GitHubIdentityRunContext,
 } from '@/lib/external-identities/stable-identity-types';
 import { createHash, randomUUID } from 'crypto';
+import { canonicalJson } from '@/db/persistence/value-codecs';
 import { syncEventBus } from './events';
 import { syncLogger } from '@/lib/logger';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
@@ -81,17 +82,6 @@ import {
   shouldEnrichWithAI,
   type AIEnrichmentInput,
 } from '@/lib/notifications/enrichment/ai-enrichment';
-
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-    .join(',')}}`;
-}
 
 export function notificationEnrichmentSourceRevision(
   input: AIEnrichmentInput,

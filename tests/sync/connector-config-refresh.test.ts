@@ -190,6 +190,14 @@ vi.mock('@/lib/connectors', () => ({
   },
 }));
 
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: mocks.getConnector,
+    replaceConnector: mocks.replaceConnector,
+    getAllConnectors: vi.fn(() => []),
+  }),
+}));
+
 vi.mock('@/lib/sync/push-manager', () => ({
   pushPendingChanges: vi.fn(async () => ({ pushed: 0, errors: [] })),
 }));

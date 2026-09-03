@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
+import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
 
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
   const registerWorker = vi.fn();
+  const clearCore = vi.fn();
+  const clearWorker = vi.fn();
+  const registerConnectorRuntime = vi.fn();
+  const registerDemoSeedCommandService = vi.fn();
+  const registerRelativeReminderTimezoneRepository = vi.fn();
+  const resumeSemantic = vi.fn();
+  const stopSemantic = vi.fn(async () => undefined);
   const backend = {
     generation: 0,
     initialize: vi.fn(async () => {
@@ -22,6 +31,11 @@ const mocks = vi.hoisted(() => {
   const workerRepositories: WorkerPersistenceRepositories[] = [];
   return {
     backend,
+    clearCore,
+    clearWorker,
+    registerConnectorRuntime,
+    registerDemoSeedCommandService,
+    registerRelativeReminderTimezoneRepository,
     registerCore,
     repositories,
     createCore: vi.fn(() => {
@@ -64,6 +78,8 @@ const mocks = vi.hoisted(() => {
       return repository;
     }),
     registerWorker,
+    resumeSemantic,
+    stopSemantic,
     workerRepositories,
     createWorker: vi.fn((_db, _pool, core: CorePersistenceRepositories) => {
       const repository: WorkerPersistenceRepositories = {
@@ -106,11 +122,28 @@ vi.mock('@/db', () => ({
 vi.mock('@/db/runtime-backend', () => ({
   resolveDatabaseBackend: () => 'postgres',
 }));
+vi.mock('@/lib/connectors', () => {
+  throw new Error('Runtime initialization evaluated the connector domain barrel');
+});
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  assertCanRegisterConnectorRuntimeRegistry: vi.fn(),
+  registerConnectorRuntimeRegistry: mocks.registerConnectorRuntime,
+}));
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  assertCanRegisterSemanticPublicationService: vi.fn(),
+  registerSemanticPublicationService: vi.fn(),
+}));
 vi.mock('@/lib/persistence/runtime', () => ({
+  clearCorePersistenceRepositories: mocks.clearCore,
   registerCorePersistenceRepositories: mocks.registerCore,
 }));
 vi.mock('@/lib/persistence/worker-runtime', () => ({
+  clearWorkerPersistenceRepositories: mocks.clearWorker,
   registerWorkerPersistenceRepositories: mocks.registerWorker,
+}));
+vi.mock('@/lib/settings/mode-route-services', () => ({
+  registerDemoSeedCommandService: mocks.registerDemoSeedCommandService,
+  registerRelativeReminderTimezoneRepository: mocks.registerRelativeReminderTimezoneRepository,
 }));
 vi.mock('@/db/postgres/runtime', () => ({
   PostgresPersistenceBackend: class {
@@ -134,9 +167,14 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: vi.fn(() => ({})),
 }));
+vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
+  resumePackagedPostgresSemanticRuntime: mocks.resumeSemantic,
+  stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
+}));
 
 describe('PostgreSQL runtime core repository registration', () => {
   beforeEach(() => {
+    vi.resetModules();
     vi.clearAllMocks();
     mocks.backend.generation = 0;
     mocks.repositories.length = 0;
@@ -146,11 +184,16 @@ describe('PostgreSQL runtime core repository registration', () => {
   it('keeps the neutral registration identity stable while replacing the live delegate', async () => {
     const {
       getPostgresCoreRepositories,
+      getPostgresSyncJobRepository,
       initializeRuntimeDatabase,
+      registerPostgresSyncJobRepository,
       shutdownRuntimeDatabase,
     } = await import('@/db/runtime');
 
-    await initializeRuntimeDatabase();
+    await Promise.all([
+      initializeRuntimeDatabase(),
+      initializeRuntimeDatabase(),
+    ]);
     const registeredComposition = mocks.registerCore.mock.calls[0][0];
     const registeredWorkerComposition = mocks.registerWorker.mock.calls[0][0];
     await getPostgresCoreRepositories().tasks.get('task-1');
@@ -168,13 +211,23 @@ describe('PostgreSQL runtime core repository registration', () => {
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].reminders.cancelInvalidated).toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].triage.syncState.getAll).toHaveBeenCalledOnce();
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(1);
+    expect(mocks.registerCore).toHaveBeenCalledTimes(1);
+    expect(mocks.registerWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.registerConnectorRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(1);
 
     await shutdownRuntimeDatabase();
+    expect(mocks.stopSemantic).toHaveBeenCalledOnce();
+    expect(mocks.stopSemantic.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.backend.shutdown.mock.invocationCallOrder[0],
+    );
     await initializeRuntimeDatabase();
 
     expect(mocks.registerCore).toHaveBeenCalledTimes(2);
     expect(mocks.registerCore.mock.calls[1][0]).toBe(registeredComposition);
     expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
@@ -190,5 +243,139 @@ describe('PostgreSQL runtime core repository registration', () => {
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].reminders.cancelInvalidated).toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].triage.syncState.getAll).toHaveBeenCalledOnce();
+
+    mocks.stopSemantic.mockRejectedValueOnce(new Error('semantic stop failed'));
+    mocks.backend.shutdown.mockRejectedValueOnce(new Error('backend stop failed'));
+    await expect(shutdownRuntimeDatabase()).rejects.toThrow('PostgreSQL runtime shutdown failed');
+    expect(mocks.stopSemantic).toHaveBeenCalledTimes(2);
+    expect(mocks.backend.shutdown).toHaveBeenCalledTimes(2);
+    expect(() => registeredComposition.tasks.get('fenced-task')).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => registerPostgresSyncJobRepository({} as SyncJobRepository)).toThrow(
+      'Persistence composition publication is blocked until initializeRuntimeDatabase()',
+    );
+    const durableRuntime = await import('@/lib/ai/durable-runs/runtime');
+    const replacementDurableRepository = {} as DurableAiRunRepository;
+    await expect(durableRuntime.getDurableAiRunRepository()).rejects.toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    const registeredDemoSeedCommandService =
+      mocks.registerDemoSeedCommandService.mock.calls[0][0];
+    const registeredTimezoneRepository =
+      mocks.registerRelativeReminderTimezoneRepository.mock.calls[0][0];
+    expect(() => registeredDemoSeedCommandService.clearDatabase()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => registeredTimezoneRepository.applyTimezoneRecompute({
+      now: new Date(),
+      recompute: () => ({ success: false }),
+    })).toThrow('Persistence composition is unavailable until initializeRuntimeDatabase() completes');
+    expect(() => (
+      durableRuntime.registerPostgresDurableAiRunRepository(replacementDurableRepository)
+    )).toThrow(
+      'Persistence composition publication is blocked until initializeRuntimeDatabase()',
+    );
+
+    let finishCleanup!: () => void;
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    }));
+    const reinitialize = initializeRuntimeDatabase();
+    expect(initializeRuntimeDatabase()).toBe(reinitialize);
+    await vi.waitFor(() => expect(finishCleanup).toBeTypeOf('function'));
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
+    finishCleanup();
+    await reinitialize;
+    expect(mocks.stopSemantic).toHaveBeenCalledTimes(3);
+    expect(mocks.backend.shutdown).toHaveBeenCalledTimes(3);
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(3);
+    expect(mocks.registerCore).toHaveBeenCalledTimes(3);
+    expect(mocks.registerWorker).toHaveBeenCalledTimes(3);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(3);
+    const selectedDurableRepository = await durableRuntime.getDurableAiRunRepository();
+    durableRuntime.clearPostgresDurableAiRunRepository(replacementDurableRepository);
+    expect(await durableRuntime.getDurableAiRunRepository()).toBe(selectedDurableRepository);
+  });
+
+  it('fences access immediately while failed initialization cleanup is unresolved', async () => {
+    const {
+      getPostgresSyncJobRepository,
+      initializeRuntimeDatabase,
+      registerPostgresSyncJobRepository,
+      shutdownRuntimeDatabase,
+    } = await import('@/db/runtime');
+    let finishCleanup!: () => void;
+    mocks.resumeSemantic.mockImplementationOnce(() => {
+      throw new Error('semantic resume failed');
+    });
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishCleanup = resolve;
+    }));
+
+    const initialization = initializeRuntimeDatabase();
+    await vi.waitFor(() => expect(mocks.resumeSemantic).toHaveBeenCalledOnce());
+
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+    expect(() => registerPostgresSyncJobRepository({} as SyncJobRepository)).toThrow(
+      'Persistence composition publication is blocked until initializeRuntimeDatabase()',
+    );
+    expect(initializeRuntimeDatabase()).toBe(initialization);
+    expect(mocks.backend.initialize).toHaveBeenCalledOnce();
+
+    finishCleanup();
+    await expect(initialization).rejects.toThrow('semantic resume failed');
+
+    await expect(initializeRuntimeDatabase()).resolves.toBeUndefined();
+    await shutdownRuntimeDatabase();
+  });
+
+  it('keeps access fenced when shutdown overtakes initialization', async () => {
+    const {
+      getPostgresSyncJobRepository,
+      initializeRuntimeDatabase,
+      shutdownRuntimeDatabase,
+    } = await import('@/db/runtime');
+    let finishInitialization!: () => void;
+    let finishShutdown!: () => void;
+    mocks.backend.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishInitialization = resolve;
+    }));
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishShutdown = resolve;
+    }));
+
+    const initialization = initializeRuntimeDatabase();
+    await vi.waitFor(() => expect(finishInitialization).toBeTypeOf('function'));
+    const shutdown = shutdownRuntimeDatabase();
+    const queuedReinitialization = initializeRuntimeDatabase();
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+
+    finishInitialization();
+    await vi.waitFor(() => expect(finishShutdown).toBeTypeOf('function'));
+    expect(mocks.registerCore).not.toHaveBeenCalled();
+    expect(mocks.registerWorker).not.toHaveBeenCalled();
+    expect(mocks.resumeSemantic).not.toHaveBeenCalled();
+    expect(mocks.backend.shutdown).toHaveBeenCalledOnce();
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+
+    finishShutdown();
+    await Promise.all([initialization, shutdown, queuedReinitialization]);
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
+    expect(mocks.backend.shutdown).toHaveBeenCalledOnce();
+    expect(mocks.registerCore).toHaveBeenCalledOnce();
+    expect(mocks.registerWorker).toHaveBeenCalledOnce();
+    expect(mocks.resumeSemantic).toHaveBeenCalledOnce();
+    expect(() => getPostgresSyncJobRepository()).not.toThrow();
+    await shutdownRuntimeDatabase();
   });
 });

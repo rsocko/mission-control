@@ -468,6 +468,7 @@ describe('checkpointed dependency reconciliation', () => {
       import('@/db/schema'),
       import('@/lib/sync/task-dependency-manager'),
     ]);
+    await (await import('@/db/runtime')).initializeRuntimeDatabase();
 
     const completed = await manager.reconcileTaskDependencies(
       connectorId,

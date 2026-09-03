@@ -47,6 +47,7 @@ export interface PostgresContext {
 export class PostgresPersistenceBackend
 implements PersistenceBackend<PostgresTransaction> {
   private contextValue: PostgresContext | null = null;
+  private cleanupPool: Pool | null = null;
   private initializePromise: Promise<void> | null = null;
   private shutdownPromise: Promise<void> | null = null;
 
@@ -82,6 +83,9 @@ implements PersistenceBackend<PostgresTransaction> {
   initialize(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise.then(() => this.initialize());
+    }
+    if (this.cleanupPool) {
+      return this.shutdown().then(() => this.initialize());
     }
     if (this.contextValue) return Promise.resolve();
     if (this.initializePromise) return this.initializePromise;
@@ -120,7 +124,16 @@ implements PersistenceBackend<PostgresTransaction> {
         vector,
       };
     } catch (error) {
-      await pool.end();
+      try {
+        await pool.end();
+      } catch (cleanupError) {
+        this.cleanupPool = pool;
+        throw new AggregateError(
+          [error, cleanupError],
+          'PostgreSQL initialization failed and pool cleanup is incomplete',
+          { cause: error },
+        );
+      }
       throw error;
     }
   }
@@ -138,7 +151,15 @@ implements PersistenceBackend<PostgresTransaction> {
       await this.initializePromise.catch(() => undefined);
     }
     const context = this.contextValue;
-    this.contextValue = null;
-    if (context) await context.pool.end();
+    const pool = context?.pool ?? this.cleanupPool;
+    if (!pool) return;
+    try {
+      await pool.end();
+    } catch (error) {
+      this.cleanupPool = pool;
+      throw error;
+    }
+    if (this.contextValue === context) this.contextValue = null;
+    if (this.cleanupPool === pool) this.cleanupPool = null;
   }
 }

@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const ingestNotifications = vi.fn(async () => []);
 vi.mock('@/lib/persistence/worker-runtime', () => ({
+  assertCanRegisterWorkerPersistenceRepositories: vi.fn(),
+  clearWorkerPersistenceRepositories: vi.fn(),
   getWorkerPersistenceRepositories: async () => ({
     execution: {
       notifications: {
@@ -12,6 +14,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
       },
     },
   }),
+  registerWorkerPersistenceRepositories: vi.fn(),
 }));
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'mc-durable-ai-notifier-'));

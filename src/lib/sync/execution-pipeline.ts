@@ -1,5 +1,5 @@
-import { connectorRegistry } from '@/lib/connectors';
 import type { IConnector } from '@/lib/connectors';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
 import type {
   InboundNotification,
   ConnectorConfig,
@@ -81,7 +81,7 @@ import type {
 import {
   shouldEnrichWithAI,
   type AIEnrichmentInput,
-} from '@/lib/notifications/enrichment/ai-enrichment';
+} from '@/lib/notifications/enrichment/ai-enrichment-policy';
 
 export function notificationEnrichmentSourceRevision(
   input: AIEnrichmentInput,
@@ -1126,7 +1126,7 @@ export class SyncExecutionPipeline {
       type: config.type,
       hasCredentials: !!config.credentials?.accessToken,
     }, 'Refreshing connector from DB');
-    return connectorRegistry.replaceConnector(resolvedConfig);
+    return getConnectorRegistry().replaceConnector(resolvedConfig);
   }
 
   // ─── Notifications upsert ──────────────────────────────────────────────────
@@ -1548,7 +1548,7 @@ export class SyncExecutionPipeline {
   async runAll(full?: boolean): Promise<SyncResult[]> {
     const support = (await getWorkerPersistenceRepositories()).execution.support;
     const connectorIds = await support.listEnabledConnectorIds();
-    for (const c of connectorRegistry.getAllConnectors()) {
+    for (const c of getConnectorRegistry().getAllConnectors()) {
       if (!connectorIds.includes(c.id)) connectorIds.push(c.id);
     }
 
@@ -1774,7 +1774,7 @@ export class SyncExecutionPipeline {
       const result = await this.runExclusiveConnectorOperation(
         candidate.connectorId,
         async () => {
-          const connector = connectorRegistry.getConnector(candidate.connectorId)
+          const connector = getConnectorRegistry().getConnector(candidate.connectorId)
             ?? await this.initializeConnectorFromDb(candidate.connectorId);
           if (!connector) return null;
           return withSyncPhaseTiming(
@@ -2031,7 +2031,7 @@ export class SyncExecutionPipeline {
       );
       try {
         await this.runExclusiveConnectorOperation(config.id, async () => {
-          const connector = connectorRegistry.getConnector(config.id)
+          const connector = getConnectorRegistry().getConnector(config.id)
             ?? await this.initializeConnectorFromDb(config.id);
           if (
             !connector

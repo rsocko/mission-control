@@ -31,7 +31,7 @@ describe('Layer 7 triage worker persistence boundary', () => {
 
   it('composes triage atomically beside every inherited worker member', () => {
     const worker = source('src/db/persistence/worker-repositories.ts');
-    const sqliteRuntime = source('src/lib/persistence/worker-runtime.ts');
+    const sqliteRuntime = source('src/db/persistence/sqlite-worker-runtime.ts');
     const postgres = source('src/db/postgres/repositories/index.ts');
     const runtime = source('src/db/runtime.ts');
 
@@ -39,10 +39,7 @@ describe('Layer 7 triage worker persistence boundary', () => {
     expect(worker).toContain('notificationDelivery: NotificationDeliveryRepository');
     expect(worker).toContain('reminders: TaskReminderRepository');
     expect(worker).toContain('finance: FinanceWorkerPersistence');
-    expect(sqliteRuntime).toContain("import('@/db/persistence/sqlite-triage-repositories')");
-    expect(sqliteRuntime).not.toMatch(
-      /(?:^|\n)import\s+[^;]*from\s+['"]@\/db\/persistence\/sqlite-triage-repositories['"]/,
-    );
+    expect(sqliteRuntime).toContain("from './sqlite-triage-repositories'");
     expect(sqliteRuntime).toContain('triage: createSqliteTriagePersistenceRepositories(sqlite)');
     expect(postgres).toContain('triage: createPostgresTriagePersistenceRepositories(db)');
     expect(runtime).toContain(
@@ -52,14 +49,14 @@ describe('Layer 7 triage worker persistence boundary', () => {
 
   it('keeps PostgreSQL selection fail-closed before SQLite adapter evaluation', () => {
     const runtime = source('src/lib/persistence/worker-runtime.ts');
-    const failure = runtime.indexOf(
-      'PostgreSQL worker repositories must be registered before worker persistence is accessed',
+    expect(runtime).toContain(
+      'Worker persistence repositories must be registered before worker persistence is accessed',
     );
-    const sqliteEvaluation = runtime.indexOf(
-      'sqliteWorkerPersistencePromise ??= createSqliteWorkerPersistenceRepositories()',
+    expect(runtime).not.toContain('sqlite');
+    expect(source('src/db/runtime.ts')).toContain("import('./index')");
+    expect(source('src/db/index.ts')).toMatch(
+      /(?:from\s+|import\()['"]\.\/persistence\/sqlite-worker-runtime['"]/,
     );
-    expect(failure).toBeGreaterThan(-1);
-    expect(sqliteEvaluation).toBeGreaterThan(failure);
   });
 
   it('routes scheduled capture and sync state through the triage ports', () => {

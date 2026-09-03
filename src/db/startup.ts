@@ -2,6 +2,8 @@ import { isDatabaseContentionError } from '@/db/contention';
 import { isRetryablePostgresError } from '@/db/postgres/errors';
 import { initializeRuntimeDatabase } from '@/db/runtime';
 import { dbLogger } from '@/lib/logger';
+import '@/lib/connectors';
+import '@/lib/semantic-index/publication';
 
 const DEFAULT_MAX_ATTEMPTS = 5;
 const DEFAULT_RETRY_BASE_MS = 1_000;

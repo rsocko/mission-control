@@ -21,9 +21,12 @@ export function createPostgresAIEnrichmentService(): AIEnrichmentService {
           throw error;
         });
       const executor = await executorPromise;
-      return executor(input, {
-        signal: options?.signal ?? new AbortController().signal,
-      });
+        return executor({
+          ...input,
+          body: input.body ?? null,
+        }, {
+          signal: options?.signal ?? new AbortController().signal,
+        });
     },
   };
 }

@@ -237,6 +237,29 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
     await expect(service.enrich(input)).resolves.toEqual({ summary: 'postgres' });
   });
 
+  it('normalizes absent and null enrichment bodies identically', async () => {
+    const { createPostgresAIEnrichmentService } = await import(
+      '@/db/postgres/sync/notification-enrichment-service'
+    );
+    const service = createPostgresAIEnrichmentService();
+    const input = {
+      notificationId: 'body-normalization',
+      title: 'Review requested',
+      connectorType: 'github',
+      category: 'development',
+      metadata: {},
+      presentation: {},
+    };
+    mocks.enrich.mockClear();
+
+    await service.enrich(input);
+    await service.enrich({ ...input, body: null });
+
+    expect(mocks.enrich).toHaveBeenCalledTimes(2);
+    expect(mocks.enrich.mock.calls[0][0]).toMatchObject({ body: null });
+    expect(mocks.enrich.mock.calls[1][0]).toMatchObject({ body: null });
+  });
+
   it('fails closed for documented optional SQLite-only services', async () => {
     const [
       { getLegacySearchIndexingService },

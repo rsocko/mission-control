@@ -20,8 +20,27 @@ vi.mock('sonner', () => ({
 }));
 
 import { useTodayActions } from '@/lib/hooks/useTodayActions';
-import type { MyDayItem } from '@/components/today/types';
+import { EMPTY_SUGGESTION_GROUPS, type MyDayItem, type SuggestionGroups } from '@/components/today/types';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
+
+function suggestionsWithYesterdayTask(taskId: string): SuggestionGroups {
+  return {
+    ...EMPTY_SUGGESTION_GROUPS,
+    yesterday: [{
+      id: taskId,
+      title: 'Suggested task',
+      status: 'todo',
+      priority: 'medium',
+      dueDate: null,
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      sourceListName: 'Inbox',
+      localDisposition: 'active',
+      taskSourceModel: 'mc-owned',
+      editPolicy: editableTaskPolicy,
+    }],
+  };
+}
 
 const disabledMirrorPolicy = makeTaskEditPolicy({
   sourceModel: 'remote-mirror',
@@ -271,5 +290,83 @@ describe('useTodayActions completion', () => {
     expect(result.current.items).toHaveLength(1);
     expect(mocks.toastError).toHaveBeenCalledWith('Disposition was rejected');
     expect(fetchData).not.toHaveBeenCalled();
+  });
+
+  it('removes a suggestion-only task from the suggestion groups when completed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-1'),
+      );
+      const actions = useTodayActions({
+        items: [],
+        setItems: vi.fn(),
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { suggestions, actions };
+    });
+
+    expect(result.current.suggestions.yesterday).toHaveLength(1);
+
+    await act(async () => {
+      const completion = result.current.actions.completeTask('suggestion-1', {
+        title: 'Suggested task',
+        status: 'todo',
+        editPolicy: editableTaskPolicy,
+      });
+      await vi.advanceTimersByTimeAsync(600);
+      expect(await completion).toBe(true);
+    });
+
+    expect(result.current.suggestions.yesterday).toHaveLength(0);
+  });
+
+  it('removes a suggestion-only task from the suggestion groups when deleted', async () => {
+    vi.useRealTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true })));
+    const fetchData = vi.fn(async () => {});
+    const { result } = renderHook(() => {
+      const [suggestions, setSuggestions] = useState<SuggestionGroups>(
+        suggestionsWithYesterdayTask('suggestion-2'),
+      );
+      const actions = useTodayActions({
+        items: [],
+        setItems: vi.fn(),
+        suggestions,
+        setSuggestions,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { suggestions, actions };
+    });
+
+    expect(result.current.suggestions.yesterday).toHaveLength(1);
+
+    act(() => {
+      result.current.actions.deleteTask('suggestion-2', {
+        title: 'Suggested task',
+        editPolicy: editableTaskPolicy,
+      });
+    });
+    await act(async () => {
+      result.current.actions.confirmDialog.onConfirm();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+    expect(result.current.suggestions.yesterday).toHaveLength(0);
   });
 });

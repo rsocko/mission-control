@@ -90,6 +90,26 @@ export function ConnectionStatus({
 
   const hasTokens = connectorSettings.hasTokens;
   if (hasCredentials || hasTokens) {
+    // Prefer the most recent explicit signal we have: a manual "Test Connection"
+    // click, falling back to the outcome of the last scheduled/triggered sync.
+    // Credentials being *present* doesn't mean they're still *valid* — an expired
+    // OAuth token still satisfies hasCredentials, so without this check the badge
+    // stayed green even after re-authentication was required.
+    const failureReason = connector.lastTestStatus === 'failed'
+      ? connector.lastTestError
+      : (connector.lastTestStatus !== 'success' && connector.lastSyncStatus === 'failed')
+        ? connector.lastSyncError
+        : null;
+
+    if (failureReason) {
+      const isTokenIssue = /token|expired|401|unauthorized|re-authenticate/i.test(failureReason);
+      return (
+        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-red-900/30 text-red-400 font-medium border border-red-800/30">
+          <WifiOff size={8} /> {isTokenIssue ? 'Token Expired' : 'Connection Failed'}
+        </span>
+      );
+    }
+
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-900/30 text-emerald-400 font-medium border border-emerald-800/30">
         <Wifi size={8} /> Active

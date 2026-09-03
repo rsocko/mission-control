@@ -9,6 +9,7 @@ related:
   - "[Task Sync Integration](../reference/TASK-SYNC-INTEGRATION.md)"
   - "[Future Integrations](FUTURE-INTEGRATIONS.md)"
   - "[Kanban Column Mapping](KANBAN-COLUMN-MAPPING-DESIGN.md)"
+  - "[Home Assistant: Multi-Instance, Updates/Repairs, and Custom Actions](../proposed/home-assistant-multi-instance-expansion.md)"
 mockups: []
 ---
 
@@ -67,6 +68,16 @@ Fully implemented as `home-assistant` connector in `src/lib/connectors/home-assi
 - Built-in rules: door-open (high), low-battery (medium), motion (low), device-offline (medium)
 - Per-rule cooldown support (prevents alert fatigue)
 - **Surfaces:** Alerts panel, triage queue, notification badges
+
+**Proposed next phase:** see
+[Home Assistant: Multi-Instance, Updates/Repairs, and Custom Actions](../proposed/home-assistant-multi-instance-expansion.md)
+for multi-home support (already architecturally possible, needs UI/labeling
+polish), ingesting HA's Updates and Repairs subsystems (Repairs requires the
+WebSocket API — REST doesn't expose them), and HA-specific action buttons
+(install/skip update, ignore repair, dismiss) via the existing notification
+provider/action framework. Tracked in
+[#1756](https://github.com/rsocko/mission-control/issues/1756) —
+see also #133 and #627.
 
 ### 2. ✅ Document Intelligence — DONE
 

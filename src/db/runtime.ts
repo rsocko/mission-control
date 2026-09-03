@@ -5,6 +5,12 @@ import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
 import type { SemanticSourcePort } from '@/lib/semantic-index/source/contracts';
+import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
+import {
+  clearPostgresDurableAiRunRepository,
+  registerPostgresDurableAiRunRepository,
+} from '@/lib/ai/durable-runs/runtime';
+import { PostgresDurableAiRunRepository } from '@/lib/ai/durable-runs/postgres-adapter';
 import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
@@ -32,6 +38,7 @@ let postgresConnectorOperationLeaseRepository: ConnectorOperationLeaseRepository
 let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
 let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
 let postgresSemanticSourcePort: SemanticSourcePort | null = null;
+let postgresDurableAiRunRepository: DurableAiRunRepository | null = null;
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
   if (!postgresRepositories) {
@@ -184,6 +191,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ),
     }),
   },
+  notificationEntityLinking: new Proxy(
+    {} as WorkerPersistenceRepositories['notificationEntityLinking'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().notificationEntityLinking[
+          property as keyof WorkerPersistenceRepositories['notificationEntityLinking']
+        ]
+      ),
+    },
+  ),
   notificationEnrichment: new Proxy(
     {} as WorkerPersistenceRepositories['notificationEnrichment'],
     {
@@ -247,6 +264,8 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
   postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
+  postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
+  registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
 }
 
 export async function shutdownRuntimeDatabase(): Promise<void> {
@@ -259,6 +278,8 @@ export async function shutdownRuntimeDatabase(): Promise<void> {
     postgresKeywordSearchRepository = null;
     postgresSemanticIndexRepository = null;
     postgresSemanticSourcePort = null;
+    postgresDurableAiRunRepository = null;
+    clearPostgresDurableAiRunRepository();
   }
 }
 

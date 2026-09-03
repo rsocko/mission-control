@@ -12,6 +12,7 @@ import {
   SEMANTIC_RUN_KINDS,
   SEMANTIC_TERMINAL_INTENT_STATUSES,
   SEMANTIC_WRITABLE_IDENTITY_STATUSES,
+  MAX_SEMANTIC_INTENT_CLAIM_BATCH,
   SemanticIndexValidationError,
   type SemanticActivationGate,
   type SemanticActivationResult,
@@ -36,6 +37,7 @@ import {
   type SemanticIntentEnqueue,
   type SemanticIntentEnqueueResult,
   type SemanticIntentFailure,
+  type SemanticIntentLeaseFence,
   type SemanticIntentQueueMetrics,
   type SemanticIntentStatus,
   type SemanticQueryRequest,
@@ -98,6 +100,37 @@ async function execute(client: Client, text: string, params: unknown[] = []): Pr
   return result.rowCount ?? 0;
 }
 
+async function holdsIntentLease(
+  client: Client,
+  fence: SemanticIntentLeaseFence | undefined,
+  now: string,
+): Promise<boolean> {
+  if (!fence) return true;
+  const [held] = await query<{ held: number }>(
+    client,
+    `
+      SELECT 1 AS held FROM semantic_intents
+      WHERE id = $1 AND status = 'running' AND lease_owner = $2
+        AND attempt = $3 AND lease_expires_at > $4
+      FOR UPDATE
+    `,
+    [fence.intentId, fence.owner, fence.attempt, now],
+  );
+  return held !== undefined;
+}
+
+async function lockSemanticEntity(
+  client: Client,
+  indexId: string,
+  entityType: SemanticEntityType,
+  entityId: string,
+): Promise<void> {
+  await client.query(
+    `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+    [`mission-control-semantic-entity:${indexId}`, JSON.stringify([entityType, entityId])],
+  );
+}
+
 async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await pool.connect();
   try {
@@ -110,6 +143,7 @@ async function withTransaction<T>(pool: Pool, work: (client: PoolClient) => Prom
       await client.query('ROLLBACK');
       throw error;
     }
+
   } finally {
     client.release();
   }
@@ -183,6 +217,7 @@ const VECTOR_COLUMNS = `
 const INTENT_COLUMNS = `
   id,
   idempotency_key AS "idempotencyKey",
+  idempotency_key_version AS "idempotencyKeyVersion",
   index_id AS "indexId",
   kind,
   entity_type AS "entityType",
@@ -210,6 +245,7 @@ const RUN_COLUMNS = `
   index_id AS "indexId",
   kind,
   idempotency_key AS "idempotencyKey",
+  idempotency_key_version AS "idempotencyKeyVersion",
   status,
   checkpoint,
   processed_count AS "processedCount",
@@ -230,6 +266,84 @@ const RUN_COLUMNS = `
 const TERMINAL_INTENT_LIST = SEMANTIC_TERMINAL_INTENT_STATUSES
   .map((status) => `'${status}'`)
   .join(', ');
+
+const ENCODED_IDEMPOTENCY_KEY_PREFIX = 'mc-semantic-key:v1:';
+const ENCODED_IDEMPOTENCY_KEY_VERSION = 1;
+const LEGACY_IDEMPOTENCY_KEY_VERSION = 0;
+
+interface StoredIdempotencyKey {
+  idempotencyKey: string;
+  idempotencyKeyVersion: number;
+}
+
+type StoredSemanticIntent = SemanticIntent & StoredIdempotencyKey;
+type StoredSemanticRun = SemanticRun & StoredIdempotencyKey;
+
+function encodeIdempotencyKey(value: string): StoredIdempotencyKey {
+  // UTF-16LE preserves every JavaScript string code unit, including lone
+  // surrogates, so the boundary encoding is injective over the full contract.
+  return {
+    idempotencyKey:
+      `${ENCODED_IDEMPOTENCY_KEY_PREFIX}${Buffer.from(value, 'utf16le').toString('base64url')}`,
+    idempotencyKeyVersion: ENCODED_IDEMPOTENCY_KEY_VERSION,
+  };
+}
+
+function decodeIdempotencyKey(value: string, version: number): string {
+  if (version === LEGACY_IDEMPOTENCY_KEY_VERSION) return value;
+  if (
+    version !== ENCODED_IDEMPOTENCY_KEY_VERSION
+    || !value.startsWith(ENCODED_IDEMPOTENCY_KEY_PREFIX)
+  ) {
+    throw new Error(`Unsupported semantic idempotency key encoding version: ${version}`);
+  }
+  const encoded = value.slice(ENCODED_IDEMPOTENCY_KEY_PREFIX.length);
+  const decoded = Buffer.from(encoded, 'base64url').toString('utf16le');
+  if (encodeIdempotencyKey(decoded).idempotencyKey !== value) {
+    throw new Error('Stored semantic idempotency key is malformed');
+  }
+  return decoded;
+}
+
+function hydrateIntent(row: StoredSemanticIntent): SemanticIntent {
+  const { idempotencyKeyVersion, ...intent } = row;
+  return {
+    ...intent,
+    idempotencyKey: decodeIdempotencyKey(intent.idempotencyKey, idempotencyKeyVersion),
+  };
+}
+
+function hydrateRun(row: StoredSemanticRun): SemanticRun {
+  const { idempotencyKeyVersion, ...run } = row;
+  return {
+    ...run,
+    idempotencyKey: decodeIdempotencyKey(run.idempotencyKey, idempotencyKeyVersion),
+  };
+}
+
+/**
+ * Version 0 is the pre-Layer-6 raw TEXT representation. It is queried only
+ * when PostgreSQL can represent the logical key; embedded NUL keys have no
+ * possible legacy row. Version 1 is the injective encoding used for all new
+ * writes. Pairing version and value prevents a legacy raw prefix lookalike from
+ * ever being decoded or colliding with its encoded counterpart.
+ */
+function idempotencyKeyLookup(value: string): {
+  versions: number[];
+  values: string[];
+  encoded: StoredIdempotencyKey;
+} {
+  const encoded = encodeIdempotencyKey(value);
+  return {
+    versions: value.includes('\u0000')
+      ? [encoded.idempotencyKeyVersion]
+      : [encoded.idempotencyKeyVersion, LEGACY_IDEMPOTENCY_KEY_VERSION],
+    values: value.includes('\u0000')
+      ? [encoded.idempotencyKey]
+      : [encoded.idempotencyKey, value],
+    encoded,
+  };
+}
 
 const DOCUMENT_SUMMARY_COLUMNS = `
   d.id AS id,
@@ -1051,6 +1165,15 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
 
   async upsertDocument(document: SemanticDocumentWrite): Promise<SemanticDocumentWriteResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticDocumentWriteResult> => {
+      if (!await holdsIntentLease(client, document.leaseFence, document.now)) {
+        return { status: 'stale', document: null, reason: 'lease-lost' };
+      }
+      await lockSemanticEntity(
+        client,
+        document.indexId,
+        document.entityType,
+        document.entityId,
+      );
       const identity = await this.requireWritableIdentity(client, document.indexId);
       validateDocumentWrite(document, identity);
 
@@ -1205,8 +1328,13 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
     entityId: string;
     now: string;
     sourceUpdatedAt?: string;
+    leaseFence?: SemanticIntentLeaseFence;
   }): Promise<SemanticDocumentDeleteResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticDocumentDeleteResult> => {
+      if (!await holdsIntentLease(client, input.leaseFence, input.now)) {
+        return { status: 'lease-lost', removedVectors: 0 };
+      }
+      await lockSemanticEntity(client, input.indexId, input.entityType, input.entityId);
       const [existing] = await query<{ id: string; deletedAt: string | null }>(
         client,
         `
@@ -1317,6 +1445,9 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
 
   async upsertVector(vector: SemanticVectorWrite): Promise<SemanticVectorWriteResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticVectorWriteResult> => {
+      if (!await holdsIntentLease(client, vector.leaseFence, vector.now)) {
+        return { status: 'stale', reason: 'lease-lost' };
+      }
       const identity = await this.requireWritableIdentity(client, vector.indexId);
       const norm = validateVectorWrite(vector, identity);
 
@@ -1875,23 +2006,35 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       await this.requireWritableIdentity(client, intent.indexId);
       const availableAt = intent.availableAt ?? intent.now;
       const maxAttempts = intent.maxAttempts ?? getSemanticIntentMaxAttempts();
+      const keyLookup = idempotencyKeyLookup(intent.idempotencyKey);
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+        ['mission-control-semantic-intent', keyLookup.encoded.idempotencyKey],
+      );
 
-      const [queued] = await query<SemanticIntent>(
+      const storedQueued = await query<StoredSemanticIntent>(
         client,
         `
           SELECT ${INTENT_COLUMNS} FROM semantic_intents
-          WHERE idempotency_key = $1 AND status = 'queued'
+          WHERE status = 'queued'
+            AND (idempotency_key_version, idempotency_key) IN (
+              SELECT * FROM unnest($1::integer[], $2::text[])
+            )
           FOR UPDATE
         `,
-        [intent.idempotencyKey],
+        [keyLookup.versions, keyLookup.values],
       );
+      if (storedQueued.length > 1) {
+        throw new Error('Semantic intent has ambiguous legacy and encoded idempotency keys');
+      }
+      const queued = storedQueued[0] ? hydrateIntent(storedQueued[0]) : undefined;
 
       if (queued) {
         // Never regress a queued row to older work.
         if (queued.requestedAt > intent.requestedAt) {
           return { status: 'ignored', intent: queued };
         }
-        const [updated] = await query<SemanticIntent>(
+        const [updated] = await query<StoredSemanticIntent>(
           client,
           `
             UPDATE semantic_intents
@@ -1907,43 +2050,58 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
             intent.requestedAt, availableAt, maxAttempts, intent.now, queued.id,
           ],
         );
-        return { status: 'coalesced', intent: updated };
+        return { status: 'coalesced', intent: hydrateIntent(updated) };
       }
 
       // An in-flight attempt is never mutated. Newer work becomes its own queued
       // row so the running attempt can finish against the projection it claimed.
       const [running] = await query<{ id: string }>(
         client,
-        `SELECT id FROM semantic_intents WHERE idempotency_key = $1 AND status = 'running' LIMIT 1`,
-        [intent.idempotencyKey],
+        `SELECT id FROM semantic_intents
+         WHERE status = 'running'
+           AND (idempotency_key_version, idempotency_key) IN (
+             SELECT * FROM unnest($1::integer[], $2::text[])
+           )
+         LIMIT 1`,
+        [keyLookup.versions, keyLookup.values],
       );
 
-      const [created] = await query<SemanticIntent>(
+      const [created] = await query<StoredSemanticIntent>(
         client,
         `
           INSERT INTO semantic_intents (
-            id, idempotency_key, index_id, kind, entity_type, entity_id,
+            id, idempotency_key, idempotency_key_version, index_id, kind, entity_type, entity_id,
             source_revision, content_fingerprint, projection_version, requested_at,
             status, attempt, max_attempts, available_at, lease_owner,
             lease_expires_at, retry_after, last_error, outcome,
             created_at, updated_at, completed_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'queued', 0, $11, $12,
-                    NULL, NULL, NULL, NULL, NULL, $13, $13, NULL)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'queued', 0, $12, $13,
+                    NULL, NULL, NULL, NULL, NULL, $14, $14, NULL)
           RETURNING ${INTENT_COLUMNS}
         `,
         [
-          intent.id, intent.idempotencyKey, intent.indexId, intent.kind,
+          intent.id,
+          keyLookup.encoded.idempotencyKey,
+          keyLookup.encoded.idempotencyKeyVersion,
+          intent.indexId,
+          intent.kind,
           intent.entityType, intent.entityId, intent.sourceRevision ?? null,
           intent.contentFingerprint ?? null, intent.projectionVersion ?? null,
           intent.requestedAt, maxAttempts, availableAt, intent.now,
         ],
       );
-      return { status: running ? 'superseded' : 'enqueued', intent: created };
+      return {
+        status: running ? 'superseded' : 'enqueued',
+        intent: hydrateIntent(created),
+      };
     });
   }
 
   async claimIntents(request: SemanticIntentClaimRequest): Promise<SemanticIntent[]> {
-    const limit = Math.max(1, Math.trunc(request.limit) || 1);
+    const limit = Math.min(
+      MAX_SEMANTIC_INTENT_CLAIM_BATCH,
+      Math.max(1, Math.trunc(request.limit) || 1),
+    );
     if (request.entityTypes?.length === 0) return [];
     await this.recoverExpiredIntentLeases(request.now);
     return withTransaction(this.pool, async (client) => {
@@ -1952,7 +2110,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       // concurrent workers step over each other's locked rows instead of
       // blocking or double-claiming. The CTE aliases `id` so `RETURNING` is
       // unambiguous.
-      return query<SemanticIntent>(
+      const claimed = await query<StoredSemanticIntent>(
         client,
         `
           WITH candidates AS (
@@ -1973,12 +2131,18 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         `,
         [request.indexId, request.now, request.entityTypes ?? null, limit, request.owner, leaseExpiresAt],
       );
+      return claimed.map(hydrateIntent).sort((left, right) =>
+        left.requestedAt.localeCompare(right.requestedAt)
+        || left.createdAt.localeCompare(right.createdAt)
+        || left.id.localeCompare(right.id)
+      );
     });
   }
 
   async renewIntentLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean> {
@@ -1987,9 +2151,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       `
         UPDATE semantic_intents
         SET lease_expires_at = $1, updated_at = $2
-        WHERE id = $3 AND status = 'running' AND lease_owner = $4 AND lease_expires_at > $2
+        WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          AND attempt = $5 AND lease_expires_at > $2
       `,
-      [addMs(input.now, input.leaseMs), input.now, input.id, input.owner],
+      [addMs(input.now, input.leaseMs), input.now, input.id, input.owner, input.attempt],
     );
     return changed > 0;
   }
@@ -2002,23 +2167,26 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         SET status = 'succeeded', outcome = $1, completed_at = $2, updated_at = $2,
             lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
         WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          AND attempt = $5 AND lease_expires_at > $2
       `,
-      [input.outcome ?? 'succeeded', input.now, input.id, input.owner],
+      [input.outcome ?? 'succeeded', input.now, input.id, input.owner, input.attempt],
     );
     return changed > 0;
   }
 
   async failIntent(input: SemanticIntentFailure): Promise<SemanticIntentStatus | null> {
     return withTransaction(this.pool, async (client): Promise<SemanticIntentStatus | null> => {
-      const [row] = await query<SemanticIntent>(
+      const [storedRow] = await query<StoredSemanticIntent>(
         client,
         `
           SELECT ${INTENT_COLUMNS} FROM semantic_intents
           WHERE id = $1 AND status = 'running' AND lease_owner = $2
+            AND attempt = $3 AND lease_expires_at > $4
           FOR UPDATE
         `,
-        [input.id, input.owner],
+        [input.id, input.owner, input.attempt, input.now],
       );
+      const row = storedRow ? hydrateIntent(storedRow) : undefined;
       if (!row) return null;
 
       const next = resolveIntentFailureStatus({
@@ -2032,36 +2200,43 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         // A newer queued row for the same key already carries fresher work; this
         // attempt must not resurrect stale work (and cannot, given the partial
         // unique index on queued idempotency keys).
+        const keyLookup = idempotencyKeyLookup(row.idempotencyKey);
         const [superseding] = await query<{ id: string }>(
           client,
           `
             SELECT id FROM semantic_intents
-            WHERE idempotency_key = $1 AND status = 'queued' AND id <> $2
+            WHERE status = 'queued' AND id <> $3
+              AND (idempotency_key_version, idempotency_key) IN (
+                SELECT * FROM unnest($1::integer[], $2::text[])
+              )
             LIMIT 1
           `,
-          [row.idempotencyKey, row.id],
+          [keyLookup.versions, keyLookup.values, row.id],
         );
         if (superseding) {
-          await execute(
+          const changed = await execute(
             client,
             `
               UPDATE semantic_intents
               SET status = 'expired', outcome = 'superseded', last_error = $1,
                   completed_at = $2, updated_at = $2, lease_owner = NULL, lease_expires_at = NULL
-              WHERE id = $3
+              WHERE id = $3 AND status = 'running' AND lease_owner = $4
+                AND attempt = $5 AND lease_expires_at > $2
             `,
-            [input.error, input.now, row.id],
+            [input.error, input.now, row.id, input.owner, input.attempt],
           );
+          if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
           return 'expired';
         }
 
-        await execute(
+        const changed = await execute(
           client,
           `
             UPDATE semantic_intents
             SET status = 'queued', available_at = $1, retry_after = $2, last_error = $3,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = $4
-            WHERE id = $5
+            WHERE id = $5 AND status = 'running' AND lease_owner = $6
+              AND attempt = $7 AND lease_expires_at > $4
           `,
           [
             input.retryAfter ?? computeSemanticRetryAt(input.now, row.attempt),
@@ -2069,37 +2244,50 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
             input.error,
             input.now,
             row.id,
+            input.owner,
+            input.attempt,
           ],
         );
+        if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
         return 'queued';
       }
 
-      await execute(
+      const changed = await execute(
         client,
         `
           UPDATE semantic_intents
           SET status = $1, outcome = $2, last_error = $3, completed_at = $4,
               updated_at = $4, lease_owner = NULL, lease_expires_at = NULL
-          WHERE id = $5
+          WHERE id = $5 AND status = 'running' AND lease_owner = $6
+            AND attempt = $7 AND lease_expires_at > $4
         `,
-        [next, next === 'denied' ? 'denied' : 'permanent-failure', input.error, input.now, row.id],
+        [
+          next,
+          next === 'denied' ? 'denied' : 'permanent-failure',
+          input.error,
+          input.now,
+          row.id,
+          input.owner,
+          input.attempt,
+        ],
       );
+      if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
       return next;
     });
   }
 
   async getIntent(id: string): Promise<SemanticIntent | null> {
-    const [row] = await query<SemanticIntent>(
+    const [row] = await query<StoredSemanticIntent>(
       this.pool,
       `SELECT ${INTENT_COLUMNS} FROM semantic_intents WHERE id = $1`,
       [id],
     );
-    return row ?? null;
+    return row ? hydrateIntent(row) : null;
   }
 
   async recoverExpiredIntentLeases(now: string): Promise<{ requeued: number; expired: number }> {
     return withTransaction(this.pool, async (client) => {
-      const rows = await query<SemanticIntent>(
+      const storedRows = await query<StoredSemanticIntent>(
         client,
         `
           SELECT ${INTENT_COLUMNS} FROM semantic_intents
@@ -2108,45 +2296,68 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         `,
         [now],
       );
+      const rows = storedRows.map(hydrateIntent);
 
       let requeued = 0;
       let expired = 0;
       for (const row of rows) {
+        const keyLookup = idempotencyKeyLookup(row.idempotencyKey);
         const [superseding] = await query<{ id: string }>(
           client,
           `
             SELECT id FROM semantic_intents
-            WHERE idempotency_key = $1 AND status = 'queued' AND id <> $2
+            WHERE status = 'queued' AND id <> $3
+              AND (idempotency_key_version, idempotency_key) IN (
+                SELECT * FROM unnest($1::integer[], $2::text[])
+              )
             LIMIT 1
           `,
-          [row.idempotencyKey, row.id],
+          [keyLookup.versions, keyLookup.values, row.id],
         );
 
         if (!superseding && row.attempt < row.maxAttempts) {
-          requeued += await execute(
+          const changed = await execute(
             client,
             `
               UPDATE semantic_intents
               SET status = 'queued', available_at = $1, lease_owner = NULL,
                   lease_expires_at = NULL, last_error = 'Lease expired before completion',
                   updated_at = $2
-              WHERE id = $3 AND status = 'running'
+              WHERE id = $3 AND status = 'running' AND attempt = $4
+                AND lease_owner = $5 AND lease_expires_at <= $2
             `,
-            [computeSemanticRetryAt(now, row.attempt), now, row.id],
+            [
+              computeSemanticRetryAt(now, row.attempt),
+              now,
+              row.id,
+              row.attempt,
+              row.leaseOwner,
+            ],
           );
+          if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during recovery`);
+          requeued += changed;
           continue;
         }
 
-        expired += await execute(
+        const changed = await execute(
           client,
           `
             UPDATE semantic_intents
             SET status = 'expired', outcome = $1, last_error = 'Lease expired before completion',
                 completed_at = $2, updated_at = $2, lease_owner = NULL, lease_expires_at = NULL
-            WHERE id = $3 AND status = 'running'
+            WHERE id = $3 AND status = 'running' AND attempt = $4
+              AND lease_owner = $5 AND lease_expires_at <= $2
           `,
-          [superseding ? 'superseded' : 'attempts-exhausted', now, row.id],
+          [
+            superseding ? 'superseded' : 'attempts-exhausted',
+            now,
+            row.id,
+            row.attempt,
+            row.leaseOwner,
+          ],
         );
+        if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during recovery`);
+        expired += changed;
       }
       return { requeued, expired };
     });
@@ -2169,11 +2380,24 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
   async createRun(run: SemanticRunCreate): Promise<SemanticRunCreateResult> {
     return withTransaction(this.pool, async (client): Promise<SemanticRunCreateResult> => {
       await this.requireIdentity(client, run.indexId);
-      const [existing] = await query<SemanticRun>(
-        client,
-        `SELECT ${RUN_COLUMNS} FROM semantic_runs WHERE idempotency_key = $1 FOR UPDATE`,
-        [run.idempotencyKey],
+      const keyLookup = idempotencyKeyLookup(run.idempotencyKey);
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+        ['mission-control-semantic-run', keyLookup.encoded.idempotencyKey],
       );
+      const storedExisting = await query<StoredSemanticRun>(
+        client,
+        `SELECT ${RUN_COLUMNS} FROM semantic_runs
+         WHERE (idempotency_key_version, idempotency_key) IN (
+           SELECT * FROM unnest($1::integer[], $2::text[])
+         )
+         FOR UPDATE`,
+        [keyLookup.versions, keyLookup.values],
+      );
+      if (storedExisting.length > 1) {
+        throw new Error('Semantic run has ambiguous legacy and encoded idempotency keys');
+      }
+      const existing = storedExisting[0] ? hydrateRun(storedExisting[0]) : undefined;
 
       let checkpoint = run.checkpoint ?? null;
       if (existing) {
@@ -2187,30 +2411,45 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         // checkpoint is carried forward so the replacement resumes instead of
         // restarting the corpus.
         checkpoint = run.checkpoint ?? existing.checkpoint;
+        const superseded = encodeIdempotencyKey(
+          supersededRunIdempotencyKey(run.idempotencyKey, existing.id),
+        );
         await execute(
           client,
-          `UPDATE semantic_runs SET idempotency_key = $1, updated_at = $2 WHERE id = $3`,
-          [supersededRunIdempotencyKey(run.idempotencyKey, existing.id), run.now, existing.id],
+          `UPDATE semantic_runs
+           SET idempotency_key = $1, idempotency_key_version = $2, updated_at = $3
+           WHERE id = $4`,
+          [
+            superseded.idempotencyKey,
+            superseded.idempotencyKeyVersion,
+            run.now,
+            existing.id,
+          ],
         );
       }
 
-      const [created] = await query<SemanticRun>(
+      const [created] = await query<StoredSemanticRun>(
         client,
         `
           INSERT INTO semantic_runs (
-            id, index_id, kind, idempotency_key, status, checkpoint,
+            id, index_id, kind, idempotency_key, idempotency_key_version, status, checkpoint,
             processed_count, failed_count, skipped_count, attempt, max_attempts,
             available_at, lease_owner, lease_expires_at, error_message,
             created_at, updated_at, started_at, completed_at
-          ) VALUES ($1, $2, $3, $4, 'queued', $5, 0, 0, 0, 0, $6, $7, NULL, NULL, NULL, $8, $8, NULL, NULL)
+          ) VALUES ($1, $2, $3, $4, $5, 'queued', $6, 0, 0, 0, 0, $7, $8, NULL, NULL, NULL, $9, $9, NULL, NULL)
           RETURNING ${RUN_COLUMNS}
         `,
         [
-          run.id, run.indexId, run.kind, run.idempotencyKey, checkpoint,
+          run.id,
+          run.indexId,
+          run.kind,
+          keyLookup.encoded.idempotencyKey,
+          keyLookup.encoded.idempotencyKeyVersion,
+          checkpoint,
           run.maxAttempts ?? getSemanticRunMaxAttempts(), run.availableAt ?? run.now, run.now,
         ],
       );
-      return { status: 'created', run: created };
+      return { status: 'created', run: hydrateRun(created) };
     });
   }
 
@@ -2228,44 +2467,86 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         params.push(request.kinds);
         filters += ` AND r.kind = ANY($${params.length}::text[])`;
       }
-      params.push(request.owner);
-      const ownerParam = `$${params.length}`;
-      params.push(leaseExpiresAt);
-      const leaseParam = `$${params.length}`;
-
-      const [row] = await query<SemanticRun>(
+      const [peeked] = await query<StoredSemanticRun>(
         client,
         `
-          WITH candidate AS (
-            SELECT r.id AS candidate_id FROM semantic_runs r
-            WHERE r.status = 'queued' AND r.available_at <= $1
-              AND NOT EXISTS (
-                SELECT 1 FROM semantic_runs active
-                WHERE active.index_id = r.index_id AND active.kind = r.kind
-                  AND active.status = 'running'
-              )
-              ${filters}
-            ORDER BY r.available_at ASC, r.created_at ASC, r.id ASC
-            LIMIT 1
-            FOR UPDATE SKIP LOCKED
-          )
-          UPDATE semantic_runs
-          SET status = 'running', lease_owner = ${ownerParam},
-              lease_expires_at = ${leaseParam}, started_at = COALESCE(started_at, $1),
-              error_message = NULL, updated_at = $1
-          FROM candidate
-          WHERE semantic_runs.id = candidate.candidate_id AND semantic_runs.status = 'queued'
-          RETURNING ${RUN_COLUMNS}
+          SELECT ${RUN_COLUMNS} FROM semantic_runs r
+          WHERE r.status = 'queued' AND r.available_at <= $1
+            AND NOT EXISTS (
+              SELECT 1 FROM semantic_runs active
+              WHERE active.index_id = r.index_id AND active.kind = r.kind
+                AND active.status = 'running'
+            )
+            ${filters}
+          ORDER BY r.available_at ASC, r.created_at ASC, r.id ASC
+          LIMIT 1
         `,
         params,
       );
-      return row ?? null;
+      if (!peeked) return null;
+
+      // Serialize one identity/kind before taking a row lock. Locking the row
+      // first would let a concurrent caller skip the FIFO head and race the
+      // second row for the advisory lock.
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))`,
+        [`mission-control-semantic-run:${peeked.indexId}`, peeked.kind],
+      );
+      const [active] = await query<{ id: string }>(
+        client,
+        `
+          SELECT id FROM semantic_runs
+          WHERE index_id = $1 AND kind = $2 AND status = 'running'
+          LIMIT 1
+        `,
+        [peeked.indexId, peeked.kind],
+      );
+      if (active) return null;
+      const [candidate] = await query<StoredSemanticRun>(
+        client,
+        `
+          SELECT ${RUN_COLUMNS} FROM semantic_runs
+          WHERE index_id = $1 AND kind = $2
+            AND status = 'queued' AND available_at <= $3
+          ORDER BY available_at ASC, created_at ASC, id ASC
+          LIMIT 1
+          FOR UPDATE SKIP LOCKED
+        `,
+        [peeked.indexId, peeked.kind, request.now],
+      );
+      if (!candidate) return null;
+      const [storedRow] = await query<StoredSemanticRun>(
+        client,
+        `
+          UPDATE semantic_runs
+          SET status = 'running', lease_owner = $1,
+              lease_expires_at = $2, started_at = COALESCE(started_at, $3),
+              error_message = NULL, updated_at = $3
+          WHERE id = $4 AND status = 'queued'
+            AND NOT EXISTS (
+              SELECT 1 FROM semantic_runs active
+              WHERE active.index_id = $5 AND active.kind = $6
+                AND active.status = 'running' AND active.id <> $4
+            )
+          RETURNING ${RUN_COLUMNS}
+        `,
+        [
+          request.owner,
+          leaseExpiresAt,
+          request.now,
+          candidate.id,
+          candidate.indexId,
+          candidate.kind,
+        ],
+      );
+      return storedRow ? hydrateRun(storedRow) : null;
     });
   }
 
   async renewRunLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean> {
@@ -2274,9 +2555,10 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       `
         UPDATE semantic_runs
         SET lease_expires_at = $1, updated_at = $2
-        WHERE id = $3 AND status = 'running' AND lease_owner = $4 AND lease_expires_at > $2
+        WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          AND attempt = $5 AND lease_expires_at > $2
       `,
-      [addMs(input.now, input.leaseMs), input.now, input.id, input.owner],
+      [addMs(input.now, input.leaseMs), input.now, input.id, input.owner, input.attempt],
     );
     return changed > 0;
   }
@@ -2293,6 +2575,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
             lease_expires_at = COALESCE($5::text, lease_expires_at),
             updated_at = $6
         WHERE id = $7 AND status = 'running' AND lease_owner = $8
+          AND attempt = $9 AND lease_expires_at > $6
       `,
       [
         input.checkpoint ?? null,
@@ -2303,6 +2586,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         input.now,
         input.id,
         input.owner,
+        input.attempt,
       ],
     );
     return changed > 0;
@@ -2311,6 +2595,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
   async releaseRun(input: {
     id: string;
     owner: string;
+    attempt: number;
     now: string;
     availableAt?: string;
   }): Promise<boolean> {
@@ -2321,8 +2606,9 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         SET status = 'queued', available_at = $1, lease_owner = NULL,
             lease_expires_at = NULL, updated_at = $2
         WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          AND attempt = $5 AND lease_expires_at > $2
       `,
-      [input.availableAt ?? input.now, input.now, input.id, input.owner],
+      [input.availableAt ?? input.now, input.now, input.id, input.owner, input.attempt],
     );
     return changed > 0;
   }
@@ -2335,23 +2621,33 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         SET status = $1, checkpoint = COALESCE($2::text, checkpoint), completed_at = $3,
             updated_at = $3, lease_owner = NULL, lease_expires_at = NULL
         WHERE id = $4 AND status = 'running' AND lease_owner = $5
+          AND attempt = $6 AND lease_expires_at > $3
       `,
-      [input.status ?? 'succeeded', input.checkpoint ?? null, input.now, input.id, input.owner],
+      [
+        input.status ?? 'succeeded',
+        input.checkpoint ?? null,
+        input.now,
+        input.id,
+        input.owner,
+        input.attempt,
+      ],
     );
     return changed > 0;
   }
 
   async failRun(input: SemanticRunFailure): Promise<SemanticRunStatus | null> {
     return withTransaction(this.pool, async (client): Promise<SemanticRunStatus | null> => {
-      const [row] = await query<SemanticRun>(
+      const [storedRow] = await query<StoredSemanticRun>(
         client,
         `
           SELECT ${RUN_COLUMNS} FROM semantic_runs
           WHERE id = $1 AND status = 'running' AND lease_owner = $2
+            AND attempt = $3 AND lease_expires_at > $4
           FOR UPDATE
         `,
-        [input.id, input.owner],
+        [input.id, input.owner, input.attempt, input.now],
       );
+      const row = storedRow ? hydrateRun(storedRow) : undefined;
       if (!row) return null;
 
       // `attempt` counts *failures*, not claims: a run that yields its slice and
@@ -2359,13 +2655,14 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
       // here — atomically with the state transition that spends it.
       const attempt = row.attempt + 1;
       if (!input.terminal && attempt < row.maxAttempts) {
-        await execute(
+        const changed = await execute(
           client,
           `
             UPDATE semantic_runs
             SET status = 'queued', attempt = $1, available_at = $2, error_message = $3,
                 lease_owner = NULL, lease_expires_at = NULL, updated_at = $4
-            WHERE id = $5
+            WHERE id = $5 AND status = 'running' AND lease_owner = $6
+              AND attempt = $7 AND lease_expires_at > $4
           `,
           [
             attempt,
@@ -2373,37 +2670,42 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
             input.error,
             input.now,
             row.id,
+            input.owner,
+            input.attempt,
           ],
         );
+        if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during failure`);
         return 'queued';
       }
 
-      await execute(
+      const changed = await execute(
         client,
         `
           UPDATE semantic_runs
           SET status = 'failed', attempt = $1, error_message = $2, completed_at = $3, updated_at = $3,
               lease_owner = NULL, lease_expires_at = NULL
-          WHERE id = $4
+          WHERE id = $4 AND status = 'running' AND lease_owner = $5
+            AND attempt = $6 AND lease_expires_at > $3
         `,
-        [attempt, input.error, input.now, row.id],
+        [attempt, input.error, input.now, row.id, input.owner, input.attempt],
       );
+      if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during failure`);
       return 'failed';
     });
   }
 
   async getRun(id: string): Promise<SemanticRun | null> {
-    const [row] = await query<SemanticRun>(
+    const [row] = await query<StoredSemanticRun>(
       this.pool,
       `SELECT ${RUN_COLUMNS} FROM semantic_runs WHERE id = $1`,
       [id],
     );
-    return row ?? null;
+    return row ? hydrateRun(row) : null;
   }
 
   async recoverExpiredRunLeases(now: string): Promise<{ requeued: number; expired: number }> {
     return withTransaction(this.pool, async (client) => {
-      const rows = await query<SemanticRun>(
+      const storedRows = await query<StoredSemanticRun>(
         client,
         `
           SELECT ${RUN_COLUMNS} FROM semantic_runs
@@ -2412,6 +2714,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         `,
         [now],
       );
+      const rows = storedRows.map(hydrateRun);
 
       let requeued = 0;
       let expired = 0;
@@ -2422,29 +2725,42 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         if (attempt < row.maxAttempts) {
           // The checkpoint is deliberately preserved so recovery resumes rather
           // than restarting the backfill from the beginning.
-          requeued += await execute(
+          const changed = await execute(
             client,
             `
               UPDATE semantic_runs
               SET status = 'queued', attempt = $1, available_at = $2, lease_owner = NULL,
                   lease_expires_at = NULL, error_message = 'Lease expired before completion',
                   updated_at = $3
-              WHERE id = $4 AND status = 'running'
+              WHERE id = $4 AND status = 'running' AND attempt = $5
+                AND lease_owner = $6 AND lease_expires_at <= $3
             `,
-            [attempt, computeSemanticRetryAt(now, attempt), now, row.id],
+            [
+              attempt,
+              computeSemanticRetryAt(now, attempt),
+              now,
+              row.id,
+              row.attempt,
+              row.leaseOwner,
+            ],
           );
+          if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during recovery`);
+          requeued += changed;
           continue;
         }
-        expired += await execute(
+        const changed = await execute(
           client,
           `
             UPDATE semantic_runs
             SET status = 'expired', attempt = $1, error_message = 'Lease expired before completion',
                 completed_at = $2, updated_at = $2, lease_owner = NULL, lease_expires_at = NULL
-            WHERE id = $3 AND status = 'running'
+            WHERE id = $3 AND status = 'running' AND attempt = $4
+              AND lease_owner = $5 AND lease_expires_at <= $2
           `,
-          [attempt, now, row.id],
+          [attempt, now, row.id, row.attempt, row.leaseOwner],
         );
+        if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during recovery`);
+        expired += changed;
       }
       return { requeued, expired };
     });
@@ -2536,7 +2852,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
   private async latestRunProgress(indexId: string): Promise<SemanticRunProgress[]> {
     const progress: SemanticRunProgress[] = [];
     for (const kind of SEMANTIC_RUN_KINDS) {
-      const [run] = await query<SemanticRun>(
+      const [run] = await query<StoredSemanticRun>(
         this.pool,
         `
           SELECT ${RUN_COLUMNS} FROM semantic_runs
@@ -2546,7 +2862,7 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         `,
         [indexId, kind],
       );
-      if (run) progress.push(runProgress(run));
+      if (run) progress.push(runProgress(hydrateRun(run)));
     }
     return progress;
   }

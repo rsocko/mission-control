@@ -45,6 +45,7 @@ describe('SemanticIndexWorker', () => {
     isEnabled: () => boolean;
     config: Partial<ReturnType<typeof getSemanticWorkerConfig>>;
     owner: string;
+    onRunCheckpointed: ConstructorParameters<typeof SemanticIndexWorker>[0]['onRunCheckpointed'];
   }> = {}) {
     return new SemanticIndexWorker({
       repository: overrides.repository ?? harness.repository,
@@ -54,6 +55,7 @@ describe('SemanticIndexWorker', () => {
       config: { ...harness.config, ...overrides.config },
       isEnabled: overrides.isEnabled ?? (() => true),
       owner: overrides.owner ?? 'worker-under-test',
+      onRunCheckpointed: overrides.onRunCheckpointed,
     });
   }
 
@@ -78,6 +80,27 @@ describe('SemanticIndexWorker', () => {
       await worker.stop();
       expect(worker.isRunning).toBe(false);
       expect(await harness.repository.listIdentities()).toEqual([]);
+    });
+
+    it('wakes once activated without waiting for the dormant poll interval', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-activation' }));
+      let enabled = false;
+      const worker = createWorker({
+        isEnabled: () => enabled,
+        config: { pollIntervalMs: 60_000 },
+      });
+
+      worker.start();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(await harness.repository.listIdentities()).toEqual([]);
+
+      enabled = true;
+      worker.wake();
+      worker.wake();
+      await vi.waitFor(async () => {
+        expect(await harness.repository.listIdentities()).toHaveLength(1);
+      });
+      await worker.stop();
     });
   });
 
@@ -292,6 +315,61 @@ describe('SemanticIndexWorker', () => {
       expect(await harness.repository.getActiveIdentity()).not.toBeNull();
       expect(matches).not.toHaveBeenCalled();
     });
+
+    it('never promotes a backfill whose fenced checkpoint was rejected', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-1' }));
+      const activate = vi.spyOn(harness.repository, 'activateIdentity');
+      const checkpoint = vi.spyOn(harness.repository, 'checkpointRun').mockImplementation(async () => {
+        // Ignore the maintenance-time readiness evaluation that precedes the
+        // run; no activation may occur after checkpoint ownership is rejected.
+        activate.mockClear();
+        return false;
+      });
+      const onRunCheckpointed = vi.fn();
+
+      await createWorker({ onRunCheckpointed }).runCycle();
+
+      expect(checkpoint).toHaveBeenCalled();
+      expect(onRunCheckpointed).not.toHaveBeenCalled();
+      expect(activate).not.toHaveBeenCalled();
+      expect((await harness.repository.listIdentities())[0]).toMatchObject({ status: 'ready' });
+    });
+
+    it('invokes the packaged lifecycle hook only after a durable run checkpoint', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-1' }));
+      const onRunCheckpointed = vi.fn();
+
+      await createWorker({ onRunCheckpointed }).runCycle();
+
+      expect(onRunCheckpointed).toHaveBeenCalledOnce();
+      expect(onRunCheckpointed.mock.calls[0][0]).toMatchObject({ kind: 'backfill' });
+      expect(onRunCheckpointed.mock.calls[0][1]).toMatchObject({ status: 'completed' });
+    });
+
+    it('cannot roll back a durable checkpoint when the packaged lifecycle hook fails', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-1' }));
+      harness.source.putTask(taskFixture({ id: 'task-2' }));
+      const failure = new Error('checkpoint observer failed');
+      let checkpointedRunId: string | undefined;
+      const worker = createWorker({
+        config: { runPageSize: 1 },
+        onRunCheckpointed: (run) => {
+          checkpointedRunId = run.id;
+          throw failure;
+        },
+      });
+
+      await expect(worker.runCycle()).rejects.toBe(failure);
+
+      expect(checkpointedRunId).toBeDefined();
+      if (!checkpointedRunId) throw new Error('Expected checkpoint hook to observe a run');
+      const run = await harness.repository.getRun(checkpointedRunId);
+      expect(run).toMatchObject({
+        status: 'running',
+        checkpoint: null,
+        processedCount: 2,
+      });
+    });
   });
 
   // ─── Leases ─────────────────────────────────────────────────────────
@@ -342,6 +420,28 @@ describe('SemanticIndexWorker', () => {
       const report = await recovering.runCycle();
       expect(report.leasesRecovered).toBeGreaterThan(0);
       expect((await harness.repository.getIntent(claimed.id))?.status).not.toBe('running');
+    });
+
+    it('aborts in-flight intent work when its heartbeat loses the lease', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-1' }));
+      const worker = createWorker({ config: { heartbeatIntervalMs: 1 } });
+      await worker.runCycle();
+      vi.spyOn(harness.repository, 'renewIntentLease').mockResolvedValue(false);
+      let aborted = false;
+      vi.spyOn(harness.embeddings, 'embed').mockImplementation(
+        async (request) => new Promise((resolve) => {
+          request.signal?.addEventListener('abort', () => {
+            aborted = true;
+            resolve({ status: 'aborted', reason: 'aborted', retryAfter: null });
+          }, { once: true });
+        }),
+      );
+
+      await worker.runCycle();
+
+      expect(aborted).toBe(true);
+      const identity = (await harness.repository.listIdentities())[0];
+      expect(await harness.repository.getVector(identity.id, 'task', 'task-1')).toBeNull();
     });
 
     it('stops the intent when its duration budget elapses', async () => {

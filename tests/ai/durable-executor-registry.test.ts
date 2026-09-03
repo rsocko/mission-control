@@ -17,11 +17,15 @@ import {
 } from '@/lib/ai/copilot-run-events';
 import {
   createDurableAiExecutorRegistry,
+  DURABLE_AI_ENQUEUEABLE_ROUTES as REGISTRY_ENQUEUEABLE_ROUTES,
   shutdownDurableAiExecutorRegistry,
   validateDurableAiExecutorRegistry,
   type DirectCopilotExecutorLifecycle,
   type DurableAiExecutorRegistryDependencies,
 } from '@/lib/ai/durable-runs/executor-registry';
+import {
+  DURABLE_AI_ENQUEUEABLE_ROUTES as CONTRACT_ENQUEUEABLE_ROUTES,
+} from '@/lib/ai/durable-runs/route-contract';
 import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
 import {
   CopilotSessionLifecycleManager,
@@ -241,6 +245,11 @@ function executionContext(
 
 describe('durable AI executor registry', () => {
   it('is exhaustive and rejects empty, missing, extra, or incomplete coverage', () => {
+    expect(Object.isFrozen(CONTRACT_ENQUEUEABLE_ROUTES)).toBe(true);
+    expect(REGISTRY_ENQUEUEABLE_ROUTES).toBe(CONTRACT_ENQUEUEABLE_ROUTES);
+    expect([
+      ...createDurableAiExecutorRegistry(dependencies(lifecycle())).keys(),
+    ]).toEqual([...CONTRACT_ENQUEUEABLE_ROUTES]);
     expect(() => validateDurableAiExecutorRegistry(new Map())).toThrow(/must not be empty/);
     expect(() => validateDurableAiExecutorRegistry(
       new Map([['unexpected', { async execute() {} }]]),
@@ -277,6 +286,46 @@ describe('durable AI executor registry', () => {
     await detached.execute(executionContext());
     expect(detachedLifecycle.resumeRun).toHaveBeenCalledWith('run-a');
     expect(detachedLifecycle.createRun).not.toHaveBeenCalled();
+  });
+
+  it('recovers an expired attached idle session before resuming it', async () => {
+    let current = lifecycleRecord({
+      ownerId: 'worker-before-restart',
+      leaseExpiresAt: 0,
+    });
+    const manager = lifecycle(current);
+    vi.mocked(manager.getRun).mockImplementation(async () => current);
+    vi.mocked(manager.recoverExpiredWorkerLeases).mockImplementation(async () => {
+      current = lifecycleRecord({
+        connection: 'detached',
+        ownerId: 'worker-a',
+      });
+      return [current];
+    });
+    vi.mocked(manager.resumeRun).mockImplementation(async () => {
+      current = lifecycleRecord({ ownerId: 'worker-a' });
+      return current;
+    });
+    vi.mocked(manager.completeRun).mockImplementation(async () => {
+      current = lifecycleRecord({
+        state: 'cleaned_up',
+        connection: 'detached',
+        terminalState: 'completed',
+        providerSessionId: undefined,
+        ownerId: 'worker-a',
+      });
+      return current;
+    });
+    const executor = createDurableAiExecutorRegistry(dependencies(manager))
+      .get(COPILOT_EXECUTION_ROUTE)!;
+
+    await expect(executor.execute(executionContext())).resolves.toMatchObject({
+      provider: COPILOT_PROVIDER,
+      fallbackState: 'not_used',
+    });
+    expect(manager.recoverExpiredWorkerLeases).toHaveBeenCalledOnce();
+    expect(manager.resumeRun).toHaveBeenCalledWith('run-a');
+    expect(manager.completeRun).toHaveBeenCalledWith('run-a');
   });
 
   it('fences stale cancellation before touching the Copilot lifecycle', async () => {

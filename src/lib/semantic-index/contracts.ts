@@ -129,11 +129,18 @@ export interface SemanticIndexDocument {
   sourceUpdatedAt: string;
 }
 
+export interface SemanticIntentLeaseFence {
+  intentId: string;
+  owner: string;
+  attempt: number;
+}
+
 /** A document write, addressed to a specific index identity. */
 export interface SemanticDocumentWrite extends SemanticIndexDocument {
   id: string;
   indexId: string;
   now: string;
+  leaseFence?: SemanticIntentLeaseFence;
 }
 
 /** A persisted document row. */
@@ -157,7 +164,8 @@ export type SemanticDocumentWriteStatus = 'created' | 'updated' | 'unchanged' | 
 export type SemanticStaleReason =
   | 'older-source-update'
   | 'document-missing'
-  | 'document-superseded';
+  | 'document-superseded'
+  | 'lease-lost';
 
 export interface SemanticDocumentWriteResult {
   status: SemanticDocumentWriteStatus;
@@ -167,7 +175,7 @@ export interface SemanticDocumentWriteResult {
 }
 
 export interface SemanticDocumentDeleteResult {
-  status: 'deleted' | 'already-deleted' | 'missing';
+  status: 'deleted' | 'already-deleted' | 'missing' | 'lease-lost';
   removedVectors: number;
 }
 
@@ -203,6 +211,7 @@ export interface SemanticVectorWrite {
   intentId: string | null;
   expiresAt?: string | null;
   now: string;
+  leaseFence?: SemanticIntentLeaseFence;
 }
 
 export interface SemanticVectorRecord {
@@ -497,9 +506,12 @@ export interface SemanticIntentClaimRequest {
   now: string;
 }
 
+export const MAX_SEMANTIC_INTENT_CLAIM_BATCH = 200;
+
 export interface SemanticIntentFailure {
   id: string;
   owner: string;
+  attempt: number;
   error: string;
   now: string;
   /** Terminal policy denial; skips retry regardless of attempts remaining. */
@@ -513,6 +525,7 @@ export interface SemanticIntentFailure {
 export interface SemanticIntentCompletion {
   id: string;
   owner: string;
+  attempt: number;
   now: string;
   /** Free-form terminal detail, e.g. `embedded`, `unchanged`, `deleted`. */
   outcome?: string | null;
@@ -625,6 +638,7 @@ export interface SemanticRunClaimRequest {
 export interface SemanticRunCheckpoint {
   id: string;
   owner: string;
+  attempt: number;
   now: string;
   checkpoint?: string | null;
   processedDelta?: number;
@@ -637,6 +651,7 @@ export interface SemanticRunCheckpoint {
 export interface SemanticRunFailure {
   id: string;
   owner: string;
+  attempt: number;
   error: string;
   now: string;
   terminal?: boolean;
@@ -646,6 +661,7 @@ export interface SemanticRunFailure {
 export interface SemanticRunCompletion {
   id: string;
   owner: string;
+  attempt: number;
   now: string;
   status?: Extract<SemanticRunStatus, 'succeeded' | 'cancelled'>;
   checkpoint?: string | null;
@@ -959,6 +975,7 @@ export interface SemanticIndexRepository {
     entityId: string;
     now: string;
     sourceUpdatedAt?: string;
+    leaseFence?: SemanticIntentLeaseFence;
   }): Promise<SemanticDocumentDeleteResult>;
   /** Tombstones documents past `retainUntil` and removes their vectors. */
   expireDocuments(input: { now: string; indexId?: string; limit?: number }): Promise<{
@@ -988,6 +1005,7 @@ export interface SemanticIndexRepository {
   renewIntentLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean>;
@@ -1005,12 +1023,19 @@ export interface SemanticIndexRepository {
   renewRunLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean>;
   checkpointRun(input: SemanticRunCheckpoint): Promise<boolean>;
   /** Yields a claimed run back to `queued`, preserving its checkpoint. */
-  releaseRun(input: { id: string; owner: string; now: string; availableAt?: string }): Promise<boolean>;
+  releaseRun(input: {
+    id: string;
+    owner: string;
+    attempt: number;
+    now: string;
+    availableAt?: string;
+  }): Promise<boolean>;
   completeRun(input: SemanticRunCompletion): Promise<boolean>;
   failRun(input: SemanticRunFailure): Promise<SemanticRunStatus | null>;
   getRun(id: string): Promise<SemanticRun | null>;

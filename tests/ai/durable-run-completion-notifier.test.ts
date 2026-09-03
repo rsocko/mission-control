@@ -3,10 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
-const createNotification = vi.fn(async (input: { dedupeKey: string }) => {
-  void input;
-});
-vi.mock('@/lib/notifications/service', () => ({ createNotification }));
+const ingestNotifications = vi.fn(async () => []);
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    execution: {
+      notifications: {
+        ingest: ingestNotifications,
+      },
+    },
+  }),
+}));
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'mc-durable-ai-notifier-'));
 process.env.MC_DB_PATH = join(testDirectory, 'runs.db');
@@ -51,18 +57,20 @@ describe('durable AI run completion notifier', () => {
     await notifyDurableAiRunCompletion(terminal);
     await notifyDurableAiRunCompletion(terminal);
 
-    expect(createNotification).toHaveBeenCalledTimes(2);
-    expect(createNotification).toHaveBeenNthCalledWith(
+    expect(ingestNotifications).toHaveBeenCalledTimes(2);
+    expect(ingestNotifications).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({
-        dedupeKey: 'ai-run:completion-notifier-run:cancelled',
-        metadata: expect.objectContaining({
-          runId: 'completion-notifier-run',
-          status: 'cancelled',
+      [expect.objectContaining({
+        input: expect.objectContaining({
+          dedupeKey: 'ai-run:completion-notifier-run:cancelled',
+          metadata: expect.objectContaining({
+            runId: 'completion-notifier-run',
+            status: 'cancelled',
+          }),
         }),
-      }),
+      })],
     );
-    expect(createNotification.mock.calls[1]?.[0].dedupeKey)
-      .toBe(createNotification.mock.calls[0]?.[0].dedupeKey);
+    expect(ingestNotifications.mock.calls[1]?.[0]?.[0].input.dedupeKey)
+      .toBe(ingestNotifications.mock.calls[0]?.[0]?.[0].input.dedupeKey);
   });
 });

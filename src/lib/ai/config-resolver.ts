@@ -7,17 +7,16 @@ import {
   validateAIRoutingPolicy,
 } from './sensitivity-policy';
 import {
+  DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL,
+  DEFAULT_EMBEDDING_PROVIDER,
   parseSavedAIProviderConfig,
-  resolveAICompletionConfig,
-  resolveAIProviderApiKey,
-  resolveAIProviderBaseUrl,
+  resolveAIConfig,
 } from './config-values';
 
 const SETTINGS_KEY = 'ai_provider_config';
 const ROUTING_POLICY_SETTINGS_KEY = 'ai_routing_policy';
 const CONFIG_CACHE_TTL = 60_000;
-export const DEFAULT_EMBEDDING_PROVIDER = 'bifrost';
-export const DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL = 'azure/text-embedding-3-small';
+export { DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL, DEFAULT_EMBEDDING_PROVIDER };
 
 let cachedConfig: ResolvedAIConfig | null = null;
 let cachedRoutingPolicy: AIRoutingPolicyConfig | null = null;
@@ -36,30 +35,6 @@ function loadSavedAIProviderConfigSync(): SavedAIProviderConfig {
   }
 }
 
-function getDefaultEmbeddingModel(provider: string) {
-  if (provider === 'ollama') return 'nomic-embed-text';
-  if (provider === 'bifrost') return DEFAULT_BIFROST_AZURE_EMBEDDING_MODEL;
-  return 'text-embedding-3-small';
-}
-
-function resolveSemanticSearchEnabled(saved: SavedAIProviderConfig) {
-  if (typeof saved.semanticSearchEnabled === 'boolean') {
-    return saved.semanticSearchEnabled;
-  }
-  return /^(1|true|yes|on)$/i.test(process.env.AI_SEMANTIC_SEARCH_ENABLED?.trim() ?? '');
-}
-
-function resolveHoustonMemoryEnabled(saved: SavedAIProviderConfig) {
-  if (typeof saved.houstonMemoryEnabled === 'boolean') return saved.houstonMemoryEnabled;
-  return /^(1|true|yes|on)$/i.test(process.env.AI_HOUSTON_MEMORY_ENABLED?.trim() ?? '');
-}
-
-function resolveHoustonMemoryRetentionDays(saved: SavedAIProviderConfig) {
-  const value = saved.houstonMemoryRetentionDays
-    ?? Number(process.env.AI_HOUSTON_MEMORY_RETENTION_DAYS);
-  return Number.isSafeInteger(value) ? Math.min(Math.max(value, 1), 365) : 90;
-}
-
 export function invalidateAIConfigCache() {
   cachedConfig = null;
   cachedRoutingPolicy = null;
@@ -73,60 +48,7 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
   }
 
   const saved = loadSavedAIProviderConfigSync();
-  const completion = resolveAICompletionConfig(saved);
-  const { provider, model, baseUrl, apiKey, configured } = completion;
-  const legacyEmbeddingProvider = saved.provider || process.env.AI_PROVIDER;
-  const embeddingProvider = saved.embeddingProvider
-    || process.env.AI_EMBEDDING_PROVIDER
-    || legacyEmbeddingProvider
-    || DEFAULT_EMBEDDING_PROVIDER;
-  const embeddingModel = saved.embeddingModel
-    || process.env.AI_EMBEDDING_MODEL
-    || getDefaultEmbeddingModel(embeddingProvider);
-  const sharesCompletionTarget = !saved.embeddingProvider
-    && !process.env.AI_EMBEDDING_PROVIDER
-    && embeddingProvider === provider;
-  const embeddingTarget = {
-    baseUrl: saved.embeddingBaseUrl
-      || process.env.AI_EMBEDDING_BASE_URL
-      || (sharesCompletionTarget ? saved.baseUrl : undefined),
-    apiKey: saved.embeddingApiKey
-      || process.env.AI_EMBEDDING_API_KEY
-      || (sharesCompletionTarget ? saved.apiKey : undefined),
-  };
-  const embeddingBaseUrl = resolveAIProviderBaseUrl(
-    embeddingProvider,
-    embeddingTarget,
-    sharesCompletionTarget,
-  );
-  const embeddingApiKey = resolveAIProviderApiKey(
-    embeddingProvider,
-    embeddingTarget,
-    sharesCompletionTarget,
-  );
-  const embeddingConfigured = embeddingProvider === 'ollama'
-    ? Boolean(embeddingBaseUrl)
-    : embeddingProvider === 'azure'
-      ? Boolean(embeddingBaseUrl && embeddingApiKey)
-      : embeddingProvider === 'bifrost'
-        ? Boolean(embeddingBaseUrl)
-        : Boolean(embeddingApiKey || embeddingBaseUrl);
-
-  cachedConfig = {
-    provider,
-    model,
-    embeddingProvider,
-    embeddingModel,
-    embeddingBaseUrl,
-    embeddingApiKey,
-    embeddingConfigured,
-    semanticSearchEnabled: resolveSemanticSearchEnabled(saved),
-    houstonMemoryEnabled: resolveHoustonMemoryEnabled(saved),
-    houstonMemoryRetentionDays: resolveHoustonMemoryRetentionDays(saved),
-    baseUrl,
-    apiKey,
-    configured,
-  };
+  cachedConfig = resolveAIConfig(saved);
   cacheTime = Date.now();
 
   return cachedConfig;

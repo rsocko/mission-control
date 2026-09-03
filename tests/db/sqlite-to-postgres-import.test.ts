@@ -1139,6 +1139,106 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     }
   });
 
+  it('omits PostgreSQL-only semantic key versions so imported rows use their defaults', async () => {
+    const sqlite = new Database(':memory:');
+    sqlite.exec(`
+      CREATE TABLE semantic_intents (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL
+      );
+      CREATE TABLE semantic_runs (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL
+      );
+    `);
+    const legacyIntentKey = 'mc-semantic-key:v1:QQ';
+    const legacyRunKey = 'mc-semantic-key:v1:Qg';
+    sqlite.prepare('INSERT INTO semantic_intents VALUES (?, ?)').run(
+      'legacy-intent',
+      legacyIntentKey,
+    );
+    sqlite.prepare('INSERT INTO semantic_runs VALUES (?, ?)').run(
+      'legacy-run',
+      legacyRunKey,
+    );
+
+    const queries: Array<{ sql: string; values?: readonly unknown[] }> = [];
+    const client = {
+      async query(sql: string, values?: readonly unknown[]) {
+        queries.push({ sql, values });
+        return { rows: [] };
+      },
+      release: vi.fn(),
+    };
+    const pool = {
+      connect: vi.fn(async () => client),
+    };
+    const semanticColumns = (keyVersionFirst: boolean) => [
+      {
+        name: 'id',
+        dataType: 'text',
+        udtName: 'text',
+        nullable: false,
+        hasDefault: false,
+        generated: false,
+      },
+      ...(keyVersionFirst ? [{
+        name: 'idempotency_key_version',
+        dataType: 'integer',
+        udtName: 'int4',
+        nullable: false,
+        hasDefault: true,
+        generated: false,
+      }] : []),
+      {
+        name: 'idempotency_key',
+        dataType: 'text',
+        udtName: 'text',
+        nullable: false,
+        hasDefault: false,
+        generated: false,
+      },
+      ...(!keyVersionFirst ? [{
+        name: 'idempotency_key_version',
+        dataType: 'integer',
+        udtName: 'int4',
+        nullable: false,
+        hasDefault: true,
+        generated: false,
+      }] : []),
+    ];
+    const validateSource = vi.fn();
+    try {
+      const counts = await copyAllTables(
+        pool as never,
+        sqlite,
+        ['semantic_intents', 'semantic_runs'],
+        new Map([
+          ['semantic_intents', semanticColumns(false)],
+          ['semantic_runs', semanticColumns(true)],
+        ]),
+        [],
+        validateSource,
+      );
+
+      expect(counts).toEqual([
+        { table: 'semantic_intents', sourceRows: 1, targetRows: 1 },
+        { table: 'semantic_runs', sourceRows: 1, targetRows: 1 },
+      ]);
+      const inserts = queries.filter(({ sql }) => sql.startsWith('INSERT INTO "semantic_'));
+      expect(inserts).toHaveLength(2);
+      for (const insert of inserts) {
+        expect(insert.sql).not.toContain('idempotency_key_version');
+      }
+      expect(inserts[0]?.values).toEqual(['legacy-intent', legacyIntentKey]);
+      expect(inserts[1]?.values).toEqual(['legacy-run', legacyRunKey]);
+      expect(validateSource).toHaveBeenCalledOnce();
+      expect(queries.map(({ sql }) => sql)).toContain('COMMIT');
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('isolates target-dependent jsonb rejection without exposing the value', async () => {
     const sqlite = new Database(':memory:');
     sqlite.exec('CREATE TABLE probe (id TEXT PRIMARY KEY, payload TEXT)');

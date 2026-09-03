@@ -17,6 +17,10 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/search/embedding-request', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/search/embedding-request')>()),
   getEmbeddingConfig: mocks.getEmbeddingConfig,
+}));
+
+vi.mock('@/lib/search/embedding-transport', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/search/embedding-transport')>()),
   getConfiguredEmbeddingRoute: mocks.getConfiguredEmbeddingRoute,
   requestEmbeddingResult: mocks.requestEmbeddingResult,
 }));

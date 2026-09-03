@@ -19,8 +19,16 @@ describe('sync worker artifact guard', () => {
     'createPostgresFinanceConnectionRecoveryPersistence',
     'financeConnectionEpisodeId',
     'Selected worker persistence composition is incomplete',
-    'legacy durable AI run worker is disabled on PostgreSQL',
-    'semantic index worker is disabled for this persistence backend',
+    'createPackagedDurableAiRuntime',
+    'createDurableAiExecutorRegistry',
+    'PostgresDurableAiRunRepository',
+    'createPackagedPostgresSemanticRuntime',
+    'createPackagedNotificationEnrichmentExecutor',
+    'composePostgresPackagedWorkflowCapability',
+    'PostgresWorkerProcessingLatch',
+    'processingLatch.activate',
+    'startAtomicWorkerComponents',
+    'PostgreSQL packaged workflow capability activation is invalid',
   ].join('\n');
   const eventOutboxActivation = [
     'EventOutboxDispatcher',
@@ -30,8 +38,18 @@ describe('sync worker artifact guard', () => {
     'Event delivery lease was fenced out mid-flight',
     'Event delivery moved to dead letter',
   ].join('\n');
-  const completeActivation =
-    `${financeActivation}\n${triageActivation}\n${finalActivation}\n${eventOutboxActivation}`;
+  const completeActivation = [
+    financeActivation,
+    triageActivation,
+    finalActivation,
+    eventOutboxActivation,
+    'planning-signals',
+    'project-automation',
+    'event-outbox',
+    'notification-enrichment',
+    'durable-ai',
+    'semantic-search',
+  ].join('\n');
 
   it('rejects a bundle containing the retired finance backlog emitter', () => {
     const retiredCode = ['finance', 'attention', 'backlog', 'exceeded'].join('_');
@@ -62,7 +80,22 @@ describe('sync worker artifact guard', () => {
     )).toThrow('Sync worker bundle omitted durable event outbox markers');
   });
 
-  it('accepts the activated finance and triage worker with separately gated delivery', () => {
+  it('accepts the atomically activated Layer 7 packaged worker', () => {
     expect(() => assertSyncWorkerArtifact(completeActivation)).not.toThrow();
+  });
+
+  it('rejects a bundle missing any Layer 7 family', () => {
+    const missingFamily = completeActivation.replace(
+      'semantic-search',
+      'semantic-disabled',
+    );
+    expect(() => assertSyncWorkerArtifact(missingFamily))
+      .toThrow('omitted PostgreSQL Layer 7 families');
+  });
+
+  it('rejects retired PostgreSQL disable branches', () => {
+    expect(() => assertSyncWorkerArtifact(
+      `${completeActivation}\nlegacy durable AI run worker is disabled on PostgreSQL`,
+    )).toThrow('retained PostgreSQL Layer 7 disable markers');
   });
 });

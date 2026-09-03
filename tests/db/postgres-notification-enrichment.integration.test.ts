@@ -3,6 +3,9 @@ import type { Pool } from 'pg';
 import type { ConnectorNotificationCommand } from '@/db/persistence/connector-execution';
 import { createPostgresConnectorExecutionRepositories } from '@/db/postgres/repositories/connector-execution-repositories';
 import { createPostgresNotificationEnrichmentRepository } from '@/db/postgres/repositories/notification-enrichment-repository';
+import {
+  createPostgresNotificationEntityLinkingRepository,
+} from '@/db/postgres/repositories/notification-entity-linking-repository';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
 vi.mock('@/db', () => {
@@ -37,6 +40,8 @@ async function pool(): Promise<Pool> {
 async function reset() {
   const db = await pool();
   await db.query("DELETE FROM notifications WHERE id LIKE 'ne-%'");
+  await db.query("DELETE FROM tasks WHERE id LIKE 'ne-link-%'");
+  await db.query("DELETE FROM hub_projects WHERE id LIKE 'ne-link-%'");
 }
 
 async function seed(id: string, revision = 'r1') {
@@ -136,6 +141,62 @@ if (connectionString) {
   });
 
   describe('PostgreSQL notification enrichment repository', () => {
+    it('matches the SQLite entity-linking contract for tasks and projects', async () => {
+      const db = await pool();
+      await db.query(
+        `INSERT INTO tasks (
+           id, source_id, connector_type, connector_instance_id, title, status,
+           priority, created_at, updated_at, last_synced_at
+         ) VALUES
+           ('ne-link-exact', 'owner/repo:42', 'github-issues', 'ne-link-connector',
+             'Exact', 'todo', 'normal', $1, $1, $1),
+           ('ne-link-suffix', 'prefix:owner/repo:43', 'github-issues', 'ne-link-connector',
+             'Suffix', 'todo', 'normal', $1, $1, $1),
+           ('ne-link-ambiguous-a', 'a:owner/repo:44', 'github-issues', 'ne-link-connector',
+             'Ambiguous A', 'todo', 'normal', $1, $1, $1),
+           ('ne-link-ambiguous-b', 'b:owner/repo:44', 'github-issues', 'ne-link-connector',
+             'Ambiguous B', 'todo', 'normal', $1, $1, $1)`,
+        ['2026-01-01T00:00:00.000Z'],
+      );
+      await db.query(
+        `INSERT INTO hub_projects (
+           id, name, color, source_bindings, auto_include_rules, kanban_columns,
+           default_view, status, hidden, sort_order, hierarchy_revision, metadata,
+           created_at, updated_at
+         ) VALUES (
+           'ne-link-project', 'Entity link', '#3b82f6', '[]'::jsonb, '[]'::jsonb,
+           '[]'::jsonb, 'list', 'active', false, 0, 0,
+           '{"repository":"owner/repo"}'::jsonb, $1, $1
+         )`,
+        ['2026-01-01T00:00:00.000Z'],
+      );
+      const repository = createPostgresNotificationEntityLinkingRepository(db);
+
+      await expect(repository.findTaskBySourceReference({
+        connectorInstanceId: 'ne-link-connector',
+        repository: 'owner/repo',
+        number: 42,
+      })).resolves.toEqual({ id: 'ne-link-exact' });
+      await expect(repository.findTaskBySourceReference({
+        connectorInstanceId: 'ne-link-connector',
+        repository: 'owner/repo',
+        number: 43,
+      })).resolves.toEqual({ id: 'ne-link-suffix' });
+      await expect(
+        repository.findProjectByRepository('owner/repo'),
+      ).resolves.toBe('ne-link-project');
+      await expect(repository.findTaskBySourceReference({
+        connectorInstanceId: 'ne-link-connector',
+        repository: 'owner/repo',
+        number: 44,
+      })).resolves.toBeNull();
+      await expect(repository.findTaskBySourceReference({
+        connectorInstanceId: 'ne-link-connector',
+        repository: 'missing/repo',
+        number: 45,
+      })).resolves.toBeNull();
+    });
+
     it('claims concurrently without duplication and fences a stale owner', async () => {
       const db = await pool();
       const repository = createPostgresNotificationEnrichmentRepository(db);

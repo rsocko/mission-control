@@ -523,6 +523,7 @@ export interface ConnectorExecutionSupport {
   allowsLegacyWorkflow(
     workflow:
       | 'dependency-reconciliation'
+      | 'durable-ai'
       | 'event-outbox'
       | 'notification-dispatcher'
       | 'notification-enrichment'

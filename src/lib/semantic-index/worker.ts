@@ -26,11 +26,6 @@
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { semanticIndexLogger } from '@/lib/logger';
-import {
-  getSemanticWorkerConfig,
-  isSemanticIndexEnabled,
-  type SemanticWorkerConfig,
-} from './config';
 import type {
   SemanticIndexIdentity,
   SemanticIndexRepository,
@@ -47,15 +42,16 @@ import {
 } from './runs';
 import type { SemanticSourceEntityType, SemanticSourcePort } from './source/contracts';
 import type { SemanticEmbeddingProvider } from './embedding-provider';
+import type { SemanticWorkerConfig } from './worker-config';
 
 export interface SemanticIndexWorkerOptions {
   repository: SemanticIndexRepository;
   source: SemanticSourcePort;
   embeddings: SemanticEmbeddingProvider;
   service: SemanticIndexService;
-  config?: SemanticWorkerConfig;
-  /** Overrides the feature gate; defaults to the AI settings check. */
-  isEnabled?: () => boolean;
+  config: SemanticWorkerConfig;
+  /** Explicit feature gate supplied by the composition root. */
+  isEnabled: () => boolean;
   /** Re-reads corpus gates each cycle so settings changes take effect without a restart. */
   enabledEntityTypes?: () => readonly SemanticSourceEntityType[];
   owner?: string;
@@ -63,6 +59,8 @@ export interface SemanticIndexWorkerOptions {
   /** Injected for tests so a cycle can be driven without real timers. */
   setTimer?: (callback: () => void, ms: number) => NodeJS.Timeout;
   clearTimer?: (timer: NodeJS.Timeout) => void;
+  /** Explicit packaged-test hook invoked only after a durable run checkpoint. */
+  onRunCheckpointed?: (run: SemanticRun, result: SemanticRunSliceResult) => void;
 }
 
 export interface SemanticWorkerCycleReport {
@@ -125,6 +123,10 @@ export class SemanticIndexWorker {
   private readonly now: () => string;
   private readonly setTimer: (callback: () => void, ms: number) => NodeJS.Timeout;
   private readonly clearTimer: (timer: NodeJS.Timeout) => void;
+  private readonly onRunCheckpointed?: (
+    run: SemanticRun,
+    result: SemanticRunSliceResult,
+  ) => void;
 
   readonly owner: string;
 
@@ -134,19 +136,21 @@ export class SemanticIndexWorker {
   private shutdown: AbortController | null = null;
   private lastMaintenanceMs = 0;
   private lastReport: SemanticWorkerCycleReport = EMPTY_REPORT;
+  private wakeAfterCycle = false;
 
   constructor(options: SemanticIndexWorkerOptions) {
     this.repository = options.repository;
     this.source = options.source;
     this.embeddings = options.embeddings;
     this.service = options.service;
-    this.config = options.config ?? getSemanticWorkerConfig();
-    this.isEnabled = options.isEnabled ?? isSemanticIndexEnabled;
+    this.config = options.config;
+    this.isEnabled = options.isEnabled;
     this.enabledEntityTypes = options.enabledEntityTypes ?? (() => this.config.entityTypes);
     this.now = options.now ?? (() => new Date().toISOString());
     this.owner = options.owner ?? defaultOwner();
     this.setTimer = options.setTimer ?? defaultSetTimer;
     this.clearTimer = options.clearTimer ?? ((timer) => clearTimeout(timer));
+    this.onRunCheckpointed = options.onRunCheckpointed;
   }
 
   get isRunning(): boolean {
@@ -201,6 +205,19 @@ export class SemanticIndexWorker {
     }, 'Semantic index worker stopped');
   }
 
+  wake(): void {
+    if (!this.running) return;
+    if (this.cycle) {
+      this.wakeAfterCycle = true;
+      return;
+    }
+    if (this.timer) {
+      this.clearTimer(this.timer);
+      this.timer = null;
+    }
+    this.schedule(0);
+  }
+
   private schedule(delayMs: number): void {
     if (!this.running) return;
     this.timer = this.setTimer(() => {
@@ -228,7 +245,13 @@ export class SemanticIndexWorker {
     this.lastReport = report;
     const busy = report.status === 'worked'
       && report.intentsClaimed >= this.config.batchSize;
-    this.schedule(busy ? this.config.busyIntervalMs : this.config.pollIntervalMs);
+    const delayMs = this.wakeAfterCycle
+      ? 0
+      : busy
+        ? this.config.busyIntervalMs
+        : this.config.pollIntervalMs;
+    this.wakeAfterCycle = false;
+    this.schedule(delayMs);
   }
 
   /**
@@ -248,9 +271,15 @@ export class SemanticIndexWorker {
     if (maintenanceDue) {
       const recovered = await this.recoverLeases();
       report.leasesRecovered = recovered;
+      if (!this.isEnabled()) {
+        return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+      }
     }
 
     const identity = await this.resolveIdentity(maintenanceDue, abortSignal);
+    if (!this.isEnabled()) {
+      return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+    }
     if (!identity.identity) {
       this.lastMaintenanceMs = maintenanceDue ? Date.now() : this.lastMaintenanceMs;
       return { ...report, status: 'unavailable', reason: identity.reason };
@@ -259,6 +288,9 @@ export class SemanticIndexWorker {
 
     if (maintenanceDue) {
       await this.scheduleRuns(identity.identity);
+      if (!this.isEnabled()) {
+        return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+      }
       // Promotion is re-evaluated on every maintenance tick, not only when a
       // backfill completes: the backfill finishes as soon as it has *enqueued*
       // every entity, so the activation gate almost always fails on that first
@@ -267,10 +299,13 @@ export class SemanticIndexWorker {
       this.lastMaintenanceMs = Date.now();
     }
 
+    if (!this.isEnabled()) {
+      return { ...report, status: 'disabled', reason: 'semantic-search-disabled' };
+    }
     const intentReport = await this.drainIntents(identity.identity, entityTypes, abortSignal);
     Object.assign(report, intentReport);
 
-    if (!abortSignal.aborted) {
+    if (!abortSignal.aborted && this.isEnabled()) {
       report.runsExecuted = await this.executeRun(identity.identity, entityTypes, abortSignal) ? 1 : 0;
     }
 
@@ -370,16 +405,19 @@ export class SemanticIndexWorker {
     signal: AbortSignal,
   ): Promise<SemanticIntentOutcome> {
     const budget = new AbortController();
+    const lease = new AbortController();
     const budgetTimer = this.setTimer(() => budget.abort(), this.config.intentBudgetMs);
-    const combined = AbortSignal.any([signal, budget.signal]);
+    const combined = AbortSignal.any([signal, budget.signal, lease.signal]);
     const heartbeat = this.startHeartbeat(
       () => this.repository.renewIntentLease({
         id: intent.id,
         owner: this.owner,
+        attempt: intent.attempt,
         leaseMs: this.config.intentLeaseMs,
         now: this.now(),
       }),
       combined,
+      () => lease.abort(),
     );
 
     try {
@@ -408,6 +446,7 @@ export class SemanticIndexWorker {
   private startHeartbeat(
     renew: () => Promise<boolean>,
     signal: AbortSignal,
+    onLeaseLost: () => void,
   ): { stop: () => void } {
     let stopped = false;
     let timer: NodeJS.Timeout | null = null;
@@ -425,8 +464,14 @@ export class SemanticIndexWorker {
         })
         .then((renewed) => {
           // A lost lease means another worker owns this row now; stop
-          // heartbeating so the new owner is not fought over.
-          if (!stopped && renewed !== false) schedule();
+          // heartbeating and abort the stale work immediately.
+          if (stopped) return;
+          if (renewed === false) {
+            stopped = true;
+            onLeaseLost();
+            return;
+          }
+          schedule();
         });
     };
 
@@ -509,15 +554,19 @@ export class SemanticIndexWorker {
     }
     if (!run) return false;
     const claimed = run;
+    const lease = new AbortController();
+    const combined = AbortSignal.any([signal, lease.signal]);
 
     const heartbeat = this.startHeartbeat(
       () => this.repository.renewRunLease({
         id: claimed.id,
         owner: this.owner,
+        attempt: claimed.attempt,
         leaseMs: this.config.runLeaseMs,
         now: this.now(),
       }),
-      signal,
+      combined,
+      () => lease.abort(),
     );
 
     const deps: SemanticRunDependencies = {
@@ -534,7 +583,7 @@ export class SemanticIndexWorker {
         run: claimed,
         identity,
         owner: this.owner,
-        signal,
+        signal: combined,
         deadlineMs: Date.now() + this.config.runSliceBudgetMs,
       }, deps);
     } catch (error) {
@@ -543,6 +592,7 @@ export class SemanticIndexWorker {
       await this.repository.failRun({
         id: claimed.id,
         owner: this.owner,
+        attempt: claimed.attempt,
         error: message.slice(0, 500),
         now: this.now(),
       });
@@ -567,9 +617,10 @@ export class SemanticIndexWorker {
     identity: SemanticIndexIdentity,
   ): Promise<void> {
     const now = this.now();
-    await this.repository.checkpointRun({
+    const checkpointed = await this.repository.checkpointRun({
       id: run.id,
       owner: this.owner,
+      attempt: run.attempt,
       now,
       checkpoint: result.checkpoint,
       processedDelta: result.processed,
@@ -577,6 +628,8 @@ export class SemanticIndexWorker {
       skippedDelta: result.skipped,
       leaseMs: this.config.runLeaseMs,
     });
+    if (!checkpointed) return;
+    this.onRunCheckpointed?.(run, result);
 
     semanticIndexLogger.info({
       event: 'semantic_run_slice',
@@ -592,13 +645,24 @@ export class SemanticIndexWorker {
     }, 'Semantic index run slice completed');
 
     if (result.status === 'completed') {
-      await this.repository.completeRun({ id: run.id, owner: this.owner, now, checkpoint: null });
-      if (run.kind === 'backfill') await this.promoteIdentity(identity);
+      const completed = await this.repository.completeRun({
+        id: run.id,
+        owner: this.owner,
+        attempt: run.attempt,
+        now,
+        checkpoint: null,
+      });
+      if (completed && run.kind === 'backfill') await this.promoteIdentity(identity);
       return;
     }
     // Yielded or aborted: hand the lease back with the checkpoint intact so the
     // next pass (this worker or another) resumes exactly where this one stopped.
-    await this.repository.releaseRun({ id: run.id, owner: this.owner, now });
+    await this.repository.releaseRun({
+      id: run.id,
+      owner: this.owner,
+      attempt: run.attempt,
+      now,
+    });
   }
 
   /**

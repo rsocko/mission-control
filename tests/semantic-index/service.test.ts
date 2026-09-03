@@ -5,6 +5,7 @@ import {
   FakeEmbeddingProvider,
   alertFixture,
   createSemanticHarness,
+  houstonSummaryFixture,
   projectFixture,
   tagFixture,
   taskFixture,
@@ -580,16 +581,23 @@ describe('SemanticIndexService', () => {
       )).toBeNull();
     });
 
-    it('uses the same idempotent lifecycle for every enabled entity kind', async () => {
+    it('uses the same upsert and delete lifecycle for all six entity kinds', async () => {
+      harness.source.putTask(taskFixture());
       harness.source.putProject(projectFixture());
       harness.source.putTag(tagFixture());
       harness.source.putTriageItem(triageItemFixture());
+      harness.source.putAlert(alertFixture());
+      harness.source.putHoustonSummary(houstonSummaryFixture());
       const identity = await bootstrap();
 
-      for (const [entityType, entityId] of [
-        ['project', 'project-1'],
-        ['tag', 'tag-1'],
-        ['triage-item', 'triage-1'],
+      for (const [entityType, entityId, remove] of [
+        ['task', 'task-1', () => harness.source.tasks.delete('task-1')],
+        ['project', 'project-1', () => harness.source.projects.delete('project-1')],
+        ['tag', 'tag-1', () => harness.source.tags.delete('tag-1')],
+        ['triage-item', 'triage-1', () => harness.source.triageItems.delete('triage-1')],
+        ['alert', 'alert-1', () => harness.source.alerts.delete('alert-1')],
+        ['houston-summary', 'conversation-1',
+          () => harness.source.houstonSummaries.delete('conversation-1')],
       ] as const) {
         await harness.service.publish({ kind: 'upsert', entityType, entityId, indexId: identity.id });
         const created = await harness.service.processIntent(
@@ -598,11 +606,13 @@ describe('SemanticIndexService', () => {
         expect(created).toMatchObject({ status: 'succeeded', outcome: 'embedded' });
         expect(await harness.repository.getVector(identity.id, entityType, entityId)).not.toBeNull();
 
+        remove();
         await harness.service.publish({ kind: 'delete', entityType, entityId, indexId: identity.id });
-        const staleDelete = await harness.service.processIntent(
+        const deleted = await harness.service.processIntent(
           await claimOne(identity.id), { owner: OWNER },
         );
-        expect(staleDelete).toMatchObject({ status: 'succeeded', outcome: 'unchanged' });
+        expect(deleted).toMatchObject({ status: 'succeeded', outcome: 'deleted' });
+        expect(await harness.repository.getVector(identity.id, entityType, entityId)).toBeNull();
       }
     });
 

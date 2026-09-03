@@ -28,6 +28,10 @@ function exportedTables(schema: Record<string, unknown>) {
  * "adds PostgreSQL-only search-index tables..." below).
  */
 const POSTGRES_ONLY_TABLE_EXPORTS = new Set(['taskSearchDocuments', 'notificationSearchDocuments']);
+const POSTGRES_ONLY_SHARED_COLUMNS = new Map([
+  ['semanticIntents', new Set(['idempotency_key_version'])],
+  ['semanticRuns', new Set(['idempotency_key_version'])],
+]);
 
 function sharedTables(schema: Record<string, unknown>) {
   return Object.fromEntries(
@@ -50,7 +54,10 @@ describe('PostgreSQL schema', () => {
       const sqliteColumns = Object.values(getTableColumns(sqliteTable)).map((column) => column.name);
       const postgresColumns = Object.values(getTableColumns(postgresTable))
         .map((column) => column.name)
-        .filter((name) => name !== 'search_vector');
+        .filter((name) => (
+          name !== 'search_vector'
+          && !POSTGRES_ONLY_SHARED_COLUMNS.get(exportName)?.has(name)
+        ));
       expect(postgresColumns, exportName).toEqual(sqliteColumns);
 
       const sqliteColumnConfig = Object.values(getTableColumns(sqliteTable)).map((column) => ({
@@ -61,7 +68,10 @@ describe('PostgreSQL schema', () => {
         hasDefault: column.hasDefault,
       }));
       const postgresColumnConfig = Object.values(getTableColumns(postgresTable))
-        .filter((column) => column.name !== 'search_vector')
+        .filter((column) => (
+          column.name !== 'search_vector'
+          && !POSTGRES_ONLY_SHARED_COLUMNS.get(exportName)?.has(column.name)
+        ))
         .map((column) => ({
           name: column.name,
           dataType: column.dataType,
@@ -210,12 +220,42 @@ describe('PostgreSQL schema', () => {
     expect(notificationDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.notifications);
   });
 
-  it('ships one clean PostgreSQL baseline plus additive notification enrichment and connector test-result tracking', () => {
+  it('keeps semantic idempotency-key versions PostgreSQL-only and importer-safe', () => {
+    for (const [exportName, columnName] of [
+      ['semanticIntents', 'idempotencyKeyVersion'],
+      ['semanticRuns', 'idempotencyKeyVersion'],
+    ] as const) {
+      const postgresColumns = getTableColumns(postgresSchema[exportName]);
+      const sqliteColumns = getTableColumns(sqliteSchema[exportName]);
+      expect(postgresColumns[columnName]).toMatchObject({
+        name: 'idempotency_key_version',
+        notNull: true,
+        hasDefault: true,
+      });
+      expect(Object.keys(sqliteColumns)).not.toContain(columnName);
+    }
+
+    const intentIndexes = getPostgresTableConfig(postgresSchema.semanticIntents).indexes;
+    expect(
+      intentIndexes
+        .find((index) => index.config.name === 'idx_semantic_intents_pending')
+        ?.config.columns.map((column) => 'name' in column ? column.name : undefined),
+    ).toEqual(['idempotency_key_version', 'idempotency_key']);
+
+    const runIndexes = getPostgresTableConfig(postgresSchema.semanticRuns).indexes;
+    expect(
+      runIndexes
+        .find((index) => index.config.name === 'idx_semantic_runs_idempotency')
+        ?.config.columns.map((column) => 'name' in column ? column.name : undefined),
+    ).toEqual(['idempotency_key_version', 'idempotency_key']);
+  });
+
+  it('ships the PostgreSQL baseline and additive parity migrations', () => {
     const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(3);
+    expect(migrations).toHaveLength(4);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -253,5 +293,50 @@ describe('PostgreSQL schema', () => {
     expect(connectorTestResultSql).toContain(
       'ALTER TABLE "connector_configs" ADD COLUMN "last_test_at" text',
     );
+
+    const semanticKeyVersionSql = readFileSync(resolve(migrationDirectory, migrations[3]), 'utf8');
+    expect(semanticKeyVersionSql).toContain(
+      'ALTER TABLE "semantic_intents" ADD COLUMN "idempotency_key_version" integer DEFAULT 0 NOT NULL',
+    );
+    expect(semanticKeyVersionSql).toContain(
+      'ALTER TABLE "semantic_runs" ADD COLUMN "idempotency_key_version" integer DEFAULT 0 NOT NULL',
+    );
+    expect(semanticKeyVersionSql).toContain(
+      '("idempotency_key_version","idempotency_key")',
+    );
+    const intentColumn = semanticKeyVersionSql.indexOf(
+      'ALTER TABLE "semantic_intents" ADD COLUMN',
+    );
+    const runColumn = semanticKeyVersionSql.indexOf(
+      'ALTER TABLE "semantic_runs" ADD COLUMN',
+    );
+    const dropIntentIndex = semanticKeyVersionSql.indexOf(
+      'DROP INDEX "idx_semantic_intents_pending"',
+    );
+    const createIntentIndex = semanticKeyVersionSql.indexOf(
+      'CREATE UNIQUE INDEX "idx_semantic_intents_pending"',
+    );
+    const dropRunIndex = semanticKeyVersionSql.indexOf(
+      'DROP INDEX "idx_semantic_runs_idempotency"',
+    );
+    const createRunIndex = semanticKeyVersionSql.indexOf(
+      'CREATE UNIQUE INDEX "idx_semantic_runs_idempotency"',
+    );
+    expect([
+      intentColumn,
+      runColumn,
+      dropIntentIndex,
+      createIntentIndex,
+      dropRunIndex,
+      createRunIndex,
+    ]).toEqual([...[
+      intentColumn,
+      runColumn,
+      dropIntentIndex,
+      createIntentIndex,
+      dropRunIndex,
+      createRunIndex,
+    ]].sort((left, right) => left - right));
+    expect(semanticKeyVersionSql.match(/--> statement-breakpoint/g)).toHaveLength(5);
   });
 });

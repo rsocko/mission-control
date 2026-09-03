@@ -25,7 +25,7 @@ export type NotificationEnrichmentExecutor = (
   options: { signal: AbortSignal },
 ) => Promise<AIEnrichmentResult | null>;
 
-interface NotificationEnrichmentWorkerOptions {
+export interface NotificationEnrichmentWorkerOptions {
   owner?: string;
   leaseMs?: number;
   timeoutMs?: number;
@@ -35,6 +35,7 @@ interface NotificationEnrichmentWorkerOptions {
   repository?: NotificationEnrichmentRepository;
   execute?: NotificationEnrichmentExecutor;
   now?: () => Date;
+  isEnabled?(): boolean;
 }
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -97,6 +98,7 @@ export class NotificationEnrichmentWorker {
   private stopping = false;
   private loop: Promise<void> | null = null;
   private activeController: AbortController | null = null;
+  private wakeWaiter: (() => void) | null = null;
 
   constructor(private readonly options: NotificationEnrichmentWorkerOptions = {}) {
     this.owner = options.owner ?? `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -137,7 +139,12 @@ export class NotificationEnrichmentWorker {
     let recoveredStaleLeases = false;
     while (!this.stopping) {
       try {
+        if (this.options.isEnabled?.() === false) {
+          await this.delay(this.pollMs);
+          continue;
+        }
         repository ??= await this.repository();
+        if (this.options.isEnabled?.() === false) continue;
         if (!recoveredStaleLeases) {
           const recovered = await repository.recoverStaleLeases({ now: this.now() });
           recoveredStaleLeases = true;
@@ -145,6 +152,7 @@ export class NotificationEnrichmentWorker {
             syncLogger.warn({ recovered }, 'Recovered stale notification enrichment leases');
           }
         }
+        if (this.options.isEnabled?.() === false) continue;
         if (!await this.runOnce(repository)) {
           await this.delay(this.pollMs);
         }
@@ -161,7 +169,9 @@ export class NotificationEnrichmentWorker {
   }
 
   async runOnce(repository?: NotificationEnrichmentRepository): Promise<boolean> {
+    if (this.options.isEnabled?.() === false) return false;
     const selected = repository ?? await this.repository();
+    if (this.options.isEnabled?.() === false) return false;
     const claim = await selected.claimNext({
       now: this.now(),
       leaseMs: this.leaseMs,
@@ -261,13 +271,26 @@ export class NotificationEnrichmentWorker {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => {
-      const timer = setTimeout(resolve, ms);
+      const timer = setTimeout(() => {
+        this.wakeWaiter = null;
+        resolve();
+      }, ms);
       timer.unref?.();
+      this.wakeWaiter = () => {
+        clearTimeout(timer);
+        this.wakeWaiter = null;
+        resolve();
+      };
     });
+  }
+
+  wake(): void {
+    this.wakeWaiter?.();
   }
 
   async stop(): Promise<void> {
     this.stopping = true;
+    this.wake();
     this.activeController?.abort(new DOMException('Worker shutting down', 'AbortError'));
     await this.loop;
   }

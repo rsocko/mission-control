@@ -73,7 +73,10 @@ describe('notification delivery persistence boundary', () => {
   });
 
   it('wakes portable delivery recovery after both runtime entrypoints initialize persistence', () => {
-    for (const path of ['src/instrumentation.ts', 'src/sync-worker.ts']) {
+    for (const path of [
+      'src/instrumentation.ts',
+      'src/lib/runtime/packaged-sync-worker.ts',
+    ]) {
       const source = read(path);
       expect(
         source.indexOf('wakeNotificationDeliveryDispatcher()'),

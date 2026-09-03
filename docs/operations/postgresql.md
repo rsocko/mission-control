@@ -53,6 +53,29 @@ select PostgreSQL in production, change deployment configuration, establish
 complete web/API persistence parity, or perform the production cutover tracked
 by [#1155](https://github.com/rsocko/mission-control/issues/1155).
 
+### Application workflow parity
+
+The normal PostgreSQL web and packaged-worker compositions support planning
+signals, project automation, the durable event outbox, durable notification
+enrichment, the durable AI executor registry, and semantic indexing/search.
+The six-family capability is atomic: producers receive backend-selected
+PostgreSQL repositories, while the worker precomposes and validates all
+repositories, executor routes, semantic entities/intents, provider
+configuration, and stop handles before any consumer may claim work. Missing
+composition fails startup; it does not disable a family or fall back to SQLite.
+
+Worker consumers remain dormant behind an instance-local latch until the full
+startup transaction completes. Readiness is published only after activation.
+Startup failure and normal shutdown revoke new claims before reverse-order
+drain and database close. The PostgreSQL import graph and packaged artifact are
+checked with SQLite poisoned.
+
+This is application capability availability, not production activation. It
+does not change the default backend, deployment or Homelab configuration,
+secrets, production data, or cutover status. Selecting PostgreSQL and performing
+a production cutover still require the separate operator audit, approval, data
+migration, and maintenance-window work tracked above.
+
 Keep SQLite databases and rollback artifacts until those separate activation
 and cutover steps are complete.
 

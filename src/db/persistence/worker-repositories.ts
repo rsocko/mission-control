@@ -10,6 +10,9 @@ import type { PlanningSignalRepository } from './planning-signals';
 import type { ProjectAutomationRepository } from './project-automation';
 import type { EventDeliveryRepositories } from './event-outbox';
 import type { NotificationEnrichmentRepository } from './notification-enrichment';
+import type {
+  NotificationEntityLinkingRepository,
+} from './notification-entity-linking';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -60,6 +63,7 @@ export interface WorkerPersistenceRepositories {
    * emission.
    */
   eventDelivery: EventDeliveryRepositories;
+  notificationEntityLinking: NotificationEntityLinkingRepository;
   notificationEnrichment: NotificationEnrichmentRepository;
   /**
    * Layer 5A: the atomic core finance worker projection (identity, transaction

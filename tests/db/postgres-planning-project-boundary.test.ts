@@ -36,13 +36,13 @@ describe('PostgreSQL planning and project automation boundary', () => {
       .not.toThrow();
   });
 
-  it('keeps both workflow gates closed', async () => {
+  it('exposes both backend capabilities to normal entrypoints', async () => {
     const { createPostgresConnectorExecutionRepositories } = await import(
       '@/db/postgres/repositories/connector-execution-repositories'
     );
     const support = createPostgresConnectorExecutionRepositories({} as never).support;
-    expect(support.allowsLegacyWorkflow('planning-signals')).toBe(false);
-    expect(support.allowsLegacyWorkflow('project-automation')).toBe(false);
+    expect(support.allowsLegacyWorkflow('planning-signals')).toBe(true);
+    expect(support.allowsLegacyWorkflow('project-automation')).toBe(true);
   });
 
   it('acquires the project lock before opening the serializable snapshot', async () => {

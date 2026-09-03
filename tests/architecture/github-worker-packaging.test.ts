@@ -111,7 +111,7 @@ describe('sync worker persistence packaging reachability', () => {
     // Layer 3B must be part of the same atomic composition.
     expect(index).toContain('recovery: createPostgresGitHubRecoveryRepositories(pool)');
 
-    const worker = read('src/sync-worker.ts');
+    const worker = read('src/lib/runtime/packaged-sync-worker.ts');
     expect(worker).toContain('githubWorkerCompositionPresent');
     expect(worker).toMatch(/startDependencyReconciliationResume\(\)/);
   });

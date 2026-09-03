@@ -338,6 +338,34 @@ describe('event outbox stale lease recovery', () => {
 });
 
 describe('packaged event outbox dispatcher runtime', () => {
+  it('does not recover or claim while dormant and drains after activation', async () => {
+    addWebhook('a', ['sync.completed']);
+    enqueue('k1');
+    let enabled = false;
+    const fetchImpl = vi.fn(async () => response(204)) as unknown as typeof fetch;
+    const recoverExpired = vi.spyOn(repositories.outbox, 'recoverStaleLeases');
+    const claimNext = vi.spyOn(repositories.outbox, 'claimNext');
+    const dispatcher = new EventOutboxDispatcher({
+      repositories,
+      fetchImpl,
+      scheduleWakeups: false,
+      staleLeaseSweepMs: 3_600_000,
+      isEnabled: () => enabled,
+    });
+
+    await dispatcher.start();
+    await dispatcher.drain();
+    expect(recoverExpired).not.toHaveBeenCalled();
+    expect(claimNext).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    enabled = true;
+    await Promise.all([dispatcher.drain(), dispatcher.drain()]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(rows()[0]).toMatchObject({ status: 'delivered' });
+    await dispatcher.stop();
+  });
+
   it('recovers stale leases at startup, drains, and stops cleanly', async () => {
     addWebhook('a', ['sync.completed']);
     enqueue('k1');

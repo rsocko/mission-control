@@ -150,6 +150,58 @@ describe('sync worker runtime', () => {
     expect(queueMocks.getSyncQueueMetrics).not.toHaveBeenCalled();
   });
 
+  it('stays dormant until activation and wakes exactly once without a polling delay', async () => {
+    let enabled = false;
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob.mockReturnValue(null);
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(vi.fn(), {
+      ownerId: 'worker-a',
+      pollIntervalMs: 60_000,
+      isEnabled: () => enabled,
+    });
+
+    worker.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(queueMocks.claimNextSyncJob).not.toHaveBeenCalled();
+    expect(queueMocks.pruneSyncJobs).not.toHaveBeenCalled();
+
+    enabled = true;
+    worker.wake();
+    worker.wake();
+    await waitFor(() => expect(queueMocks.claimNextSyncJob).toHaveBeenCalledOnce());
+    await worker.stop();
+  });
+
+  it('releases a claim won concurrently with processing deactivation', async () => {
+    let enabled = true;
+    let resolveClaim!: (value: SyncJob) => void;
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob.mockReturnValueOnce(new Promise<SyncJob>((resolve) => {
+      resolveClaim = resolve;
+    }));
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const execute = vi.fn();
+    const worker = new SyncWorker(execute, {
+      ownerId: 'worker-a',
+      pollIntervalMs: 60_000,
+      isEnabled: () => enabled,
+    });
+
+    worker.start();
+    await waitFor(() => expect(queueMocks.claimNextSyncJob).toHaveBeenCalledOnce());
+    enabled = false;
+    resolveClaim(job());
+    await waitFor(() => expect(queueMocks.releaseSyncJob).toHaveBeenCalledWith(
+      'job-1',
+      'worker-a',
+      'worker_deactivated',
+    ));
+    await worker.stop();
+
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it('records successful work only after the connector returns success', async () => {
     const { SyncWorker } = await import('@/lib/sync/worker');
     const execute = vi.fn().mockResolvedValue(result(true));

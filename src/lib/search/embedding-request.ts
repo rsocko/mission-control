@@ -27,31 +27,27 @@
 
 import {
   getAIRequestContext,
-  getAIRouteOutcome,
   getAIRoutingHeaders,
-  AIRoutingDeniedError,
 } from '@/lib/ai/provider-factory';
 import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
-import { extractBifrostRoutingMetadata } from '@/lib/ai/sensitivity-policy';
-import type { AIRequestContext, SensitivityClass } from '@/lib/ai/types';
-import { aiLogger } from '@/lib/logger';
-
-export interface EmbeddingConfig {
-  provider: string;
-  baseUrl?: string;
-  apiKey?: string;
-  model: string;
-  endpoint: string;
-  headers: Record<string, string>;
-  context: AIRequestContext;
-}
-
-export interface EmbeddingRoute {
-  provider: string;
-  model: string;
-}
-
-export const DEFAULT_EMBEDDING_TIMEOUT_MS = 20_000;
+import type { SensitivityClass } from '@/lib/ai/types';
+import {
+  requestEmbeddingResult,
+  type EmbeddingConfig,
+  type EmbeddingRequestResult,
+} from './embedding-transport';
+export {
+  DEFAULT_EMBEDDING_TIMEOUT_MS,
+  getConfiguredEmbeddingRoute,
+  parseRetryAfter,
+  requestEmbeddingResult,
+  type EmbeddingConfig,
+  type EmbeddingRequestFailure,
+  type EmbeddingRequestFailureStatus,
+  type EmbeddingRequestResult,
+  type EmbeddingRequestSuccess,
+  type EmbeddingRoute,
+} from './embedding-transport';
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -61,14 +57,6 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 function nonNegativeInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-/** Request timeout for a single attempt. */
-function embeddingTimeoutMs(): number {
-  return positiveInteger(
-    process.env.MC_EMBEDDING_REQUEST_TIMEOUT_MS,
-    DEFAULT_EMBEDDING_TIMEOUT_MS,
-  );
 }
 
 /** Retries *after* the first attempt, hard-capped so a request cannot hang. */
@@ -175,248 +163,6 @@ export async function getEmbeddingConfig(
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     context,
-  };
-}
-
-/**
- * The provider/model this configuration would resolve to without egress.
- *
- * The configured **embedding** identity is passed explicitly so the outcome is
- * never resolved against the completion provider/model.
- */
-export function getConfiguredEmbeddingRoute(config: EmbeddingConfig): EmbeddingRoute {
-  const outcome = getAIRouteOutcome(
-    config.context,
-    { modelId: config.model },
-    undefined,
-    { provider: config.provider, model: config.model },
-  );
-  return {
-    provider: outcome.provider,
-    model: outcome.model,
-  };
-}
-
-export interface EmbeddingRequestSuccess {
-  status: 'ok';
-  embedding: number[];
-  /** The provider that actually answered, per response routing metadata. */
-  provider: string;
-  /** The model that actually answered, per response routing metadata. */
-  model: string;
-  /** True when the resolved route differs from the configured one. */
-  fallbackOccurred: boolean;
-  correlationId: string;
-}
-
-export type EmbeddingRequestFailureStatus =
-  /** Policy refusal. Terminal: retrying cannot make the route allowed. */
-  | 'denied'
-  /** Provider is busy/unavailable, or the network blipped. Safe to retry. */
-  | 'retryable'
-  /** Malformed or unusable response. Retrying the same input will not help. */
-  | 'failed'
-  /** The caller's `AbortSignal` fired; no attempt was consumed. */
-  | 'aborted';
-
-export interface EmbeddingRequestFailure {
-  status: EmbeddingRequestFailureStatus;
-  /** Short, non-sensitive reason code suitable for logs and durable rows. */
-  reason: string;
-  /** Provider-supplied `Retry-After`, normalized to an ISO instant. */
-  retryAfter: string | null;
-  httpStatus: number | null;
-  cause?: unknown;
-}
-
-export type EmbeddingRequestResult = EmbeddingRequestSuccess | EmbeddingRequestFailure;
-
-/**
- * Parses an HTTP `Retry-After` header (delta-seconds or HTTP-date) into an ISO
- * instant. Returns `null` for absent or nonsensical values so the caller falls
- * back to its own backoff instead of trusting a bad hint.
- */
-export function parseRetryAfter(header: string | null, now: number = Date.now()): string | null {
-  if (!header) return null;
-  const trimmed = header.trim();
-  if (!trimmed) return null;
-
-  if (/^\d+$/.test(trimmed)) {
-    const seconds = Number(trimmed);
-    // A day is already far beyond any useful queue delay; treat larger hints as
-    // hostile rather than parking work for a week.
-    if (!Number.isFinite(seconds) || seconds < 0 || seconds > 86_400) return null;
-    return new Date(now + seconds * 1_000).toISOString();
-  }
-
-  const parsed = Date.parse(trimmed);
-  if (!Number.isFinite(parsed)) return null;
-  if (parsed <= now) return new Date(now).toISOString();
-  if (parsed - now > 86_400_000) return null;
-  return new Date(parsed).toISOString();
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error
-    && (error.name === 'AbortError' || error.name === 'TimeoutError');
-}
-
-function combineSignals(
-  external: AbortSignal | undefined,
-  timeoutMs: number,
-): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  return external ? AbortSignal.any([external, timeoutSignal]) : timeoutSignal;
-}
-
-/**
- * Performs one embedding request and classifies the outcome.
- *
- * Classification rules:
- * - `AIRoutingDeniedError` (pre-request assertion or post-response route
- *   verification) -> `denied`;
- * - HTTP 429/503 -> `retryable`, honouring `Retry-After`;
- * - other HTTP 5xx and 408 -> `retryable`;
- * - other non-2xx -> `failed`;
- * - a caller abort -> `aborted`; a request timeout -> `retryable`;
- * - any other network/transport error -> `retryable`;
- * - a response without a usable numeric embedding -> `failed`.
- *
- * Request and response bodies are never logged, and neither are credentials.
- */
-export async function requestEmbeddingResult(
-  text: string,
-  config: EmbeddingConfig,
-  options: { signal?: AbortSignal; timeoutMs?: number; attempt?: number } = {},
-): Promise<EmbeddingRequestResult> {
-  const timeoutMs = options.timeoutMs ?? embeddingTimeoutMs();
-  let response: Response;
-  try {
-    response = await fetch(config.endpoint, {
-      method: 'POST',
-      headers: config.headers,
-      body: JSON.stringify(
-        config.provider === 'azure'
-          ? { input: text }
-          : { model: config.model, input: text },
-      ),
-      signal: combineSignals(options.signal, timeoutMs),
-    });
-  } catch (error) {
-    if (error instanceof AIRoutingDeniedError) {
-      return { status: 'denied', reason: 'routing-denied', retryAfter: null, httpStatus: null, cause: error };
-    }
-    if (options.signal?.aborted) {
-      return { status: 'aborted', reason: 'aborted', retryAfter: null, httpStatus: null, cause: error };
-    }
-    aiLogger.warn({
-      featureId: config.context.featureId,
-      sensitivity: config.context.sensitivity,
-      correlationId: config.context.correlationId,
-      attempt: options.attempt,
-      err: error,
-    }, 'AI embedding request failed');
-    return {
-      status: 'retryable',
-      reason: isAbortError(error) ? 'timeout' : 'network-error',
-      retryAfter: null,
-      httpStatus: null,
-      cause: error,
-    };
-  }
-
-  if (!response.ok) {
-    aiLogger.warn({
-      featureId: config.context.featureId,
-      sensitivity: config.context.sensitivity,
-      correlationId: config.context.correlationId,
-      status: response.status,
-      attempt: options.attempt,
-    }, 'AI embedding request failed');
-    const retryAfter = parseRetryAfter(response.headers.get('retry-after'));
-    const retryable = response.status === 429
-      || response.status === 408
-      || response.status >= 500;
-    return {
-      status: retryable ? 'retryable' : 'failed',
-      reason: `http-${response.status}`,
-      retryAfter,
-      httpStatus: response.status,
-    };
-  }
-
-  let payload: { data?: Array<{ embedding?: number[] }>; extra_fields?: unknown };
-  try {
-    payload = await response.json() as {
-      data?: Array<{ embedding?: number[] }>;
-      extra_fields?: unknown;
-    };
-  } catch (error) {
-    return {
-      status: 'failed',
-      reason: 'malformed-response',
-      retryAfter: null,
-      httpStatus: response.status,
-      cause: error,
-    };
-  }
-
-  // The resolved route is read from the response: Bifrost reports the provider
-  // and model it actually used in the body, and any route header is honoured
-  // too, so a fallback is never mistaken for the configured route.
-  let outcome: { provider: string; model: string; fallbackOccurred: boolean };
-  try {
-    outcome = getAIRouteOutcome(
-      config.context,
-      {
-        modelId: config.model,
-        headers: Object.fromEntries(response.headers.entries()),
-      },
-      config.provider === 'bifrost' ? extractBifrostRoutingMetadata(payload) : undefined,
-      { provider: config.provider, model: config.model },
-    );
-  } catch (error) {
-    if (error instanceof AIRoutingDeniedError) {
-      return {
-        status: 'denied',
-        reason: 'response-route-denied',
-        retryAfter: null,
-        httpStatus: response.status,
-        cause: error,
-      };
-    }
-    throw error;
-  }
-
-  const embedding = payload.data?.[0]?.embedding;
-  if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-    return {
-      status: 'failed',
-      reason: 'empty-embedding',
-      retryAfter: null,
-      httpStatus: response.status,
-    };
-  }
-
-  aiLogger.info({
-    featureId: config.context.featureId,
-    sensitivity: config.context.sensitivity,
-    allowedRoutes: config.context.allowedRoutes,
-    correlationId: config.context.correlationId,
-    provider: outcome.provider,
-    model: outcome.model,
-    dimensions: embedding.length,
-    fallbackOccurred: outcome.fallbackOccurred,
-    status: response.status,
-  }, 'AI embedding request completed');
-
-  return {
-    status: 'ok',
-    embedding,
-    provider: outcome.provider,
-    model: outcome.model,
-    fallbackOccurred: outcome.fallbackOccurred,
-    correlationId: config.context.correlationId,
   };
 }
 

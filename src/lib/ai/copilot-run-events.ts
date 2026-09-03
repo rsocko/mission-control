@@ -10,10 +10,16 @@ import {
   type HoustonToolAuditOutcome,
   type HoustonToolPermissionDecision,
 } from './copilot-houston-tools';
+import {
+  COPILOT_EXECUTION_ROUTE,
+  COPILOT_PROVIDER,
+} from './durable-runs/route-contract';
 
 export const HOUSTON_RUN_EVENT_SCHEMA_VERSION = 1 as const;
-export const COPILOT_EXECUTION_ROUTE = 'direct-copilot-sdk' as const;
-export const COPILOT_PROVIDER = 'github-copilot' as const;
+export {
+  COPILOT_EXECUTION_ROUTE,
+  COPILOT_PROVIDER,
+};
 
 export type HoustonRunTerminalState =
   | 'completed'

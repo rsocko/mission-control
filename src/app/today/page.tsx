@@ -34,8 +34,8 @@ export default function TodayPage() {
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [selectedSuggestionContext, setSelectedSuggestionContext] = useState<SuggestionTask | null>(null);
-  const { items, scheduled, calendarEvents, suggestions, sourceLists, energyLevel, loading, fetchData, setItems, setEnergyLevel } = useMyDayData(todayISO);
-  const actions = useTodayActions({ items, setItems, scheduled, calendarEvents, sourceLists, energyLevel, setEnergyLevel, todayISO, fetchData });
+  const { items, scheduled, calendarEvents, suggestions, sourceLists, energyLevel, loading, fetchData, setItems, setSuggestions, setEnergyLevel } = useMyDayData(todayISO);
+  const actions = useTodayActions({ items, setItems, suggestions, setSuggestions, scheduled, calendarEvents, sourceLists, energyLevel, setEnergyLevel, todayISO, fetchData });
   async function completeSelectedTask(taskId: string) {
     if (items.some((item) => item.taskId === taskId)) {
       if (await actions.completeTask(taskId)) {
